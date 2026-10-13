@@ -23,7 +23,7 @@ import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { IconActionProvider } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
-import { ShellSlot, ShellSlotsProvider } from "../shell/shell-slots";
+import { ShellSlot, ShellSlotsProvider, useBarMenu } from "../shell/shell-slots";
 import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
@@ -159,6 +159,9 @@ function ChatWorkspace({
   const [threadId, setThreadId] = useThreadUrl();
   // The consoles and builders return here, to this thread (CE4).
   useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
+  // The one-row bar's Menu closes once another thread is on screen (a search hit, the bell).
+  const { setOpen: setBarMenuOpen } = useBarMenu();
+  useEffect(() => setBarMenuOpen(false), [threadId, setBarMenuOpen]);
   const [listError, setListError] = useState<ApiError | null>(null);
   const adapter = useMemo(
     () => createThreadListAdapter(session, { onError: setListError }),

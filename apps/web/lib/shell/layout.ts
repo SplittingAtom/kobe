@@ -22,10 +22,11 @@ export const RAIL_PX = { expanded: 280, collapsed: 48 } as const;
  */
 export type ShellBand = "wide" | "medium" | "overlay" | "single";
 
+/** Range syntax, as in the CSS: `width < 768px` and `width >= 768px` meet at fractional widths. */
 export const BAND_QUERIES = {
-  wide: `(min-width: ${BREAKPOINTS.wide}px)`,
-  medium: `(min-width: ${BREAKPOINTS.medium}px)`,
-  overlay: `(min-width: ${BREAKPOINTS.overlay}px)`,
+  wide: `(width >= ${BREAKPOINTS.wide}px)`,
+  medium: `(width >= ${BREAKPOINTS.medium}px)`,
+  overlay: `(width >= ${BREAKPOINTS.overlay}px)`,
 } as const;
 
 export function bandFromMatches(m: {

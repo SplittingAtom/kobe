@@ -38,6 +38,8 @@ export interface ModalLayerOptions {
  * A drawer or sheet over the shell (CE7, CE8, KOBE-201) while `active`: focus moves into it (unless
  * it is already there), Escape and, when modal, a press outside call `onClose`, the background is
  * inert, and focus returns to what had it before (if it is still on the page) once it closes.
+ * An Escape that a control inside handled first (`preventDefault`, or a stop at the React root)
+ * and an Escape from a popover portalled out of the layer are left alone.
  */
 export function useModalLayer(
   ref: RefObject<HTMLElement | null>,
@@ -55,8 +57,7 @@ export function useModalLayer(
   useLayoutEffect(() => {
     if (active) before.current = document.activeElement;
   }, [active]);
-  // A passive effect: React restores the focus it saw before a commit once the DOM is updated, so
-  // moving focus back from a layout effect's cleanup would be undone.
+  // The modal parts follow `modal` and `escape` (a sheet crossing 768 px stays open).
   useEffect(() => {
     const el = ref.current;
     if (!active || !el) return;
@@ -64,6 +65,7 @@ export function useModalLayer(
     if (!el.contains(document.activeElement)) el.focus();
     const onKeyDown = (e: KeyboardEvent) => {
       if (!escape || e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest(PORTALLED)) return;
       e.preventDefault();
       close.current();
     };
@@ -78,11 +80,19 @@ export function useModalLayer(
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown);
       undoInert();
+    };
+  }, [ref, active, modal, escape]);
+  // Focus goes back only when the layer closes, after the effect above has lifted `inert`. A
+  // passive effect: React restores the focus it saw before a commit once the DOM is updated, so
+  // moving focus from a layout effect's cleanup would be undone.
+  useEffect(() => {
+    if (!active) return;
+    return () => {
       const back = before.current;
       before.current = null;
       if (back instanceof HTMLElement && back.isConnected && !back.closest("[inert], [hidden]")) {
         back.focus();
       }
     };
-  }, [ref, active, modal, escape]);
+  }, [active]);
 }

@@ -15,24 +15,34 @@ export function useShellBand(): ShellBand {
   return useContext(BandContext);
 }
 
-function readBand(): ShellBand {
-  if (typeof window.matchMedia !== "function") return "wide";
-  const matches = (query: string) => window.matchMedia(query).matches;
-  return bandFromMatches({
-    wide: matches(BAND_QUERIES.wide),
-    medium: matches(BAND_QUERIES.medium),
-    overlay: matches(BAND_QUERIES.overlay),
-  });
-}
-
 export function ShellBandProvider({ children }: { readonly children: ReactNode }) {
   const [band, setBand] = useState<ShellBand>("wide");
   useEffect(() => {
-    // Every band change is a resize (rotation and zoom included); setState skips equal bands.
-    const update = () => setBand(readBand());
+    if (typeof window.matchMedia !== "function") return;
+    // One list per edge, created once; each says when the window crosses it.
+    const lists = {
+      wide: window.matchMedia(BAND_QUERIES.wide),
+      medium: window.matchMedia(BAND_QUERIES.medium),
+      overlay: window.matchMedia(BAND_QUERIES.overlay),
+    };
+    const update = () =>
+      setBand(
+        bandFromMatches({
+          wide: lists.wide.matches,
+          medium: lists.medium.matches,
+          overlay: lists.overlay.matches,
+        }),
+      );
     update();
+    const all = Object.values(lists).filter((l) => typeof l.addEventListener === "function");
+    for (const l of all) l.addEventListener("change", update);
+    // Also on resize, reading the same lists: some engines miss a `change` (happy-dom does when
+    // the window jumps across all three edges at once), and a test fake may have no listeners.
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    return () => {
+      for (const l of all) l.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
+    };
   }, []);
   return <BandContext.Provider value={band}>{children}</BandContext.Provider>;
 }

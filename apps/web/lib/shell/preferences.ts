@@ -65,14 +65,6 @@ export function readPreferences(data: unknown): LayoutPreferences {
   );
 }
 
-/**
- * The rail's collapsed state to apply, or null to keep the default. It is the member's choice for
- * wide windows; narrower bands collapse the rail on screen without changing it (KOBE-201).
- */
-export function applyRailCollapsed(stored: boolean | undefined): boolean | null {
-  return stored ?? null;
-}
-
 /** The stored share if it is within the rail's bounds, else null (the default applies). */
 export function applyThreadsShare(stored: number | undefined): number | null {
   if (stored === undefined || !Number.isFinite(stored)) return null;

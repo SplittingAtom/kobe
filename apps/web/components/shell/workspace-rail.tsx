@@ -1,7 +1,7 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { FileBrowser } from "../files/file-browser";
@@ -143,8 +143,7 @@ export function WorkspaceRail({
   useFoldOnThreadChange(rail);
   const aside = useRef<HTMLElement>(null);
   const { collapsed, drawer, toggle } = rail;
-  const closeDrawer = useCallback(() => toggle(true), [toggle]);
-  useModalLayer(aside, drawer, closeDrawer, { modal: true, escape: true });
+  useModalLayer(aside, drawer, rail.closeDrawer, { modal: true, escape: true });
   useRevealFocus(rail);
   const sections = useRef<HTMLDivElement>(null);
   const single = useShellBand() === "single";

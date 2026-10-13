@@ -56,7 +56,7 @@ export interface ArtifactPanelApi {
   readonly createdTitles: Readonly<Record<string, string>>;
   /** The column's dragged width in px; null is the default (half the space right of the rail). */
   readonly width: number | null;
-  /** Under 820 px: the artifact sheet is showing (the member opened an artifact). Else false. */
+  /** Under 820 px: the artifact sheet is showing (the member opened one there). Else false. */
   readonly sheetOpen: boolean;
   /** Back to the conversation: hides the sheet, keeps the tabs. */
   hideSheet(): void;
@@ -208,17 +208,21 @@ function useArtifactWidth(
 }
 
 /**
- * Whether the artifact sheet shows (under 820 px): from the member's open until Back, the last
- * tab closing or a thread switch. The agent's auto-opens never show it.
+ * Whether the artifact sheet shows (under 820 px): from the member's open on a sheet width until
+ * Back, the last tab closing, a thread switch or the window crossing 820 px. Opens on a column
+ * width and the agent's auto-opens never show it, so narrowing the window never pops one up.
  */
-function useSheet(threadId: string | undefined, hasTabs: boolean) {
-  const [state, setState] = useState({ open: false, threadId });
-  if (state.threadId !== threadId || (state.open && !hasTabs)) {
-    setState({ open: false, threadId });
+function useSheet(threadId: string | undefined, hasTabs: boolean, asSheet: boolean) {
+  const [state, setState] = useState({ open: false, threadId, asSheet });
+  if (state.threadId !== threadId || state.asSheet !== asSheet || (state.open && !hasTabs)) {
+    setState({ open: false, threadId, asSheet });
   }
-  const show = useCallback(() => setState({ open: true, threadId }), [threadId]);
-  const hide = useCallback(() => setState({ open: false, threadId }), [threadId]);
-  const open = state.open && state.threadId === threadId && hasTabs;
+  const show = useCallback(
+    () => setState({ open: asSheet, threadId, asSheet }),
+    [threadId, asSheet],
+  );
+  const hide = useCallback(() => setState({ open: false, threadId, asSheet }), [threadId, asSheet]);
+  const open = state.open && state.threadId === threadId && state.asSheet === asSheet && hasTabs;
   return useMemo(() => ({ open, show, hide }), [open, show, hide]);
 }
 
@@ -242,8 +246,7 @@ export function ArtifactPanelProvider({
   const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
-  const sheet = useSheet(threadId, t.tabs.active !== null);
-  const asSheet = artifactAsSheet(useShellBand());
+  const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
   const { openArtifact: openTab } = t;
   const openArtifact = useCallback(
     (id: string, version?: number) => {
@@ -260,7 +263,7 @@ export function ArtifactPanelProvider({
       artifacts,
       createdTitles,
       width,
-      sheetOpen: asSheet && sheet.open,
+      sheetOpen: sheet.open,
       hideSheet: sheet.hide,
       openArtifact,
       activate: t.activate,
@@ -274,7 +277,6 @@ export function ArtifactPanelProvider({
       createdTitles,
       width,
       setWidth,
-      asSheet,
       sheet.open,
       sheet.hide,
       openArtifact,

@@ -180,7 +180,7 @@ function useSheetLayer(ref: RefObject<HTMLElement | null>) {
   const band = useShellBand();
   const sheet = artifactAsSheet(band);
   const hide = useCallback(() => panel?.hideSheet(), [panel]);
-  useModalLayer(ref, sheet && panel?.sheetOpen === true, hide, {
+  useModalLayer(ref, panel?.sheetOpen === true, hide, {
     modal: band === "single",
     escape: false, // the panel's own Escape (below) goes back
   });

@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useState,
   type HTMLAttributes,
   type ReactNode,
@@ -26,6 +27,21 @@ type Register = (name: ShellSlotName, el: HTMLElement | null) => void;
 const TargetsContext = createContext<Targets | null>(null);
 const RegisterContext = createContext<Register | null>(null);
 
+/**
+ * The one-row bar's menu (CE8, KOBE-201), open or not: the bar shows it, and the workspace closes
+ * it when another thread opens (a search hit, a notification).
+ */
+export interface BarMenu {
+  readonly open: boolean;
+  setOpen(open: boolean): void;
+}
+
+const BarMenuContext = createContext<BarMenu>({ open: false, setOpen: () => {} });
+
+export function useBarMenu(): BarMenu {
+  return useContext(BarMenuContext);
+}
+
 export function ShellSlotsProvider({ children }: { readonly children: ReactNode }) {
   const [targets, setTargets] = useState<Targets>({
     search: null,
@@ -35,9 +51,13 @@ export function ShellSlotsProvider({ children }: { readonly children: ReactNode 
   const register = useCallback<Register>((name, el) => {
     setTargets((t) => (t[name] === el ? t : { ...t, [name]: el }));
   }, []);
+  const [open, setOpen] = useState(false);
+  const menu = useMemo(() => ({ open, setOpen }), [open]);
   return (
     <RegisterContext.Provider value={register}>
-      <TargetsContext.Provider value={targets}>{children}</TargetsContext.Provider>
+      <BarMenuContext.Provider value={menu}>
+        <TargetsContext.Provider value={targets}>{children}</TargetsContext.Provider>
+      </BarMenuContext.Provider>
     </RegisterContext.Provider>
   );
 }

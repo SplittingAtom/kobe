@@ -29,7 +29,7 @@
   outline: none;
 }
 
-@media (max-width: 767.98px) {
+@media (width < 768px) {
   .rail:not([data-drawer]) {
     display: none;
   }
@@ -71,7 +71,7 @@
   display: none;
 }
 
-@media (min-width: 48rem) {
+@media (width >= 768px) {
   .rail {
     height: 100%;
     border-bottom: 0;
@@ -274,7 +274,7 @@
   font-weight: 600;
 }
 
-@media (min-width: 48rem) {
+@media (width >= 768px) {
   .rail[data-collapsed] .dropText {
     writing-mode: vertical-rl;
   }

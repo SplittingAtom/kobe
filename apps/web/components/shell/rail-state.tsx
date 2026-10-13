@@ -11,7 +11,6 @@ import {
 } from "react";
 import { THREADS_SHARE_BOUNDS } from "@kobe/protocol";
 import {
-  applyRailCollapsed,
   applyThreadsShare,
   useStoredPreference,
   type LayoutPreferences,
@@ -108,7 +107,8 @@ export function RailProvider({
   const chosen = useStoredPreference<boolean>({
     initial: false,
     ready,
-    resolve: () => applyRailCollapsed(preferences?.railCollapsed),
+    // The stored state is the wide-window choice; narrower bands collapse on screen only.
+    resolve: () => preferences?.railCollapsed ?? null,
     save: onSave && ((railCollapsed) => onSave({ railCollapsed })),
   });
   const share = useStoredPreference<number>({
@@ -145,12 +145,15 @@ export function RailProvider({
     (next: boolean) => (docked ? commitChosen(next) : openDrawer(!next)),
     [docked, commitChosen, openDrawer],
   );
-  // The drawer's divider sits in a different height: it moves the drawer only, unsaved.
-  const { commit: commitShare, set: setShare } = share;
+  // The drawer's divider sits in a different height: it moves the drawer only, unsaved, and the
+  // docked rail keeps the member's share.
+  const [drawerShare, setDrawerShare] = useState<number | null>(null);
+  const commitShare = share.commit;
   const setThreadsShare = useCallback(
-    (next: number) => (docked ? commitShare : setShare)(clampShare(next)),
-    [docked, commitShare, setShare],
+    (next: number) => (docked ? commitShare : setDrawerShare)(clampShare(next)),
+    [docked, commitShare],
   );
+  const threadsShare = docked ? share.value : (drawerShare ?? share.value);
   const reveal = useCallback(
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
       if (options?.toggle && collapsedNow()) toggle(false);
@@ -164,7 +167,7 @@ export function RailProvider({
     () => ({
       collapsed: docked ? chosen.value : !drawerOpen,
       drawer: drawerOpen,
-      threadsShare: share.value,
+      threadsShare,
       revealed,
       filesRequests,
       settled,
@@ -179,7 +182,7 @@ export function RailProvider({
       docked,
       chosen.value,
       drawerOpen,
-      share.value,
+      threadsShare,
       revealed,
       filesRequests,
       settled,

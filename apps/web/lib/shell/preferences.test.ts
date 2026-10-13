@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyArtifactWidth,
-  applyRailCollapsed,
   applyThreadsShare,
   createPreferencesSaver,
   loadPreferences,
@@ -14,13 +13,6 @@ import {
 
 /** KOBE-202 (CE8): layout preferences, applied when they still fit and saved debounced. */
 describe("apply (ac-3)", () => {
-  it("applies the stored rail state as the wide-window choice", () => {
-    // The stored state is the wide-window choice; narrow bands collapse on screen (KOBE-201).
-    expect(applyRailCollapsed(true)).toBe(true);
-    expect(applyRailCollapsed(false)).toBe(false);
-    expect(applyRailCollapsed(undefined)).toBeNull();
-  });
-
   it("applies a share within the rail's bounds and ignores one outside", () => {
     expect(applyThreadsShare(0.45)).toBe(0.45);
     expect(applyThreadsShare(0.2)).toBe(0.2);

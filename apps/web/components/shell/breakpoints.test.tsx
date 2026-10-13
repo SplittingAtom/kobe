@@ -58,6 +58,8 @@ const artifactRegion = () =>
   must(document.querySelector<HTMLElement>('[data-shell-region="artifact"]'));
 const grid = () => must(artifactRegion().parentElement);
 const header = () => must(document.querySelector("header"));
+const row = (n: 1 | 2) => must(header().querySelector<HTMLElement>(`[data-bar-row="${n}"]`));
+const menuPanel = () => must(document.querySelector<HTMLElement>("#kobe-bar-menu"));
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const handle = () =>
   screen.queryByRole("separator", { name: "Resize the artifact column and the conversation" });
@@ -154,50 +156,88 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("390: one 56 px row with the drawer button, team switcher, title and menu", async () => {
+  it("390: one 56 px row with the drawer button, team switcher, title and Menu", async () => {
     resizeWindow(390);
     openApp(fake);
     await composer();
     await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("single"));
-    const rows = header().querySelectorAll(":scope > [data-bar-row]");
-    expect(rows).toHaveLength(1);
-    const one = within(must(rows[0] as HTMLElement));
+    const one = within(row(1));
     expect(one.getByRole("button", { name: "Show the workspace" })).toBeTruthy();
     expect(one.getByRole("heading", { name: "Kobe" })).toBeTruthy();
-    // Everything else sits in the menu: row two's pickers, the search, the areas, the profile.
-    const menu = must(header().querySelector<HTMLDetailsElement>("details[data-bar-overflow]"));
-    await userEvent.setup().click(must(menu.querySelector('summary[aria-label="Menu"]')));
-    expect(menu.open).toBe(true);
-    const inMenu = within(menu);
-    const context = inMenu.getByRole("group", { name: "Conversation context" });
+    // Folded: row two and the rest are hidden behind the Menu.
+    const menuButton = one.getByRole("button", { name: "Menu" });
+    expect(menuButton.getAttribute("aria-expanded")).toBe("false");
+    expect(row(2).hidden).toBe(true);
+    expect(menuPanel().hidden).toBe(true);
+    await userEvent.setup().click(menuButton);
+    expect(menuButton.getAttribute("aria-expanded")).toBe("true");
+    expect(menuButton.getAttribute("aria-controls")).toBe("kobe-bar-menu kobe-bar-context");
+    // Row two's pickers, then the search, the areas, the profile menu.
+    const context = within(row(2));
+    expect(row(2).hidden).toBe(false);
+    expect(await context.findByRole("button", { name: "Chat with: No agent" })).toBeTruthy();
     expect(
-      await within(context).findByRole("button", { name: "Chat with: No agent" }),
+      await context.findByRole("combobox", { name: "Model for this conversation" }),
     ).toBeTruthy();
-    expect(
-      await within(context).findByRole("combobox", { name: "Model for this conversation" }),
-    ).toBeTruthy();
-    expect(within(context).getByRole("button", { name: "Files" })).toBeTruthy();
-    expect(inMenu.getByLabelText("Search conversations")).toBeTruthy();
-    expect(inMenu.getByRole("navigation", { name: "My area" })).toBeTruthy();
-    expect(menu.querySelector('summary[aria-label="Profile"]')).not.toBeNull();
+    expect(context.getByRole("button", { name: "Files" })).toBeTruthy();
+    const panel = within(menuPanel());
+    expect(menuPanel().hidden).toBe(false);
+    expect(panel.getByLabelText("Search conversations")).toBeTruthy();
+    expect(panel.getByRole("navigation", { name: "My area" })).toBeTruthy();
+    expect(menuPanel().querySelector('summary[aria-label="Profile"]')).not.toBeNull();
   });
 
-  it("390: the menu stays open while a picker inside it is used, and opens the profile menu inside", async () => {
+  it("390: the Menu stays open through a picker; Escape and a press outside close it", async () => {
     resizeWindow(390);
     openApp(fake);
     await composer();
     const user = userEvent.setup();
-    const menu = must(header().querySelector<HTMLDetailsElement>("details[data-bar-overflow]"));
-    await user.click(must(menu.querySelector("summary")));
-    expect(menu.open).toBe(true);
-    await user.click(await within(menu).findByRole("button", { name: "Chat with: No agent" }));
+    const menuButton = screen.getByRole("button", { name: "Menu" });
+    await user.click(menuButton);
+    await user.click(await within(row(2)).findByRole("button", { name: "Chat with: No agent" }));
     const choices = await screen.findByRole("radiogroup", { name: "Chat with" });
     await user.click(within(choices).getByRole("radio", { name: /Ledger Bot/ }));
-    expect(menu.open).toBe(true);
-    const profile = must(menu.querySelector<HTMLElement>('summary[aria-label="Profile"]'));
-    await user.click(profile);
-    expect(menu.open).toBe(true);
-    expect(must(profile.closest("details")).open).toBe(true);
+    expect(menuButton.getAttribute("aria-expanded")).toBe("true");
+    await user.keyboard("{Escape}"); // the agent popover
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+    expect(document.activeElement).toBe(menuButton);
+    await user.click(menuButton);
+    await user.click(await composer());
+    expect(menuButton.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("390: a search hit in the Menu opens the thread and closes the Menu", async () => {
+    resizeWindow(390);
+    const t = fake.addThread("Quarterly revenue");
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    const menuButton = screen.getByRole("button", { name: "Menu" });
+    await user.click(menuButton);
+    await user.type(within(menuPanel()).getByLabelText("Search conversations"), "revenue{Enter}");
+    const results = within(await screen.findByRole("list", { name: "Search results" }));
+    await user.click(results.getByRole("button", { name: "Quarterly revenue" }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
+    await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
+    expect(menuPanel().hidden).toBe(true);
+  });
+
+  it("crossing 768 px keeps the bar's parts mounted: the search keeps its text", async () => {
+    openApp(fake);
+    await composer();
+    const box = screen.getByLabelText("Search conversations");
+    const bell = row(1).querySelector('[data-command="notifications"]');
+    await userEvent.setup().type(box, "budget");
+    resizeWindow(390);
+    await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("single"));
+    expect(screen.getByLabelText("Search conversations")).toBe(box);
+    expect((box as HTMLInputElement).value).toBe("budget");
+    expect(row(1).querySelector('[data-command="notifications"]')).toBe(bell);
+    resizeWindow(DESKTOP_WIDTH);
+    await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("double"));
+    expect(screen.getByLabelText("Search conversations")).toBe(box);
+    expect(row(2).hidden).toBe(false);
   });
 
   it("390: the rail is a drawer from the bar; the collapsed rail is not shown", async () => {
@@ -238,6 +278,67 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(header().hasAttribute("inert")).toBe(false);
     expect(document.activeElement).toBe(opener);
     expect(screen.getByRole("tab", { name: "Plan", hidden: true })).toBeTruthy();
+  });
+});
+
+describe("review round 1", () => {
+  it("Escape that cancels a rename in the drawer leaves the drawer open", async () => {
+    resizeWindow(960);
+    fake.addThread("Budget");
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(await within(aside()).findByRole("button", { name: "Show threads" }));
+    const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
+    await user.click(await drawer.findByRole("button", { name: "Rename Budget" }));
+    expect(drawer.getByLabelText("New title for Budget")).toBe(document.activeElement);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(drawer.queryByLabelText("New title for Budget")).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+    await user.keyboard("{Escape}"); // the next one is the drawer's
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
+  });
+
+  it("a sheet crossing 768 px stays open, and Back still returns focus to its opener", async () => {
+    resizeWindow(800);
+    const opener = await openArtifact();
+    await waitFor(() => expect(artifactRegion().hasAttribute("data-sheet-open")).toBe(true));
+    resizeWindow(390);
+    const sheet = await screen.findByRole("dialog", { name: "Plan" });
+    expect(header().hasAttribute("inert")).toBe(true);
+    await userEvent
+      .setup()
+      .click(within(sheet).getByRole("button", { name: "Back to the conversation" }));
+    expect(artifactRegion().hasAttribute("data-sheet-open")).toBe(false);
+    expect(header().hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("an artifact opened as a column doesn't pop up as a sheet when the window narrows", async () => {
+    await openArtifact();
+    resizeWindow(390);
+    await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("single"));
+    expect(artifactRegion().hasAttribute("data-sheet-open")).toBe(false);
+    expect(header().hasAttribute("inert")).toBe(false);
+  });
+
+  it("the drawer's divider stays in the drawer: the docked rail keeps the member's share", async () => {
+    fake.preferences = { threads_share: 0.4 };
+    resizeWindow(960);
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(await within(aside()).findByRole("button", { name: "Show threads" }));
+    const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
+    const divider = () => screen.getByRole("separator", { name: "Resize Threads and Files" });
+    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("40"));
+    drawer.getByRole("separator", { name: "Resize Threads and Files" }).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(divider().getAttribute("aria-valuenow")).toBe("50");
+    resizeWindow(DESKTOP_WIDTH);
+    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("40"));
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts()).toHaveLength(0);
   });
 });
 

@@ -38,15 +38,13 @@ band (`wide` / `medium` / `overlay` / `single`) from `matchMedia`, followed on `
   comes back when the window grows (ac-2). The stored width waits to apply until the window has a
   column to measure (no apply on a phone). It is never saved from a sheet width. A drag at
   820–1100 px is saved (both floors fit there).
-- **One-row bar (CE8).** Under 768 px the bar is one row: drawer button (`open-rail`, portalled
-  from the workspace through a new `nav` slot), team switcher, title, and a **Menu** (`thread-menu`,
-  a `<details>` like the other bar menus). The menu holds row two through the same `context` slot
-  (agent picker, model picker, Files), then the search, areas, consoles, bell and profile menu.
+- **One-row bar (CE8).** Under 768 px the bar is one row: the drawer button (`open-rail`,
+  portalled from the workspace through a new `nav` slot), the team switcher, the title and a
+  **Menu** that discloses row two (agent picker, model picker, Files), the search, the areas, the
+  consoles, the bell and the profile menu. See review round 1.
   "Title" is the Kobe wordmark; the thread title stays in the conversation header right below.
 - **Gauge (CE14).** Not built. ContextRow already carries the B7 slot comment; on one column it
   renders in the menu, and the menu marks the slot.
-- **Bar menus.** A press in a Radix popover (a picker's popover, portalled to the body) no longer
-  closes the menu. Opening a menu inside another (profile inside Menu) keeps the parent open.
 - **Accessibility.** `useModalLayer` (drawer, both sheets): focus moves in, Escape closes the
   drawer, a press outside closes a modal layer, and everything else in the chat is `inert` while
   modal. That is the focus trap, the same as a native modal dialog. Focus returns to the opener.
@@ -62,13 +60,39 @@ band (`wide` / `medium` / `overlay` / `single`) from `matchMedia`, followed on `
 - **Replaced KOBE-205's one-column rows** (`minmax(min(20rem,100%),1fr)` with 40/50dvh caps): under
   768 px the conversation is the only grid row. The drawer and sheet lie over it.
 
+## Review round 1 (`/code-review medium`, 10 findings: all confirmed, all fixed)
+
+- **Escape twice:** the rename input now `preventDefault`s its Escape, and the layer also ignores
+  an Escape from a portalled popover. An inner handler that stops at the React root never reaches
+  the layer's document listener anyway.
+- **Opener across bands:** focus return is its own effect keyed on `active`, so a sheet crossing
+  768 px (modal on/off) keeps its opener.
+- **Drawer divider:** the drawer keeps its own share; the docked rail shows the member's again.
+- **Sheet on narrowing:** the sheet opens only from a member's open on a sheet width, and resets
+  when the window crosses 820 px. An artifact opened as a column never pops up as a sheet.
+- **Fractional widths:** range syntax (`width < 768px`, `width >= 768px`, `768px <= width < 820px`)
+  in the CSS and in `BAND_QUERIES`. The contract test refuses any min/max-width in the shell CSS.
+- **One bar tree:** the Menu is now a disclosure button (`thread-menu`, `aria-expanded`,
+  `aria-controls` = the search/icons panel and row two). Folded, both are `hidden`; open, they
+  unfold under row one and the bar grows. Nothing remounts across 768 px (search text, pickers,
+  bell). `BarOverflowMenu` is gone and `bar-menu.ts` is back to main. A press outside the bar
+  (popovers excepted) or Escape closes it, with focus back on Menu.
+- **Deferred item fixed:** the Menu closes when another thread is on screen (search hit, bell).
+  Its state sits in `ShellSlotsProvider` (`useBarMenu`), so the workspace can close it.
+- `matchMedia` lists are created once, with `change` listeners. Resize also re-reads the same
+  lists, because happy-dom misses a `change` when the window jumps across all three edges.
+- `rail.closeDrawer` is used directly; `useSheetLayer` uses `panel.sheetOpen` alone;
+  `applyRailCollapsed` is inlined and its test dropped.
+- Tests: `breakpoints.test.tsx` "review round 1" covers the rename Escape, the sheet crossing
+  768 px, no sheet on narrowing and the drawer divider. The 390 bar tests cover the Menu, Escape
+  and outside press, a search hit closing it, and the parts staying mounted across 768 px.
+  Mutation check: undoing fix 1, 2 or 3 fails its test.
+
 ## Open questions (for Chris or the coordinator)
 
 - Diff is ~720 added non-test lines, ~600 net. About 150 are comments and re-indentation, so it
   is at the ~700 guide. Split if wanted: (1) bands, yield order, drawer, overlay sheet;
   (2) the one-row bar and the full-screen sheet.
-- The overflow menu stays open after a search hit opens a thread (the drawer closes). Small
-  follow-up if it bothers anyone on a phone.
 
 ## Evidence (acceptance criteria → test or command output)
 

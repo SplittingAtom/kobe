@@ -25,9 +25,9 @@ describe("bands (CE7)", () => {
         overlay: w >= BREAKPOINTS.overlay,
       });
     for (const w of [1280, 1100, 960, 820, 800, 768, 390]) expect(at(w)).toBe(bandFor(w));
-    expect(BAND_QUERIES.wide).toBe("(min-width: 1100px)");
-    expect(BAND_QUERIES.medium).toBe("(min-width: 820px)");
-    expect(BAND_QUERIES.overlay).toBe("(min-width: 768px)");
+    expect(BAND_QUERIES.wide).toBe("(width >= 1100px)");
+    expect(BAND_QUERIES.medium).toBe("(width >= 820px)");
+    expect(BAND_QUERIES.overlay).toBe("(width >= 768px)");
   });
 });
 

@@ -4,7 +4,7 @@ import { cleanup, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { viewport } from "../../app/layout";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { BREAKPOINTS } from "../../lib/shell/layout";
+import { BAND_QUERIES, BREAKPOINTS } from "../../lib/shell/layout";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
 import { useViewportHeight } from "../chat/use-viewport-height";
@@ -92,15 +92,20 @@ function media(source: string, query: string): string {
 }
 
 describe("breakpoints (KOBE-201, CE7, CE8)", () => {
-  const below = (px: number) => `(max-width: ${px - 0.02}px)`;
-  const from = (px: number) => `(min-width: ${px}px)`;
+  // Range syntax, the same as `BAND_QUERIES`, so CSS and JS agree at fractional widths.
+  const below = (px: number) => `(width < ${px}px)`;
+  const from = (px: number) => `(width >= ${px}px)`;
+  const between = (lo: number, hi: number) => `(${lo}px <= width < ${hi}px)`;
 
-  it("the CSS bands sit on the layout module's numbers", () => {
+  it("the CSS bands sit on the layout module's numbers, in the same range syntax", () => {
     expect(BREAKPOINTS).toEqual({ overlay: 768, medium: 820, wide: 1100 });
+    for (const q of Object.values(BAND_QUERIES)) expect(q).toMatch(/^\(width >= \d+px\)$/);
+    // No min-/max-width with a fractional edge left in the shell's CSS.
+    expect(`${SHELL}${RAIL}`).not.toMatch(/\((min|max)-width/);
     for (const query of [
       below(BREAKPOINTS.overlay),
       from(BREAKPOINTS.overlay),
-      `${from(BREAKPOINTS.overlay)} and ${below(BREAKPOINTS.medium)}`,
+      between(BREAKPOINTS.overlay, BREAKPOINTS.medium),
       from(BREAKPOINTS.medium),
       below(BREAKPOINTS.wide),
     ]) {
@@ -127,7 +132,7 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
   });
 
   it("768–820: the artifact column is a sheet over the conversation, shown only while open", () => {
-    const overlay = media(SHELL, `${from(BREAKPOINTS.overlay)} and ${below(BREAKPOINTS.medium)}`);
+    const overlay = media(SHELL, between(BREAKPOINTS.overlay, BREAKPOINTS.medium));
     expect(declares(overlay, ".artifact", "position: absolute;")).toBe(true);
     expect(
       declares(overlay, ".artifact", "width: clamp(360px, 50%, 100% - var(--kobe-rail-width));"),
