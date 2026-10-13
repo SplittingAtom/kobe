@@ -15,7 +15,7 @@
 ## Decisions
 
 - **Frame route** = artifact frame rules: `FRAME_HEADERS` unchanged (CSP `sandbox allow-scripts
-  allow-forms` without `allow-same-origin`, `connect-src 'none'`, `frame-ancestors 'self'`,
+allow-forms` without `allow-same-origin`, `connect-src 'none'`, `frame-ancestors 'self'`,
   `X-Frame-Options: SAMEORIGIN`), same `Sec-Fetch-Site`/`Origin` check (now a shared helper,
   `isSameSiteFrameRequest` in `artifacts/serve.ts`, used by both routes). Stricter than the artifact
   frame: `team` is **required** (strict query, unknown params 400), only `.html`/`.htm` (checked
