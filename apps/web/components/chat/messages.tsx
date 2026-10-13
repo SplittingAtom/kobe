@@ -20,6 +20,7 @@ import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
+import { ArrivingWords } from "./arriving-words";
 import { Markdown } from "./markdown";
 import { ToolCallCard } from "./tool-call";
 import styles from "./chat.module.css";
@@ -29,11 +30,16 @@ function PlainText({ text }: TextMessagePartProps) {
   return <span>{text}</span>;
 }
 
-function Reasoning({ text }: ReasoningMessagePartProps) {
+/** Reasoning as written; while it streams, its words arrive as fading spans (KOBE-207). */
+function Reasoning({ text, status }: ReasoningMessagePartProps) {
   return (
     <details className="text-muted-foreground group my-2 text-sm">
       <summary className="hover:text-foreground cursor-pointer select-none">Reasoning</summary>
-      <p className="border-border mt-1 border-s-2 ps-3 whitespace-pre-wrap">{text}</p>
+      <div data-kobe-arrive={status.type === "running" ? "running" : undefined}>
+        <p className="border-border mt-1 border-s-2 ps-3 whitespace-pre-wrap">
+          <ArrivingWords text={text} />
+        </p>
+      </div>
     </details>
   );
 }
@@ -86,9 +92,12 @@ function Offloaded() {
   return <p className={styles.notice}>This part of the conversation is too large to show here.</p>;
 }
 
-/** Agent text: sanitised Markdown (`markdown.tsx`); the user's own text stays as typed. */
-function MarkdownText({ text }: TextMessagePartProps) {
-  return <Markdown text={text} />;
+/**
+ * Agent text: sanitised Markdown (`markdown.tsx`); the user's own text stays as typed. The part
+ * being written fades its words in (KOBE-207); the status changes once per part, not per token.
+ */
+function MarkdownText({ text, status }: TextMessagePartProps) {
+  return <Markdown text={text} words arriving={status.type === "running"} />;
 }
 
 const ASSISTANT_PARTS = {

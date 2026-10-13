@@ -147,6 +147,7 @@ function MessagesAndComposer({
           role="region"
           aria-labelledby="kobe-thread-title"
           data-kobe-scroll="messages"
+          data-kobe-follow={follow}
           className="flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-auto overscroll-contain scroll-smooth [overflow-anchor:auto] motion-reduce:scroll-auto"
         >
           <div

@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { announcement, chatRequests, composer, openApp, streaming } from "./testing";
+import { announcement, chatRequests, composer, openApp, streamed, streaming } from "./testing";
 import { must } from "../../lib/testing/must";
 
 let fake: FakeKobe;
@@ -53,7 +53,7 @@ describe("streaming a run (D16)", () => {
 
     fake.agent.delta(runId, "m1", "Here is ");
     fake.agent.delta(runId, "m1", "the chart");
-    expect(await screen.findByText("Here is the chart")).toBeTruthy();
+    expect(await screen.findByText(streamed("Here is the chart"))).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
 
     fake.agent.toolCall(runId, "tc1", "bash", { cmd: "python plot.py" }, "m1");
@@ -204,14 +204,14 @@ describe("streaming a run (D16)", () => {
     const { runId } = await sendAndStart("count to five", t);
     fake.agent.delta(runId, "m1", "one, ");
     fake.agent.delta(runId, "m1", "two, ");
-    expect(await screen.findByText("one, two,")).toBeTruthy();
+    expect(await screen.findByText(streamed("one, two,"))).toBeTruthy();
 
     first.unmount(); // the tab is refreshed while the run goes on server-side (U4)
     fake.agent.delta(runId, "m1", "three, ");
     expect(fake.openStreams).toHaveLength(0);
 
     openApp(fake, t);
-    expect(await screen.findByText("one, two, three,")).toBeTruthy();
+    expect(await screen.findByText(streamed("one, two, three,"))).toBeTruthy();
     // The prompt is back too (pending-messages), before Pi committed it.
     expect(screen.getByText("count to five")).toBeTruthy();
     const sse = fake.requests.filter((r) => r.method === "SSE");
@@ -224,8 +224,8 @@ describe("streaming a run (D16)", () => {
     fake.dropConnections();
     fake.agent.delta(runId, "m1", "four, ");
     fake.agent.delta(runId, "m1", "five");
-    expect(await screen.findByText("one, two, three, four, five")).toBeTruthy();
-    expect(screen.queryByText(/three, three/)).toBeNull();
+    expect(await screen.findByText(streamed("one, two, three, four, five"))).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/three, three/);
     expect(fake.openStreams[0]?.connections).toBe(2);
   });
 
@@ -254,7 +254,7 @@ describe("streaming a run (D16)", () => {
     fake.agent.delta(runId, "m2", "step two");
 
     openApp(fake, t);
-    expect(await screen.findByText("step two")).toBeTruthy();
+    expect(await screen.findByText(streamed("step two"))).toBeTruthy();
     const sse = fake.requests.filter((r) => r.method === "SSE");
     expect(sse.at(-1)?.path).toBe(`/v1/runs/${runId}/events?starting_after=${resumeAt}`);
     // What the stream said before the resume point (the denial) is kept.
@@ -319,7 +319,7 @@ describe("queue, Steer and Stop (D17)", () => {
     );
     expect(screen.getByText("second, edited")).toBeTruthy();
     fake.agent.delta(must(queued[0]).run_id, "m1", "answer to the edit");
-    expect(await screen.findByText("answer to the edit")).toBeTruthy();
+    expect(await screen.findByText(streamed("answer to the edit"))).toBeTruthy();
   });
 
   it("shows what the resolver left out as a notice (KOBE-77)", async () => {
@@ -418,7 +418,7 @@ describe("queue, Steer and Stop (D17)", () => {
     openApp(fake, t);
     const { user, runId } = await sendAndStart("long job", t);
     fake.agent.delta(runId, "m1", "Working on it");
-    await screen.findByText("Working on it");
+    await screen.findByText(streamed("Working on it"));
     await user.click(screen.getByRole("button", { name: "Stop" }));
     expect(await screen.findByText("Stopped.")).toBeTruthy();
     expect(screen.getByText("Working on it")).toBeTruthy();
@@ -451,7 +451,7 @@ describe("interrupted runs (D14)", () => {
     await streaming(fake, retry.run_id);
     await waitFor(() => expect(screen.queryByText("The run was interrupted")).toBeNull());
     fake.agent.delta(retry.run_id, "m1", "Second attempt");
-    expect(await screen.findByText("Second attempt")).toBeTruthy();
+    expect(await screen.findByText(streamed("Second attempt"))).toBeTruthy();
     expect(queued.status).toBe("queued");
   });
 
