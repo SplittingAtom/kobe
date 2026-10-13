@@ -58,6 +58,21 @@ describe("CSS contract", () => {
     expect(grid.some((b) => b.includes("grid-template-rows: minmax(0, 1fr);"))).toBe(true);
     expect(grid.some((b) => b.includes("min-height: 0;"))).toBe(true);
   });
+
+  it("the artifact column: half by default, a dragged width within both floors, none when empty (KOBE-200)", () => {
+    const flat = (bodies: string[]) => bodies.map((b) => b.replace(/\s+/g, " "));
+    expect(
+      declares(SHELL, ".grid", "--kobe-artifact-width: calc((100% - var(--kobe-rail-width)) / 2);"),
+    ).toBe(true);
+    const floors =
+      "minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px)) minmax(400px, 1fr);";
+    expect(
+      flat(rules(SHELL, ".grid:has(> .artifact:not(:empty))")).some((b) => b.includes(floors)),
+    ).toBe(true);
+    expect(declares(SHELL, ".artifact:empty", "display: none;")).toBe(true);
+    // The resize handle has its own strip, off the column's scrollbar (review round 1).
+    expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
+  });
 });
 
 describe("DOM contract", () => {

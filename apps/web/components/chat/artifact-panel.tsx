@@ -1,105 +1,25 @@
 "use client";
 
 /**
- * The artifact panel (KOBE-130, D-6/D-7 of docs/ledger/KOBE-55.md), assistant-ui's with-artifacts
- * pattern: a side panel next to the thread, opened from the run notice, the tool card or the
- * thread's artifact list. The panel is a labelled region, closable with Escape. What it shows comes
- * from `/v1/artifacts` (team in `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded
- * from the server's frame route (`artifact-views.tsx`).
+ * The artifact column (KOBE-130, D-6/D-7 of docs/ledger/KOBE-55.md; tabs KOBE-200, CE6),
+ * assistant-ui's with-artifacts pattern: a tab per artifact opened in the thread, opened from the
+ * run notice, the tool card or the thread's artifact list, or by the agent creating one. The
+ * column is a labelled region; Escape closes the active tab, and with no tabs it is gone. It is
+ * view-only (member editing is a later spec). What it shows comes from `/v1/artifacts` (team in
+ * `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded from the server's frame route
+ * (`artifact-views.tsx`). State: `artifact-state.tsx`.
  */
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { artifactContentUrl, type ArtifactDetailView } from "../../lib/chat/artifacts";
 import type { ApiError } from "../../lib/api/client";
 import { cn } from "../../lib/utils";
 import { ErrorNotice } from "../admin/error-notice";
+import { ArtifactResizeHandle } from "../shell/artifact-resize";
 import { IconAction } from "../shell/icon-action";
+import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
+import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
-import { useChatSession, useKobeExtras } from "./kobe-runtime";
-
-interface OpenRequest {
-  readonly id: string;
-  /** A specific version; absent = the latest, following updates. */
-  readonly version: number | undefined;
-  /** Distinguishes two requests for the same artifact, so a click resets the version. */
-  readonly seq: number;
-}
-
-export interface ArtifactPanelApi {
-  readonly openId: string | null;
-  openArtifact(id: string, version?: number): void;
-  close(): void;
-}
-
-const ArtifactPanelContext = createContext<ArtifactPanelApi | null>(null);
-
-/** Null outside a provider (slots rendered on their own show no Open button). */
-export function useArtifactPanel(): ArtifactPanelApi | null {
-  return useContext(ArtifactPanelContext);
-}
-
-/**
- * `scope` identifies what is on screen (team and thread): when it changes the open artifact belongs
- * to something else, so the panel closes.
- */
-export function ArtifactPanelProvider({
-  scope,
-  children,
-}: {
-  readonly scope: string;
-  readonly children: ReactNode;
-}) {
-  const [request, setRequest] = useState<OpenRequest | null>(null);
-  const [seenScope, setSeenScope] = useState(scope);
-  if (seenScope !== scope) {
-    setSeenScope(scope);
-    setRequest(null);
-  }
-  const opener = useRef<Element | null>(null);
-  const seq = useRef(0);
-  const openArtifact = useCallback((id: string, version?: number) => {
-    opener.current = document.activeElement;
-    seq.current += 1;
-    setRequest({ id, version, seq: seq.current });
-  }, []);
-  const close = useCallback(() => {
-    setRequest(null);
-    const back = opener.current;
-    opener.current = null;
-    if (back instanceof HTMLElement) back.focus();
-  }, []);
-  const api = useMemo<ArtifactPanelApi>(
-    () => ({ openId: request?.id ?? null, openArtifact, close }),
-    [request?.id, openArtifact, close],
-  );
-  return (
-    <ArtifactPanelContext.Provider value={api}>
-      <ArtifactPanelRequest.Provider value={request}>{children}</ArtifactPanelRequest.Provider>
-    </ArtifactPanelContext.Provider>
-  );
-}
-
-const ArtifactPanelRequest = createContext<OpenRequest | null>(null);
-
-/** Artifact events seen on the live run: a change means the list or the open artifact moved on. */
-export function useArtifactEventCount(): number {
-  const live = useKobeExtras()?.state.live;
-  if (!live) return 0;
-  const onTools = Object.values(live.tools).reduce((n, t) => n + t.artifacts.length, 0);
-  const notices = live.notices.filter(
-    (n) => n.type === "artifact.created" || n.type === "artifact.updated",
-  ).length;
-  return onTools + notices;
-}
+import { useChatSession } from "./kobe-runtime";
 
 interface Detail {
   readonly artifact: ArtifactDetailView | null;
@@ -109,7 +29,7 @@ interface Detail {
 
 function useArtifactDetail(id: string): Detail {
   const session = useChatSession();
-  const events = useArtifactEventCount();
+  const events = useArtifactEventCount(id);
   const [state, setState] = useState<Detail>({ artifact: null, error: null });
   useEffect(() => {
     let current = true;
@@ -158,18 +78,29 @@ function VersionNav({
   );
 }
 
+export const artifactTitleId = (id: string) => `kobe-artifact-title-${id}`;
+
+/**
+ * One tab's artifact. Every open tab stays mounted (hidden while inactive), so a tab keeps the
+ * version the member chose and its loaded content; `initialVersion` applies when the tab opens.
+ */
 function PanelContent({
   id,
   initialVersion,
+  onTitle,
 }: {
   readonly id: string;
-  readonly initialVersion?: number;
+  readonly initialVersion: number | undefined;
+  readonly onTitle: (id: string, title: string) => void;
 }) {
   const session = useChatSession();
-  const panel = useArtifactPanel();
   const detail = useArtifactDetail(id);
   const [pinned, setPinned] = useState<number | null>(initialVersion ?? null);
   const artifact = detail.artifact;
+  const title = artifact?.title;
+  useEffect(() => {
+    if (title !== undefined) onTitle(id, title);
+  }, [id, title, onTitle]);
   const versions = artifact?.versions.map((v) => v.version) ?? [];
   const latest = artifact?.currentVersion ?? 1;
   const version = pinned !== null && versions.includes(pinned) ? pinned : latest;
@@ -177,7 +108,7 @@ function PanelContent({
   return (
     <>
       <header className="flex items-center gap-2 border-b px-3 py-2">
-        <h2 id="kobe-artifact-title" className="min-w-0 flex-1 truncate text-sm font-medium">
+        <h2 id={artifactTitleId(id)} className="min-w-0 flex-1 truncate text-sm font-medium">
           {artifact?.title ?? "Artifact"}
         </h2>
         {artifact && (
@@ -195,7 +126,6 @@ function PanelContent({
             />
           </>
         )}
-        <IconAction command="artifact-close" onClick={() => panel?.close()} />
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {!artifact && !detail.error && <p role="status">Loading the artifact…</p>}
@@ -213,7 +143,24 @@ function PanelContent({
   );
 }
 
-/** The panel region beside the thread; nothing while no artifact is open. */
+/** Tab titles: the thread's list, else the run's announcement, else the loaded artifact. */
+function useTabTitles(open: readonly string[]) {
+  const panel = useArtifactPanel();
+  const [loaded, setLoaded] = useState<Readonly<Record<string, string>>>({});
+  const onTitle = useCallback(
+    (id: string, title: string) =>
+      setLoaded((prev) => (prev[id] === title ? prev : { ...prev, [id]: title })),
+    [],
+  );
+  const listed = new Map(panel?.artifacts?.map((a) => [a.id, a.title]));
+  const tabs = open.map((id, index) => ({
+    id,
+    title: listed.get(id) ?? panel?.createdTitles[id] ?? loaded[id] ?? `Artifact ${index + 1}`,
+  }));
+  return { tabs, onTitle };
+}
+
+/** The artifact column's content: tabs, the open artifacts and the resize handle. */
 export function ArtifactPanel({ className }: { readonly className?: string | undefined }) {
   const panel = useArtifactPanel();
   const request = useContext(ArtifactPanelRequest);
@@ -222,11 +169,15 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
   useEffect(() => {
     if (requestKey !== null) ref.current?.focus();
   }, [requestKey]);
-  if (!panel || !request) return null;
+  const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
+  const active = panel?.openId ?? null;
+  if (!panel || active === null) return null; // no tabs: no column (CE6)
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape" && !event.defaultPrevented) {
       event.stopPropagation();
+      const last = panel.tabs.open.length === 1;
       panel.close();
+      if (!last) ref.current?.focus();
     }
   };
   return (
@@ -234,23 +185,41 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
       ref={ref}
       tabIndex={-1}
       role="region"
-      aria-labelledby="kobe-artifact-title"
+      aria-labelledby={artifactTitleId(active)}
       onKeyDown={onKeyDown}
       className={cn(
         "bg-background flex min-h-96 min-w-0 flex-col border-s outline-none",
         className,
       )}
     >
-      <PanelContent
-        key={requestKey}
-        id={request.id}
-        {...(request.version === undefined ? {} : { initialVersion: request.version })}
+      <ArtifactTabStrip
+        tabs={tabs}
+        active={active}
+        onSelect={panel.activate}
+        onClose={panel.closeTab}
       />
+      {tabs.map(({ id }) => (
+        <div
+          key={id}
+          role="tabpanel"
+          id={artifactTabpanelId(id)}
+          aria-labelledby={artifactTabId(id)}
+          hidden={id !== active}
+          className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex"
+        >
+          <PanelContent
+            id={id}
+            initialVersion={request?.id === id ? request.version : undefined}
+            onTitle={onTitle}
+          />
+        </div>
+      ))}
+      <ArtifactResizeHandle width={panel.width} onChange={panel.setWidth} />
     </aside>
   );
 }
 
-/** Opens the panel: used by the run notice and the tool card. */
+/** Opens an artifact's tab: used by the run notice and the tool card. */
 export function OpenArtifactButton({
   id,
   version,
