@@ -17,7 +17,8 @@ import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat
 import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
-import { useKobeExtras } from "./kobe-runtime";
+import { isStopping } from "../../lib/chat/thread-state";
+import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { ArrivingWords } from "./arriving-words";
@@ -30,12 +31,25 @@ function PlainText({ text }: TextMessagePartProps) {
   return <span>{text}</span>;
 }
 
+/**
+ * Whether a part is being written, for the arrival fade (KOBE-207): it streams, and Stop was not
+ * accepted for its run (KOBE-269: the run's end can arrive seconds after Stop; nothing fades meanwhile).
+ */
+function useArriving(status: { readonly type: string }): boolean {
+  const stopping = useAuiState((s) => {
+    const extras = s.thread.extras as KobeThreadExtras | undefined;
+    return extras ? isStopping(extras.state) : false;
+  });
+  return status.type === "running" && !stopping;
+}
+
 /** Reasoning as written; while it streams, its words arrive as fading spans (KOBE-207). */
 function Reasoning({ text, status }: ReasoningMessagePartProps) {
+  const arriving = useArriving(status);
   return (
     <details className="text-muted-foreground group my-2 text-sm">
       <summary className="hover:text-foreground cursor-pointer select-none">Reasoning</summary>
-      <div data-kobe-arrive={status.type === "running" ? "running" : undefined}>
+      <div data-kobe-arrive={arriving ? "running" : undefined}>
         <p className="border-border mt-1 border-s-2 ps-3 whitespace-pre-wrap">
           <ArrivingWords text={text} />
         </p>
@@ -97,7 +111,7 @@ function Offloaded() {
  * being written fades its words in (KOBE-207); the status changes once per part, not per token.
  */
 function MarkdownText({ text, status }: TextMessagePartProps) {
-  return <Markdown text={text} words arriving={status.type === "running"} />;
+  return <Markdown text={text} words arriving={useArriving(status)} />;
 }
 
 const ASSISTANT_PARTS = {

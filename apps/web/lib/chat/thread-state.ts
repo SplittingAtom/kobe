@@ -58,6 +58,8 @@ export interface ThreadState {
     { readonly error: ApiError; readonly draft?: string | undefined } | undefined;
   /** Actions in flight, e.g. `stop`, `retry`, `edit:<runId>`. */
   readonly busy: readonly string[];
+  /** The run the server accepted Stop for; it may stream on until its end arrives (KOBE-269). */
+  readonly stopRequested?: string | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
   /** Bumped per announcement, so the same text twice is announced twice. */
@@ -139,6 +141,12 @@ export function currentRunId(state: ThreadState): string | undefined {
 
 export function isThreadRunning(state: ThreadState): boolean {
   return currentRunId(state) !== undefined;
+}
+
+/** Stop was accepted for the current run, whose end has not arrived yet (KOBE-269). */
+export function isStopping(state: ThreadState): boolean {
+  const runId = currentRunId(state);
+  return runId !== undefined && state.stopRequested === runId;
 }
 
 /** The run to stream: the active one, else the next queued one (unless the thread is interrupted). */

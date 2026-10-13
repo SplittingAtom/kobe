@@ -562,7 +562,10 @@ export class ThreadController {
     if (!res.ok) {
       this.#set((s) => ({ ...s, queuePaused: false }));
       this.#fail(res.error);
-    } else this.#announce(holds ? "Stopped. The queue is paused." : "Stopping…");
+    } else {
+      this.#set((s) => ({ ...s, stopRequested: runId }));
+      this.#announce(holds ? "Stopped. The queue is paused." : "Stopping…");
+    }
   };
 
   readonly cancelQueued = async (runId: string): Promise<void> => {

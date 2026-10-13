@@ -39,8 +39,23 @@
   under it), a modal sheet in this band (changes CE7's overlay into the < 768 behaviour), a
   ResizeObserver-fed height variable (more code for the same result).
 
+- **Arrival fade colours (coordinator, 2026-10-13):** on gate1 Chromium mid-fade words computed
+  as `oklab(1 69.6 189.8)` (red/green): `@keyframes kobe-arrive` interpolated `color` from the
+  rgb/oklch tint to the text colour, which the build emits as `lab()`. Now the keyframes move a
+  registered `@property --kobe-arrived` (<percentage>, 0% → 100%, initial 100%) and the word's
+  colour is `color-mix(in srgb, currentColor var(--kobe-arrived), var(--kobe-arrive-tint))`: no
+  colour interpolation, both endpoints mixed in one space. Text colour first because Tailwind's
+  build emits the first colour as the fallback without color-mix (`color: currentColor`, checked
+  in the built CSS). Without @property the percentage flips at mid-animation (discrete), harmless.
+- **Fade after Stop:** the part kept `data-kobe-arrive="running"` until the run's end event,
+  which can come seconds after the server accepts the cancel. The controller now records
+  `stopRequested` (the run id) on an accepted Stop; `isStopping(state)` holds while that run is
+  still current, and the text and reasoning parts stop fading at once (`useArriving` in
+  `messages.tsx`, a boolean selector, so no extra renders per token).
+
 ## Open questions (for Chris or the coordinator)
 
+- Confirm on gate1: mid-fade word colour lies between the tint and the text colour.
 - Confirm on gate1 after deploy at ~800 px with an artifact open: Send visible and clickable,
   sheet bottom at the composer's top; queue chips and the Files list flush left.
 
@@ -53,3 +68,7 @@
   `markdown.test.tsx` pins `data-kobe-markdown` and the Markdown list classes.
 - ac-3 (sheet): `layout-contract.test.tsx` 768–820 test pins `bottom: anchor(--kobe-composer top)`
   and the anchor name; `next build` keeps both declarations in the emitted CSS.
+- Fade (coordinator follow-up): `arrival-fade.test.tsx` pins the registered percentage, the
+  endpoints (0% tint, 100%/rest text colour) and that the keyframes never set `color`; "Stop ends
+  the fade at once, before the server confirms" (cancel accepted with 202, end withheld) failed
+  before the fix; "after Stop and the run's end" passes.

@@ -159,10 +159,25 @@ body:has([data-kobe-chat]) {
    (`data-kobe-arrive`). The tint is the accent only while the message list follows the stream
    (`data-kobe-follow`, KOBE-205); scrolled up, it is the text colour, so words arrive plain.
    Swapping the variable, rather than the animation, means re-pinning never restarts the fade on
-   words already there. Code and tool output never have word spans. */
+   words already there. Code and tool output never have word spans.
+   The animation moves a registered percentage, not the colour (KOBE-269): each frame mixes the
+   text colour (`currentColor`, what the word inherits) with the tint in sRGB, by how far the word
+   has arrived. Interpolating the colour itself mixed an rgb/oklch tint with the `lab()` text colour
+   (the build emits tokens as lab), and Chromium painted words red and green mid-fade. At rest
+   (100%: the end, no animation, reduced motion) the word is the text colour; the text colour comes
+   first so that the build's fallback without color-mix is the plain text colour too. */
+@property --kobe-arrived {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+
 @keyframes kobe-arrive {
   from {
-    color: var(--kobe-arrive-tint);
+    --kobe-arrived: 0%;
+  }
+  to {
+    --kobe-arrived: 100%;
   }
 }
 
@@ -175,6 +190,7 @@ body:has([data-kobe-chat]) {
 }
 
 [data-kobe-arrive="running"] [data-kobe-word] {
+  color: color-mix(in srgb, currentColor var(--kobe-arrived), var(--kobe-arrive-tint));
   animation: kobe-arrive 600ms ease-out;
 }
 
