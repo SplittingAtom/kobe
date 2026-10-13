@@ -1,6 +1,6 @@
 # KOBE-269: Chat shell polish: crushed icon buttons, list indents, sheet over send
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #268)
 - **Branch / worktree:** `kobe-269-shell-polish` in `../Kobe-wt269`
 - **Depends on:** none (found in the gate1 browser check 2026-10-13)
 
