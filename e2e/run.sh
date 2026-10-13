@@ -2022,10 +2022,29 @@ SH
     contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
     printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
-    if printf '%s' "$sf_out" | grep -q "Policy could not be evaluated"; then # KOBE-242: the cause is in the server log
+    sf_run=$(printf '%s\n' "$sf_out" | sed -n 's/^run=//p')
+    if ! printf '%s\n' "$sf_out" | grep -Eq '^file_events=[0-9a-f-]{36}:'; then
+      # KOBE-242/266: no file.shared. Say why: the run's policy decisions and approvals, its audit
+      # rows, the server's errors and Postgres's own report of any deadlock.
+      echo "     share_file: no file.shared; run $sf_run (events, approvals, audit):"
+      psql_kobe "SELECT * FROM (
+          SELECT 'event ' || seq || ' ' || type || ' ' || left(payload::text, 300) FROM run_events
+           WHERE team_id = '$E2E_TEAM_ID' AND run_id = '${sf_run:-00000000-0000-4000-8000-000000000000}'
+             AND type NOT LIKE '%.delta' ORDER BY seq) e
+        UNION ALL SELECT 'approval ' || tool || ' ' || status || ' ' || coalesce(cause, '-') FROM approvals
+           WHERE team_id = '$E2E_TEAM_ID' AND run_id = '${sf_run:-00000000-0000-4000-8000-000000000000}'
+        UNION ALL SELECT * FROM (SELECT 'audit ' || action || ' ' || left(target::text, 200) FROM audit_log
+           WHERE team_id = '$E2E_TEAM_ID' AND target ->> 'runId' = '${sf_run:-none}' ORDER BY seq) a" \
+        | sed 's/^/       /' || true
       $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=3m --tail=-1 2>&1 \
-        | grep -E "policy|lock timeout|approval" | tail -n 20 | cut -c1-600 | sed 's/^/     server: /' || true
+        | grep -E '"level":(40|50)' | grep -E "policy|lock|approval|deadlock|share" | tail -n 20 \
+        | cut -c1-600 | sed 's/^/     server: /' || true
+      $KUBECTL -n kobe-deps logs deploy/pg --since=3m 2>&1 | grep -A8 "deadlock detected" | head -n 20 \
+        | cut -c1-300 | sed 's/^/     postgres: /' || true
     fi
+    if printf '%s' "$sf_out" | grep -q "Policy could not be evaluated"; then
+      fail "share_file: the policy check failed with an error (see server/postgres lines above; KOBE-242/266)"
+    else ok "share_file: the policy check was decided, not an error"; fi
     contains "share_file: the run completed" '^terminal=run.completed$' "$sf_out"
     contains "share_file: the event stream carried file.shared (id, name, size)" \
       "^file_events=[0-9a-f-]{36}:shared-report.txt:$((${#share_text} + 1))\$" "$sf_out"

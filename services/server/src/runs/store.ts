@@ -206,6 +206,12 @@ export async function setThreadLockTimeout(tx: KobeTx): Promise<void> {
  * Locks the thread row by id (system paths: promotion, sweeps, wire hooks). The thread lock is the
  * per-thread mutex of D17 across replicas; the partial unique index `runs_one_active_per_thread`
  * backs it in the database.
+ *
+ * `FOR NO KEY UPDATE`, never `FOR UPDATE` (KOBE-266): it excludes every other thread locker just
+ * the same, but not the `FOR KEY SHARE` that foreign-key checks take. An appender holding the run
+ * row re-checks `runs.thread_id` on its seq trigger's second update of that row (Postgres re-checks
+ * a row its own transaction wrote), so with `FOR UPDATE` here a thread → run locker and a run's
+ * event writer deadlocked (40P01).
  */
 export async function lockThreadRow(
   tx: KobeTx,
@@ -226,7 +232,7 @@ export async function lockThreadRow(
   }>(sql`
     SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
            deleted_at, model_alias, project_id
-      FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR UPDATE`);
+      FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const r = res.rows[0];
   return r
     ? {

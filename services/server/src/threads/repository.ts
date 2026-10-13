@@ -281,7 +281,8 @@ export async function createThread(
 /**
  * The thread with the viewer's access to it, or null when they may not read it (unknown id,
  * another team's thread, another user's private thread: all indistinguishable). `lock` takes the
- * row lock that every change holds; lock order is thread before run (KOBE-29).
+ * row lock that every change holds; lock order is thread before run (KOBE-29). It is
+ * `FOR NO KEY UPDATE`, as `lockThreadRow` (KOBE-266: `FOR UPDATE` deadlocked with foreign-key checks).
  */
 export async function findThread(
   tx: KobeTx,
@@ -294,7 +295,7 @@ export async function findThread(
     .from(threads)
     .where(and(eq(threads.id, id), readableBy(viewer)));
   // Only the threads row is locked; nothing else is joined.
-  const [row] = await (options.lock ? query.for("update") : query);
+  const [row] = await (options.lock ? query.for("no key update") : query);
   if (!row) return null;
   return { thread: row, access: row.ownerUserId === viewer.userId ? "owner" : "reader" };
 }

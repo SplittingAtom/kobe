@@ -37,13 +37,28 @@ export const APPROVALS_MAX_PER_RUN = 100;
 
 const CREATE_ATTEMPTS = 3;
 
-/** Postgres lock_not_available (`lock_timeout` expired), possibly wrapped by Drizzle. */
-export function isLockTimeout(err: unknown): boolean {
+/** The first SQLSTATE in `err` or its causes (Drizzle wraps the driver's error). */
+function pgCodeOf(err: unknown): string | undefined {
   for (let e: unknown = err, depth = 0; e && depth < 5; depth += 1) {
-    if ((e as { code?: unknown }).code === "55P03") return true;
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code;
     e = (e as { cause?: unknown }).cause;
   }
-  return false;
+  return undefined;
+}
+
+/** Postgres lock_not_available (`lock_timeout` expired), possibly wrapped by Drizzle. */
+export function isLockTimeout(err: unknown): boolean {
+  return pgCodeOf(err) === "55P03";
+}
+
+/**
+ * A lock conflict that rolled the whole transaction back, so running it again is safe: a lock
+ * timeout (55P03) or a deadlock (40P01; KOBE-266 removed its known cause, this is the second line).
+ */
+export function retryableLockConflict(err: unknown): "55P03" | "40P01" | undefined {
+  const code = pgCodeOf(err);
+  return code === "55P03" || code === "40P01" ? code : undefined;
 }
 
 export interface BrokerTuning {
@@ -183,18 +198,22 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
 
   /**
    * `#create` rolls back entirely when it fails, so a lock timeout (55P03: another transaction held
-   * the thread or run row past APPEND_LOCK_TIMEOUT, e.g. ingest or a sweep under load) is retried a
-   * couple of times before it turns the call into a "Policy could not be evaluated" deny (KOBE-242).
+   * the thread or run row past APPEND_LOCK_TIMEOUT, e.g. ingest or a sweep under load) or a deadlock
+   * (40P01) is retried a couple of times before it turns the call into a "Policy could not be
+   * evaluated" deny (KOBE-242, KOBE-266). Each retry is logged; the last failure still denies.
    */
   async #createWithRetry(req: ApprovalRequest, canonical: string) {
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.#create(req, canonical);
       } catch (err) {
-        if (!isLockTimeout(err) || attempt >= CREATE_ATTEMPTS || req.signal.aborted) throw err;
+        const code = retryableLockConflict(err);
+        if (!code || attempt >= CREATE_ATTEMPTS || req.signal.aborted) throw err;
         this.#ctx.log.warn(
-          { err, attempt, run_id: req.runId },
-          "approval create lock timeout; retrying",
+          { err, code, attempt, run_id: req.runId, tool: req.tool },
+          code === "40P01"
+            ? "approval create deadlock; retrying"
+            : "approval create lock timeout; retrying",
         );
       }
     }
