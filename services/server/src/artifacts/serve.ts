@@ -76,6 +76,19 @@ export const FRAME_HEADERS: Readonly<Record<string, string>> = {
   "x-content-type-options": "nosniff",
 };
 
+/** Browsers mark a navigation another site started; a frame must come from Kobe's own page. */
+const SAME_SITE_FETCH = new Set(["same-origin", "none"]);
+
+/**
+ * Whether a frame request comes from Kobe's own page (D-6): `Sec-Fetch-Site`, when sent, is
+ * same-origin or none, and `Origin`, when sent, is Kobe's public URL.
+ */
+export function isSameSiteFrameRequest(headers: Headers, publicUrl: string): boolean {
+  const site = headers.get("sec-fetch-site");
+  const origin = headers.get("origin");
+  return (site === null || SAME_SITE_FETCH.has(site)) && (origin === null || origin === publicUrl);
+}
+
 /** An SVG as a minimal HTML document (the frame route serves HTML only). */
 export function svgDocument(svg: string): string {
   return (

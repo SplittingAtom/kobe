@@ -9,6 +9,7 @@ import {
   FRAME_HEADERS,
   artifactExtension,
   fileStem,
+  isSameSiteFrameRequest,
   readArtifactBytes,
   svgDocument,
 } from "../artifacts/serve.js";
@@ -19,8 +20,6 @@ import type { Viewer } from "../threads/repository.js";
 
 type ArtifactContext = Context<{ Variables: TeamVariables }>;
 
-/** Browsers mark a navigation another site started; a frame must come from Kobe's own page. */
-const SAME_SITE_FETCH = new Set(["same-origin", "none"]);
 const NOT_FOUND = { code: "artifact_not_found", message: "No artifact with that id." } as const;
 
 const versionParam = (raw: string): number | undefined => {
@@ -121,12 +120,7 @@ export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
    * believes is active comes as `?team=` and must match the session's (as the thread export).
    */
   app.get("/:id/versions/:n/frame", async (c) => {
-    const site = c.req.header("sec-fetch-site");
-    const origin = c.req.header("origin");
-    if (
-      (site !== undefined && !SAME_SITE_FETCH.has(site)) ||
-      (origin !== undefined && origin !== deps.publicUrl)
-    ) {
+    if (!isSameSiteFrameRequest(c.req.raw.headers, deps.publicUrl)) {
       return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
     }
     const team = c.get("team");

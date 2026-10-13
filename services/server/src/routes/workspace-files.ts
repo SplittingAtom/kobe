@@ -34,6 +34,7 @@ import {
   isReadOnlyPath,
   joinPath,
 } from "../workspace-files/paths.js";
+import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { currentEntry } from "../workspace-sync/store.js";
@@ -239,6 +240,8 @@ export function workspaceFileRoutes(
         return c.body(null, 204);
     }
   });
+
+  registerWorkspaceFrame(app, deps, sync);
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {
