@@ -174,9 +174,14 @@ const versionCount = async (team: string) =>
     )[0]?.n,
   );
 
+const AUDIT_POLL = { timeout: 5000, interval: 50 };
+
+/**
+ * The team's `sandbox.artifact_refused` audit rows. They are written off the frame path, so wait
+ * for an expected row with `expect.poll(..., AUDIT_POLL)` (as KOBE-263 did for memory refusals:
+ * a fixed 300 ms wait lost to a loaded runner).
+ */
 async function refusals(team: string): Promise<{ reason: string; text: string }[]> {
-  // Audit rows are written off the frame path.
-  await new Promise((r) => setTimeout(r, 300));
   return (
     await rows<{ target: Record<string, unknown> }>(
       `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'sandbox.artifact_refused' ORDER BY seq`,
@@ -237,6 +242,7 @@ describe("artifact.put: create and update", () => {
         payload: { artifact_id: artifactId, tool_call_id: "call-2", title: "Plan 2", version: 2 },
       },
     ]);
+    // Nothing was refused, so no audit write is in flight: none may exist.
     expect(await refusals(w.team)).toEqual([]);
   });
 
@@ -261,7 +267,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     const res = await allowedPut(sb, w, "call-1", "create_artifact", create());
     expect(res).toMatchObject({ ok: false, error: { code: "not_allowed" } });
     expect(await versionCount(w.team)).toBe(0);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["capability_missing"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["capability_missing"]);
   });
 
   it("refuses a tool call the server never allowed", async () => {
@@ -269,7 +277,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     const sb = await started(w);
     const res = await put(sb, w, "never-checked", "create_artifact", create());
     expect(res).toMatchObject({ ok: false, error: { code: "not_allowed" } });
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["not_allowed"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["not_allowed"]);
   });
 
   it("refuses a call the policy denied", async () => {
@@ -279,7 +289,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     expect((await check(sb, w, "call-1", "create_artifact", input)).decision).toBe("deny");
     expect(await put(sb, w, "call-1", "create_artifact", input)).toMatchObject({ ok: false });
     expect(await versionCount(w.team)).toBe(0);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["not_allowed"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["not_allowed"]);
   });
 
   it("refuses other input than the allowed one (even one byte), and keeps it refused", async () => {
@@ -294,7 +306,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     // The input the server allowed still goes through (key order does not matter: canonical JSON).
     const reordered = { content: "# Plan\nSECRET-CONTENT", title: "Plan", kind: "markdown" };
     expect(await put(sb, w, "call-1", "create_artifact", reordered)).toMatchObject({ ok: true });
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["input_mismatch"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["input_mismatch"]);
     expect(await versionCount(w.team)).toBe(1);
   });
 
@@ -307,7 +321,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     // call-1 was allowed as create_artifact, not as update_artifact.
     expect(await put(sb, w, "call-1", "update_artifact", update)).toMatchObject({ ok: false });
     expect(await versionCount(w.team)).toBe(1);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["not_allowed"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["not_allowed"]);
   });
 
   it("refuses once the run has ended", async () => {
@@ -321,7 +337,9 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
     });
     expect(await versionCount(w.team)).toBe(0);
     expect(objects.keys(`${PREFIX}teams/${w.team}/`)).toEqual([]);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["run_not_active"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["run_not_active"]);
   });
 
   it("refuses an update of an artifact of another thread, or of another team", async () => {
@@ -359,14 +377,19 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
 
     expect(await versionCount(w.team)).toBe(1);
     expect(await versionCount(v.team)).toBe(0);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["artifact_not_found"]);
-    expect((await refusals(v.team)).map((r) => r.reason)).toEqual(["artifact_not_found"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["artifact_not_found"]);
+    await expect
+      .poll(async () => (await refusals(v.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["artifact_not_found"]);
   });
 
   it("never records content in the audit rows", async () => {
     const w = await world();
     const sb = await started(w);
     await put(sb, w, "never-checked", "create_artifact", create());
+    await expect.poll(async () => (await refusals(w.team)).length, AUDIT_POLL).toBe(1);
     const [row] = await refusals(w.team);
     expect(must(row, "audit row").text).not.toMatch(/SECRET-CONTENT|Plan/);
   });
@@ -436,7 +459,9 @@ describe("orphans and replay identity (review)", () => {
     const res = await allowedPut(sb2, w2, "call-1", "create_artifact", create());
     expect(res).toMatchObject({ ok: false, error: { code: "not_allowed" } });
     expect(await versionCount(w.team)).toBe(1);
-    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["not_allowed"]);
+    await expect
+      .poll(async () => (await refusals(w.team)).map((r) => r.reason), AUDIT_POLL)
+      .toEqual(["not_allowed"]);
   });
 });
 

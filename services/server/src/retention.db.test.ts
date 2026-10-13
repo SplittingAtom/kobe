@@ -753,10 +753,10 @@ describe("export (D18)", () => {
 
 describe("one replica at a time, once a day", () => {
   it("lets one replica run a pass while another holds the lock; skips when not due", async () => {
-    const job = (now?: Date) =>
+    const job = (now?: Date, pool: { connect: () => Promise<PoolClient> } = h.deps.database.pool) =>
       new RetentionJob({
         db: h.deps.database.db,
-        pool: h.deps.database.pool,
+        pool,
         blobs,
         hourUtc: 3,
         logger: log,
@@ -776,9 +776,38 @@ describe("one replica at a time, once a day", () => {
     expect(await job(new Date("2026-10-04T03:40:00Z")).tick()).toBe("not_due");
     expect(await job(new Date("2026-10-05T12:00:00Z")).tick()).toBe("not_due");
     expect(await job(new Date("2026-10-05T03:05:00Z")).tick()).toBe("ran");
-    // Two concurrent ticks: exactly one runs.
-    const both = await Promise.all([job().tick(true), job().tick(true)]);
-    expect(both.sort()).toEqual(["busy", "ran"]);
+    // Two concurrent ticks: exactly one runs. The first is held right after it takes the lock, so
+    // the second tries while the first still holds it (KOBE-247: two ticks started together let
+    // the first finish its pass before the second tried, and both ran).
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let taken = () => {};
+    const lockTaken = new Promise<void>((resolve) => (taken = resolve));
+    const held = {
+      connect: async () => {
+        const client = await h.deps.database.pool.connect();
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        (client as unknown as { query: unknown }).query = async (...args: unknown[]) => {
+          const result = await query(...args);
+          if (String(args[0]).includes("pg_try_advisory_lock")) {
+            // Once: the client goes back to the pool unwrapped.
+            delete (client as unknown as { query?: unknown }).query;
+            taken();
+            await gate;
+          }
+          return result;
+        };
+        return client;
+      },
+    };
+    const first = job(undefined, held).tick(true);
+    await Promise.race([
+      lockTaken,
+      first.then((r) => Promise.reject(new Error(`first tick ended before the lock: ${r}`))),
+    ]);
+    expect(await job().tick(true)).toBe("busy");
+    release();
+    expect(await first).toBe("ran");
   });
 });
 

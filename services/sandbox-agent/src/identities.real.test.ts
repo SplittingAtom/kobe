@@ -128,6 +128,20 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     return first as unknown as Launch;
   }
 
+  /**
+   * Wait until `runId` has ended in the agent's bookkeeping: the agent ends the run in the same
+   * step that forwards Pi's `agent_settled`, so the thread takes its next run from here on
+   * (KOBE-262: one started earlier is rejected with "thread has an active run").
+   */
+  async function settled(runId: string): Promise<void> {
+    await h.server.waitFor(
+      (f) =>
+        f.type === "pi.event" &&
+        f.run_id === runId &&
+        (f.event as { type?: string }).type === "agent_settled",
+    );
+  }
+
   /** Run a shell command as a tool of `threadId`'s Pi (a new run on that thread). */
   async function tool(
     threadId: string,
@@ -148,12 +162,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
         f.run_id === runId &&
         (f.event as { type?: string }).type === "kobe_test_shell",
     );
-    await h.server.waitFor(
-      (f) =>
-        f.type === "pi.event" &&
-        f.run_id === runId &&
-        (f.event as { type?: string }).type === "agent_settled",
-    );
+    await settled(runId);
     return (event as unknown as { event: { code: number; stdout: string; stderr: string } }).event;
   }
 
@@ -168,7 +177,9 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
         run_id: RUN_2,
       }),
     );
-    await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
+    // Both first runs over before a test starts the next run on either thread (KOBE-262).
+    await settled(RUN);
+    await settled(RUN_2);
     return [await launch(THREAD), await launch(THREAD_2)];
   }
 
@@ -232,7 +243,8 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
         run_id: RUN_2,
       }),
     );
-    await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
+    await settled(RUN);
+    await settled(RUN_2);
     const b = await launch(THREAD_2);
     const shared = path.join(h.dir, "home");
     expect(b.home).not.toBe(shared);
@@ -318,7 +330,8 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
         run_id: RUN_2,
       }),
     );
-    await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
+    await settled(RUN);
+    await settled(RUN_2);
     const a = await launch(THREAD);
     const files = ["mcp.json", "mcp-token"].map((n) => path.join(a.agentDir, n));
     for (const file of files) {
@@ -367,12 +380,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     ok(
       await h.server.command(runStart("say:a", { config: { model: MODEL, system_prompt: "P1" } })),
     );
-    await h.server.waitFor(
-      (f) =>
-        f.type === "pi.event" &&
-        f.run_id === RUN &&
-        (f.event as { type?: string }).type === "agent_settled",
-    );
+    await settled(RUN);
     const a = await launch(THREAD);
     const file = (a as unknown as { appendSystemPromptFile: string }).appendSystemPromptFile;
     expect((a as unknown as { appendSystemPromptText: string }).appendSystemPromptText).toBe("P1");

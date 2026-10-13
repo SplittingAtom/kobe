@@ -212,6 +212,7 @@ function sendRead(sb: FakeSandbox, w: World, callId: string, input: Input): stri
   return request_id;
 }
 
+const AUDIT_POLL = { timeout: 5000, interval: 50 };
 const rows = async <T>(text: string, params: unknown[]) =>
   (await fx.admin.query(text, params)).rows as T[];
 const docCount = async (team: string) =>
@@ -226,8 +227,12 @@ const updates = (w: World) =>
     [w.team, w.runId],
   );
 
+/**
+ * The team's `sandbox.memory_refused` audit rows. They are written off the frame path, so assert
+ * on them with `expect.poll(() => refusals(team), AUDIT_POLL)` (KOBE-263: a fixed 300 ms wait
+ * lost to a loaded runner).
+ */
 async function refusals(team: string): Promise<string[]> {
-  await new Promise((r) => setTimeout(r, 300)); // audit rows are written off the frame path
   return (
     await rows<{ target: { op: string; reason: string } }>(
       `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'sandbox.memory_refused' ORDER BY seq`,
@@ -369,12 +374,14 @@ describe("memory.put / memory.read: personal memory", () => {
     expect(errorCode(late)).toBe("not_allowed");
     expect(await docCount(w2.team)).toBe(0);
     expect(await docCount(w.team)).toBe(0);
-    expect(await refusals(w2.team)).toEqual(
-      expect.arrayContaining(["put:not_allowed", "put:input_mismatch", "put:run_not_active"]),
-    );
-    expect(await refusals(w.team)).toEqual(
-      expect.arrayContaining(["put:capability_missing", "read:capability_missing"]),
-    );
+    await expect
+      .poll(() => refusals(w2.team), AUDIT_POLL)
+      .toEqual(
+        expect.arrayContaining(["put:not_allowed", "put:input_mismatch", "put:run_not_active"]),
+      );
+    await expect
+      .poll(() => refusals(w.team), AUDIT_POLL)
+      .toEqual(expect.arrayContaining(["put:capability_missing", "read:capability_missing"]));
   });
 
   it("refuses an oversized index and returns the store's codes", async () => {
@@ -416,9 +423,9 @@ describe("recall is bound to the policy check (D-3)", () => {
     const denied = await result(sb, sendRead(sb, w, "rc-d", {}));
     expect(errorCode(denied)).toBe("not_allowed");
     expect(JSON.stringify(denied)).not.toContain("secret");
-    expect(await refusals(w.team)).toEqual(
-      expect.arrayContaining(["read:not_allowed", "read:input_mismatch"]),
-    );
+    await expect
+      .poll(() => refusals(w.team), AUDIT_POLL)
+      .toEqual(expect.arrayContaining(["read:not_allowed", "read:input_mismatch"]));
   });
 });
 
@@ -433,7 +440,7 @@ describe("switches", () => {
     expect(errorCode(refused)).toBe("memory_disabled");
     expect(errorCode(await read(sb, w, { scope: "user" }))).toBe("memory_disabled");
     expect(await docCount(w.team)).toBe(0);
-    expect(await refusals(w.team)).toContain("put:memory_disabled");
+    await expect.poll(() => refusals(w.team), AUDIT_POLL).toContain("put:memory_disabled");
   });
 
   it("the site switch is ANDed with the team's", async () => {
@@ -588,7 +595,7 @@ describe("project memory", () => {
       [w.team, w.runId],
     );
     await decide(w.owner, must(approval, "approval").id, "deny");
-    expect(await refusals(w.team)).toContain("put:approval_denied");
+    await expect.poll(() => refusals(w.team), AUDIT_POLL).toContain("put:approval_denied");
     expect(await docCount(w.team)).toBe(0);
     expect(await updates(w)).toHaveLength(0);
   });
@@ -753,9 +760,9 @@ describe("project memory", () => {
     await check(sbS, stranger, "n1", input);
     expect(errorCode(await result(sbS, sendPut(sbS, stranger, "n1", input)))).toBe("not_allowed");
     expect(errorCode(await read(sbS, stranger, { scope: "project" }))).toBe("not_allowed");
-    expect(await refusals(stranger.team)).toEqual(
-      expect.arrayContaining(["put:not_a_member", "read:not_a_member"]),
-    );
+    await expect
+      .poll(() => refusals(stranger.team), AUDIT_POLL)
+      .toEqual(expect.arrayContaining(["put:not_a_member", "read:not_a_member"]));
     expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [stranger.team])).length).toBe(
       0,
     );
@@ -765,7 +772,7 @@ describe("project memory", () => {
     const sbL = await started(loose);
     await check(sbL, loose, "n2", input);
     expect(errorCode(await result(sbL, sendPut(sbL, loose, "n2", input)))).toBe("not_allowed");
-    expect(await refusals(loose.team)).toContain("put:no_project");
+    await expect.poll(() => refusals(loose.team), AUDIT_POLL).toContain("put:no_project");
 
     const off = await world();
     await inProject(off);
