@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #266)
 - **Branch / worktree:** `kobe-207-arrival-fade` in `../Kobe-wt207`
 - **Depends on:** KOBE-205 (merged). Phase B run now at Chris's request; the Gate 4 note does not block.
 
