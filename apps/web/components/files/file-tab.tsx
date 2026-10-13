@@ -11,7 +11,6 @@
  * Cannot preview, with Download. Text is read up to 1 MB; large images are not fetched.
  */
 import { useEffect, useState } from "react";
-import { XIcon } from "lucide-react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { describeFileError, formatBytes } from "../../lib/files/format";
@@ -257,15 +256,13 @@ export function FileGoneNotice() {
   return (
     <div className={styles.dismissibleBanner} role="status">
       <p>{`${fileName(gone)} is no longer in your workspace, so its tab was closed.`}</p>
-      <button
-        type="button"
-        className="hover:bg-muted inline-flex size-7 shrink-0 items-center justify-center rounded-md"
-        aria-label="Dismiss file notice"
-        title="Dismiss"
+      <IconAction
+        command="dismiss-notice"
+        label="Dismiss file notice"
+        size="sm"
+        className="shrink-0"
         onClick={panel.dismissGone}
-      >
-        <XIcon aria-hidden className="size-4" />
-      </button>
+      />
     </div>
   );
 }

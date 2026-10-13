@@ -336,12 +336,16 @@
   }
 }
 
-/* 768–820: the artifact column is a sheet over the conversation, which keeps the width. */
+/* 768–820: the artifact column is a sheet over the conversation, which keeps the width. The sheet
+   ends above the composer, so Send stays reachable while it is open (KOBE-269): anchor positioning
+   on `[data-kobe-composer]` (chat-global.css); where unsupported, the declaration drops and the
+   sheet keeps the full height. */
 @media (768px <= width < 820px) {
   .artifact {
     position: absolute;
     z-index: 20;
     inset-block: 0;
+    bottom: anchor(--kobe-composer top);
     inset-inline-end: 0;
     width: clamp(360px, 50%, 100% - var(--kobe-rail-width));
     background: var(--admin-bg);

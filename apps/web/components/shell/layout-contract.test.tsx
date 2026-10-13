@@ -18,6 +18,7 @@ const css = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8
 const SHELL = css("./shell.module.css");
 const CHAT = css("../chat/chat.module.css");
 const RAIL = css("./rail.module.css");
+const GLOBAL = css("../../app/chat-global.css");
 
 /** Every declaration block whose selector list names `selector`, media blocks included. */
 function rules(source: string, selector: string): string[] {
@@ -140,6 +141,12 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     expect(declares(overlay, ".artifact:not([data-sheet-open])", "display: none;")).toBe(true);
     // Not a grid column there: the conversation keeps everything right of the 48 px rail.
     expect(overlay).not.toContain("grid-template-columns");
+    // KOBE-269: the sheet ends above the composer, so Send stays reachable (anchor positioning;
+    // where it is unsupported the declaration drops and the sheet keeps the full height).
+    expect(declares(overlay, ".artifact", "bottom: anchor(--kobe-composer top);")).toBe(true);
+    expect(
+      declares(GLOBAL, "[data-kobe-chat] [data-kobe-composer]", "anchor-name: --kobe-composer;"),
+    ).toBe(true);
   });
 
   it("under 768 px: one column; the drawer and the full-screen sheet leave the grid", () => {
@@ -164,6 +171,15 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
       expect(all.length).toBeGreaterThan(0);
       expect((motion.match(/animation:/g) ?? []).length).toBe(all.length);
     }
+  });
+});
+
+describe("chrome spacing (KOBE-269)", () => {
+  it("Kobe's own lists and paragraphs drop the browser's margins and indent; Markdown keeps them", () => {
+    const flat = GLOBAL.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+    expect(flat).toMatch(
+      /@layer base \{.*\[data-kobe-chat\] :where\(ul, ol, p\):not\(\[data-kobe-markdown\] \*\) \{ margin: 0; padding: 0; \}/,
+    );
   });
 });
 

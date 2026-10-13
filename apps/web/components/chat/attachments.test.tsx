@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import type { UploadOutcome, UploadRequest, UploadTransport } from "../../lib/chat/uploads";
-import { chatRequests, composer, openApp } from "./testing";
+import { chatRequests, composer, crushedIconButtons, openApp } from "./testing";
 
 /** Composer attachments (KOBE-145): pick or drop, progress, remove, errors, file_ids on send. */
 let fake: FakeKobe;
@@ -63,6 +63,7 @@ describe("composer attachments", () => {
     expect(bar.getAttribute("value")).toBe("40");
     calls[0]?.finish(okOutcome(fileOf("notes.txt")));
     await screen.findByText("Ready");
+    expect(crushedIconButtons()).toEqual([]); // KOBE-269: the composer's icons keep their size
 
     await user.click(screen.getByRole("button", { name: "Remove notes.txt" }));
     expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();

@@ -1,20 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRightIcon, DownloadIcon, FileIcon, FolderIcon, Trash2Icon } from "lucide-react";
+import { ChevronRightIcon, FileIcon, FolderIcon } from "lucide-react";
 import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
 import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
 import { ErrorNotice } from "../admin/error-notice";
+import { IconAction } from "../shell/icon-action";
 import { useFolder } from "./use-folder";
 
 /** The sandbox syncs shortly after it starts; read the listing again after this. */
 const DEFAULT_REFRESH_AFTER_WAKE_MS = 4000;
-
-const iconButton =
-  "hover:bg-muted focus-visible:ring-ring/50 inline-flex size-7 items-center justify-center rounded-md border";
 
 /**
  * Wakes the sandbox on mount and again on each new `key` (the member asked for the files again),
@@ -179,24 +177,20 @@ function Row({
         <span className="text-muted-foreground text-xs">{formatBytes(entry.sizeBytes)}</span>
       )}
       {!dir && (
-        <button
-          type="button"
-          className={iconButton}
-          aria-label={`Download ${entry.name}`}
+        <IconAction
+          command="download-file"
+          label={`Download ${entry.name}`}
+          size="sm"
           onClick={() => onDownload(entry)}
-        >
-          <DownloadIcon aria-hidden className="size-4" />
-        </button>
+        />
       )}
       {!readOnly && (
-        <button
-          type="button"
-          className={iconButton}
-          aria-label={`Delete ${entry.name}`}
+        <IconAction
+          command="delete-file"
+          label={`Delete ${entry.name}`}
+          size="sm"
           onClick={() => onDelete(entry)}
-        >
-          <Trash2Icon aria-hidden className="size-4" />
-        </button>
+        />
       )}
     </li>
   );

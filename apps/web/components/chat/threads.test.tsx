@@ -3,7 +3,15 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { announcement, chatRequests, composer, openApp, streamed, streaming } from "./testing";
+import {
+  announcement,
+  chatRequests,
+  composer,
+  crushedIconButtons,
+  openApp,
+  streamed,
+  streaming,
+} from "./testing";
 import { must } from "../../lib/testing/must";
 
 let fake: FakeKobe;
@@ -138,6 +146,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     openApp(fake);
     const user = userEvent.setup();
     await screen.findByText(/older than 90 days will be deleted from/);
+    expect(crushedIconButtons()).toEqual([]); // KOBE-269: the close icon keeps its size
     await user.click(screen.getByRole("button", { name: "Dismiss retention notice" }));
     expect(screen.queryByText(/will be deleted from/)).toBeNull();
 

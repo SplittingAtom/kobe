@@ -154,9 +154,14 @@ const LIST = [
   { id: "restore-thread", name: "Restore", icon: ArchiveRestoreIcon, scope: "rail" },
   { id: "delete-thread", name: "Delete forever", icon: CircleXIcon, scope: "rail" },
   { id: "export-threads", name: "Export my conversations", icon: DownloadIcon, scope: "rail" },
+  // The Files section's rows (call sites name the file: "Download report.csv").
+  { id: "download-file", name: "Download", icon: DownloadIcon, scope: "rail" },
+  { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "rail" },
   // The conversation's chrome.
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
+  // Closes a notice banner (retention, a file that left the workspace).
+  { id: "dismiss-notice", name: "Dismiss", icon: XIcon, scope: "thread" },
   // Under 768 px the bar's one row ends in this menu: row two, search, areas, profile (CE8).
   { id: "thread-menu", name: "Menu", icon: EllipsisVerticalIcon, scope: "thread" },
   // Message actions.

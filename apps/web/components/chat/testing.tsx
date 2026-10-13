@@ -66,3 +66,22 @@ export function streamed(text: string): MatcherFunction {
   const holds = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim() === text;
   return (_content, el) => el !== null && holds(el) && ![...el.children].some(holds);
 }
+
+/**
+ * Icon-only raw buttons in the chat that the base button rule would crush (KOBE-269):
+ * `chat-global.css` pads every `button:not([data-slot])` 0.25rem 0.75rem, which leaves a 28 px
+ * icon button 2 px for its svg. An icon button must be an `IconAction` (shadcn's Button sets
+ * `data-slot`) or set its own padding (`p-0`, `p-1`). Returns each offender's accessible label;
+ * happy-dom has no layout, so this checks attributes and classes, not pixels.
+ */
+export function crushedIconButtons(root: ParentNode = document): string[] {
+  const visibleText = (el: Element) => {
+    const copy = el.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+    return (copy.textContent ?? "").trim();
+  };
+  return [...root.querySelectorAll("[data-kobe-chat] button:not([data-slot])")]
+    .filter((b) => b.querySelector("svg") && visibleText(b) === "")
+    .filter((b) => ![...b.classList].some((c) => /^p-/.test(c)))
+    .map((b) => b.getAttribute("aria-label") ?? b.outerHTML.slice(0, 120));
+}
