@@ -885,6 +885,21 @@ export class FakeKobe {
       this.#advance(thread.thread_id);
       return json(200, this.#threadRuns(thread.thread_id));
     }
+    if (action === "queue" && sub === "pause" && method === "POST") {
+      if (this.#queued(thread.thread_id).length > 0) thread.queue_paused = true;
+      return json(200, this.#threadRuns(thread.thread_id));
+    }
+    if (action === "queue" && sub === "order" && method === "POST") {
+      const ids = ((body as { run_ids?: unknown } | undefined)?.run_ids ?? []) as string[];
+      const queued = this.#queued(thread.thread_id);
+      const same = ids.length === queued.length && queued.every((r) => ids.includes(r.run_id));
+      if (!same) return error(409, "queue_changed", "The queue changed meanwhile.");
+      for (const id of ids) {
+        const run = this.runs.get(id);
+        if (run) run.queue_pos = ++this.#queueN;
+      }
+      return json(200, this.#threadRuns(thread.thread_id));
+    }
     return error(404, "not_found");
   }
 

@@ -65,6 +65,9 @@ export interface LiveRun {
   readonly runId: string;
   readonly lastSeq: number;
   readonly started: boolean;
+  /** From `run.started`: when it started and the model alias it uses (the steering panel, CE10). */
+  readonly startedAt?: string | undefined;
+  readonly model?: string | undefined;
   /** `sandbox.waking` until the first sign of work (D14 "Waking your workspace…"). */
   readonly waking?: Payload<"sandbox.waking">["reason"] | undefined;
   readonly terminal?: TerminalEvent | undefined;
@@ -218,7 +221,7 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     case "run.queued":
       return next;
     case "run.started":
-      return { ...next, started: true };
+      return { ...next, started: true, startedAt: event.ts, model: event.payload.model };
     case "sandbox.waking":
       return { ...next, waking: event.payload.reason };
     case "text.delta":

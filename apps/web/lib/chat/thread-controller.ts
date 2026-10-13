@@ -606,6 +606,43 @@ export class ThreadController {
   /** "Resume queue" after Stop: the held messages run in order. */
   readonly resumeQueue = async (): Promise<void> => this.#resumeQueue("The queue resumed.");
 
+  /** Pause (CE10): the queued messages wait after the current run until resumed or a send. */
+  readonly pauseQueue = async (): Promise<void> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return;
+    const res = await this.#busy("pause", () => this.#api.pauseQueue(threadId));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return;
+    }
+    this.#applyRuns(res.data);
+    this.#announce("The queue is paused.");
+  };
+
+  /**
+   * Reorder (CE10): `runIds` is the whole queue in its new order. Shown at once; a stale list
+   * (`queue_changed`) or any refusal reads the queue again.
+   */
+  readonly reorderQueue = async (runIds: readonly string[]): Promise<void> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return;
+    const rank = new Map(runIds.map((id, i) => [id, i + 1] as const));
+    this.#set((s) => ({
+      ...s,
+      pending: s.pending.map((m) => {
+        const pos = rank.get(m.runId);
+        return pos === undefined ? m : { ...m, queuePos: pos };
+      }),
+    }));
+    const res = await this.#busy("reorder", () => this.#api.reorderQueue(threadId, runIds));
+    if (!res.ok) this.#fail(res.error);
+    else {
+      this.#applyRuns(res.data);
+      this.#announce("Queue reordered.");
+    }
+    await this.refresh();
+  };
+
   async #resumeQueue(announcement: string): Promise<void> {
     const threadId = this.#state.threadId;
     if (threadId === null) return;

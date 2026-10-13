@@ -101,6 +101,10 @@ export interface ChatApi {
   listRuns(threadId: string): Promise<ApiResult<ThreadRuns>>;
   pendingMessages(threadId: string): Promise<ApiResult<PendingMessages>>;
   resumeQueue(threadId: string): Promise<ApiResult<ThreadRuns>>;
+  /** Holds the queued messages until resumed or a new message (CE10, KOBE-206). */
+  pauseQueue(threadId: string): Promise<ApiResult<ThreadRuns>>;
+  /** The whole queue in its new order; 409 `queue_changed` when the list is stale. */
+  reorderQueue(threadId: string, runIds: readonly string[]): Promise<ApiResult<ThreadRuns>>;
   getRun(runId: string): Promise<ApiResult<RunSnapshot>>;
   editQueued(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
   steer(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
@@ -215,6 +219,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listRuns: (id) => get(`/v1/threads/${enc(id)}/runs`),
     pendingMessages: (id) => get(`/v1/threads/${enc(id)}/pending-messages`),
     resumeQueue: (id) => send("POST", `/v1/threads/${enc(id)}/queue/resume`),
+    pauseQueue: (id) => send("POST", `/v1/threads/${enc(id)}/queue/pause`),
+    reorderQueue: (id, runIds) =>
+      send("POST", `/v1/threads/${enc(id)}/queue/order`, { run_ids: runIds }),
     getRun: (runId) => get(`/v1/runs/${enc(runId)}`),
     editQueued: (runId, content) => send("PATCH", `/v1/runs/${enc(runId)}`, { content }),
     steer: (runId, content) => send("POST", `/v1/runs/${enc(runId)}/steer`, { content }),

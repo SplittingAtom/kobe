@@ -1,11 +1,11 @@
 "use client";
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { MicIcon, SquareIcon } from "lucide-react";
+import { MicIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useDictation } from "../../lib/chat/dictation";
-import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
+import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments, useDraftFiles } from "./attachment-chips";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
@@ -14,9 +14,10 @@ import { ModelPicker } from "./model-picker";
 import styles from "./chat.module.css";
 
 /**
- * The composer (D17). Idle: Enter sends. While a run holds the thread: Enter **queues** the message
- * (it runs next, in order), "Steer now" (Ctrl/Cmd+Shift+Enter) injects it into the running agent
- * at its next safe point, and Stop cancels the run (queued messages stay). The text is cleared only
+ * The composer (D17). Idle: Enter sends. While a run holds the thread the primary button reads
+ * **Queue** and Enter queues the message (it runs next, in order); Ctrl/Cmd+Shift+Enter steers it
+ * into the running agent at its next safe point. The Steer now and Stop buttons sit in the
+ * steering panel above the input (CE10, `steering-panel.tsx`). The text is cleared only
  * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
  * sending stops dictation.
  */
@@ -72,7 +73,8 @@ export function Composer({
     }
   };
   const steer = async () => {
-    if (!controller || empty) return;
+    // A steer carries text only: with files attached, the message is queued instead.
+    if (!controller || empty || files.length > 0) return;
     dictation.stop();
     if (await controller.steer(text.trim())) aui.composer.setText("");
   };
@@ -174,37 +176,17 @@ export function Composer({
             </IconAction>
           )}
           {running ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-full px-3"
-                onClick={() => void queue()}
-                disabled={empty || blocker !== undefined}
-              >
-                Queue
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-full px-3"
-                onClick={() => void steer()}
-                disabled={empty || isBusy(state, "steer") || files.length > 0}
-              >
-                Steer now
-              </Button>
-              <IconAction
-                command="stop"
-                variant="default"
-                className="size-7 rounded-full"
-                onClick={() => void controller?.stop()}
-                disabled={isBusy(state, "stop")}
-              >
-                <SquareIcon aria-hidden className="size-3.5 fill-current" />
-              </IconAction>
-            </>
+            // CE10: the primary button queues during a run; Steer now and Stop sit in the
+            // steering panel above the input.
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-full px-3"
+              onClick={() => void queue()}
+              disabled={empty || blocker !== undefined}
+            >
+              Queue
+            </Button>
           ) : (
             <ComposerPrimitive.Send asChild>
               <IconAction
