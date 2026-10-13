@@ -2,30 +2,14 @@
 
 /**
  * The thread's artifacts as buttons under its title (KOBE-130): how an old thread's artifacts are
- * reopened (`GET /v1/artifacts?thread_id=`). Read again when the live run reports an artifact.
+ * reopened. The list (`GET /v1/artifacts?thread_id=`) is read by the artifact column's state
+ * (`artifact-state.tsx`), again when the live run reports an artifact.
  */
-import { useEffect, useState } from "react";
-import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
-import { useArtifactEventCount, useArtifactPanel } from "./artifact-panel";
-import { useChatSession } from "./kobe-runtime";
+import { useArtifactPanel } from "./artifact-state";
 
-export function ArtifactList({ threadId }: { readonly threadId: string | null }) {
-  const session = useChatSession();
+export function ArtifactList() {
   const panel = useArtifactPanel();
-  const events = useArtifactEventCount();
-  const [artifacts, setArtifacts] = useState<readonly ArtifactSummaryView[]>([]);
-  useEffect(() => {
-    setArtifacts([]); // never show another thread's artifacts while this one loads
-    if (threadId === null) return;
-    let current = true;
-    void session.api.listArtifacts(threadId).then((res) => {
-      // A failed list only means no shortcuts; the notice and tool card still open artifacts.
-      if (current) setArtifacts(res.ok ? res.data.artifacts : []);
-    });
-    return () => {
-      current = false;
-    };
-  }, [session, threadId, events]);
+  const artifacts = panel?.artifacts ?? [];
   if (!panel || artifacts.length === 0) return null;
   return (
     <nav aria-label="Artifacts in this conversation" className="flex flex-wrap gap-2 px-4 pb-2">

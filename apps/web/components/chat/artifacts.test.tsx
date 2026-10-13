@@ -17,6 +17,7 @@ let fake: FakeKobe;
 
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear(); // remembered artifact tabs (KOBE-200)
   // The frame route is the server's: don't let happy-dom fetch it from localhost.
   const settings = (window as unknown as { happyDOM?: { settings: Record<string, boolean> } })
     .happyDOM?.settings;

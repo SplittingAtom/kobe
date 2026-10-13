@@ -204,9 +204,11 @@
   min-height: 0;
 }
 
-/* The workspace rail is 280 px, 48 px while collapsed (CE5). */
+/* The workspace rail is 280 px, 48 px while collapsed (CE5). The artifact column defaults to half
+   the space right of the rail (CE6); a dragged width (inline, KOBE-200) replaces it. */
 .grid {
   --kobe-rail-width: 280px;
+  --kobe-artifact-width: calc((100% - var(--kobe-rail-width)) / 2);
 }
 
 .grid:has(> .rail > [data-collapsed]) {
@@ -285,9 +287,39 @@
   }
 }
 
-/* Wide enough for every floor: artifact column ≥ 360 px, conversation ≥ 400 px (CE7). */
+/* The drag handle on the artifact column's edge (CE6, KOBE-200): only where both floors fit. */
+.resizeHandle {
+  display: none;
+}
+
+/* Wide enough for every floor: artifact column ≥ 360 px, conversation ≥ 400 px (CE7). A dragged
+   width holds while it fits and comes back when the window widens again. */
 @media (min-width: 1100px) {
   .grid:has(> .artifact:not(:empty)) {
-    grid-template-columns: var(--kobe-rail-width) minmax(360px, 1fr) minmax(400px, 1fr);
+    grid-template-columns:
+      var(--kobe-rail-width)
+      minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px))
+      minmax(400px, 1fr);
+  }
+
+  .artifact {
+    position: relative;
+  }
+
+  .resizeHandle {
+    position: absolute;
+    z-index: 10;
+    inset-block: 0;
+    inset-inline-end: 0;
+    display: block;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .resizeHandle:hover,
+  .resizeHandle:focus-visible {
+    background: var(--admin-accent);
+    outline: none;
   }
 }

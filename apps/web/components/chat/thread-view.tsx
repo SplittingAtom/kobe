@@ -238,7 +238,7 @@ export function ThreadView({
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
         {state.threadId === null && <DraftProjectNote />}
       </div>
-      <ArtifactList threadId={state.threadId} />
+      <ArtifactList />
       {state.phase === "error" && state.loadError && (
         <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-2 px-4">
           <ErrorNotice error={state.loadError} />

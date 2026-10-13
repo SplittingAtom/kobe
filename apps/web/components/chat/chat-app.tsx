@@ -13,7 +13,8 @@ import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
-import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
+import { ArtifactPanel } from "./artifact-panel";
+import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailProvider } from "../shell/rail-state";
@@ -109,6 +110,12 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
   return state;
 }
 
+/** The shell grid with the artifact column's dragged width (CE6). */
+function WorkspaceGrid(props: Omit<Parameters<typeof ShellGrid>[0], "artifactWidth">) {
+  const panel = useArtifactPanel();
+  return <ShellGrid {...props} artifactWidth={panel?.width ?? null} />;
+}
+
 /** Starter prompts on an empty conversation; picking one fills the composer. */
 const STARTER_SUGGESTIONS = [
   {
@@ -161,14 +168,14 @@ function ChatWorkspace({
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
       <RailProvider>
-        <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
+        <ArtifactPanelProvider teamId={session.teamId} threadId={threadId}>
           <ShellSlot name="search">
             <ThreadSearch onOpenThread={setThreadId} />
           </ShellSlot>
           <ShellSlot name="context">
             <ContextRow />
           </ShellSlot>
-          <ShellGrid
+          <WorkspaceGrid
             rail={
               <WorkspaceRail
                 teamName={teamName || "Workspace"}

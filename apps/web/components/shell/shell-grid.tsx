@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { ARTIFACT_WIDTH_VAR } from "../../lib/chat/artifact-tabs";
 import styles from "./shell.module.css";
 
 /**
@@ -7,24 +8,31 @@ import styles from "./shell.module.css";
  *
  * Slots for the Phase A tickets that plug in here:
  * - rail: the workspace rail (A2, KOBE-198), 280 px or 48 px collapsed;
- * - artifact: A4 (KOBE-200) puts the artifact tabs here, drag-resizable against the conversation;
+ * - artifact: the artifact tabs (A4, KOBE-200), drag-resizable against the conversation;
+ *   `artifactWidth` is the dragged width in px (null: half the space right of the rail);
  * - breakpoints: A5 (KOBE-201) owns the CE7 yield order and the overlay sheet (shell.module.css).
  */
 export function ShellGrid({
   rail,
   artifact,
   conversation,
+  artifactWidth = null,
 }: {
   readonly rail: ReactNode;
   readonly artifact: ReactNode;
   readonly conversation: ReactNode;
+  readonly artifactWidth?: number | null;
 }) {
+  const style =
+    artifactWidth === null
+      ? undefined
+      : ({ [ARTIFACT_WIDTH_VAR]: `${artifactWidth}px` } as CSSProperties);
   return (
-    <div className={styles.grid}>
+    <div className={styles.grid} style={style}>
       <div className={styles.rail} data-shell-region="rail">
         {rail}
       </div>
-      <div className={styles.artifact} data-shell-region="artifact">
+      <div id="kobe-artifact-column" className={styles.artifact} data-shell-region="artifact">
         {artifact}
       </div>
       <div className={styles.conversation} data-shell-region="conversation">
