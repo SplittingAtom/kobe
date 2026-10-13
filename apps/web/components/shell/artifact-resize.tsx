@@ -14,6 +14,7 @@ import {
   clampArtifactWidth,
   maxArtifactWidth,
 } from "../../lib/chat/artifact-tabs";
+import { spaceRightOfRail } from "../../lib/shell/preferences";
 import styles from "./shell.module.css";
 
 const STEP_PX = 24;
@@ -44,11 +45,10 @@ function regions(handle: HTMLElement | null) {
 }
 
 function measure(handle: HTMLElement | null): Measure | null {
-  const { column, conversation } = regions(handle);
-  if (!column || !conversation) return null;
-  const width = column.getBoundingClientRect().width;
-  const available = width + conversation.getBoundingClientRect().width;
-  return available > 0 ? { column: width, available } : null;
+  const { column, grid } = regions(handle);
+  const available = spaceRightOfRail(grid);
+  if (!column || available === null) return null;
+  return { column: column.getBoundingClientRect().width, available };
 }
 
 /**

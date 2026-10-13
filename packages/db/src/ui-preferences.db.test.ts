@@ -48,6 +48,26 @@ describe("users.ui_preferences", () => {
     },
   );
 
+  /** `{"x": "<n>"}` as jsonb text: jsonb renders a space after the colon, so 9 bytes plus n. */
+  const ofBytes = (bytes: number) => JSON.stringify({ x: "a".repeat(bytes - 9) });
+  const storedBytes = async () =>
+    (
+      await app.query(`SELECT octet_length(ui_preferences::text) AS n FROM users WHERE id = $1`, [
+        userId,
+      ])
+    ).rows[0]?.n as number;
+
+  it("accepts exactly the bound, measured as jsonb text", async () => {
+    await write(ofBytes(UI_PREFERENCES_MAX_BYTES));
+    expect(await storedBytes()).toBe(UI_PREFERENCES_MAX_BYTES);
+  });
+
+  it("refuses one byte over the bound", async () => {
+    await expect(write(ofBytes(UI_PREFERENCES_MAX_BYTES + 1))).rejects.toMatchObject({
+      code: "23514",
+    });
+  });
+
   it("refuses an object larger than the bound", async () => {
     const big = JSON.stringify({ x: "a".repeat(UI_PREFERENCES_MAX_BYTES) });
     await expect(write(big)).rejects.toMatchObject({ code: "23514" });

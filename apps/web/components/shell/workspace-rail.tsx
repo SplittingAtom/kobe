@@ -47,8 +47,16 @@ function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
       <ThreadListPrimitive.New asChild>
         <IconAction command="new-thread" side="right" />
       </ThreadListPrimitive.New>
-      <IconAction command="show-threads" side="right" onClick={() => rail.reveal("threads")} />
-      <IconAction command="show-files" side="right" onClick={() => rail.reveal("files")} />
+      <IconAction
+        command="show-threads"
+        side="right"
+        onClick={() => rail.reveal("threads", { toggle: true })}
+      />
+      <IconAction
+        command="show-files"
+        side="right"
+        onClick={() => rail.reveal("files", { toggle: true })}
+      />
     </div>
   );
 }
@@ -148,7 +156,7 @@ export function WorkspaceRail({
             side="right"
             aria-expanded
             aria-controls="kobe-rail-sections"
-            onClick={() => rail.setCollapsed(true)}
+            onClick={() => rail.toggle(true)}
           />
         </div>
         <div

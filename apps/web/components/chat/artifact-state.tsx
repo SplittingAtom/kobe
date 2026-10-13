@@ -9,11 +9,13 @@
  * - The open set and active tab are remembered per thread in this browser (localStorage,
  *   `use-artifact-tabs.ts`); a thread switch swaps them, and tabs of artifacts the thread no
  *   longer lists are dropped.
- * - Slot (A6, KOBE-202): CE8 keeps the column's width per user, server-side. Until A6 loads and
- *   saves it here, a dragged width lives in memory for the page's lifetime.
+ * - The column's width is per user, server-side (CE8, KOBE-202, `lib/shell/preferences.ts`): the
+ *   stored width applies once it loads if it still fits this window beside the conversation's
+ *   floor (else the default, half the space), and a resize is saved when it is released.
  */
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -25,6 +27,15 @@ import { useAuiState } from "@assistant-ui/react";
 import { tabsKey, type ArtifactTabs } from "../../lib/chat/artifact-tabs";
 import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
 import type { LiveRun } from "../../lib/chat/live";
+import {
+  applyArtifactWidth,
+  holdsBothFloors,
+  shellGrid,
+  spaceRightOfRail,
+  useStoredPreference,
+  type LayoutPreferences,
+} from "../../lib/shell/preferences";
+import { isNarrowScreen, useRail } from "../shell/rail-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
@@ -154,19 +165,55 @@ function useThreadArtifacts(
   return list !== null && list.threadId === threadId ? list.artifacts : null;
 }
 
+/**
+ * The column's width: the member's stored width, applied once the rail on screen is settled if it
+ * fits the space right of it (measured), and saved on release. A width chosen on a narrow screen,
+ * or where the two floors don't both fit, stays on this page (it would not fit elsewhere).
+ */
+function useArtifactWidth(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const rail = useRail();
+  const width = useStoredPreference<number | null>({
+    initial: null,
+    ready: preferences !== null && (rail === null || rail.settled),
+    resolve: () => {
+      const space = spaceRightOfRail(shellGrid());
+      return space === null ? null : applyArtifactWidth(preferences?.artifactWidth, space);
+    },
+    save: onSave && ((artifactWidth) => onSave({ artifactWidth })),
+  });
+  const { set, commit } = width;
+  const setWidth = useCallback(
+    (next: number) => {
+      const space = spaceRightOfRail(shellGrid());
+      const local = isNarrowScreen() || (space !== null && !holdsBothFloors(space));
+      return local ? set(next) : commit(next);
+    },
+    [set, commit],
+  );
+  return [width.value, setWidth] as const;
+}
+
 export function ArtifactPanelProvider({
   teamId,
   threadId,
+  preferences = null,
+  onSavePreferences,
   children,
 }: {
   readonly teamId: string;
   /** The thread on screen; undefined for a new conversation (nothing to remember yet). */
   readonly threadId: string | undefined;
+  /** The member's stored layout (null while it loads). */
+  readonly preferences?: LayoutPreferences | null;
+  /** Saves a width the member chose (debounced by the caller). */
+  readonly onSavePreferences?: (change: LayoutPreferences) => void;
   readonly children: ReactNode;
 }) {
   const t = useArtifactTabs(threadId === undefined ? null : tabsKey(teamId, threadId));
-  // Slot (A6, KOBE-202): load and save the width per user here.
-  const [width, setWidth] = useState<number | null>(null);
+  const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
 
@@ -183,7 +230,17 @@ export function ArtifactPanelProvider({
       close: t.close,
       setWidth,
     }),
-    [t.tabs, artifacts, createdTitles, width, t.openArtifact, t.activate, t.closeTab, t.close],
+    [
+      t.tabs,
+      artifacts,
+      createdTitles,
+      width,
+      setWidth,
+      t.openArtifact,
+      t.activate,
+      t.closeTab,
+      t.close,
+    ],
   );
   return (
     <ArtifactPanelContext.Provider value={api}>

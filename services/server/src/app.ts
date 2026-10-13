@@ -143,7 +143,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));
-  api.route("/me", meRoutes());
+  api.route("/me", meRoutes(deps));
   api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));
   api.route("/team/audit", teamAuditRoutes(deps));

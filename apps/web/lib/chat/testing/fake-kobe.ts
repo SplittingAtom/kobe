@@ -141,6 +141,8 @@ export class FakeKobe {
   readonly workspaceListings: string[] = [];
   /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
   readonly teamModels: FakeTeamModel[] = [];
+  /** The member's stored layout preferences (KOBE-202), wire casing; PUTs merge into it. */
+  preferences: Json = {};
   /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
   readonly runnableAgents: FakeRunnableAgent[] = [];
   runnablePageSize = 200;
@@ -507,6 +509,10 @@ export class FakeKobe {
       });
     }
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });
+    if (url.pathname === "/v1/me/preferences") {
+      if (method === "PUT") this.preferences = { ...this.preferences, ...(body as Json) };
+      return json(200, { preferences: this.preferences });
+    }
     if (url.pathname === "/v1/notifications" || url.pathname === "/v1/notifications/read") {
       return this.#notificationRoute(method, url);
     }

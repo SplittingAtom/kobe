@@ -32,6 +32,8 @@ export interface RequestOptions {
   readonly ifMatch?: string | undefined;
   /** `Idempotency-Key`: makes a create safe to repeat (`POST /v1/threads/{id}/messages`, KOBE-30). */
   readonly idempotencyKey?: string | undefined;
+  /** Lets the request outlive the page (a save on `pagehide`); small bodies only (64 KiB). */
+  readonly keepalive?: boolean | undefined;
   readonly fetchFn?: typeof fetch | undefined;
 }
 
@@ -125,6 +127,7 @@ export async function apiRequest<T>(
     teamId,
     ifMatch,
     idempotencyKey,
+    keepalive,
     fetchFn = fetch,
   } = options;
   const headers = new Headers({ accept: "application/json" });
@@ -144,7 +147,13 @@ export async function apiRequest<T>(
 
   let res: Response;
   try {
-    res = await fetchFn(path, { method, headers, body, credentials: "same-origin" });
+    res = await fetchFn(path, {
+      method,
+      headers,
+      body,
+      credentials: "same-origin",
+      ...(keepalive ? { keepalive: true } : {}),
+    });
   } catch {
     return { ok: false, error: fallback(0) };
   }
