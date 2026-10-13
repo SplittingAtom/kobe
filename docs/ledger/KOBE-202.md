@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (feature PR); migration merged in #261 (`0093_users_ui_preferences`)
+- **Status:** in review (PR #262); migration merged in #261 (`0093_users_ui_preferences`)
 - **Branch / worktree:** `kobe-202-layout-prefs` in `../Kobe-wt202` (migration: `kobe-202-migration`)
 - **Depends on:** KOBE-198 (rail), KOBE-200 (artifact tabs and resize)
 
