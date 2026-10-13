@@ -652,6 +652,13 @@
       "when": 1791793025734,
       "tag": "0092_memory_versions_tool_call_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791872598765,
+      "tag": "0093_users_ui_preferences",
+      "breakpoints": true
     }
   ]
 }
