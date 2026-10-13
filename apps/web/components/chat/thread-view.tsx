@@ -12,10 +12,12 @@ import { FilesButton } from "../shell/rail-state";
 import { ArtifactList } from "./artifact-list";
 import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
+import { ComposerDictationProvider } from "./composer-steer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
-import { RunPanel } from "./run-panel";
+import { RunNotices } from "./run-notices";
+import { SteeringPanel } from "./steering-panel";
 import { useFollowLatest } from "./use-follow";
 
 function statusLabel(state: ThreadState): string | undefined {
@@ -178,11 +180,16 @@ function MessagesAndComposer({
       </div>
       <div data-kobe-composer className={cn("bg-background shrink-0", welcome && "flex-1")}>
         <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6">
-          {/* A long queue scrolls on its own, so it never pushes the composer away. */}
+          {/* Long notices scroll on their own, so they never push the composer away. */}
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
-            <RunPanel extras={extras} />
+            <RunNotices extras={extras} />
           </div>
-          <Composer extras={extras} modelPicker={modelPicker} />
+          <ComposerDictationProvider>
+            <div className="flex flex-col">
+              <SteeringPanel extras={extras} />
+              <Composer extras={extras} modelPicker={modelPicker} />
+            </div>
+          </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
             {state.phase === "ready" && <ThreadSuggestions />}
           </AuiIf>
@@ -193,7 +200,8 @@ function MessagesAndComposer({
 }
 
 /**
- * The conversation on screen: the active branch of the entry tree, the run panel and composer.
+ * The conversation on screen: the active branch of the entry tree, the run notices, the steering
+ * panel (CE10) and the composer.
  * It fills its column and never grows past it: only the message list scrolls (KOBE-205).
  * In the chat shell (`contextInBar`) the agent, model and Files controls live in bar row two
  * (KOBE-197); the builder's test pane keeps them here.

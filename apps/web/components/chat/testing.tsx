@@ -44,9 +44,9 @@ export async function composer() {
   return (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
 }
 
-/** The status line screen readers hear (polite live region). */
+/** The status line screen readers hear (the thread's polite live region, not the phase one). */
 export function announcement(): string {
-  const live = document.querySelector('[aria-live="polite"]');
+  const live = document.querySelector('[aria-live="polite"]:not([data-kobe-phase-live])');
   return (live?.textContent ?? "").replace(/\u00a0/g, "");
 }
 

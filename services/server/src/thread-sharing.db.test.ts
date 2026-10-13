@@ -141,6 +141,8 @@ describe("read-only enforcement", () => {
       await r.post(`${t}/restore`, {}),
       await r.post(`${t}/messages`, { content: "hi" }),
       await r.post(`${t}/queue/resume`, {}),
+      await r.post(`${t}/queue/pause`, {}),
+      await r.post(`${t}/queue/order`, { run_ids: [x.runId] }),
       await r.post(`/v1/runs/${x.runId}/steer`, { content: "x" }),
       await r.post(`/v1/runs/${x.runId}/cancel`, {}),
       await r.post(`/v1/runs/${x.runId}/retry`, {}),

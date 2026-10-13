@@ -262,14 +262,15 @@ describe("streaming a run (D16)", () => {
     expect(screen.getAllByText("two steps")).toHaveLength(1);
   });
 
-  it("shows Waking your workspace… until the agent starts working (D14)", async () => {
+  it("shows Waking your workspace in the steering panel until the agent starts working (D14)", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);
     const { runId } = await sendAndStart("hello", t);
     fake.emit(runId, "sandbox.waking", { reason: "hibernated" });
-    expect(await screen.findByText("Waking your workspace…")).toBeTruthy();
+    const phase = () => document.querySelector("[data-phase]")?.textContent;
+    await waitFor(() => expect(phase()).toBe("Waking your workspace…"));
     fake.agent.delta(runId, "m1", "Hi");
-    await waitFor(() => expect(screen.queryByText("Waking your workspace…")).toBeNull());
+    await waitFor(() => expect(phase()).toBe("Thinking"));
   });
 });
 
@@ -290,7 +291,7 @@ describe("queue, Steer and Stop (D17)", () => {
     expect(queued.map((r) => r.input)).toEqual(["second", "third"]);
 
     // Edit the first queued message.
-    await user.click(must(within(queue).getAllByRole("button", { name: "Edit" })[0]));
+    await user.click(within(queue).getByRole("button", { name: "Edit queued message 1: second" }));
     const editor = within(queue).getByLabelText("Edit queued message 1");
     await user.clear(editor);
     await user.type(editor, "second, edited");
@@ -304,7 +305,7 @@ describe("queue, Steer and Stop (D17)", () => {
     });
 
     // Delete the other one.
-    await user.click(must(within(queue).getAllByRole("button", { name: "Delete" })[1]));
+    await user.click(within(queue).getByRole("button", { name: "Delete queued message 2" }));
     await waitFor(() => expect(must(queued[1]).status).toBe("cancelled"));
     await waitFor(() => expect(within(queue).getAllByRole("listitem")).toHaveLength(1));
 

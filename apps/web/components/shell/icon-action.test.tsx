@@ -154,6 +154,7 @@ describe("command registry", () => {
       "toggle-rail": "Mod+B",
       edit: "Mod+Shift+E",
       stop: "Mod+.",
+      steer: "Mod+Shift+Enter",
     });
   });
 

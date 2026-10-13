@@ -845,6 +845,12 @@ export const AUDIT_EVENTS = {
     /** A scheduled run the system cancelled because its owner was deactivated or removed (KOBE-180). */
     reason: z.enum(["owner_deactivated", "member_removed"]).optional(),
   }),
+  /** The owner paused the queue: `queued` messages wait until resumed; retries run anyway (KOBE-206). */
+  "run.queue_paused": event("team", { threadId: id, queued: count }),
+  /** The owner resumed a paused queue or chose Continue without retry (D14, KOBE-26, KOBE-206). */
+  "run.queue_resumed": event("team", { threadId: id, wasInterrupted: z.boolean() }),
+  /** The owner reordered the `queued` messages waiting on the thread (CE10; KOBE-206). */
+  "run.queue_reordered": event("team", { threadId: id, queued: count }),
   /** The thread owner retried an interrupted run; `runId` is the new run (D14; KOBE-30). */
   "run.retried": event("team", { runId: id, threadId: id, retryOfRunId: id }),
   /** A run ended because a budget is used up, after its current step (D30; system). */

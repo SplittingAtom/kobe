@@ -10,6 +10,7 @@ import {
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { RunError } from "../runs/errors.js";
+import { queueOrderBodySchema } from "../runs/queue-order.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 
@@ -111,6 +112,25 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     if (!id) return invalidRequest(c);
     return answer(c, async () => {
       await deps.runs.resumeQueue(actorOf(c), id);
+      return c.json(await threadRuns(deps, actorOf(c), id));
+    });
+  });
+
+  app.post("/:id/queue/pause", async (c) => {
+    const id = idParam(c);
+    if (!id) return invalidRequest(c);
+    return answer(c, async () => {
+      await deps.runs.pauseQueue(actorOf(c), id);
+      return c.json(await threadRuns(deps, actorOf(c), id));
+    });
+  });
+
+  app.post("/:id/queue/order", async (c) => {
+    const id = idParam(c);
+    const parsed = await body(c, queueOrderBodySchema);
+    if (!id || !parsed) return invalidRequest(c, "Give run_ids: every queued run once, in order.");
+    return answer(c, async () => {
+      await deps.runs.reorderQueue(actorOf(c), id, parsed.run_ids);
       return c.json(await threadRuns(deps, actorOf(c), id));
     });
   });

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import type { BudgetStatusLine } from "../../lib/admin/api/budgets";
-import { budgetBannerText } from "../chat/run-panel";
+import { budgetBannerText } from "../chat/run-notices";
 import { SiteBudget } from "./site/site-budget";
 import { TeamBudgetsPage, spentOf, tokensOf } from "./team/budgets-page";
 import { TEAM, renderSite, renderTeam, stubApi } from "./testing";

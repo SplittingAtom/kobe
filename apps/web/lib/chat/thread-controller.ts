@@ -606,6 +606,60 @@ export class ThreadController {
   /** "Resume queue" after Stop: the held messages run in order. */
   readonly resumeQueue = async (): Promise<void> => this.#resumeQueue("The queue resumed.");
 
+  /** Pause (CE10): the queued messages wait after the current run until resumed or a send. */
+  readonly pauseQueue = async (): Promise<void> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return;
+    const res = await this.#busy("pause", () => this.#api.pauseQueue(threadId));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return;
+    }
+    this.#applyRuns(res.data);
+    this.#announce("The queue is paused.");
+  };
+
+  /**
+   * Reorder (CE10): `runIds` is the whole queue in its new order. Shown at once, with retries kept
+   * first as the server keeps them (D14). The server's answer is applied as is; a stale list
+   * (`queue_changed`) or any other refusal shows the error and reads the queue again.
+   */
+  readonly reorderQueue = async (runIds: readonly string[]): Promise<void> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return;
+    const retries = new Set(
+      this.#state.runs.filter((r) => r.retryOfRunId !== undefined).map((r) => r.runId),
+    );
+    const order = [
+      ...runIds.filter((id) => retries.has(id)),
+      ...runIds.filter((id) => !retries.has(id)),
+    ];
+    this.#setQueuePositions(new Map(order.map((id, i) => [id, i + 1] as const)));
+    const res = await this.#busy("reorder", () => this.#api.reorderQueue(threadId, order));
+    if (!res.ok) {
+      this.#fail(res.error);
+      await this.refresh();
+      return;
+    }
+    this.#applyRuns(res.data);
+    this.#setQueuePositions(
+      new Map(
+        res.data.runs.flatMap((r) => (r.queuePos === undefined ? [] : [[r.runId, r.queuePos]])),
+      ),
+    );
+    this.#announce("Queue reordered.");
+  };
+
+  #setQueuePositions(positions: ReadonlyMap<string, number>): void {
+    this.#set((s) => ({
+      ...s,
+      pending: s.pending.map((m) => {
+        const pos = positions.get(m.runId);
+        return pos === undefined ? m : { ...m, queuePos: pos };
+      }),
+    }));
+  }
+
   async #resumeQueue(announcement: string): Promise<void> {
     const threadId = this.#state.threadId;
     if (threadId === null) return;
