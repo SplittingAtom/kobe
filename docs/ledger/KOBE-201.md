@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #263)
 - **Branch / worktree:** `kobe-201-breakpoints` in `../Kobe-wt201`
 - **Depends on:** KOBE-198 (rail), KOBE-200 (artifact tabs), KOBE-202 (layout preferences)
 
