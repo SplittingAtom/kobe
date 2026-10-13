@@ -12,6 +12,7 @@ import { FilesButton } from "../shell/rail-state";
 import { ArtifactList } from "./artifact-list";
 import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
+import { ComposerDictationProvider } from "./composer-steer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
@@ -183,10 +184,12 @@ function MessagesAndComposer({
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
             <RunNotices extras={extras} />
           </div>
-          <div className="flex flex-col">
-            <SteeringPanel extras={extras} />
-            <Composer extras={extras} modelPicker={modelPicker} />
-          </div>
+          <ComposerDictationProvider>
+            <div className="flex flex-col">
+              <SteeringPanel extras={extras} />
+              <Composer extras={extras} modelPicker={modelPicker} />
+            </div>
+          </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
             {state.phase === "ready" && <ThreadSuggestions />}
           </AuiIf>

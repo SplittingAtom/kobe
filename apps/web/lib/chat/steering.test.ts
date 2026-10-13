@@ -67,6 +67,18 @@ describe("runPhase and steeringMode", () => {
     expect(runPhase(byStatus, false)).toEqual({ kind: "approval" });
   });
 
+  it("says the workspace is waking even before the run starts (D14)", () => {
+    const early: ThreadState = {
+      ...initialThreadState(T),
+      runs: [{ runId: R, threadId: T, status: "queued", trigger: "user" }],
+      live: { ...newLiveRun(R), waking: "hibernated" },
+    };
+    const phase = runPhase(early, false);
+    expect(phase).toEqual({ kind: "waking", reason: "hibernated" });
+    expect(phaseText(phase ?? { kind: "thinking" })).toBe("Waking your workspace…");
+    expect(steeringMode(early, phase)).toBe("active");
+  });
+
   it("finishing on budget wins over tools and thinking", () => {
     const busy = running({ tools: { a: tool({ call: call("bash") }) } });
     expect(runPhase(busy, true)).toEqual({ kind: "budget" });

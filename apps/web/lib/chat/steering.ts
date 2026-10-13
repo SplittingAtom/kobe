@@ -17,9 +17,9 @@ export type RunPhase =
   | { readonly kind: "budget" };
 
 const WAKING: Record<NonNullable<LiveRun["waking"]>, string> = {
-  hibernated: "Waking your workspace",
-  first_start: "Starting your workspace for the first time",
-  rebuild: "Rebuilding your workspace",
+  hibernated: "Waking your workspace…",
+  first_start: "Starting your workspace for the first time…",
+  rebuild: "Rebuilding your workspace…",
 };
 
 export function phaseText(phase: RunPhase): string {
@@ -79,13 +79,17 @@ function runningTool(live: LiveRun | undefined): string | undefined {
 
 /** What the running agent is doing; undefined when no run holds the thread. */
 export function runPhase(state: ThreadState, budgetExhausted: boolean): RunPhase | undefined {
-  if (currentRunId(state) === undefined) return undefined;
+  // The workspace may wake before the run starts: say so whenever the stream says so (D14).
+  const waking = state.live?.terminal === undefined ? state.live?.waking : undefined;
+  if (currentRunId(state) === undefined) {
+    return waking ? { kind: "waking", reason: waking } : undefined;
+  }
   const live = currentLive(state);
   if (activeRun(state)?.status === "waiting_approval" || awaitsApproval(live)) {
     return { kind: "approval" };
   }
   if (budgetExhausted) return { kind: "budget" };
-  if (live?.waking) return { kind: "waking", reason: live.waking };
+  if (waking) return { kind: "waking", reason: waking };
   const tool = runningTool(live);
   return tool === undefined ? { kind: "thinking" } : { kind: "tool", tool };
 }

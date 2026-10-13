@@ -71,13 +71,28 @@ wasInterrupted}` (resume had none) and `run.queue_reordered {threadId, queued}`;
   stay in the thread.
 - **Readers** of a shared thread see the status row only, while a run is on.
 
+## Review round 1 (security/DB: 4 LOW; web: 8 findings; all fixed)
+
+- **Server** (`fe06645c`):
+  - `run_ids` is bounded at 100, because a Retry may queue past the tunable cap of 25. The exact-set check decides, and a body past the cap gets 409, not 400.
+  - Pause counts and holds messages only; a queued Retry still runs first, and the OpenAPI and audit text now say so.
+  - Pause and resume touch the thread, like reorder.
+  - Positions are written with one `unnest … WITH ORDINALITY` UPDATE per step.
+  - New tests: a reader gets 403 on both routes (`thread-sharing.db.test.ts`), and a thread in Trash gets 409.
+- **Web:**
+  - A reader never sees "Finishing on budget" (the budget read is the viewer's own).
+  - Drag keeps the dragged and target run ids and resolves them on drop; if either is gone, nothing drops.
+  - One `useSteer` helper (`composer-steer.tsx`) serves the composer and the panel. It shares the composer's dictation through `ComposerDictationProvider`, so Steer now stops dictation.
+  - "Waking your workspace…" shows whenever `live.waking` is set, even before `run.started`.
+  - Reorder applies the server's answer (positions included) and reads the queue again only after a refusal.
+  - The client keeps retries first, as FakeKobe and the server do.
+  - The queued text without a run now reads "the next message starts in a moment".
+
 ## Open questions (for Chris or the coordinator)
 
 - Size: web ~780 added / ~225 removed non-test lines (about 550 net, a good share of it comments),
   plus ~190 server lines from the two approved route commits. If you want a split: (1) the server
   routes (both commits), (2) the web panel.
-- Dictation keeps listening when the panel's Steer now clears the text. The composer's keyboard
-  steer still stops it.
 
 ## Evidence (acceptance criteria → test or command output)
 

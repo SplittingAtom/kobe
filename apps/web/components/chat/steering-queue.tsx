@@ -80,36 +80,47 @@ export function SteeringQueue({ state, controller }: Props) {
   const queued = queuedMessages(state);
   const queuing = queuingText(state);
   const [editing, setEditing] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
-  const centres = useRef<readonly number[]>([]);
+  // The dragged run and the run it would land on, by id: the queue may change mid-drag.
+  const [drag, setDrag] = useState<{ id: string; target: string } | null>(null);
+  const start = useRef<{ ids: readonly string[]; centres: readonly number[] }>({
+    ids: [],
+    centres: [],
+  });
   const list = useRef<HTMLOListElement>(null);
   const hintId = useId();
   if (queued.length === 0 && queuing === undefined) return null;
 
   const ids = queued.map((m) => m.runId);
-  const shown = drag ? moveItem(queued, drag.from, drag.to) : queued;
-  const reorder = (from: number, to: number) => {
-    const next = moveItem(ids, from, to);
+  const from = drag ? ids.indexOf(drag.id) : -1;
+  const to = drag ? ids.indexOf(drag.target) : -1;
+  const shown = from >= 0 && to >= 0 ? moveItem(queued, from, to) : queued;
+  const reorder = (src: number, dst: number) => {
+    const next = moveItem(ids, src, dst);
     if (next !== ids) void controller.reorderQueue(next);
   };
 
-  const onPointerDown = (e: PointerEvent<HTMLElement>, index: number) => {
+  const onPointerDown = (e: PointerEvent<HTMLElement>, id: string) => {
     if (e.button !== 0 || isBusy(state, "reorder")) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const chips = [...(list.current?.querySelectorAll("[data-queued]") ?? [])];
-    centres.current = chips.map((c) => {
-      const r = c.getBoundingClientRect();
-      return r.left + r.width / 2;
-    });
-    setDrag({ from: index, to: index });
+    start.current = {
+      ids,
+      centres: chips.map((c) => {
+        const r = c.getBoundingClientRect();
+        return r.left + r.width / 2;
+      }),
+    };
+    setDrag({ id, target: id });
   };
   const onPointerMove = (e: PointerEvent<HTMLElement>) => {
     if (!drag) return;
-    const to = dropIndex(centres.current, drag.from, e.clientX);
-    if (to !== drag.to) setDrag({ ...drag, to });
+    const { ids: was, centres } = start.current;
+    const target = was[dropIndex(centres, was.indexOf(drag.id), e.clientX)];
+    if (target !== undefined && target !== drag.target) setDrag({ ...drag, target });
   };
   const onPointerUp = () => {
-    if (drag) reorder(drag.from, drag.to);
+    // Resolved against the queue as it is now; a run that left meanwhile cancels the drop.
+    if (from >= 0 && to >= 0) reorder(from, to);
     setDrag(null);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLElement>, index: number) => {
@@ -155,7 +166,7 @@ export function SteeringQueue({ state, controller }: Props) {
               <li
                 key={m.runId}
                 data-queued
-                data-dragging={drag?.from === index || undefined}
+                data-dragging={drag?.id === m.runId || undefined}
                 aria-label={`Queued message ${position}`}
                 className={CHIP}
               >
@@ -167,7 +178,7 @@ export function SteeringQueue({ state, controller }: Props) {
                   aria-describedby={hintId}
                   className="cursor-grab touch-none active:cursor-grabbing"
                   disabled={isBusy(state, "reorder")}
-                  onPointerDown={(e) => onPointerDown(e, index)}
+                  onPointerDown={(e) => onPointerDown(e, m.runId)}
                   onPointerMove={onPointerMove}
                   onPointerUp={onPointerUp}
                   onPointerCancel={() => setDrag(null)}

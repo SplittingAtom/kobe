@@ -298,6 +298,25 @@ export class FakeKobe {
     return run;
   }
 
+  /** A Retry waiting in the queue (the server's abort hold): it runs before every message. */
+  queueRetry(threadId: string, input: string): string {
+    this.#runN += 1;
+    const run: FakeRun = {
+      run_id: uuid(4, this.#runN),
+      thread_id: threadId,
+      status: "queued",
+      input,
+      parent_entry_id: null,
+      queue_pos: 0,
+      retry_of_run_id: uuid(4, 9_000 + this.#runN),
+      events: [],
+      compacted: false,
+      tip: null,
+    };
+    this.runs.set(run.run_id, run);
+    return run.run_id;
+  }
+
   activeRun(threadId: string): FakeRun | undefined {
     return [...this.runs.values()].find((r) => r.thread_id === threadId && ACTIVE.has(r.status));
   }
@@ -894,7 +913,9 @@ export class FakeKobe {
       const queued = this.#queued(thread.thread_id);
       const same = ids.length === queued.length && queued.every((r) => ids.includes(r.run_id));
       if (!same) return error(409, "queue_changed", "The queue changed meanwhile.");
-      for (const id of ids) {
+      // Like the server: retries keep running first, each group in the order given.
+      const retry = (id: string) => this.runs.get(id)?.retry_of_run_id !== undefined;
+      for (const id of [...ids.filter(retry), ...ids.filter((id) => !retry(id))]) {
         const run = this.runs.get(id);
         if (run) run.queue_pos = ++this.#queueN;
       }

@@ -1,9 +1,7 @@
 "use client";
 
-import { useAui, useAuiState } from "@assistant-ui/react";
 import { SquareIcon } from "lucide-react";
 import { useState } from "react";
-import { NEW_DRAFT } from "../../lib/chat/attachments";
 import {
   formatElapsed,
   phaseText,
@@ -21,7 +19,7 @@ import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { useDraftAgentName } from "./agent-picker";
-import { useDraftFiles } from "./attachment-chips";
+import { useSteer } from "./composer-steer";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { SteeringQueue } from "./steering-queue";
 
@@ -30,11 +28,6 @@ export const PHASE_ANNOUNCE_MS = 2_000;
 
 /** The composer's Steer key (CE10), also shown in the Steer now tooltip. */
 export const STEER_SHORTCUT = "Mod+Shift+Enter";
-
-interface RowProps {
-  readonly state: ThreadState;
-  readonly controller: ThreadController;
-}
 
 /** Since the run started; a run this tab saw start without a time counts from first sight. */
 function Elapsed({ since, runId }: { readonly since: string | undefined; readonly runId: string }) {
@@ -77,7 +70,7 @@ function StatusRow({
             you resume the queue (sending a new message resumes it too).
           </>
         ) : (
-          "Queued: runs after the current message"
+          "Queued: the next message starts in a moment"
         )}
       </p>
     );
@@ -101,16 +94,18 @@ function StatusRow({
 }
 
 /** Row 3: Steer now and Stop while a run holds the thread; Retry and Continue when interrupted. */
-function ControlsRow({ state, controller, mode }: RowProps & { readonly mode: SteeringMode }) {
-  const aui = useAui();
-  const text = useAuiState((s) => s.composer.text);
-  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
-  const files = useDraftFiles(remoteId ?? NEW_DRAFT);
+function ControlsRow({
+  extras,
+  controller,
+  mode,
+}: {
+  readonly extras: KobeThreadExtras;
+  readonly controller: ThreadController;
+  readonly mode: SteeringMode;
+}) {
+  const { state } = extras;
+  const { steer, unavailable } = useSteer(extras);
   const queued = queuedMessages(state).length;
-  const steer = async () => {
-    if (text.trim() === "") return;
-    if (await controller.steer(text.trim())) aui.composer.setText("");
-  };
   if (mode === "interrupted") {
     return (
       <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -166,14 +161,8 @@ function ControlsRow({ state, controller, mode }: RowProps & { readonly mode: St
             shortcut={STEER_SHORTCUT}
             size="sm"
             side="top"
-            description={
-              files.length > 0
-                ? "Files can't be steered in: queue the message instead."
-                : text.trim() === ""
-                  ? "Type in the message box first."
-                  : undefined
-            }
-            disabled={text.trim() === "" || files.length > 0 || isBusy(state, "steer")}
+            description={unavailable}
+            disabled={unavailable !== undefined}
             onClick={() => void steer()}
           />
           <IconAction
@@ -202,11 +191,16 @@ function ControlsRow({ state, controller, mode }: RowProps & { readonly mode: St
 export function SteeringPanel({ extras }: { readonly extras: KobeThreadExtras }) {
   const { controller, state } = extras;
   const runId = currentRunId(state);
-  const toolResults = Object.values(state.live?.tools ?? {}).filter((t) => t.result).length;
-  const finishing = useBudgetFinishing(controller?.budgetStatus, runId, toolResults);
-  const phase = runPhase(state, finishing);
-  const mode = controller ? steeringMode(state, phase) : "idle";
   const reader = state.summary?.readOnly === true;
+  const toolResults = Object.values(state.live?.tools ?? {}).filter((t) => t.result).length;
+  // The budget read is the viewer's own: it says something about the run only for its owner.
+  const finishing = useBudgetFinishing(
+    reader ? undefined : controller?.budgetStatus,
+    runId,
+    toolResults,
+  );
+  const phase = runPhase(state, finishing && !reader);
+  const mode = controller ? steeringMode(state, phase) : "idle";
   const said = useThrottledText(
     mode === "interrupted" ? "" : phase ? phaseText(phase) : "",
     PHASE_ANNOUNCE_MS,
@@ -227,7 +221,7 @@ export function SteeringPanel({ extras }: { readonly extras: KobeThreadExtras })
           <div className="bg-muted/30 mb-2 flex flex-col gap-1.5 rounded-xl border px-3 py-2">
             <StatusRow state={state} mode={mode} phase={phase} />
             {!reader && <SteeringQueue state={state} controller={controller} />}
-            {!reader && <ControlsRow state={state} controller={controller} mode={mode} />}
+            {!reader && <ControlsRow extras={extras} controller={controller} mode={mode} />}
           </div>
         )}
       </div>

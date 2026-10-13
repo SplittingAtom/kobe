@@ -113,3 +113,24 @@ describe("composer dictation", () => {
     expect(screen.queryByRole("button", { name: "Dictate" })).toBeNull();
   });
 });
+
+describe("dictation and Steer now (KOBE-206)", () => {
+  it("the steering panel's Steer now stops dictation, like every send", async () => {
+    vi.stubGlobal("webkitSpeechRecognition", FakeRecognition);
+    const t = fake.addThread("Steer");
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "go{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const input = await composer();
+    await user.click(await screen.findByRole("button", { name: "Dictate" }));
+    recognition().say("faster please");
+    await waitFor(() => expect(input.value).toBe("faster please"));
+    await user.click(screen.getByRole("button", { name: "Steer now" }));
+    expect(recognition().started).toBe(false);
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(
+      fake.requests.find((r) => r.method === "POST" && r.path.endsWith("/steer"))?.body,
+    ).toEqual({ content: "faster please" });
+  });
+});

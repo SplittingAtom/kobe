@@ -4,9 +4,9 @@ import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { MicIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
-import { useDictation } from "../../lib/chat/dictation";
 import { isThreadRunning } from "../../lib/chat/thread-state";
-import { ComposerAttachments, useDraftFiles } from "./attachment-chips";
+import { ComposerAttachments } from "./attachment-chips";
+import { useComposerDictation, useSteer } from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
@@ -37,9 +37,9 @@ export function Composer({
   const running = isThreadRunning(state);
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
-  const dictation = useDictation((t) => aui.composer.setText(t));
+  const dictation = useComposerDictation();
+  const { steer } = useSteer(extras);
   const draft = remoteId ?? NEW_DRAFT;
-  const files = useDraftFiles(draft);
   const blocker = session.attachments.blocker(draft);
   const picker = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -72,13 +72,6 @@ export function Composer({
       aui.composer.setText("");
     }
   };
-  const steer = async () => {
-    // A steer carries text only: with files attached, the message is queued instead.
-    if (!controller || empty || files.length > 0) return;
-    dictation.stop();
-    if (await controller.steer(text.trim())) aui.composer.setText("");
-  };
-
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
     if (e.shiftKey && (e.ctrlKey || e.metaKey)) {

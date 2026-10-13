@@ -268,7 +268,7 @@ describe("streaming a run (D16)", () => {
     const { runId } = await sendAndStart("hello", t);
     fake.emit(runId, "sandbox.waking", { reason: "hibernated" });
     const phase = () => document.querySelector("[data-phase]")?.textContent;
-    await waitFor(() => expect(phase()).toBe("Waking your workspace"));
+    await waitFor(() => expect(phase()).toBe("Waking your workspace…"));
     fake.agent.delta(runId, "m1", "Hi");
     await waitFor(() => expect(phase()).toBe("Thinking"));
   });

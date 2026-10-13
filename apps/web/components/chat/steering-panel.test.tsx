@@ -324,3 +324,68 @@ describe("composer and controls (ac-3)", () => {
     await waitFor(() => expect(phase()).toBe("Finishing on budget"));
   });
 });
+
+describe("review round 1", () => {
+  it("a retry waiting in the queue stays first after a reorder", async () => {
+    const t = thread();
+    openApp(fake, t);
+    const { user } = await startRun(t);
+    await queue(user, "a");
+    fake.queueRetry(t, "retry");
+    await user.type(await composer(), "b{Enter}"); // the send reads the queue again
+    await waitFor(() => expect(queuedTexts()).toEqual(["retry", "a", "b"]));
+    within(queueRegion()).getByRole("button", { name: "Move queued message 3" }).focus();
+    await user.keyboard("{Home}");
+    await waitFor(() => expect(queuedTexts()).toEqual(["retry", "b", "a"]));
+    const order = chatRequests(fake, "POST").filter((r) => r.path.endsWith("/queue/order"));
+    expect((order.at(-1)?.body as { run_ids: string[] }).run_ids).toHaveLength(3);
+    // The server's answer is applied: no extra read of the queue after a reorder.
+    const reads = () => fake.requests.filter((r) => r.path.endsWith("/pending-messages")).length;
+    const before = reads();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reads()).toBe(before);
+  });
+
+  it("a drag whose run left the queue meanwhile drops nothing", async () => {
+    const t = thread();
+    openApp(fake, t);
+    const { user } = await startRun(t);
+    await queue(user, "a", "b", "c");
+    const chips = within(queueRegion()).getAllByRole("listitem");
+    chips.forEach((chip, i) => {
+      chip.getBoundingClientRect = () =>
+        ({
+          left: i * 100,
+          width: 80,
+          top: 0,
+          height: 24,
+          right: i * 100 + 80,
+          bottom: 24,
+        }) as DOMRect;
+    });
+    const grip = within(queueRegion()).getByRole("button", { name: "Move queued message 1" });
+    fireEvent.pointerDown(grip, { pointerId: 1, button: 0, clientX: 40 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientX: 250 });
+    // "c" (the drop target) is deleted from another tab; this tab reads the queue again.
+    must([...fake.runs.values()].find((r) => r.input === "c")).status = "cancelled";
+    await user.type(await composer(), "d{Enter}");
+    await waitFor(() => expect(queuedTexts()).toEqual(["a", "b", "d"]));
+    fireEvent.pointerUp(grip, { pointerId: 1, clientX: 250 });
+    expect(chatRequests(fake, "POST").some((r) => r.path.endsWith("/queue/order"))).toBe(false);
+  });
+
+  it("a reader never sees Finishing on budget (the budget read is the viewer's own)", async () => {
+    const t = thread();
+    const first = openApp(fake, t);
+    await startRun(t);
+    first.unmount();
+    must(fake.threads.get(t)).read_only = true;
+    fake.budgetStatus = { state: "exhausted", lines: [] };
+    openApp(fake, t);
+    await waitFor(() => expect(phase()).toBe("Thinking"));
+    expect(
+      fake.requests.some((r) => r.path === "/v1/team/budgets/status" && r.method === "GET"),
+    ).toBe(true); // the notices' banner reads it; the panel doesn't use it for a reader
+    expect(within(panel()).queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+});
