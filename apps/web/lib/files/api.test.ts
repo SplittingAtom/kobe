@@ -68,4 +68,50 @@ describe("files api", () => {
     const res = await createFilesApi("t1", fetchFn).download("d/n.txt");
     expect(res.ok && new TextDecoder().decode(res.data)).toBe("abc");
   });
+
+  it("reads at most maxBytes, says so, and reports the full size", async () => {
+    const seen: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      seen.push(String(input));
+      return new Response("abcdefgh", { headers: { "content-length": "8" } });
+    };
+    const api = createFilesApi("t1", fetchFn);
+    const cut = await api.read("d/n.txt", 3);
+    expect(cut.ok && { ...cut.data, bytes: new TextDecoder().decode(cut.data.bytes) }).toEqual({
+      bytes: "abc",
+      size: 8,
+      truncated: true,
+    });
+    const whole = await api.read("d/n.txt", 8);
+    expect(whole.ok && whole.data.truncated).toBe(false);
+    expect(seen[0]).toBe("/v1/workspace/file?path=d%2Fn.txt");
+    const missing = await createFilesApi("t1", stub(404, { code: "not_found" }).fetchFn).read(
+      "x",
+      3,
+    );
+    expect(!missing.ok && missing.error.code).toBe("not_found");
+  });
+
+  it("finds a file's entry in its folder's listing, following pages", async () => {
+    const pages: Record<string, unknown> = {
+      "": { path: "d", entries: [{ name: "a", path: "d/a", type: "file" }], next_cursor: "p2" },
+      p2: { path: "d", entries: [{ name: "n.txt", path: "d/n.txt", type: "file", size_bytes: 9 }] },
+    };
+    const urls: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      urls.push(String(input));
+      const cursor = new URL(String(input), "http://x").searchParams.get("cursor") ?? "";
+      return Response.json(pages[cursor]);
+    };
+    const api = createFilesApi("t1", fetchFn);
+    const found = await api.stat("d/n.txt");
+    expect(found.ok && found.data?.sizeBytes).toBe(9);
+    expect(urls).toEqual(["/v1/workspace/files?path=d", "/v1/workspace/files?path=d&cursor=p2"]);
+    const gone = await api.stat("d/zzz");
+    expect(gone.ok && gone.data).toBeNull();
+    const folderGone = await createFilesApi("t1", stub(404, { code: "not_found" }).fetchFn).stat(
+      "x/y",
+    );
+    expect(folderGone.ok && folderGone.data).toBeNull();
+  });
 });

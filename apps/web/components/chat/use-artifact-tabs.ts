@@ -34,6 +34,8 @@ export interface ArtifactTabsApi {
   close(): void;
   /** Drops tabs of artifacts the thread no longer lists. */
   prune(existing: ReadonlySet<string>): void;
+  /** Drops one tab whose content is gone (a deleted file), without moving focus. */
+  drop(id: string): void;
 }
 
 /** Where focus goes when the last tab closes and nothing that opened the column is left. */
@@ -96,5 +98,9 @@ export function useArtifactTabs(key: string | null): ArtifactTabsApi {
     (existing: ReadonlySet<string>) => setTabs((prev) => retainTabs(prev, existing)),
     [],
   );
-  return { tabs, request, openArtifact, autoOpen, activate, closeTab, close, prune };
+  const drop = useCallback((id: string) => {
+    setTabs((prev) => closeTabIn(prev, id));
+    setRequest((prev) => (prev?.id === id ? null : prev));
+  }, []);
+  return { tabs, request, openArtifact, autoOpen, activate, closeTab, close, prune, drop };
 }

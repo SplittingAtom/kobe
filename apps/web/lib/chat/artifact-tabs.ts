@@ -3,9 +3,10 @@
  * the active tab are remembered per thread in this browser (localStorage, CE6: transient state);
  * missing, blocked or garbled storage reads as no tabs. Every function returns a new value.
  */
+import { filePathOfTab } from "../files/preview";
 
 export interface ArtifactTabs {
-  /** Artifact ids in order of opening. */
+  /** Artifact ids and file tab ids (`lib/files/preview.ts`) in order of opening. */
   readonly open: readonly string[];
   /** One of `open`, or null when nothing is open. */
   readonly active: string | null;
@@ -17,6 +18,9 @@ export const NO_TABS: ArtifactTabs = { open: [], active: null };
 export const MAX_TABS = 20;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** An artifact id, or a workspace file's tab (`file:<path>`, KOBE-268). */
+const isTabId = (id: string) => UUID.test(id) || filePathOfTab(id) !== null;
 
 /** Opens `id` (at the end, unless it is open already) and makes it active. */
 export function openTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
@@ -38,9 +42,12 @@ export function closeTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
   return { open, active: open[Math.min(index, open.length - 1)] ?? null };
 }
 
-/** Drops tabs of artifacts that no longer exist (the thread's list is the record). */
+/**
+ * Drops tabs of artifacts that no longer exist (the thread's list is the record). File tabs
+ * (KOBE-268) are not the list's: the file viewer drops one when its file is gone.
+ */
 export function retainTabs(tabs: ArtifactTabs, existing: ReadonlySet<string>): ArtifactTabs {
-  const open = tabs.open.filter((id) => existing.has(id));
+  const open = tabs.open.filter((id) => existing.has(id) || filePathOfTab(id) !== null);
   if (open.length === tabs.open.length) return tabs;
   return normalise(open, tabs.active);
 }
@@ -76,7 +83,7 @@ export function readTabs(key: string): ArtifactTabs {
   const { open, active } = value as Record<string, unknown>;
   if (!Array.isArray(open)) return NO_TABS;
   const ids = [
-    ...new Set(open.filter((id): id is string => typeof id === "string" && UUID.test(id))),
+    ...new Set(open.filter((id): id is string => typeof id === "string" && isTabId(id))),
   ];
   return normalise(ids.slice(Math.max(0, ids.length - MAX_TABS)), active);
 }

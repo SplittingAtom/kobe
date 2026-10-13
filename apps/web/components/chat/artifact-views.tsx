@@ -49,8 +49,14 @@ function useArtifactContent(id: string, version: number, enabled: boolean): Cont
   return state;
 }
 
-function CsvTable({ text }: { readonly text: string }) {
-  const rows = parseCsv(text);
+export function CsvTable({
+  text,
+  delimiter = ",",
+}: {
+  readonly text: string;
+  readonly delimiter?: string;
+}) {
+  const rows = parseCsv(text, delimiter);
   const [head, ...body] = rows;
   if (!head) return <p>This artifact is empty.</p>;
   const shown = body.slice(0, MAX_CSV_ROWS);

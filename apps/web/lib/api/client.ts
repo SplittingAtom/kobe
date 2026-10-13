@@ -189,6 +189,61 @@ export async function apiTextFile(
   return { ok: true, status: res.status, data: { text: await res.text(), filename } };
 }
 
+/** At most `maxBytes` of a binary body, and whether there was more (`size`: Content-Length). */
+export interface CappedBytes {
+  readonly bytes: Uint8Array;
+  readonly size: number | null;
+  readonly truncated: boolean;
+}
+
+/** Reads the body until `maxBytes`, then cancels the rest (it is never downloaded in full). */
+async function readUpTo(res: Response, maxBytes: number): Promise<CappedBytes> {
+  const length = Number(res.headers.get("content-length") ?? "NaN");
+  const size = Number.isSafeInteger(length) ? length : null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let truncated = false;
+  const reader = res.body?.getReader();
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+    if (total > maxBytes) {
+      truncated = true;
+      await reader.cancel();
+      break;
+    }
+  }
+  const bytes = new Uint8Array(Math.min(total, maxBytes));
+  let at = 0;
+  for (const chunk of chunks) {
+    const part = chunk.subarray(0, bytes.length - at);
+    bytes.set(part, at);
+    at += part.length;
+  }
+  return { bytes, size, truncated };
+}
+
+/** GET of a binary body capped at `maxBytes` (a preview); errors as `apiDownload`. */
+export async function apiReadCapped(
+  path: string,
+  maxBytes: number,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
+): Promise<ApiResult<CappedBytes>> {
+  assertApiPath(path);
+  const { teamId, fetchFn = fetch } = options;
+  const headers = new Headers();
+  if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
+  try {
+    const res = await fetchFn(path, { method: "GET", headers, credentials: "same-origin" });
+    if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
+    return { ok: true, status: res.status, data: await readUpTo(res, maxBytes) };
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
+}
+
 export type ErrorKind =
   "signIn" | "forbidden" | "notFound" | "chooseTeam" | "reload" | "isolation" | "other";
 

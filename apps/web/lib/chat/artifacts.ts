@@ -51,8 +51,8 @@ export function artifactFrameUrl(artifactId: string, version: number, teamId: st
 /** The iframe's sandbox: scripts and forms, never `allow-same-origin` (opaque origin, D25). */
 export const ARTIFACT_FRAME_SANDBOX = "allow-scripts allow-forms";
 
-/** RFC 4180-style CSV: quoted fields, doubled quotes, CRLF or LF rows. Never throws. */
-export function parseCsv(text: string): readonly (readonly string[])[] {
+/** RFC 4180-style CSV (or TSV): quoted fields, doubled quotes, CRLF or LF rows. Never throws. */
+export function parseCsv(text: string, delimiter = ","): readonly (readonly string[])[] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -72,7 +72,7 @@ export function parseCsv(text: string): readonly (readonly string[])[] {
       } else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") {
+    else if (c === delimiter) {
       row.push(field);
       field = "";
     } else if (c === "\n" || c === "\r") {

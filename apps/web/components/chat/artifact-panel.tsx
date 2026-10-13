@@ -7,7 +7,8 @@
  * column is a labelled region; Escape closes the active tab, and with no tabs it is gone. It is
  * view-only (member editing is a later spec). What it shows comes from `/v1/artifacts` (team in
  * `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded from the server's frame route
- * (`artifact-views.tsx`). State: `artifact-state.tsx`.
+ * (`artifact-views.tsx`). Workspace files open here as tabs too (KOBE-268, `files/file-tab.tsx`).
+ * State: `artifact-state.tsx`.
  */
 import {
   useCallback,
@@ -22,6 +23,9 @@ import { artifactContentUrl, type ArtifactDetailView } from "../../lib/chat/arti
 import type { ApiError } from "../../lib/api/client";
 import { artifactAsSheet } from "../../lib/shell/layout";
 import { cn } from "../../lib/utils";
+import type { FilesApi } from "../../lib/files/api";
+import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
+import { FileTabContent } from "../files/file-tab";
 import { ErrorNotice } from "../admin/error-notice";
 import { ArtifactResizeHandle } from "../shell/artifact-resize";
 import { IconAction } from "../shell/icon-action";
@@ -89,7 +93,7 @@ function VersionNav({
   );
 }
 
-export const artifactTitleId = (id: string) => `kobe-artifact-title-${id}`;
+export const artifactTitleId = (id: string) => `kobe-artifact-title-${tabDomId(id)}`;
 
 /**
  * One tab's artifact. Every open tab stays mounted (hidden while inactive), so a tab keeps the
@@ -164,10 +168,19 @@ function useTabTitles(open: readonly string[]) {
     [],
   );
   const listed = new Map(panel?.artifacts?.map((a) => [a.id, a.title]));
-  const tabs = open.map((id, index) => ({
-    id,
-    title: listed.get(id) ?? panel?.createdTitles[id] ?? loaded[id] ?? `Artifact ${index + 1}`,
-  }));
+  const tabs = open.map((id, index) => {
+    const path = filePathOfTab(id);
+    const title = path === null ? undefined : fileName(path);
+    return {
+      id,
+      title:
+        title ??
+        listed.get(id) ??
+        panel?.createdTitles[id] ??
+        loaded[id] ??
+        `Artifact ${index + 1}`,
+    };
+  });
   return { tabs, onTitle };
 }
 
@@ -187,8 +200,47 @@ function useSheetLayer(ref: RefObject<HTMLElement | null>) {
   return { sheet, modal: band === "single" };
 }
 
+/**
+ * A workspace file's tab (KOBE-268). Its file is read once the tab is first shown, not while it
+ * waits hidden behind others; after that it stays loaded like an artifact tab.
+ */
+function FileTab({
+  path,
+  id,
+  shown,
+  filesApi,
+}: {
+  readonly path: string;
+  readonly id: string;
+  readonly shown: boolean;
+  readonly filesApi: FilesApi;
+}) {
+  const dropFile = useArtifactPanel()?.dropFile; // stable: the file is not read again
+  const session = useChatSession();
+  const [seen, setSeen] = useState(shown);
+  if (shown && !seen) setSeen(true);
+  const onGone = useCallback((gone: string) => dropFile?.(gone), [dropFile]);
+  if (!seen) return null;
+  return (
+    <FileTabContent
+      path={path}
+      api={filesApi}
+      teamId={session.teamId}
+      titleId={artifactTitleId(id)}
+      onGone={onGone}
+    />
+  );
+}
+
 /** The artifact column's content: tabs, the open artifacts and the resize handle. */
-export function ArtifactPanel({ className }: { readonly className?: string | undefined }) {
+export function ArtifactPanel({
+  className,
+  filesApi,
+}: {
+  readonly className?: string | undefined;
+  /** Reads workspace files for file tabs (KOBE-268); without it they show nothing. */
+  readonly filesApi?: FilesApi | undefined;
+}) {
   const panel = useArtifactPanel();
   const request = useContext(ArtifactPanelRequest);
   const ref = useRef<HTMLElement>(null);
@@ -235,22 +287,29 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
           />
         </div>
       </div>
-      {tabs.map(({ id }) => (
-        <div
-          key={id}
-          role="tabpanel"
-          id={artifactTabpanelId(id)}
-          aria-labelledby={artifactTabId(id)}
-          hidden={id !== active}
-          className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex"
-        >
-          <PanelContent
-            id={id}
-            initialVersion={request?.id === id ? request.version : undefined}
-            onTitle={onTitle}
-          />
-        </div>
-      ))}
+      {tabs.map(({ id }) => {
+        const path = filePathOfTab(id);
+        return (
+          <div
+            key={id}
+            role="tabpanel"
+            id={artifactTabpanelId(id)}
+            aria-labelledby={artifactTabId(id)}
+            hidden={id !== active}
+            className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex"
+          >
+            {path === null ? (
+              <PanelContent
+                id={id}
+                initialVersion={request?.id === id ? request.version : undefined}
+                onTitle={onTitle}
+              />
+            ) : (
+              filesApi && <FileTab path={path} id={id} shown={id === active} filesApi={filesApi} />
+            )}
+          </div>
+        );
+      })}
       {!sheet && <ArtifactResizeHandle width={panel.width} onChange={panel.setWidth} />}
     </aside>
   );

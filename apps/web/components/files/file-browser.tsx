@@ -133,11 +133,14 @@ function ConfirmDelete({
 function Row({
   entry,
   onOpen,
+  onOpenFile,
   onDownload,
   onDelete,
 }: {
   readonly entry: FileEntry;
   onOpen(path: string): void;
+  /** Views a file in the artifact column (KOBE-268); without it a file's name is plain text. */
+  readonly onOpenFile: ((entry: FileEntry) => void) | undefined;
   onDownload(entry: FileEntry): void;
   onDelete(entry: FileEntry): void;
 }) {
@@ -156,6 +159,15 @@ function Row({
           className="min-w-0 flex-1 truncate text-start underline"
           aria-label={`Open folder ${entry.name}`}
           onClick={() => onOpen(entry.path)}
+        >
+          {entry.name}
+        </button>
+      ) : onOpenFile ? (
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-start hover:underline"
+          aria-label={`View ${entry.name}`}
+          onClick={() => onOpenFile(entry)}
         >
           {entry.name}
         </button>
@@ -195,8 +207,11 @@ export function FileBrowser({
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
   wakeKey = 0,
   showFolder = null,
+  onOpenFile,
 }: {
   readonly api: FilesApi;
+  /** A file's name opens it in the artifact column (KOBE-268); folders still navigate. */
+  readonly onOpenFile?: ((entry: FileEntry) => void) | undefined;
   readonly refreshAfterWakeMs?: number;
   /** A new value wakes the sandbox and lists again (Show files, refresh). */
   readonly wakeKey?: number;
@@ -308,6 +323,7 @@ export function FileBrowser({
             key={entry.path}
             entry={entry}
             onOpen={open}
+            onOpenFile={onOpenFile}
             onDownload={(e) => void download(e)}
             onDelete={setPending}
           />
