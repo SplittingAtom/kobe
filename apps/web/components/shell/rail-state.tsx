@@ -6,7 +6,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -14,6 +13,7 @@ import { THREADS_SHARE_BOUNDS } from "@kobe/protocol";
 import {
   applyRailCollapsed,
   applyThreadsShare,
+  useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { IconAction } from "./icon-action";
@@ -24,8 +24,9 @@ import { IconAction } from "./icon-action";
  *
  * Both are per user, server-side (CE8, KOBE-202, `lib/shell/preferences.ts`): the provider applies
  * the stored values once they load (unless the member already changed that value on this page)
- * and saves the member's changes: a toggle, a divider release. Narrow screens keep the rail
- * collapsed whatever is stored, and their rail toggles are not saved (the drawer is per device).
+ * and saves the member's own changes only: the rail's toggle (Collapse, and the collapsed rail's
+ * icons, the only way to expand it) and a divider release. Programmatic expansions (the bar's
+ * Files, a drop) and narrow screens' toggles are not saved: the drawer is per device.
  */
 export type RailSection = "threads" | "files";
 
@@ -64,12 +65,20 @@ export interface RailApi {
   readonly threadsShare: number;
   /** The section the member asked to see; the rail focuses it once rendered. */
   readonly revealed: { readonly section: RailSection; readonly seq: number } | null;
+  /** Collapses or expands the rail on this page only (automatic; not saved). */
   setCollapsed(collapsed: boolean): void;
+  /** The member's own toggle: saved on wide screens. */
+  toggle(collapsed: boolean): void;
+  /** True once the member's stored layout has been applied (or failed to load). */
+  readonly settled: boolean;
   setThreadsShare(share: number): void;
   /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
   readonly filesRequests: number;
-  /** Expands the rail and moves focus to a section (the collapsed icons, the bar's Files). */
-  reveal(section: RailSection): void;
+  /**
+   * Expands the rail and moves focus to a section (the collapsed icons, the bar's Files).
+   * `toggle`: the member expanded the collapsed rail with its own icons (saved like `toggle`).
+   */
+  reveal(section: RailSection, options?: { readonly toggle?: boolean }): void;
   /** Lists the workspace and wakes the sandbox (first use, Show files, refresh). */
   requestFiles(): void;
 }
@@ -91,73 +100,72 @@ export function RailProvider({
   /** Saves a change the member made (debounced by the caller). */
   readonly onSave?: (change: LayoutPreferences) => void;
 }) {
+  const ready = preferences !== null;
   // Expanded on the server and the first client render; narrow screens collapse after mount.
-  const [collapsed, setCollapsedState] = useState(false);
+  const collapsed = useStoredPreference<boolean>({
+    initial: false,
+    ready,
+    resolve: () => applyRailCollapsed(preferences?.railCollapsed, isNarrowScreen()),
+    save: onSave && ((railCollapsed) => onSave({ railCollapsed })),
+  });
+  const share = useStoredPreference<number>({
+    initial: THREADS_SHARE.initial,
+    ready,
+    resolve: () => applyThreadsShare(preferences?.threadsShare),
+    save: onSave && ((threadsShare) => onSave({ threadsShare })),
+  });
+  // Set in the same pass as the stored values above, so it renders together with them.
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
-    if (isNarrowScreen()) setCollapsedState(true);
-  }, []);
+    if (ready) setSettled(true);
+  }, [ready]);
+  const { set: setCollapsed, commit: commitCollapsed, current: collapsedNow } = collapsed;
+  useEffect(() => {
+    if (isNarrowScreen()) setCollapsed(true);
+  }, [setCollapsed]);
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
-  const [threadsShare, setShare] = useState<number>(THREADS_SHARE.initial);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
-  const save = useRef(onSave);
-  useEffect(() => {
-    save.current = onSave;
-  }, [onSave]);
-  const collapsedNow = useRef(collapsed);
-  useEffect(() => {
-    collapsedNow.current = collapsed;
-  }, [collapsed]);
-  /** Values the member changed on this page: stored values that load later don't override them. */
-  const touched = useRef({ collapsed: false, share: false });
-  const applied = useRef(false);
-  useEffect(() => {
-    if (preferences === null || applied.current) return;
-    applied.current = true;
-    const nextCollapsed = applyRailCollapsed(preferences.railCollapsed, isNarrowScreen());
-    if (nextCollapsed !== null && !touched.current.collapsed) setCollapsedState(nextCollapsed);
-    const nextShare = applyThreadsShare(preferences.threadsShare);
-    if (nextShare !== null && !touched.current.share) setShare(nextShare);
-  }, [preferences]);
-  const setCollapsed = useCallback((next: boolean) => {
-    touched.current.collapsed = true;
-    setCollapsedState(next);
-    // A phone's drawer is not the member's layout: only wide screens save the rail's state.
-    if (!isNarrowScreen()) save.current?.({ railCollapsed: next });
-  }, []);
-  const setThreadsShare = useCallback((share: number) => {
-    const next = clampShare(share);
-    touched.current.share = true;
-    setShare(next);
-    save.current?.({ threadsShare: next });
-  }, []);
+  // A phone's drawer is not the member's layout: only wide screens save the rail's state.
+  const toggle = useCallback(
+    (next: boolean) => (isNarrowScreen() ? setCollapsed(next) : commitCollapsed(next)),
+    [setCollapsed, commitCollapsed],
+  );
+  const commitShare = share.commit;
+  const setThreadsShare = useCallback(
+    (next: number) => commitShare(clampShare(next)),
+    [commitShare],
+  );
   const reveal = useCallback(
-    (section: RailSection) => {
-      // Expanding a collapsed rail is a toggle (saved); an expanded one just moves focus.
-      if (collapsedNow.current) setCollapsed(false);
-      else setCollapsedState(false);
+    (section: RailSection, options?: { readonly toggle?: boolean }) => {
+      if (options?.toggle && collapsedNow()) toggle(false);
+      else setCollapsed(false);
       setRevealed((prev) => ({ section, seq: (prev?.seq ?? 0) + 1 }));
       if (section === "files") setFilesRequests((n) => n + 1);
     },
-    [setCollapsed],
+    [collapsedNow, toggle, setCollapsed],
   );
   const api = useMemo(
     () => ({
-      collapsed,
-      threadsShare,
+      collapsed: collapsed.value,
+      threadsShare: share.value,
       revealed,
       filesRequests,
+      settled,
       setCollapsed,
+      toggle,
       setThreadsShare,
       reveal,
       requestFiles,
     }),
     [
-      collapsed,
-      threadsShare,
+      collapsed.value,
+      share.value,
       revealed,
       filesRequests,
+      settled,
       setCollapsed,
+      toggle,
       setThreadsShare,
       reveal,
       requestFiles,

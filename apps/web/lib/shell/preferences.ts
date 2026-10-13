@@ -3,27 +3,26 @@
  * divider and the artifact column's width follow the member across devices. The shell loads them
  * once at start (`GET /v1/me/preferences`) and applies them to the rail and the artifact column;
  * changes are debounced into one `PUT` of the keys that changed (callers commit on release or
- * toggle, never per pointer move). A failure is logged and never blocks the UI: the shell keeps
- * its defaults and whatever the member does on screen.
+ * toggle, never per pointer move), and what is still queued goes out when the page is hidden or
+ * left. A failure is logged and never blocks the UI: the shell keeps its defaults and whatever the
+ * member does on screen.
  *
  * Applying checks each value against this screen: a stored value that no longer fits (a width the
- * space can't hold next to the conversation's floor, a share outside the rail's bounds) is ignored
- * and the default applies.
+ * space right of the rail can't hold beside the conversation's floor, a share outside the rail's
+ * bounds) is ignored and the default applies.
  *
- * Narrow screens keep their default (the rail starts collapsed, CE8; A5 KOBE-201 owns the
- * breakpoints): a stored "expanded" never opens the rail on a phone, and the rail's state changed
- * there is not saved, so closing the drawer on a phone never collapses the rail on a desktop.
+ * Narrow screens keep their defaults (the rail starts collapsed, CE8; A5 KOBE-201 owns the
+ * breakpoints): a stored "expanded" never opens the rail on a phone, and neither the rail's state
+ * nor the artifact width changed there is saved, so a phone never rewrites the desktop layout.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { THREADS_SHARE_BOUNDS } from "@kobe/protocol";
+import { readUiPreferences, THREADS_SHARE_BOUNDS, type UiPreferences } from "@kobe/protocol";
 import { apiRequest } from "../api/client";
 import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs";
 
 export const PREFERENCES_PATH = "/v1/me/preferences";
 /** Changes within this window go out as one PUT. */
 export const SAVE_DELAY_MS = 600;
-/** The rail's width in px (shell.module.css `--kobe-rail-width`). */
-export const RAIL_WIDTH_PX = { expanded: 280, collapsed: 48 } as const;
 
 export interface LayoutPreferences {
   readonly railCollapsed?: boolean;
@@ -32,33 +31,37 @@ export interface LayoutPreferences {
   readonly artifactWidth?: number | null;
 }
 
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** The response's preferences (camel-cased by the API client); anything malformed is dropped. */
-export function readPreferences(data: unknown): LayoutPreferences {
-  const raw = isRecord(data) && isRecord(data.preferences) ? data.preferences : {};
-  const out: Mutable<LayoutPreferences> = {};
-  if (typeof raw.railCollapsed === "boolean") out.railCollapsed = raw.railCollapsed;
-  if (typeof raw.threadsShare === "number" && Number.isFinite(raw.threadsShare)) {
-    out.threadsShare = raw.threadsShare;
-  }
-  if (raw.artifactWidth === null) out.artifactWidth = null;
-  else if (typeof raw.artifactWidth === "number" && Number.isInteger(raw.artifactWidth)) {
-    out.artifactWidth = raw.artifactWidth;
-  }
-  return out;
-}
+const fromWire = (p: UiPreferences): LayoutPreferences => ({
+  ...(p.rail_collapsed !== undefined ? { railCollapsed: p.rail_collapsed } : {}),
+  ...(p.threads_share !== undefined ? { threadsShare: p.threads_share } : {}),
+  ...(p.artifact_width !== undefined ? { artifactWidth: p.artifact_width } : {}),
+});
 
 /** The wire body (snake_case) for a change. */
-export function toWire(change: LayoutPreferences): Record<string, unknown> {
+export function toWire(change: LayoutPreferences): UiPreferences {
   return {
     ...(change.railCollapsed !== undefined ? { rail_collapsed: change.railCollapsed } : {}),
     ...(change.threadsShare !== undefined ? { threads_share: change.threadsShare } : {}),
     ...(change.artifactWidth !== undefined ? { artifact_width: change.artifactWidth } : {}),
   };
+}
+
+/**
+ * The response's preferences, read with the protocol's reader (malformed values dropped). The API
+ * client camel-cases responses, so the known keys go back to wire casing first.
+ */
+export function readPreferences(data: unknown): LayoutPreferences {
+  const raw = isRecord(data) && isRecord(data.preferences) ? data.preferences : {};
+  return fromWire(
+    readUiPreferences({
+      rail_collapsed: raw.railCollapsed,
+      threads_share: raw.threadsShare,
+      artifact_width: raw.artifactWidth,
+    }),
+  );
 }
 
 /** The rail's collapsed state to apply, or null to keep the default. Narrow: always collapsed. */
@@ -87,10 +90,31 @@ export function applyArtifactWidth(
   return stored + CONVERSATION_FLOOR_PX <= available ? stored : null;
 }
 
-/** The space right of the rail in this window, for {@link applyArtifactWidth}. */
-export function availableBesideRail(railCollapsed: boolean): number {
-  const viewport = typeof window === "undefined" ? 0 : window.innerWidth;
-  return viewport - (railCollapsed ? RAIL_WIDTH_PX.collapsed : RAIL_WIDTH_PX.expanded);
+/** Whether `available` px holds both floors (else the column is squeezed: CE7, A5's overlay). */
+export function holdsBothFloors(available: number): boolean {
+  return available >= ARTIFACT_FLOOR_PX + CONVERSATION_FLOOR_PX;
+}
+
+/**
+ * The space right of the rail in the shell grid as laid out now: the artifact column and the
+ * conversation together (the column is 0 px while empty). null when the grid isn't laid out.
+ */
+export function spaceRightOfRail(grid: ParentNode | null | undefined): number | null {
+  const region = (name: string) =>
+    grid?.querySelector<HTMLElement>(`:scope > [data-shell-region="${name}"]`) ?? null;
+  const column = region("artifact");
+  const conversation = region("conversation");
+  if (!column || !conversation) return null;
+  const width = column.getBoundingClientRect().width + conversation.getBoundingClientRect().width;
+  return width > 0 ? width : null;
+}
+
+/** The shell grid on this page (the artifact column's parent), if there is one. */
+export function shellGrid(): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  return (
+    document.querySelector<HTMLElement>('[data-shell-region="artifact"]')?.parentElement ?? null
+  );
 }
 
 type Log = (message: string, detail?: unknown) => void;
@@ -110,8 +134,8 @@ export async function loadPreferences(
 export interface PreferencesSaver {
   /** Queues a change; changes within the delay go out as one PUT. */
   save(change: LayoutPreferences): void;
-  /** Sends what is queued now (the shell unmounting). */
-  flush(): void;
+  /** Sends what is queued now; `keepalive` lets it outlive the page (pagehide). */
+  flush(options?: { readonly keepalive?: boolean }): void;
 }
 
 /** Debounces changes into one PUT of the keys that changed; failures are logged, never thrown. */
@@ -126,17 +150,20 @@ export function createPreferencesSaver({
 } = {}): PreferencesSaver {
   let pending: LayoutPreferences = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const flush = () => {
+  const flush = (options: { readonly keepalive?: boolean } = {}) => {
     if (timer !== null) clearTimeout(timer);
     timer = null;
     const body = toWire(pending);
     pending = {};
     if (Object.keys(body).length === 0) return;
-    void apiRequest<unknown>(PREFERENCES_PATH, { method: "PUT", json: body, fetchFn }).then(
-      (res) => {
-        if (!res.ok) log("layout preferences could not be saved", res.error);
-      },
-    );
+    void apiRequest<unknown>(PREFERENCES_PATH, {
+      method: "PUT",
+      json: body,
+      keepalive: options.keepalive,
+      fetchFn,
+    }).then((res) => {
+      if (!res.ok) log("layout preferences could not be saved", res.error);
+    });
   };
   return {
     save(change) {
@@ -154,7 +181,10 @@ export interface LayoutPreferencesApi {
   save(change: LayoutPreferences): void;
 }
 
-/** Loads the preferences once when the shell starts and saves changes, debounced. */
+/**
+ * Loads the preferences once when the shell starts and saves changes, debounced. What is queued
+ * is sent at once (keepalive) when the page is hidden or left, and when the shell unmounts.
+ */
 export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesApi {
   const [preferences, setPreferences] = useState<LayoutPreferences | null>(null);
   const saver = useRef<PreferencesSaver | null>(null);
@@ -166,12 +196,82 @@ export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesA
     });
     const own = createPreferencesSaver({ fetchFn: fetchRef.current });
     saver.current = own;
+    const leave = () => own.flush({ keepalive: true });
+    const hidden = () => {
+      if (document.visibilityState === "hidden") leave();
+    };
+    window.addEventListener("pagehide", leave);
+    document.addEventListener("visibilitychange", hidden);
     return () => {
       current = false;
+      window.removeEventListener("pagehide", leave);
+      document.removeEventListener("visibilitychange", hidden);
       own.flush();
       if (saver.current === own) saver.current = null;
     };
   }, []);
   const save = useCallback((change: LayoutPreferences) => saver.current?.save(change), []);
   return useMemo(() => ({ preferences, save }), [preferences, save]);
+}
+
+export interface StoredPreference<T> {
+  readonly value: T;
+  /** Sets the value on this page only, unsaved (automatic changes, narrow screens). */
+  set(next: T): void;
+  /** Sets the value and saves it if it changed (a release, a toggle). */
+  commit(next: T): void;
+  /** The value now, current even before the next render. */
+  current(): T;
+}
+
+/**
+ * One layout value backed by the member's stored preferences: `resolve` runs once, when `ready`,
+ * and its non-null answer replaces the value unless the member already changed it on this page.
+ */
+export function useStoredPreference<T>({
+  initial,
+  ready,
+  resolve,
+  save,
+}: {
+  readonly initial: T;
+  readonly ready: boolean;
+  /** The stored value that fits now, or null to keep the current one. */
+  readonly resolve: () => T | null;
+  readonly save: ((value: T) => void) | undefined;
+}): StoredPreference<T> {
+  const [value, setValue] = useState(initial);
+  const latest = useRef(initial);
+  const touched = useRef(false);
+  const applied = useRef(false);
+  const resolveRef = useRef(resolve);
+  const saveRef = useRef(save);
+  useEffect(() => {
+    resolveRef.current = resolve;
+    saveRef.current = save;
+  });
+  useEffect(() => {
+    if (!ready || applied.current) return;
+    applied.current = true;
+    if (touched.current) return;
+    const stored = resolveRef.current();
+    if (stored === null) return;
+    latest.current = stored;
+    setValue(stored);
+  }, [ready]);
+  const set = useCallback((next: T) => {
+    touched.current = true;
+    latest.current = next;
+    setValue(next);
+  }, []);
+  const commit = useCallback(
+    (next: T) => {
+      const changed = next !== latest.current;
+      set(next);
+      if (changed) saveRef.current?.(next);
+    },
+    [set],
+  );
+  const current = useCallback(() => latest.current, []);
+  return useMemo(() => ({ value, set, commit, current }), [value, set, commit, current]);
 }

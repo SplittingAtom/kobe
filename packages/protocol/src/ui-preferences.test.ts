@@ -64,6 +64,11 @@ describe("readUiPreferences", () => {
     ).toEqual({ rail_collapsed: false });
   });
 
+  it("drops a share outside the rail's bounds instead of clamping it", () => {
+    expect(readUiPreferences({ threads_share: 0.95 })).toEqual({});
+    expect(readUiPreferences({ threads_share: 0.8 })).toEqual({ threads_share: 0.8 });
+  });
+
   it.each([null, undefined, [], "x", 3])("reads %o as no preferences", (raw) => {
     expect(readUiPreferences(raw)).toEqual({});
   });

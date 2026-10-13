@@ -29,11 +29,13 @@ import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
 import type { LiveRun } from "../../lib/chat/live";
 import {
   applyArtifactWidth,
-  applyRailCollapsed,
-  availableBesideRail,
+  holdsBothFloors,
+  shellGrid,
+  spaceRightOfRail,
+  useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
-import { isNarrowScreen } from "../shell/rail-state";
+import { isNarrowScreen, useRail } from "../shell/rail-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
@@ -163,33 +165,35 @@ function useThreadArtifacts(
   return list !== null && list.threadId === threadId ? list.artifacts : null;
 }
 
-/** The column's width: the member's stored width once it loads and fits, saved on release. */
+/**
+ * The column's width: the member's stored width, applied once the rail on screen is settled if it
+ * fits the space right of it (measured), and saved on release. A width chosen on a narrow screen,
+ * or where the two floors don't both fit, stays on this page (it would not fit elsewhere).
+ */
 function useArtifactWidth(
   preferences: LayoutPreferences | null,
   onSave: ((change: LayoutPreferences) => void) | undefined,
 ) {
-  const [width, setWidthState] = useState<number | null>(null);
-  const save = useRef(onSave);
-  useEffect(() => {
-    save.current = onSave;
-  }, [onSave]);
-  const touched = useRef(false);
-  const applied = useRef(false);
-  useEffect(() => {
-    if (preferences === null || applied.current) return;
-    applied.current = true;
-    if (touched.current) return;
-    const narrow = isNarrowScreen();
-    const railCollapsed = applyRailCollapsed(preferences.railCollapsed, narrow) ?? narrow;
-    const fits = applyArtifactWidth(preferences.artifactWidth, availableBesideRail(railCollapsed));
-    if (fits !== null) setWidthState(fits);
-  }, [preferences]);
-  const setWidth = useCallback((next: number) => {
-    touched.current = true;
-    setWidthState(next);
-    save.current?.({ artifactWidth: next });
-  }, []);
-  return [width, setWidth] as const;
+  const rail = useRail();
+  const width = useStoredPreference<number | null>({
+    initial: null,
+    ready: preferences !== null && (rail === null || rail.settled),
+    resolve: () => {
+      const space = spaceRightOfRail(shellGrid());
+      return space === null ? null : applyArtifactWidth(preferences?.artifactWidth, space);
+    },
+    save: onSave && ((artifactWidth) => onSave({ artifactWidth })),
+  });
+  const { set, commit } = width;
+  const setWidth = useCallback(
+    (next: number) => {
+      const space = spaceRightOfRail(shellGrid());
+      const local = isNarrowScreen() || (space !== null && !holdsBothFloors(space));
+      return local ? set(next) : commit(next);
+    },
+    [set, commit],
+  );
+  return [width.value, setWidth] as const;
 }
 
 export function ArtifactPanelProvider({

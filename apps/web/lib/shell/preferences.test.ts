@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyArtifactWidth,
@@ -7,6 +8,7 @@ import {
   loadPreferences,
   PREFERENCES_PATH,
   readPreferences,
+  spaceRightOfRail,
   toWire,
 } from "./preferences";
 
@@ -55,6 +57,8 @@ describe("wire", () => {
         preferences: { railCollapsed: "yes", threadsShare: "0.4", artifactWidth: 1.5 },
       }),
     ).toEqual({});
+    // Read with the protocol's reader: a share outside the rail's bounds is dropped, not clamped.
+    expect(readPreferences({ preferences: { threadsShare: 0.95 } })).toEqual({});
     expect(readPreferences(null)).toEqual({});
     expect(readPreferences({ preferences: [] })).toEqual({});
   });
@@ -130,6 +134,17 @@ describe("save", () => {
     expect(fetchFn).toHaveBeenCalledOnce();
   });
 
+  it("lets a flush outlive the page when asked (keepalive)", () => {
+    const fetchFn = putFetch();
+    const saver = createPreferencesSaver({ fetchFn, delayMs: 500 });
+    saver.save({ railCollapsed: true });
+    saver.flush({ keepalive: true });
+    expect(fetchFn.mock.calls[0]?.[1]).toMatchObject({ method: "PUT", keepalive: true });
+    saver.save({ railCollapsed: false });
+    saver.flush();
+    expect(fetchFn.mock.calls[1]?.[1]?.keepalive).toBeUndefined();
+  });
+
   it("logs a failed save and never throws", async () => {
     const log = vi.fn();
     const fetchFn = vi.fn(async () => Response.json({ code: "x" }, { status: 400 }));
@@ -137,5 +152,33 @@ describe("save", () => {
     saver.save({ railCollapsed: false });
     await vi.advanceTimersByTimeAsync(20);
     await vi.waitFor(() => expect(log).toHaveBeenCalledOnce());
+  });
+});
+
+describe("spaceRightOfRail", () => {
+  const grid = (artifact: number, conversation: number) => {
+    const el = document.createElement("div");
+    for (const [name, width] of [
+      ["rail", 280],
+      ["artifact", artifact],
+      ["conversation", conversation],
+    ] as const) {
+      const child = document.createElement("div");
+      child.setAttribute("data-shell-region", name);
+      child.getBoundingClientRect = () => ({ width }) as DOMRect;
+      el.append(child);
+    }
+    return el;
+  };
+
+  it("is the artifact column and the conversation together, as laid out", () => {
+    expect(spaceRightOfRail(grid(0, 1000))).toBe(1000);
+    expect(spaceRightOfRail(grid(400, 600))).toBe(1000);
+  });
+
+  it("is null when the grid isn't there or not laid out", () => {
+    expect(spaceRightOfRail(null)).toBeNull();
+    expect(spaceRightOfRail(grid(0, 0))).toBeNull();
+    expect(spaceRightOfRail(document.createElement("div"))).toBeNull();
   });
 });

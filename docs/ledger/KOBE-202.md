@@ -32,17 +32,23 @@
   `octet_length(value::text)` on the jsonb (jsonb adds a space after `:` and `,`); a CHECK
   violation (23514) maps to 400, never 500.
 - **Debounce:** the web saver coalesces changes for 600 ms into one PUT of the changed keys;
-  callers commit on release (divider, artifact resize) or toggle, never per pointer move. A run's
-  transaction holds FOR SHARE on the user row, so writes stay rare.
-- **Apply time** (`apply*` in `lib/shell/preferences.ts`): a share outside 0.2..0.8 or a width
-  under 360 px or wider than the space right of the rail minus the conversation's 400 px floor is
-  ignored, and the default applies. A value the member already changed on the page before the
-  load finished is not overridden. Loading or saving failures are logged (`console.warn`) and
-  never block the UI.
+  callers commit on release (divider, artifact resize) or toggle, never per pointer move, and an
+  unchanged value is not saved. What is still queued is sent with `keepalive` on `pagehide` and
+  `visibilitychange` → hidden. A run's transaction holds FOR SHARE on the user row, so writes stay
+  rare.
+- **Apply time** (`lib/shell/preferences.ts`): one `useStoredPreference` hook per value applies
+  the stored value once, unless the member already changed it on the page. A share outside
+  0.2..0.8 is dropped by the protocol's reader. A width applies only if it is at least 360 px
+  and leaves the conversation its 400 px in the space right of the rail, measured on the grid
+  (`spaceRightOfRail`, shared with the resize handle) once the rail on screen has settled.
+  Loading or saving failures are logged (`console.warn`) and never block the UI.
+- **What saves:** the rail's own toggles (Collapse, and the collapsed rail's Show threads/Show
+  files icons, the only way to expand it) and releases. Programmatic expansions (the bar's Files,
+  a drop) don't save.
 - **Narrow screens** (A5 KOBE-201 owns breakpoints): under the one-column breakpoint the rail
-  always starts collapsed, whatever is stored, and rail toggles made there are not saved, so a
-  phone's drawer never collapses the desktop rail. The divider and width still save (they only
-  apply where they fit).
+  always starts collapsed, whatever is stored, and rail toggles made there are not saved. Nor is
+  an artifact width chosen on a narrow screen or where both floors don't fit, so a phone never
+  rewrites the desktop layout.
 - **Erasure:** users are never deleted (no DELETE grant on `users`; deactivation only), and there
   is no user erase path; `ui_preferences` holds only layout numbers, no personal content, and
   lives and goes with the user row.

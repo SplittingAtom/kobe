@@ -53,18 +53,27 @@ export const uiPreferencesResponseSchema = z.strictObject({ preferences: uiPrefe
 export type UiPreferencesResponse = z.infer<typeof uiPreferencesResponseSchema>;
 
 /**
+ * The shape a stored document is read with: like {@link uiPreferencesSchema}, but a share outside
+ * the rail's bounds is dropped rather than clamped (it no longer fits, so the default applies).
+ */
+const storedShape = {
+  ...uiPreferencesSchema.shape,
+  threads_share: z.number().min(THREADS_SHARE_BOUNDS.min).max(THREADS_SHARE_BOUNDS.max).optional(),
+};
+
+/**
  * Reads a stored or received document leniently: each known key that is valid on its own is kept,
  * anything else (unknown keys, values from an older shape) is dropped. Never throws.
  */
 export function readUiPreferences(raw: unknown): UiPreferences {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
   const record = raw as Record<string, unknown>;
-  const shape = uiPreferencesSchema.shape;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(shape) as (keyof typeof shape)[]) {
-    if (!Object.hasOwn(record, key) || record[key] === undefined) continue;
-    const parsed = shape[key].safeParse(record[key]);
-    if (parsed.success) out[key] = parsed.data;
-  }
-  return out as UiPreferences;
+  const keys = Object.keys(storedShape) as (keyof typeof storedShape)[];
+  return Object.fromEntries(
+    keys.flatMap((key) => {
+      if (!Object.hasOwn(record, key) || record[key] === undefined) return [];
+      const parsed = storedShape[key].safeParse(record[key]);
+      return parsed.success ? [[key, parsed.data]] : [];
+    }),
+  ) as UiPreferences;
 }
