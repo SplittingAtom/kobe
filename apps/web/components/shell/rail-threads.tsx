@@ -160,7 +160,8 @@ export function RailThreads({
     () => groupThreads(listed, trashIds, (id) => projects.names.get(id)),
     [listed, trashIds, projects],
   );
-  // Groups the member opened or closed against their default (in memory; A6 slot, KOBE-202).
+  // Groups the member opened or closed against their default (in memory: CE8 keeps per user
+  // only the rail state, the divider and the artifact width, KOBE-202).
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   const flip = (key: string) =>
     setFlipped((prev) => {

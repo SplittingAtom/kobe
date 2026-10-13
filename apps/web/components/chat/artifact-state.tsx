@@ -9,11 +9,13 @@
  * - The open set and active tab are remembered per thread in this browser (localStorage,
  *   `use-artifact-tabs.ts`); a thread switch swaps them, and tabs of artifacts the thread no
  *   longer lists are dropped.
- * - Slot (A6, KOBE-202): CE8 keeps the column's width per user, server-side. Until A6 loads and
- *   saves it here, a dragged width lives in memory for the page's lifetime.
+ * - The column's width is per user, server-side (CE8, KOBE-202, `lib/shell/preferences.ts`): the
+ *   stored width applies once it loads if it still fits this window beside the conversation's
+ *   floor (else the default, half the space), and a resize is saved when it is released.
  */
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -25,6 +27,13 @@ import { useAuiState } from "@assistant-ui/react";
 import { tabsKey, type ArtifactTabs } from "../../lib/chat/artifact-tabs";
 import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
 import type { LiveRun } from "../../lib/chat/live";
+import {
+  applyArtifactWidth,
+  applyRailCollapsed,
+  availableBesideRail,
+  type LayoutPreferences,
+} from "../../lib/shell/preferences";
+import { isNarrowScreen } from "../shell/rail-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
@@ -154,19 +163,53 @@ function useThreadArtifacts(
   return list !== null && list.threadId === threadId ? list.artifacts : null;
 }
 
+/** The column's width: the member's stored width once it loads and fits, saved on release. */
+function useArtifactWidth(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const [width, setWidthState] = useState<number | null>(null);
+  const save = useRef(onSave);
+  useEffect(() => {
+    save.current = onSave;
+  }, [onSave]);
+  const touched = useRef(false);
+  const applied = useRef(false);
+  useEffect(() => {
+    if (preferences === null || applied.current) return;
+    applied.current = true;
+    if (touched.current) return;
+    const narrow = isNarrowScreen();
+    const railCollapsed = applyRailCollapsed(preferences.railCollapsed, narrow) ?? narrow;
+    const fits = applyArtifactWidth(preferences.artifactWidth, availableBesideRail(railCollapsed));
+    if (fits !== null) setWidthState(fits);
+  }, [preferences]);
+  const setWidth = useCallback((next: number) => {
+    touched.current = true;
+    setWidthState(next);
+    save.current?.({ artifactWidth: next });
+  }, []);
+  return [width, setWidth] as const;
+}
+
 export function ArtifactPanelProvider({
   teamId,
   threadId,
+  preferences = null,
+  onSavePreferences,
   children,
 }: {
   readonly teamId: string;
   /** The thread on screen; undefined for a new conversation (nothing to remember yet). */
   readonly threadId: string | undefined;
+  /** The member's stored layout (null while it loads). */
+  readonly preferences?: LayoutPreferences | null;
+  /** Saves a width the member chose (debounced by the caller). */
+  readonly onSavePreferences?: (change: LayoutPreferences) => void;
   readonly children: ReactNode;
 }) {
   const t = useArtifactTabs(threadId === undefined ? null : tabsKey(teamId, threadId));
-  // Slot (A6, KOBE-202): load and save the width per user here.
-  const [width, setWidth] = useState<number | null>(null);
+  const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
 
@@ -183,7 +226,17 @@ export function ArtifactPanelProvider({
       close: t.close,
       setWidth,
     }),
-    [t.tabs, artifacts, createdTitles, width, t.openArtifact, t.activate, t.closeTab, t.close],
+    [
+      t.tabs,
+      artifacts,
+      createdTitles,
+      width,
+      setWidth,
+      t.openArtifact,
+      t.activate,
+      t.closeTab,
+      t.close,
+    ],
   );
   return (
     <ArtifactPanelContext.Provider value={api}>

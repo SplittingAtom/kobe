@@ -18,6 +18,7 @@ import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailProvider } from "../shell/rail-state";
+import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { IconActionProvider } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
@@ -164,11 +165,18 @@ function ChatWorkspace({
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
+  // The member's layout, from any device (CE8): loaded once, changes saved debounced.
+  const layout = useLayoutPreferences(fetchFn);
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
-      <RailProvider>
-        <ArtifactPanelProvider teamId={session.teamId} threadId={threadId}>
+      <RailProvider preferences={layout.preferences} onSave={layout.save}>
+        <ArtifactPanelProvider
+          teamId={session.teamId}
+          threadId={threadId}
+          preferences={layout.preferences}
+          onSavePreferences={layout.save}
+        >
           <ShellSlot name="search">
             <ThreadSearch onOpenThread={setThreadId} />
           </ShellSlot>
