@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, type MatcherFunction } from "@testing-library/react";
 import { expect } from "vitest";
 import type { UploadTransport } from "../../lib/chat/uploads";
 import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -56,4 +56,13 @@ export async function agentChoices(): Promise<HTMLElement> {
   if (open) return open;
   fireEvent.click(await screen.findByRole("button", { name: /^Chat with:/ }));
   return screen.findByRole("radiogroup", { name: "Chat with" });
+}
+
+/**
+ * Matches the innermost element holding exactly `text`, also when the text is split across
+ * elements: a streaming part's words are separate spans (KOBE-207).
+ */
+export function streamed(text: string): MatcherFunction {
+  const holds = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim() === text;
+  return (_content, el) => el !== null && holds(el) && ![...el.children].some(holds);
 }

@@ -184,7 +184,8 @@ describe("Jump to latest (ac-1)", () => {
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
 
     act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
-    expect(await screen.findByText("Here is the chart")).toBeTruthy();
+    // Streaming words are spans (KOBE-207), so the text is split across elements.
+    await waitFor(() => expect(list().textContent).toContain("Here is the chart"));
     grow(600);
     expect(list().scrollTop).toBe(200);
     const jump = await screen.findByRole("button", { name: "Jump to latest, 1 new message" });
@@ -316,5 +317,23 @@ describe("scroll position per thread (ac-2)", () => {
     expect(await screen.findByText("Beta answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(100));
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
+  });
+});
+
+describe("arrival fade follows the pin (KOBE-207 ac-3)", () => {
+  it("the list says unpinned while the member has scrolled up, pinned again at the bottom", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+    expect(list().dataset.kobeFollow).toBe("pinned");
+
+    scrollTo(200);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+    act(() => kobe.agent.delta(runId, "m1", "Here is"));
+    // The words still mount as spans; the CSS gives them no tint while unpinned.
+    await waitFor(() => expect(list().querySelectorAll("[data-kobe-word]")).toHaveLength(2));
+
+    await userEvent.setup().click(must(pill()));
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("pinned"));
   });
 });

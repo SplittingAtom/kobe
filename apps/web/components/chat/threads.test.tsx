@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { announcement, chatRequests, composer, openApp, streaming } from "./testing";
+import { announcement, chatRequests, composer, openApp, streamed, streaming } from "./testing";
 import { must } from "../../lib/testing/must";
 
 let fake: FakeKobe;
@@ -298,7 +298,7 @@ describe("errors", () => {
     fake.run(run.run_id).status = "completed";
     fake.run(run.run_id).compacted = true;
     fake.dropConnections();
-    expect(await screen.findByText("from the entries")).toBeTruthy();
+    expect(await screen.findByText(streamed("from the entries"))).toBeTruthy();
     await waitFor(() => expect(fake.openStreams).toHaveLength(0));
   });
 });
@@ -322,7 +322,7 @@ describe("accessibility", () => {
     const run = must(fake.activeRun(t));
     await streaming(fake, run.run_id);
     fake.agent.delta(run.run_id, "m1", "streaming text");
-    const text = await screen.findByText("streaming text");
+    const text = await screen.findByText(streamed("streaming text"));
     expect(text.closest('[aria-busy="true"]')).toBeTruthy();
     expect(
       screen.getByText("Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"),

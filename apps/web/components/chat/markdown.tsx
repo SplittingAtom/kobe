@@ -19,6 +19,7 @@ import remarkGfm from "remark-gfm";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
+import { rehypeArrivingWords } from "./arriving-words";
 
 const SAFE_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"]);
 
@@ -167,17 +168,32 @@ const COMPONENTS: Components = {
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkHtmlAsText];
+const ARRIVING_PLUGINS = [rehypeArrivingWords];
 
 /** Unsafe URLs are dropped before rendering; the components above check again. */
 function urlTransform(url: string): string {
   return safeUrl(url) ?? "";
 }
 
-export function Markdown({ text }: { readonly text: string }) {
+/**
+ * `arriving`: the part is streaming, so its words are spans that fade in as they arrive
+ * (`arriving-words.tsx`, KOBE-207); the root then says `data-kobe-arrive="running"` for the CSS.
+ */
+export function Markdown({
+  text,
+  arriving = false,
+}: {
+  readonly text: string;
+  readonly arriving?: boolean;
+}) {
   return (
-    <div className="[&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:rounded-md [&_:not(pre)>code]:border [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&>:first-child]:mt-0 [&>:last-child]:mb-0">
+    <div
+      data-kobe-arrive={arriving ? "running" : undefined}
+      className="[&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:rounded-md [&_:not(pre)>code]:border [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&>:first-child]:mt-0 [&>:last-child]:mb-0"
+    >
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={arriving ? ARRIVING_PLUGINS : undefined}
         components={COMPONENTS}
         urlTransform={urlTransform}
       >

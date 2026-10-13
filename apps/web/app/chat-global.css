@@ -139,3 +139,41 @@ body:has([data-kobe-chat]) {
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
   }
 }
+
+/* Streaming arrival fade (CE11, KOBE-207). While a part streams, each word is a
+   `[data-kobe-word]` span that mounts as it arrives (components/chat/arriving-words.tsx); the
+   animation runs once per span, from the tint to the text colour. The tint is the accent only while
+   the message list follows the stream (`data-kobe-follow`, KOBE-205); scrolled up, it is the text
+   colour, so words arrive plain. Swapping the variable, rather than the animation, means re-pinning
+   never restarts the fade on words already there. Tool output never has word spans. */
+@keyframes kobe-arrive {
+  from {
+    color: var(--kobe-arrive-tint);
+  }
+}
+
+[data-kobe-scroll="messages"] {
+  --kobe-arrive-tint: currentColor;
+}
+
+[data-kobe-scroll="messages"][data-kobe-follow="pinned"] {
+  --kobe-arrive-tint: var(--admin-accent, var(--primary));
+}
+
+[data-kobe-arrive="running"] [data-kobe-word] {
+  animation: kobe-arrive 600ms ease-out;
+}
+
+/* Reduced motion: no fade; a static 2 px accent bar left of the paragraph being written, drawn as
+   two shadows (the background covers the gap), so nothing moves or reflows. */
+@media (prefers-reduced-motion: reduce) {
+  [data-kobe-arrive="running"] [data-kobe-word] {
+    animation: none;
+  }
+
+  [data-kobe-follow="pinned"] [data-kobe-arrive="running"] > :last-child {
+    box-shadow:
+      -6px 0 0 0 var(--background),
+      -8px 0 0 0 var(--kobe-arrive-tint);
+  }
+}
