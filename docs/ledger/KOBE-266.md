@@ -1,6 +1,6 @@
 # KOBE-266: Flaky: executor e2e share_file run completes without a file.shared event
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #270)
 - **Branch / worktree:** `kobe-266-policy-deadlock` in `../Kobe-wt266`
 - **Depends on:** none. No migration.
 
