@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review
+- **Status:** in review (PR #264)
 - **Branch / worktree:** `kobe-206-steering-panel` in `../Kobe-wt206`
 - **Depends on:** KOBE-205 (fixed composer footer), KOBE-203 (IconAction, registry), KOBE-201
 
