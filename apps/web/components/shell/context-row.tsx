@@ -5,7 +5,7 @@ import { AgentChips } from "../chat/agent-chips";
 import { AgentPickerMenu } from "../chat/agent-picker";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { ModelPicker } from "../chat/model-picker";
-import { FilesToggleButton } from "../files/files-panel";
+import { FilesButton } from "./rail-state";
 
 /** The thread's agent: the picker while the conversation is new, then its name (and state). */
 function AgentControl() {
@@ -32,7 +32,7 @@ export function ContextRow() {
         <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
       )}
       {/* Slot: context gauge (CE14, KOBE-211). */}
-      <FilesToggleButton />
+      <FilesButton />
       {/* Slot: Detail toggle (CE12, KOBE-208). */}
       {/* Slot: branch indicator (CE16, KOBE-214/216). */}
     </>

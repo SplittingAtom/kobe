@@ -15,27 +15,33 @@ const DEFAULT_REFRESH_AFTER_WAKE_MS = 4000;
 const iconButton =
   "hover:bg-muted focus-visible:ring-ring/50 inline-flex size-7 items-center justify-center rounded-md border";
 
-/** Opens the panel's wake and tracks "last synced" until the refresh after it. */
-function useWake(api: FilesApi, reload: () => void, refreshMs: number): boolean {
-  const [waking, setWaking] = useState(true);
+/**
+ * Wakes the sandbox on mount and again on each new `key` (the member asked for the files again),
+ * listing again at once and after the sync; tracks "last synced" until that refresh.
+ */
+function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: number): boolean {
+  const [doneKey, setDoneKey] = useState<number | null>(null);
+  const mounted = useRef(false);
   useEffect(() => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    if (mounted.current) reload(); // the first listing is useFolder's own
+    mounted.current = true;
     void api.wake().then((res) => {
       if (!current) return;
-      if (!res.ok) return setWaking(false);
+      if (!res.ok) return setDoneKey(key);
       timer = setTimeout(() => {
         reload();
-        setWaking(false);
+        setDoneKey(key);
       }, refreshMs);
     });
     return () => {
       current = false;
       clearTimeout(timer);
     };
-    // reload is stable; the wake runs once per panel opening.
-  }, [api, refreshMs]);
-  return waking;
+    // reload is stable; the wake runs once per ask.
+  }, [api, refreshMs, key]);
+  return doneKey !== key;
 }
 
 function Breadcrumb({ path, onOpen }: { readonly path: string; onOpen(path: string): void }) {
@@ -186,13 +192,16 @@ function Row({
 export function FileBrowser({
   api,
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
+  wakeKey = 0,
 }: {
   readonly api: FilesApi;
   readonly refreshAfterWakeMs?: number;
+  /** A new value wakes the sandbox and lists again (Show files, refresh). */
+  readonly wakeKey?: number;
 }) {
   const [path, setPath] = useState("");
   const folder = useFolder(api, path);
-  const waking = useWake(api, folder.reload, refreshAfterWakeMs);
+  const waking = useWake(api, folder.reload, refreshAfterWakeMs, wakeKey);
   const [pending, setPending] = useState<FileEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<ApiError | null>(null);

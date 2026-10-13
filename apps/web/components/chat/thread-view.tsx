@@ -8,7 +8,7 @@ import { IconAction } from "../shell/icon-action";
 import { Skeleton } from "../ui/skeleton";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
-import { FilesToggleButton } from "../files/files-panel";
+import { FilesButton } from "../shell/rail-state";
 import { ArtifactList } from "./artifact-list";
 import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
@@ -230,7 +230,7 @@ export function ThreadView({
         )}
         {!contextInBar && (
           <span className="ms-auto">
-            <FilesToggleButton />
+            <FilesButton />
           </span>
         )}
       </header>

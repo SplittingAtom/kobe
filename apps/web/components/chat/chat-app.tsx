@@ -14,9 +14,10 @@ import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
-import { FilesPanel, FilesPanelProvider } from "../files/files-panel";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
+import { RailProvider } from "../shell/rail-state";
+import { WorkspaceRail } from "../shell/workspace-rail";
 import { IconActionProvider } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
 import { ShellSlot, ShellSlotsProvider } from "../shell/shell-slots";
@@ -24,7 +25,6 @@ import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
-import { ThreadSidebar } from "./thread-sidebar";
 import { ThreadView } from "./thread-view";
 import { useViewportHeight } from "./use-viewport-height";
 import styles from "./chat.module.css";
@@ -70,7 +70,7 @@ type TeamState =
   | { readonly status: "signedOut" }
   | { readonly status: "noTeam" }
   | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly teamId: string };
+  | { readonly status: "ready"; readonly teamId: string; readonly teamName: string };
 
 /** The active team (D9), asked again when the switcher activates one on first load. */
 function useActiveTeam(fetchFn?: typeof fetch): TeamState {
@@ -88,7 +88,10 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
         if (!current) return;
         if (my === null) setState({ status: "signedOut" });
         else if (my.activeTeamId === null) setState({ status: "noTeam" });
-        else setState({ status: "ready", teamId: my.activeTeamId });
+        else {
+          const active = my.teams.find((t) => t.id === my.activeTeamId);
+          setState({ status: "ready", teamId: my.activeTeamId, teamName: active?.name ?? "" });
+        }
       },
       (e: unknown) => {
         if (current) {
@@ -127,9 +130,12 @@ const STARTER_SUGGESTIONS = [
 
 function ChatWorkspace({
   session,
+  teamName,
   fetchFn,
 }: {
   readonly session: ChatSession;
+  /** The rail's header (CE2): the workspace is the member's view of this team. */
+  readonly teamName: string;
   readonly fetchFn: typeof fetch | undefined;
 }) {
   const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
@@ -154,7 +160,7 @@ function ChatWorkspace({
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
-      <FilesPanelProvider scope={session.teamId}>
+      <RailProvider>
         <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
           <ShellSlot name="search">
             <ThreadSearch onOpenThread={setThreadId} />
@@ -163,13 +169,15 @@ function ChatWorkspace({
             <ContextRow />
           </ShellSlot>
           <ShellGrid
-            rail={<ThreadSidebar listError={listError} />}
-            artifact={
-              <>
-                <ArtifactPanel />
-                <FilesPanel api={filesApi} />
-              </>
+            rail={
+              <WorkspaceRail
+                teamName={teamName || "Workspace"}
+                listError={listError}
+                filesApi={filesApi}
+                fetchFn={fetchFn}
+              />
             }
+            artifact={<ArtifactPanel />}
             conversation={
               <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
                 <ThreadView onOpenThread={setThreadId} contextInBar />
@@ -177,7 +185,7 @@ function ChatWorkspace({
             }
           />
         </ArtifactPanelProvider>
-      </FilesPanelProvider>
+      </RailProvider>
     </AssistantRuntimeProvider>
   );
 }
@@ -248,7 +256,12 @@ export function ChatApp({
   } else if (session) {
     body = (
       <ChatSessionContext.Provider value={session}>
-        <ChatWorkspace key={session.teamId} session={session} fetchFn={fetchFn} />
+        <ChatWorkspace
+          key={session.teamId}
+          session={session}
+          teamName={team.status === "ready" ? team.teamName : ""}
+          fetchFn={fetchFn}
+        />
       </ChatSessionContext.Provider>
     );
   }

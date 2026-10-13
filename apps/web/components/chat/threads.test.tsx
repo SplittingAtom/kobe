@@ -18,9 +18,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-const list = () => screen.findByRole("list", { name: "Your conversations" });
+const list = () => screen.findByRole("list", { name: "Your threads" });
 
 describe("thread list (RemoteThreadListAdapter)", () => {
   it("lists the caller's threads newest first and opens one", async () => {
@@ -42,7 +43,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
   it("creates a thread on the first message, titled with its first line", async () => {
     openApp(fake);
     const user = userEvent.setup();
-    await list();
+    await screen.findByText("No threads yet.");
     await user.type(
       await composer(),
       "Plot revenue by month{Shift>}{Enter}{/Shift}in a bar chart{Enter}",
@@ -82,9 +83,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     await user.click(await items.findByRole("button", { name: "Move Budget 2027 to Trash" }));
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
     await user.click(screen.getByRole("button", { name: "Trash" }));
-    expect(
-      screen.getByText("Conversations in Trash are deleted for good after 30 days."),
-    ).toBeTruthy();
+    expect(screen.getByText("Threads in Trash are deleted for good after 30 days.")).toBeTruthy();
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
     await user.click(await trash.findByRole("button", { name: "Restore Budget 2027" }));
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).toBeNull());
@@ -114,9 +113,9 @@ describe("thread list (RemoteThreadListAdapter)", () => {
       path: `/v1/threads/${t}/purge`,
       team: fake.teamId,
     });
-    await waitFor(() =>
-      expect(trash.queryByRole("button", { name: "Delete Old plan forever" })).toBeNull(),
-    );
+    // An empty Trash is hidden (CE5).
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Trash" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Delete Old plan forever" })).toBeNull();
   });
 
   it("offers the export of the team's conversations as a download (KOBE-18)", async () => {
@@ -144,7 +143,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
 
     cleanup();
     openApp(fake);
-    await list();
+    await screen.findByText("No threads yet.");
     expect(screen.queryByText(/will be deleted from/)).toBeNull();
 
     cleanup();
@@ -311,7 +310,7 @@ describe("accessibility", () => {
     const skip = await screen.findByRole("link", { name: "Skip to the conversation" });
     expect(skip.getAttribute("href")).toBe("#kobe-chat-main");
     expect(document.getElementById("kobe-chat-main")?.tagName).toBe("MAIN");
-    expect(screen.getByRole("complementary", { name: "Conversations" })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Workspace" })).toBeTruthy();
     expect(screen.getByRole("search")).toBeTruthy();
     expect(await screen.findByRole("region", { name: "A11y" })).toBeTruthy();
     const box = await composer();
@@ -339,13 +338,16 @@ describe("accessibility", () => {
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
-  it("folds the conversation list behind a toggle on narrow screens", async () => {
+  it("starts the rail collapsed on narrow screens, and its icons expand it", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
+    );
     openApp(fake);
-    const toggle = await screen.findByRole("button", { name: "Show conversations" });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    await userEvent.setup().click(toggle);
-    expect(
-      screen.getByRole("button", { name: "Hide conversations" }).getAttribute("aria-expanded"),
-    ).toBe("true");
+    const rail = await screen.findByRole("complementary", { name: "Workspace" });
+    expect(within(rail).queryByRole("heading", { name: "Threads" })).toBeNull();
+    await userEvent.setup().click(within(rail).getByRole("button", { name: "Show threads" }));
+    // The expanded rail is a new element.
+    const expanded = await screen.findByRole("complementary", { name: "Workspace" });
+    expect(await within(expanded).findByRole("heading", { name: "Threads" })).toBeTruthy();
   });
 });

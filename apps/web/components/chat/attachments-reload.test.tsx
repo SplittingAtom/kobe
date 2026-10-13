@@ -49,7 +49,7 @@ describe("chips after a reload", () => {
     await waitFor(() => expect(chips.textContent).toContain("2 KB"));
     expect(chips.textContent).toContain("1.5 KB");
     // One listing for the whole thread, not one request per file.
-    expect(fake.workspaceListings).toEqual([`uploads/${t}`]);
+    expect(fake.workspaceListings.filter((p) => p !== "")).toEqual([`uploads/${t}`]);
     // Only a raster image gets a thumbnail, and it is a blob URL typed from the allowlist.
     await waitFor(() => expect(chips.querySelectorAll("img")).toHaveLength(1));
     expect(chips.querySelector("img")?.getAttribute("src")).toBe("blob:chip-1");

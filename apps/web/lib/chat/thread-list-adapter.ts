@@ -7,6 +7,7 @@
 import type { RemoteThreadListAdapter } from "@assistant-ui/react";
 import type { ApiError, ApiResult } from "../api/client";
 import type { ChatSession } from "./session";
+import { placementCustom } from "./thread-groups";
 import type { ThreadSummary } from "./types";
 
 /** An API failure surfaced through assistant-ui (which expects rejected promises). */
@@ -28,6 +29,8 @@ export function metadataOf(thread: ThreadSummary): RemoteThreadMetadata {
     remoteId: thread.threadId,
     title: thread.title ?? undefined,
     lastMessageAt: new Date(thread.lastActivityAt),
+    // The rail's groups read this (CE5): project, Scheduled, Shared with me.
+    custom: placementCustom(thread),
   };
 }
 
@@ -55,11 +58,9 @@ export function createThreadListAdapter(
       const cursor = params?.after;
       if (cursor !== undefined) {
         const page = await unwrap(api.listThreads(cursor));
-        session.noteScheduled(page.threads);
         return { threads: page.threads.map(metadataOf), nextCursor: page.nextCursor ?? undefined };
       }
       const [page, trash] = await Promise.all([unwrap(api.listThreads()), unwrap(api.listTrash())]);
-      session.noteScheduled([...page.threads, ...trash.threads]);
       return {
         threads: [...page.threads, ...trash.threads].map(metadataOf),
         nextCursor: page.nextCursor ?? undefined,
@@ -113,9 +114,7 @@ export function createThreadListAdapter(
       })) as unknown as GenerateTitle,
 
     async fetch(threadId) {
-      const summary = await unwrap(api.threadSummary(threadId));
-      session.noteScheduled([summary]);
-      return metadataOf(summary);
+      return metadataOf(await unwrap(api.threadSummary(threadId)));
     },
   };
 }

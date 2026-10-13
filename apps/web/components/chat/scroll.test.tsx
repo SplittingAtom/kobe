@@ -224,7 +224,7 @@ describe("Jump to latest (ac-1)", () => {
 });
 
 describe("scroll position per thread (ac-2)", () => {
-  const titles = () => within(screen.getByRole("list", { name: "Your conversations" }));
+  const titles = () => within(screen.getByRole("list", { name: "Your threads" }));
 
   it("a thread opens at the bottom, and reopening one restores where it was left", async () => {
     const a = threadWithHistory("Alpha");
