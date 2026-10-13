@@ -52,11 +52,11 @@ const GONE = "gone";
 
 /** What the tab shows for `path`, or GONE when the file no longer exists. */
 async function load(api: FilesApi, path: string, preview: FilePreview): Promise<Loaded | "gone"> {
-  if (preview.kind === "none") return { status: "none" };
   const stat = await api.stat(path);
   if (!stat.ok) return { status: "error", error: describeFileError(stat.error) };
   const entry = stat.data;
   if (!entry) return GONE;
+  if (preview.kind === "none") return { status: "none" };
   if (entry.source === "live") return { status: "unsynced" };
   const size = entry.sizeBytes ?? 0;
   if (preview.kind === "html") {

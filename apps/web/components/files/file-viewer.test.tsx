@@ -280,12 +280,17 @@ describe("memory, deleted files and caps (ac-3)", () => {
     const t = thread("One");
     localStorage.setItem(
       tabsKey(fake.teamId, t),
-      JSON.stringify({ open: ["file:kept.md", "file:old/gone.md"], active: "file:old/gone.md" }),
+      JSON.stringify({
+        open: ["file:kept.md", "file:old.pdf", "file:old/gone.md"],
+        active: "file:old/gone.md",
+      }),
     );
     mount(t);
-    expect(await screen.findByText(/gone\.md is no longer in your workspace/)).toBeTruthy();
+    // The active tab's file is gone; its neighbour (a PDF, checked too once shown) is gone too.
     await waitFor(() => expect(tabNames()).toEqual(["kept.md*"]));
-    expect(reads).not.toContain("old/gone.md");
+    expect(await screen.findByText(/old\.pdf is no longer in your workspace/)).toBeTruthy();
+    expect(await within(screen.getByRole("tabpanel")).findByText("Kept")).toBeTruthy();
+    expect(reads).toEqual(["kept.md"]);
     await userEvent.setup().click(screen.getByRole("button", { name: "Dismiss file notice" }));
     expect(screen.queryByText(/no longer in your workspace/)).toBeNull();
   });
