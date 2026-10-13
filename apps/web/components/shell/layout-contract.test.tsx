@@ -70,6 +70,8 @@ describe("CSS contract", () => {
       flat(rules(SHELL, ".grid:has(> .artifact:not(:empty))")).some((b) => b.includes(floors)),
     ).toBe(true);
     expect(declares(SHELL, ".artifact:empty", "display: none;")).toBe(true);
+    // The resize handle has its own strip, off the column's scrollbar (review round 1).
+    expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
   });
 });
 

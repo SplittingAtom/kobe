@@ -6,14 +6,14 @@
  *
  * - Tabs are in order of opening; artifacts the agent creates during a run open by themselves and
  *   become active (without taking focus from the member).
- * - The open set and active tab are remembered per thread in this browser (localStorage); a
- *   thread switch swaps them, and tabs of artifacts the thread no longer lists are dropped.
+ * - The open set and active tab are remembered per thread in this browser (localStorage,
+ *   `use-artifact-tabs.ts`); a thread switch swaps them, and tabs of artifacts the thread no
+ *   longer lists are dropped.
  * - Slot (A6, KOBE-202): CE8 keeps the column's width per user, server-side. Until A6 loads and
  *   saves it here, a dragged width lives in memory for the page's lifetime.
  */
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -21,28 +21,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  activateTab,
-  closeTab as closeTabIn,
-  NO_TABS,
-  openTab,
-  readTabs,
-  retainTabs,
-  tabsKey,
-  writeTabs,
-  type ArtifactTabs,
-} from "../../lib/chat/artifact-tabs";
+import { useAuiState } from "@assistant-ui/react";
+import { tabsKey, type ArtifactTabs } from "../../lib/chat/artifact-tabs";
 import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
 import type { LiveRun } from "../../lib/chat/live";
-import { useChatSession, useKobeExtras } from "./kobe-runtime";
+import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
+import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
-export interface OpenRequest {
-  readonly id: string;
-  /** A specific version; absent = the latest, following updates. */
-  readonly version: number | undefined;
-  /** Distinguishes two requests for the same artifact, so a click resets the version. */
-  readonly seq: number;
-}
+export type { OpenRequest };
 
 export interface ArtifactPanelApi {
   /** The active tab's artifact. */
@@ -50,6 +36,8 @@ export interface ArtifactPanelApi {
   readonly tabs: ArtifactTabs;
   /** The thread's artifacts; null while they load or when the list could not be read. */
   readonly artifacts: readonly ArtifactSummaryView[] | null;
+  /** Titles the run announced (`artifact.created`), for tabs the list doesn't have yet. */
+  readonly createdTitles: Readonly<Record<string, string>>;
   /** The column's dragged width in px; null is the default (half the space right of the rail). */
   readonly width: number | null;
   /** The member opens an artifact: its tab becomes active and the column takes focus. */
@@ -69,43 +57,71 @@ export function useArtifactPanel(): ArtifactPanelApi | null {
   return useContext(ArtifactPanelContext);
 }
 
-/** Artifact events seen on the live run: a change means the list or the open artifact moved on. */
-export function useArtifactEventCount(): number {
-  const live = useKobeExtras()?.state.live;
-  if (!live) return 0;
-  const onTools = Object.values(live.tools).reduce((n, t) => n + t.artifacts.length, 0);
-  const notices = live.notices.filter(
-    (n) => n.type === "artifact.created" || n.type === "artifact.updated",
-  ).length;
-  return onTools + notices;
+interface ArtifactEvent {
+  readonly artifact_id: string;
+  readonly version: number;
+  readonly title?: string | undefined;
 }
 
-/** Artifacts the live run created (version 1), on tool calls or as run notices. */
-function createdOn(live: LiveRun | undefined): readonly string[] {
+/** The live run's artifact events, on tool calls and as run notices. */
+function artifactEvents(live: LiveRun | undefined): readonly ArtifactEvent[] {
   if (!live) return [];
-  const onTools = Object.values(live.tools).flatMap((t) =>
-    t.artifacts.filter((a) => a.version === 1).map((a) => a.artifact_id),
-  );
   const notices = live.notices.flatMap((n) =>
-    n.type === "artifact.created" ? [n.payload.artifact_id] : [],
+    n.type === "artifact.created" || n.type === "artifact.updated" ? [n.payload] : [],
   );
-  return [...onTools, ...notices];
+  return [...Object.values(live.tools).flatMap((t) => t.artifacts), ...notices];
 }
 
-/** Calls `onCreated` once per artifact the agent creates in `threadId` while it is on screen. */
-function useAgentCreated(threadId: string | undefined, onCreated: (id: string) => void): void {
-  const state = useKobeExtras()?.state;
-  const created = useMemo(() => createdOn(state?.live), [state?.live]);
-  const sameThread = threadId !== undefined && state?.threadId === threadId;
+const liveOf = (extras: unknown) => (extras as KobeThreadExtras | undefined)?.state.live;
+
+/**
+ * Artifact events seen on the live run (of `id` only, when given): a change means the list or
+ * that artifact moved on. A number, so streamed text deltas don't re-render the caller.
+ */
+export function useArtifactEventCount(id?: string): number {
+  return useAuiState(
+    (s) =>
+      artifactEvents(liveOf(s.thread.extras)).filter(
+        (e) => id === undefined || e.artifact_id === id,
+      ).length,
+  );
+}
+
+/**
+ * Artifacts the agent created (version 1) on the live run of `threadId`, as a stable string of
+ * `id\ttitle` lines, so the caller re-renders only when one is added.
+ */
+function useCreatedOn(threadId: string | undefined): string {
+  return useAuiState((s) => {
+    const extras = s.thread.extras as KobeThreadExtras | undefined;
+    if (threadId === undefined || extras?.state.threadId !== threadId) return "";
+    return artifactEvents(extras.state.live)
+      .filter((e) => e.version === 1)
+      .map((e) => `${e.artifact_id}\t${e.title ?? ""}`)
+      .join("\n");
+  });
+}
+
+/** Opens each artifact the agent creates in `threadId` once; returns the titles it announced. */
+function useAgentCreated(
+  threadId: string | undefined,
+  onCreated: (id: string) => void,
+): Readonly<Record<string, string>> {
+  const created = useCreatedOn(threadId);
   const seen = useRef(new Set<string>());
+  const entries = useMemo(
+    () =>
+      created === "" ? [] : created.split("\n").map((line) => line.split("\t") as [string, string]),
+    [created],
+  );
   useEffect(() => {
-    if (!sameThread) return;
-    for (const id of created) {
+    for (const [id] of entries) {
       if (seen.current.has(id)) continue;
       seen.current.add(id);
       onCreated(id);
     }
-  }, [created, sameThread, onCreated]);
+  }, [entries, onCreated]);
+  return useMemo(() => Object.fromEntries(entries.filter(([, t]) => t !== "")), [entries]);
 }
 
 interface ThreadList {
@@ -148,73 +164,30 @@ export function ArtifactPanelProvider({
   readonly threadId: string | undefined;
   readonly children: ReactNode;
 }) {
-  const key = threadId === undefined ? null : tabsKey(teamId, threadId);
-  const [tabs, setTabs] = useState<ArtifactTabs>(() => (key === null ? NO_TABS : readTabs(key)));
-  const [request, setRequest] = useState<OpenRequest | null>(null);
-  const [seenKey, setSeenKey] = useState(key);
-  if (seenKey !== key) {
-    setSeenKey(key);
-    setTabs(key === null ? NO_TABS : readTabs(key));
-    setRequest(null);
-  }
-  useEffect(() => {
-    if (key !== null) writeTabs(key, tabs);
-  }, [key, tabs]);
+  const t = useArtifactTabs(threadId === undefined ? null : tabsKey(teamId, threadId));
   // Slot (A6, KOBE-202): load and save the width per user here.
   const [width, setWidth] = useState<number | null>(null);
-
-  const tabsNow = useRef(tabs);
-  tabsNow.current = tabs;
-  const opener = useRef<Element | null>(null);
-  const seq = useRef(0);
-
-  const openArtifact = useCallback((id: string, version?: number) => {
-    opener.current = document.activeElement;
-    seq.current += 1;
-    setRequest({ id, version, seq: seq.current });
-    setTabs((prev) => openTab(prev, id));
-  }, []);
-  const autoOpen = useCallback((id: string) => setTabs((prev) => openTab(prev, id)), []);
-  const activate = useCallback((id: string) => setTabs((prev) => activateTab(prev, id)), []);
-  const closeTab = useCallback((id: string) => {
-    const next = closeTabIn(tabsNow.current, id);
-    setTabs(next);
-    setRequest((prev) => (prev?.id === id ? null : prev));
-    if (next.open.length > 0) return;
-    // The column is gone: focus goes back to what opened it.
-    const back = opener.current;
-    opener.current = null;
-    if (back instanceof HTMLElement && back.isConnected) back.focus();
-  }, []);
-  const close = useCallback(() => {
-    const active = tabsNow.current.active;
-    if (active !== null) closeTab(active);
-  }, [closeTab]);
-  const prune = useCallback(
-    (existing: ReadonlySet<string>) => setTabs((prev) => retainTabs(prev, existing)),
-    [],
-  );
-
-  useAgentCreated(threadId, autoOpen);
-  const artifacts = useThreadArtifacts(threadId, prune);
+  const createdTitles = useAgentCreated(threadId, t.autoOpen);
+  const artifacts = useThreadArtifacts(threadId, t.prune);
 
   const api = useMemo<ArtifactPanelApi>(
     () => ({
-      openId: tabs.active,
-      tabs,
+      openId: t.tabs.active,
+      tabs: t.tabs,
       artifacts,
+      createdTitles,
       width,
-      openArtifact,
-      activate,
-      closeTab,
-      close,
+      openArtifact: t.openArtifact,
+      activate: t.activate,
+      closeTab: t.closeTab,
+      close: t.close,
       setWidth,
     }),
-    [tabs, artifacts, width, openArtifact, activate, closeTab, close],
+    [t.tabs, artifacts, createdTitles, width, t.openArtifact, t.activate, t.closeTab, t.close],
   );
   return (
     <ArtifactPanelContext.Provider value={api}>
-      <ArtifactPanelRequest.Provider value={request}>{children}</ArtifactPanelRequest.Provider>
+      <ArtifactPanelRequest.Provider value={t.request}>{children}</ArtifactPanelRequest.Provider>
     </ArtifactPanelContext.Provider>
   );
 }

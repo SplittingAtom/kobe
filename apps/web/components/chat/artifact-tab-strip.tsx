@@ -9,7 +9,7 @@ export interface ArtifactTabView {
 }
 
 export const artifactTabId = (id: string) => `kobe-artifact-tab-${id}`;
-export const ARTIFACT_TABPANEL_ID = "kobe-artifact-tabpanel";
+export const artifactTabpanelId = (id: string) => `kobe-artifact-tabpanel-${id}`;
 
 /**
  * The artifact column's tabs (CE6, KOBE-200): WAI-ARIA tabs with automatic activation. Arrow
@@ -28,7 +28,10 @@ export function ArtifactTabStrip({
   onClose(id: string): void;
 }) {
   const list = useRef<HTMLDivElement>(null);
-  /** Set by the strip's own keys and close icons: the new active tab takes focus. */
+  /**
+   * Set by the strip's own keys and close icons, only when they change the tabs: the new active
+   * tab takes focus. Never left set, or a later auto-open would take focus from the composer.
+   */
   const refocus = useRef(false);
   useEffect(() => {
     if (!refocus.current) return;
@@ -54,6 +57,7 @@ export function ArtifactTabStrip({
     const next = target[e.key] === undefined ? undefined : tabs[target[e.key] ?? 0];
     if (!next) return;
     e.preventDefault();
+    if (next.id === active) return;
     refocus.current = true;
     onSelect(next.id);
   };
@@ -78,7 +82,7 @@ export function ArtifactTabStrip({
               role="tab"
               id={artifactTabId(tab.id)}
               aria-selected={selected}
-              aria-controls={selected ? ARTIFACT_TABPANEL_ID : undefined}
+              aria-controls={artifactTabpanelId(tab.id)}
               aria-keyshortcuts="Delete"
               tabIndex={selected ? 0 : -1}
               className="max-w-48 truncate px-3 py-1.5 text-xs aria-selected:font-medium"

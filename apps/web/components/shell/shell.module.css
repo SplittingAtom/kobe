@@ -302,8 +302,10 @@
       minmax(400px, 1fr);
   }
 
+  /* The handle gets its own strip at the column's edge, so it never covers the scrollbar. */
   .artifact {
     position: relative;
+    padding-inline-end: 6px;
   }
 
   .resizeHandle {

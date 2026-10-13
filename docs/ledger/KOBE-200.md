@@ -44,6 +44,25 @@ conversation (CE7 floors), the open set per thread in localStorage. Web only; no
 - **View-only:** no editor; members only read, step versions, download.
 - **Files:** nothing in the column renders Files (KOBE-198 moved it to the rail); a test pins it.
 
+## Review round 1 (`/code-review medium`, 10 findings, all confirmed and fixed)
+
+- Tab strip sets its refocus flag only when a key changes the selection (a stale flag let a
+  later auto-open take focus from the composer).
+- A press on the handle without 3 px of movement commits nothing: the default stays.
+- The handle has its own 6 px strip (`padding-inline-end` on the column at ≥ 1100 px), so it
+  never covers the tabpanel's scrollbar.
+- Tab state moved to `use-artifact-tabs.ts`; every change is a functional update, so an
+  auto-open and a close in one tick both apply. Closing the last tab with no opener focuses the
+  conversation (`#kobe-chat-main`).
+- Every open tab stays mounted (hidden while inactive): a tab keeps the member's version and
+  content; the requested version applies only when the request opens the tab; a hidden tab
+  re-reads only on its own artifact's events.
+- Tab titles: the list, else the `artifact.created` title, else the artifact's own read, else
+  "Artifact N"; close labels follow.
+- Handle values follow a ResizeObserver on both columns (rail collapse), plus on focus/keys.
+- Live-run reads go through `useAuiState` selectors that return primitives, so streamed deltas
+  don't re-render the provider.
+
 ## Open questions (for Chris or the coordinator)
 
 - None blocking. Real widths still need the gate1 browser check (happy-dom has no layout).

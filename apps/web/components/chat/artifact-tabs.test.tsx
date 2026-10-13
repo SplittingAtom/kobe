@@ -107,6 +107,9 @@ describe("auto-open (ac-1)", () => {
     openApp(fake, t);
     const user = userEvent.setup();
     await openFromList(user, "Older");
+    // A key that changes nothing (one tab) must not leave the strip waiting to take focus.
+    screen.getByRole("tab", { name: "Older" }).focus();
+    await user.keyboard("{ArrowRight}");
     const input = await composer();
     await user.type(input, "make a doc{Enter}");
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
@@ -266,5 +269,112 @@ describe("view-only, no files (CE6)", () => {
     expect(column.querySelector("[contenteditable]")).toBeNull();
     expect(within(column).queryByRole("region", { name: /files/i })).toBeNull();
     expect(within(column).queryByText(/workspace/i)).toBeNull();
+  });
+});
+
+/** Starts a run in `t` and returns a function that has the agent create an artifact. */
+async function agentIn(t: string) {
+  const user = userEvent.setup();
+  await user.type(await composer(), "make a doc{Enter}");
+  await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+  const runId = must(fake.activeRun(t)).run_id;
+  await streaming(fake, runId);
+  let n = 0;
+  return (title: string, body = `${title} body`) => {
+    const id = fake.addArtifact(t, { kind: "markdown", title, versions: [body] });
+    n += 1;
+    fake.emit(runId, "artifact.created", { artifact_id: id, kind: "markdown", title, version: 1 });
+    return { id, user, n };
+  };
+}
+
+describe("review round 1", () => {
+  it("closing the last tab with no opener moves focus to the conversation", async () => {
+    const t = fake.addThread("Live");
+    openApp(fake, t);
+    const create = await agentIn(t);
+    const { user } = create("Notes");
+    await waitFor(() => expect(tabNames()).toEqual(["Notes*"]));
+    await user.click(screen.getByRole("button", { name: "Close Notes" }));
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(document.activeElement?.id).toBe("kobe-chat-main");
+  });
+
+  it("names tabs from the run or the artifact when the thread's list can't be read", async () => {
+    const { t, ids } = threadWith("Reports", "Plan");
+    const inner = fake.fetch;
+    const failing: typeof fetch = async (input, init) =>
+      String(input).includes("thread_id=")
+        ? new Response(null, { status: 503 })
+        : inner(input, init);
+    Object.defineProperty(fake, "fetch", { value: failing });
+    vi.stubGlobal("fetch", failing);
+    localStorage.setItem(
+      tabsKey(fake.teamId, t),
+      JSON.stringify({ open: [ids[0]], active: ids[0] }),
+    );
+    openApp(fake, t);
+    await waitFor(() => expect(tabNames()).toEqual(["Plan*"])); // from the artifact's own read
+    const create = await agentIn(t);
+    create("Notes");
+    await waitFor(() => expect(tabNames()).toEqual(["Plan", "Notes*"])); // from the event
+    expect(screen.getByRole("button", { name: "Close Plan" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close Notes" })).toBeTruthy();
+  });
+
+  it("a tab keeps the member's version across a switch, without reading it again", async () => {
+    const t = fake.addThread("Reports");
+    fake.addEntry(t, null, { role: "user", content: "hi" });
+    const plan = fake.addArtifact(t, { kind: "markdown", title: "Plan", versions: ["one", "two"] });
+    fake.addArtifact(t, { kind: "markdown", title: "Budget", versions: ["b"] });
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await openFromList(user, "Plan");
+    const panel = () => screen.getByRole("tabpanel");
+    await within(panel()).findByText("two");
+    await user.click(within(panel()).getByRole("button", { name: "Previous version" }));
+    expect(await within(panel()).findByText("one")).toBeTruthy();
+    await openFromList(user, "Budget");
+    const reads = fake.requests.filter((r) => r.path === `/v1/artifacts/${plan}`).length;
+    await user.click(screen.getByRole("tab", { name: "Plan" }));
+    expect(within(panel()).getByText("Version 1 of 2")).toBeTruthy();
+    expect(fake.requests.filter((r) => r.path === `/v1/artifacts/${plan}`)).toHaveLength(reads);
+  });
+
+  it("a click on the handle leaves the default width; its values follow the columns", async () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(readonly cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const { t } = threadWith("Reports", "Plan");
+    openApp(fake, t);
+    await openFromList(userEvent.setup(), "Plan");
+    const box = (left: number, width: number) =>
+      ({ left, width, right: left + width, top: 0, height: 800, x: left, y: 0 }) as DOMRect;
+    const column = vi.spyOn(region("artifact"), "getBoundingClientRect");
+    column.mockReturnValue(box(280, 500));
+    vi.spyOn(region("conversation"), "getBoundingClientRect").mockReturnValue(box(780, 500));
+    const handle = screen.getByRole("separator", {
+      name: "Resize the artifact column and the conversation",
+    });
+    const grid = must(region("artifact").parentElement);
+    fireEvent.pointerDown(handle, { clientX: 780, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 781, pointerId: 1 }); // under the drag threshold
+    fireEvent.pointerUp(handle, { clientX: 781, pointerId: 1 });
+    expect(grid.style.getPropertyValue("--kobe-artifact-width")).toBe("");
+
+    // The rail collapses: 232 px more right of it, seen without a window resize.
+    column.mockReturnValue(box(48, 616));
+    vi.spyOn(region("conversation"), "getBoundingClientRect").mockReturnValue(box(664, 616));
+    act(() => observers.forEach((cb) => cb()));
+    expect(handle.getAttribute("aria-valuenow")).toBe("616");
+    expect(handle.getAttribute("aria-valuemax")).toBe("832");
   });
 });

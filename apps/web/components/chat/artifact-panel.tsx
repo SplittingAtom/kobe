@@ -9,14 +9,14 @@
  * `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded from the server's frame route
  * (`artifact-views.tsx`). State: `artifact-state.tsx`.
  */
-import { useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { artifactContentUrl, type ArtifactDetailView } from "../../lib/chat/artifacts";
 import type { ApiError } from "../../lib/api/client";
 import { cn } from "../../lib/utils";
 import { ErrorNotice } from "../admin/error-notice";
 import { ArtifactResizeHandle } from "../shell/artifact-resize";
 import { IconAction } from "../shell/icon-action";
-import { ARTIFACT_TABPANEL_ID, ArtifactTabStrip, artifactTabId } from "./artifact-tab-strip";
+import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
 import { useChatSession } from "./kobe-runtime";
@@ -29,7 +29,7 @@ interface Detail {
 
 function useArtifactDetail(id: string): Detail {
   const session = useChatSession();
-  const events = useArtifactEventCount();
+  const events = useArtifactEventCount(id);
   const [state, setState] = useState<Detail>({ artifact: null, error: null });
   useEffect(() => {
     let current = true;
@@ -78,17 +78,29 @@ function VersionNav({
   );
 }
 
+export const artifactTitleId = (id: string) => `kobe-artifact-title-${id}`;
+
+/**
+ * One tab's artifact. Every open tab stays mounted (hidden while inactive), so a tab keeps the
+ * version the member chose and its loaded content; `initialVersion` applies when the tab opens.
+ */
 function PanelContent({
   id,
   initialVersion,
+  onTitle,
 }: {
   readonly id: string;
-  readonly initialVersion?: number;
+  readonly initialVersion: number | undefined;
+  readonly onTitle: (id: string, title: string) => void;
 }) {
   const session = useChatSession();
   const detail = useArtifactDetail(id);
   const [pinned, setPinned] = useState<number | null>(initialVersion ?? null);
   const artifact = detail.artifact;
+  const title = artifact?.title;
+  useEffect(() => {
+    if (title !== undefined) onTitle(id, title);
+  }, [id, title, onTitle]);
   const versions = artifact?.versions.map((v) => v.version) ?? [];
   const latest = artifact?.currentVersion ?? 1;
   const version = pinned !== null && versions.includes(pinned) ? pinned : latest;
@@ -96,7 +108,7 @@ function PanelContent({
   return (
     <>
       <header className="flex items-center gap-2 border-b px-3 py-2">
-        <h2 id="kobe-artifact-title" className="min-w-0 flex-1 truncate text-sm font-medium">
+        <h2 id={artifactTitleId(id)} className="min-w-0 flex-1 truncate text-sm font-medium">
           {artifact?.title ?? "Artifact"}
         </h2>
         {artifact && (
@@ -131,7 +143,24 @@ function PanelContent({
   );
 }
 
-/** The artifact column's content: tabs, the active artifact and the resize handle. */
+/** Tab titles: the thread's list, else the run's announcement, else the loaded artifact. */
+function useTabTitles(open: readonly string[]) {
+  const panel = useArtifactPanel();
+  const [loaded, setLoaded] = useState<Readonly<Record<string, string>>>({});
+  const onTitle = useCallback(
+    (id: string, title: string) =>
+      setLoaded((prev) => (prev[id] === title ? prev : { ...prev, [id]: title })),
+    [],
+  );
+  const listed = new Map(panel?.artifacts?.map((a) => [a.id, a.title]));
+  const tabs = open.map((id, index) => ({
+    id,
+    title: listed.get(id) ?? panel?.createdTitles[id] ?? loaded[id] ?? `Artifact ${index + 1}`,
+  }));
+  return { tabs, onTitle };
+}
+
+/** The artifact column's content: tabs, the open artifacts and the resize handle. */
 export function ArtifactPanel({ className }: { readonly className?: string | undefined }) {
   const panel = useArtifactPanel();
   const request = useContext(ArtifactPanelRequest);
@@ -140,11 +169,9 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
   useEffect(() => {
     if (requestKey !== null) ref.current?.focus();
   }, [requestKey]);
+  const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
   if (!panel || active === null) return null; // no tabs: no column (CE6)
-  const titles = new Map(panel.artifacts?.map((a) => [a.id, a.title]));
-  const tabs = panel.tabs.open.map((id) => ({ id, title: titles.get(id) ?? "Artifact" }));
-  const pinned = request?.id === active ? request : null;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape" && !event.defaultPrevented) {
       event.stopPropagation();
@@ -158,7 +185,7 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
       ref={ref}
       tabIndex={-1}
       role="region"
-      aria-labelledby="kobe-artifact-title"
+      aria-labelledby={artifactTitleId(active)}
       onKeyDown={onKeyDown}
       className={cn(
         "bg-background flex min-h-96 min-w-0 flex-col border-s outline-none",
@@ -171,18 +198,22 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
         onSelect={panel.activate}
         onClose={panel.closeTab}
       />
-      <div
-        role="tabpanel"
-        id={ARTIFACT_TABPANEL_ID}
-        aria-labelledby={artifactTabId(active)}
-        className="flex min-h-0 flex-1 flex-col"
-      >
-        <PanelContent
-          key={pinned ? `${active}:${pinned.seq}` : active}
-          id={active}
-          {...(pinned?.version === undefined ? {} : { initialVersion: pinned.version })}
-        />
-      </div>
+      {tabs.map(({ id }) => (
+        <div
+          key={id}
+          role="tabpanel"
+          id={artifactTabpanelId(id)}
+          aria-labelledby={artifactTabId(id)}
+          hidden={id !== active}
+          className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex"
+        >
+          <PanelContent
+            id={id}
+            initialVersion={request?.id === id ? request.version : undefined}
+            onTitle={onTitle}
+          />
+        </div>
+      ))}
       <ArtifactResizeHandle width={panel.width} onChange={panel.setWidth} />
     </aside>
   );

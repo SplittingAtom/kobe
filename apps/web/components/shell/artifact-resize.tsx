@@ -17,6 +17,8 @@ import {
 import styles from "./shell.module.css";
 
 const STEP_PX = 24;
+/** A press that moves less than this is a click: it leaves the width alone (default stays). */
+const DRAG_THRESHOLD_PX = 3;
 
 const KEY_STEPS: Readonly<Record<string, (width: number, max: number) => number>> = {
   ArrowLeft: (w) => w - STEP_PX,
@@ -65,15 +67,23 @@ export function ArtifactResizeHandle({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<Measure | null>(null);
-  /** The width shown while dragging; committed on release (null: not dragging). */
-  const dragged = useRef<number | null>(null);
+  /** The drag under way: where it started, and the width shown once it moved (else null). */
+  const drag = useRef<{ readonly startX: number; readonly width: number | null } | null>(null);
 
+  // The values follow the columns' real sizes: a dragged width, the rail collapsing, the window.
   const remeasure = useCallback(() => setSize(measure(ref.current)), []);
   useEffect(() => {
     remeasure();
-    window.addEventListener("resize", remeasure);
-    return () => window.removeEventListener("resize", remeasure);
-  }, [remeasure, width]);
+    const { column, conversation } = regions(ref.current);
+    if (typeof ResizeObserver === "undefined" || !column || !conversation) {
+      window.addEventListener("resize", remeasure);
+      return () => window.removeEventListener("resize", remeasure);
+    }
+    const observer = new ResizeObserver(remeasure);
+    observer.observe(column);
+    observer.observe(conversation);
+    return () => observer.disconnect();
+  }, [remeasure]);
 
   const commit = (next: number) => {
     if (next !== width) onChange(next);
@@ -82,22 +92,24 @@ export function ArtifactResizeHandle({
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    dragged.current = width ?? measure(e.currentTarget)?.column ?? null;
+    drag.current = { startX: e.clientX, width: null };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (dragged.current === null) return;
+    const current = drag.current;
+    if (current === null) return;
+    if (current.width === null && Math.abs(e.clientX - current.startX) < DRAG_THRESHOLD_PX) return;
     const { column, grid } = regions(e.currentTarget);
     const now = measure(e.currentTarget);
     if (!column || !grid || !now) return;
     const next = clampArtifactWidth(e.clientX - column.getBoundingClientRect().left, now.available);
-    dragged.current = next;
+    drag.current = { ...current, width: next };
     grid.style.setProperty(ARTIFACT_WIDTH_VAR, `${next}px`);
     e.currentTarget.setAttribute("aria-valuenow", String(next));
   };
   const onPointerEnd = (e: PointerEvent<HTMLDivElement>) => {
-    const next = dragged.current;
-    dragged.current = null;
+    const next = drag.current?.width ?? null;
+    drag.current = null;
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
@@ -106,6 +118,7 @@ export function ArtifactResizeHandle({
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = KEY_STEPS[e.key];
     const now = measure(e.currentTarget);
+    setSize(now);
     if (!step || !now) return;
     e.preventDefault();
     commit(clampArtifactWidth(step(now.column, maxArtifactWidth(now.available)), now.available));
@@ -128,6 +141,7 @@ export function ArtifactResizeHandle({
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
       onKeyDown={onKeyDown}
+      onFocus={remeasure}
     />
   );
 }
