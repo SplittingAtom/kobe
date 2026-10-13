@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "ui_preferences" jsonb;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_ui_preferences" CHECK ("users"."ui_preferences" IS NULL OR (jsonb_typeof("users"."ui_preferences") = 'object' AND octet_length("users"."ui_preferences"::text) <= 4096));

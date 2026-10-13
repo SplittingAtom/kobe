@@ -2,8 +2,10 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -18,21 +20,39 @@ import {
 const createdAt = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 
-export const users = pgTable("users", {
-  id: uuid().primaryKey().defaultRandom(),
-  name: text().notNull(),
-  email: text().notNull().unique(),
-  emailVerified: boolean().notNull().default(false),
-  image: text(),
-  twoFactorEnabled: boolean().notNull().default(false),
-  /**
-   * Set while the user is deactivated (KOBE-13, spec D7): no sign-in by any method, no API access.
-   * Not a Better Auth field, so no Better Auth endpoint can read or change it.
-   */
-  deactivatedAt: timestamp({ withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+/** Upper bound on the stored `users.ui_preferences` JSON text, in bytes (KOBE-202). */
+export const UI_PREFERENCES_MAX_BYTES = 4096;
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    name: text().notNull(),
+    email: text().notNull().unique(),
+    emailVerified: boolean().notNull().default(false),
+    image: text(),
+    twoFactorEnabled: boolean().notNull().default(false),
+    /**
+     * Set while the user is deactivated (KOBE-13, spec D7): no sign-in by any method, no API access.
+     * Not a Better Auth field, so no Better Auth endpoint can read or change it.
+     */
+    deactivatedAt: timestamp({ withTimezone: true }),
+    /**
+     * Layout preferences that follow the user across devices (KOBE-202, CE8): rail state, divider
+     * share, artifact column width. NULL means defaults. The server validates the shape (zod schema
+     * in @kobe/protocol); the CHECK only bounds it to a small JSON object. Not a Better Auth field.
+     */
+    uiPreferences: jsonb(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      "users_ui_preferences",
+      sql`${t.uiPreferences} IS NULL OR (jsonb_typeof(${t.uiPreferences}) = 'object' AND octet_length(${t.uiPreferences}::text) <= ${sql.raw(String(UI_PREFERENCES_MAX_BYTES))})`,
+    ),
+  ],
+);
 
 const userRef = () =>
   uuid()
