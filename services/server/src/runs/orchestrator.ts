@@ -154,6 +154,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   queuePaused(actor: ActorContext, threadId: string): Promise<boolean>;
   /** The owner reorders the queued messages (CE10): `runIds` is the whole queue, in order. */
   reorderQueue(actor: ActorContext, threadId: string, runIds: readonly string[]): Promise<void>;
+  /** The owner holds the queue until resumed or a new message (CE10); no-op with nothing queued. */
+  pauseQueue(actor: ActorContext, threadId: string): Promise<void>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
@@ -555,6 +557,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const paused = await isQueuePaused(tx, actor.team_id, thread.id);
       if (thread.status !== "interrupted" && !paused) return undefined;
       if (paused) await setQueuePaused(tx, actor.team_id, thread.id, false);
+      await recordAudit(tx, {
+        action: "run.queue_resumed",
+        actor: userActor(actor),
+        teamId: actor.team_id,
+        target: { threadId: thread.id, wasInterrupted: thread.status === "interrupted" },
+      });
       await setThreadStatus(
         tx,
         actor.team_id,
@@ -575,6 +583,27 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
       await reorderQueuedRuns(tx, actor.team_id, thread.id, runIds);
       await touchThread(tx, actor.team_id, thread.id);
+      await recordAudit(tx, {
+        action: "run.queue_reordered",
+        actor: userActor(actor),
+        teamId: actor.team_id,
+        target: { threadId: thread.id, queued: runIds.length },
+      });
+    });
+  }
+
+  async pauseQueue(actor: ActorContext, threadId: string): Promise<void> {
+    await this.#threadTx(actor, async (tx, viewer) => {
+      const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
+      const queued = await queuedCount(tx, actor.team_id, thread.id);
+      if (queued === 0 || (await isQueuePaused(tx, actor.team_id, thread.id))) return;
+      await setQueuePaused(tx, actor.team_id, thread.id, true);
+      await recordAudit(tx, {
+        action: "run.queue_paused",
+        actor: userActor(actor),
+        teamId: actor.team_id,
+        target: { threadId: thread.id, queued },
+      });
     });
   }
 

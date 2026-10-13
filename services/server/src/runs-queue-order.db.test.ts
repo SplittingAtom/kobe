@@ -73,6 +73,7 @@ describe("queue order", () => {
     ws.reply(await ws.started(q3), "three");
     await f.until(w.team, q3, "completed");
     expect(ws.starts().map((s) => s.run_id)).toEqual([active, q3]);
+    expect(await auditTargets(w.team, "run.queue_reordered")).toEqual([{ threadId, queued: 3 }]);
   });
 
   it("refuses a stale or partial set with 409 queue_changed and changes nothing", async () => {
@@ -120,9 +121,11 @@ describe("queue order", () => {
     const [q1, q2] = waiting as [string, string];
     const before = await queuePositions(w.team, threadId);
 
-    const member = await f.on(0, must(w.others[0])).post(`/v1/threads/${threadId}/queue/order`, {
-      run_ids: [q2, q1],
-    });
+    const member = await f
+      .on(0, must(w.others[0], "member"))
+      .post(`/v1/threads/${threadId}/queue/order`, {
+        run_ids: [q2, q1],
+      });
     expect(member.status).toBe(404);
     expect(member.json.code).toBe("thread_not_found");
 
@@ -158,5 +161,80 @@ describe("queue order", () => {
     // Never two at once, and positions stay unique.
     const positions = (await queuePositions(w.team, threadId)).map((r) => r.queue_pos);
     expect(new Set(positions).size).toBe(positions.length);
+  });
+});
+
+async function auditTargets(team: string, action: string) {
+  const { rows } = await f.fx.admin.query<{ target: Record<string, unknown> }>(
+    `SELECT target FROM audit_log WHERE team_id = $1 AND action = $2 ORDER BY seq`,
+    [team, action],
+  );
+  return rows.map((r) => r.target);
+}
+
+const pause = (w: RunWorld, threadId: string, replica = 0) =>
+  f.on(replica, w.owner).post(`/v1/threads/${threadId}/queue/pause`);
+
+describe("queue pause", () => {
+  it("holds the queue past the active run's end until resumed, and audits both", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, active, waiting } = await busyThread(w, ws, 2);
+    const [q1] = waiting as [string, string];
+
+    const res = await pause(w, threadId, 1);
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(threadRunsSchema.parse(res.json).queue_paused).toBe(true);
+    expect((await pause(w, threadId)).status).toBe(200); // idempotent
+    expect(await auditTargets(w.team, "run.queue_paused")).toEqual([{ threadId, queued: 2 }]);
+
+    ws.reply(await ws.started(active), "done");
+    await f.until(w.team, active, "completed");
+    for (let i = 0; i < 2; i += 1) {
+      await f.fx.replica(i).deps.runs.idle();
+      await f.fx.replica(i).deps.runs.sweep();
+      await f.fx.replica(i).deps.runs.idle();
+    }
+    expect(await f.status(w.team, q1)).toBe("queued");
+    expect(ws.starts().map((s) => s.run_id)).toEqual([active]);
+
+    const resumed = await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
+    expect(threadRunsSchema.parse(resumed.json).queue_paused).toBe(false);
+    ws.reply(await ws.started(q1), "one");
+    await f.until(w.team, q1, "completed");
+    expect(await auditTargets(w.team, "run.queue_resumed")).toEqual([
+      { threadId, wasInterrupted: false },
+    ]);
+  });
+
+  it("does nothing with nothing queued; a new message releases a paused queue", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const empty = await busyThread(w, ws, 0);
+    const none = await pause(w, empty.threadId);
+    expect(threadRunsSchema.parse(none.json).queue_paused).toBe(false);
+    expect(await auditTargets(w.team, "run.queue_paused")).toEqual([]);
+
+    const busy = await busyThread(w, ws, 1);
+    await pause(w, busy.threadId);
+    const sent = await f.send(w.owner, busy.threadId, "one more");
+    expect(sent.json.queued).toBe(true);
+    const runs = await f.on(0, w.owner).get(`/v1/threads/${busy.threadId}/runs`);
+    expect(threadRunsSchema.parse(runs.json).queue_paused).toBe(false);
+  });
+
+  it("only the owner pauses: a team member and another team get 404", async () => {
+    const w = await f.world(1);
+    const ws = await f.connect(w, 0);
+    const { threadId } = await busyThread(w, ws, 1);
+    const member = await f
+      .on(0, must(w.others[0], "member"))
+      .post(`/v1/threads/${threadId}/queue/pause`);
+    expect(member.status).toBe(404);
+    const other = await f.world();
+    const foreign = await f.on(0, other.owner).post(`/v1/threads/${threadId}/queue/pause`);
+    expect(foreign.status).toBe(404);
+    const runs = await f.on(0, w.owner).get(`/v1/threads/${threadId}/runs`);
+    expect(threadRunsSchema.parse(runs.json).queue_paused).toBe(false);
   });
 });

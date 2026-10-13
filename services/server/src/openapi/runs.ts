@@ -162,6 +162,22 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/queue/pause": {
+      post: {
+        operationId: "pauseThreadQueue",
+        summary: "Pause the queue: queued messages wait until resumed (CE10; owner only)",
+        description:
+          "The active run goes on; the queued runs don't start until `queue/resume` or a new " +
+          "message. No-op when nothing is queued. Returns the thread's runs.",
+        parameters: change,
+        responses: {
+          "200": json("ThreadRuns", "The thread's runs; `queue_paused` is true while any wait."),
+          "404": json("Error", "`thread_not_found`."),
+          "409": conflict("`thread_in_trash` or"),
+          ...COMMON,
+        },
+      },
+    },
     "/v1/threads/{id}/queue/order": {
       post: {
         operationId: "reorderThreadQueue",

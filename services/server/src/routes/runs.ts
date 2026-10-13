@@ -116,6 +116,15 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     });
   });
 
+  app.post("/:id/queue/pause", async (c) => {
+    const id = idParam(c);
+    if (!id) return invalidRequest(c);
+    return answer(c, async () => {
+      await deps.runs.pauseQueue(actorOf(c), id);
+      return c.json(await threadRuns(deps, actorOf(c), id));
+    });
+  });
+
   app.post("/:id/queue/order", async (c) => {
     const id = idParam(c);
     const parsed = await body(c, queueOrderBodySchema);
