@@ -1,67 +1,121 @@
-/**
- * Streaming arrival fade (CE11, KOBE-207). While a part streams, each word is its own
- * `<span data-kobe-word>`; React keeps the spans already on screen and mounts one per new word, so
- * the CSS animation in `app/chat-global.css` (which runs when an element first matches) fades just
- * the words that arrived. No state, effects or timers: the text renders exactly as often as it
- * did before. A finished part renders as plain text again, so history carries no extra elements.
- */
+"use client";
 
-/** A word with the whitespace after it; whitespace before the first word stays plain text. */
+/**
+ * Streaming arrival fade (CE11, KOBE-207). Words that arrive after the text mounted are each a
+ * `<span data-kobe-word>`, keyed by their offset in the source, so a word keeps its element across
+ * re-renders and re-parses and only new words mount; the CSS animation in `app/chat-global.css`
+ * runs on mount, so just those fade. Text already there at mount (history, a thread opened or
+ * reconnected mid-run) stays plain. No state beyond that mount-time length, no effects or timers:
+ * the text renders exactly as often as it did before. The spans stay after the part finishes, so
+ * the DOM (and any selection in it) is stable; `data-kobe-arrive` only switches the fade on.
+ */
+import { createContext, useContext, useState, type ReactNode } from "react";
+
 const WORD = /\S+\s*/g;
 
-/** `text` as [leading whitespace, ...words], each word with its trailing whitespace. */
-export function splitWords(text: string): { readonly lead: string; readonly words: string[] } {
-  const words = text.match(WORD) ?? [];
-  const lead = words.length === 0 ? text : text.slice(0, text.indexOf(words[0] as string));
+/** A word with the whitespace after it, at `offset` in its text. */
+export interface Word {
+  readonly offset: number;
+  readonly text: string;
+}
+
+/** `text` as its leading whitespace and its words. */
+export function splitWords(text: string): {
+  readonly lead: string;
+  readonly words: readonly Word[];
+} {
+  const lead = text.match(/^\s*/)?.[0] ?? "";
+  const words = [...text.matchAll(WORD)].map((m) => ({ offset: m.index, text: m[0] }));
   return { lead, words };
 }
 
-/** Plain text (reasoning) as word spans. Keys are positions: arrived words never remount. */
-export function ArrivingWords({ text }: { readonly text: string }) {
-  const { lead, words } = splitWords(text);
+/** The source length when the text mounted: words before it were already on screen. */
+export function useMountLength(text: string): number {
+  const [length] = useState(text.length);
+  return length;
+}
+
+/** `text` starting at source offset `start`: plain up to `settled`, then one span per word. */
+function Words({
+  text,
+  start,
+  settled,
+}: {
+  readonly text: string;
+  readonly start: number;
+  readonly settled: number;
+}) {
+  const { words } = splitWords(text);
+  const first = words.findIndex((w) => start + w.offset >= settled);
+  if (first === -1) return text;
+  const fresh = words.slice(first);
   return (
     <>
-      {lead}
-      {words.map((word, i) => (
-        <span key={i} data-kobe-word="">
-          {word}
+      {text.slice(0, fresh[0]?.offset)}
+      {fresh.map((w) => (
+        <span key={start + w.offset} data-kobe-word="">
+          {w.text}
         </span>
       ))}
     </>
   );
 }
 
-interface HastNode {
-  type: string;
-  value?: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
+/** Plain text (reasoning) with its arriving words as spans. */
+export function ArrivingWords({ text }: { readonly text: string }) {
+  return <Words text={text} start={0} settled={useMountLength(text)} />;
 }
 
-function wordNodes(text: string): HastNode[] {
-  const { lead, words } = splitWords(text);
-  const spans = words.map((word): HastNode => ({
+/** Markdown's mount-time source length, for the word groups below it. */
+export const SettledContext = createContext(Number.POSITIVE_INFINITY);
+
+/** A text run the rehype step marked (`data-kobe-words` = its source offset), as words. */
+export function MarkdownWords({ text, start }: { readonly text: string; readonly start: number }) {
+  return <Words text={text} start={start} settled={useContext(SettledContext)} />;
+}
+
+export function SettledProvider({
+  text,
+  children,
+}: {
+  readonly text: string;
+  readonly children: ReactNode;
+}) {
+  return <SettledContext.Provider value={useMountLength(text)}>{children}</SettledContext.Provider>;
+}
+
+interface HastNode {
+  readonly type: string;
+  readonly value?: string;
+  readonly tagName?: string;
+  readonly position?: { readonly start?: { readonly offset?: number } };
+  readonly children?: readonly HastNode[];
+}
+
+/** Code renders plain: fades are for prose, and code blocks can be long. */
+const PLAIN = new Set(["pre", "code"]);
+
+function wordRun(text: HastNode): HastNode {
+  const start = text.position?.start?.offset;
+  if (typeof start !== "number" || !/\S/.test(text.value ?? "")) return text;
+  return {
     type: "element",
     tagName: "span",
-    properties: { dataKobeWord: "" },
-    children: [{ type: "text", value: word }],
-  }));
-  return lead === "" ? spans : [{ type: "text", value: lead }, ...spans];
+    properties: { dataKobeWords: start },
+    children: [text],
+  } as HastNode;
 }
 
 /**
- * rehype step for Markdown: every text node with a word in it becomes word spans. Whitespace-only
- * text (between list items, table rows) stays as it is. react-markdown keys siblings by tag and
- * position (`span-0`, `span-1`, ...), so appended words are new elements and earlier ones stay.
+ * rehype step for Markdown: each text run with a word in it becomes a marked span, which
+ * `markdown.tsx` renders as `MarkdownWords` (no element of its own). Whitespace-only runs (between
+ * list items, table rows), runs without a source position and code stay as they are.
  */
 export function rehypeArrivingWords() {
   const visit = (node: HastNode): HastNode => {
-    if (!node.children) return node;
-    const children = node.children.flatMap((child) =>
-      child.type === "text" && /\S/.test(child.value ?? "")
-        ? wordNodes(child.value ?? "")
-        : [visit(child)],
+    if (!node.children || PLAIN.has(node.tagName ?? "")) return node;
+    const children = node.children.map((child) =>
+      child.type === "text" ? wordRun(child) : visit(child),
     );
     return { ...node, children };
   };

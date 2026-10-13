@@ -329,9 +329,11 @@ describe("arrival fade follows the pin (KOBE-207 ac-3)", () => {
 
     scrollTo(200);
     await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
-    act(() => kobe.agent.delta(runId, "m1", "Here is"));
-    // The words still mount as spans; the CSS gives them no tint while unpinned.
-    await waitFor(() => expect(list().querySelectorAll("[data-kobe-word]")).toHaveLength(2));
+    act(() => kobe.agent.delta(runId, "m1", "Here"));
+    await waitFor(() => expect(list().textContent).toContain("Here"));
+    act(() => kobe.agent.delta(runId, "m1", " is"));
+    // New words still mount as spans; the CSS gives them no tint while unpinned.
+    await waitFor(() => expect(list().querySelectorAll("[data-kobe-word]")).toHaveLength(1));
 
     await userEvent.setup().click(must(pill()));
     await waitFor(() => expect(list().dataset.kobeFollow).toBe("pinned"));

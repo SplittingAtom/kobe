@@ -140,12 +140,13 @@ body:has([data-kobe-chat]) {
   }
 }
 
-/* Streaming arrival fade (CE11, KOBE-207). While a part streams, each word is a
-   `[data-kobe-word]` span that mounts as it arrives (components/chat/arriving-words.tsx); the
-   animation runs once per span, from the tint to the text colour. The tint is the accent only while
-   the message list follows the stream (`data-kobe-follow`, KOBE-205); scrolled up, it is the text
-   colour, so words arrive plain. Swapping the variable, rather than the animation, means re-pinning
-   never restarts the fade on words already there. Tool output never has word spans. */
+/* Streaming arrival fade (CE11, KOBE-207). Words that arrive while a part streams are
+   `[data-kobe-word]` spans that mount as they arrive (components/chat/arriving-words.tsx); the
+   animation runs once per span, from the tint to the text colour, while the part is being written
+   (`data-kobe-arrive`). The tint is the accent only while the message list follows the stream
+   (`data-kobe-follow`, KOBE-205); scrolled up, it is the text colour, so words arrive plain.
+   Swapping the variable, rather than the animation, means re-pinning never restarts the fade on
+   words already there. Code and tool output never have word spans. */
 @keyframes kobe-arrive {
   from {
     color: var(--kobe-arrive-tint);
@@ -164,16 +165,18 @@ body:has([data-kobe-chat]) {
   animation: kobe-arrive 600ms ease-out;
 }
 
-/* Reduced motion: no fade; a static 2 px accent bar left of the paragraph being written, drawn as
-   two shadows (the background covers the gap), so nothing moves or reflows. */
+/* Reduced motion: no fade; a static 2 px accent bar inside the left edge of the block being
+   written. Prose blocks of agent text keep a constant inset for it, so the bar never reflows. */
 @media (prefers-reduced-motion: reduce) {
   [data-kobe-arrive="running"] [data-kobe-word] {
     animation: none;
   }
 
+  [data-kobe-words] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol) {
+    padding-inline-start: 0.5rem;
+  }
+
   [data-kobe-follow="pinned"] [data-kobe-arrive="running"] > :last-child {
-    box-shadow:
-      -6px 0 0 0 var(--background),
-      -8px 0 0 0 var(--kobe-arrive-tint);
+    box-shadow: inset 2px 0 0 0 var(--kobe-arrive-tint);
   }
 }

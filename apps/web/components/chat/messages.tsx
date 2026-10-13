@@ -32,13 +32,12 @@ function PlainText({ text }: TextMessagePartProps) {
 
 /** Reasoning as written; while it streams, its words arrive as fading spans (KOBE-207). */
 function Reasoning({ text, status }: ReasoningMessagePartProps) {
-  const arriving = status.type === "running";
   return (
     <details className="text-muted-foreground group my-2 text-sm">
       <summary className="hover:text-foreground cursor-pointer select-none">Reasoning</summary>
-      <div data-kobe-arrive={arriving ? "running" : undefined}>
+      <div data-kobe-arrive={status.type === "running" ? "running" : undefined}>
         <p className="border-border mt-1 border-s-2 ps-3 whitespace-pre-wrap">
-          {arriving ? <ArrivingWords text={text} /> : text}
+          <ArrivingWords text={text} />
         </p>
       </div>
     </details>
@@ -98,7 +97,7 @@ function Offloaded() {
  * being written fades its words in (KOBE-207); the status changes once per part, not per token.
  */
 function MarkdownText({ text, status }: TextMessagePartProps) {
-  return <Markdown text={text} arriving={status.type === "running"} />;
+  return <Markdown text={text} words arriving={status.type === "running"} />;
 }
 
 const ASSISTANT_PARTS = {

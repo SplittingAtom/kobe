@@ -17,22 +17,28 @@ KOBE-205 follow state as `data-kobe-follow` so the CSS drops the tint while scro
 - **Not assistant-ui's `useSmooth`.** assistant-ui 0.15's smooth streaming (`useSmooth`,
   `MessagePartPrimitive.Text smooth`) is a typewriter reveal that sets React state every animation
   frame and renders one text node, so it has no per-word spans and would add renders (against
-  ac-2 and "no per-character reveal"). Instead `components/chat/arriving-words.tsx` splits the text
-  into word spans during the render that already happens per text delta: a rehype step for
-  Markdown (react-markdown keys siblings `span-0`, `span-1`, ..., so arrived words keep their
-  element and only new words mount) and `ArrivingWords` for reasoning.
-- **Only the part being written** (`status.type === "running"`, which changes once per part) gets
-  spans and `data-kobe-arrive="running"`. Finished parts and history render plain text, so no
-  extra DOM in long threads and no fade on load. When a part finishes, words still mid-fade snap to
-  the text colour (at most 600 ms of tail).
+  ac-2 and "no per-character reveal"). Instead `components/chat/arriving-words.tsx` splits text
+  into word spans in the render that already happens per delta: a rehype step marks each Markdown
+  text run with its source offset and `MarkdownWords` renders its words (no element of its own);
+  `ArrivingWords` does the same for reasoning.
+- **Keys are source offsets** (run start + offset in the run), not react-markdown's per-tag counter,
+  so a word keeps its element across re-parses (closing backtick, `**`, setext heading) and words
+  after a restructure are new elements. Words that move into a new parent (the text inside a
+  just-closed `**`) remount and fade again: React cannot move DOM across parents.
+- **Only words that arrive after mount get spans.** Text there when the Markdown mounted (history,
+  a thread opened, reloaded or switched mid-run) renders plain and never fades; the length at mount
+  is the only state. Side effect: a part's first delta, which mounts it, does not fade.
+- **Spans stay when the part finishes** (stable DOM, selection kept); `data-kobe-arrive="running"`
+  (part status, changes once per part) is what switches the fade on.
+- **Code renders plain** (`pre`/`code` skipped): long code blocks add no spans per delta.
 - **Pinned gating via a variable, not the animation.** `--kobe-arrive-tint` is the accent under
   `[data-kobe-follow="pinned"]`, else `currentColor` (fade invisible). Toggling `animation` itself
   would restart the fade on every word of the part when the member re-pins.
 - **Tint:** `--admin-accent` (the chat's accent, #2449c7 / #8fa8ff dark), falling back to
   `--primary`; the shadcn `--accent` token is a near-white background colour.
-- **Reduced motion:** no animation; a 2 px bar left of the last block of the part being written,
-  drawn with two box-shadows (background gap, then tint), so nothing reflows and the code block's
-  `overflow: hidden` does not clip it. Also only while pinned.
+- **Reduced motion:** no animation; an inset 2 px bar (`box-shadow: inset`) inside the last block of
+  the part being written, only while pinned. Agent prose blocks (p, headings, lists) keep a constant
+  0.5rem start padding under reduced motion so the bar never touches text and nothing reflows.
 - **Tests that found streaming text by `findByText`** now use `streamed(text)` from
   `components/chat/testing.tsx` (innermost element holding the text across spans).
 
@@ -43,9 +49,11 @@ KOBE-205 follow state as `data-kobe-follow` so the CSS drops the tint while scro
 
 ## Evidence (acceptance criteria → test or command output)
 
-- **ac-1** `apps/web/components/chat/arrival-fade.test.tsx`: "wraps each word of a streaming part",
-  "streaming answer and reasoning words arrive as spans; tool output does not", "animates arriving
-  words over 600 ms", "under reduced motion: no fade, a static bar".
+- **ac-1** `apps/web/components/chat/arrival-fade.test.tsx`: "wraps each word that arrives",
+  "streaming answer and reasoning words arrive as spans; tool output does not", "leaves code blocks
+  plain", backtick/bold/heading re-parse cases, "reopening mid-run shows what streamed so far plain",
+  "animates arriving words over 600 ms", "under reduced motion: no fade, a static inset bar".
+- Review round 1 (coordinator, 6 findings): all fixed as above.
 - **ac-2** same file, "costs no React renders per token over plain Markdown" (React `Profiler`:
   7 tokens give 8 renders with and without the fade) and "keeps arrived words' spans as text grows".
 - **ac-3** same file, "tints only while the message list is pinned"; `scroll.test.tsx`, "arrival

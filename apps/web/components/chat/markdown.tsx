@@ -19,7 +19,7 @@ import remarkGfm from "remark-gfm";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
-import { rehypeArrivingWords } from "./arriving-words";
+import { MarkdownWords, rehypeArrivingWords, SettledProvider } from "./arriving-words";
 
 const SAFE_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"]);
 
@@ -100,6 +100,12 @@ const LINK =
   "text-primary decoration-primary/40 hover:decoration-primary underline underline-offset-4";
 
 const COMPONENTS: Components = {
+  /** A text run marked by `rehypeArrivingWords`: its words, no element of its own. */
+  span: ({ node, children }) => {
+    const start = node?.properties?.dataKobeWords;
+    if (typeof start !== "number") return <span>{children}</span>;
+    return <MarkdownWords text={textOf(node as HastNode)} start={start} />;
+  },
   a: ({ href, children }) => {
     const url = safeUrl(href);
     if (!url) return <span>{children}</span>;
@@ -168,7 +174,7 @@ const COMPONENTS: Components = {
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkHtmlAsText];
-const ARRIVING_PLUGINS = [rehypeArrivingWords];
+const WORD_PLUGINS = [rehypeArrivingWords];
 
 /** Unsafe URLs are dropped before rendering; the components above check again. */
 function urlTransform(url: string): string {
@@ -176,29 +182,35 @@ function urlTransform(url: string): string {
 }
 
 /**
- * `arriving`: the part is streaming, so its words are spans that fade in as they arrive
- * (`arriving-words.tsx`, KOBE-207); the root then says `data-kobe-arrive="running"` for the CSS.
+ * `words`: agent text as it streams (KOBE-207). Words that arrive after mount are spans
+ * (`arriving-words.tsx`); `arriving` (the part is being written) marks the root
+ * `data-kobe-arrive="running"`, which is what switches their fade on in the CSS.
  */
 export function Markdown({
   text,
+  words = false,
   arriving = false,
 }: {
   readonly text: string;
+  readonly words?: boolean;
   readonly arriving?: boolean;
 }) {
   return (
     <div
-      data-kobe-arrive={arriving ? "running" : undefined}
+      data-kobe-words={words ? "" : undefined}
+      data-kobe-arrive={words && arriving ? "running" : undefined}
       className="[&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:rounded-md [&_:not(pre)>code]:border [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&>:first-child]:mt-0 [&>:last-child]:mb-0"
     >
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={arriving ? ARRIVING_PLUGINS : undefined}
-        components={COMPONENTS}
-        urlTransform={urlTransform}
-      >
-        {text}
-      </ReactMarkdown>
+      <SettledProvider text={text}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={words ? WORD_PLUGINS : undefined}
+          components={COMPONENTS}
+          urlTransform={urlTransform}
+        >
+          {text}
+        </ReactMarkdown>
+      </SettledProvider>
     </div>
   );
 }
