@@ -78,6 +78,7 @@ import {
   type RunRow,
 } from "./store.js";
 import { lockOwnedThread, ownedRun } from "./access.js";
+import { QUEUE_ORDER_MAX, reorderQueuedRuns } from "./queue-order.js";
 import { RunDispatcher, type StopTarget } from "./dispatch.js";
 import { sweepRuns, type RunSweepResult } from "./sweeper.js";
 import { MODEL_TOKEN_DEFAULTS, type ModelTokenDefaults } from "../models/token-limits.js";
@@ -108,7 +109,7 @@ export interface RunTuning {
 }
 
 export const RUN_DEFAULTS: RunTuning = {
-  maxQueuedPerThread: 25,
+  maxQueuedPerThread: QUEUE_ORDER_MAX,
   stopGraceMs: 10_000,
   startDeadlineMs: 150_000,
   stallMs: 30_000,
@@ -151,6 +152,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null>;
   /** Messages wait behind a Stop until the user resumes the queue or sends one (KOBE-26). */
   queuePaused(actor: ActorContext, threadId: string): Promise<boolean>;
+  /** The owner reorders the queued messages (CE10): `runIds` is the whole queue, in order. */
+  reorderQueue(actor: ActorContext, threadId: string, runIds: readonly string[]): Promise<void>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
@@ -561,6 +564,18 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       return promoteInTx(tx, this.#agents, actor.team_id, thread.id, this.#hold);
     });
     if (promotion) this.#afterCommit(actor.team_id, promotion);
+  }
+
+  async reorderQueue(
+    actor: ActorContext,
+    threadId: string,
+    runIds: readonly string[],
+  ): Promise<void> {
+    await this.#threadTx(actor, async (tx, viewer) => {
+      const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
+      await reorderQueuedRuns(tx, actor.team_id, thread.id, runIds);
+      await touchThread(tx, actor.team_id, thread.id);
+    });
   }
 
   async getRun(actor: ActorContext, runId: string): Promise<RunSnapshot> {

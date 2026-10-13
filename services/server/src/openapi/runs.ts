@@ -6,6 +6,7 @@ import {
   submitMessageResultSchema,
   updateQueuedBodySchema,
 } from "@kobe/protocol";
+import { queueOrderBodySchema } from "../runs/queue-order.js";
 
 /**
  * OpenAPI 3.1 description of messages and runs (spec §6.1, KOBE-30), generated from the zod
@@ -161,6 +162,26 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/queue/order": {
+      post: {
+        operationId: "reorderThreadQueue",
+        summary: "Reorder the queued messages (CE10; owner only)",
+        description:
+          "`run_ids` names every queued run of the thread once, in the new order. Retries still " +
+          "run first (D14). Returns the thread's runs.",
+        parameters: change,
+        requestBody: body("QueueOrderBody"),
+        responses: {
+          "200": json("ThreadRuns", "The thread's runs in the new order."),
+          "404": json("Error", "`thread_not_found`."),
+          "409": conflict(
+            "`queue_changed` (the ids are not the queued set: read the queue again), " +
+              "`thread_in_trash` or",
+          ),
+          ...COMMON,
+        },
+      },
+    },
     "/v1/runs/{id}": {
       get: {
         operationId: "getRun",
@@ -245,5 +266,6 @@ export function runsOpenApiSchemas(): Record<string, JsonSchema> {
     SubmitMessageResult: withoutDialect(output(submitMessageResultSchema)),
     SteerBody: withoutDialect(input(steerBodySchema)),
     UpdateQueuedBody: withoutDialect(input(updateQueuedBodySchema)),
+    QueueOrderBody: withoutDialect(input(queueOrderBodySchema)),
   };
 }
