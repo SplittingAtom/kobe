@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { XIcon } from "lucide-react";
 import { threadExportUrl, type TeamRetentionNotice } from "../../lib/chat/api";
+import { IconAction } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
@@ -75,15 +75,13 @@ export function RetentionNotice() {
         </InlineLink>{" "}
         to keep a copy.
       </p>
-      <button
-        type="button"
-        className="hover:bg-muted inline-flex size-7 shrink-0 items-center justify-center rounded-md"
-        aria-label="Dismiss retention notice"
-        title="Dismiss"
+      <IconAction
+        command="dismiss-notice"
+        label="Dismiss retention notice"
+        size="sm"
+        className="shrink-0"
         onClick={dismiss}
-      >
-        <XIcon aria-hidden className="size-4" />
-      </button>
+      />
     </div>
   );
 }

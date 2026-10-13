@@ -18,6 +18,7 @@ const css = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8
 const SHELL = css("./shell.module.css");
 const CHAT = css("../chat/chat.module.css");
 const RAIL = css("./rail.module.css");
+const GLOBAL = css("../../app/chat-global.css");
 
 /** Every declaration block whose selector list names `selector`, media blocks included. */
 function rules(source: string, selector: string): string[] {
@@ -140,6 +141,17 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     expect(declares(overlay, ".artifact:not([data-sheet-open])", "display: none;")).toBe(true);
     // Not a grid column there: the conversation keeps everything right of the 48 px rail.
     expect(overlay).not.toContain("grid-template-columns");
+    // KOBE-269: the sheet ends above the composer, so Send stays reachable (anchor positioning).
+    // No anchor on screen (loading, error): the fallback keeps it full height; no anchor
+    // positioning at all: the declaration drops, with the same result.
+    expect(declares(overlay, ".artifact", "bottom: anchor(--kobe-composer top, 0px);")).toBe(true);
+    expect(
+      declares(
+        GLOBAL,
+        "[data-kobe-chat] [data-kobe-composer-box]",
+        "anchor-name: --kobe-composer;",
+      ),
+    ).toBe(true);
   });
 
   it("under 768 px: one column; the drawer and the full-screen sheet leave the grid", () => {
@@ -197,6 +209,21 @@ describe("DOM contract", () => {
     expect(footer.className).toMatch(/\bshrink-0\b/);
     expect(list.getAttribute("role")).toBe("region");
     expect(list.getAttribute("aria-labelledby")).toBe("kobe-thread-title");
+  });
+
+  it("the sheet's anchor is the composer box (steering panel and input), not its footer (KOBE-269)", async () => {
+    const t = kobe.addThread("Sales");
+    kobe.addEntry(t, null, { role: "user", content: "q1" });
+    openApp(kobe, t);
+    const input = await composer();
+    const boxes = document.querySelectorAll("[data-kobe-composer-box]");
+    expect(boxes).toHaveLength(1);
+    const box = must(boxes[0]);
+    expect(box.contains(input)).toBe(true);
+    expect(box.querySelector("[data-kobe-steering]")).toBeTruthy();
+    // The footer grows (welcome, notices); the box is only as tall as what it holds.
+    expect(box.hasAttribute("data-kobe-composer")).toBe(false);
+    expect(box.className).not.toMatch(/\bflex-1\b/);
   });
 });
 

@@ -186,7 +186,8 @@ function MessagesAndComposer({
             <RunNotices extras={extras} />
           </div>
           <ComposerDictationProvider>
-            <div className="flex flex-col">
+            {/* The overlay sheet at 768–820 px ends above this box (KOBE-269, chat-global.css). */}
+            <div className="flex flex-col" data-kobe-composer-box>
               <SteeringPanel extras={extras} />
               <Composer extras={extras} modelPicker={modelPicker} />
             </div>

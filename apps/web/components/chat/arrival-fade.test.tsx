@@ -29,6 +29,7 @@ const spanOf = (root: ParentNode, word: string) =>
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Agent Markdown mounted with `text`; `update` streams more, `finish` ends the part. */
@@ -181,11 +182,25 @@ describe("the fade's CSS (ac-1, ac-3)", () => {
   it("animates arriving words over 600 ms from the tint", () => {
     const source = flat(CSS);
     expect(source).toMatch(
-      /@keyframes kobe-arrive \{ from \{ color: var\(--kobe-arrive-tint\); \} \}/,
+      /\[data-kobe-arrive="running"\] \[data-kobe-word\] \{ color: [^;]+; animation: kobe-arrive 600ms/,
     );
-    expect(source).toMatch(
-      /\[data-kobe-arrive="running"\] \[data-kobe-word\] \{ animation: kobe-arrive 600ms/,
+  });
+
+  it("mixes two colours in one space; it never interpolates a colour (KOBE-269)", () => {
+    const source = flat(CSS);
+    // Endpoints: the tint at the start (0% arrived), the inherited text colour at the end and at
+    // rest (100%); the text colour first, so the build's no-color-mix fallback is the text colour.
+    expect(source).toContain(
+      '@property --kobe-arrived { syntax: "<percentage>"; inherits: false; initial-value: 100%; }',
     );
+    expect(source).toContain(
+      "@keyframes kobe-arrive { from { --kobe-arrived: 0%; } to { --kobe-arrived: 100%; } }",
+    );
+    expect(source).toContain(
+      "color: color-mix(in srgb, currentColor var(--kobe-arrived), var(--kobe-arrive-tint));",
+    );
+    const keyframes = must(source.match(/@keyframes kobe-arrive \{.*?\} \}/))[0];
+    expect(keyframes).not.toMatch(/[{;] ?color:/);
   });
 
   it("tints only while the message list is pinned; otherwise words arrive plain", () => {
@@ -221,6 +236,9 @@ describe("in the conversation", () => {
     await streaming(kobe, run.run_id);
     return run.run_id;
   }
+
+  const answerText = () =>
+    [...document.querySelectorAll('[data-role="assistant"]')].map((m) => m.textContent).join(" ");
 
   const answer = () =>
     must(document.querySelector<HTMLElement>('[data-role="assistant"][aria-busy="true"]'));
@@ -268,6 +286,46 @@ describe("in the conversation", () => {
     await streaming(kobe, runId);
     act(() => kobe.agent.delta(runId, "m1", "four"));
     await waitFor(() => expect(words(document)).toEqual(["four"]));
+  });
+
+  it("Stop ends the fade at once, before the server confirms the run ended (KOBE-269)", async () => {
+    const t = kobe.addThread("Sales");
+    // The server accepts the cancel but the run's end arrives later (the sandbox is stopping).
+    const real = kobe.fetch;
+    vi.spyOn(kobe, "fetch").mockImplementation(async (input, init = {}) => {
+      const url = new URL(String(input), "http://kobe.test");
+      if (init.method === "POST" && url.pathname.endsWith("/cancel")) {
+        const res = await real(url.pathname.replace(/\/cancel$/, ""), { method: "GET" });
+        return Response.json(await res.json(), { status: 202 });
+      }
+      return real(input, init);
+    });
+    openApp(kobe, t);
+    const runId = await startRun(t);
+    act(() => kobe.agent.delta(runId, "m1", "Here is", 1));
+    await waitFor(() =>
+      expect(document.querySelector('[data-kobe-arrive="running"]')).toBeTruthy(),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(document.querySelector("[data-kobe-arrive]")).toBeNull());
+    expect(kobe.activeRun(t)?.run_id).toBe(runId); // the server has not ended it
+    // Words that still arrive before the run's end don't fade either.
+    act(() => kobe.agent.delta(runId, "m1", " more", 1));
+    await waitFor(() => expect(answerText()).toContain("more"));
+    expect(document.querySelector("[data-kobe-arrive]")).toBeNull();
+  });
+
+  it("after Stop and the run's end, no part is left marked as being written (KOBE-269)", async () => {
+    const t = kobe.addThread("Sales");
+    openApp(kobe, t);
+    const runId = await startRun(t);
+    act(() => kobe.agent.delta(runId, "m1", "Here is", 1));
+    await waitFor(() =>
+      expect(document.querySelector('[data-kobe-arrive="running"]')).toBeTruthy(),
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(kobe.activeRun(t)).toBeUndefined());
+    await waitFor(() => expect(document.querySelector("[data-kobe-arrive]")).toBeNull());
   });
 
   it("marks the message list with its follow state for the CSS (ac-3)", async () => {

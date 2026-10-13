@@ -44,7 +44,7 @@ import { artifactAsSheet } from "../../lib/shell/layout";
 import { fileTabId } from "../../lib/files/preview";
 import { useRail } from "../shell/rail-state";
 import { useShellBand } from "../shell/shell-band";
-import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
+import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
 export type { OpenRequest };
@@ -102,8 +102,6 @@ function artifactEvents(live: LiveRun | undefined): readonly ArtifactEvent[] {
   return [...Object.values(live.tools).flatMap((t) => t.artifacts), ...notices];
 }
 
-const liveOf = (extras: unknown) => (extras as KobeThreadExtras | undefined)?.state.live;
-
 /**
  * Artifact events seen on the live run (of `id` only, when given): a change means the list or
  * that artifact moved on. A number, so streamed text deltas don't re-render the caller.
@@ -111,7 +109,7 @@ const liveOf = (extras: unknown) => (extras as KobeThreadExtras | undefined)?.st
 export function useArtifactEventCount(id?: string): number {
   return useAuiState(
     (s) =>
-      artifactEvents(liveOf(s.thread.extras)).filter(
+      artifactEvents(kobeExtrasOf(s)?.state.live).filter(
         (e) => id === undefined || e.artifact_id === id,
       ).length,
   );
@@ -123,7 +121,7 @@ export function useArtifactEventCount(id?: string): number {
  */
 function useCreatedOn(threadId: string | undefined): string {
   return useAuiState((s) => {
-    const extras = s.thread.extras as KobeThreadExtras | undefined;
+    const extras = kobeExtrasOf(s);
     if (threadId === undefined || extras?.state.threadId !== threadId) return "";
     return artifactEvents(extras.state.live)
       .filter((e) => e.version === 1)

@@ -54,7 +54,7 @@ function StatusRow({
   if (mode === "interrupted") {
     const waiting = queuedMessages(state).length;
     return (
-      <p className="text-sm" role="alert">
+      <p className="m-0 text-sm" role="alert">
         <strong>The run was interrupted</strong> because the workspace stopped. It may have done
         part of its work, so it is not retried automatically.
         {waiting > 0 ? ` ${waiting} queued message${waiting === 1 ? " waits" : "s wait"}.` : ""}
@@ -63,7 +63,7 @@ function StatusRow({
   }
   if (!phase) {
     return (
-      <p className="text-muted-foreground text-xs">
+      <p className="text-muted-foreground m-0 text-xs">
         {state.queuePaused ? (
           <>
             <strong className="text-foreground">Queue paused.</strong> The messages below wait until
@@ -76,7 +76,7 @@ function StatusRow({
     );
   }
   return (
-    <p className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs">
+    <p className="text-muted-foreground m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs">
       {agent && <span className="text-foreground truncate font-medium">{agent}</span>}
       {agent && <span aria-hidden>·</span>}
       <span className="truncate">{model}</span>
