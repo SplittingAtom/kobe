@@ -214,9 +214,14 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(grid().querySelector('[data-shell-region="conversation"]')?.hasAttribute("inert")).toBe(
       true,
     );
+    // The drawer's divider moves the drawer only: nothing is saved on a phone (KOBE-202).
+    within(drawer).getByRole("separator", { name: "Resize Threads and Files" }).focus();
+    await user.keyboard("{ArrowUp}");
     await user.click(within(drawer).getByRole("button", { name: "Close the workspace" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
     expect(document.activeElement).toBe(open);
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts()).toHaveLength(0);
   });
 
   it("390: an artifact opens as a full-screen modal sheet with Back and a tab strip", async () => {

@@ -22,7 +22,7 @@ band (`wide` / `medium` / `overlay` / `single`) from `matchMedia`, followed on `
   wide windows only. Below 1100 px the grid gives the rail 48 px whatever was chosen. Expanding it
   there opens a **modal drawer** (280 px, `role=dialog`, `aria-modal`). The drawer is never saved
   and never touches the choice, so the choice comes back above 1100 px (ac-2). A resize across
-  1100 px closes the drawer. `applyRailCollapsed` no longer forces "collapsed" on narrow screens:
+  1100 px closes the drawer. The drawer's Threads/Files divider moves the drawer only (unsaved). `applyRailCollapsed` no longer forces "collapsed" on narrow screens:
   the band does that on screen without touching the stored value.
 - **Artifact column (CE7 steps 2–3).** ≥ 820 px: a column within both floors, with the resize
   handle (previously ≥ 1100 px only). Between 820 and 1100 px the rail is already 48 px, so the

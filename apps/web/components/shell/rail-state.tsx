@@ -145,10 +145,11 @@ export function RailProvider({
     (next: boolean) => (docked ? commitChosen(next) : openDrawer(!next)),
     [docked, commitChosen, openDrawer],
   );
-  const commitShare = share.commit;
+  // The drawer's divider sits in a different height: it moves the drawer only, unsaved.
+  const { commit: commitShare, set: setShare } = share;
   const setThreadsShare = useCallback(
-    (next: number) => commitShare(clampShare(next)),
-    [commitShare],
+    (next: number) => (docked ? commitShare : setShare)(clampShare(next)),
+    [docked, commitShare, setShare],
   );
   const reveal = useCallback(
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
