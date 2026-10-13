@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review
+- **Status:** in review (PR #260)
 - **Branch / worktree:** `kobe-200-artifact-tabs` in `../Kobe-wt200`
 - **Depends on:** KOBE-197 (shell grid), KOBE-203 (IconAction), KOBE-205 (column scroll), KOBE-198
 
