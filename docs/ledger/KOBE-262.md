@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review
+- **Status:** in review (PR #269)
 - **Branch / worktree:** `kobe-262-flaky-tests` in `../Kobe-wt262`
 - **Scope:** test-only; no product change.
 
