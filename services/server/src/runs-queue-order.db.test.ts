@@ -106,12 +106,25 @@ describe("queue order", () => {
       { run_ids: [] },
       { run_ids: ["nope"] },
       { run_ids: [q1, q1] },
-      { run_ids: ids(26) },
+      { run_ids: ids(101) },
       { run_ids: [q1], extra: true },
     ]) {
       const res = await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/order`, body);
       expect(res.status, JSON.stringify(body)).toBe(400);
     }
+    // Past the queue cap (a Retry may queue past it) the exact-set check decides: 409, not 400.
+    const many = await order(w, threadId, ids(26));
+    expect([many.status, many.json.code]).toEqual([409, "queue_changed"]);
+  });
+
+  it("refuses a thread in Trash on both routes (409 thread_in_trash)", async () => {
+    const w = await f.world();
+    const threadId = await f.thread(w.owner);
+    expect((await f.on(0, w.owner).delete(`/v1/threads/${threadId}`)).status).toBe(200);
+    const ordered = await order(w, threadId, [crypto.randomUUID()]);
+    expect([ordered.status, ordered.json.code]).toEqual([409, "thread_in_trash"]);
+    const paused = await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/pause`);
+    expect([paused.status, paused.json.code]).toEqual([409, "thread_in_trash"]);
   });
 
   it("only the owner reorders: a team member and another team get 404", async () => {

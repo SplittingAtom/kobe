@@ -78,7 +78,7 @@ import {
   type RunRow,
 } from "./store.js";
 import { lockOwnedThread, ownedRun } from "./access.js";
-import { QUEUE_ORDER_MAX, reorderQueuedRuns } from "./queue-order.js";
+import { queuedMessageCount, reorderQueuedRuns } from "./queue-order.js";
 import { RunDispatcher, type StopTarget } from "./dispatch.js";
 import { sweepRuns, type RunSweepResult } from "./sweeper.js";
 import { MODEL_TOKEN_DEFAULTS, type ModelTokenDefaults } from "../models/token-limits.js";
@@ -109,7 +109,7 @@ export interface RunTuning {
 }
 
 export const RUN_DEFAULTS: RunTuning = {
-  maxQueuedPerThread: QUEUE_ORDER_MAX,
+  maxQueuedPerThread: 25,
   stopGraceMs: 10_000,
   startDeadlineMs: 150_000,
   stallMs: 30_000,
@@ -557,6 +557,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const paused = await isQueuePaused(tx, actor.team_id, thread.id);
       if (thread.status !== "interrupted" && !paused) return undefined;
       if (paused) await setQueuePaused(tx, actor.team_id, thread.id, false);
+      await touchThread(tx, actor.team_id, thread.id);
       await recordAudit(tx, {
         action: "run.queue_resumed",
         actor: userActor(actor),
@@ -595,14 +596,17 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async pauseQueue(actor: ActorContext, threadId: string): Promise<void> {
     await this.#threadTx(actor, async (tx, viewer) => {
       const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
-      const queued = await queuedCount(tx, actor.team_id, thread.id);
-      if (queued === 0 || (await isQueuePaused(tx, actor.team_id, thread.id))) return;
+      // A queued Retry still runs first while paused (D14, promotion): only messages wait.
+      const waiting = await queuedMessageCount(tx, actor.team_id, thread.id);
+      if (waiting === 0 || (await isQueuePaused(tx, actor.team_id, thread.id))) return;
       await setQueuePaused(tx, actor.team_id, thread.id, true);
+      // Like every other queue change: the thread's activity moves, so other tabs read it again.
+      await touchThread(tx, actor.team_id, thread.id);
       await recordAudit(tx, {
         action: "run.queue_paused",
         actor: userActor(actor),
         teamId: actor.team_id,
-        target: { threadId: thread.id, queued },
+        target: { threadId: thread.id, queued: waiting },
       });
     });
   }

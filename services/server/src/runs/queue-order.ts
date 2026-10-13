@@ -5,11 +5,11 @@ import { RunError } from "./errors.js";
 
 /**
  * Reordering a thread's queued messages (CE10, KOBE-206): `POST /v1/threads/{id}/queue/order`.
- * The body names every queued run of the thread once, in the new order. Bounded by the queue cap
- * (`RunTuning.maxQueuedPerThread`, 25 by default), so the server never reads more ids than a
- * thread can hold.
+ * The body names every queued run of the thread once, in the new order. The bound is generous on
+ * purpose: the queue cap (`RunTuning.maxQueuedPerThread`, 25 by default) is a tunable and a Retry
+ * may queue past it, so the exact-set check under the lock is what decides, never this bound.
  */
-export const QUEUE_ORDER_MAX = 25;
+export const QUEUE_ORDER_MAX = 100;
 
 export const queueOrderBodySchema = z.strictObject({
   run_ids: z
@@ -36,8 +36,8 @@ interface QueuedRow {
  * and `queue_pos` agrees with the rank the client reads back.
  *
  * `runs_queue_pos_unique` (team, thread, queue_pos) among queued runs is checked per row, so the
- * rewrite runs in two steps: first above every current position (no clash with untouched rows),
- * then down to 1..n (every row already sits above n).
+ * rewrite runs in two set-based steps: first above every current position (no clash with
+ * untouched rows), then down to 1..n (every row already sits above n).
  */
 export async function reorderQueuedRuns(
   tx: KobeTx,
@@ -64,16 +64,32 @@ export async function reorderQueuedRuns(
   await writePositions(tx, teamId, order, 0);
 }
 
-/** `queue_pos` = base + 1, base + 2, … in `order` (at most the queue cap of rows). */
+/** `queue_pos` = base + 1, base + 2, … in `order`: one UPDATE, ordinals from `unnest`. */
 async function writePositions(
   tx: KobeTx,
   teamId: string,
   order: readonly string[],
   base: number,
 ): Promise<void> {
-  for (const [i, id] of order.entries()) {
-    await tx.execute(sql`
-      UPDATE runs SET queue_pos = ${base + i + 1}
-       WHERE team_id = ${teamId} AND id = ${id} AND status = 'queued'`);
-  }
+  const ids = sql`ARRAY[${sql.join(
+    order.map((id) => sql`${id}`),
+    sql`, `,
+  )}]::uuid[]`;
+  await tx.execute(sql`
+    UPDATE runs r SET queue_pos = ${base} + o.ord
+      FROM unnest(${ids}) WITH ORDINALITY AS o(id, ord)
+     WHERE r.team_id = ${teamId} AND r.id = o.id AND r.status = 'queued'`);
+}
+
+/** Queued user messages, retries excluded (a paused queue still lets a Retry start, D14). */
+export async function queuedMessageCount(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<number> {
+  const res = await tx.execute<{ n: string | number }>(sql`
+    SELECT count(*) AS n FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND status = 'queued'
+       AND retry_of_run_id IS NULL`);
+  return Number(res.rows[0]?.n ?? 0);
 }

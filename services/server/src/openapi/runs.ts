@@ -167,8 +167,9 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         operationId: "pauseThreadQueue",
         summary: "Pause the queue: queued messages wait until resumed (CE10; owner only)",
         description:
-          "The active run goes on; the queued runs don't start until `queue/resume` or a new " +
-          "message. No-op when nothing is queued. Returns the thread's runs.",
+          "The active run goes on; the queued messages don't start until `queue/resume` or a " +
+          "new message. A queued Retry still runs first (D14). No-op when no message is " +
+          "queued. Returns the thread's runs.",
         parameters: change,
         responses: {
           "200": json("ThreadRuns", "The thread's runs; `queue_paused` is true while any wait."),
