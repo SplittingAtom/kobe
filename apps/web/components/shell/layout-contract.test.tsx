@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { cleanup, renderHook, screen } from "@testing-library/react";
+import { cleanup, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { viewport } from "../../app/layout";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -16,6 +16,7 @@ import { useViewportHeight } from "../chat/use-viewport-height";
 const css = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const SHELL = css("./shell.module.css");
 const CHAT = css("../chat/chat.module.css");
+const RAIL = css("./rail.module.css");
 
 /** Every declaration block whose selector list names `selector`, media blocks included. */
 function rules(source: string, selector: string): string[] {
@@ -89,6 +90,49 @@ describe("DOM contract", () => {
     expect(footer.className).toMatch(/\bshrink-0\b/);
     expect(list.getAttribute("role")).toBe("region");
     expect(list.getAttribute("aria-labelledby")).toBe("kobe-thread-title");
+  });
+});
+
+describe("rail width (KOBE-267)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("the sections grid is one column exactly the rail's width, so the divider is too", () => {
+    expect(declares(RAIL, ".sections", "grid-template-columns: minmax(0, 1fr);")).toBe(true);
+    // An explicit width or min-width on the divider could still push past the rail.
+    const divider = rules(RAIL, ".divider").join("");
+    expect(divider).toContain("min-width: 0;");
+    expect(divider).not.toMatch(/(^|[^-])width:/);
+  });
+
+  it("nothing in the rail is sized by a title's length: every level may shrink", () => {
+    expect(declares(RAIL, ".rail", "min-width: 0;")).toBe(true);
+    expect(declares(RAIL, ".rail", "overflow-x: clip;")).toBe(true);
+    for (const selector of [".expanded", ".sections", ".section", ".sectionBody", ".scroll"]) {
+      expect(declares(RAIL, selector, "min-width: 0;"), selector).toBe(true);
+    }
+    for (const selector of [".threadList", ".threadItem", ".threadTrigger"]) {
+      expect(declares(CHAT, selector, "min-width: 0;"), selector).toBe(true);
+    }
+    const trigger = rules(CHAT, ".threadTrigger").join("");
+    for (const d of ["overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
+      expect(trigger).toContain(d);
+    }
+  });
+
+  it("a 200-character title renders inside the ellipsizing trigger, in the rail", async () => {
+    const kobe = new FakeKobe();
+    vi.stubGlobal("fetch", kobe.fetch);
+    const title = "Quarterly revenue reconciliation ".repeat(7).slice(0, 200);
+    kobe.addThread(title);
+    openApp(kobe);
+    const rail = await screen.findByRole("complementary", { name: "Workspace" });
+    const text = await within(rail).findByText(title);
+    const trigger = must(text.closest("button"), "trigger");
+    expect(trigger.className).toMatch(/threadTrigger/);
+    expect(trigger.closest("aside")).toBe(rail);
   });
 });
 

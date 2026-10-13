@@ -4,7 +4,9 @@
 .rail {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  overflow-x: clip; /* never wider than its column (KOBE-267); no scroll container */
   background: var(--admin-panel);
   border-bottom: 1px solid var(--admin-border);
 }
@@ -25,6 +27,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -67,16 +70,20 @@
   white-space: nowrap;
 }
 
-/* Threads, divider, Files; the rows' split is set inline from the divider's position. */
+/* Threads, divider, Files; the rows' split is set inline from the divider's position. One column
+   exactly the rail's width: an auto column grew to a long title's length (KOBE-267). */
 .sections {
   display: grid;
   flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   min-height: 0;
 }
 
 .section {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   outline: none;
 }
@@ -85,6 +92,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -112,6 +120,7 @@
 
 .scroll {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   padding: 0 0.5rem 0.75rem;
   overflow-y: auto;
@@ -120,6 +129,7 @@
 
 .divider {
   position: relative;
+  min-width: 0;
   height: 0.5rem;
   cursor: row-resize;
   touch-action: none;

@@ -45,6 +45,19 @@ drop. A small server change opens one spot of uploads/ to the member (coordinato
   (507): before this, its message never reached the member, in the file browser too.
 - `packages/protocol/src/files.ts`: doc comment only (the exception). No schema change.
 
+## KOBE-267 (same PR, separate commit; coordinator, 2026-10-12)
+
+- gate1 (headless Chrome) showed the rail's sections grid at 587 px inside the 280 px rail. Its
+  implicit `auto` column grew to a long title's max-content, so titles clipped, and the divider
+  reached under the conversation. That would also have made the drop overlay too wide.
+- Fix: `.sections` gets `grid-template-columns: minmax(0, 1fr)`; `min-width: 0` on the rail,
+  `.expanded`, `.sections`, `.section`, `.sectionBody`, `.scroll`, `.divider`, `.threadList` and
+  `.threadItem`; the rail gets `overflow-x: clip` (no scroll container). The trigger already
+  ellipsizes.
+- Tests: `layout-contract.test.tsx` "rail width (KOBE-267)": the CSS contract (happy-dom has no
+  layout), plus a 200-character title rendered in the ellipsizing trigger inside the rail. The real
+  widths still need the gate1 browser check.
+
 ## Open questions (for Chris or the coordinator)
 
 - None blocking. A dropped file keeps its name only up to 9 copies; after that the drop fails
