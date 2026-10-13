@@ -16,6 +16,7 @@ import {
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, B, C] = [id(1), id(2), id(3)];
+const F = "file:notes/todo list.md";
 
 afterEach(() => {
   localStorage.clear();
@@ -52,6 +53,11 @@ describe("tab state", () => {
     expect(retainTabs(tabs, new Set([A, C]))).toEqual({ open: [A, C], active: C });
     expect(retainTabs(tabs, new Set())).toEqual(NO_TABS);
   });
+
+  it("leaves file tabs to the file viewer (KOBE-268): the artifact list never drops them", () => {
+    const tabs = { open: [A, F, B], active: F };
+    expect(retainTabs(tabs, new Set([B]))).toEqual({ open: [F, B], active: F });
+  });
 });
 
 describe("storage", () => {
@@ -78,6 +84,12 @@ describe("storage", () => {
   it("keeps only artifact ids, once each, and a valid active tab", () => {
     localStorage.setItem(key, JSON.stringify({ open: [A, 7, "../x", A, B, null], active: "nope" }));
     expect(readTabs(key)).toEqual({ open: [A, B], active: B });
+  });
+
+  it("keeps file tabs with valid workspace paths beside artifact tabs (KOBE-268)", () => {
+    const open = [A, F, "file:", "file:/etc/x", "file:a/../b", F, "file:x.csv"];
+    localStorage.setItem(key, JSON.stringify({ open, active: F }));
+    expect(readTabs(key)).toEqual({ open: [A, F, "file:x.csv"], active: F });
   });
 
   it("survives blocked storage", () => {

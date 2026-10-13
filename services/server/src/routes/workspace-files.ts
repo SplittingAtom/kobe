@@ -34,6 +34,7 @@ import {
   isReadOnlyPath,
   joinPath,
 } from "../workspace-files/paths.js";
+import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { currentEntry } from "../workspace-sync/store.js";
@@ -115,6 +116,7 @@ export function workspaceFileRoutes(
   app.get("/file", async (c) => {
     const query = workspaceDownloadQuerySchema.safeParse(queryOf(c));
     if (!query.success) return badPath(c);
+    if (isInternalPath(query.data.path)) return notFound(c);
     const owner = ownerOf(c);
     const entry = await withTeam(db, owner.teamId, async (tx) => {
       const found = await currentEntry(tx, owner, query.data.path);
@@ -239,6 +241,8 @@ export function workspaceFileRoutes(
         return c.body(null, 204);
     }
   });
+
+  registerWorkspaceFrame(app, deps, sync);
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {

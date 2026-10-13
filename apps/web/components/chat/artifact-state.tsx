@@ -15,6 +15,8 @@
  * - Under 820 px the column is a sheet (CE7, CE8, KOBE-201): it shows when the member opens an
  *   artifact and hides with Back, keeping the tabs; the agent's new artifacts join the tabs
  *   without covering the conversation. The width is neither applied nor saved there.
+ * - Workspace files open as tabs too (KOBE-268, `lib/files/preview.ts`: `file:<path>` ids, so they
+ *   never collide with artifact ids); one whose file is gone is dropped with a notice.
  */
 import {
   createContext,
@@ -39,6 +41,7 @@ import {
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { artifactAsSheet } from "../../lib/shell/layout";
+import { fileTabId } from "../../lib/files/preview";
 import { useRail } from "../shell/rail-state";
 import { useShellBand } from "../shell/shell-band";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
@@ -62,6 +65,13 @@ export interface ArtifactPanelApi {
   hideSheet(): void;
   /** The member opens an artifact: its tab becomes active and the column takes focus. */
   openArtifact(id: string, version?: number): void;
+  /** The member opens a workspace file (KOBE-268): like an artifact, keyed by its path. */
+  openFile(path: string): void;
+  /** The file's tab closes: it is no longer in the workspace (`goneFile` names it). */
+  dropFile(path: string): void;
+  /** The last file whose tab was dropped, until the member dismisses the notice. */
+  readonly goneFile: string | null;
+  dismissGone(): void;
   activate(id: string): void;
   closeTab(id: string): void;
   /** Closes the active tab. */
@@ -242,12 +252,17 @@ export function ArtifactPanelProvider({
   readonly onSavePreferences?: (change: LayoutPreferences) => void;
   readonly children: ReactNode;
 }) {
-  const t = useArtifactTabs(threadId === undefined ? null : tabsKey(teamId, threadId));
+  // assistant-ui's id of the conversation on screen: unchanged when a new one gets its thread id.
+  const conversation = useAuiState((s) => s.threadListItem.id);
+  const t = useArtifactTabs(
+    threadId === undefined ? null : tabsKey(teamId, threadId),
+    conversation,
+  );
   const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
-  const { openArtifact: openTab } = t;
+  const { openArtifact: openTab, drop } = t;
   const openArtifact = useCallback(
     (id: string, version?: number) => {
       sheet.show();
@@ -255,6 +270,20 @@ export function ArtifactPanelProvider({
     },
     [sheet, openTab],
   );
+  const openFile = useCallback((path: string) => openArtifact(fileTabId(path)), [openArtifact]);
+  const [gone, setGone] = useState<{ readonly path: string; readonly threadId?: string } | null>(
+    null,
+  );
+  // The notice belongs to the thread it was raised on: another thread on screen clears it.
+  const goneFile = gone !== null && gone.threadId === threadId ? gone.path : null;
+  const dropFile = useCallback(
+    (path: string) => {
+      drop(fileTabId(path));
+      setGone(threadId === undefined ? { path } : { path, threadId });
+    },
+    [drop, threadId],
+  );
+  const dismissGone = useCallback(() => setGone(null), []);
 
   const api = useMemo<ArtifactPanelApi>(
     () => ({
@@ -266,12 +295,20 @@ export function ArtifactPanelProvider({
       sheetOpen: sheet.open,
       hideSheet: sheet.hide,
       openArtifact,
+      openFile,
+      dropFile,
+      goneFile,
+      dismissGone,
       activate: t.activate,
       closeTab: t.closeTab,
       close: t.close,
       setWidth,
     }),
     [
+      openFile,
+      dropFile,
+      goneFile,
+      dismissGone,
       t.tabs,
       artifacts,
       createdTitles,

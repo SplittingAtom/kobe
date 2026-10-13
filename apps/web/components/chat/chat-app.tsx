@@ -21,6 +21,7 @@ import { RailDrawerButton, RailProvider } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { WorkspaceRail } from "../shell/workspace-rail";
+import { FileGoneNotice } from "../files/file-tab";
 import { IconActionProvider } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
 import { ShellSlot, ShellSlotsProvider, useBarMenu } from "../shell/shell-slots";
@@ -189,6 +190,7 @@ function ChatWorkspace({
           preferences={layout.preferences}
           onSavePreferences={layout.save}
         >
+          <FileGoneNotice />
           <ShellSlot name="search">
             <ThreadSearch onOpenThread={setThreadId} />
           </ShellSlot>
@@ -207,7 +209,7 @@ function ChatWorkspace({
                 fetchFn={fetchFn}
               />
             }
-            artifact={<ArtifactPanel />}
+            artifact={<ArtifactPanel filesApi={filesApi} />}
             conversation={
               <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
                 <ThreadView onOpenThread={setThreadId} contextInBar />

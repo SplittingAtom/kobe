@@ -37,6 +37,13 @@ describe("parseCsv", () => {
     expect(parseCsv("")).toEqual([]);
     expect(parseCsv("a,,c\n")).toEqual([["a", "", "c"]]);
   });
+
+  it("splits TSV on tabs when asked (KOBE-268)", () => {
+    expect(parseCsv("a\tb,c\n1\t2", "\t")).toEqual([
+      ["a", "b,c"],
+      ["1", "2"],
+    ]);
+  });
 });
 
 describe("fenced", () => {

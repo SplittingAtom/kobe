@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type KeyboardEvent } from "react";
+import { tabDomId } from "../../lib/files/preview";
 import { IconAction } from "../shell/icon-action";
 
 export interface ArtifactTabView {
@@ -8,8 +9,8 @@ export interface ArtifactTabView {
   readonly title: string;
 }
 
-export const artifactTabId = (id: string) => `kobe-artifact-tab-${id}`;
-export const artifactTabpanelId = (id: string) => `kobe-artifact-tabpanel-${id}`;
+export const artifactTabId = (id: string) => `kobe-artifact-tab-${tabDomId(id)}`;
+export const artifactTabpanelId = (id: string) => `kobe-artifact-tabpanel-${tabDomId(id)}`;
 
 /**
  * The artifact column's tabs (CE6, KOBE-200): WAI-ARIA tabs with automatic activation. Arrow

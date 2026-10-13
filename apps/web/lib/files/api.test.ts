@@ -68,4 +68,43 @@ describe("files api", () => {
     const res = await createFilesApi("t1", fetchFn).download("d/n.txt");
     expect(res.ok && new TextDecoder().decode(res.data)).toBe("abc");
   });
+
+  it("reads at most maxBytes, says so, and reports the full size", async () => {
+    const seen: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      seen.push(String(input));
+      return new Response("abcdefgh", { headers: { "content-length": "8" } });
+    };
+    const api = createFilesApi("t1", fetchFn);
+    const cut = await api.read("d/n.txt", 3);
+    expect(cut.ok && { ...cut.data, bytes: new TextDecoder().decode(cut.data.bytes) }).toEqual({
+      bytes: "abc",
+      size: 8,
+      truncated: true,
+    });
+    const whole = await api.read("d/n.txt", 8);
+    expect(whole.ok && whole.data.truncated).toBe(false);
+    expect(seen[0]).toBe("/v1/workspace/file?path=d%2Fn.txt");
+    const missing = await createFilesApi("t1", stub(404, { code: "not_found" }).fetchFn).read(
+      "x",
+      3,
+    );
+    expect(!missing.ok && missing.error.code).toBe("not_found");
+  });
+
+  it("fetches nothing of a body whose Content-Length is over the cap", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(4));
+      },
+    });
+    const fetchFn: typeof fetch = async () =>
+      new Response(body, { headers: { "content-length": "8" } });
+    const api = createFilesApi("t1", fetchFn);
+    const res = await api.read("big", 0, true);
+    expect(res.ok && res.data).toEqual({ bytes: new Uint8Array(0), size: 8, truncated: true });
+    expect(pulled).toBeLessThanOrEqual(1); // at most the stream's own first pull
+  });
 });

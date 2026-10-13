@@ -4,7 +4,13 @@
  * caller's own, so no call names an owner. Entries are camelized by the client.
  */
 import type { WorkspaceArea } from "@kobe/protocol";
-import { apiDownload, apiRequest, type ApiResult } from "../api/client";
+import {
+  apiDownload,
+  apiReadCapped,
+  apiRequest,
+  type ApiResult,
+  type CappedBytes,
+} from "../api/client";
 
 export interface FileEntry {
   readonly name: string;
@@ -31,6 +37,12 @@ export interface FilesApi {
   download(path: string): Promise<ApiResult<Uint8Array>>;
   upload(folder: string, file: File): Promise<ApiResult<FileEntry>>;
   remove(path: string): Promise<ApiResult<void>>;
+  /**
+   * A file's first `maxBytes` for a preview (KOBE-268); the rest is never fetched. `wholeOnly`:
+   * nothing is read when its size is over the cap (images; 0 = headers only, for the size and
+   * whether it exists). 404 `not_found`: the file is gone.
+   */
+  read(path: string, maxBytes: number, wholeOnly?: boolean): Promise<ApiResult<CappedBytes>>;
   /** The panel opened: start the sandbox so the next sync catches up (202, fire and forget). */
   wake(): Promise<ApiResult<{ readonly status: string }>>;
 }
@@ -48,6 +60,8 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
   const opts = { teamId, fetchFn };
   return {
     list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
+    read: (path, maxBytes, wholeOnly = false) =>
+      apiReadCapped(`/v1/workspace/file${query({ path })}`, maxBytes, { ...opts, wholeOnly }),
     download: (path) => apiDownload(`/v1/workspace/file${query({ path })}`, opts),
     upload: (folder, file) => {
       const form = new FormData();

@@ -3,7 +3,8 @@
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
 import { useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
-import type { FilesApi } from "../../lib/files/api";
+import type { FileEntry, FilesApi } from "../../lib/files/api";
+import { useArtifactPanel } from "../chat/artifact-state";
 import { FileBrowser } from "../files/file-browser";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
@@ -88,6 +89,14 @@ function RailFiles({
     clearDrop();
     rail.requestFiles();
   };
+  const panel = useArtifactPanel();
+  // A file opens in the artifact column (KOBE-268); the drawer (under 1100 px) makes way for it.
+  const openFile = panel
+    ? (entry: FileEntry) => {
+        if (rail.drawer) rail.closeDrawer();
+        panel.openFile(entry.path);
+      }
+    : undefined;
   return (
     <section
       id={SECTION_IDS.files}
@@ -111,7 +120,12 @@ function RailFiles({
           </button>
         </div>
       ) : (
-        <FileBrowser api={api} wakeKey={rail.filesRequests} showFolder={showFolder} />
+        <FileBrowser
+          api={api}
+          wakeKey={rail.filesRequests}
+          showFolder={showFolder}
+          onOpenFile={openFile}
+        />
       )}
     </section>
   );

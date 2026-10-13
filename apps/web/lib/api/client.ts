@@ -189,6 +189,46 @@ export async function apiTextFile(
   return { ok: true, status: res.status, data: { text: await res.text(), filename } };
 }
 
+/** At most `maxBytes` of a binary body, and whether there was more (`size`: Content-Length). */
+export interface CappedBytes {
+  readonly bytes: Uint8Array;
+  readonly size: number | null;
+  readonly truncated: boolean;
+}
+
+/** Reads the body until `maxBytes`, then cancels the rest (it is never downloaded in full). */
+async function readUpTo(res: Response, maxBytes: number, wholeOnly: boolean): Promise<CappedBytes> {
+  const length = Number(res.headers.get("content-length") ?? "NaN");
+  const size = Number.isSafeInteger(length) ? length : null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (wholeOnly && size !== null && size > maxBytes) {
+    await res.body?.cancel(); // only all of it would do: none of it is fetched
+    return { bytes: new Uint8Array(0), size, truncated: true };
+  }
+  let truncated = false;
+  const reader = res.body?.getReader();
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+    if (total > maxBytes) {
+      truncated = true;
+      await reader.cancel();
+      break;
+    }
+  }
+  const bytes = new Uint8Array(Math.min(total, maxBytes));
+  let at = 0;
+  for (const chunk of chunks) {
+    const part = chunk.subarray(0, bytes.length - at);
+    bytes.set(part, at);
+    at += part.length;
+  }
+  return { bytes, size, truncated };
+}
+
 export type ErrorKind =
   "signIn" | "forbidden" | "notFound" | "chooseTeam" | "reload" | "isolation" | "other";
 
@@ -205,14 +245,13 @@ export function errorKind(error: ApiError): ErrorKind {
   return "other";
 }
 
-/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
-export async function apiDownload(
+/** A GET whose body is binary: the response when it is ok, else the same `ApiError`s as `apiRequest`. */
+async function getBinary(
   path: string,
-  options: {
-    readonly teamId?: string | undefined;
-    readonly fetchFn?: typeof fetch | undefined;
-  } = {},
-): Promise<ApiResult<Uint8Array>> {
+  options: Pick<RequestOptions, "teamId" | "fetchFn">,
+): Promise<
+  { readonly ok: true; readonly res: Response } | { readonly ok: false; readonly error: ApiError }
+> {
   assertApiPath(path);
   const { teamId, fetchFn = fetch } = options;
   const headers = new Headers();
@@ -224,5 +263,39 @@ export async function apiDownload(
     return { ok: false, error: fallback(0) };
   }
   if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
-  return { ok: true, status: res.status, data: new Uint8Array(await res.arrayBuffer()) };
+  return { ok: true, res };
+}
+
+/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
+export async function apiDownload(
+  path: string,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
+): Promise<ApiResult<Uint8Array>> {
+  const got = await getBinary(path, options);
+  if (!got.ok) return got;
+  try {
+    return { ok: true, status: got.res.status, data: new Uint8Array(await got.res.arrayBuffer()) };
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
+}
+
+/**
+ * GET of a binary body capped at `maxBytes` (a preview): the rest is never fetched. `wholeOnly`
+ * (an image, or `maxBytes` 0 for headers only): a body whose Content-Length is over the cap is
+ * not read at all.
+ */
+export async function apiReadCapped(
+  path: string,
+  maxBytes: number,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> & { readonly wholeOnly?: boolean } = {},
+): Promise<ApiResult<CappedBytes>> {
+  const got = await getBinary(path, options);
+  if (!got.ok) return got;
+  try {
+    const data = await readUpTo(got.res, maxBytes, options.wholeOnly === true);
+    return { ok: true, status: got.res.status, data };
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
 }

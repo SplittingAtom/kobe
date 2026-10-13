@@ -76,6 +76,19 @@ export const FRAME_HEADERS: Readonly<Record<string, string>> = {
   "x-content-type-options": "nosniff",
 };
 
+/** Browsers mark a navigation another site started; a frame must come from Kobe's own page. */
+const SAME_SITE_FETCH = new Set(["same-origin", "none"]);
+
+/**
+ * Whether a frame request comes from Kobe's own page (D-6): `Sec-Fetch-Site`, when sent, is
+ * same-origin or none, and `Origin`, when sent, is Kobe's public URL.
+ */
+export function isSameSiteFrameRequest(headers: Headers, publicUrl: string): boolean {
+  const site = headers.get("sec-fetch-site");
+  const origin = headers.get("origin");
+  return (site === null || SAME_SITE_FETCH.has(site)) && (origin === null || origin === publicUrl);
+}
+
 /** An SVG as a minimal HTML document (the frame route serves HTML only). */
 export function svgDocument(svg: string): string {
   return (
@@ -85,6 +98,29 @@ export function svgDocument(svg: string): string {
     "justify-content:center}svg{max-width:100%;max-height:100%}</style></head>" +
     `<body>${svg}</body></html>`
   );
+}
+
+/**
+ * A body read to the end, or "too_large" (the stream destroyed) once it passes `maxBytes`. A
+ * stream error rejects; callers log it with their context. Shared by the artifact and workspace
+ * frame routes.
+ */
+export async function readCappedBody(
+  body: Readable,
+  maxBytes: number,
+): Promise<Buffer | "too_large"> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of body) {
+    const b = Buffer.from(chunk as Uint8Array);
+    bytes += b.length;
+    if (bytes > maxBytes) {
+      body.destroy();
+      return "too_large";
+    }
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -104,16 +140,6 @@ export async function readArtifactBytes(
     object.body.destroy();
     return undefined;
   }
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of object.body as Readable) {
-    const b = Buffer.from(chunk as Uint8Array);
-    bytes += b.length;
-    if (bytes > ARTIFACT_CONTENT_MAX_BYTES) {
-      object.body.destroy();
-      return undefined;
-    }
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks);
+  const bytes = await readCappedBody(object.body, ARTIFACT_CONTENT_MAX_BYTES);
+  return bytes === "too_large" ? undefined : bytes;
 }
