@@ -121,8 +121,11 @@ export const workspaceDownloadQuerySchema = z.strictObject({ path: workspacePath
  * root), then one file part (name per `uploadFileNameSchema`). 201 body: the new
  * {@link workspaceFileEntrySchema}. Writes land in the synced copy; the agent receives them on its
  * next sync. Server-owned areas (`uploads/`, `projects/`) are refused (`read_only`), except the
- * rail drop (KOBE-199): `path` exactly `uploads`, a new file directly in it (a UUID-shaped name,
- * a thread's folder, is `invalid_path`), which the member may also delete.
+ * rail drop (KOBE-199, `isMemberDropPath`): `path` exactly `uploads`, a file directly in it
+ * (a name shaped like a thread's folder is `invalid_path`), which the member may also delete. A
+ * drop never fails on a clash: the server stores it as `name (1).ext` and so on, and the 201 body
+ * has the final path. Drops take this browser-upload path, which is not virus-scanned or
+ * MIME-sniffed (only `POST /v1/uploads` attachments are), so `uploads/` is no longer all scanned.
  */
 export const workspaceUploadFieldsSchema = z.strictObject({ path: dirPath.optional() });
 

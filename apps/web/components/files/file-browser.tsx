@@ -2,15 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRightIcon, DownloadIcon, FileIcon, FolderIcon, Trash2Icon } from "lucide-react";
+import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
-import {
-  describeFileError,
-  formatBytes,
-  isDroppedUpload,
-  isReadOnlyPath,
-} from "../../lib/files/format";
+import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
 import { ErrorNotice } from "../admin/error-notice";
 import { useFolder } from "./use-folder";
 
@@ -180,7 +176,7 @@ function Row({
           <DownloadIcon aria-hidden className="size-4" />
         </button>
       )}
-      {(!readOnly || isDroppedUpload(entry)) && (
+      {!readOnly && (
         <button
           type="button"
           className={iconButton}
@@ -279,7 +275,7 @@ export function FileBrowser({
       )}
       {readOnly ? (
         <p className="text-muted-foreground text-xs">
-          {path === "uploads"
+          {path === WORKSPACE_DROP_FOLDER
             ? "Drop files on the rail to add them here. Files your threads attached are read-only."
             : "This folder is read-only: files here cannot be uploaded or deleted."}
         </p>

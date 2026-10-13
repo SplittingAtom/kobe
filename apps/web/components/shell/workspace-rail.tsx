@@ -62,12 +62,19 @@ function RailFiles({
   api,
   drop,
   showFolder,
+  clearDrop,
 }: {
   readonly rail: RailApi;
   readonly api: FilesApi;
   readonly drop: DropStatus;
   readonly showFolder: { readonly path: string; readonly seq: number } | null;
+  /** A Files action (open, refresh) clears the last drop's notice and errors. */
+  clearDrop(): void;
 }) {
+  const request = () => {
+    clearDrop();
+    rail.requestFiles();
+  };
   return (
     <section
       id={SECTION_IDS.files}
@@ -80,13 +87,13 @@ function RailFiles({
           Files
         </h3>
         {rail.filesRequests > 0 && (
-          <IconAction command="refresh-files" size="sm" side="right" onClick={rail.requestFiles} />
+          <IconAction command="refresh-files" size="sm" side="right" onClick={request} />
         )}
       </div>
       <RailDropNotice status={drop} />
       {rail.filesRequests === 0 ? (
         <div className={styles.scroll}>
-          <button type="button" className={styles.loadMore} onClick={rail.requestFiles}>
+          <button type="button" className={styles.loadMore} onClick={request}>
             Open files
           </button>
         </div>
@@ -164,7 +171,13 @@ export function WorkspaceRail({
             container={sections}
             controls={SECTION_IDS.threads}
           />
-          <RailFiles rail={rail} api={filesApi} drop={drop.status} showFolder={drop.showFolder} />
+          <RailFiles
+            rail={rail}
+            api={filesApi}
+            drop={drop.status}
+            showFolder={drop.showFolder}
+            clearDrop={drop.clear}
+          />
         </div>
       </div>
     </aside>

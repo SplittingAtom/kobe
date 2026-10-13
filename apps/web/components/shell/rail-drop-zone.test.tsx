@@ -6,6 +6,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import type { UploadRequest, UploadTransport } from "../../lib/chat/uploads";
 import { ChatApp } from "../chat/chat-app";
 import { chatRequests, composer } from "../chat/testing";
+import { DROP_NOTICE_MS } from "./rail-drop-zone";
 
 /** The rail drop zone (CE5, KOBE-199): overlay, upload into uploads/, errors, touch, composer. */
 
@@ -19,6 +20,8 @@ let uploads: Upload[];
 let wakes: number;
 let listed: string[];
 let answers: (() => Response)[];
+/** While set, each upload waits for it (overlapping drops). */
+let uploadGate: Promise<void>;
 let touch: boolean;
 let attachCalls: UploadRequest[];
 
@@ -57,9 +60,15 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
   if (route === "POST /v1/workspace/files") {
     const form = init.body as FormData;
     const file = form.get("file") as File;
+    await uploadGate;
     const answer = answers.shift();
     if (answer) return answer();
-    const up = { path: String(form.get("path")), name: file.name };
+    // The server picks a free name on a clash (KOBE-199): "name (n).ext".
+    let name = file.name;
+    for (let n = 1; uploads.some((u) => u.name === name); n += 1) {
+      name = file.name.replace(/(\.[^.]*)?$/, (ext) => ` (${n})${ext}`);
+    }
+    const up = { path: String(form.get("path")), name };
     uploads.push(up);
     return Response.json(entry(up.name, `uploads/${up.name}`, "file", "uploads"), { status: 201 });
   }
@@ -91,6 +100,7 @@ beforeEach(() => {
   wakes = 0;
   listed = [];
   answers = [];
+  uploadGate = Promise.resolve();
   touch = false;
   attachCalls = [];
   sessionStorage.clear();
@@ -205,12 +215,44 @@ describe("rail drop zone: upload (ac-1)", () => {
     expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();
   });
 
-  it("keeps both files on a name clash: the second becomes 'name (1).ext'", async () => {
+  it("shows the name the server chose on a clash, sending each file once", async () => {
     const rail = await mount();
-    answers.push(refusal(409, "already_exists", "A file or folder with that name already exists."));
+    uploads.push({ path: "uploads", name: "brief.pdf" });
     fireEvent.drop(rail, files(fileOf("brief.pdf")));
-    expect(await within(filesRegion()).findByText("brief (1).pdf")).toBeTruthy();
-    expect(uploads).toEqual([{ path: "uploads", name: "brief (1).pdf" }]);
+    expect(await screen.findByText("Added brief (1).pdf to uploads.")).toBeTruthy();
+    expect(uploads.map((u) => u.name)).toEqual(["brief.pdf", "brief (1).pdf"]);
+  });
+
+  it("puts a drop made while another uploads into the same batch, with one status", async () => {
+    const rail = await mount();
+    let release = () => {};
+    uploadGate = new Promise((resolve) => (release = resolve));
+    fireEvent.drop(rail, files(fileOf("a.txt")));
+    fireEvent.drop(rail, files(fileOf("b.txt")));
+    expect(await screen.findByText("Adding 2 files to your workspace…")).toBeTruthy();
+    release();
+    expect(await screen.findByText("Added a.txt, b.txt to uploads.")).toBeTruthy();
+    expect(uploads.map((u) => u.name)).toEqual(["a.txt", "b.txt"]);
+    await waitFor(() => expect(wakes).toBe(1)); // Files revealed once for the batch
+  });
+
+  it("clears the success notice after a while, and errors on the next Files action", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const rail = await mount();
+      fireEvent.drop(rail, files(fileOf("a.txt")));
+      expect(await screen.findByText("Added a.txt to uploads.")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(DROP_NOTICE_MS));
+      expect(screen.queryByText("Added a.txt to uploads.")).toBeNull();
+
+      answers.push(refusal(413, "file_too_large", "Too big."));
+      fireEvent.drop(rail, files(fileOf("huge.iso")));
+      expect(await within(filesRegion()).findByRole("alert")).toBeTruthy();
+      fireEvent.click(within(filesRegion()).getByRole("button", { name: "Refresh files" }));
+      expect(within(filesRegion()).queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses folders by name and still uploads the files beside them", async () => {

@@ -681,12 +681,12 @@ describe("rail drop into uploads/ (KOBE-199)", () => {
     );
     expect(rows[0]).toMatchObject({ origin: "server" });
     expect(await auditRows(w.team, "workspace.file_uploaded")).toEqual([
-      { userId: w.alice.id, bytes: 4 },
+      { userId: w.alice.id, bytes: 4, area: "drop" },
     ]);
     expect((await w.a.get("/v1/workspace/file?path=uploads/brief.pdf")).text).toBe("pdf!");
   });
 
-  it("refuses nested paths, thread folders and UUID-shaped names", async () => {
+  it("refuses nested paths, thread folders and UUID-shaped names, lookalikes too", async () => {
     const w = await world();
     await seed(w, w.alice, `uploads/${THREAD}/a.txt`, "a", "uploads");
     for (const folder of [`uploads/${THREAD}`, "uploads/new", "uploads/a/b"]) {
@@ -694,7 +694,7 @@ describe("rail drop into uploads/ (KOBE-199)", () => {
       expect(res.status, folder).toBe(403);
       expect(workspaceFileErrorSchema.parse(res.json).code).toBe("read_only");
     }
-    for (const name of [THREAD, THREAD.toUpperCase()]) {
+    for (const name of [THREAD, THREAD.toUpperCase(), ` ${THREAD} `, `${THREAD}\u200d`]) {
       const res = await upload(w.a, "uploads", name, "x");
       expect(res.status, name).toBe(400);
       expect(workspaceFileErrorSchema.parse(res.json).code).toBe("invalid_path");
@@ -702,16 +702,36 @@ describe("rail drop into uploads/ (KOBE-199)", () => {
     expect(await uploadRows(w)).toEqual([`uploads/${THREAD}/a.txt`]);
   });
 
-  it("never overwrites: a clash with a file or a folder is already_exists", async () => {
+  it("never overwrites: a clash takes the next free copy name, chosen by the server", async () => {
     const w = await world();
     await seed(w, w.alice, "uploads/notes.txt", "old", "uploads");
+    await seed(w, w.alice, "uploads/notes (1).txt", "older", "uploads");
     await seed(w, w.alice, "uploads/legacy/f.txt", "f", "uploads");
-    for (const name of ["notes.txt", "legacy"]) {
+    for (const [name, path] of [
+      ["notes.txt", "uploads/notes (2).txt"],
+      ["legacy", "uploads/legacy (1)"],
+    ] as const) {
       const res = await upload(w.a, "uploads", name, "new");
-      expect(res.status, name).toBe(409);
-      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("already_exists");
+      expect(res.status, name).toBe(201);
+      expect(workspaceFileEntrySchema.parse(res.json).path).toBe(path);
     }
     expect((await w.a.get("/v1/workspace/file?path=uploads/notes.txt")).text).toBe("old");
+    expect((await w.a.get("/v1/workspace/file?path=uploads/notes (2).txt")).text).toBe("new");
+    // Outside uploads/ a clash is still refused (the file browser's own upload).
+    await seed(w, w.alice, "a.txt", "a");
+    expect((await upload(w.a, undefined, "a.txt", "b")).status).toBe(409);
+  });
+
+  it("gives two concurrent drops of one name distinct names", async () => {
+    const w = await world();
+    const [one, two] = await Promise.all([
+      upload(w.a, "uploads", "same.txt", "first"),
+      upload(w.a, "uploads", "same.txt", "second"),
+    ]);
+    expect([one.status, two.status]).toEqual([201, 201]);
+    const paths = [one, two].map((r) => workspaceFileEntrySchema.parse(r.json).path).sort();
+    expect(paths).toEqual(["uploads/same (1).txt", "uploads/same.txt"]);
+    expect(await uploadRows(w)).toEqual(paths);
   });
 
   it("deletes a dropped file, but never a folder or a thread's files in uploads/", async () => {
@@ -719,16 +739,15 @@ describe("rail drop into uploads/ (KOBE-199)", () => {
     expect((await upload(w.a, "uploads", "oops.txt", "x")).status).toBe(201);
     await seed(w, w.alice, `uploads/${THREAD}/a.txt`, "a", "uploads");
     await seed(w, w.alice, "uploads/legacy/f.txt", "f", "uploads");
-    for (const path of [
-      `uploads/${THREAD}`,
-      `uploads/${THREAD}/a.txt`,
-      "uploads/legacy",
-      "uploads",
-    ]) {
+    for (const path of [`uploads/${THREAD}`, `uploads/${THREAD}/a.txt`, "uploads"]) {
       const res = await w.a.request("DELETE", `/v1/workspace/files?path=${path}`);
       expect(res.status, path).toBe(403);
       expect(workspaceFileErrorSchema.parse(res.json).code).toBe("read_only");
     }
+    // A drop path deletes that one file only: a folder of the same name is not a drop.
+    expect((await w.a.request("DELETE", "/v1/workspace/files?path=uploads/legacy")).status).toBe(
+      404,
+    );
     expect((await w.a.request("DELETE", "/v1/workspace/files?path=uploads/oops.txt")).status).toBe(
       204,
     );

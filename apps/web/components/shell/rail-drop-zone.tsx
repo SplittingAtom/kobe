@@ -1,12 +1,12 @@
 "use client";
 
+import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import { UploadIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import {
   carriesFiles,
-  DROP_FOLDER,
   droppedItems,
   folderError,
   uploadDropped,
@@ -109,43 +109,102 @@ export interface DropStatus {
   readonly errors: readonly ApiError[];
 }
 
+/** How long "Added … to uploads." stays before it clears itself. */
+export const DROP_NOTICE_MS = 8000;
 const IDLE: DropStatus = { busy: false, notice: "", errors: [] };
+const UNEXPECTED: ApiError = {
+  status: 0,
+  code: "drop_failed",
+  message: "Those files could not be added. Try again.",
+};
 const plural = (n: number) => (n === 1 ? "1 file" : `${n} files`);
 
+/** Drops that overlap (one lands while another uploads) form one batch with one status. */
+interface Batch {
+  readonly pending: number;
+  readonly added: readonly string[];
+  readonly errors: readonly ApiError[];
+}
+
+function batchStatus(batch: Batch): DropStatus {
+  if (batch.pending > 0) {
+    return {
+      busy: true,
+      notice: `Adding ${plural(batch.pending)} to your workspace…`,
+      errors: batch.errors,
+    };
+  }
+  const notice = batch.added.length > 0 ? `Added ${batch.added.join(", ")} to uploads.` : "";
+  return { busy: false, notice, errors: batch.errors };
+}
+
+/** The success notice clears itself; errors stay until the next drop or Files action. */
+function useDropStatus() {
+  const [status, setStatus] = useState<DropStatus>(IDLE);
+  const done = !status.busy && status.notice !== "";
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(() => setStatus((s) => ({ ...s, notice: "" })), DROP_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [done, status.notice]);
+  const clear = useCallback(() => setStatus((s) => (s.busy ? s : IDLE)), []);
+  return { status, setStatus, clear };
+}
+
 /**
- * The rail's drop zone: drag handlers for the rail, the overlay flag, the last drop's outcome and
- * the folder Files should show. Files land in uploads/; Files is revealed (first use wakes and
- * lists, later ones list again) and opens uploads/ once something was added.
+ * The rail's drop zone: drag handlers for the rail, the overlay flag, the drops' outcome and the
+ * folder Files should show. Drops upload one after another into uploads/; when the batch is done
+ * Files is revealed (first use wakes and lists, later ones list again) on uploads/.
  */
 export function useRailDropZone(api: FilesApi, rail: RailApi) {
-  const [status, setStatus] = useState<DropStatus>(IDLE);
+  const { status, setStatus, clear } = useDropStatus();
   const [showFolder, setShowFolder] = useState<{ path: string; seq: number } | null>(null);
   const { reveal, setCollapsed } = rail;
-  const upload = useCallback(
-    async ({ files, folders }: DroppedItems) => {
-      const refused = folders.length > 0 ? [folderError(folders)] : [];
-      if (files.length > 0) {
-        setStatus({
-          busy: true,
-          notice: `Adding ${plural(files.length)} to your workspace…`,
-          errors: refused,
-        });
-      }
-      const { added, errors } =
-        files.length > 0 ? await uploadDropped(api, files) : { added: [], errors: [] };
-      setStatus({
-        busy: false,
-        notice: added.length > 0 ? `Added ${added.join(", ")} to uploads.` : "",
-        errors: [...refused, ...errors],
-      });
-      if (added.length === 0) return setCollapsed(false); // the notice is in Files
-      setShowFolder((prev) => ({ path: DROP_FOLDER, seq: (prev?.seq ?? 0) + 1 }));
+  const batch = useRef<Batch | null>(null);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+
+  const finish = useCallback(
+    (done: Batch) => {
+      if (done.added.length === 0) return setCollapsed(false); // the notice is in Files
+      setShowFolder((prev) => ({ path: WORKSPACE_DROP_FOLDER, seq: (prev?.seq ?? 0) + 1 }));
       reveal("files");
     },
-    [api, reveal, setCollapsed],
+    [reveal, setCollapsed],
   );
-  const drag = useRailDrag(useDropSupported(), (items) => void upload(items));
-  return { ...drag, status, showFolder };
+
+  const enqueue = useCallback(
+    ({ files, folders }: DroppedItems) => {
+      const prev = batch.current ?? { pending: 0, added: [], errors: [] };
+      const refused = folders.length > 0 ? [folderError(folders)] : [];
+      batch.current = {
+        ...prev,
+        pending: prev.pending + files.length,
+        errors: [...prev.errors, ...refused],
+      };
+      setStatus(batchStatus(batch.current));
+      queue.current = queue.current.then(async () => {
+        const out = files.length > 0 ? await uploadDropped(api, files) : { added: [], errors: [] };
+        const cur = batch.current ?? prev;
+        const next: Batch = {
+          pending: cur.pending - files.length,
+          added: [...cur.added, ...out.added],
+          errors: [...cur.errors, ...out.errors],
+        };
+        batch.current = next.pending > 0 ? next : null;
+        setStatus(batchStatus(next));
+        if (next.pending === 0) finish(next);
+      });
+      // Never leave the queue rejected: later drops must still run.
+      queue.current = queue.current.catch((err: unknown) => {
+        console.error("rail drop: upload failed", err);
+        batch.current = null;
+        setStatus({ busy: false, notice: "", errors: [UNEXPECTED] });
+      });
+    },
+    [api, finish, setStatus],
+  );
+  const drag = useRailDrag(useDropSupported(), enqueue);
+  return { ...drag, status, showFolder, clear };
 }
 
 export function RailDropOverlay() {

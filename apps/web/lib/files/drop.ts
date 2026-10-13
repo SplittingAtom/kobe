@@ -3,13 +3,10 @@
  * the workspace files API and sync on the next run. Never attached to a message (the composer is
  * the attach path, KOBE-145).
  */
+import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
 import type { FilesApi } from "./api";
 import { describeFileError } from "./format";
-
-export const DROP_FOLDER = "uploads";
-/** Copies tried after a name clash: "name (1).ext" .. "name (9).ext". */
-const MAX_COPIES = 9;
 
 export interface DroppedItems {
   readonly files: readonly File[];
@@ -18,7 +15,7 @@ export interface DroppedItems {
 }
 
 export interface DropOutcome {
-  /** The names the files were stored under, in order. */
+  /** The names the files were stored under, in order (the server picks a copy name on a clash). */
   readonly added: readonly string[];
   readonly errors: readonly ApiError[];
 }
@@ -46,32 +43,11 @@ export function droppedItems(dt: DataTransfer): DroppedItems {
   return { files, folders };
 }
 
-/** "report.pdf" -> "report (1).pdf"; a leading dot is part of the name (".env" -> ".env (1)"). */
-export function copyName(name: string, n: number): string {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
-}
-
 export function folderError(folders: readonly string[]): ApiError {
   return {
     status: 400,
     code: "folder_dropped",
     message: `Folders can't be added to your workspace (${folders.join(", ")}). Drop the files inside them instead.`,
-  };
-}
-
-/** One file into uploads/; a name clash tries "name (1).ext" and so on, never overwriting. */
-async function uploadOne(api: FilesApi, file: File): Promise<{ name: string } | ApiError> {
-  for (let n = 0; n <= MAX_COPIES; n += 1) {
-    const name = n === 0 ? file.name : copyName(file.name, n);
-    const res = await api.upload(DROP_FOLDER, file, name);
-    if (res.ok) return { name };
-    if (res.error.code !== "already_exists") return res.error;
-  }
-  return {
-    status: 409,
-    code: "already_exists",
-    message: "Too many files with this name are already in uploads.",
   };
 }
 
@@ -83,14 +59,14 @@ export async function uploadDropped(api: FilesApi, files: readonly File[]): Prom
   const added: string[] = [];
   const errors: ApiError[] = [];
   for (const file of files) {
-    const res = await uploadOne(api, file);
-    if ("name" in res) {
-      added.push(res.name);
+    const res = await api.upload(WORKSPACE_DROP_FOLDER, file);
+    if (res.ok) {
+      added.push(res.data.name);
       continue;
     }
-    const described = describeFileError(res);
+    const described = describeFileError(res.error);
     errors.push({ ...described, message: `${file.name}: ${described.message}` });
-    if (res.code === "quota_exceeded") break;
+    if (res.error.code === "quota_exceeded") break;
   }
   return { added, errors };
 }

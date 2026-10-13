@@ -2,6 +2,7 @@
    own. The grid gives it 280 px, or 48 px collapsed (shell.module.css). */
 
 .rail {
+  position: relative; /* the drop overlay covers exactly the rail (KOBE-199) */
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -214,10 +215,6 @@
 
 /* The drop zone (KOBE-199): over the whole rail while files are dragged; never takes the events,
    so the rail's enter/leave count sees its own children only. */
-.rail {
-  position: relative;
-}
-
 .dropOverlay {
   position: absolute;
   inset: 0;

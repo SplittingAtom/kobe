@@ -1,28 +1,14 @@
+import { isMemberDropPath } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
 
-/** Server-owned areas of `/workspace` (D-file-browser): read-only for the user and the agent. */
+/**
+ * Server-owned areas of `/workspace` (D-file-browser): read-only for the user and the agent, except
+ * the member's own drops directly in uploads/ (KOBE-199, the protocol's `isMemberDropPath`).
+ */
 const READ_ONLY_ROOTS: ReadonlySet<string> = new Set(["uploads", "projects"]);
 
 export function isReadOnlyPath(path: string): boolean {
-  return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "");
-}
-
-const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * A file the member dropped on the rail (KOBE-199): directly in uploads/, never a thread's
- * attachment folder (named by its UUID). The one deletable spot of a read-only area.
- */
-export function isDroppedUpload(entry: { readonly path: string; readonly type: string }): boolean {
-  const [root, name, ...rest] = entry.path.split("/");
-  return (
-    entry.type === "file" &&
-    root === "uploads" &&
-    name !== undefined &&
-    name !== "" &&
-    rest.length === 0 &&
-    !UUID_NAME.test(name)
-  );
+  return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "") && !isMemberDropPath(path);
 }
 
 export function parentPath(path: string): string {

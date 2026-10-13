@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { pipeline, type Readable } from "node:stream";
-import { withTeam, type KobeDb } from "@kobe/db";
+import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { WorkspaceFileError } from "@kobe/protocol";
 import { logger } from "../logger.js";
 import { recordAudit } from "../audit/record.js";
@@ -18,7 +18,7 @@ import {
   type StoredEntry,
 } from "../workspace-sync/store.js";
 import { pathIsTaken } from "./browse.js";
-import { ancestorsOf } from "./paths.js";
+import { ancestorsOf, copyPath } from "./paths.js";
 
 type Failure = {
   readonly ok: false;
@@ -44,6 +44,30 @@ export interface IncomingFile {
   readonly limitBytes: number;
   /** The team's storage quota default (KOBE-143), used when the team has no limit of its own. */
   readonly teamQuotaDefaultBytes: number;
+  /**
+   * A rail drop into uploads/ (KOBE-199): a clash never fails, the file takes the first free
+   * `name (n).ext`, chosen under the workspace lock; the audit event records `area: "drop"`.
+   */
+  readonly drop?: boolean;
+}
+
+/** Copies tried after a drop's name clash before giving up (already_exists). */
+const MAX_COPIES = 100;
+
+/** The path to write: `path`, or for a drop the first free copy of it; undefined when none is. */
+async function freePath(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  path: string,
+  ancestors: readonly string[],
+  copy: boolean,
+): Promise<string | undefined> {
+  if (!(await pathIsTaken(tx, owner, path, ancestors))) return path;
+  for (let n = 1; copy && n <= MAX_COPIES; n += 1) {
+    const candidate = copyPath(path, n);
+    if (!(await pathIsTaken(tx, owner, candidate, ancestors))) return candidate;
+  }
+  return undefined;
 }
 
 /**
@@ -67,13 +91,16 @@ export async function uploadToWorkspace(
   incoming: IncomingFile,
 ): Promise<UploadResult> {
   const ancestors = ancestorsOf(path);
+  const copy = incoming.drop === true;
   const pre = await withTeam(db, owner.teamId, async (tx) => {
-    if (await pathIsTaken(tx, owner, path, ancestors)) return "taken" as const;
+    if (!copy && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
     const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
     return (await storageUsed(tx, owner.teamId)) >= limit ? ("full" as const) : ("ok" as const);
   });
-  if (pre === "taken") return TAKEN;
-  if (pre === "full") return QUOTA;
+  if (pre !== "ok") {
+    incoming.body.destroy(); // refused before reading: never leave the body to the socket
+    return pre === "taken" ? TAKEN : QUOTA;
+  }
 
   const staging = `${workspacePrefix(sync.prefix, owner)}incoming/${randomUUID()}`;
   const meter = new UploadMeter(incoming.limitBytes);
@@ -127,7 +154,7 @@ async function commitUpload(
   }
   const blobKey = workspaceBlobKey(sync.prefix, owner, sha256);
   const reserved = await withTeam(db, owner.teamId, async (tx) => {
-    if (await pathIsTaken(tx, owner, path, ancestors)) return "taken" as const;
+    if (!incoming.drop && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
     const held = await blobState(tx, owner, sha256);
     if (held !== "absent") return held;
     const ok = await reserveUpload(tx, owner, size, resolveLimits(limits));
@@ -145,7 +172,9 @@ async function commitUpload(
 
   return withTeam(db, owner.teamId, async (tx): Promise<UploadResult> => {
     const state = await lockWorkspace(tx, owner);
-    if (await pathIsTaken(tx, owner, path, ancestors)) return TAKEN;
+    // Under the workspace lock: the clash check (and a drop's free name) is atomic with the write.
+    const target = await freePath(tx, owner, path, ancestors, incoming.drop === true);
+    if (target === undefined) return TAKEN;
     const decision = await sync.quota(tx, {
       owner,
       fileBytes: size,
@@ -158,11 +187,16 @@ async function commitUpload(
     await lockTeamStorage(tx, owner.teamId);
     const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
     if ((await storageUsed(tx, owner.teamId)) + size > limit) return QUOTA;
-    const entry = await sync.putServerFile(tx, owner, { path, sha256, size, blobKey }, "user");
+    const entry = await sync.putServerFile(
+      tx,
+      owner,
+      { path: target, sha256, size, blobKey },
+      "user",
+    );
     await recordAudit(tx, {
       action: "workspace.file_uploaded",
       teamId: owner.teamId,
-      target: { userId: owner.userId, bytes: size },
+      target: { userId: owner.userId, bytes: size, ...(incoming.drop ? { area: "drop" } : {}) },
     });
     return { ok: true, entry };
   });

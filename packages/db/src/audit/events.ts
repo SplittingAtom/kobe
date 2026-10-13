@@ -1074,7 +1074,12 @@ export const AUDIT_EVENTS = {
   /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
   "workspace.file_downloaded": event("team", { userId: id, bytes: count }),
   /** The user uploaded a file into their own workspace in the file browser (KOBE-148; no names). */
-  "workspace.file_uploaded": event("team", { userId: id, bytes: count }),
+  // `area: "drop"`: a file dropped on the rail into uploads/ (KOBE-199).
+  "workspace.file_uploaded": event("team", {
+    userId: id,
+    bytes: count,
+    area: z.enum(["drop"]).optional(),
+  }),
   /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
   "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
