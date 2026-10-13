@@ -18,7 +18,7 @@ import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { isStopping } from "../../lib/chat/thread-state";
-import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
+import { kobeExtrasOf, useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { ArrivingWords } from "./arriving-words";
@@ -37,7 +37,7 @@ function PlainText({ text }: TextMessagePartProps) {
  */
 function useArriving(status: { readonly type: string }): boolean {
   const stopping = useAuiState((s) => {
-    const extras = s.thread.extras as KobeThreadExtras | undefined;
+    const extras = kobeExtrasOf(s);
     return extras ? isStopping(extras.state) : false;
   });
   return status.type === "running" && !stopping;

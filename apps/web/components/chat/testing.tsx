@@ -67,21 +67,44 @@ export function streamed(text: string): MatcherFunction {
   return (_content, el) => el !== null && holds(el) && ![...el.children].some(holds);
 }
 
+/** Text only screen readers get: Tailwind's `sr-only` and the CSS modules' `visuallyHidden`. */
+const VISUALLY_HIDDEN = '.sr-only, [class*="visuallyHidden"], [class*="visually-hidden"]';
+
+/** A class that sets the horizontal padding (`p-0`, `px-1`, `md:p-0`); `py-*` alone does not. */
+const INLINE_PADDING = /^(?:[\w-]+:)*!?px?-/;
+
+function visibleText(el: Element): string {
+  const copy = el.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll(VISUALLY_HIDDEN)) hidden.remove();
+  return (copy.textContent ?? "").trim();
+}
+
 /**
  * Icon-only raw buttons in the chat that the base button rule would crush (KOBE-269):
  * `chat-global.css` pads every `button:not([data-slot])` 0.25rem 0.75rem, which leaves a 28 px
- * icon button 2 px for its svg. An icon button must be an `IconAction` (shadcn's Button sets
- * `data-slot`) or set its own padding (`p-0`, `p-1`). Returns each offender's accessible label;
- * happy-dom has no layout, so this checks attributes and classes, not pixels.
+ * icon button 2 px for its svg. A button whose visible text is empty (its name comes from
+ * `aria-label` or visually hidden text) must be an `IconAction` (shadcn's Button sets `data-slot`)
+ * or set its own inline padding. Returns each offender's accessible label; happy-dom has no
+ * layout, so this checks attributes and classes, not pixels.
  */
 export function crushedIconButtons(root: ParentNode = document): string[] {
-  const visibleText = (el: Element) => {
-    const copy = el.cloneNode(true) as Element;
-    for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
-    return (copy.textContent ?? "").trim();
-  };
   return [...root.querySelectorAll("[data-kobe-chat] button:not([data-slot])")]
-    .filter((b) => b.querySelector("svg") && visibleText(b) === "")
-    .filter((b) => ![...b.classList].some((c) => /^p-/.test(c)))
-    .map((b) => b.getAttribute("aria-label") ?? b.outerHTML.slice(0, 120));
+    .filter((b) => b.querySelector("svg, img") !== null && visibleText(b) === "")
+    .filter((b) => ![...b.classList].some((c) => INLINE_PADDING.test(c)))
+    .map(
+      (b) => b.getAttribute("aria-label") ?? (b.textContent?.trim() || b.outerHTML.slice(0, 120)),
+    );
+}
+
+/**
+ * Lists and paragraphs under `root` that keep the browser's spacing (KOBE-269): the chat has no
+ * Tailwind preflight, so Kobe chrome resets its own (`m-0`; lists also `list-none ps-0`), while
+ * message Markdown and notices keep theirs. Returns the offenders' tag names and text.
+ */
+export function browserSpaced(root: ParentNode): string[] {
+  const has = (el: Element, ...names: string[]) => names.every((n) => el.classList.contains(n));
+  return [...root.querySelectorAll("p, ul, ol")]
+    .filter((el) => !el.classList.contains("sr-only"))
+    .filter((el) => (el.tagName === "P" ? !has(el, "m-0") : !has(el, "m-0", "list-none", "ps-0")))
+    .map((el) => `${el.tagName.toLowerCase()}: ${(el.textContent ?? "").trim().slice(0, 40)}`);
 }

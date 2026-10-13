@@ -29,6 +29,7 @@ import {
   mergeServerEntries,
   queuedRuns,
   runToStream,
+  settleStop,
   type ThreadState,
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
@@ -101,7 +102,7 @@ export class ThreadController {
 
   #set(change: (state: ThreadState) => ThreadState): void {
     if (this.#disposed) return;
-    const next = change(this.#state);
+    const next = settleStop(change(this.#state));
     if (next === this.#state) return;
     this.#state = next;
     for (const listener of this.#listeners) listener();
@@ -557,15 +558,17 @@ export class ThreadController {
     const runId = currentRunId(this.#state);
     if (runId === undefined) return;
     const holds = queuedRuns(this.#state).length > 0;
-    if (holds) this.#set((s) => ({ ...s, queuePaused: true }));
+    // Optimistic (KOBE-269): the part stops fading at the click; a refused cancel undoes it.
+    this.#set((s) => ({ ...s, stopRequested: runId, queuePaused: holds || s.queuePaused }));
     const res = await this.#busy("stop", () => this.#api.cancel(runId));
     if (!res.ok) {
-      this.#set((s) => ({ ...s, queuePaused: false }));
+      this.#set((s) => ({
+        ...s,
+        queuePaused: false,
+        stopRequested: s.stopRequested === runId ? undefined : s.stopRequested,
+      }));
       this.#fail(res.error);
-    } else {
-      this.#set((s) => ({ ...s, stopRequested: runId }));
-      this.#announce(holds ? "Stopped. The queue is paused." : "Stopping…");
-    }
+    } else this.#announce(holds ? "Stopped. The queue is paused." : "Stopping…");
   };
 
   readonly cancelQueued = async (runId: string): Promise<void> => {

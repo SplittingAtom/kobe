@@ -29,6 +29,7 @@ const spanOf = (root: ParentNode, word: string) =>
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Agent Markdown mounted with `text`; `update` streams more, `finish` ends the part. */
@@ -291,15 +292,14 @@ describe("in the conversation", () => {
     const t = kobe.addThread("Sales");
     // The server accepts the cancel but the run's end arrives later (the sandbox is stopping).
     const real = kobe.fetch;
-    const delayed: typeof fetch = async (input, init = {}) => {
+    vi.spyOn(kobe, "fetch").mockImplementation(async (input, init = {}) => {
       const url = new URL(String(input), "http://kobe.test");
       if (init.method === "POST" && url.pathname.endsWith("/cancel")) {
         const res = await real(url.pathname.replace(/\/cancel$/, ""), { method: "GET" });
         return Response.json(await res.json(), { status: 202 });
       }
       return real(input, init);
-    };
-    Object.defineProperty(kobe, "fetch", { value: delayed });
+    });
     openApp(kobe, t);
     const runId = await startRun(t);
     act(() => kobe.agent.delta(runId, "m1", "Here is", 1));
@@ -308,6 +308,7 @@ describe("in the conversation", () => {
     );
     await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(document.querySelector("[data-kobe-arrive]")).toBeNull());
+    expect(kobe.activeRun(t)?.run_id).toBe(runId); // the server has not ended it
     // Words that still arrive before the run's end don't fade either.
     act(() => kobe.agent.delta(runId, "m1", " more", 1));
     await waitFor(() => expect(answerText()).toContain("more"));

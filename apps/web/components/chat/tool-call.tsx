@@ -112,7 +112,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         {activity.denied && (
           <div className={styles.denied} role="note">
             <strong>Denied by policy.</strong> The tool did not run.
-            <ul className="list-disc ps-5">
+            <ul>
               {activity.denied.reasons.map((reason) => (
                 <li key={`${reason.stage}:${reason.code}`}>{reason.message}</li>
               ))}

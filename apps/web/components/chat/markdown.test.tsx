@@ -15,14 +15,6 @@ function html(text: string): HTMLElement {
   ).container;
 }
 
-describe("chrome spacing (KOBE-269)", () => {
-  it("marks its root, so the chat's list and paragraph reset leaves message lists alone", () => {
-    const root = html("- one\n- two").firstElementChild;
-    expect(root?.hasAttribute("data-kobe-markdown")).toBe(true);
-    expect(root?.querySelector("ul")?.className).toContain("list-disc");
-  });
-});
-
 /** Nothing executable or loading: no script/iframe/img/object, no on* or style attributes. */
 function expectInert(root: HTMLElement) {
   for (const tag of ["script", "iframe", "img", "object", "embed", "style", "form", "math"]) {

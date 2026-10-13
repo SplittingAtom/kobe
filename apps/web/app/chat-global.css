@@ -102,16 +102,9 @@ body:has([data-kobe-chat]) {
     display: block;
   }
 
-  /* Kobe's own lists and paragraphs (queue chips, file rows, notices) lay out with utilities and
-     modules, so they drop the browser's margins and 40 px list indent (KOBE-269). Message Markdown
-     (`[data-kobe-markdown]`) keeps them: its own utilities space and indent its lists. */
-  [data-kobe-chat] :where(ul, ol, p):not([data-kobe-markdown] *) {
-    margin: 0;
-    padding: 0;
-  }
-
-  /* The artifact sheet at 768–820 px ends above the composer (KOBE-269, shell.module.css). */
-  [data-kobe-chat] [data-kobe-composer] {
+  /* The artifact sheet at 768–820 px ends above the composer box: the steering panel (Stop,
+     queue) and the input, not the footer's notices or welcome space (KOBE-269, shell.module.css). */
+  [data-kobe-chat] [data-kobe-composer-box] {
     anchor-name: --kobe-composer;
   }
 

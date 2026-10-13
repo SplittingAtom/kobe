@@ -223,7 +223,7 @@ export function RailDropNotice({ status }: { readonly status: DropStatus }) {
       {status.errors.map((error, i) => (
         <ErrorNotice key={`${i}:${error.message}`} error={error} />
       ))}
-      <p role="status" className="text-muted-foreground text-xs">
+      <p role="status" className="text-muted-foreground m-0 text-xs">
         {status.notice}
       </p>
     </div>

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatApi } from "./api";
 import { FakeKobe } from "./testing/fake-kobe";
 import { ThreadController } from "./thread-controller";
-import { currentRunId, liveOverlay, type ThreadState } from "./thread-state";
+import { currentRunId, isStopping, liveOverlay, type ThreadState } from "./thread-state";
 import { projectThread } from "./tree";
 
 let fake: FakeKobe;
@@ -16,10 +16,10 @@ afterEach(() => {
   for (const c of controllers) c.dispose();
 });
 
-function open(threadId: string, reopenDelayMs = 0) {
+function open(threadId: string, reopenDelayMs = 0, fetchFn: typeof fetch = fake.fetch) {
   let n = 0;
   const controller = new ThreadController(threadId, {
-    api: createChatApi(fake.teamId, fake.fetch),
+    api: createChatApi(fake.teamId, fetchFn),
     eventSource: fake.eventSource,
     newKey: () => `k${++n}`,
     reopenDelayMs: () => reopenDelayMs,
@@ -176,5 +176,51 @@ describe("ThreadController", () => {
       draft: "again",
       error: { code: "client_error" },
     });
+  });
+});
+
+describe("Stop (KOBE-269)", () => {
+  /** A thread with a run streaming; cancels go through `onCancel` instead of the fake. */
+  async function running(
+    onCancel?: (input: RequestInfo | URL, init: RequestInit) => Promise<Response>,
+  ) {
+    const t = fake.addThread("x");
+    const fetchFn: typeof fetch = async (input, init = {}) =>
+      onCancel && init.method === "POST" && String(input).includes("/cancel")
+        ? onCancel(input, init)
+        : fake.fetch(input, init);
+    const c = open(t, 0, fetchFn);
+    await c.load();
+    expect(await c.send("q")).toBe(true);
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open" && currentRunId(s) === runId);
+    return { c, runId };
+  }
+
+  it("counts as stopping from the click, while the cancel is in flight", async () => {
+    let answer: (r: Response) => void = () => {};
+    const { c, runId } = await running(() => new Promise<Response>((r) => (answer = r)));
+    const stopped = c.stop();
+    expect(c.getState().stopRequested).toBe(runId);
+    expect(isStopping(c.getState())).toBe(true);
+    answer(Response.json({ code: "accepted" }, { status: 202 }));
+    await stopped;
+    expect(isStopping(c.getState())).toBe(true); // the run's end has not arrived yet
+  });
+
+  it("a refused cancel clears the flag: the run is still running", async () => {
+    const { c } = await running(async () =>
+      Response.json({ code: "internal", message: "No." }, { status: 500 }),
+    );
+    await c.stop();
+    expect(c.getState().stopRequested).toBeUndefined();
+    expect(isStopping(c.getState())).toBe(false);
+  });
+
+  it("the run's end drops the flag", async () => {
+    const { c } = await running();
+    await c.stop();
+    const state = await until(c, (s) => currentRunId(s) === undefined);
+    expect(state.stopRequested).toBeUndefined();
   });
 });

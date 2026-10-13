@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { chatRequests, composer, openApp, streaming } from "./testing";
+import { browserSpaced, chatRequests, composer, openApp, streaming } from "./testing";
 
 /**
  * The steering panel (CE10, KOBE-206) over the fake server. There is no browser e2e suite (no
@@ -238,6 +238,8 @@ describe("queue chips (ac-2)", () => {
     await queue(user, "later");
     await user.click(within(panel()).getByRole("button", { name: "Pause the queue" }));
     expect(await within(panel()).findByText(/^Queue paused: these wait/)).toBeTruthy();
+    // KOBE-269: the queue's chips and notes sit flush, without the browser's list indent.
+    expect(browserSpaced(panel())).toEqual([]);
     expect(chatRequests(fake, "POST").some((r) => r.path === `/v1/threads/${t}/queue/pause`)).toBe(
       true,
     );

@@ -197,7 +197,6 @@ export function Markdown({
 }) {
   return (
     <div
-      data-kobe-markdown=""
       data-kobe-words={words ? "" : undefined}
       data-kobe-arrive={words && arriving ? "running" : undefined}
       className="[&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:rounded-md [&_:not(pre)>code]:border [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.9em] [&>:first-child]:mt-0 [&>:last-child]:mb-0"

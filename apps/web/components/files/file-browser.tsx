@@ -103,7 +103,7 @@ function ConfirmDelete({
         }
       }}
     >
-      <p id="kobe-files-confirm" className="min-w-0 flex-1">
+      <p id="kobe-files-confirm" className="m-0 min-w-0 flex-1">
         {entry.type === "dir"
           ? `Delete the folder ${entry.name} and everything in it? This cannot be undone.`
           : `Delete ${entry.name}? This cannot be undone.`}
@@ -180,15 +180,15 @@ function Row({
         <IconAction
           command="download-file"
           label={`Download ${entry.name}`}
-          size="sm"
           onClick={() => onDownload(entry)}
         />
       )}
       {!readOnly && (
+        // Set apart from Download, so a slip doesn't open the delete prompt (KOBE-269).
         <IconAction
           command="delete-file"
           label={`Delete ${entry.name}`}
-          size="sm"
+          className="ms-2"
           onClick={() => onDelete(entry)}
         />
       )}
@@ -278,12 +278,12 @@ export function FileBrowser({
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
       <Breadcrumb path={path} onOpen={open} />
       {waking && (
-        <p role="status" className="text-muted-foreground text-xs">
+        <p role="status" className="text-muted-foreground m-0 text-xs">
           Showing the last synced files while your sandbox wakes.
         </p>
       )}
       {readOnly ? (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground m-0 text-xs">
           {path === WORKSPACE_DROP_FOLDER
             ? "Drop files on the rail to add them here. Files your threads attached are read-only."
             : "This folder is read-only: files here cannot be uploaded or deleted."}
@@ -306,12 +306,14 @@ export function FileBrowser({
       {folder.error && <ErrorNotice error={describeFileError(folder.error)} />}
       {actionError && <ErrorNotice error={actionError} />}
       {folder.loading && folder.entries.length === 0 && !folder.error && (
-        <p role="status">Loading files…</p>
+        <p role="status" className="m-0">
+          Loading files…
+        </p>
       )}
       {!folder.loading && !folder.error && folder.entries.length === 0 && (
-        <p className="text-muted-foreground text-xs">This folder is empty.</p>
+        <p className="text-muted-foreground m-0 text-xs">This folder is empty.</p>
       )}
-      <ul aria-label={`Files in ${where}`} className="divide-y text-sm">
+      <ul aria-label={`Files in ${where}`} className="m-0 list-none divide-y ps-0 text-sm">
         {folder.entries.map((entry) => (
           <Row
             key={entry.path}

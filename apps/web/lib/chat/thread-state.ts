@@ -149,6 +149,13 @@ export function isStopping(state: ThreadState): boolean {
   return runId !== undefined && state.stopRequested === runId;
 }
 
+/** Drops the Stop flag once its run is no longer the current one (it ended, or another took over). */
+export function settleStop(state: ThreadState): ThreadState {
+  if (state.stopRequested === undefined || currentRunId(state) === state.stopRequested)
+    return state;
+  return { ...state, stopRequested: undefined };
+}
+
 /** The run to stream: the active one, else the next queued one (unless the thread is interrupted). */
 export function runToStream(state: ThreadState): string | undefined {
   const active = activeRun(state);

@@ -145,7 +145,7 @@ export function SteeringQueue({ state, controller }: Props) {
         Drag, or use the arrow keys, Home and End, to change the order.
       </span>
       {state.queuePaused && currentRunId(state) !== undefined && (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-muted-foreground m-0 text-xs">
           Queue paused: these wait after the current run until you resume.
         </p>
       )}
@@ -158,7 +158,10 @@ export function SteeringQueue({ state, controller }: Props) {
           onDone={() => setEditing(null)}
         />
       ) : (
-        <ol ref={list} className="flex min-w-0 gap-1 overflow-x-auto overscroll-contain pb-0.5">
+        <ol
+          ref={list}
+          className="m-0 flex min-w-0 list-none gap-1 overflow-x-auto overscroll-contain ps-0 pb-0.5"
+        >
           {shown.map((m) => {
             const index = ids.indexOf(m.runId);
             const position = index + 1;

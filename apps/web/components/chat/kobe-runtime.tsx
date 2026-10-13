@@ -59,8 +59,15 @@ export interface KobeThreadExtras {
   readonly projection: Projection;
 }
 
+/** The thread's extras from assistant-ui state: the one selector for every `useAuiState` reader. */
+export function kobeExtrasOf(state: {
+  readonly thread: { readonly extras?: unknown };
+}): KobeThreadExtras | undefined {
+  return state.thread.extras as KobeThreadExtras | undefined;
+}
+
 export function useKobeExtras(): KobeThreadExtras | undefined {
-  return useAuiState((s) => s.thread.extras as KobeThreadExtras | undefined);
+  return useAuiState(kobeExtrasOf);
 }
 
 const DRAFT_STATE = initialThreadState(null);
