@@ -1,6 +1,6 @@
 # KOBE-268: Open workspace files in the artifact column
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #265)
 - **Branch / worktree:** `kobe-268-file-viewer` in `../Kobe-wt268`
 - **Depends on:** KOBE-198 (rail Files), KOBE-200 (artifact tabs), KOBE-201 (sheets)
 
@@ -45,7 +45,7 @@ allow-forms` without `allow-same-origin`, `connect-src 'none'`, `frame-ancestors
 
 - Previews audit as downloads (one row per preview). Fine, or should a quieter "viewed" action be
   added later (needs an audit catalogue change)?
-- PR is ~680 lines of code + ~700 of tests; split proposal in the PR description.
+- PR #265 is ~680 lines of code + ~700 of tests; split proposal in the PR description.
 
 ## Evidence (acceptance criteria → test or command output)
 
