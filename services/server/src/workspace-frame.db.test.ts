@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTeam } from "@kobe/db";
 import { createApp } from "./app.js";
 import { FRAME_HEADERS } from "./artifacts/serve.js";
@@ -159,6 +160,50 @@ describe("GET /v1/workspace/frame", () => {
     const key = await seed(w.team, w.alice, "lost.html", "<p>lost</p>");
     objects.lost.add(key);
     expect((await w.a.get(frame("lost.html", w.team))).status).toBe(404);
+  });
+
+  it("refuses NUL, backslash and encoded traversal, before any lookup", async () => {
+    const w = await world();
+    await seed(w.team, w.alice, "x.html", "<p>x</p>");
+    for (const raw of ["x%00.html", "a%5Cx.html", "%2e%2e%2fx.html", "a%2F%2e%2e%2Fx.html"]) {
+      const res = await w.a.get(`/v1/workspace/frame?path=${raw}&team=${w.team}`);
+      expect(res.status, raw).toBe(400);
+    }
+    expect(await downloads(w.team)).toEqual([]);
+  });
+
+  it("refuses a caller who is no longer a member of the team", async () => {
+    // Every team role holds team.chat; losing membership is the way to lose it.
+    const w = await world();
+    await seed(w.team, w.bob, "b.html", "<p>bob</p>");
+    await fx.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      w.team,
+      w.bob.id,
+    ]);
+    const res = await w.b.get(frame("b.html", w.team));
+    expect(res.status).toBe(403);
+    expect(res.text).not.toContain("bob");
+  });
+
+  it("answers 413 for a stored object over the cap, and a clean 503 on a stream error", async () => {
+    const w = await world();
+    const key = await seed(w.team, w.alice, "grew.html", "<p>small</p>");
+    objects.objects.set(key, Buffer.alloc(WORKSPACE_FRAME_MAX_BYTES + 1, 0x61));
+    const grew = await w.a.get(frame("grew.html", w.team));
+    expect(grew.status).toBe(413);
+    expect(grew.json).toMatchObject({ code: "file_too_large" });
+
+    await seed(w.team, w.alice, "broken.html", "<p>broken</p>");
+    const failing = new Readable({
+      read() {
+        this.destroy(new Error("storage hiccup"));
+      },
+    });
+    vi.spyOn(objects, "get").mockResolvedValueOnce({ body: failing, size: 13 });
+    const broken = await w.a.get(frame("broken.html", w.team));
+    expect(broken.status).toBe(503);
+    expect(broken.json).toMatchObject({ code: "content_unavailable" });
+    expect(broken.text).not.toContain("hiccup");
   });
 
   it("refuses files over the frame cap without reading them", async () => {

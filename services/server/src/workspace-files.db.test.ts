@@ -355,6 +355,22 @@ describe("GET /v1/workspace/file (download)", () => {
     expect((await w.a.get("/v1/workspace/file?path=d/x.txt")).status).toBe(404);
   });
 
+  it("never serves agent-internal paths (.kobe/), like list and delete", async () => {
+    const w = await world();
+    // The sync never stores .kobe/ (it is excluded): plant a row as a guard against that changing.
+    await seed(w, w.alice, "state.json", "agent state");
+    await fx.admin.query(
+      `UPDATE workspace_files SET path = '.kobe/state.json' WHERE team_id = $1 AND path = 'state.json'`,
+      [w.team],
+    );
+    for (const path of [".kobe", ".kobe/state.json"]) {
+      const res = await w.a.get(`/v1/workspace/file?path=${encodeURIComponent(path)}`);
+      expect(res.status, path).toBe(404);
+      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("not_found");
+    }
+    expect(await auditRows(w.team, "workspace.file_downloaded")).toEqual([]);
+  });
+
   it("cannot read a teammate's file, even by exact path", async () => {
     const w = await world();
     await seed(w, w.alice, "secret.txt", "alice only");

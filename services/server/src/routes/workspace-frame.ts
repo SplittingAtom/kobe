@@ -1,4 +1,3 @@
-import type { Readable } from "node:stream";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { withTeam } from "@kobe/db";
@@ -6,7 +5,7 @@ import { workspacePathSchema } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import type { TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { FRAME_HEADERS, isSameSiteFrameRequest } from "../artifacts/serve.js";
+import { FRAME_HEADERS, isSameSiteFrameRequest, readCappedBody } from "../artifacts/serve.js";
 import { logger } from "../logger.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { isInternalPath } from "../workspace-files/paths.js";
@@ -25,22 +24,8 @@ const HTML_FILE = /\.html?$/i;
 const frameQuerySchema = z.strictObject({ path: workspacePathSchema, team: uuidSchema });
 
 const notFound = (c: Ctx) => c.json({ code: "not_found", message: "No such file." }, 404);
-
-/** The object's bytes, or undefined when it is gone or grew past the cap. */
-async function readCapped(body: Readable): Promise<Buffer | undefined> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of body) {
-    const b = Buffer.from(chunk as Uint8Array);
-    bytes += b.length;
-    if (bytes > WORKSPACE_FRAME_MAX_BYTES) {
-      body.destroy();
-      return undefined;
-    }
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks);
-}
+const tooLarge = (c: Ctx) =>
+  c.json({ code: "file_too_large", message: "This file is too large to show." }, 413);
 
 /**
  * `GET /v1/workspace/frame?path=&team=` (KOBE-268): one of the caller's own synced HTML files as
@@ -92,15 +77,23 @@ export function registerWorkspaceFrame(
       return entry.blobKey;
     });
     if (found === undefined) return notFound(c);
-    if (found === "too_large") {
-      return c.json({ code: "file_too_large", message: "This file is too large to show." }, 413);
-    }
-    const object = await sync.objects.get(found).catch((err: unknown) => {
+    if (found === "too_large") return tooLarge(c);
+    try {
+      const object = await sync.objects.get(found);
+      if (!object) return notFound(c);
+      if (object.size > WORKSPACE_FRAME_MAX_BYTES) {
+        object.body.destroy();
+        return tooLarge(c);
+      }
+      const bytes = await readCappedBody(object.body, WORKSPACE_FRAME_MAX_BYTES);
+      if (bytes === "too_large") return tooLarge(c);
+      return new Response(new Uint8Array(bytes), { headers: FRAME_HEADERS });
+    } catch (err) {
       logger.error({ err, teamId: owner.teamId }, "workspace frame unreadable");
-      return null;
-    });
-    const bytes = object ? await readCapped(object.body) : undefined;
-    if (!bytes) return notFound(c);
-    return new Response(new Uint8Array(bytes), { headers: FRAME_HEADERS });
+      return c.json(
+        { code: "content_unavailable", message: "The file's content is unavailable." },
+        503,
+      );
+    }
   });
 }

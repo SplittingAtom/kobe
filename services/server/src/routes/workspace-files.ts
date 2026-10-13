@@ -116,6 +116,7 @@ export function workspaceFileRoutes(
   app.get("/file", async (c) => {
     const query = workspaceDownloadQuerySchema.safeParse(queryOf(c));
     if (!query.success) return badPath(c);
+    if (isInternalPath(query.data.path)) return notFound(c);
     const owner = ownerOf(c);
     const entry = await withTeam(db, owner.teamId, async (tx) => {
       const found = await currentEntry(tx, owner, query.data.path);

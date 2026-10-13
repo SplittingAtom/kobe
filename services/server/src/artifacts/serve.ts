@@ -101,6 +101,29 @@ export function svgDocument(svg: string): string {
 }
 
 /**
+ * A body read to the end, or "too_large" (the stream destroyed) once it passes `maxBytes`. A
+ * stream error rejects; callers log it with their context. Shared by the artifact and workspace
+ * frame routes.
+ */
+export async function readCappedBody(
+  body: Readable,
+  maxBytes: number,
+): Promise<Buffer | "too_large"> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of body) {
+    const b = Buffer.from(chunk as Uint8Array);
+    bytes += b.length;
+    if (bytes > maxBytes) {
+      body.destroy();
+      return "too_large";
+    }
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
  * The version's bytes from the thread's own object tree, capped at the artifact size limit;
  * undefined when the object is missing, outside the tree or too large (nothing is served then).
  */
@@ -117,16 +140,6 @@ export async function readArtifactBytes(
     object.body.destroy();
     return undefined;
   }
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of object.body as Readable) {
-    const b = Buffer.from(chunk as Uint8Array);
-    bytes += b.length;
-    if (bytes > ARTIFACT_CONTENT_MAX_BYTES) {
-      object.body.destroy();
-      return undefined;
-    }
-    chunks.push(b);
-  }
-  return Buffer.concat(chunks);
+  const bytes = await readCappedBody(object.body, ARTIFACT_CONTENT_MAX_BYTES);
+  return bytes === "too_large" ? undefined : bytes;
 }
