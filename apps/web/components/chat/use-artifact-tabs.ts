@@ -34,9 +34,12 @@ export interface ArtifactTabsApi {
   close(): void;
   /** Drops tabs of artifacts the thread no longer lists. */
   prune(existing: ReadonlySet<string>): void;
-  /** Drops one tab whose content is gone (a deleted file), without moving focus. */
+  /** Drops one tab whose content is gone (a deleted file); focus as `closeTab` when it was there. */
   drop(id: string): void;
 }
+
+/** The shell's artifact column (`components/shell/shell-grid.tsx`). */
+const ARTIFACT_COLUMN_ID = "kobe-artifact-column";
 
 /** Where focus goes when the last tab closes and nothing that opened the column is left. */
 function focusConversation(): void {
@@ -45,17 +48,27 @@ function focusConversation(): void {
 
 /**
  * The tabs of the thread under `key` (null: a new conversation, nothing remembered): restored
- * from and remembered in localStorage, swapped when the key changes. Every change is a functional
+ * from and remembered in localStorage, swapped when the key changes, except when `conversation`
+ * (assistant-ui's thread item id) stays the same: a new conversation got its thread id. Every change is a functional
  * update, so updates queued in one tick (an auto-open and a close) all apply.
  */
-export function useArtifactTabs(key: string | null): ArtifactTabsApi {
+export function useArtifactTabs(key: string | null, conversation?: string): ArtifactTabsApi {
   const [tabs, setTabs] = useState<ArtifactTabs>(() => (key === null ? NO_TABS : readTabs(key)));
   const [request, setRequest] = useState<OpenRequest | null>(null);
-  const [seenKey, setSeenKey] = useState(key);
-  if (seenKey !== key) {
-    setSeenKey(key);
-    setTabs(key === null ? NO_TABS : readTabs(key));
-    setRequest(null);
+  const [seen, setSeen] = useState({ key, conversation });
+  if (seen.key !== key || seen.conversation !== conversation) {
+    setSeen({ key, conversation });
+    // A new conversation that just became a thread (same conversation, first key) keeps its tabs:
+    // they are remembered under the new key from now on.
+    const adopted =
+      seen.key === null &&
+      key !== null &&
+      conversation !== undefined &&
+      seen.conversation === conversation;
+    if (!adopted) {
+      setTabs(key === null ? NO_TABS : readTabs(key));
+      setRequest(null);
+    }
   }
   useEffect(() => {
     if (key !== null) writeTabs(key, tabs);
@@ -98,7 +111,11 @@ export function useArtifactTabs(key: string | null): ArtifactTabsApi {
     (existing: ReadonlySet<string>) => setTabs((prev) => retainTabs(prev, existing)),
     [],
   );
+  /** Like closeTab, but focus moves only if it was in the column (or lost): a restore may drop. */
   const drop = useCallback((id: string) => {
+    const active = document.activeElement;
+    const column = document.getElementById(ARTIFACT_COLUMN_ID);
+    closing.current = active === null || active === document.body || !!column?.contains(active);
     setTabs((prev) => closeTabIn(prev, id));
     setRequest((prev) => (prev?.id === id ? null : prev));
   }, []);

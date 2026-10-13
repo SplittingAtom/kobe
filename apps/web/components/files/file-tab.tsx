@@ -2,9 +2,9 @@
 
 /**
  * A workspace file as a tab of the artifact column (KOBE-268): view-only, from the synced
- * workspace (so it works while the sandbox hibernates and shows the last-synced version). The
- * file's entry is looked up in its folder's listing first (size, and whether it still exists);
- * a file that is gone calls `onGone` and its tab closes. Renderers reuse the artifact views:
+ * workspace (so it works while the sandbox hibernates and shows the last-synced version). The read
+ * itself tells whether the file still exists (404: `onGone`, its tab closes) and its size
+ * (Content-Length); files that aren't shown inline (HTML, PDF, unknown) are read headers only. Renderers reuse the artifact views:
  * Markdown, CSV/TSV tables, code and text as fenced blocks, JSON pretty-printed, images and SVG
  * as `<img>` from a `data:` URL (never inline SVG markup), HTML in the sandboxed frame served by
  * `/v1/workspace/frame` (same sandbox and CSP as artifact frames). PDFs and anything else:
@@ -38,8 +38,8 @@ import styles from "../chat/chat.module.css";
 type Loaded =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly error: ApiError }
-  | { readonly status: "none" | "unsynced" | "frame" }
-  | { readonly status: "too_large"; readonly size: number }
+  | { readonly status: "none" | "frame" }
+  | { readonly status: "too_large"; readonly size: number | null }
   | { readonly status: "image"; readonly src: string }
   | {
       readonly status: "text";
@@ -50,38 +50,56 @@ type Loaded =
 
 const GONE = "gone";
 
-/** What the tab shows for `path`, or GONE when the file no longer exists. */
-async function load(api: FilesApi, path: string, preview: FilePreview): Promise<Loaded | "gone"> {
-  const stat = await api.stat(path);
-  if (!stat.ok) return { status: "error", error: describeFileError(stat.error) };
-  const entry = stat.data;
-  if (!entry) return GONE;
-  if (preview.kind === "none") return { status: "none" };
-  if (entry.source === "live") return { status: "unsynced" };
-  const size = entry.sizeBytes ?? 0;
-  if (preview.kind === "html") {
-    return size > HTML_FRAME_MAX_BYTES ? { status: "too_large", size } : { status: "frame" };
+/** The bytes to read for a preview, and whether only the whole file will do. */
+function readPlan(preview: FilePreview): { readonly max: number; readonly wholeOnly: boolean } {
+  switch (preview.kind) {
+    case "none":
+    case "html":
+      return { max: 0, wholeOnly: true }; // headers only: whether it exists, and its size
+    case "image":
+    case "svg":
+      return { max: IMAGE_PREVIEW_MAX_BYTES, wholeOnly: true };
+    default:
+      return { max: TEXT_PREVIEW_MAX_BYTES, wholeOnly: false };
   }
-  const image = preview.kind === "image" || preview.kind === "svg";
-  if (image && size > IMAGE_PREVIEW_MAX_BYTES) return { status: "too_large", size };
-  const read = await api.read(path, image ? IMAGE_PREVIEW_MAX_BYTES : TEXT_PREVIEW_MAX_BYTES);
+}
+
+/** What the tab shows for `path`, or GONE when the read says the file no longer exists. */
+async function load(api: FilesApi, path: string, preview: FilePreview): Promise<Loaded | "gone"> {
+  const plan = readPlan(preview);
+  const read = await api.read(path, plan.max, plan.wholeOnly);
   if (!read.ok) {
     return read.error.status === 404
       ? GONE
       : { status: "error", error: describeFileError(read.error) };
   }
-  const { bytes, truncated } = read.data;
-  if (image) {
-    return truncated
-      ? { status: "too_large", size }
-      : { status: "image", src: imageDataUrl(bytes, preview.mime) };
+  const { bytes, truncated, size } = read.data;
+  switch (preview.kind) {
+    case "none":
+      return { status: "none" };
+    case "html":
+      return size !== null && size > HTML_FRAME_MAX_BYTES
+        ? { status: "too_large", size }
+        : { status: "frame" };
+    case "image":
+    case "svg":
+      return truncated
+        ? { status: "too_large", size }
+        : { status: "image", src: imageDataUrl(bytes, preview.mime) };
+    default: {
+      const text = decodePreviewText(bytes, truncated);
+      return text === null ? { status: "none" } : { status: "text", text, truncated, size };
+    }
   }
-  const text = decodePreviewText(bytes, truncated);
-  if (text === null) return { status: "none" };
-  return { status: "text", text, truncated, size: read.data.size ?? size };
 }
 
-function useFilePreview(api: FilesApi, path: string, onGone: (path: string) => void): Loaded {
+/** The file's preview, read again on each new `reload` (the member opened it again). */
+function useFilePreview(
+  api: FilesApi,
+  path: string,
+  reload: number,
+  onGone: (path: string) => void,
+): Loaded {
   const [state, setState] = useState<Loaded>({ status: "loading" });
   useEffect(() => {
     let current = true;
@@ -93,7 +111,7 @@ function useFilePreview(api: FilesApi, path: string, onGone: (path: string) => v
     return () => {
       current = false;
     };
-  }, [api, path, onGone]);
+  }, [api, path, reload, onGone]);
   return state;
 }
 
@@ -147,12 +165,14 @@ function FileBody({
       return <ErrorNotice error={loaded.error} />;
     case "none":
       return <CannotPreview reason="Cannot preview this file." />;
-    case "unsynced":
-      return <CannotPreview reason="This file has not synced from your sandbox yet." />;
     case "too_large":
       return (
         <CannotPreview
-          reason={`This file is too large to preview (${formatBytes(loaded.size)}).`}
+          reason={
+            loaded.size === null
+              ? "This file is too large to preview."
+              : `This file is too large to preview (${formatBytes(loaded.size)}).`
+          }
         />
       );
     case "frame":
@@ -189,15 +209,18 @@ export function FileTabContent({
   api,
   teamId,
   titleId,
+  reload,
   onGone,
 }: {
   readonly path: string;
   readonly api: FilesApi;
   readonly teamId: string;
   readonly titleId: string;
+  /** A new value reads the file again (it was opened again from Files). */
+  readonly reload: number;
   onGone(path: string): void;
 }) {
-  const loaded = useFilePreview(api, path, onGone);
+  const loaded = useFilePreview(api, path, reload, onGone);
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
   const name = fileName(path);
   const download = async () => {

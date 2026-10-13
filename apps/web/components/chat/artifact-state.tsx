@@ -252,7 +252,12 @@ export function ArtifactPanelProvider({
   readonly onSavePreferences?: (change: LayoutPreferences) => void;
   readonly children: ReactNode;
 }) {
-  const t = useArtifactTabs(threadId === undefined ? null : tabsKey(teamId, threadId));
+  // assistant-ui's id of the conversation on screen: unchanged when a new one gets its thread id.
+  const conversation = useAuiState((s) => s.threadListItem.id);
+  const t = useArtifactTabs(
+    threadId === undefined ? null : tabsKey(teamId, threadId),
+    conversation,
+  );
   const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
@@ -266,15 +271,19 @@ export function ArtifactPanelProvider({
     [sheet, openTab],
   );
   const openFile = useCallback((path: string) => openArtifact(fileTabId(path)), [openArtifact]);
-  const [goneFile, setGoneFile] = useState<string | null>(null);
+  const [gone, setGone] = useState<{ readonly path: string; readonly threadId?: string } | null>(
+    null,
+  );
+  // The notice belongs to the thread it was raised on: another thread on screen clears it.
+  const goneFile = gone !== null && gone.threadId === threadId ? gone.path : null;
   const dropFile = useCallback(
     (path: string) => {
       drop(fileTabId(path));
-      setGoneFile(path);
+      setGone(threadId === undefined ? { path } : { path, threadId });
     },
-    [drop],
+    [drop, threadId],
   );
-  const dismissGone = useCallback(() => setGoneFile(null), []);
+  const dismissGone = useCallback(() => setGone(null), []);
 
   const api = useMemo<ArtifactPanelApi>(
     () => ({

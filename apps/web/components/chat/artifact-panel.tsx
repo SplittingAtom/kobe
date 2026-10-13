@@ -202,23 +202,29 @@ function useSheetLayer(ref: RefObject<HTMLElement | null>) {
 
 /**
  * A workspace file's tab (KOBE-268). Its file is read once the tab is first shown, not while it
- * waits hidden behind others; after that it stays loaded like an artifact tab.
+ * waits hidden behind others, and again each time the member opens it again (`openSeq`: the
+ * open request's seq while it names this tab), which shows new content or drops a gone file.
  */
 function FileTab({
   path,
   id,
   shown,
+  openSeq,
   filesApi,
 }: {
   readonly path: string;
   readonly id: string;
   readonly shown: boolean;
+  readonly openSeq: number | null;
   readonly filesApi: FilesApi;
 }) {
   const dropFile = useArtifactPanel()?.dropFile; // stable: the file is not read again
   const session = useChatSession();
   const [seen, setSeen] = useState(shown);
   if (shown && !seen) setSeen(true);
+  const [reload, setReload] = useState({ seq: openSeq, count: 0 });
+  if (openSeq !== null && openSeq !== reload.seq)
+    setReload({ seq: openSeq, count: reload.count + 1 });
   const onGone = useCallback((gone: string) => dropFile?.(gone), [dropFile]);
   if (!seen) return null;
   return (
@@ -227,6 +233,7 @@ function FileTab({
       api={filesApi}
       teamId={session.teamId}
       titleId={artifactTitleId(id)}
+      reload={reload.count}
       onGone={onGone}
     />
   );
@@ -238,8 +245,8 @@ export function ArtifactPanel({
   filesApi,
 }: {
   readonly className?: string | undefined;
-  /** Reads workspace files for file tabs (KOBE-268); without it they show nothing. */
-  readonly filesApi?: FilesApi | undefined;
+  /** Reads workspace files for file tabs (KOBE-268). */
+  readonly filesApi: FilesApi;
 }) {
   const panel = useArtifactPanel();
   const request = useContext(ArtifactPanelRequest);
@@ -305,7 +312,13 @@ export function ArtifactPanel({
                 onTitle={onTitle}
               />
             ) : (
-              filesApi && <FileTab path={path} id={id} shown={id === active} filesApi={filesApi} />
+              <FileTab
+                path={path}
+                id={id}
+                shown={id === active}
+                openSeq={request?.id === id ? request.seq : null}
+                filesApi={filesApi}
+              />
             )}
           </div>
         );

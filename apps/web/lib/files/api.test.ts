@@ -92,26 +92,19 @@ describe("files api", () => {
     expect(!missing.ok && missing.error.code).toBe("not_found");
   });
 
-  it("finds a file's entry in its folder's listing, following pages", async () => {
-    const pages: Record<string, unknown> = {
-      "": { path: "d", entries: [{ name: "a", path: "d/a", type: "file" }], next_cursor: "p2" },
-      p2: { path: "d", entries: [{ name: "n.txt", path: "d/n.txt", type: "file", size_bytes: 9 }] },
-    };
-    const urls: string[] = [];
-    const fetchFn: typeof fetch = async (input) => {
-      urls.push(String(input));
-      const cursor = new URL(String(input), "http://x").searchParams.get("cursor") ?? "";
-      return Response.json(pages[cursor]);
-    };
+  it("fetches nothing of a body whose Content-Length is over the cap", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(4));
+      },
+    });
+    const fetchFn: typeof fetch = async () =>
+      new Response(body, { headers: { "content-length": "8" } });
     const api = createFilesApi("t1", fetchFn);
-    const found = await api.stat("d/n.txt");
-    expect(found.ok && found.data?.sizeBytes).toBe(9);
-    expect(urls).toEqual(["/v1/workspace/files?path=d", "/v1/workspace/files?path=d&cursor=p2"]);
-    const gone = await api.stat("d/zzz");
-    expect(gone.ok && gone.data).toBeNull();
-    const folderGone = await createFilesApi("t1", stub(404, { code: "not_found" }).fetchFn).stat(
-      "x/y",
-    );
-    expect(folderGone.ok && folderGone.data).toBeNull();
+    const res = await api.read("big", 0, true);
+    expect(res.ok && res.data).toEqual({ bytes: new Uint8Array(0), size: 8, truncated: true });
+    expect(pulled).toBeLessThanOrEqual(1); // at most the stream's own first pull
   });
 });

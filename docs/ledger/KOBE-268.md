@@ -25,11 +25,21 @@ allow-forms` without `allow-same-origin`, `connect-src 'none'`, `frame-ancestors
   schema lives in the route (reuses `workspacePathSchema`).
 - **Reads** use the existing `/v1/workspace/file` (synced copy; works while hibernating). Previews
   therefore record `workspace.file_downloaded` audit rows, as downloads do.
-- **Existence and size first**: a file tab looks its entry up in its folder's listing (`stat`, no
-  audit row, follows pages up to 10). Gone → tab dropped (no focus move) + dismissible banner
-  "<name> is no longer in your workspace". `source: live` (not synced yet) → message, tab kept.
+- **The read is the record** (review): no listing lookup. A 404 from `/file` means gone → tab
+  dropped (focus back like a close when it was in the column) + banner, cleared on a thread
+  change. Size comes from Content-Length; HTML, PDF and unknown files are read headers only
+  (`wholeOnly`, cap 0), so the frame route never waits on a lookup and nothing is reported gone
+  because of a listing cap. A file not synced yet is a 404 too (treated as gone).
+- **Opening again re-reads** (review): the open request's seq bumps a per-tab reload.
+- **A new conversation's tabs carry over** to its thread key when the first message creates it
+  (assistant-ui's thread item id stays the same); any other key change swaps tabs as before.
 - **Caps**: text read with a streaming cap (1 MiB, then cancelled; notice "Showing the first 1 MB
-  of N"); images/SVG over 10 MiB are not fetched; HTML over 1 MiB is not framed.
+  of N"); images/SVG over 10 MiB are not read (Content-Length); HTML over 1 MiB is not framed.
+- **Frame route errors** (review): a stored object over the cap is 413; a storage stream error is
+  logged with the team and answered 503 `content_unavailable`. One capped reader
+  (`readCappedBody`, `artifacts/serve.ts`) serves both frame routes. `/file` now refuses `.kobe/`.
+- No team role lacks `team.chat` (member is the lowest), so the "role without it" test removes the
+  membership instead (403).
 - **Images and SVG** as `<img>` from `data:` URLs (page CSP `img-src 'self' data:`; no `blob:`), so
   SVG script never runs and there is no inline SVG markup.
 - **PDF → Cannot preview + Download**: browser PDF viewers don't run inside a sandboxed,
@@ -43,8 +53,8 @@ allow-forms` without `allow-same-origin`, `connect-src 'none'`, `frame-ancestors
 
 ## Open questions (for Chris or the coordinator)
 
-- Previews audit as downloads (one row per preview). Fine, or should a quieter "viewed" action be
-  added later (needs an audit catalogue change)?
+- Previews audit as downloads (coordinator: keep; `file_previewed` is a follow-up). An HTML view
+  writes two rows (the headers-only read and the frame).
 - PR #265 is ~680 lines of code + ~700 of tests; split proposal in the PR description.
 
 ## Evidence (acceptance criteria → test or command output)

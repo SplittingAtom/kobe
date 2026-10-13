@@ -197,11 +197,15 @@ export interface CappedBytes {
 }
 
 /** Reads the body until `maxBytes`, then cancels the rest (it is never downloaded in full). */
-async function readUpTo(res: Response, maxBytes: number): Promise<CappedBytes> {
+async function readUpTo(res: Response, maxBytes: number, wholeOnly: boolean): Promise<CappedBytes> {
   const length = Number(res.headers.get("content-length") ?? "NaN");
   const size = Number.isSafeInteger(length) ? length : null;
   const chunks: Uint8Array[] = [];
   let total = 0;
+  if (wholeOnly && size !== null && size > maxBytes) {
+    await res.body?.cancel(); // only all of it would do: none of it is fetched
+    return { bytes: new Uint8Array(0), size, truncated: true };
+  }
   let truncated = false;
   const reader = res.body?.getReader();
   while (reader) {
@@ -225,25 +229,6 @@ async function readUpTo(res: Response, maxBytes: number): Promise<CappedBytes> {
   return { bytes, size, truncated };
 }
 
-/** GET of a binary body capped at `maxBytes` (a preview); errors as `apiDownload`. */
-export async function apiReadCapped(
-  path: string,
-  maxBytes: number,
-  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
-): Promise<ApiResult<CappedBytes>> {
-  assertApiPath(path);
-  const { teamId, fetchFn = fetch } = options;
-  const headers = new Headers();
-  if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
-  try {
-    const res = await fetchFn(path, { method: "GET", headers, credentials: "same-origin" });
-    if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
-    return { ok: true, status: res.status, data: await readUpTo(res, maxBytes) };
-  } catch {
-    return { ok: false, error: fallback(0) };
-  }
-}
-
 export type ErrorKind =
   "signIn" | "forbidden" | "notFound" | "chooseTeam" | "reload" | "isolation" | "other";
 
@@ -260,14 +245,13 @@ export function errorKind(error: ApiError): ErrorKind {
   return "other";
 }
 
-/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
-export async function apiDownload(
+/** A GET whose body is binary: the response when it is ok, else the same `ApiError`s as `apiRequest`. */
+async function getBinary(
   path: string,
-  options: {
-    readonly teamId?: string | undefined;
-    readonly fetchFn?: typeof fetch | undefined;
-  } = {},
-): Promise<ApiResult<Uint8Array>> {
+  options: Pick<RequestOptions, "teamId" | "fetchFn">,
+): Promise<
+  { readonly ok: true; readonly res: Response } | { readonly ok: false; readonly error: ApiError }
+> {
   assertApiPath(path);
   const { teamId, fetchFn = fetch } = options;
   const headers = new Headers();
@@ -279,5 +263,39 @@ export async function apiDownload(
     return { ok: false, error: fallback(0) };
   }
   if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
-  return { ok: true, status: res.status, data: new Uint8Array(await res.arrayBuffer()) };
+  return { ok: true, res };
+}
+
+/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
+export async function apiDownload(
+  path: string,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
+): Promise<ApiResult<Uint8Array>> {
+  const got = await getBinary(path, options);
+  if (!got.ok) return got;
+  try {
+    return { ok: true, status: got.res.status, data: new Uint8Array(await got.res.arrayBuffer()) };
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
+}
+
+/**
+ * GET of a binary body capped at `maxBytes` (a preview): the rest is never fetched. `wholeOnly`
+ * (an image, or `maxBytes` 0 for headers only): a body whose Content-Length is over the cap is
+ * not read at all.
+ */
+export async function apiReadCapped(
+  path: string,
+  maxBytes: number,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> & { readonly wholeOnly?: boolean } = {},
+): Promise<ApiResult<CappedBytes>> {
+  const got = await getBinary(path, options);
+  if (!got.ok) return got;
+  try {
+    const data = await readUpTo(got.res, maxBytes, options.wholeOnly === true);
+    return { ok: true, status: got.res.status, data };
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
 }

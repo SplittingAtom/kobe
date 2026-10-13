@@ -9,13 +9,16 @@ import { workspaceFrameUrl } from "../../lib/files/preview";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
 import { ChatApp } from "../chat/chat-app";
+import { composer } from "../chat/testing";
 
 /** KOBE-268: workspace files open as tabs of the artifact column. */
 let fake: FakeKobe;
-/** The synced workspace: path -> content; `sizes` overrides the listed size. */
+/** The synced workspace: path -> content. */
 let files: Map<string, Uint8Array>;
-let sizes: Map<string, number>;
+/** Requests for a file's content, and the bytes of it the page actually pulled. */
 let reads: string[];
+let pulled: Map<string, number>;
+const CHUNK = 64 * 1024;
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -25,7 +28,7 @@ function entry(path: string, type: "file" | "dir") {
     name: path.slice(path.lastIndexOf("/") + 1),
     path,
     type,
-    size_bytes: type === "dir" ? null : (sizes.get(path) ?? bytes?.length ?? 0),
+    size_bytes: type === "dir" ? null : (bytes?.length ?? 0),
     mtime: "2026-10-01T10:00:00.000Z",
     source: "synced",
     owner: "sandbox",
@@ -63,7 +66,17 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     reads.push(path);
     const bytes = files.get(path);
     if (!bytes) return Response.json({ code: "not_found", message: "Gone." }, { status: 404 });
-    return new Response(new Uint8Array(bytes), {
+    let at = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (at >= bytes.length) return controller.close();
+        const chunk = bytes.subarray(at, at + CHUNK);
+        at += chunk.length;
+        pulled.set(path, at);
+        controller.enqueue(chunk);
+      },
+    });
+    return new Response(bytes.length === 0 ? null : body, {
       headers: { "content-length": String(bytes.length) },
     });
   }
@@ -77,8 +90,8 @@ function thread(title: string) {
   return t;
 }
 
-function mount(threadId: string) {
-  window.history.replaceState(null, "", `/?thread=${threadId}`);
+function mount(threadId?: string) {
+  window.history.replaceState(null, "", threadId ? `/?thread=${threadId}` : "/");
   return render(<ChatApp fetchFn={fetchFn} eventSource={fake.eventSource} />);
 }
 
@@ -112,8 +125,8 @@ beforeEach(() => {
   }
   fake = new FakeKobe();
   files = new Map();
-  sizes = new Map();
   reads = [];
+  pulled = new Map();
   vi.stubGlobal("fetch", fetchFn);
 });
 
@@ -151,6 +164,43 @@ describe("opening files (ac-1)", () => {
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
     await user.click(within(section).getByRole("button", { name: "Download todo.md" }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("opening again (ac-1, ac-3)", () => {
+  it("re-reads the file: new content shows; a deleted one drops, focus back on Files", async () => {
+    files.set("a.md", enc("# One"));
+    mount(thread("Work"));
+    const user = userEvent.setup();
+    const section = await openFiles(user);
+    const panel = await view(user, section, "a.md");
+    expect(await within(panel).findByRole("heading", { name: "One" })).toBeTruthy();
+
+    files.set("a.md", enc("# Two"));
+    await view(user, section, "a.md");
+    expect(await within(panel).findByRole("heading", { name: "Two" })).toBeTruthy();
+
+    files.delete("a.md");
+    const opener = within(section).getByRole("button", { name: "View a.md" });
+    await user.click(opener);
+    expect(await screen.findByText(/a\.md is no longer in your workspace/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("tablist")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("a file opened on a new conversation stays open once its first message makes the thread", async () => {
+    files.set("brief.md", enc("# Brief"));
+    mount();
+    const user = userEvent.setup();
+    await view(user, await openFiles(user), "brief.md");
+    await user.type(await composer(), "summarise it{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(1));
+    const id = must([...fake.threads.values()][0]).thread_id;
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${id}`));
+    expect(tabNames()).toEqual(["brief.md*"]);
+    await waitFor(() =>
+      expect(localStorage.getItem(tabsKey(fake.teamId, id))).toContain("file:brief.md"),
+    );
   });
 });
 
@@ -226,7 +276,9 @@ describe("renderers (ac-2)", () => {
     expect(frame.getAttribute("src")).toBe(workspaceFrameUrl("index.html", fake.teamId));
     expect(frame.getAttribute("sandbox")).toBe(ARTIFACT_FRAME_SANDBOX);
     expect(frame.hasAttribute("srcdoc")).toBe(false);
-    expect(reads).toEqual([]); // the page itself never reads the HTML
+    // The page only asks whether it exists and how large it is: none of the HTML is read.
+    expect(reads).toEqual(["index.html"]);
+    expect(pulled.get("index.html") ?? 0).toBeLessThanOrEqual(CHUNK);
     expect(panel.querySelector("script")).toBeNull();
   });
 
@@ -241,7 +293,8 @@ describe("renderers (ac-2)", () => {
       expect(within(panel).getByRole("button", { name: `Download ${name}` })).toBeTruthy();
       cleanup();
     }
-    expect(reads).toEqual(["bad.txt"]); // only the text file was read, to find it binary
+    // Each was checked (it exists); only the text file's content was read, to find it binary.
+    expect(reads).toEqual(["doc.pdf", "blob.bin", "bad.txt"]);
   });
 });
 
@@ -290,15 +343,30 @@ describe("memory, deleted files and caps (ac-3)", () => {
     await waitFor(() => expect(tabNames()).toEqual(["kept.md*"]));
     expect(await screen.findByText(/old\.pdf is no longer in your workspace/)).toBeTruthy();
     expect(await within(screen.getByRole("tabpanel")).findByText("Kept")).toBeTruthy();
-    expect(reads).toEqual(["kept.md"]);
+    expect(reads.sort()).toEqual(["kept.md", "old.pdf", "old/gone.md"]);
     await userEvent.setup().click(screen.getByRole("button", { name: "Dismiss file notice" }));
     expect(screen.queryByText(/no longer in your workspace/)).toBeNull();
   });
 
+  it("the notice belongs to its thread: another thread on screen clears it", async () => {
+    const t = thread("One");
+    const other = thread("Two");
+    localStorage.setItem(
+      tabsKey(fake.teamId, t),
+      JSON.stringify({ open: ["file:gone.md"], active: "file:gone.md" }),
+    );
+    mount(t);
+    expect(await screen.findByText(/gone\.md is no longer in your workspace/)).toBeTruthy();
+    act(() => {
+      window.history.pushState(null, "", `/?thread=${other}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(screen.queryByText(/no longer in your workspace/)).toBeNull());
+  });
+
   it("text previews stop at 1 MB with a notice; large images are not fetched", async () => {
     files.set("big.txt", enc("x".repeat(1024 * 1024 + 10)));
-    files.set("huge.png", new Uint8Array([1]));
-    sizes.set("huge.png", 20 * 1024 * 1024);
+    files.set("huge.png", new Uint8Array(10 * 1024 * 1024 + 1));
     mount(thread("Work"));
     const user = userEvent.setup();
     const section = await openFiles(user);
@@ -307,7 +375,9 @@ describe("memory, deleted files and caps (ac-3)", () => {
     const shownText = must(big.querySelector("pre")).textContent;
     expect(shownText.length).toBeLessThanOrEqual(1024 * 1024 + 1);
     const huge = await view(user, section, "huge.png");
-    expect(await within(huge).findByText(/too large to preview \(20 MB\)/)).toBeTruthy();
-    expect(reads).toEqual(["big.txt"]);
+    expect(await within(huge).findByText(/too large to preview \(10 MB\)/)).toBeTruthy();
+    // The text stopped at the cap; the image's Content-Length was enough to read none of it.
+    expect(must(pulled.get("big.txt"))).toBeLessThanOrEqual(1024 * 1024 + CHUNK);
+    expect(pulled.get("huge.png") ?? 0).toBeLessThanOrEqual(CHUNK);
   });
 });
