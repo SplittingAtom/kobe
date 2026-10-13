@@ -9,13 +9,24 @@
  * `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded from the server's frame route
  * (`artifact-views.tsx`). State: `artifact-state.tsx`.
  */
-import { useCallback, useContext, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import { artifactContentUrl, type ArtifactDetailView } from "../../lib/chat/artifacts";
 import type { ApiError } from "../../lib/api/client";
+import { artifactAsSheet } from "../../lib/shell/layout";
 import { cn } from "../../lib/utils";
 import { ErrorNotice } from "../admin/error-notice";
 import { ArtifactResizeHandle } from "../shell/artifact-resize";
 import { IconAction } from "../shell/icon-action";
+import { useShellBand } from "../shell/shell-band";
+import { useModalLayer } from "../shell/use-modal-layer";
 import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
@@ -160,6 +171,22 @@ function useTabTitles(open: readonly string[]) {
   return { tabs, onTitle };
 }
 
+/**
+ * Under 820 px the column is a sheet (CE7, CE8, KOBE-201): over the conversation from 768 px, full
+ * screen and modal below it. Back (or Escape) hides it and focus returns to what opened it.
+ */
+function useSheetLayer(ref: RefObject<HTMLElement | null>) {
+  const panel = useArtifactPanel();
+  const band = useShellBand();
+  const sheet = artifactAsSheet(band);
+  const hide = useCallback(() => panel?.hideSheet(), [panel]);
+  useModalLayer(ref, panel?.sheetOpen === true, hide, {
+    modal: band === "single",
+    escape: false, // the panel's own Escape (below) goes back
+  });
+  return { sheet, modal: band === "single" };
+}
+
 /** The artifact column's content: tabs, the open artifacts and the resize handle. */
 export function ArtifactPanel({ className }: { readonly className?: string | undefined }) {
   const panel = useArtifactPanel();
@@ -169,22 +196,27 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
   useEffect(() => {
     if (requestKey !== null) ref.current?.focus();
   }, [requestKey]);
+  const { sheet, modal } = useSheetLayer(ref);
   const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
   if (!panel || active === null) return null; // no tabs: no column (CE6)
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape" && !event.defaultPrevented) {
-      event.stopPropagation();
-      const last = panel.tabs.open.length === 1;
-      panel.close();
-      if (!last) ref.current?.focus();
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    event.stopPropagation();
+    if (sheet) {
+      panel.hideSheet();
+      return;
     }
+    const last = panel.tabs.open.length === 1;
+    panel.close();
+    if (!last) ref.current?.focus();
   };
   return (
     <aside
       ref={ref}
       tabIndex={-1}
-      role="region"
+      role={modal ? "dialog" : "region"}
+      aria-modal={modal || undefined}
       aria-labelledby={artifactTitleId(active)}
       onKeyDown={onKeyDown}
       className={cn(
@@ -192,12 +224,17 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
         className,
       )}
     >
-      <ArtifactTabStrip
-        tabs={tabs}
-        active={active}
-        onSelect={panel.activate}
-        onClose={panel.closeTab}
-      />
+      <div className="flex shrink-0 items-center border-b">
+        {sheet && <IconAction command="artifact-back" onClick={panel.hideSheet} />}
+        <div className="min-w-0 flex-1">
+          <ArtifactTabStrip
+            tabs={tabs}
+            active={active}
+            onSelect={panel.activate}
+            onClose={panel.closeTab}
+          />
+        </div>
+      </div>
       {tabs.map(({ id }) => (
         <div
           key={id}
@@ -214,7 +251,7 @@ export function ArtifactPanel({ className }: { readonly className?: string | und
           />
         </div>
       ))}
-      <ArtifactResizeHandle width={panel.width} onChange={panel.setWidth} />
+      {!sheet && <ArtifactResizeHandle width={panel.width} onChange={panel.setWidth} />}
     </aside>
   );
 }

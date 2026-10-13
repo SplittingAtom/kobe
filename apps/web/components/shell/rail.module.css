@@ -16,11 +16,46 @@
   padding: 0.25rem;
 }
 
-/* The three icons: a row on one column, a column beside the conversation. */
+/* Below 1100 px an expanded rail is a drawer over the shell (CE7, CE8, KOBE-201); its shadow is
+   the scrim. Under 768 px the rail shows only as the drawer. */
+.rail[data-drawer] {
+  position: absolute;
+  z-index: 40;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: min(280px, 85vw);
+  height: auto;
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.4);
+  outline: none;
+}
+
+@media (width < 768px) {
+  .rail:not([data-drawer]) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rail[data-drawer] {
+    animation: drawer-in 160ms ease-out;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+/* The three icons of the collapsed rail, in its 48 px column. */
 .icons {
   display: flex;
   gap: 0.25rem;
   align-items: center;
+}
+
+.icons[hidden] {
+  display: none;
 }
 
 /* Header and sections; kept mounted (hidden) while collapsed. */
@@ -36,7 +71,7 @@
   display: none;
 }
 
-@media (min-width: 48rem) {
+@media (width >= 768px) {
   .rail {
     height: 100%;
     border-bottom: 0;
@@ -239,7 +274,7 @@
   font-weight: 600;
 }
 
-@media (min-width: 48rem) {
+@media (width >= 768px) {
   .rail[data-collapsed] .dropText {
     writing-mode: vertical-rl;
   }

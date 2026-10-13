@@ -45,6 +45,8 @@ afterEach(() => {
 });
 
 const rail = () => screen.getByRole("complementary", { name: "Workspace" });
+/** The rail as a drawer is a dialog (KOBE-201). */
+const railAside = () => must(document.querySelector<HTMLElement>('aside[aria-label="Workspace"]'));
 const divider = () => screen.getByRole("separator", { name: "Resize Threads and Files" });
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const loads = () => fake.requests.filter((r) => r.method === "GET" && r.path === PREFERENCES_PATH);
@@ -193,8 +195,8 @@ describe("values that no longer fit (ac-3)", () => {
     await openShell();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
     const user = userEvent.setup();
-    await user.click(within(rail()).getByRole("button", { name: "Show threads" }));
-    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Show the workspace" }));
+    await waitFor(() => expect(railAside().hasAttribute("data-drawer")).toBe(true));
     await new Promise((r) => setTimeout(r, 900));
     expect(puts()).toHaveLength(0);
   });

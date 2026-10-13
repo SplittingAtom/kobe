@@ -37,7 +37,10 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
               autoFocus
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setDraft(null);
+                if (e.key !== "Escape") return;
+                // Handled here: the rail's drawer (KOBE-201) must not close on the same key.
+                e.preventDefault();
+                setDraft(null);
               }}
             />
             <button type="submit">Save</button>

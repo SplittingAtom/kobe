@@ -11,9 +11,10 @@
  * space right of the rail can't hold beside the conversation's floor, a share outside the rail's
  * bounds) is ignored and the default applies.
  *
- * Narrow screens keep their defaults (the rail starts collapsed, CE8; A5 KOBE-201 owns the
- * breakpoints): a stored "expanded" never opens the rail on a phone, and neither the rail's state
- * nor the artifact width changed there is saved, so a phone never rewrites the desktop layout.
+ * Narrow windows never rewrite the desktop layout (CE7, KOBE-201, `lib/shell/layout.ts`): the
+ * stored rail state is the member's choice for wide windows (below 1100 px the rail is collapsed
+ * or a drawer, unsaved), and the artifact width is neither applied nor saved while artifacts open
+ * as a sheet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readUiPreferences, THREADS_SHARE_BOUNDS, type UiPreferences } from "@kobe/protocol";
@@ -62,12 +63,6 @@ export function readPreferences(data: unknown): LayoutPreferences {
       artifact_width: raw.artifactWidth,
     }),
   );
-}
-
-/** The rail's collapsed state to apply, or null to keep the default. Narrow: always collapsed. */
-export function applyRailCollapsed(stored: boolean | undefined, narrow: boolean): boolean | null {
-  if (narrow) return true;
-  return stored ?? null;
 }
 
 /** The stored share if it is within the rail's bounds, else null (the default applies). */

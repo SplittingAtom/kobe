@@ -81,7 +81,8 @@ const attachTransport: UploadTransport = (request) => {
 };
 
 function matchMedia(query: string) {
-  const matches = query.includes("pointer: coarse") ? touch : false;
+  // A desktop window (the shell's `width >=` bands match), with or without touch.
+  const matches = query.includes("pointer: coarse") ? touch : query.includes("width >=");
   return {
     matches,
     media: query,

@@ -63,12 +63,7 @@ export function ArtifactTabStrip({
   };
 
   return (
-    <div
-      ref={list}
-      role="tablist"
-      aria-label="Open artifacts"
-      className="flex shrink-0 overflow-x-auto border-b"
-    >
+    <div ref={list} role="tablist" aria-label="Open artifacts" className="flex overflow-x-auto">
       {tabs.map((tab, index) => {
         const selected = tab.id === active;
         return (

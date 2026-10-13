@@ -17,12 +17,13 @@ import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
-import { RailProvider } from "../shell/rail-state";
+import { RailDrawerButton, RailProvider } from "../shell/rail-state";
+import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { IconActionProvider } from "../shell/icon-action";
 import { InlineLink } from "../shell/text-links";
-import { ShellSlot, ShellSlotsProvider } from "../shell/shell-slots";
+import { ShellSlot, ShellSlotsProvider, useBarMenu } from "../shell/shell-slots";
 import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
@@ -111,10 +112,18 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
   return state;
 }
 
-/** The shell grid with the artifact column's dragged width (CE6). */
-function WorkspaceGrid(props: Omit<Parameters<typeof ShellGrid>[0], "artifactWidth">) {
+/** The shell grid with the artifact column's dragged width (CE6) and sheet (CE7). */
+function WorkspaceGrid(
+  props: Omit<Parameters<typeof ShellGrid>[0], "artifactWidth" | "artifactSheet">,
+) {
   const panel = useArtifactPanel();
-  return <ShellGrid {...props} artifactWidth={panel?.width ?? null} />;
+  return (
+    <ShellGrid
+      {...props}
+      artifactWidth={panel?.width ?? null}
+      artifactSheet={panel?.sheetOpen ?? false}
+    />
+  );
 }
 
 /** Starter prompts on an empty conversation; picking one fills the composer. */
@@ -150,6 +159,9 @@ function ChatWorkspace({
   const [threadId, setThreadId] = useThreadUrl();
   // The consoles and builders return here, to this thread (CE4).
   useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
+  // The one-row bar's Menu closes once another thread is on screen (a search hit, the bell).
+  const { setOpen: setBarMenuOpen } = useBarMenu();
+  useEffect(() => setBarMenuOpen(false), [threadId, setBarMenuOpen]);
   const [listError, setListError] = useState<ApiError | null>(null);
   const adapter = useMemo(
     () => createThreadListAdapter(session, { onError: setListError }),
@@ -182,6 +194,9 @@ function ChatWorkspace({
           </ShellSlot>
           <ShellSlot name="context">
             <ContextRow />
+          </ShellSlot>
+          <ShellSlot name="nav">
+            <RailDrawerButton />
           </ShellSlot>
           <WorkspaceGrid
             rail={
@@ -283,17 +298,19 @@ export function ChatApp({
 
   return (
     <IconActionProvider>
-      <ShellSlotsProvider>
-        <div ref={setAppEl} className={styles.app} data-kobe-chat>
-          {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
-          <a className={styles.skipLink} href="#kobe-chat-main">
-            Skip to the conversation
-          </a>
-          <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
-          <TeamInvites />
-          {body}
-        </div>
-      </ShellSlotsProvider>
+      <ShellBandProvider>
+        <ShellSlotsProvider>
+          <div ref={setAppEl} className={styles.app} data-kobe-chat>
+            {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
+            <a className={styles.skipLink} href="#kobe-chat-main">
+              Skip to the conversation
+            </a>
+            <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+            <TeamInvites />
+            {body}
+          </div>
+        </ShellSlotsProvider>
+      </ShellBandProvider>
     </IconActionProvider>
   );
 }

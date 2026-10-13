@@ -10,18 +10,21 @@ import styles from "./shell.module.css";
  * - rail: the workspace rail (A2, KOBE-198), 280 px or 48 px collapsed;
  * - artifact: the artifact tabs (A4, KOBE-200), drag-resizable against the conversation;
  *   `artifactWidth` is the dragged width in px (null: half the space right of the rail);
- * - breakpoints: A5 (KOBE-201) owns the CE7 yield order and the overlay sheet (shell.module.css).
+ * - breakpoints (CE7, CE8, KOBE-201, `lib/shell/layout.ts`): under 820 px the artifact column is a
+ *   sheet, shown while `artifactSheet` (the member opened an artifact); under 768 px one column.
  */
 export function ShellGrid({
   rail,
   artifact,
   conversation,
   artifactWidth = null,
+  artifactSheet = false,
 }: {
   readonly rail: ReactNode;
   readonly artifact: ReactNode;
   readonly conversation: ReactNode;
   readonly artifactWidth?: number | null;
+  readonly artifactSheet?: boolean;
 }) {
   const style =
     artifactWidth === null
@@ -32,7 +35,12 @@ export function ShellGrid({
       <div className={styles.rail} data-shell-region="rail">
         {rail}
       </div>
-      <div id="kobe-artifact-column" className={styles.artifact} data-shell-region="artifact">
+      <div
+        id="kobe-artifact-column"
+        className={styles.artifact}
+        data-shell-region="artifact"
+        {...(artifactSheet ? { "data-sheet-open": "" } : {})}
+      >
         {artifact}
       </div>
       <div className={styles.conversation} data-shell-region="conversation">

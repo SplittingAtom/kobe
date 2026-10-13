@@ -187,20 +187,61 @@
   font-size: 0.85rem;
 }
 
-/* --- grid (CE5–CE7) ------------------------------------------------------------------------
-   Slot (A5, KOBE-201): the CE7 yield order (rail to 48 px, artifact to its floor, then an overlay
-   sheet) and the narrow-screen layout replace the two breakpoints below. */
+/* --- one-row bar (CE8, KOBE-201) ----------------------------------------------------------- */
 
-/* Each column scrolls on its own and the page never does (KOBE-205): the grid fills the height
-   under the bar, the rail and the artifact column scroll, and the conversation leaves scrolling to
-   its message list so the composer stays put. One column: rail, conversation, artifact. The
-   conversation row keeps at least 20rem (the composer plus some list) and the rail and the
-   artifact column yield first; A5 (KOBE-201) owns the full yield order. */
+.nav:empty {
+  display: none;
+}
+
+/* The search and the bar's icons: part of row one on two rows; the Menu's body on one row. */
+.menuPanel {
+  display: contents;
+}
+
+.menuPanel[hidden],
+.rowTwo[hidden] {
+  display: none;
+}
+
+/* Open, the Menu unfolds under row one (the bar grows; nothing remounts): search and icons on
+   their own line, then row two with the pickers. */
+.bar[data-bar-layout="single"] .menuPanel:not([hidden]) {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.bar[data-bar-layout="single"] .search {
+  flex: none;
+  max-width: none;
+}
+
+.bar[data-bar-layout="single"] .actions {
+  flex-wrap: wrap;
+  margin-inline-start: 0;
+}
+
+.bar[data-bar-layout="single"] .rowOne > [data-command="thread-menu"] {
+  margin-inline-start: auto;
+}
+
+/* --- grid (CE5–CE8) ------------------------------------------------------------------------
+   The CE7 table (KOBE-201; the same numbers as lib/shell/layout.ts):
+   ≥ 1100 px  rail 280 or 48 (the member's choice) · artifact column · conversation;
+   820–1100   rail 48 (expanding it opens a drawer) · artifact column toward 360 · conversation;
+   768–820    rail 48 · conversation, with the artifact column as a sheet over it;
+   < 768      the conversation alone; the rail is a drawer, artifacts a full-screen sheet.
+   Beside the artifact column the conversation never gets under 400 px, the column never under
+   360 px. Each column scrolls on its own and the page never does (KOBE-205): the grid fills the
+   height under the bar, the rail and the artifact column scroll, and the conversation leaves
+   scrolling to its message list so the composer stays put. */
 .grid {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, auto) minmax(min(20rem, 100%), 1fr) minmax(0, auto);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -229,10 +270,6 @@
   overscroll-behavior: contain;
 }
 
-.rail {
-  max-height: 40dvh;
-}
-
 .conversation {
   overflow: hidden;
 }
@@ -245,11 +282,8 @@
 .artifact {
   display: flex;
   flex-direction: column;
-  order: 1; /* below the conversation while the grid is one column */
   min-width: 0;
   min-height: 0;
-  max-height: 50dvh;
-  border-top: 1px solid var(--admin-border);
 }
 
 .artifact:empty {
@@ -265,36 +299,82 @@
   border-top: 1px solid var(--admin-border);
 }
 
-@media (min-width: 48rem) {
-  .grid {
-    grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-
+/* One column (CE8): the rail and the artifact column leave the grid. The rail's drawer and the
+   artifact sheet lie over the whole chat (`.app` is their containing block). */
+@media (width < 768px) {
   .rail,
   .artifact {
-    max-height: none;
+    display: contents;
   }
 
-  .grid:has(> .artifact:not(:empty)) {
-    grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr) minmax(0, 1fr);
+  .artifact:not([data-sheet-open]) > * {
+    display: none;
+  }
+
+  .artifact[data-sheet-open] > * {
+    position: absolute;
+    z-index: 40;
+    inset: 0;
+  }
+}
+
+@media (width >= 768px) {
+  .grid {
+    position: relative; /* the drawer and the overlay sheet lie over the grid, under the bar */
+    grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr);
   }
 
   .artifact {
-    order: 0;
-    border-top: 0;
     border-inline-end: 1px solid var(--admin-border);
   }
 }
 
-/* The drag handle on the artifact column's edge (CE6, KOBE-200): only where both floors fit. */
+/* The rail yields first: below 1100 px it keeps 48 px, collapsed or open as a drawer over it. */
+@media (width < 1100px) {
+  .grid {
+    --kobe-rail-width: 48px;
+  }
+}
+
+/* 768–820: the artifact column is a sheet over the conversation, which keeps the width. */
+@media (768px <= width < 820px) {
+  .artifact {
+    position: absolute;
+    z-index: 20;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: clamp(360px, 50%, 100% - var(--kobe-rail-width));
+    background: var(--admin-bg);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.16);
+  }
+
+  .artifact:not([data-sheet-open]) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .artifact[data-sheet-open] {
+    animation: sheet-in 160ms ease-out;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(2rem);
+  }
+}
+
+/* The drag handle on the artifact column's edge (CE6, KOBE-200): only where it is a column. */
 .resizeHandle {
   display: none;
 }
 
-/* Wide enough for every floor: artifact column ≥ 360 px, conversation ≥ 400 px (CE7). A dragged
-   width holds while it fits and comes back when the window widens again. */
-@media (min-width: 1100px) {
+/* From 820 px the artifact column sits beside the conversation, within both floors (CE7): the
+   column ≥ 360 px, the conversation ≥ 400 px. A dragged width holds while it fits and comes back
+   when the window widens again. */
+@media (width >= 820px) {
   .grid:has(> .artifact:not(:empty)) {
     grid-template-columns:
       var(--kobe-rail-width)
