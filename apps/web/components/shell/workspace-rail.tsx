@@ -1,7 +1,7 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { FileBrowser } from "../files/file-browser";
@@ -13,21 +13,23 @@ import {
   useRailDropZone,
   type DropStatus,
 } from "./rail-drop-zone";
-import { isNarrowScreen, sectionRows, useRail, type RailApi } from "./rail-state";
+import { sectionRows, useRail, type RailApi } from "./rail-state";
+import { useShellBand } from "./shell-band";
+import { useModalLayer } from "./use-modal-layer";
 import { RailThreads } from "./rail-threads";
 import styles from "./rail.module.css";
 
 const SECTION_IDS = { threads: "kobe-rail-threads", files: "kobe-rail-files" } as const;
 
-/** On one column the rail folds once a thread is on screen, however it was opened (A5 slot). */
-function useFoldOnThreadChange({ setCollapsed }: RailApi) {
+/** The drawer closes once a thread is on screen, however it was opened (CE8). */
+function useFoldOnThreadChange({ closeDrawer }: RailApi) {
   const threadId = useAuiState((s) => s.threadListItem.id);
   const seen = useRef(threadId);
   useEffect(() => {
     if (seen.current === threadId) return;
     seen.current = threadId;
-    if (isNarrowScreen()) setCollapsed(true);
-  }, [threadId, setCollapsed]);
+    closeDrawer();
+  }, [threadId, closeDrawer]);
 }
 
 /** Moves focus to the section the member asked for, once it is on screen (once per request). */
@@ -40,10 +42,13 @@ function useRevealFocus({ revealed, collapsed }: RailApi) {
   }, [revealed, collapsed]);
 }
 
-/** The three icons of the collapsed rail (CE5). New keeps the rail as it is. */
+/**
+ * The three icons of the collapsed rail (CE5). New keeps the rail as it is. Hidden, not unmounted,
+ * while the rail is expanded, so focus can return to the icon that opened a drawer.
+ */
 function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
   return (
-    <div className={styles.icons}>
+    <div className={styles.icons} hidden={!rail.collapsed}>
       <ThreadListPrimitive.New asChild>
         <IconAction command="new-thread" side="right" />
       </ThreadListPrimitive.New>
@@ -117,6 +122,10 @@ function RailFiles({
  * draggable divider, each scrolling on its own; 280 px, or 48 px collapsed to three icons. The
  * sections stay mounted (hidden) while collapsed, so their state survives and nothing re-wakes.
  * The whole rail is the drop zone for files (A3, KOBE-199, `rail-drop-zone.tsx`).
+ *
+ * Below 1100 px an expanded rail is a modal drawer (CE7, CE8, KOBE-201): focus moves in, the rest
+ * of the chat is inert, Escape or a press outside closes it and focus returns to the control that
+ * opened it. Under 768 px the collapsed rail is not shown at all; the bar opens the drawer.
  */
 export function WorkspaceRail({
   teamName,
@@ -132,20 +141,26 @@ export function WorkspaceRail({
   const rail = useRail();
   if (!rail) throw new Error("WorkspaceRail needs a RailProvider");
   useFoldOnThreadChange(rail);
+  const aside = useRef<HTMLElement>(null);
+  const { collapsed, drawer, toggle } = rail;
+  const closeDrawer = useCallback(() => toggle(true), [toggle]);
+  useModalLayer(aside, drawer, closeDrawer, { modal: true, escape: true });
   useRevealFocus(rail);
   const sections = useRef<HTMLDivElement>(null);
-  const { collapsed } = rail;
+  const single = useShellBand() === "single";
   const drop = useRailDropZone(filesApi, rail);
 
   return (
     <aside
+      ref={aside}
       aria-label="Workspace"
       className={styles.rail}
       {...(collapsed ? { "data-collapsed": "" } : {})}
+      {...(drawer ? { "data-drawer": "", role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}
       {...drop.handlers}
     >
       {drop.active && <RailDropOverlay />}
-      {collapsed && <CollapsedIcons rail={rail} />}
+      {!single && <CollapsedIcons rail={rail} />}
       <div className={styles.expanded} hidden={collapsed}>
         <div className={styles.header}>
           <h2 className={styles.team} title={teamName}>
@@ -153,10 +168,11 @@ export function WorkspaceRail({
           </h2>
           <IconAction
             command="toggle-rail"
+            label={drawer ? "Close the workspace" : undefined}
             side="right"
             aria-expanded
             aria-controls="kobe-rail-sections"
-            onClick={() => rail.toggle(true)}
+            onClick={() => toggle(true)}
           />
         </div>
         <div

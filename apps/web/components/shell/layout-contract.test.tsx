@@ -4,6 +4,7 @@ import { cleanup, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { viewport } from "../../app/layout";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { BREAKPOINTS } from "../../lib/shell/layout";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
 import { useViewportHeight } from "../chat/use-viewport-height";
@@ -51,11 +52,12 @@ describe("CSS contract", () => {
 
   it("the grid's row is bounded at every width, so no column can push the page taller", () => {
     const grid = rules(SHELL, ".grid");
-    // One column: the conversation keeps 20rem (or all there is); the rail and artifact yield.
-    const narrow =
-      "grid-template-rows: minmax(0, auto) minmax(min(20rem, 100%), 1fr) minmax(0, auto);";
-    expect(grid.some((b) => b.includes(narrow))).toBe(true);
+    // One row at every width: under 768 px the rail and the artifact column leave the grid
+    // (drawer, sheet; KOBE-201), so the conversation is all of it.
     expect(grid.some((b) => b.includes("grid-template-rows: minmax(0, 1fr);"))).toBe(true);
+    expect(
+      grid.some((b) => b.includes("grid-template-rows:") && !b.includes("minmax(0, 1fr)")),
+    ).toBe(false);
     expect(grid.some((b) => b.includes("min-height: 0;"))).toBe(true);
   });
 
@@ -72,6 +74,91 @@ describe("CSS contract", () => {
     expect(declares(SHELL, ".artifact:empty", "display: none;")).toBe(true);
     // The resize handle has its own strip, off the column's scrollbar (review round 1).
     expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
+  });
+});
+
+/** The body of `@media <query> { … }` (the first one), braces matched; "" when absent. */
+function media(source: string, query: string): string {
+  const flat = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  const start = flat.indexOf(`@media ${query} {`);
+  if (start < 0) return "";
+  let depth = 0;
+  for (let i = flat.indexOf("{", start); i < flat.length; i += 1) {
+    if (flat[i] === "{") depth += 1;
+    if (flat[i] === "}") depth -= 1;
+    if (depth === 0) return flat.slice(flat.indexOf("{", start) + 1, i);
+  }
+  return "";
+}
+
+describe("breakpoints (KOBE-201, CE7, CE8)", () => {
+  const below = (px: number) => `(max-width: ${px - 0.02}px)`;
+  const from = (px: number) => `(min-width: ${px}px)`;
+
+  it("the CSS bands sit on the layout module's numbers", () => {
+    expect(BREAKPOINTS).toEqual({ overlay: 768, medium: 820, wide: 1100 });
+    for (const query of [
+      below(BREAKPOINTS.overlay),
+      from(BREAKPOINTS.overlay),
+      `${from(BREAKPOINTS.overlay)} and ${below(BREAKPOINTS.medium)}`,
+      from(BREAKPOINTS.medium),
+      below(BREAKPOINTS.wide),
+    ]) {
+      expect(media(SHELL, query), query).not.toBe("");
+    }
+    expect(media(RAIL, below(BREAKPOINTS.overlay))).not.toBe("");
+  });
+
+  it("below 1100 px the rail's column is 48 px; an expanded rail is a drawer over it", () => {
+    expect(
+      declares(media(SHELL, below(BREAKPOINTS.wide)), ".grid", "--kobe-rail-width: 48px;"),
+    ).toBe(true);
+    const drawer = rules(RAIL, ".rail[data-drawer]").join("");
+    expect(drawer).toContain("position: absolute;");
+    expect(drawer).toContain("width: min(280px, 85vw);");
+  });
+
+  it("from 820 px the artifact column sits beside the conversation, within both floors", () => {
+    const column = media(SHELL, from(BREAKPOINTS.medium)).replace(/\s+/g, " ");
+    expect(column).toContain(
+      "minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px)) minmax(400px, 1fr);",
+    );
+    expect(declares(column, ".resizeHandle", "display: block;")).toBe(true);
+  });
+
+  it("768–820: the artifact column is a sheet over the conversation, shown only while open", () => {
+    const overlay = media(SHELL, `${from(BREAKPOINTS.overlay)} and ${below(BREAKPOINTS.medium)}`);
+    expect(declares(overlay, ".artifact", "position: absolute;")).toBe(true);
+    expect(
+      declares(overlay, ".artifact", "width: clamp(360px, 50%, 100% - var(--kobe-rail-width));"),
+    ).toBe(true);
+    expect(declares(overlay, ".artifact:not([data-sheet-open])", "display: none;")).toBe(true);
+    // Not a grid column there: the conversation keeps everything right of the 48 px rail.
+    expect(overlay).not.toContain("grid-template-columns");
+  });
+
+  it("under 768 px: one column; the drawer and the full-screen sheet leave the grid", () => {
+    const single = media(SHELL, below(BREAKPOINTS.overlay));
+    expect(declares(single, ".rail", "display: contents;")).toBe(true);
+    expect(declares(single, ".artifact", "display: contents;")).toBe(true);
+    expect(declares(single, ".artifact[data-sheet-open] > *", "inset: 0;")).toBe(true);
+    expect(declares(single, ".artifact:not([data-sheet-open]) > *", "display: none;")).toBe(true);
+    expect(
+      declares(
+        media(RAIL, below(BREAKPOINTS.overlay)),
+        ".rail:not([data-drawer])",
+        "display: none;",
+      ),
+    ).toBe(true);
+  });
+
+  it("the drawer and the sheets move only for members who allow motion", () => {
+    for (const source of [SHELL, RAIL]) {
+      const motion = media(source, "(prefers-reduced-motion: no-preference)");
+      const all = source.match(/animation:/g) ?? [];
+      expect(all.length).toBeGreaterThan(0);
+      expect((motion.match(/animation:/g) ?? []).length).toBe(all.length);
+    }
   });
 });
 

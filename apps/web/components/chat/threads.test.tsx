@@ -338,16 +338,16 @@ describe("accessibility", () => {
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
-  it("starts the rail collapsed on narrow screens, and its icons expand it", async () => {
+  it("starts the rail collapsed on narrow screens, and the bar opens it as a drawer", async () => {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
     );
     openApp(fake);
     const rail = await screen.findByRole("complementary", { name: "Workspace" });
     expect(within(rail).queryByRole("heading", { name: "Threads" })).toBeNull();
-    await userEvent.setup().click(within(rail).getByRole("button", { name: "Show threads" }));
-    // The expanded rail is a new element.
-    const expanded = await screen.findByRole("complementary", { name: "Workspace" });
-    expect(await within(expanded).findByRole("heading", { name: "Threads" })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show the workspace" }));
+    // The drawer is a modal dialog (KOBE-201).
+    const drawer = await screen.findByRole("dialog", { name: "Workspace" });
+    expect(await within(drawer).findByRole("heading", { name: "Threads" })).toBeTruthy();
   });
 });

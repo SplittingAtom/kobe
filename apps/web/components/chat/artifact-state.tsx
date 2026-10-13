@@ -12,6 +12,9 @@
  * - The column's width is per user, server-side (CE8, KOBE-202, `lib/shell/preferences.ts`): the
  *   stored width applies once it loads if it still fits this window beside the conversation's
  *   floor (else the default, half the space), and a resize is saved when it is released.
+ * - Under 820 px the column is a sheet (CE7, CE8, KOBE-201): it shows when the member opens an
+ *   artifact and hides with Back, keeping the tabs; the agent's new artifacts join the tabs
+ *   without covering the conversation. The width is neither applied nor saved there.
  */
 import {
   createContext,
@@ -35,7 +38,9 @@ import {
   useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
-import { isNarrowScreen, useRail } from "../shell/rail-state";
+import { artifactAsSheet } from "../../lib/shell/layout";
+import { useRail } from "../shell/rail-state";
+import { useShellBand } from "../shell/shell-band";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 
@@ -51,6 +56,10 @@ export interface ArtifactPanelApi {
   readonly createdTitles: Readonly<Record<string, string>>;
   /** The column's dragged width in px; null is the default (half the space right of the rail). */
   readonly width: number | null;
+  /** Under 820 px: the artifact sheet is showing (the member opened an artifact). Else false. */
+  readonly sheetOpen: boolean;
+  /** Back to the conversation: hides the sheet, keeps the tabs. */
+  hideSheet(): void;
   /** The member opens an artifact: its tab becomes active and the column takes focus. */
   openArtifact(id: string, version?: number): void;
   activate(id: string): void;
@@ -175,9 +184,11 @@ function useArtifactWidth(
   onSave: ((change: LayoutPreferences) => void) | undefined,
 ) {
   const rail = useRail();
+  // A sheet has no column to measure: the stored width waits for a window with one.
+  const sheet = artifactAsSheet(useShellBand());
   const width = useStoredPreference<number | null>({
     initial: null,
-    ready: preferences !== null && (rail === null || rail.settled),
+    ready: preferences !== null && (rail === null || rail.settled) && !sheet,
     resolve: () => {
       const space = spaceRightOfRail(shellGrid());
       return space === null ? null : applyArtifactWidth(preferences?.artifactWidth, space);
@@ -188,12 +199,27 @@ function useArtifactWidth(
   const setWidth = useCallback(
     (next: number) => {
       const space = spaceRightOfRail(shellGrid());
-      const local = isNarrowScreen() || (space !== null && !holdsBothFloors(space));
+      const local = sheet || (space !== null && !holdsBothFloors(space));
       return local ? set(next) : commit(next);
     },
-    [set, commit],
+    [sheet, set, commit],
   );
   return [width.value, setWidth] as const;
+}
+
+/**
+ * Whether the artifact sheet shows (under 820 px): from the member's open until Back, the last
+ * tab closing or a thread switch. The agent's auto-opens never show it.
+ */
+function useSheet(threadId: string | undefined, hasTabs: boolean) {
+  const [state, setState] = useState({ open: false, threadId });
+  if (state.threadId !== threadId || (state.open && !hasTabs)) {
+    setState({ open: false, threadId });
+  }
+  const show = useCallback(() => setState({ open: true, threadId }), [threadId]);
+  const hide = useCallback(() => setState({ open: false, threadId }), [threadId]);
+  const open = state.open && state.threadId === threadId && hasTabs;
+  return useMemo(() => ({ open, show, hide }), [open, show, hide]);
 }
 
 export function ArtifactPanelProvider({
@@ -216,6 +242,16 @@ export function ArtifactPanelProvider({
   const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
+  const sheet = useSheet(threadId, t.tabs.active !== null);
+  const asSheet = artifactAsSheet(useShellBand());
+  const { openArtifact: openTab } = t;
+  const openArtifact = useCallback(
+    (id: string, version?: number) => {
+      sheet.show();
+      openTab(id, version);
+    },
+    [sheet, openTab],
+  );
 
   const api = useMemo<ArtifactPanelApi>(
     () => ({
@@ -224,7 +260,9 @@ export function ArtifactPanelProvider({
       artifacts,
       createdTitles,
       width,
-      openArtifact: t.openArtifact,
+      sheetOpen: asSheet && sheet.open,
+      hideSheet: sheet.hide,
+      openArtifact,
       activate: t.activate,
       closeTab: t.closeTab,
       close: t.close,
@@ -236,7 +274,10 @@ export function ArtifactPanelProvider({
       createdTitles,
       width,
       setWidth,
-      t.openArtifact,
+      asSheet,
+      sheet.open,
+      sheet.hide,
+      openArtifact,
       t.activate,
       t.closeTab,
       t.close,

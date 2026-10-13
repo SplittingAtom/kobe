@@ -15,7 +15,7 @@ import { createPortal } from "react-dom";
  * team is active and stays mounted across team switches; the workspace, which owns the
  * assistant-ui runtime, portals its bar parts into these targets so they keep its context.
  */
-export type ShellSlotName = "search" | "context";
+export type ShellSlotName = "search" | "context" | "nav";
 
 type Targets = Readonly<Record<ShellSlotName, HTMLElement | null>>;
 
@@ -27,7 +27,11 @@ const TargetsContext = createContext<Targets | null>(null);
 const RegisterContext = createContext<Register | null>(null);
 
 export function ShellSlotsProvider({ children }: { readonly children: ReactNode }) {
-  const [targets, setTargets] = useState<Targets>({ search: null, context: null });
+  const [targets, setTargets] = useState<Targets>({
+    search: null,
+    context: null,
+    nav: null,
+  });
   const register = useCallback<Register>((name, el) => {
     setTargets((t) => (t[name] === el ? t : { ...t, [name]: el }));
   }, []);

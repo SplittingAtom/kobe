@@ -287,7 +287,7 @@ describe("thread search in the bar", () => {
     expect(resultsPanel()).toBeNull();
   });
 
-  it("folds the rail on narrow screens when a search hit opens a thread", async () => {
+  it("closes the rail's drawer on narrow screens when a thread opens from it", async () => {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
     );
@@ -295,13 +295,11 @@ describe("thread search in the bar", () => {
     openApp(fake);
     await composer();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Show threads" }));
-    expect(await screen.findByRole("button", { name: "Collapse the rail" })).toBeTruthy();
-    await user.type(searchBox(), "revenue{Enter}");
-    const results = within(await screen.findByRole("list", { name: "Search results" }));
-    await user.click(results.getByRole("button", { name: "Quarterly revenue" }));
+    await user.click(screen.getByRole("button", { name: "Show the workspace" }));
+    const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
+    await user.click(await drawer.findByRole("button", { name: "Quarterly revenue" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show threads" })).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
   });
 });
 

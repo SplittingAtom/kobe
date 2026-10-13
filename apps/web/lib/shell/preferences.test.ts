@@ -14,12 +14,11 @@ import {
 
 /** KOBE-202 (CE8): layout preferences, applied when they still fit and saved debounced. */
 describe("apply (ac-3)", () => {
-  it("keeps the narrow-screen default: the rail starts collapsed whatever is stored", () => {
-    expect(applyRailCollapsed(false, true)).toBe(true);
-    expect(applyRailCollapsed(undefined, true)).toBe(true);
-    expect(applyRailCollapsed(true, false)).toBe(true);
-    expect(applyRailCollapsed(false, false)).toBe(false);
-    expect(applyRailCollapsed(undefined, false)).toBeNull();
+  it("applies the stored rail state as the wide-window choice", () => {
+    // The stored state is the wide-window choice; narrow bands collapse on screen (KOBE-201).
+    expect(applyRailCollapsed(true)).toBe(true);
+    expect(applyRailCollapsed(false)).toBe(false);
+    expect(applyRailCollapsed(undefined)).toBeNull();
   });
 
   it("applies a share within the rail's bounds and ignores one outside", () => {

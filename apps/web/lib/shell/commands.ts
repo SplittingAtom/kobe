@@ -1,5 +1,6 @@
 import {
   ArchiveRestoreIcon,
+  ArrowLeftIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   BellIcon,
@@ -12,11 +13,13 @@ import {
   CircleXIcon,
   CopyIcon,
   DownloadIcon,
+  EllipsisVerticalIcon,
   FolderIcon,
   FolderKanbanIcon,
   MessagesSquareIcon,
   MicIcon,
   PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   PanelRightOpenIcon,
   PaperclipIcon,
   PencilIcon,
@@ -139,6 +142,8 @@ const LIST = [
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
+  // Under 768 px the rail is a drawer the bar opens (CE8, KOBE-201).
+  { id: "open-rail", name: "Show the workspace", icon: PanelLeftOpenIcon, scope: "rail" },
   { id: "refresh-files", name: "Refresh files", icon: RefreshCwIcon, scope: "rail" },
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "rail" },
   { id: "trash-thread", name: "Move to Trash", icon: Trash2Icon, scope: "rail" },
@@ -148,6 +153,8 @@ const LIST = [
   // The conversation's chrome.
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
+  // Under 768 px the bar's one row ends in this menu: row two, search, areas, profile (CE8).
+  { id: "thread-menu", name: "Menu", icon: EllipsisVerticalIcon, scope: "thread" },
   // Message actions.
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
   { id: "edit", name: "Edit", icon: PencilIcon, scope: "message", shortcut: "Mod+Shift+E" },
@@ -171,6 +178,8 @@ const LIST = [
   { id: "artifact-next", name: "Next version", icon: ChevronRightIcon, scope: "artifact" },
   { id: "artifact-download", name: "Download", icon: DownloadIcon, scope: "artifact" },
   { id: "artifact-close", name: "Close artifact", icon: XIcon, scope: "artifact" },
+  // The artifact sheet (under 820 px) goes back to the conversation; its tabs stay open.
+  { id: "artifact-back", name: "Back to the conversation", icon: ArrowLeftIcon, scope: "artifact" },
 ] as const satisfies readonly Command[];
 
 export type CommandId = (typeof LIST)[number]["id"];

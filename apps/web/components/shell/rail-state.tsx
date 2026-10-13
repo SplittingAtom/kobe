@@ -16,7 +16,9 @@ import {
   useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
+import { railDocked } from "../../lib/shell/layout";
 import { IconAction } from "./icon-action";
+import { useShellBand } from "./shell-band";
 
 /**
  * The workspace rail's state (CE5, KOBE-198): collapsed (48 px) or expanded (280 px), and the
@@ -26,7 +28,12 @@ import { IconAction } from "./icon-action";
  * the stored values once they load (unless the member already changed that value on this page)
  * and saves the member's own changes only: the rail's toggle (Collapse, and the collapsed rail's
  * icons, the only way to expand it) and a divider release. Programmatic expansions (the bar's
- * Files, a drop) and narrow screens' toggles are not saved: the drawer is per device.
+ * Files, a drop) are not saved.
+ *
+ * Breakpoints (CE7, KOBE-201): the member's choice is the rail's state on wide windows only.
+ * Below 1100 px the rail is collapsed whatever was chosen, and expanding it opens it as a drawer
+ * over the shell (under 768 px the rail has no column, so the bar opens the drawer). The drawer is
+ * never saved and never touches the choice, so the chosen state comes back when the window grows.
  */
 export type RailSection = "threads" | "files";
 
@@ -37,15 +44,6 @@ export const THREADS_SHARE = {
   max: THREADS_SHARE_BOUNDS.max,
   step: 0.05,
 } as const;
-
-/** Under the shell's one-column breakpoint the rail starts collapsed (A5 replaces this, CE8). */
-const NARROW_QUERY = "(max-width: 47.99rem)";
-
-export function isNarrowScreen(): boolean {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function"
-    ? window.matchMedia(NARROW_QUERY).matches
-    : false;
-}
 
 export function clampShare(share: number): number {
   if (!Number.isFinite(share)) return THREADS_SHARE.initial;
@@ -61,12 +59,17 @@ export function sectionRows(share: number): string {
 }
 
 export interface RailApi {
+  /** Showing the collapsed icons (48 px): the member's choice when docked, else no drawer. */
   readonly collapsed: boolean;
+  /** Expanded below 1100 px: the rail is a modal drawer over the shell. */
+  readonly drawer: boolean;
   readonly threadsShare: number;
   /** The section the member asked to see; the rail focuses it once rendered. */
   readonly revealed: { readonly section: RailSection; readonly seq: number } | null;
   /** Collapses or expands the rail on this page only (automatic; not saved). */
   setCollapsed(collapsed: boolean): void;
+  /** Closes the drawer, if open (a thread opened from it). */
+  closeDrawer(): void;
   /** The member's own toggle: saved on wide screens. */
   toggle(collapsed: boolean): void;
   /** True once the member's stored layout has been applied (or failed to load). */
@@ -101,11 +104,11 @@ export function RailProvider({
   readonly onSave?: (change: LayoutPreferences) => void;
 }) {
   const ready = preferences !== null;
-  // Expanded on the server and the first client render; narrow screens collapse after mount.
-  const collapsed = useStoredPreference<boolean>({
+  const docked = railDocked(useShellBand());
+  const chosen = useStoredPreference<boolean>({
     initial: false,
     ready,
-    resolve: () => applyRailCollapsed(preferences?.railCollapsed, isNarrowScreen()),
+    resolve: () => applyRailCollapsed(preferences?.railCollapsed),
     save: onSave && ((railCollapsed) => onSave({ railCollapsed })),
   });
   const share = useStoredPreference<number>({
@@ -119,17 +122,28 @@ export function RailProvider({
   useEffect(() => {
     if (ready) setSettled(true);
   }, [ready]);
-  const { set: setCollapsed, commit: commitCollapsed, current: collapsedNow } = collapsed;
-  useEffect(() => {
-    if (isNarrowScreen()) setCollapsed(true);
-  }, [setCollapsed]);
+  // The drawer belongs to the band it opened in: a resize across the 1100 px edge closes it.
+  const [drawer, setDrawer] = useState({ open: false, docked });
+  if (drawer.docked !== docked) setDrawer({ open: false, docked });
+  const drawerOpen = !docked && drawer.open;
+  const openDrawer = useCallback((open: boolean) => setDrawer({ open, docked }), [docked]);
+  const closeDrawer = useCallback(() => openDrawer(false), [openDrawer]);
+  const { set: setChosen, commit: commitChosen, current: chosenNow } = chosen;
+  const setCollapsed = useCallback(
+    (next: boolean) => (docked ? setChosen(next) : openDrawer(!next)),
+    [docked, setChosen, openDrawer],
+  );
+  const collapsedNow = useCallback(
+    () => (docked ? chosenNow() : !drawerOpen),
+    [docked, chosenNow, drawerOpen],
+  );
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
-  // A phone's drawer is not the member's layout: only wide screens save the rail's state.
+  // Only the docked rail's toggle is the member's layout; the drawer is not saved.
   const toggle = useCallback(
-    (next: boolean) => (isNarrowScreen() ? setCollapsed(next) : commitCollapsed(next)),
-    [setCollapsed, commitCollapsed],
+    (next: boolean) => (docked ? commitChosen(next) : openDrawer(!next)),
+    [docked, commitChosen, openDrawer],
   );
   const commitShare = share.commit;
   const setThreadsShare = useCallback(
@@ -147,24 +161,29 @@ export function RailProvider({
   );
   const api = useMemo(
     () => ({
-      collapsed: collapsed.value,
+      collapsed: docked ? chosen.value : !drawerOpen,
+      drawer: drawerOpen,
       threadsShare: share.value,
       revealed,
       filesRequests,
       settled,
       setCollapsed,
+      closeDrawer,
       toggle,
       setThreadsShare,
       reveal,
       requestFiles,
     }),
     [
-      collapsed.value,
+      docked,
+      chosen.value,
+      drawerOpen,
       share.value,
       revealed,
       filesRequests,
       settled,
       setCollapsed,
+      closeDrawer,
       toggle,
       setThreadsShare,
       reveal,
@@ -179,4 +198,19 @@ export function FilesButton() {
   const rail = useRail();
   if (!rail) return null;
   return <IconAction command="files" onClick={() => rail.reveal("files")} />;
+}
+
+/** Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). */
+export function RailDrawerButton() {
+  const rail = useRail();
+  const single = useShellBand() === "single";
+  if (!rail || !single) return null;
+  return (
+    <IconAction
+      command="open-rail"
+      aria-haspopup="dialog"
+      aria-expanded={rail.drawer}
+      onClick={() => rail.reveal("threads", { toggle: true })}
+    />
+  );
 }
