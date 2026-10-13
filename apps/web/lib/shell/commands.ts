@@ -139,6 +139,7 @@ const LIST = [
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
+  { id: "refresh-files", name: "Refresh files", icon: RefreshCwIcon, scope: "rail" },
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "rail" },
   { id: "trash-thread", name: "Move to Trash", icon: Trash2Icon, scope: "rail" },
   { id: "restore-thread", name: "Restore", icon: ArchiveRestoreIcon, scope: "rail" },

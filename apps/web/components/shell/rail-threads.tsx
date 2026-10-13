@@ -7,6 +7,7 @@ import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
 import {
   groupThreads,
+  placementCustom,
   placementOf,
   type GroupKind,
   type ThreadGroup,
@@ -32,22 +33,52 @@ const HINTS: Partial<Readonly<Record<GroupKind, ReactNode>>> = {
 /** CE5: Archived starts collapsed; so does Trash, which only holds what the member threw away. */
 const START_FOLDED: ReadonlySet<GroupKind> = new Set<GroupKind>(["archived", "trash"]);
 
-/** Project names for the groups; ids the read misses (or a failed read) show as "Project". */
+interface ProjectNames {
+  readonly names: ReadonlyMap<string, string>;
+  /** The last read failed: the groups fall back to "Project". */
+  readonly failed: boolean;
+}
+
+const NO_NAMES: ProjectNames = { names: new Map(), failed: false };
+
+/**
+ * Project names for the groups: read when the projects in the list change, when the window
+ * regains focus (a rename or a new project elsewhere) and per team; another team's never show.
+ */
 function useProjectNames(teamId: string, ids: string, fetchFn: typeof fetch | undefined) {
-  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const [state, setState] = useState<ProjectNames & { readonly teamId: string }>({
+    ...NO_NAMES,
+    teamId,
+  });
+  const [focused, setFocused] = useState(0);
+  useEffect(() => {
+    const onFocus = () => setFocused((n) => n + 1);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
   useEffect(() => {
     if (ids === "") return;
     let current = true;
     void createProjectsApi(teamId, fetchFn)
       .list(true)
       .then((res) => {
-        if (current && res.ok) setNames(new Map(res.data.map((p) => [p.id, p.name])));
+        if (!current) return;
+        if (res.ok) {
+          setState({ teamId, names: new Map(res.data.map((p) => [p.id, p.name])), failed: false });
+          return;
+        }
+        console.warn("rail: could not read the project names", res.error);
+        setState((prev) => ({
+          teamId,
+          names: prev.teamId === teamId ? prev.names : new Map(),
+          failed: true,
+        }));
       });
     return () => {
       current = false;
     };
-  }, [teamId, ids, fetchFn]);
-  return names;
+  }, [teamId, ids, fetchFn, focused]);
+  return state.teamId === teamId && ids !== "" ? state : NO_NAMES;
 }
 
 function Group({
@@ -111,18 +142,23 @@ export function RailThreads({
   const hasMore = useAuiState((s) => s.threads.hasMore);
   const loading = useAuiState((s) => s.threads.isLoading);
   const listed = useMemo(() => {
-    const custom = new Map(items.map((i) => [i.id, i.custom]));
+    // A thread created since the last list read has no `custom` yet: its seeded summary has it.
+    const seeded = (remoteId: string | undefined) => {
+      const summary = remoteId === undefined ? null : session.peek(remoteId)?.getState().summary;
+      return summary ? placementCustom(summary) : undefined;
+    };
+    const custom = new Map(items.map((i) => [i.id, i.custom ?? seeded(i.remoteId)]));
     return threadIds.map((id) => ({ id, custom: custom.get(id) }));
-  }, [threadIds, items]);
+  }, [threadIds, items, session]);
   const projectIds = [
     ...new Set(listed.map((t) => placementOf(t.custom).projectId).filter((p) => p !== null)),
   ]
     .sort()
     .join(",");
-  const names = useProjectNames(session.teamId, projectIds, fetchFn);
+  const projects = useProjectNames(session.teamId, projectIds, fetchFn);
   const groups = useMemo(
-    () => groupThreads(listed, trashIds, (id) => names.get(id)),
-    [listed, trashIds, names],
+    () => groupThreads(listed, trashIds, (id) => projects.names.get(id)),
+    [listed, trashIds, projects],
   );
   // Groups the member opened or closed against their default (in memory; A6 slot, KOBE-202).
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
@@ -153,6 +189,11 @@ export function RailThreads({
       </div>
       <div className={styles.scroll}>
         {listError && <ErrorNotice error={listError} />}
+        {projects.failed && (
+          <p className={chat.hint} role="status">
+            Project names could not be loaded.
+          </p>
+        )}
         {!loading && groups.length === 0 && <p className={chat.hint}>No threads yet.</p>}
         {groups.map((g) => (
           <Group

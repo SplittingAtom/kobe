@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
-import { THREADS_SHARE } from "./rail-state";
+import { clampShare, sectionRows, THREADS_SHARE } from "./rail-state";
 import styles from "./rail.module.css";
 
 const KEY_STEPS: Readonly<Record<string, (share: number) => number>> = {
@@ -16,7 +16,8 @@ const KEY_STEPS: Readonly<Record<string, (share: number) => number>> = {
 /**
  * The draggable divider between Threads and Files (CE5): a focusable window splitter (WAI-ARIA
  * `separator`) whose value is Threads' share in percent. Drag it, or use the arrow keys, Page
- * Up/Down, Home and End. `onChange` clamps.
+ * Up/Down, Home and End. A drag moves the rows directly and commits once, on release, so the
+ * rail does not re-render on every pointer move. `onChange` clamps.
  */
 export function RailDivider({
   share,
@@ -30,29 +31,38 @@ export function RailDivider({
   readonly container: RefObject<HTMLElement | null>;
   readonly controls: string;
 }) {
-  const dragging = useRef(false);
+  /** The share shown while dragging; committed on release (null: not dragging). */
+  const dragged = useRef<number | null>(null);
 
-  const shareAt = (clientY: number): number | null => {
+  /** The pointer's share of the two sections' rows (the grid minus the divider's own row). */
+  const shareAt = (clientY: number, divider: HTMLElement): number | null => {
     const box = container.current?.getBoundingClientRect();
-    return box && box.height > 0 ? (clientY - box.top) / box.height : null;
+    const own = divider.getBoundingClientRect().height;
+    const rows = (box?.height ?? 0) - own;
+    return box && rows > 0 ? clampShare((clientY - box.top - own / 2) / rows) : null;
   };
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    dragging.current = true;
+    dragged.current = share;
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return;
-    const next = shareAt(e.clientY);
-    if (next !== null) onChange(next);
+    if (dragged.current === null) return;
+    const next = shareAt(e.clientY, e.currentTarget);
+    if (next === null || container.current === null) return;
+    dragged.current = next;
+    container.current.style.gridTemplateRows = sectionRows(next);
+    e.currentTarget.setAttribute("aria-valuenow", String(Math.round(next * 100)));
   };
   const onPointerEnd = (e: PointerEvent<HTMLDivElement>) => {
-    dragging.current = false;
+    const next = dragged.current;
+    dragged.current = null;
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
+    if (next !== null && next !== share) onChange(next);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = KEY_STEPS[e.key];

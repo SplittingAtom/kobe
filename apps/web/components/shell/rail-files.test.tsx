@@ -70,16 +70,20 @@ function mount() {
   return render(<ChatApp fetchFn={fetchFn} eventSource={fake.eventSource} />);
 }
 
-/** The rail's Files section, once the root is listed. */
+/** The rail's Files section, opened (Open files) and listed. */
 async function open() {
   const user = userEvent.setup();
   mount();
   const panel = await screen.findByRole("region", { name: "Files" });
+  await user.click(await within(panel).findByRole("button", { name: "Open files" }));
   await within(panel).findByText("report.csv");
   return { user, panel };
 }
 
-const woken = () => seen.some((s) => s.method === "POST" && s.url === "/v1/workspace/wake");
+const wakes = () =>
+  seen.filter((s) => s.method === "POST" && s.url === "/v1/workspace/wake").length;
+const rootListings = () =>
+  seen.filter((s) => s.method === "GET" && s.url === "/v1/workspace/files").length;
 
 beforeEach(() => {
   seen = [];
@@ -96,23 +100,48 @@ afterEach(() => {
 });
 
 describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
-  it("lists /workspace with its folders, and wakes the sandbox only once Files is used", async () => {
-    const { user, panel } = await open();
+  it("lists and wakes nothing until Files is opened, then lists /workspace and wakes", async () => {
+    mount();
+    const panel = await screen.findByRole("region", { name: "Files" });
+    const openFiles = await within(panel).findByRole("button", { name: "Open files" });
+    await screen.findByRole("heading", { name: "Finance" });
+    expect(seen).toEqual([]);
+    await userEvent.setup().click(openFiles);
+    await within(panel).findByText("report.csv");
     expect(within(panel).getByRole("button", { name: "Open folder notes" })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: "Open folder uploads" })).toBeTruthy();
     expect(within(panel).getAllByText("2 KB").length).toBeGreaterThan(0);
-    expect(woken()).toBe(false);
-    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
-    await waitFor(() => expect(woken()).toBe(true));
+    await waitFor(() => expect(wakes()).toBe(1));
+    expect(rootListings()).toBe(1);
   });
 
-  it("shows Files from the bar: the section takes focus and the sandbox wakes", async () => {
+  it("wakes and lists again on each Show files, bar Files and Refresh", async () => {
     const { user } = await open();
+    await waitFor(() => expect(wakes()).toBe(1));
     await user.click(screen.getByRole("button", { name: "Files" }));
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("region", { name: "Files" })),
     );
-    await waitFor(() => expect(woken()).toBe(true));
+    await waitFor(() => expect(wakes()).toBe(2));
+    expect(rootListings()).toBe(2);
+    await user.click(screen.getByRole("button", { name: "Refresh files" }));
+    await waitFor(() => expect(wakes()).toBe(3));
+    expect(rootListings()).toBe(3);
+    await user.click(screen.getByRole("button", { name: "Collapse the rail" }));
+    await user.click(screen.getByRole("button", { name: "Show files" }));
+    await waitFor(() => expect(wakes()).toBe(4));
+  });
+
+  it("keeps its folder through collapse and expand, without waking again", async () => {
+    const { user, panel } = await open();
+    await waitFor(() => expect(wakes()).toBe(1));
+    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
+    await within(panel).findByText("todo.md");
+    await user.click(screen.getByRole("button", { name: "Collapse the rail" }));
+    expect(screen.getByText("todo.md").closest("[hidden]")).not.toBeNull(); // hidden, still mounted
+    await user.click(screen.getByRole("button", { name: "Show threads" }));
+    expect(await within(panel).findByText("todo.md")).toBeTruthy();
+    expect(wakes()).toBe(1);
   });
 
   it("is gone from the artifact column: the old side panel is removed", async () => {
@@ -251,8 +280,10 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
         { code: "sandbox_unavailable", message: "Workspace storage is not configured." },
         { status: 503 },
       );
+    const user = userEvent.setup();
     mount();
     const panel = await screen.findByRole("region", { name: "Files" });
+    await user.click(await within(panel).findByRole("button", { name: "Open files" }));
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/Workspace storage/);
   });
 });

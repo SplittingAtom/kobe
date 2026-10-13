@@ -65,27 +65,39 @@ describe("rail (ac-1)", () => {
     expect(within(rail()).getByRole("region", { name: "Files" })).toBeTruthy();
   });
 
-  it("collapses to three icons, each of which expands it again", async () => {
+  it("collapses to three icons: New keeps it collapsed, threads and files expand it", async () => {
     openWithFetch();
     await screen.findByRole("heading", { name: "Finance" });
     const user = userEvent.setup();
+    await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
+    expect(rail().hasAttribute("data-collapsed")).toBe(true);
+    expect(
+      within(rail())
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["New conversation", "Show threads", "Show files"]);
+    await user.click(within(rail()).getByRole("button", { name: "New conversation" }));
+    expect(rail().hasAttribute("data-collapsed")).toBe(true);
     for (const [icon, focused] of [
-      ["New conversation", null],
       ["Show threads", "kobe-rail-threads"],
       ["Show files", "kobe-rail-files"],
     ] as const) {
-      await user.click(await within(rail()).findByRole("button", { name: "Collapse the rail" }));
-      const collapsed = rail();
-      expect(collapsed.hasAttribute("data-collapsed")).toBe(true);
-      expect(
-        within(collapsed)
-          .getAllByRole("button")
-          .map((b) => b.getAttribute("aria-label")),
-      ).toEqual(["New conversation", "Show threads", "Show files"]);
-      await user.click(within(collapsed).getByRole("button", { name: icon }));
+      await user.click(within(rail()).getByRole("button", { name: icon }));
       await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
-      if (focused) await waitFor(() => expect(document.activeElement?.id).toBe(focused));
+      await waitFor(() => expect(document.activeElement?.id).toBe(focused));
+      await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
     }
+  });
+
+  it("renders the same expanded markup first on narrow screens, then collapses", async () => {
+    const narrow = vi
+      .spyOn(window, "matchMedia")
+      .mockImplementation(
+        (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
+      );
+    openWithFetch();
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    expect(narrow).toHaveBeenCalled();
   });
 });
 
@@ -115,29 +127,40 @@ describe("divider (ac-1)", () => {
   it("follows the pointer while dragged, and stops on release", async () => {
     openWithFetch();
     await screen.findByRole("heading", { name: "Finance" });
-    const box = must(document.getElementById("kobe-rail-sections"));
-    vi.spyOn(box, "getBoundingClientRect").mockReturnValue({
-      top: 100,
-      height: 400,
-      bottom: 500,
-      left: 0,
-      right: 280,
-      width: 280,
-      x: 0,
-      y: 100,
-      toJSON: () => ({}),
-    });
+    const rect = (top: number, height: number) =>
+      ({
+        top,
+        height,
+        bottom: top + height,
+        left: 0,
+        right: 280,
+        width: 280,
+        x: 0,
+        y: top,
+      }) as DOMRect;
+    // 408 px of sections, 8 of them the divider: 400 px to share between Threads and Files.
+    vi.spyOn(
+      must(document.getElementById("kobe-rail-sections")),
+      "getBoundingClientRect",
+    ).mockReturnValue(rect(100, 408));
     const sep = divider();
+    vi.spyOn(sep, "getBoundingClientRect").mockReturnValue(rect(0, 8));
     fireEvent.pointerMove(sep, { clientY: 200, pointerId: 1 });
     expect(divider().getAttribute("aria-valuenow")).toBe("60"); // not dragging yet
-    fireEvent.pointerDown(sep, { clientY: 340, button: 0, pointerId: 1 });
-    fireEvent.pointerMove(sep, { clientY: 280, pointerId: 1 });
+    fireEvent.pointerDown(sep, { clientY: 344, button: 0, pointerId: 1 });
+    // The divider's middle under the pointer: 180 px of Threads above it, 45%.
+    fireEvent.pointerMove(sep, { clientY: 284, pointerId: 1 });
     expect(divider().getAttribute("aria-valuenow")).toBe("45");
+    expect(rows()).toBe("minmax(0, 0.45fr) auto minmax(0, 0.55fr)");
     fireEvent.pointerMove(sep, { clientY: 110, pointerId: 1 });
     expect(divider().getAttribute("aria-valuenow")).toBe("20"); // clamped
     fireEvent.pointerUp(sep, { clientY: 110, pointerId: 1 });
+    // Committed on release: the rail keeps it through a re-render (keyboard from there).
+    sep.focus();
+    await userEvent.setup().keyboard("{ArrowDown}");
+    expect(divider().getAttribute("aria-valuenow")).toBe("25");
     fireEvent.pointerMove(sep, { clientY: 400, pointerId: 1 });
-    expect(divider().getAttribute("aria-valuenow")).toBe("20");
+    expect(divider().getAttribute("aria-valuenow")).toBe("25");
   });
 });
 
@@ -187,5 +210,55 @@ describe("thread groups (ac-2)", () => {
     await userEvent.setup().click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("button", { name: "Plain chat" })).toBeNull();
+  });
+
+  it("puts a thread created in a project in that project's group before the list is read again", async () => {
+    let lists = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const inner = fake.fetch;
+    Object.defineProperty(fake, "fetch", {
+      value: async (input: string, init?: RequestInit) => {
+        const url = new URL(input, "http://kobe.test");
+        if (url.pathname === "/v1/threads" && (init?.method ?? "GET") === "GET" && ++lists > 1) {
+          await held; // the reload after the first message waits
+        }
+        return inner(input, init);
+      },
+    });
+    openApp(fake, undefined, undefined, `?project=${PROJECT_A}`);
+    await screen.findByText("No threads yet.");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Message"), "Hero copy{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(1));
+    const website = await screen.findByRole("list", { name: "Website" });
+    expect(within(website).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByRole("list", { name: "Your threads" })).toBeNull();
+    release();
+  });
+});
+
+describe("project names", () => {
+  it("says when they could not be read, and reads them again on focus", async () => {
+    const t = fake.addThread("Landing page");
+    must(fake.threads.get(t)).project_id = PROJECT_A;
+    let answer: () => Response = () =>
+      Response.json({ code: "unavailable", message: "down" }, { status: 503 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const inner = fake.fetch;
+    Object.defineProperty(fake, "fetch", {
+      value: async (input: string, init?: RequestInit) =>
+        new URL(input, "http://kobe.test").pathname === "/v1/projects"
+          ? answer()
+          : inner(input, init),
+    });
+    openWithFetch();
+    expect(await screen.findByText("Project names could not be loaded.")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Project" })).toBeTruthy();
+    expect(warn).toHaveBeenCalled();
+    answer = () => Response.json({ projects: [{ id: PROJECT_A, name: "Site redesign" }] });
+    fireEvent.focus(window);
+    expect(await screen.findByRole("list", { name: "Site redesign" })).toBeTruthy();
+    expect(screen.queryByText("Project names could not be loaded.")).toBeNull();
   });
 });

@@ -16,30 +16,32 @@ const iconButton =
   "hover:bg-muted focus-visible:ring-ring/50 inline-flex size-7 items-center justify-center rounded-md border";
 
 /**
- * Wakes the sandbox once `enabled` (the member reached for the files) and tracks "last synced"
- * until the refresh after it. The listing itself never waits for the wake.
+ * Wakes the sandbox on mount and again on each new `key` (the member asked for the files again),
+ * listing again at once and after the sync; tracks "last synced" until that refresh.
  */
-function useWake(api: FilesApi, reload: () => void, refreshMs: number, enabled: boolean): boolean {
-  const [done, setDone] = useState(false);
+function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: number): boolean {
+  const [doneKey, setDoneKey] = useState<number | null>(null);
+  const mounted = useRef(false);
   useEffect(() => {
-    if (!enabled) return;
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    if (mounted.current) reload(); // the first listing is useFolder's own
+    mounted.current = true;
     void api.wake().then((res) => {
       if (!current) return;
-      if (!res.ok) return setDone(true);
+      if (!res.ok) return setDoneKey(key);
       timer = setTimeout(() => {
         reload();
-        setDone(true);
+        setDoneKey(key);
       }, refreshMs);
     });
     return () => {
       current = false;
       clearTimeout(timer);
     };
-    // reload is stable; the wake runs once per opening.
-  }, [api, refreshMs, enabled]);
-  return enabled && !done;
+    // reload is stable; the wake runs once per ask.
+  }, [api, refreshMs, key]);
+  return doneKey !== key;
 }
 
 function Breadcrumb({ path, onOpen }: { readonly path: string; onOpen(path: string): void }) {
@@ -190,16 +192,16 @@ function Row({
 export function FileBrowser({
   api,
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
-  wake = true,
+  wakeKey = 0,
 }: {
   readonly api: FilesApi;
   readonly refreshAfterWakeMs?: number;
-  /** Start the sandbox (live files, next sync); the rail waits until the member uses Files. */
-  readonly wake?: boolean;
+  /** A new value wakes the sandbox and lists again (Show files, refresh). */
+  readonly wakeKey?: number;
 }) {
   const [path, setPath] = useState("");
   const folder = useFolder(api, path);
-  const waking = useWake(api, folder.reload, refreshAfterWakeMs, wake);
+  const waking = useWake(api, folder.reload, refreshAfterWakeMs, wakeKey);
   const [pending, setPending] = useState<FileEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<ApiError | null>(null);

@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { IconAction } from "./icon-action";
 
 /**
@@ -27,7 +35,14 @@ export function isNarrowScreen(): boolean {
 export function clampShare(share: number): number {
   if (!Number.isFinite(share)) return THREADS_SHARE.initial;
   const clamped = Math.min(THREADS_SHARE.max, Math.max(THREADS_SHARE.min, share));
-  return Math.round(clamped * 1000) / 1000;
+  return round(clamped);
+}
+
+const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/** The sections grid's rows for a Threads share: Threads, the divider, Files. */
+export function sectionRows(share: number): string {
+  return `minmax(0, ${round(share)}fr) auto minmax(0, ${round(1 - share)}fr)`;
 }
 
 export interface RailApi {
@@ -37,8 +52,12 @@ export interface RailApi {
   readonly revealed: { readonly section: RailSection; readonly seq: number } | null;
   setCollapsed(collapsed: boolean): void;
   setThreadsShare(share: number): void;
+  /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
+  readonly filesRequests: number;
   /** Expands the rail and moves focus to a section (the collapsed icons, the bar's Files). */
   reveal(section: RailSection): void;
+  /** Lists the workspace and wakes the sandbox (first use, Show files, refresh). */
+  requestFiles(): void;
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -48,17 +67,33 @@ export function useRail(): RailApi | null {
 }
 
 export function RailProvider({ children }: { readonly children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(isNarrowScreen);
+  // Expanded on the server and the first client render; narrow screens collapse after mount.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (isNarrowScreen()) setCollapsed(true);
+  }, []);
+  const [filesRequests, setFilesRequests] = useState(0);
+  const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [threadsShare, setShare] = useState<number>(THREADS_SHARE.initial);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
   const setThreadsShare = useCallback((share: number) => setShare(clampShare(share)), []);
   const reveal = useCallback((section: RailSection) => {
     setCollapsed(false);
     setRevealed((prev) => ({ section, seq: (prev?.seq ?? 0) + 1 }));
+    if (section === "files") setFilesRequests((n) => n + 1);
   }, []);
   const api = useMemo(
-    () => ({ collapsed, threadsShare, revealed, setCollapsed, setThreadsShare, reveal }),
-    [collapsed, threadsShare, revealed, setThreadsShare, reveal],
+    () => ({
+      collapsed,
+      threadsShare,
+      revealed,
+      filesRequests,
+      setCollapsed,
+      setThreadsShare,
+      reveal,
+      requestFiles,
+    }),
+    [collapsed, threadsShare, revealed, filesRequests, setThreadsShare, reveal, requestFiles],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;
 }
