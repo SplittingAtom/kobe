@@ -14,6 +14,7 @@ describe("uiPreferencesSchema", () => {
     expect(uiPreferencesSchema.parse({ threads_share: 0.45 })).toEqual({ threads_share: 0.45 });
     expect(uiPreferencesSchema.parse({ artifact_width: 720 })).toEqual({ artifact_width: 720 });
     expect(uiPreferencesSchema.parse({ artifact_width: null })).toEqual({ artifact_width: null });
+    expect(uiPreferencesSchema.parse({ detail_expanded: true })).toEqual({ detail_expanded: true });
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -41,6 +42,7 @@ describe("uiPreferencesSchema", () => {
     { artifact_width: 400.5 },
     { artifact_width: "400" },
     { rail_collapsed: 1 },
+    { detail_expanded: "yes" },
   ])("refuses %o", (body) => {
     expect(uiPreferencesSchema.safeParse(body).success).toBe(false);
   });
@@ -57,11 +59,12 @@ describe("readUiPreferences", () => {
     expect(
       readUiPreferences({
         rail_collapsed: false,
+        detail_expanded: true,
         artifact_width: 12,
         old_key: 1,
         threads_share: 2,
       }),
-    ).toEqual({ rail_collapsed: false });
+    ).toEqual({ rail_collapsed: false, detail_expanded: true });
   });
 
   it("drops a share outside the rail's bounds instead of clamping it", () => {
