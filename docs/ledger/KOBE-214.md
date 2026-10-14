@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #279)
 - **Branch / worktree:** `kobe-214-root-branching` in `../Kobe-wt214`
 - **Depends on:** KOBE-32 (chat runtime), KOBE-213 (compaction entries in the history)
 
