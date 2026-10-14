@@ -12,6 +12,7 @@ import {
 } from "./testing/entries";
 import { messageMeta, projectThread, type Projection } from "./tree";
 import { must } from "../testing/must";
+import type { ThreadEntry } from "./types";
 
 beforeEach(() => resetEntrySeq());
 
@@ -352,5 +353,94 @@ describe("projectThread with a live run", () => {
       { type: "text", text: "step 2" },
     ]);
     expect(p.items.find((i) => i.message.id === "a2")?.message.status).toEqual({ type: "running" });
+  });
+});
+
+describe("rich history (KOBE-208)", () => {
+  const at = (s: number) => `2026-10-02T10:00:${String(s).padStart(2, "0")}.000Z`;
+  /** An entry as Pi stamps it: the entry's `timestamp`, a step's start on its message. */
+  function stamped(e: ThreadEntry, end: number, start?: number): ThreadEntry {
+    const message = e.payload.message as Record<string, unknown>;
+    return {
+      ...e,
+      payload: {
+        ...e.payload,
+        timestamp: at(end),
+        message: start === undefined ? message : { ...message, timestamp: Date.parse(at(start)) },
+      },
+    };
+  }
+  const offloaded = (entryId: string, parentId: string, created: number): ThreadEntry => ({
+    entryId,
+    parentId,
+    seq: 50,
+    type: "message",
+    payload: {},
+    payloadOffloaded: true,
+    createdAt: at(created),
+  });
+
+  it("times reasoning by its step and tool calls from the call to the result", () => {
+    const entries = [
+      user("u1", null, "go"),
+      stamped(
+        assistant("a1", "u1", { type: "thinking", thinking: "Plan" }, toolCall("tc1", "bash")),
+        4,
+        1,
+      ),
+      stamped(toolResult("r1", "a1", "tc1", "ok"), 7),
+    ];
+    const parts = must(content(projectThread(entries, "r1"), "a1")) as readonly Record<
+      string,
+      unknown
+    >[];
+    expect(parts[0]).toMatchObject({
+      type: "reasoning",
+      timing: { startedAt: Date.parse(at(1)), completedAt: Date.parse(at(4)) },
+    });
+    expect(parts[1]).toMatchObject({
+      type: "tool-call",
+      result: "ok",
+      timing: { startedAt: Date.parse(at(4)), completedAt: Date.parse(at(7)) },
+    });
+  });
+
+  it("points a trimmed tool output's card at its entry; an offloaded entry stays a notice", () => {
+    const big = { ...toolResult("r1", "a1", "tc1", "preview"), payloadTruncated: true };
+    const entries = [
+      user("u1", null, "go"),
+      stamped(assistant("a1", "u1", toolCall("tc1", "bash")), 2),
+      big,
+      offloaded("o1", "r1", 9),
+      assistant("a2", "o1", text("Done")),
+    ];
+    const item = must(projectThread(entries, "a2").items.find((i) => i.message.id === "a1"));
+    expect(item.message.content).toEqual([
+      expect.objectContaining({ type: "tool-call", toolCallId: "tc1", result: "preview" }),
+      { type: "data-kobe-offloaded", data: { entryId: "o1" } },
+      { type: "text", text: "Done" },
+    ]);
+    expect(messageMeta(item.message)).toMatchObject({
+      kind: "assistant",
+      fullOutputs: { tc1: "r1" },
+      promptEntryId: "u1",
+      at: "2026-10-02T10:00:00.000Z",
+    });
+  });
+
+  it("finds an answer's prompt past an answer it continues", () => {
+    // Two branches out of one answer chain: each is an assistant node under an assistant node.
+    const entries = [
+      user("u1", null, "go"),
+      assistant("a1", "u1", text("first")),
+      assistant("a2", "a1", text("left")),
+      assistant("a3", "a1", text("right")),
+    ];
+    const p = projectThread(entries, "a3");
+    const meta = (id: string) =>
+      messageMeta(must(p.items.find((i) => i.message.id === id)).message);
+    expect(p.items.find((i) => i.message.id === "a3")?.parentId).toBe("a1");
+    expect(meta("a3")).toMatchObject({ promptEntryId: "u1" });
+    expect(meta("a1")).toMatchObject({ promptEntryId: "u1" });
   });
 });

@@ -19,6 +19,7 @@ import {
 } from "../agents/versions.js";
 import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
 import { forkThread } from "../threads/fork.js";
+import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
 import { sharedToProjectFor } from "../threads/share.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
@@ -45,6 +46,7 @@ import {
   clearTestThreadsQuerySchema,
   createThreadBodySchema,
   entriesQuerySchema,
+  entryIdSchema,
   listThreadsQuerySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
@@ -61,6 +63,9 @@ type ThreadContext = Context<{ Variables: TeamVariables }>;
 const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
   entry_not_found: [404, "That entry is not part of this thread."],
+  entry_unavailable: [409, "That message's full content is not available."],
+  not_a_tool_output: [409, "That entry is not a tool's output."],
+  output_busy: [503, "The full output could not be loaded right now. Try again in a moment."],
   entry_offloaded: [
     409,
     "Some very large messages in this conversation could not be copied into a fork.",
@@ -293,6 +298,34 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     return page
       ? c.json({ entries: page.entries, next_entries_after: page.nextAfter })
       : fail(c, "thread_not_found");
+  });
+
+  /**
+   * A tool result's full output (KOBE-208): the entry list trims outputs over 64 KB, so the chat
+   * reads one here when its card opens; an offloaded body (D15) is read from the thread's own
+   * object tree only. Whoever may read the thread (its owner, project readers once shared) may.
+   */
+  app.get("/:id/entries/:entryId/output", async (c) => {
+    const id = threadIdParam(c);
+    const entryId = entryIdSchema.safeParse(c.req.param("entryId"));
+    if (!id || !entryId.success) return invalidRequest(c);
+    c.header("X-Content-Type-Options", "nosniff");
+    const found = await asViewer(c, async (tx, viewer) => {
+      if (!(await findThread(tx, viewer, id))) return { kind: "thread_not_found" as const };
+      return findToolOutput(tx, viewer.teamId, id, entryId.data);
+    });
+    if (found.kind === "thread_not_found") return fail(c, "thread_not_found");
+    if (found.kind === "missing") return fail(c, "entry_not_found");
+    if (found.kind === "not_a_tool_output") return fail(c, "not_a_tool_output");
+    const ids = { teamId: c.get("team").id, threadId: id, entryId: entryId.data };
+    const output =
+      found.kind === "inline"
+        ? found.output
+        : await readOffloadedOutput(deps.blobs, ids, found.blobRef, c.req.raw.signal);
+    if (output === "not_a_tool_output") return fail(c, "not_a_tool_output");
+    if (output === "busy" || output === "timed_out") return fail(c, "output_busy");
+    if (typeof output === "string") return fail(c, "entry_unavailable");
+    return c.json({ entry_id: entryId.data, ...output });
   });
 
   app.patch("/:id", async (c) => {

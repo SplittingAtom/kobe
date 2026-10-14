@@ -796,6 +796,116 @@
         }
       }
     },
+    "/v1/threads/{id}/entries/{entryId}/output": {
+      "get": {
+        "operationId": "getToolOutput",
+        "summary": "A tool result's full output",
+        "description": "KOBE-208: the entry list cuts a tool output over 64 KB to a preview (`payload_truncated`); the chat reads the full one here when its card opens. Readable by whoever may read the thread. An offloaded body (D15) is read only from the thread's own object tree, up to 8 MB; the text is capped at 1,000,000 characters.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The output's text and whether the tool failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolOutput"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found` or `entry_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_a_tool_output`, or `entry_unavailable`: the stored body can't be read back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`output_busy`: too many stored outputs are being read, or the store did not answer in time. Try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/{id}/leaf": {
       "post": {
         "operationId": "setThreadLeaf",
@@ -3493,6 +3603,10 @@
                 "payload_offloaded": {
                   "type": "boolean"
                 },
+                "payload_truncated": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -3597,6 +3711,10 @@
                 "payload_offloaded": {
                   "type": "boolean"
                 },
+                "payload_truncated": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -3629,6 +3747,34 @@
           }
         },
         "required": ["entries", "next_entries_after"],
+        "additionalProperties": false
+      },
+      "ToolOutput": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "tool_call_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": ["entry_id", "tool_call_id", "tool_name", "is_error", "text", "truncated"],
         "additionalProperties": false
       },
       "CreateThreadBody": {

@@ -19,6 +19,7 @@
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, type ParsedEntry } from "./entries";
+import { entryTime, stepStart, timing, type PartTiming } from "./history";
 import type { SentFile } from "./attachments";
 import { splitAttachedFiles } from "./uploads";
 import type { LiveMessage, LiveRun, ToolActivity } from "./live";
@@ -42,6 +43,12 @@ export type KobeMessageMeta =
       readonly kind: "assistant";
       readonly entryIds: readonly string[];
       readonly live: boolean;
+      /** Tool calls whose output the list trimmed (toolCallId → result entry): read on expand. */
+      readonly fullOutputs?: Readonly<Record<string, string>> | undefined;
+      /** The prompt this answer replies to (past answers it continues): its run's usage. */
+      readonly promptEntryId?: string | undefined;
+      /** When the answer's last entry was stored (the footer's timestamp). */
+      readonly at?: string | undefined;
     };
 
 /** A scheduled run's skipped-actions report (KOBE-178), as the card shows it. */
@@ -183,6 +190,7 @@ function toolCallPart(
   toolName: string,
   args: Readonly<Record<string, unknown>>,
   result: ToolResultInfo | undefined,
+  time?: PartTiming,
 ): MessagePart {
   return {
     type: "tool-call",
@@ -191,7 +199,14 @@ function toolCallPart(
     args: args as never,
     argsText: JSON.stringify(args),
     ...(result ? { result: result.text, isError: result.isError } : {}),
+    ...(time ? { timing: time } : {}),
   };
+}
+
+/** What the rich history (KOBE-208) adds to committed parts. */
+interface HistoryContext {
+  /** When Pi stored a tool call's result. */
+  readonly resultAt: (toolCallId: string) => number | undefined;
 }
 
 function liveResult(activity: ToolActivity | undefined): ToolResultInfo | undefined {
@@ -208,17 +223,23 @@ function entryParts(
   p: ParsedEntry,
   results: ReadonlyMap<string, ToolResultInfo>,
   tools: Readonly<Record<string, ToolActivity>>,
+  history: HistoryContext,
 ): MessagePart[] {
-  if (p.kind === "offloaded")
+  if (p.kind === "offloaded") {
     return [{ type: "data-kobe-offloaded", data: { entryId: entry.entryId } }];
+  }
   if (p.kind !== "assistant") return [];
   const parts: MessagePart[] = [];
+  const end = entryTime(entry);
+  const thought = timing(stepStart(entry), end);
   for (const piece of p.pieces) {
     if (piece.kind === "text") parts.push({ type: "text", text: piece.text });
-    else if (piece.kind === "reasoning") parts.push({ type: "reasoning", text: piece.text });
-    else {
+    else if (piece.kind === "reasoning") {
+      parts.push({ type: "reasoning", text: piece.text, ...(thought ? { timing: thought } : {}) });
+    } else {
       const result = results.get(piece.toolCallId) ?? liveResult(tools[piece.toolCallId]);
-      parts.push(toolCallPart(piece.toolCallId, piece.toolName, piece.args, result));
+      const time = timing(end, history.resultAt(piece.toolCallId));
+      parts.push(toolCallPart(piece.toolCallId, piece.toolName, piece.args, result, time));
     }
   }
   if (p.problem) parts.push({ type: "data-kobe-problem", data: p.problem });
@@ -291,6 +312,23 @@ export function projectThread(
   }
   const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
   const tools = live?.run.tools ?? {};
+  const history: HistoryContext = {
+    resultAt: (call) => {
+      const stored = resultEntries.get(call);
+      return stored ? entryTime(stored) : undefined;
+    },
+  };
+  const promptOf = (node: Node): string | undefined => {
+    const seen = new Set<string>();
+    for (let at = node.parentId; at !== null && !seen.has(at);) {
+      seen.add(at);
+      const up = nodes.get(at);
+      if (!up) return undefined;
+      if (up.role === "user") return up.id;
+      at = up.parentId;
+    }
+    return undefined;
+  };
 
   const built: ProjectedItem[] = [];
   const indexOf = new Map<string, number>();
@@ -322,12 +360,21 @@ export function projectThread(
       });
     } else {
       const content = node.entries.flatMap((e) =>
-        entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools),
+        entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools, history),
       );
+      const trimmed = node.entries.flatMap((e) => {
+        const p = parsed.get(e.entryId);
+        return e.payloadTruncated && p?.kind === "toolResult"
+          ? [[p.toolCallId, e.entryId] as const]
+          : [];
+      });
       const meta: KobeMessageMeta = {
         kind: "assistant",
         entryIds: node.entries.map((e) => e.entryId),
         live: false,
+        ...(trimmed.length > 0 ? { fullOutputs: Object.fromEntries(trimmed) } : {}),
+        promptEntryId: promptOf(node),
+        at: (node.entries.at(-1) as ThreadEntry).createdAt,
       };
       indexOf.set(id, built.length);
       built.push({

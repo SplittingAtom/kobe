@@ -30,6 +30,7 @@ import { canCreateInProject } from "./references.js";
 import { visibilityOf } from "./share.js";
 import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { isModelEnabled } from "../models/team-store.js";
+import { trimLargeOutput } from "./entry-output.js";
 
 /**
  * Thread data access (spec D9, D15, D18, D23, §6.1). Every function runs inside the caller's
@@ -565,16 +566,21 @@ export async function listEntries(
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   return {
-    entries: page.map((r) => ({
-      entry_id: r.entryId,
-      parent_id: r.parentId,
-      seq: r.seq,
-      type: r.type,
-      // An offloaded body lives in object storage; never echo whatever was left inline.
-      payload: r.blobRef !== null ? {} : r.payload,
-      payload_offloaded: r.blobRef !== null,
-      created_at: r.createdAt.toISOString(),
-    })),
+    entries: page.map((r) => {
+      // An offloaded body lives in object storage; never echo whatever was left inline. A tool
+      // output over 64 KB is cut to a preview (KOBE-208: read in full when its card opens).
+      const trimmed = r.blobRef !== null ? undefined : trimLargeOutput(r.payload);
+      return {
+        entry_id: r.entryId,
+        parent_id: r.parentId,
+        seq: r.seq,
+        type: r.type,
+        payload: (trimmed?.payload ?? {}) as Record<string, unknown>,
+        payload_offloaded: r.blobRef !== null,
+        ...(trimmed?.truncated ? { payload_truncated: true } : {}),
+        created_at: r.createdAt.toISOString(),
+      };
+    }),
     nextAfter: rows.length > limit ? (page.at(-1)?.seq ?? null) : null,
   };
 }

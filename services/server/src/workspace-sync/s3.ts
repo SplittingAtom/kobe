@@ -147,9 +147,12 @@ export function createS3ObjectStore(settings: S3Settings, client?: S3Client): Ob
         body.off("error", onError);
       }
     },
-    async get(key) {
+    async get(key, options = {}) {
       try {
-        const out = await s3.send(new GetObjectCommand({ Bucket, Key: key }));
+        const out = await s3.send(
+          new GetObjectCommand({ Bucket, Key: key }),
+          options.signal ? { abortSignal: options.signal } : {},
+        );
         if (!(out.Body instanceof Readable)) throw new Error("S3 GetObject returned no stream");
         return { body: out.Body, size: out.ContentLength ?? 0 };
       } catch (err) {

@@ -9,7 +9,7 @@ import { z } from "zod";
  *   others; `artifact_width: null` goes back to the default (half the space right of the rail).
  *   Unknown keys are refused (400), as are values out of bounds; the threads share is clamped.
  *
- * Room to grow: B4's Detail toggle adds an optional key here.
+ * `detail_expanded` (KOBE-208, CE12): the Detail toggle, all reasoning and tool cards open.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -46,6 +46,7 @@ export const uiPreferencesSchema = z.strictObject({
     .max(ARTIFACT_WIDTH_BOUNDS.max)
     .nullable()
     .optional(),
+  detail_expanded: z.boolean().optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 

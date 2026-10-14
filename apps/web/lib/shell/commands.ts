@@ -9,6 +9,7 @@ import {
   CalendarClockIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChevronsUpDownIcon,
   CircleUserIcon,
   CircleXIcon,
   CopyIcon,
@@ -128,6 +129,14 @@ const LIST = [
   { id: "profile", name: "Profile", icon: CircleUserIcon, scope: "bar" },
   // Bar, row two: the open thread's context. Files shows the rail's Files section.
   { id: "files", name: "Files", icon: FolderIcon, scope: "bar", shortcut: "Mod+Shift+F" },
+  // CE12 (KOBE-208): opens or closes every reasoning block and tool card; a toggle (aria-pressed).
+  {
+    id: "detail",
+    name: "Show all details",
+    icon: ChevronsUpDownIcon,
+    scope: "bar",
+    shortcut: "Mod+Shift+D",
+  },
   // Rail.
   {
     id: "new-thread",

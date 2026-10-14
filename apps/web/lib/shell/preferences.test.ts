@@ -52,6 +52,11 @@ describe("wire", () => {
     expect(readPreferences({ preferences: { threadsShare: 0.95 } })).toEqual({});
     expect(readPreferences(null)).toEqual({});
     expect(readPreferences({ preferences: [] })).toEqual({});
+    // KOBE-208: the Detail toggle.
+    expect(readPreferences({ preferences: { detailExpanded: true } })).toEqual({
+      detailExpanded: true,
+    });
+    expect(readPreferences({ preferences: { detailExpanded: 1 } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -60,6 +65,7 @@ describe("wire", () => {
       threads_share: 0.5,
       artifact_width: null,
     });
+    expect(toWire({ detailExpanded: false })).toEqual({ detail_expanded: false });
     expect(toWire({})).toEqual({});
   });
 });

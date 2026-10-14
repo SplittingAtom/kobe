@@ -3,6 +3,7 @@
 import { useAuiState } from "@assistant-ui/react";
 import { AgentChips } from "../chat/agent-chips";
 import { AgentPickerMenu } from "../chat/agent-picker";
+import { DetailToggle } from "../chat/detail";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { ModelPicker } from "../chat/model-picker";
 import { FilesButton } from "./rail-state";
@@ -33,7 +34,7 @@ export function ContextRow() {
       )}
       {/* Slot: context gauge (CE14, KOBE-211). */}
       <FilesButton />
-      {/* Slot: Detail toggle (CE12, KOBE-208). */}
+      <DetailToggle />
       {/* Slot: branch indicator (CE16, KOBE-214/216). */}
     </>
   );

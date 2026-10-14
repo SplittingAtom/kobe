@@ -57,7 +57,15 @@ export interface UsageReport {
 
 export interface RunUsage extends UsageTotals {
   readonly runId: string;
+  /** The run's prompt entry (KOBE-208); null before Pi committed it, absent on older servers. */
+  readonly userEntryId?: string | null;
   readonly models: readonly string[];
+}
+
+/** `GET /v1/threads/{id}/usage`: per run, in the order the runs first called a model. */
+export interface ThreadUsage {
+  readonly threadId: string;
+  readonly runs: readonly RunUsage[];
 }
 
 export interface UsageQuery {

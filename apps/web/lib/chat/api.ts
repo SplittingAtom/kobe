@@ -6,7 +6,7 @@
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
-import type { RunUsage } from "../admin/api/usage";
+import type { RunUsage, ThreadUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import { createMemoryApi } from "../memory/api";
 import type {
@@ -48,6 +48,17 @@ const RUNNABLE_MAX_PAGES = 10;
 interface RunnablePage {
   readonly agents: readonly RunnableAgent[];
   readonly nextCursor: string | null;
+}
+
+/** `GET /v1/threads/{id}/entries/{entryId}/output`: a tool result's full output (KOBE-208). */
+export interface ToolOutput {
+  readonly entryId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly isError: boolean;
+  readonly text: string;
+  /** Longer than the server answers; `text` is its start. */
+  readonly truncated: boolean;
 }
 
 export interface ChatApi {
@@ -112,6 +123,10 @@ export interface ChatApi {
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
   /** Tokens and spend of one run (KOBE-43), as the model gateway measured them. */
   runUsage(runId: string): Promise<ApiResult<RunUsage>>;
+  /** Tokens and spend of each run of a thread (the answers' footers, KOBE-208). */
+  threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
+  /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
+  toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
   budgetStatus(): Promise<ApiResult<BudgetStatus>>;
   /** One of your approvals with its full input (KOBE-37). */
@@ -228,6 +243,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
+    threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
+    toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
     requestEgressAccess: (domain, threadId) =>

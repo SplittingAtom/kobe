@@ -168,9 +168,22 @@ export const threadEntrySchema = z.object({
   payload: z.record(z.string(), z.unknown()),
   /** True when the body lives in object storage (over 64 KB, D15); fetched separately. */
   payload_offloaded: z.boolean(),
+  /** A tool output over 64 KB cut to a preview (KOBE-208); the full one via `.../output`. */
+  payload_truncated: z.literal(true).optional(),
   created_at: timestamp,
 });
 export type ThreadEntry = z.infer<typeof threadEntrySchema>;
+
+/** `GET /v1/threads/{id}/entries/{entryId}/output` (KOBE-208): a tool result's full output. */
+export const toolOutputSchema = z.object({
+  entry_id: idSchema,
+  tool_call_id: z.string(),
+  tool_name: z.string(),
+  is_error: z.boolean(),
+  text: z.string(),
+  /** The output was longer than the route answers (1,000,000 characters). */
+  truncated: z.boolean(),
+});
 
 export const threadPageSchema = z.object({
   threads: z.array(threadSummarySchema),

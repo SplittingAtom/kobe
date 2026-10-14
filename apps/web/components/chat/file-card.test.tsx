@@ -56,7 +56,8 @@ describe("the file.shared download card", () => {
     const { user, id } = await shareFile(new Uint8Array([1, 2, 3]), 200, {
       description: "Q3 numbers",
     });
-    expect(await screen.findByText("report.csv")).toBeTruthy();
+    // The tool card's header names the path too (KOBE-208): find the download card's name.
+    expect(await screen.findByText("report.csv", { selector: '[class*="fileName"]' })).toBeTruthy();
     expect(screen.getByText(/2 KB/u)).toBeTruthy();
     expect(screen.getByText(/text\/csv/u)).toBeTruthy();
     expect(screen.getByText("Q3 numbers")).toBeTruthy();

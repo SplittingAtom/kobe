@@ -101,6 +101,7 @@ beforeAll(async () => {
         threadId: thread.id,
         trigger: "user",
         status: "completed",
+        userEntryId: "e-prompt",
         startedAt: new Date(),
         endedAt: new Date(),
       })
@@ -231,6 +232,8 @@ describe("dashboards", () => {
     const thread = await as.bob.get(`/v1/threads/${bobThread}/usage`);
     expect(thread.json.totals.calls).toBe(2);
     expect(thread.json.runs).toHaveLength(1);
+    // KOBE-208: the run's prompt entry, so the chat can put each run's usage under its answer.
+    expect(thread.json.runs[0]).toMatchObject({ run_id: bobRun, user_entry_id: "e-prompt" });
     expect((await as.dave.get(`/v1/runs/${bobRun}/usage`)).status).toBe(404);
     expect((await as.dave.get(`/v1/threads/${bobThread}/usage`)).status).toBe(404);
   });

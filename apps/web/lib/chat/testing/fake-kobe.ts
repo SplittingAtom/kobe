@@ -256,28 +256,40 @@ export class FakeKobe {
   /** In-app notifications the bell lists (KOBE-181), newest first. */
   readonly notifications: Json[] = [];
 
-  /** Adds a committed entry directly (history that exists before the test). */
+  /**
+   * Adds a committed entry directly (history that exists before the test). `at` is when Pi
+   * appended it; `offloaded` stores the body as object storage would (KOBE-208), read back by
+   * `GET /v1/threads/{id}/entries/{entryId}`.
+   */
   addEntry(
     threadId: string,
     parentId: string | null,
     message: Json,
-    opts: { leaf?: boolean } = {},
+    opts: { leaf?: boolean; at?: string; offloaded?: boolean } = {},
   ) {
     const thread = this.#thread(threadId);
     this.#entryN += 1;
     const id = `e${this.#entryN}`;
+    const at = opts.at ?? NOW;
+    const payload = { type: "message", id, parentId, timestamp: at, message };
+    if (opts.offloaded) this.entryBodies.set(id, payload);
     thread.entries.push({
       entry_id: id,
       parent_id: parentId,
       seq: thread.entries.length + 1,
       type: "message",
-      payload: { type: "message", id, parentId, timestamp: NOW, message },
-      payload_offloaded: false,
-      created_at: NOW,
+      payload: opts.offloaded ? {} : payload,
+      payload_offloaded: opts.offloaded === true,
+      created_at: at,
     });
     if (opts.leaf !== false) thread.leaf_entry_id = id;
     return id;
   }
+
+  /** Offloaded entry bodies (KOBE-208), by entry id. */
+  readonly entryBodies = new Map<string, Json>();
+  /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
+  readonly threadUsage = new Map<string, Json[]>();
 
   #thread(id: string): FakeThread {
     const thread = this.threads.get(id);
@@ -864,7 +876,14 @@ export class FakeKobe {
     const thread = id === undefined ? undefined : this.threads.get(id);
     if (!thread) return error(404, "thread_not_found", "No thread with that id.");
     if (action === undefined) return this.#threadItself(method, thread, url, body);
+    if (action === "entries" && sub !== undefined && url.pathname.endsWith("/output")) {
+      return this.#toolOutput(thread, sub);
+    }
     if (action === "entries") return json(200, this.#entryPage(thread, url));
+    if (action === "usage" && method === "GET") {
+      const runs = this.threadUsage.get(thread.thread_id) ?? [];
+      return json(200, { thread_id: thread.thread_id, runs });
+    }
     if (action === "share" && method === "POST") {
       if (thread.read_only)
         return error(403, "read_only", "This thread is shared with you read-only.");
@@ -968,13 +987,49 @@ export class FakeKobe {
     );
   }
 
+  /** `GET /v1/threads/{id}/entries/{entryId}/output` (KOBE-208): a tool output in full. */
+  #toolOutput(thread: FakeThread, entryId: string): Response {
+    const found = thread.entries.find((e) => e.entry_id === entryId);
+    if (!found) return error(404, "entry_not_found");
+    const payload = found.payload_offloaded ? this.entryBodies.get(entryId) : found.payload;
+    if (!payload) return error(409, "entry_unavailable");
+    const message = payload.message as Json | undefined;
+    if (message?.role !== "toolResult") return error(409, "not_a_tool_output");
+    const content = message.content as { type: string; text?: string }[];
+    return json(200, {
+      entry_id: entryId,
+      tool_call_id: message.toolCallId,
+      tool_name: message.toolName,
+      is_error: message.isError === true,
+      text: content.map((p) => p.text ?? "").join(""),
+      truncated: false,
+    });
+  }
+
+  /** The server trims a tool output over 64 KB in the list to a preview (KOBE-208). */
+  #listed(entry: FakeEntry): Json {
+    const message = entry.payload.message as Json | undefined;
+    if (message?.role !== "toolResult" || JSON.stringify(message.content).length <= 65_536) {
+      return entry as unknown as Json;
+    }
+    const text = (message.content as { text?: string }[]).map((p) => p.text ?? "").join("");
+    return {
+      ...entry,
+      payload: {
+        ...entry.payload,
+        message: { ...message, content: [{ type: "text", text: text.slice(0, 2_000) }] },
+      },
+      payload_truncated: true,
+    };
+  }
+
   #entryPage(thread: FakeThread, url: URL): Json {
     const after = Number(url.searchParams.get("after") ?? "0");
     const limit = Number(url.searchParams.get("limit") ?? "200");
     const rest = thread.entries.filter((e) => e.seq > after);
     const page = rest.slice(0, limit);
     return {
-      entries: page,
+      entries: page.map((e) => this.#listed(e)),
       next_entries_after: rest.length > limit ? (page.at(-1)?.seq ?? null) : null,
     };
   }

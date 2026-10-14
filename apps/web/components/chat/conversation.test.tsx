@@ -61,7 +61,7 @@ describe("streaming a run (D16)", () => {
     fake.agent.toolResult(runId, "tc1", "bash", "saved chart.png");
     expect(await screen.findByText("Done")).toBeTruthy();
     expect(screen.getByText("saved chart.png")).toBeTruthy();
-    expect(screen.getByText(/python plot\.py/)).toBeTruthy();
+    expect(screen.getByLabelText("Input").textContent).toContain("python plot.py");
 
     // Pi commits the prompt and the step; the entries replace the live copies.
     const u2 = fake.agent.commitPrompt(runId);

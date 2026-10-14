@@ -18,8 +18,14 @@ export interface ObjectStore {
    * body errors.
    */
   putStream(key: string, body: Readable): Promise<void>;
-  /** The object's bytes, or null when there is no such object. */
-  get(key: string): Promise<{ readonly body: Readable; readonly size: number } | null>;
+  /**
+   * The object's bytes, or null when there is no such object. With `signal`, an abort cancels the
+   * request and the body stream.
+   */
+  get(
+    key: string,
+    options?: GetOptions,
+  ): Promise<{ readonly body: Readable; readonly size: number } | null>;
   /** Server-side copy within the bucket. */
   copy(from: string, to: string): Promise<void>;
   /**
@@ -34,6 +40,10 @@ export interface ObjectStore {
    * `next` is the cursor for the following page, absent on the last one.
    */
   list(prefix: string, options?: ListOptions): Promise<ListPage>;
+}
+
+export interface GetOptions {
+  readonly signal?: AbortSignal;
 }
 
 export interface DeleteOptions {
