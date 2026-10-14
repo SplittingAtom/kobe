@@ -112,6 +112,7 @@ export interface WireTuning {
     readonly "run.steer": number;
     readonly "run.stop": number;
     readonly "pi.command": number;
+    readonly "thread.compact": number;
   };
 }
 
@@ -163,6 +164,8 @@ export const WIRE_DEFAULTS: WireTuning = {
     // The agent answers run.stop once the run has ended on the Pi side (after_step: next turn_end).
     "run.stop": 600_000,
     "pi.command": 60_000,
+    // KOBE-213: Pi's compact is a slow command (10 min in the agent), plus waking the sandbox.
+    "thread.compact": 720_000,
   },
 };
 

@@ -69,6 +69,15 @@ export function readBudgetStopScope(stored: string | null): BudgetStopScope | nu
     : null;
 }
 
+/**
+ * What a run does (KOBE-213, CE15): answer a `message` (every run before KOBE-213), or compact the
+ * thread's Pi session (`compaction`). A compaction is a run so it shares the one-active-run lock,
+ * the lease, the run token, budget and usage attribution; it is never queued, retried or shown as
+ * a chat turn, carries no input, and is server-only (not in `RunSnapshot`).
+ */
+export const RUN_KINDS = ["message", "compaction"] as const;
+export type RunKind = (typeof RUN_KINDS)[number];
+
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
 export const RUN_INPUT_MAX_CHARS = 200_000;
 
@@ -87,6 +96,8 @@ export const runs = pgTable(
     id: uuid().notNull().defaultRandom(),
     threadId: uuid().notNull(),
     trigger: runTrigger().notNull(),
+    /** `message` or `compaction` (KOBE-213; `RUN_KINDS`). Rows from before it are messages. */
+    kind: text().$type<RunKind>().notNull().default("message"),
     status: runStatus().notNull().default("queued"),
     queuePos: integer(),
     startedAt: timestamp({ withTimezone: true }),
@@ -198,6 +209,12 @@ export const runs = pgTable(
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
     check("runs_sandbox_seq", sql`${t.sandboxSeq} >= 0`),
     check("runs_sandbox_bytes", sql`${t.sandboxBytes} >= 0`),
+    check("runs_kind", sql`${t.kind} IN (${textList(RUN_KINDS)})`),
+    // A compaction has no message, branch point, prompt entry, retry, client key or queue slot.
+    check(
+      "runs_compaction_shape",
+      sql`${t.kind} = 'message' OR (${t.input} = '' AND ${t.parentEntryId} IS NULL AND ${t.userEntryId} IS NULL AND ${t.retryOfRunId} IS NULL AND ${t.clientKey} IS NULL AND ${t.status} <> 'queued')`,
+    ),
     check("runs_approval_mode", sql`${t.approvalMode} IN (${textList(RUN_APPROVAL_MODES)})`),
     check(
       "runs_input_length",

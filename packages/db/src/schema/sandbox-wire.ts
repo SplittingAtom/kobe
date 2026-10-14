@@ -62,7 +62,14 @@ export const sandboxCommandStatus = pgEnum("sandbox_command_status", [
 ]);
 export type SandboxCommandStatus = (typeof sandboxCommandStatus.enumValues)[number];
 
-export const SANDBOX_COMMAND_KINDS = ["run.start", "run.steer", "run.stop", "pi.command"] as const;
+/** `thread.compact` (KOBE-213): a compaction run's start, delivered like `run.start`. */
+export const SANDBOX_COMMAND_KINDS = [
+  "run.start",
+  "run.steer",
+  "run.stop",
+  "pi.command",
+  "thread.compact",
+] as const;
 export type SandboxCommandKind = (typeof SANDBOX_COMMAND_KINDS)[number];
 
 /**
