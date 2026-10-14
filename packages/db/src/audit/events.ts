@@ -647,6 +647,8 @@ export const AUDIT_EVENTS = {
     runId: id,
     outcome: z.enum([
       "completed",
+      "cancelled",
+      "budget_stopped",
       "thread_busy",
       "sandbox_unavailable",
       "nothing_to_compact",

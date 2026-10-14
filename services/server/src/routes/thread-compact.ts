@@ -14,7 +14,8 @@ import { uuidSchema } from "../threads/schemas.js";
 /**
  * `POST /v1/threads/{id}/compact` (KOBE-213, CE15; contract KOBE-212): the owner compacts an idle
  * thread's Pi session, optionally with a one-line focus for the summary. Answers 200 once Pi wrote
- * the summary (its `compaction` entry is then in the thread's entries), or a fixed message per
+ * the summary (its `compaction` entry is then in the thread's entries, unless Pi's new entries
+ * exceed one wire frame: then they are mirrored as the next run starts), or a fixed message per
  * code; another team's thread, or one the member can't see, is 404 and a shared reader's 403
  * (`read_only`), as for messages. Waits for Pi (a slow command, up to its 10 min).
  */
@@ -43,6 +44,13 @@ export function threadCompactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     } catch (err) {
       if (err instanceof CompactionError) {
         return c.json(compactThreadError(err.code), COMPACT_THREAD_ERROR_HTTP_STATUS[err.code]);
+      }
+      // A thread row held past the lock timeout: the contract's own busy answer.
+      if (err instanceof RunError && err.code === "thread_busy") {
+        return c.json(
+          compactThreadError("thread_busy"),
+          COMPACT_THREAD_ERROR_HTTP_STATUS.thread_busy,
+        );
       }
       if (err instanceof RunError) {
         return c.json({ code: err.code, message: err.message }, err.status as 400);

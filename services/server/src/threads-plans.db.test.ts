@@ -311,9 +311,12 @@ describe("hot thread queries use the team-leading index with the break-glass pol
     const statements = await capture(async () => {
       await sweepRuns(
         app.db,
-        { startDeadlineMs: 60_000, stopResendMs: 60_000, stallMs: 60_000 } as Parameters<
-          typeof sweepRuns
-        >[1],
+        {
+          startDeadlineMs: 60_000,
+          compactionDeadlineMs: 60_000,
+          stopResendMs: 60_000,
+          stallMs: 60_000,
+        } as Parameters<typeof sweepRuns>[1],
         silent,
       );
     });

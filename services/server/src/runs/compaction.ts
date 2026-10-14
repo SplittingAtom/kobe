@@ -202,6 +202,15 @@ function parseResult(threadId: string, data: unknown): CompactThreadResponse | u
   return parsed.success ? parsed.data : undefined;
 }
 
+/** How the compaction ended for the audit: Stop and budget stops by their run status. */
+function auditOutcome(
+  status: string | undefined,
+  code: CompactThreadErrorCode | undefined,
+): CompactThreadErrorCode | "completed" | "cancelled" | "budget_stopped" {
+  if (status === "cancelled" || status === "budget_stopped") return status;
+  return code ?? "completed";
+}
+
 function httpCode(outcome: Extract<CommandOutcome, { ok: false }>): CompactThreadErrorCode {
   return HTTP_CODE[outcome.error.code] ?? "compaction_failed";
 }
@@ -234,7 +243,12 @@ async function finish(
       action: "thread.compacted",
       actor: { kind: "user", id: actor.user_id },
       teamId,
-      target: { threadId: thread.id, runId, outcome: code ?? "completed", focused },
+      target: {
+        threadId: thread.id,
+        runId,
+        outcome: auditOutcome((await getRunRow(tx, teamId, runId))?.status, code),
+        focused,
+      },
     });
     return { ended, abort };
   });

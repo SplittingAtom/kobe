@@ -9,7 +9,9 @@ import {
 import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { recordModelUsage, type ModelUsageRecord } from "@kobe/db";
 import { must } from "./testing/event-stream-fixture.js";
-import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
+import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
+import { loadActiveRuns } from "./mcp/run-context.js";
+import { FakeWorkspace, RunFixture, type RunWorld } from "./testing/run-fixture.js";
 import type { TestResponse } from "./testing/browser.js";
 
 /**
@@ -73,6 +75,32 @@ async function compactionRuns(team: string, threadId: string) {
     [team, threadId],
   );
   return rows;
+}
+
+const auditOutcomes = async (team: string) =>
+  (
+    await f.fx.admin.query<{ outcome: string }>(
+      `SELECT target->>'outcome' AS outcome FROM audit_log
+        WHERE team_id = $1 AND action = 'thread.compacted' ORDER BY seq`,
+      [team],
+    )
+  ).rows.map((r) => r.outcome);
+
+/** A capable sandbox whose hello offers `runs` (what the real agent lists after a reconnect). */
+async function reconnect(w: RunWorld, runs: { run_id: string; thread_id: string }[]) {
+  const token = f.auth.issue({ sandboxId: randomUUID(), teamId: w.team, userId: w.owner.id });
+  const sb = await FakeSandbox.connect(must(f.listeners[1], "listener").url, token);
+  if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
+  sb.hello(
+    f.auth.verify(token).sub,
+    runs.map((r) => ({ ...r, last_seq: 0 })),
+    "1.0.0",
+    CAPABLE,
+  );
+  await sb.ready();
+  const ws = new FakeWorkspace(sb);
+  f.workspaces.push(ws);
+  return ws;
 }
 
 const expectError = (res: TestResponse, code: CompactThreadErrorCode, status: number) => {
@@ -179,6 +207,7 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
     expectError(await pending, "compaction_failed", 502);
     expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("cancelled");
     expect(await f.threadStatus(w.team, threadId)).toBe("idle");
+    expect(await auditOutcomes(w.team)).toEqual(["cancelled"]);
   });
 
   it("a budget stop aborts a compaction (it has no step to finish)", async () => {
@@ -198,6 +227,7 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
     ws.compacted(frame, { code: "compaction_failed", message: "Compaction cancelled" });
     expectError(await pending, "compaction_failed", 502);
     expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("budget_stopped");
+    expect(await auditOutcomes(w.team)).toEqual(["budget_stopped"]);
   });
 
   it("refuses a member whose budget is used up (429) before anything starts", async () => {
@@ -313,6 +343,133 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
     expect(Date.now() - t0).toBeLessThan(8_000);
     expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("failed");
     expect(await f.threadStatus(w.team, threadId)).toBe("idle");
+  });
+
+  it("never resumes a compaction offered after a reconnect: it ends, the thread and queue move on", async () => {
+    const { w, ws, threadId } = await world();
+    // A compaction whose requester (and its replica) is gone: only the run and its lease remain.
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO runs (team_id, thread_id, trigger, kind, status, started_at)
+       VALUES ($1, $2, 'user', 'compaction', 'running', now()) RETURNING id`,
+      [w.team, threadId],
+    );
+    const runId = must(rows[0], "run").id;
+    await f.fx.admin.query(
+      `INSERT INTO sandbox_run_leases (team_id, run_id, user_id, thread_id, sandbox_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [w.team, runId, w.owner.id, threadId, randomUUID()],
+    );
+    await f.fx.admin.query(`UPDATE threads SET status = 'running' WHERE team_id = $1 AND id = $2`, [
+      w.team,
+      threadId,
+    ]);
+    const queued = await f.send(w.owner, threadId, "after the lost compaction");
+    expect(queued.json.queued).toBe(true);
+    ws.kill();
+    const back = await reconnect(w, [{ run_id: runId, thread_id: threadId }]);
+    await expect
+      .poll(async () => (await compactionRuns(w.team, threadId))[0]?.status)
+      .toBe("failed");
+    // The queued message starts on the new connection; the compaction was not listed (aborted).
+    await back.started(queued.json.run_id as string);
+    expect(back.sb.frames("hello.ack")[0]?.runs ?? []).toEqual([]);
+  });
+
+  it("the run sweep ends a compaction past its deadline and aborts it", async () => {
+    const { w, ws, threadId } = await world();
+    const pending = compact(w, threadId);
+    const frame = await ws.compacting();
+    await f.fx.admin.query(
+      `UPDATE runs SET started_at = now() - interval '1 hour' WHERE team_id = $1 AND id = $2`,
+      [w.team, frame.run_id],
+    );
+    await f.fx.replica(1).deps.runs.sweep();
+    expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("failed");
+    expect(await f.threadStatus(w.team, threadId)).toBe("idle");
+    const stop = await ws.sb.until(() =>
+      ws.sb.frames("run.stop").find((s) => s.run_id === frame.run_id),
+    );
+    expect(stop.mode).toBe("abort");
+    ws.compacted(frame, { code: "compaction_failed", message: "Compaction cancelled" });
+    expectError(await pending, "compaction_failed", 502);
+  });
+
+  it("records a tampered runtime as the run's failure and answers compaction_failed", async () => {
+    const { w, ws, threadId } = await world();
+    const pending = compact(w, threadId);
+    const frame = await ws.compacting();
+    ws.compacted(frame, { code: "runtime_tampered", message: "agent/models.json changed" });
+    expectError(await pending, "compaction_failed", 502);
+    const events = await f.events(w.team, frame.run_id);
+    expect(events.at(-1)).toMatchObject({
+      type: "run.failed",
+      payload: { error: { code: "runtime_tampered" } },
+    });
+  });
+
+  it("refuses tool frames and MCP calls for a compaction run (it makes no tool calls)", async () => {
+    const { w, ws, threadId } = await world();
+    const pending = compact(w, threadId);
+    const frame = await ws.compacting();
+    ws.sb.send({
+      v: 1,
+      type: "policy.check",
+      request_id: "pc1",
+      run_id: frame.run_id,
+      thread_id: threadId,
+      tool_call_id: "call-1",
+      tool: "bash",
+      input: { command: "ls" },
+    });
+    ws.sb.send({
+      v: 1,
+      type: "artifact.put",
+      request_id: "ap1",
+      run_id: frame.run_id,
+      thread_id: threadId,
+      tool_call_id: "call-2",
+      tool: "create_artifact",
+      input: { kind: "html", title: "x", content: "<p>x</p>" },
+    });
+    const decided = await ws.sb.until(() =>
+      ws.sb.frames("policy.result").find((r) => r.request_id === "pc1"),
+    );
+    expect(decided).toMatchObject({ decision: "deny" });
+    const stored = await ws.sb.until(() =>
+      ws.sb.frames("artifact.result").find((r) => r.request_id === "ap1"),
+    );
+    expect(stored).toMatchObject({ ok: false });
+    const lease = await f.fx.admin.query<{ sandbox_id: string }>(
+      `SELECT sandbox_id FROM sandbox_run_leases WHERE team_id = $1 AND run_id = $2`,
+      [w.team, frame.run_id],
+    );
+    const active = await loadActiveRuns(
+      f.fx.replica(0).deps.database.db,
+      { load: async () => ({ floor: "auto" }) },
+      { teamId: w.team, userId: w.owner.id, sandboxId: must(lease.rows[0], "lease").sandbox_id },
+    );
+    expect(active).toEqual({ ok: true, runs: [] });
+    ws.compacted(frame, { summary: "S" });
+    expect((await pending).status).toBe(200);
+  });
+
+  it("answers a held thread row with the contract's fixed thread_busy message", async () => {
+    const { w, threadId } = await world();
+    const holder = new (await import("pg")).default.Client({
+      connectionString: f.fx.database.adminUrl,
+    });
+    await holder.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`SELECT 1 FROM threads WHERE team_id = $1 AND id = $2 FOR UPDATE`, [
+        w.team,
+        threadId,
+      ]);
+      expectError(await compact(w, threadId), "thread_busy", 409);
+    } finally {
+      await holder.query("ROLLBACK");
+      await holder.end();
+    }
   });
 
   it("leaves the compaction's summary call out of the gauge's latest call", async () => {

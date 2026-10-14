@@ -205,6 +205,8 @@ export interface LeasedRun {
   readonly threadId: string;
   readonly status: RunStatus;
   readonly sandboxSeq: number;
+  /** A compaction (KOBE-213) is never resumed on a new connection: its command died with the old. */
+  readonly kind: RunKind;
 }
 
 /** Runs leased to the (team, user) sandbox that are still active. */
@@ -218,8 +220,9 @@ export async function activeLeasedRuns(
     thread_id: string;
     status: RunStatus;
     sandbox_seq: number;
+    kind: RunKind;
   }>(sql`
-    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq
+    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq, r.kind
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
      WHERE l.team_id = ${teamId} AND l.user_id = ${userId}
@@ -229,5 +232,6 @@ export async function activeLeasedRuns(
     threadId: r.thread_id,
     status: r.status,
     sandboxSeq: r.sandbox_seq,
+    kind: r.kind,
   }));
 }

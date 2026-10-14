@@ -24,14 +24,26 @@ export interface PendingStop {
 
 export interface RunSweepResult {
   readonly lostStarts: readonly LostStart[];
+  /** Compaction runs older than their deadline (KOBE-213): their requester is gone. */
+  readonly staleCompactions: readonly StaleCompaction[];
   readonly pendingStops: readonly PendingStop[];
   /** Threads with queued runs and nothing active for a while (a promotion was lost). */
   readonly stalledThreads: readonly { readonly teamId: string; readonly threadId: string }[];
   readonly failedTeams: number;
 }
 
+/** A compaction run still active past `compactionDeadlineMs` (KOBE-213). */
+export interface StaleCompaction {
+  readonly teamId: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly ownerUserId: string;
+}
+
 export interface SweepTuning {
   readonly startDeadlineMs: number;
+  /** Longer than a compaction's whole command deadline (wake + Pi's 10 min). */
+  readonly compactionDeadlineMs: number;
   readonly stallMs: number;
   readonly stopResendMs: number;
 }
@@ -55,6 +67,30 @@ async function lostStarts(tx: KobeTx, teamId: string, deadlineMs: number): Promi
     runId: r.id,
     threadId: r.thread_id,
     ageMs: Number(r.age_ms),
+  }));
+}
+
+/**
+ * Compaction runs active past their deadline (KOBE-213). Their requester (or the replica that
+ * delivered them) died before ending them, and no answer can arrive any more: they are failed and
+ * Pi is told to abort, so the thread is never held by one.
+ */
+async function staleCompactions(
+  tx: KobeTx,
+  teamId: string,
+  deadlineMs: number,
+): Promise<StaleCompaction[]> {
+  const res = await tx.execute<{ id: string; thread_id: string; owner_user_id: string }>(sql`
+    SELECT r.id, r.thread_id, t.owner_user_id
+      FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+     WHERE r.team_id = ${teamId} AND r.kind = 'compaction'
+       AND r.status IN ('running', 'waiting_approval')
+       AND r.started_at < now() - make_interval(secs => ${secs(deadlineMs)})`);
+  return res.rows.map((r) => ({
+    teamId,
+    runId: r.id,
+    threadId: r.thread_id,
+    ownerUserId: r.owner_user_id,
   }));
 }
 
@@ -112,6 +148,7 @@ export async function sweepRuns(
   log: Logger,
 ): Promise<RunSweepResult> {
   const lost: LostStart[] = [];
+  const compactions: StaleCompaction[] = [];
   const stops: PendingStop[] = [];
   const stalled: { teamId: string; threadId: string }[] = [];
   let failedTeams = 0;
@@ -120,6 +157,7 @@ export async function sweepRuns(
     try {
       await withTeam(db, teamId, async (tx) => {
         lost.push(...(await lostStarts(tx, teamId, tuning.startDeadlineMs)));
+        compactions.push(...(await staleCompactions(tx, teamId, tuning.compactionDeadlineMs)));
         stops.push(...(await pendingStops(tx, teamId, tuning.stopResendMs)));
         stalled.push(...(await stalledThreads(tx, teamId, tuning.stallMs)));
       });
@@ -128,5 +166,11 @@ export async function sweepRuns(
       log.error({ err, team_id: teamId }, "run sweep failed for a team");
     }
   }
-  return { lostStarts: lost, pendingStops: stops, stalledThreads: stalled, failedTeams };
+  return {
+    lostStarts: lost,
+    staleCompactions: compactions,
+    pendingStops: stops,
+    stalledThreads: stalled,
+    failedTeams,
+  };
 }

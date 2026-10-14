@@ -56,6 +56,8 @@ interface Lease {
   readonly threadId: string;
   readonly ingest: RunIngest;
   ended: boolean;
+  /** A compaction run (KOBE-213): Pi's compact uses no tools, so no tool frame may name it. */
+  readonly compaction: boolean;
 }
 
 type State = "hello" | "starting" | "ready" | "closed";
@@ -222,13 +224,14 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /** A run.start is about to be delivered here: the run (and its thread) are leased to us. */
-  leaseRun(runId: string, threadId: string, cursor: number): void {
+  leaseRun(runId: string, threadId: string, cursor: number, compaction = false): void {
     const existing = this.#leases.get(runId);
     if (existing && !existing.ended) return;
     this.#threads.add(threadId);
     this.#leases.set(runId, {
       threadId,
       ended: false,
+      compaction,
       ingest: this.#newIngest(runId, threadId, cursor),
     });
   }
@@ -425,6 +428,22 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /** ok | ended (late frame of a run of this connection) | violation (already handled). */
+  /**
+   * `#checkRun` for frames a tool sends (policy checks, artifacts, files, memory, proposals, web
+   * search): a compaction run (KOBE-213) makes no tool calls, so one naming it fails closed, as if
+   * the run had ended, and is logged as a security event.
+   */
+  #checkToolRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
+    const check = this.#checkRun(runId, threadId, frameType);
+    if (check !== "ok" || this.#leases.get(runId)?.compaction !== true) return check;
+    this.log.warn(
+      { run_id: runId, frame_type: frameType, sandbox_id: this.sandboxId, security: true },
+      "tool frame for a compaction run refused",
+    );
+    this.sendError("run_not_active", "a compaction run makes no tool calls", frameType);
+    return "ended";
+  }
+
   #checkRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
     const lease = this.#leases.get(runId);
     if (!lease) {
@@ -478,7 +497,7 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   #onPolicyCheck(frame: PolicyCheckFrame): void {
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "policy.check");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "policy.check");
     if (check === "violation") return;
     if (check === "ended") {
       this.send(
@@ -568,7 +587,7 @@ export class SandboxConnection implements RegisteredConnection {
       );
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "artifact.put");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "artifact.put");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "not_allowed", "The run has ended, so the artifact was not stored.");
@@ -675,7 +694,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce file sharing.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "file.share");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "file.share");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so the file was not shared.");
@@ -765,7 +784,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce web search.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "web_search.query");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "web_search.query");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so the search was not run.");
@@ -865,7 +884,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce memory.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.put");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.put");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so nothing was remembered.");
@@ -946,7 +965,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce projects.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "project.file_propose");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "project.file_propose");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so nothing was added.");
@@ -1015,7 +1034,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce memory.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.read");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.read");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended.");
@@ -1233,8 +1252,13 @@ export class SandboxConnection implements RegisteredConnection {
     const offered = new Map(hello.runs.map((r) => [r.run_id, r]));
     const { listed, lost, orphans } = await withTeam(ctx.db, teamId, async (tx) => {
       const active = await activeLeasedRuns(tx, teamId, userId);
-      const keep = active.filter((r) => offered.get(r.runId)?.thread_id === r.threadId);
-      const gone = active.filter((r) => offered.get(r.runId)?.thread_id !== r.threadId);
+      // A compaction is never kept (KOBE-213): its `thread.compact` was issued on the old
+      // connection, so no answer can arrive on this one; it ends (failed) and the agent, not
+      // seeing it listed, aborts it. Its thread is released, its queue moves on.
+      const resumable = (r: (typeof active)[number]) =>
+        r.kind === "message" && offered.get(r.runId)?.thread_id === r.threadId;
+      const keep = active.filter(resumable);
+      const gone = active.filter((r) => !resumable(r));
       return {
         listed: keep,
         lost: gone,
@@ -1246,6 +1270,7 @@ export class SandboxConnection implements RegisteredConnection {
       this.#leases.set(run.runId, {
         threadId: run.threadId,
         ended: false,
+        compaction: false, // never kept (above)
         ingest: this.#newIngest(run.runId, run.threadId, run.sandboxSeq),
       });
     }

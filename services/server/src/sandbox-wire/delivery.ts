@@ -45,7 +45,8 @@ export interface DeliveryHost {
   hasLease(runId: string): boolean;
   /** The agent advertised this optional feature in `hello.capabilities` (KOBE-82). */
   hasCapability(name: string): boolean;
-  leaseRun(runId: string, threadId: string, cursor: number): void;
+  /** `compaction`: a compaction run's lease (KOBE-213; no tool frames may name it). */
+  leaseRun(runId: string, threadId: string, cursor: number, compaction?: boolean): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
   /** The sandbox has a newer connection: stop and close. */
@@ -493,7 +494,7 @@ export class CommandDelivery {
       return;
     }
     if (starts && row.runId !== null) {
-      this.#host.leaseRun(row.runId, row.threadId, claimed.cursor);
+      this.#host.leaseRun(row.runId, row.threadId, claimed.cursor, row.kind === "thread.compact");
     }
     this.#host.leaseThread(row.threadId);
     this.#issued.set(commandId, {
@@ -577,10 +578,20 @@ export class CommandDelivery {
   async #endCompaction(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
     const { teamId } = this.#host.target;
     if (!outcome.ok) {
-      this.#host.log.info(
-        { run_id: runId, code: outcome.error.code, error: outcome.error.message.slice(0, 300) },
-        "compaction failed in the sandbox",
-      );
+      const detail = {
+        run_id: runId,
+        code: outcome.error.code,
+        error: outcome.error.message.slice(0, 300),
+      };
+      // A tampered runtime is a security event, logged like a run's (stored as its failure code).
+      if (outcome.error.code === "runtime_tampered") {
+        this.#host.log.warn(
+          { ...detail, sandbox_id: this.#host.sandboxId, security: true },
+          "compaction stopped: Pi's runtime was tampered with",
+        );
+      } else {
+        this.#host.log.info(detail, "compaction failed in the sandbox");
+      }
     }
     const entries = outcome.ok ? await this.fetchNewEntries(threadId) : undefined;
     const end = outcome.ok

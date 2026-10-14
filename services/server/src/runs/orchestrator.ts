@@ -97,6 +97,11 @@ export interface RunTuning {
    * lost its starter (replica crash): the sweep fails it. Above the wire's run.start deadline.
    */
   readonly startDeadlineMs: number;
+  /**
+   * A compaction run still active this long after it started has lost its requester (KOBE-213):
+   * the sweep fails it and aborts it. Above the `thread.compact` command deadline.
+   */
+  readonly compactionDeadlineMs: number;
   /** A thread with queued runs and nothing active for this long is promoted by the sweep. */
   readonly stallMs: number;
   /** Sweep interval (jittered). */
@@ -115,6 +120,7 @@ export const RUN_DEFAULTS: RunTuning = {
   maxQueuedPerThread: 25,
   stopGraceMs: 10_000,
   startDeadlineMs: 150_000,
+  compactionDeadlineMs: 15 * 60_000,
   stallMs: 30_000,
   sweepMs: 15_000,
   advanceAttempts: 4,
@@ -893,6 +899,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     };
     for (const lost of result.lostStarts) {
       await each("lost start", lost.runId, () => this.#dispatch.recoverStart(lost));
+    }
+    for (const stale of result.staleCompactions) {
+      await each("stale compaction", stale.runId, () => this.#dispatch.failStaleCompaction(stale));
     }
     for (const stop of result.pendingStops) {
       // In the background: a stop waits for the sandbox's answer.
