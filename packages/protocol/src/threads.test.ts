@@ -3,6 +3,8 @@ import {
   CAPABILITY_THREAD_COMPACT,
   COMPACT_THREAD_ERROR_CODES,
   COMPACT_THREAD_ERROR_HTTP_STATUS,
+  COMPACT_THREAD_ERROR_MESSAGES,
+  compactThreadError,
   compactThreadErrorSchema,
   compactThreadRequestSchema,
   compactThreadResponseSchema,
@@ -31,6 +33,9 @@ describe("compact thread request", () => {
       "a\u0000b",
       "a\u001bb",
       "a\u007fb",
+      "a\u2028b",
+      "a\u202eb",
+      "a\u2066b",
       42,
       null,
     ]) {
@@ -68,6 +73,9 @@ describe("compact thread response", () => {
       { ...ok, tokens_before: 1.5 },
       { ...ok, estimated_tokens_after: -3 },
       { ...ok, first_kept_entry_id: "" },
+      { ...ok, first_kept_entry_id: "a\nb" },
+      { ...ok, first_kept_entry_id: "x".repeat(129) },
+      { ...ok, summary: "" },
       { ...ok, thread_id: "not-a-uuid" },
       { ...ok, details: {} },
     ]) {
@@ -89,25 +97,36 @@ describe("compact thread errors", () => {
       "thread_busy",
       "sandbox_unavailable",
       "nothing_to_compact",
+      "model_not_configured",
       "compaction_failed",
     ]);
     expect(COMPACT_THREAD_ERROR_HTTP_STATUS).toEqual({
       thread_busy: 409,
       sandbox_unavailable: 503,
       nothing_to_compact: 409,
+      model_not_configured: 409,
       compaction_failed: 502,
     });
   });
 
-  it("validates the error body", () => {
-    expect(
-      compactThreadErrorSchema.parse({ code: "thread_busy", message: "a run is active" }),
-    ).toEqual({ code: "thread_busy", message: "a run is active" });
-    expect(compactThreadErrorSchema.safeParse({ code: "busy", message: "x" }).success).toBe(false);
-    expect(
-      compactThreadErrorSchema.safeParse({ code: "thread_busy", message: "x".repeat(2001) })
-        .success,
-    ).toBe(false);
+  it("answers each code with its fixed message", () => {
+    for (const code of COMPACT_THREAD_ERROR_CODES) {
+      const body = compactThreadError(code);
+      expect(body).toEqual({ code, message: COMPACT_THREAD_ERROR_MESSAGES[code] });
+      expect(compactThreadErrorSchema.parse(body)).toEqual(body);
+    }
+  });
+
+  it("refuses any other message (never Pi's or the sandbox's text), unknown codes and keys", () => {
+    for (const bad of [
+      { code: "compaction_failed", message: "Compaction failed: 401 from http://gateway/v1" },
+      { code: "thread_busy", message: COMPACT_THREAD_ERROR_MESSAGES.compaction_failed },
+      { code: "busy", message: COMPACT_THREAD_ERROR_MESSAGES.thread_busy },
+      { ...compactThreadError("thread_busy"), detail: "x" },
+      { code: "thread_busy" },
+    ]) {
+      expect(compactThreadErrorSchema.safeParse(bad).success).toBe(false);
+    }
   });
 
   it("gates the wire command on a hello capability", () => {

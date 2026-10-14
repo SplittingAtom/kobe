@@ -457,8 +457,8 @@ export const runStopFrameSchema = frame("run.stop", {
 });
 
 /**
- * Allow-listed Pi RPC command (`get_entries(since)`, `get_state`, `compact`, ...; never `fork`, see
- * pi-rpc.ts); answered with `command.result`.
+ * Allow-listed Pi RPC command (`get_entries(since)`, `get_state`, ...; never `fork` or `compact`,
+ * see pi-rpc.ts); answered with `command.result`.
  */
 export const piCommandFrameSchema = frame("pi.command", {
   command_id: commandId,
@@ -468,27 +468,30 @@ export const piCommandFrameSchema = frame("pi.command", {
 
 /**
  * Compact a thread's Pi session (KOBE-212, CE15; threads.ts): Pi RPC `compact` with `focus` as
- * `customInstructions`. Only to agents with hello capability `thread_compact`; answered by exactly
- * one `thread.compact_result`. The summary is a model call, so the server names the run it is
- * billed to (`run_id`) with that run's model, limits and token, as `run.start` does; without
- * `run_id` Pi has no gateway token outside a run and the agent answers `model_not_configured`.
- * The agent refuses with `thread_busy` while the thread has an active run.
+ * `customInstructions`. A compaction is a run (kind compaction): the server creates it under the
+ * usual lease and run-start transaction (one active run per thread, so a busy thread is refused
+ * before anything is sent) and mints its token there. The summary's model calls are billed to that
+ * run: the frame carries its id, model and token, all required (there is no run-less path; the
+ * gateway refuses a token whose run is not active and leased). Only to agents whose hello lists
+ * both `thread_compact` and `run_token`; answered by exactly one `thread.compact_result`. The
+ * agent refuses `thread_busy` if the thread still has another run, and holds the token in memory
+ * only, as for `run.start`.
  */
 export const threadCompactFrameSchema = frame("thread.compact", {
   command_id: commandId,
   thread_id: uuidSchema,
+  run_id: uuidSchema,
   focus: threadCompactFocusSchema.optional(),
-  run_id: uuidSchema.optional(),
-  model: piThreadConfigSchema.shape.model,
+  /** The compaction run's model; unlike `run.start`, gateway model and API are required. */
+  model: z.strictObject({
+    alias: z.string().min(1).max(128),
+    gateway_model: gatewayModelSchema,
+    api: piModelApiSchema,
+  }),
   model_limits: modelLimitsSchema.optional(),
-  /** Run-bound gateway token, as `run.start.run_token` (capability `run_token`). */
-  run_token: runTokenGrantSchema.optional(),
-}).refine(
-  (f) =>
-    f.run_id !== undefined ||
-    (f.model === undefined && f.model_limits === undefined && f.run_token === undefined),
-  { message: "model, model_limits and run_token need run_id" },
-);
+  /** Run-bound gateway token for `run_id` (run-token.ts), as `run.start.run_token`. */
+  run_token: runTokenGrantSchema,
+});
 
 export const piUiResponseFrameSchema = frame("pi.ui_response", {
   thread_id: uuidSchema,

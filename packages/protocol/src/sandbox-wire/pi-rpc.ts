@@ -15,7 +15,7 @@ import { z } from "zod";
  *
  * Schemas here validate the envelope (`type`, discriminators, ids) and pass the rest through
  * (`looseObject`), so a Pi 1.0.x patch adding fields does not break the bridge. Only the commands
- * the server may issue are admitted (no `bash`, `switch_session`, `export_html`, `fork`, ...).
+ * the server may issue are admitted (no `bash`, `switch_session`, `export_html`, `fork`, `compact`, ...).
  * `fork` is excluded because it moves Pi to a new session file with fresh history (verified 1.0.0),
  * which would split the thread from the session file Kobe mirrors; edit-and-regenerate branches
  * with `run.start.parent_entry_id` instead (KOBE-23 refused it before the contract dropped it).
@@ -37,11 +37,8 @@ export const piBridgeCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ id: piId, type: z.literal("get_session_stats") }),
   z.strictObject({ id: piId, type: z.literal("get_fork_messages") }),
   z.strictObject({ id: piId, type: z.literal("clear_queue") }),
-  z.strictObject({
-    id: piId,
-    type: z.literal("compact"),
-    customInstructions: z.string().optional(),
-  }),
+  // No `compact` (KOBE-212): Pi's compact aborts a live run first and its summary is a billed model
+  // call, so compaction goes only through `thread.compact` (a compaction run with its own token).
   // No `set_model` (KOBE-169): it resolves the model from Pi's catalog, which re-reads the
   // writable agent/ config (KOBE-165). A thread's model choice goes through `run.start`
   // (config.model, applied by kobe-models), never through a pi.command.

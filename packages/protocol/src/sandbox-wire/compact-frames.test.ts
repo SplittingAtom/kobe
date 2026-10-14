@@ -8,6 +8,7 @@ import {
   decodeSandboxFrame,
   decodeServerFrame,
   encodeFrame,
+  piBridgeCommandSchema,
   threadCompactFrameSchema,
   threadCompactResultFrameSchema,
 } from "../index.js";
@@ -16,7 +17,15 @@ import { EXAMPLE_IDS } from "../testing/index.js";
 const THREAD = EXAMPLE_IDS.thread;
 const RUN = EXAMPLE_IDS.run;
 
-const compact = { v: 1, type: "thread.compact", command_id: "c1", thread_id: THREAD };
+const compact = {
+  v: 1,
+  type: "thread.compact",
+  command_id: "c1",
+  thread_id: THREAD,
+  run_id: RUN,
+  model: { alias: "fast", gateway_model: "ollama/qwen3", api: "openai-completions" },
+  run_token: { token: "krt1.abc", expires_at: "2026-10-14T12:00:00Z" },
+};
 const result = {
   v: 1,
   type: "thread.compact_result",
@@ -31,31 +40,30 @@ const result = {
 
 /** KOBE-212 (CE15): server → sandbox `thread.compact` and its `thread.compact_result`. */
 describe("thread.compact (server → sandbox)", () => {
-  it("decodes with only a thread, or with a focus", () => {
+  it("decodes with the compaction run's context, with or without focus and limits", () => {
     expect(decodeServerFrame(JSON.stringify(compact))).toEqual({ ok: true, frame: compact });
-    const focused = { ...compact, focus: "Keep the schema decisions" };
-    expect(decodeServerFrame(JSON.stringify(focused))).toEqual({ ok: true, frame: focused });
-  });
-
-  it("carries the run context the summary's model calls are billed to", () => {
-    const withRun = {
+    const full = {
       ...compact,
-      run_id: RUN,
-      model: { alias: "fast", gateway_model: "ollama/qwen3", api: "openai-completions" },
+      focus: "Keep the schema decisions",
       model_limits: { max_output_tokens: 8192, context_window: 131072 },
-      run_token: { token: "krt1.abc", expires_at: "2026-10-14T12:00:00Z" },
     };
-    expect(decodeServerFrame(JSON.stringify(withRun))).toEqual({ ok: true, frame: withRun });
+    expect(decodeServerFrame(JSON.stringify(full))).toEqual({ ok: true, frame: full });
   });
 
-  it("refuses model, limits or token without a run", () => {
-    for (const extra of [
-      { model: { alias: "fast" } },
-      { model_limits: { max_output_tokens: 10, context_window: 100 } },
-      { run_token: { token: "krt1.abc", expires_at: "2026-10-14T12:00:00Z" } },
-    ]) {
-      expect(threadCompactFrameSchema.safeParse({ ...compact, ...extra }).success).toBe(false);
+  it("requires the run, a resolved model and the run token (no run-less path)", () => {
+    for (const key of ["run_id", "model", "run_token"] as const) {
+      const { [key]: _dropped, ...rest } = compact;
+      expect(threadCompactFrameSchema.safeParse(rest).success, key).toBe(false);
     }
+    for (const model of [
+      { alias: "fast" },
+      { alias: "fast", gateway_model: "ollama/qwen3" },
+      { alias: "fast", api: "openai-completions" },
+      { ...compact.model, extra: 1 },
+    ]) {
+      expect(threadCompactFrameSchema.safeParse({ ...compact, model }).success).toBe(false);
+    }
+    expect(threadCompactFrameSchema.safeParse({ ...compact, run_id: "nope" }).success).toBe(false);
   });
 
   it("refuses a bad focus, a bad thread id and unknown keys", () => {
@@ -69,6 +77,19 @@ describe("thread.compact (server → sandbox)", () => {
     ]) {
       expect(threadCompactFrameSchema.safeParse(bad).success).toBe(false);
       expect(decodeServerFrame(JSON.stringify(bad)).ok).toBe(false);
+    }
+  });
+});
+
+describe("pi.command cannot compact (KOBE-212)", () => {
+  it("refuses compact through the raw Pi bridge, with or without instructions", () => {
+    for (const command of [
+      { id: "c1", type: "compact" },
+      { id: "c1", type: "compact", customInstructions: "keep the plan" },
+    ]) {
+      const frame = { v: 1, type: "pi.command", command_id: "c1", thread_id: THREAD, command };
+      expect(decodeServerFrame(JSON.stringify(frame)).ok).toBe(false);
+      expect(piBridgeCommandSchema.safeParse(command).success).toBe(false);
     }
   });
 });
@@ -121,6 +142,10 @@ describe("thread.compact_result (sandbox → server)", () => {
       { ...result, details: { readFiles: [] } },
       { ...result, tokens_before: -1 },
       { ...result, first_kept_entry_id: "" },
+      { ...result, first_kept_entry_id: "a\u0000b" },
+      { ...result, summary: "" },
+      { ...result, command_id: "" },
+      { ...result, thread_id: "nope" },
     ]) {
       expect(threadCompactResultFrameSchema.safeParse(bad).success).toBe(false);
     }

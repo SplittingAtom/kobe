@@ -43,36 +43,52 @@ tokensBefore, details?, usage?, fromHook?, systemMessage?}` (`firstKeptEntryId` 
 
 ## Decisions
 
+- Coordinator decision (review of #274, 2026-10-14): **a compaction is a real run row (kind
+  compaction)**. KOBE-213 creates it through the existing lease and run-start transaction:
+  `runs_one_active_per_thread` gives `thread_busy`, `mintRunToken` mints its token in the lease
+  transaction, `revokeRunTokens` at run end, `run_usage` / budget / D14 interruption / audit apply
+  unchanged. The gateway's `isRunTokenActive` is not loosened. Needs a migration (run kind).
 - `threads.ts`: `CAPABILITY_THREAD_COMPACT = "thread_compact"`, `threadCompactFocusSchema`
-  (1..1000 chars, not blank, no C0/DEL except tab/LF/CR, kept as sent), request/response/error
-  schemas, `COMPACT_THREAD_ERROR_CODES` + HTTP status (`thread_busy` 409, `sandbox_unavailable` 503,
-  `nothing_to_compact` 409, `compaction_failed` 502). `nothing_to_compact` is an addition to the
-  ticket's three codes: Pi's commonest refusal is not a failure, and the web wants to say so.
-- `thread.compact` (server -> sandbox): `command_id`, `thread_id`, `focus?`, plus optional
-  `run_id`, `model`, `model_limits`, `run_token` (the latter three require `run_id`). Reason: outside
-  a run the agent hands Pi no gateway token and no run to bill (`#answerRunToken` cancels), so the
-  summary call would fail; KOBE-213 decides how it mints the run, the contract just carries it.
+  (1..1000 chars, not blank, kept as sent; refuses C0/DEL except tab/LF/CR, U+2028/9, bidi
+  controls), request/response schemas, `COMPACT_THREAD_ERROR_CODES` with HTTP status
+  (`thread_busy` 409, `sandbox_unavailable` 503, `nothing_to_compact` 409, `model_not_configured`
+  409, `compaction_failed` 502) and **one fixed message per code** (`COMPACT_THREAD_ERROR_MESSAGES`,
+  `compactThreadError(code)`); the error schema admits only those pairs, so Pi's or the sandbox's
+  text never reaches the client (log it server-side).
+- `thread.compact` (server -> sandbox): `command_id`, `thread_id`, `focus?`, and **required**
+  `run_id`, `model` (alias + gateway model + API), `run_token`; `model_limits?`. Sent only to agents
+  announcing `thread_compact` and `run_token`.
+- `compact` removed from `piBridgeCommandSchema`: a raw `pi.command` can no longer compact (or abort
+  a run) around the server; it now fails decoding. The server never sent it; no agent code changed
+  (`SLOW_COMMANDS` still lists `compact`, now reachable only via `thread.compact` in KOBE-213).
 - Reply is its own frame `thread.compact_result` (sandbox -> server, strict, own 1 MiB entry in
   `SANDBOX_FRAME_MAX_BYTES_BY_TYPE`), sent instead of `command.result` (documented in
-  `connection.ts`). Success carries `summary?` (<= 256 KiB UTF-8; omitted when larger, the entry is
-  authoritative), `first_kept_entry_id`, `tokens_before`, `estimated_tokens_after?`; Pi's `usage`
-  and `details` are dropped. Failure codes: `thread_busy`, `nothing_to_compact`,
+  `connection.ts`). Success: `summary?` (1 char..256 KiB UTF-8; omitted when larger, the entry is
+  authoritative), `first_kept_entry_id` (`idSchema`), `tokens_before`, `estimated_tokens_after?`;
+  Pi's `usage`/`details` dropped. Failure codes: `thread_busy`, `nothing_to_compact`,
   `compaction_failed`, `model_not_configured`, `pi_unavailable`, `internal`.
-- Not touched: the server's `#sizeOk` / `frameMaxBytes` and the agent dispatch. Until KOBE-213 the
-  server sends no `thread.compact` and refuses a large `thread.compact_result` as before.
+- Not touched: the server's `#sizeOk` / `frameMaxBytes` and the agent dispatch.
 
-## Notes for KOBE-213
+## Notes for KOBE-213 (from the #274 security review)
 
-- Refuse `thread_busy` before sending (Pi's compact aborts a live run); the agent re-checks.
+- Agent: check `thread.runId` before and inside `withLock`; the thread counts as busy for the
+  whole compaction. Make the compaction run the thread's run (model file `run_id`, `#run`) and hand
+  the token on request; kobe-models fetches it only on Pi `input`, which compact never fires, so add
+  a fetch on `session_before_compact` or a lazy ask. Never write the token to disk or env.
+- Stop/budget: `after_step` waits for `turn_end`, which compaction never emits; treat it as `abort`.
+  Settle on the result or the 10 min slow timeout, then end the run and revoke the token.
 - Map Pi errors: `Nothing to compact...`/`Already compacted` -> `nothing_to_compact`; else
-  `compaction_failed`. Use the slow-command timeout (agent `SLOW_COMMANDS` has `compact`, 10 min).
+  `compaction_failed`. Accept a result only for a `command_id` sent on that connection with a
+  matching `thread_id`; add the type to `#sizeOk`.
 - `sandbox_commands.kind` has a CHECK (`0016_sandbox_wire.sql`); a durable `thread.compact` row
-  needs a migration, an internal (connection-bound) command does not.
-- After success, `get_entries since` to mirror the `compaction` entry.
+  needs it widened. After success, `get_entries since` mirrors the `compaction` entry.
+- Route: `withTeam()`, 404 across teams, only members who may post; audit `thread.compacted`;
+  render the summary as sanitized markdown; mind proxy timeouts for a long synchronous 200.
 
 ## Evidence (acceptance criteria -> test or command output)
 
 - ac-1: `packages/protocol/src/threads.test.ts`, `sandbox-wire/compact-frames.test.ts`, cap test in
   `sandbox-wire/frames.test.ts`; exported from `@kobe/protocol`.
 - ac-2: this ledger, "Pi 1.0.0 compact RPC (verified)".
-- ac-3: protocol-only diff; no server/agent/web source changed. `pnpm verify` green.
+- ac-3: protocol-only diff; no server/agent/web source changed (only `compact` left the bridge
+  allow-list, which the server never sent). `pnpm verify` green.
