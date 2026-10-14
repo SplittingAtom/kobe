@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { threadMarkersSchema } from "./routes/thread-markers.js";
+import { MAX_MARKERS, threadMarkersSchema } from "./routes/thread-markers.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
@@ -58,6 +58,7 @@ describe("GET /v1/threads/{id}/markers", () => {
     expect((await as(w.owner).get(`/v1/threads/${threadId}/markers`)).json).toEqual({
       runs: [],
       approvals: [],
+      truncated: false,
     });
 
     const first = await f.message(w.owner, threadId, "first");
@@ -79,13 +80,14 @@ describe("GET /v1/threads/{id}/markers", () => {
       [first, "interrupted", "e-1"],
       [second, "budget_stopped", null],
     ]);
-    expect(body.runs.every((r) => r.ended_at !== null && r.parent_entry_id === null)).toBe(true);
+    expect(body.runs.every((r) => r.parent_entry_id === null)).toBe(true);
+    expect(body.truncated).toBe(false);
     expect(body.approvals.map((a) => [a.tool_call_id, a.status, a.cause])).toEqual([
       ["tc-allow", "allowed", "user"],
       ["tc-deny", "denied", "user"],
       ["tc-expired", "expired", "run_interrupted"],
     ]);
-    expect(body.approvals.every((a) => a.run_id === first)).toBe(true);
+    expect(body.approvals.every((a) => a.run_id === first && a.user_entry_id === "e-1")).toBe(true);
     // Never the checked input or the reasons: the marker needs the outcome only.
     expect(JSON.stringify(res.json)).not.toContain("secret");
   });
@@ -126,5 +128,49 @@ describe("GET /v1/threads/{id}/markers", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json.runs.map((r: { run_id: string }) => r.run_id)).toEqual([runId]);
     expect(res.json.approvals).toEqual([]);
+  });
+  it("keeps the owner's trashed thread readable and hides a trashed or unshared one from members", async () => {
+    const w = await f.world();
+    const member = await f.member(w.team);
+    const project = await as(w.owner).post("/v1/projects", {
+      name: "Unshared",
+      members_mode: "selected",
+      member_user_ids: [member.id],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const made = await as(w.owner).post("/v1/threads", { project_id: project.json.id });
+    const threadId = made.json.thread_id as string;
+    const url = `/v1/threads/${threadId}/markers`;
+    // In the project but not shared: the member can't read it.
+    expect((await as(member).get(url)).status).toBe(404);
+
+    const shared = await as(w.owner).post(`/v1/threads/${threadId}/share`, {
+      visibility: "project",
+    });
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    expect((await as(member).get(url)).status).toBe(200);
+    expect((await as(w.owner).delete(`/v1/threads/${threadId}`)).status).toBe(200);
+    // In Trash: still the owner's (restorable), never a reader's.
+    expect((await as(w.owner).get(url)).status).toBe(200);
+    expect((await as(member).get(url)).status).toBe(404);
+  });
+
+  it("returns the newest runs and says when older ones were left out", async () => {
+    const w = await f.world();
+    const threadId = await f.thread(w.owner);
+    await f.fx.admin.query(
+      `INSERT INTO runs (team_id, thread_id, trigger, status, ended_at, created_at, user_entry_id)
+       SELECT $1, $2, 'user', 'interrupted', now(), now() - (n || ' seconds')::interval, 'e-' || n
+         FROM generate_series(1, $3::int) n`,
+      [w.team, threadId, MAX_MARKERS + 1],
+    );
+    const res = await as(w.owner).get(`/v1/threads/${threadId}/markers`);
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    const body = threadMarkersSchema.parse(res.json);
+    expect(body.truncated).toBe(true);
+    expect(body.runs).toHaveLength(MAX_MARKERS);
+    // Oldest first, and the oldest one (e-501) is the one left out.
+    expect(body.runs[0]?.user_entry_id).toBe(`e-${MAX_MARKERS}`);
+    expect(body.runs.at(-1)?.user_entry_id).toBe("e-1");
   });
 });
