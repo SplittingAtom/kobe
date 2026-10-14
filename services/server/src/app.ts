@@ -62,6 +62,7 @@ import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
+import { threadMarkerRoutes } from "./routes/thread-markers.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
 import {
@@ -165,6 +166,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/projects", projectRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
+  api.route("/threads", threadMarkerRoutes(deps));
   api.route("/threads", threadUsageRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
