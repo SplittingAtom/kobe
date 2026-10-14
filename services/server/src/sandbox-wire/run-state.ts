@@ -182,6 +182,15 @@ export async function endRunInTx(
       target: { runId, threadId, scope: budgetScope },
     });
   }
+  // A compaction ended by its sandbox going away (KOBE-213) is audited as one too.
+  if (requested.status === "interrupted" && run.rows[0]?.kind === "compaction") {
+    await recordAudit(tx, {
+      action: "thread.compacted",
+      actor: SYSTEM_ACTOR,
+      teamId,
+      target: { threadId, runId, outcome: "interrupted" },
+    });
+  }
   if (requested.status === "interrupted") {
     await recordAudit(tx, {
       action: "run.interrupted",
@@ -198,6 +207,22 @@ function expiryCauseOfEnd(to: RunStatus) {
   if (to === "budget_stopped") return "budget_exhausted" as const;
   if (to === "failed") return "run_failed" as const;
   return "run_interrupted" as const;
+}
+
+/**
+ * The run is an active message run of this thread (KOBE-213): what a tool frame may name. Read
+ * from the database, so a compaction is refused even if a lease's in-memory flag were wrong.
+ */
+export async function isActiveMessageRun(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  threadId: string,
+): Promise<boolean> {
+  const res = await tx.execute<{ ok: boolean }>(sql`
+    SELECT kind = 'message' AND status IN ('running', 'waiting_approval') AS ok
+      FROM runs WHERE team_id = ${teamId} AND id = ${runId} AND thread_id = ${threadId}`);
+  return res.rows[0]?.ok === true;
 }
 
 export interface LeasedRun {

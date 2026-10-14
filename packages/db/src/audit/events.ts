@@ -640,7 +640,8 @@ export const AUDIT_EVENTS = {
   }),
   /**
    * The owner compacted the thread's Pi session (KOBE-213, CE15): the compaction run and how it
-   * ended. Whether a focus was given, never its text (it is conversation content).
+   * ended. Whether a focus was given, never its text (it is conversation content); absent when the
+   * system ended the run (`timed_out` by the sweep, `interrupted` when its sandbox went away).
    */
   "thread.compacted": event("team", {
     threadId: id,
@@ -649,13 +650,15 @@ export const AUDIT_EVENTS = {
       "completed",
       "cancelled",
       "budget_stopped",
+      "timed_out",
+      "interrupted",
       "thread_busy",
       "sandbox_unavailable",
       "nothing_to_compact",
       "model_not_configured",
       "compaction_failed",
     ]),
-    focused: z.boolean(),
+    focused: z.boolean().optional(),
   }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
   "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),

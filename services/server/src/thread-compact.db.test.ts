@@ -372,6 +372,7 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
       .toBe("failed");
     // The queued message starts on the new connection; the compaction was not listed (aborted).
     await back.started(queued.json.run_id as string);
+    expect(await auditOutcomes(w.team)).toContain("interrupted");
     expect(back.sb.frames("hello.ack")[0]?.runs ?? []).toEqual([]);
   });
 
@@ -385,6 +386,7 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
     );
     await f.fx.replica(1).deps.runs.sweep();
     expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("failed");
+    expect(await auditOutcomes(w.team)).toEqual(["timed_out"]);
     expect(await f.threadStatus(w.team, threadId)).toBe("idle");
     const stop = await ws.sb.until(() =>
       ws.sb.frames("run.stop").find((s) => s.run_id === frame.run_id),

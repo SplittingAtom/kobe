@@ -256,6 +256,12 @@ export class RunDispatcher {
         SELECT 1 FROM sandbox_run_leases WHERE team_id = ${stale.teamId} AND run_id = ${stale.runId}`);
       const leased = lease.rows.length > 0;
       if (leased) await requestStop(tx, stale.teamId, stale.runId, "abort");
+      await recordAudit(tx, {
+        action: "thread.compacted",
+        actor: SYSTEM_ACTOR,
+        teamId: stale.teamId,
+        target: { threadId: stale.threadId, runId: stale.runId, outcome: "timed_out" },
+      });
       return { ended, leased };
     });
     if (!out.ended) return;
