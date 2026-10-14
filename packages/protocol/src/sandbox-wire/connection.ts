@@ -17,7 +17,8 @@
  *   oversize frame is never buffered whole; `decode*Frame` re-checks.
  * - Per-type caps, sandbox → server ({@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}): only `pi.event` and
  *   `command.result` may use the full 4 MiB, `policy.check` at most 1 MiB (it carries a `write`'s
- *   content as executed), `artifact.put` at most 1 MiB (artifacts.ts), every other frame at most
+ *   content as executed), `artifact.put` and `thread.compact_result` at most 1 MiB (artifacts.ts,
+ *   threads.ts), every other frame at most
  *   {@link SANDBOX_SMALL_FRAME_MAX_BYTES}. The
  *   server reads the type from the raw frame before decoding, so **a frame larger than
  *   {@link SANDBOX_SMALL_FRAME_MAX_BYTES} must start with `v` then `type`** — `{"v":1,"type":"…"`,
@@ -42,6 +43,8 @@
  *   `web_search.result`; same refusal rule.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective
  *   connectors for Pi's per-session MCP config; dropped (not refused) for agents without it.
+ *   `thread_compact` ({@link CAPABILITY_THREAD_COMPACT}, threads.ts, KOBE-212): the server may send
+ *   `thread.compact` (Pi `compact`), answered by `thread.compact_result`; never sent to agents without it.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose
@@ -75,7 +78,8 @@
  *   not list are aborted by the agent. Runs the agent does not list (Pi or agent restarted) are
  *   interrupted by the server (D14: never auto-retried).
  * - Server → sandbox commands are idempotent by `command_id`; the agent remembers recent ids and
- *   ignores duplicates. Every command gets exactly one `command.result`.
+ *   ignores duplicates. Every command gets exactly one `command.result` (`thread.compact`: exactly
+ *   one `thread.compact_result` instead).
  * - Outbound `seq` is NOT the Kobe Event Stream `seq`; the server assigns that when it writes
  *   `run_events`.
  */
@@ -94,6 +98,7 @@ export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
   "command.result": SANDBOX_MAX_FRAME_BYTES,
   "policy.check": 1024 * 1024,
   "artifact.put": 1024 * 1024, // KOBE-127: up to 512 KiB of content plus JSON escaping
+  "thread.compact_result": 1024 * 1024, // KOBE-212: up to 256 KiB of summary plus JSON escaping
 } as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;

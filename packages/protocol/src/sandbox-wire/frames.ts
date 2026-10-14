@@ -11,6 +11,7 @@ import {
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
+import { threadCompactFocusSchema, threadCompactResultShape } from "../threads.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import {
   memoryPutFrameSchema,
@@ -199,6 +200,45 @@ export const commandResultFrameSchema = z.union([
   frame("command.result", { command_id: commandId, ok: z.literal(false), error: errorInfoSchema }),
 ]);
 
+/**
+ * Error codes of `thread.compact_result` (KOBE-212). `thread_busy`: the thread has an active run
+ * (Pi's `compact` would abort it). `nothing_to_compact`: Pi's "Nothing to compact (session too
+ * small)" or "Already compacted". `compaction_failed`: any other Pi `success:false` (message = Pi's
+ * error). `model_not_configured`: no gateway model to summarize with.
+ */
+export const THREAD_COMPACT_WIRE_ERROR_CODES = [
+  "thread_busy",
+  "nothing_to_compact",
+  "compaction_failed",
+  "model_not_configured",
+  "pi_unavailable",
+  "internal",
+] as const;
+
+/**
+ * Sandbox -> server: the one answer to `thread.compact` (instead of `command.result`), for the same
+ * `command_id`. Success carries Pi's `compact` response data in Kobe casing (Pi's `usage` and
+ * `details` are dropped: the gateway meters the calls, the mirrored entry keeps `details`). Has its
+ * own size entry (`SANDBOX_FRAME_MAX_BYTES_BY_TYPE`); a summary over the cap is left out.
+ */
+export const threadCompactResultFrameSchema = z.union([
+  frame("thread.compact_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(true),
+    ...threadCompactResultShape,
+  }),
+  frame("thread.compact_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(false),
+    error: z.strictObject({
+      code: z.enum(THREAD_COMPACT_WIRE_ERROR_CODES),
+      message: z.string().max(2000),
+    }),
+  }),
+]);
+
 /** A thread's Pi process exited (crash or after shutdown). Active runs on it are lost. */
 export const piExitedFrameSchema = frame("pi.exited", {
   thread_id: uuidSchema,
@@ -214,6 +254,7 @@ export const sandboxToServerFrameSchema = z.union([
   piUiRequestFrameSchema,
   policyCheckFrameSchema,
   commandResultFrameSchema,
+  threadCompactResultFrameSchema,
   artifactPutFrameSchema,
   fileShareFrameSchema,
   memoryPutFrameSchema,
@@ -416,13 +457,40 @@ export const runStopFrameSchema = frame("run.stop", {
 });
 
 /**
- * Allow-listed Pi RPC command (`get_entries(since)`, `get_state`, `compact`, ...; never `fork`, see
- * pi-rpc.ts); answered with `command.result`.
+ * Allow-listed Pi RPC command (`get_entries(since)`, `get_state`, ...; never `fork` or `compact`,
+ * see pi-rpc.ts); answered with `command.result`.
  */
 export const piCommandFrameSchema = frame("pi.command", {
   command_id: commandId,
   thread_id: uuidSchema,
   command: piBridgeCommandSchema,
+});
+
+/**
+ * Compact a thread's Pi session (KOBE-212, CE15; threads.ts): Pi RPC `compact` with `focus` as
+ * `customInstructions`. A compaction is a run (kind compaction): the server creates it under the
+ * usual lease and run-start transaction (one active run per thread, so a busy thread is refused
+ * before anything is sent) and mints its token there. The summary's model calls are billed to that
+ * run: the frame carries its id, model and token, all required (there is no run-less path; the
+ * gateway refuses a token whose run is not active and leased). Only to agents whose hello lists
+ * both `thread_compact` and `run_token`; answered by exactly one `thread.compact_result`. The
+ * agent refuses `thread_busy` if the thread still has another run, and holds the token in memory
+ * only, as for `run.start`.
+ */
+export const threadCompactFrameSchema = frame("thread.compact", {
+  command_id: commandId,
+  thread_id: uuidSchema,
+  run_id: uuidSchema,
+  focus: threadCompactFocusSchema.optional(),
+  /** The compaction run's model; unlike `run.start`, gateway model and API are required. */
+  model: z.strictObject({
+    alias: z.string().min(1).max(128),
+    gateway_model: gatewayModelSchema,
+    api: piModelApiSchema,
+  }),
+  model_limits: modelLimitsSchema.optional(),
+  /** Run-bound gateway token for `run_id` (run-token.ts), as `run.start.run_token`. */
+  run_token: runTokenGrantSchema,
 });
 
 export const piUiResponseFrameSchema = frame("pi.ui_response", {
@@ -519,6 +587,7 @@ export const serverToSandboxFrameSchema = z.union([
   runSteerFrameSchema,
   runStopFrameSchema,
   piCommandFrameSchema,
+  threadCompactFrameSchema,
   piUiResponseFrameSchema,
   policyPendingFrameSchema,
   policyResultFrameSchema,
@@ -556,3 +625,5 @@ export type PolicyResultFrame = z.infer<typeof policyResultFrameSchema>;
 export type RunStartFrame = z.infer<typeof runStartFrameSchema>;
 export type RunStopFrame = z.infer<typeof runStopFrameSchema>;
 export type CommandResultFrame = z.infer<typeof commandResultFrameSchema>;
+export type ThreadCompactFrame = z.infer<typeof threadCompactFrameSchema>;
+export type ThreadCompactResultFrame = z.infer<typeof threadCompactResultFrameSchema>;
