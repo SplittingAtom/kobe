@@ -612,6 +612,14 @@ describe("root branches: the first message is editable like any other (KOBE-214,
     );
     const run = fake.latestRun(t);
     await streaming(fake, run.run_id);
+    // Until Pi saves it, the new first message is shown beside the old one, as the head.
+    expect(screen.getByText("a better start")).toBeTruthy();
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+    fake.agent.delta(run.run_id, "m1", "a better");
+    expect(await screen.findByText(streamed("a better"))).toBeTruthy();
+    expect(screen.queryByText("first question")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
     fake.agent.branchMarker(run.run_id);
     fake.agent.commitPrompt(run.run_id);
     const answer = fake.agent.commit(run.run_id, say("a better answer"));
@@ -642,6 +650,20 @@ describe("root branches: the first message is editable like any other (KOBE-214,
     expect(await screen.findByText("a better answer")).toBeTruthy();
     expect(screen.queryByText("follow-up answer")).toBeNull();
     expect(version()).toBe("Version 2 of 2");
+  });
+
+  it("after a reload, a root edit whose run saved nothing is an empty version, not another root", async () => {
+    const { t, root } = compactedThread();
+    // The run ended before Pi saved the prompt: only the agent's branch marker, now the leaf.
+    fake.addSystemEntry(t, root, "custom", { customType: "kobe.branch", data: {} });
+    openApp(fake, t);
+    expect(await screen.findByText(/This version has no messages/)).toBeTruthy();
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+    await userEvent
+      .setup()
+      .click(must(screen.getAllByRole("button", { name: "Previous version" })[0]));
+    expect(await screen.findByText("follow-up answer")).toBeTruthy();
   });
 
   it("Regenerate on the first answer branches from the root", async () => {

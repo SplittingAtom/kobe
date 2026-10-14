@@ -36,7 +36,16 @@
    entry (`lastEntryOfNode`), and Pi continues after the compaction.
 4. **ac-3:** a branch switch posts `/leaf`, which is persisted in `threads.leaf_entry_id`. On
    reload the projection's head is the leaf's message, so the chosen root stays.
-5. Test fixtures gain Pi's root settings entry (`branchedThread`, `thread-style.test.tsx`). The
+5. **Review fixes (2026-10-14).** The tree places entries exactly (`placeIn`): a node, `null`
+   for a hidden entry at the root, or `undefined` when not loaded. A root edit's pending prompt is
+   therefore a sibling of the first message while it streams. When the leaf is a hidden root entry
+   (a root edit whose run saved nothing but the `kobe.branch` marker), the head is the newest
+   message below it, or else an "empty version" item (`empty:<leaf>`, a `kobe-problem` note,
+   switchable via the picker). It is never another root's branch. One predicate,
+   `branchPoint` / `branchPointOfMeta` in `lib/chat/tree.ts`, gates Edit, Regenerate and
+   `branchAndSend`. It also requires the parent to be loaded (paginated history). The fake shares
+   `#commitEntry`.
+6. Test fixtures gain Pi's root settings entry (`branchedThread`, `thread-style.test.tsx`). The
    fake gets `agent.branchMarker()`, which works like the sandbox agent's `kobe.branch` entry.
 
 ## Open questions (for Chris or the coordinator)
@@ -47,6 +56,8 @@
 
 ## Evidence (acceptance criteria → test or command output)
 
+- Tree: `lib/chat/tree-root-branches.test.ts` (pending prompt at the root, empty version, head
+  below a hidden leaf, `branchPoint`).
 - **ac-1** `conversation.test.tsx` › "root branches" › "editing the first message starts a
   sibling root, the picker switches roots and a reload keeps the choice"; "Regenerate on the
   first answer branches from the root".
@@ -54,5 +65,6 @@
   updated (`conversation.test.tsx` D15 branches, `thread-style.test.tsx`); "a first message with
   no entry above it … offers neither Edit nor Regenerate".
 - **ac-3** same root test: unmount + reopen shows the chosen root (both directions), with the leaf
-  persisted (`leaf_entry_id` = compaction entry / new answer).
+  persisted (`leaf_entry_id` = compaction entry / new answer). Reload with the leaf on a bare
+  `kobe.branch` marker: "after a reload, a root edit whose run saved nothing is an empty version".
 - `pnpm verify` green; CI on the PR.

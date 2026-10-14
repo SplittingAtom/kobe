@@ -38,7 +38,7 @@ import {
   type ThreadState,
 } from "../../lib/chat/thread-state";
 import {
-  messageMeta,
+  branchPoint,
   projectThread,
   type Projection,
   type ProjectedItem,
@@ -126,18 +126,6 @@ function textOf(message: AppendMessage): string {
     .trim();
 }
 
-/**
- * Where an edit of the user message `id` branches from: its entry's parent. For the first message
- * that is the root settings entry Pi 1.0 writes before the first prompt, so a new first message is
- * a sibling root (KOBE-214); the server's `run.start` sends it as `parent_entry_id` like any other.
- */
-function branchPointOf(projection: Projection, id: string | null | undefined) {
-  if (!id) return undefined;
-  const item = projection.items.find((i) => i.message.id === id);
-  const meta = item ? messageMeta(item.message) : undefined;
-  return meta?.kind === "user" ? meta : undefined;
-}
-
 function apiErrorOf(err: unknown, fallback: string): ApiError {
   const apiError = (err as { apiError?: ApiError } | null)?.apiError;
   return apiError ?? { status: 0, code: "client_error", message: `${fallback} Try again.` };
@@ -211,9 +199,10 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     return sent;
   };
 
+  /** Edit and Regenerate: a new version beside the prompt, from its parent entry (`branchPoint`). */
   const branchAndSend = async (text: string, userMessageId: string | null | undefined) => {
-    const point = branchPointOf(projectionRef.current, userMessageId);
-    if (!point || point.parentEntryId === null) {
+    const point = branchPoint(projectionRef.current, userMessageId);
+    if (!point) {
       controller?.reportError(CANNOT_BRANCH, text);
       return;
     }
@@ -238,7 +227,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     },
     onEdit: async (message) => branchAndSend(textOf(message), message.sourceId),
     onReload: async (parentId) => {
-      const point = branchPointOf(projectionRef.current, parentId);
+      const point = branchPoint(projectionRef.current, parentId);
       await branchAndSend(point?.text ?? "", parentId);
     },
     onCancel: async () => controller?.stop(),

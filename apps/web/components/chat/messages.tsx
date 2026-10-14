@@ -11,7 +11,12 @@ import {
 } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
+import {
+  branchPoint,
+  branchPointOfMeta,
+  type KobeMessageMeta,
+  type SkippedReport,
+} from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
@@ -130,8 +135,10 @@ function useMeta(): KobeMessageMeta | undefined {
 export function UserMessage() {
   const meta = useMeta();
   const pending = meta?.kind === "user" && meta.pending;
-  const readOnly = isReadOnlyThread(useKobeExtras());
-  const canEdit = !readOnly && meta?.kind === "user" && branchesFrom(meta);
+  const extras = useKobeExtras();
+  const readOnly = isReadOnlyThread(extras);
+  const canEdit =
+    !readOnly && extras !== undefined && branchPointOfMeta(extras.projection, meta) !== undefined;
   return (
     <MessagePrimitive.Root
       data-role="user"
@@ -179,23 +186,11 @@ export function UserMessage() {
   );
 }
 
-/**
- * A committed prompt can be edited or regenerated: a new version branches from its entry's parent.
- * The first prompt's parent is the settings entry Pi 1.0 writes at the root of every session, so
- * it branches like any other (KOBE-214); only a prompt with no entry above it can't, since
- * `parent_entry_id` has no way to name the root itself.
- */
-function branchesFrom(meta: KobeMessageMeta & { readonly kind: "user" }): boolean {
-  return !meta.pending && meta.parentEntryId !== null;
-}
-
 /** Regenerate re-sends the question before this answer from that question's parent entry. */
 function useCanRegenerate(): boolean {
   const parentId = useAuiState((s) => s.message.parentId);
   const extras = useKobeExtras();
-  const parent = extras?.projection.items.find((i) => i.message.id === parentId);
-  const meta = parent ? messageMeta(parent.message) : undefined;
-  return meta?.kind === "user" && branchesFrom(meta);
+  return extras !== undefined && branchPoint(extras.projection, parentId) !== undefined;
 }
 
 export function AssistantMessage() {
