@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SandboxToServerFrame } from "@kobe/protocol";
 import { parseModelFile } from "./kobe-models/protocol.js";
 import type { ModelWiring } from "./models/types.js";
-import { RUN_2, THREAD, runStart, startHarness, type Harness } from "./testing/harness.js";
+import { RUN_2, THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
 
 /**
  * `thread.compact` (KOBE-213) with the scripted Pi: Pi's `compact` as the compaction run, the
@@ -166,5 +166,64 @@ describe("thread.compact (KOBE-213)", () => {
     const [, second] = await launches();
     const file = parseModelFile(await readFile(String(second?.modelFile), "utf8"));
     expect(file.model?.gateway_model).toBe(MODEL.gateway_model);
+  });
+
+  it("takes the thread before choosing the model: a racing run.start is refused, never switched", async () => {
+    h = await startHarness({ models });
+    const frame = compactFrame();
+    h.server.send(frame as never);
+    const started = await h.server.command(runStart("say:hi", { config: { model: OTHER } }));
+    expect(started).toMatchObject({ ok: false, error: { message: "thread has an active run" } });
+    const result = await h.server.waitFor(
+      (f): f is Result => f.type === "thread.compact_result" && f.command_id === frame.command_id,
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(await piCommands("prompt")).toEqual([]);
+    expect(await piCommands("set_model")).toEqual([
+      expect.objectContaining({ modelId: MODEL.gateway_model }),
+    ]);
+  });
+
+  it("refuses steering and Pi commands while compacting", async () => {
+    h = await startHarness({ models });
+    const frame = compactFrame({ focus: "hang" });
+    h.server.send(frame as never);
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "compaction_start");
+    expect(
+      await h.server.command({ type: "run.steer", run_id: RUN_2, thread_id: THREAD, message: "x" }),
+    ).toMatchObject({ ok: false, error: { message: "the thread is compacting" } });
+    expect(
+      await h.server.command({
+        type: "pi.command",
+        thread_id: THREAD,
+        command: { id: "s", type: "get_state" },
+      }),
+    ).toMatchObject({ ok: false, error: { message: "the thread is compacting" } });
+    await h.server.command({
+      type: "run.stop",
+      run_id: RUN_2,
+      thread_id: THREAD,
+      mode: "abort",
+      reason: "user_cancelled",
+    });
+  });
+
+  it("forgets the compaction's token when it fails: a later request is cancelled", async () => {
+    h = await startHarness({ models });
+    expect(await compact({ focus: "fail-late-token" })).toMatchObject({
+      ok: false,
+      error: { code: "compaction_failed" },
+    });
+    const answered = async () =>
+      (await h.commandsLog()).find(
+        (c) => c.type === "extension_ui_response" && c.id === "tok-late",
+      );
+    await until(async () => (await answered()) !== undefined);
+    expect(await answered()).toEqual({
+      type: "extension_ui_response",
+      id: "tok-late",
+      cancelled: true,
+    });
+    expect(JSON.stringify(await h.commandsLog())).not.toContain(GRANT.token);
   });
 });

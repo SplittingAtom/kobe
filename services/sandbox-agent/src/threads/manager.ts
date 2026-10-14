@@ -212,6 +212,8 @@ export class ThreadManager {
   async steerRun(frame: Frame<"run.steer">): Promise<CommandOutcome> {
     const thread = this.#threads.get(frame.thread_id);
     if (thread?.runId !== frame.run_id) return fail("unknown_run", "run is not active here");
+    // A compaction has no turn to steer (Pi would queue the message for after it).
+    if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
     try {
       const response = await thread.request(
         { type: "steer", message: frame.message },
@@ -262,14 +264,20 @@ export class ThreadManager {
     if (this.#options.models === undefined) {
       return compactFailure("model_not_configured", "this sandbox has no model gateway access");
     }
-    const model = compactModelOf(frame);
-    const ready = await this.#compactReady(thread, model);
-    if (ready !== undefined) return ready;
-    // Last check, synchronous with the start: nothing may begin between it and beginRun.
-    const busy = busyFor(thread);
+    // The thread is the compaction's from the busy check on (under the lock): a run.start that
+    // arrives meanwhile is refused, so it never runs with the model selected below.
+    const busy =
+      busyFor(thread) ??
+      (await thread.withLock(async () => {
+        const held = busyFor(thread);
+        if (held === undefined) thread.beginRun(frame.run_id, true);
+        return held;
+      }));
     if (busy !== undefined) return busy;
-    thread.beginRun(frame.run_id, true);
+    const model = compactModelOf(frame);
     try {
+      const ready = await this.#compactReady(thread, model);
+      if (ready !== undefined) return ready;
       // Memory only (KOBE-118): kobe-models asks for it when Pi starts summarizing.
       await thread.attachRun(frame.run_id, model, frame.run_token.token);
       // Once more with the run's file in place: `compact` goes out right after this.
@@ -290,17 +298,15 @@ export class ThreadManager {
   }
 
   /**
-   * A Pi whose selected model is the compaction's. A running Pi is switched with `set_model` (only
-   * after the tripwire found its config as the agent wrote it, KOBE-169); one that does not know
-   * the model (registered for another run) is restarted once with it in its model file.
-   * Undefined when ready.
+   * With the compaction's run begun: a Pi whose selected model is the compaction's. A running Pi
+   * is switched with `set_model` (only after the tripwire found its config as the agent wrote it,
+   * KOBE-169); one that does not know the model (registered for another run) is restarted once
+   * with it in its model file, keeping the run. Undefined when ready.
    */
   async #compactReady(thread: Thread, model: RunModel): Promise<CompactReply | undefined> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const started = await thread.withLock(async () => {
-        const busy = busyFor(thread);
-        if (busy !== undefined) return busy;
-        if (attempt > 0) await thread.stopProcess();
+        if (attempt > 0) await thread.stopProcess({ keepRun: true });
         const failed = await this.#ensureProcess(thread, undefined, model);
         return failed === undefined || failed.ok
           ? undefined
@@ -312,11 +318,7 @@ export class ThreadManager {
         await thread.stopTampered(tampered, "compact");
         return compactFailure("internal", `runtime tampered: ${tampered}`);
       }
-      try {
-        if (await this.#selectModel(thread, model)) return undefined;
-      } catch (error) {
-        return compactThrown(error);
-      }
+      if (await this.#selectModel(thread, model)) return undefined;
     }
     return compactFailure("model_not_configured", "Pi did not select the compaction's model");
   }
@@ -340,6 +342,8 @@ export class ThreadManager {
   async #piCommand(thread: Thread, frame: Frame<"pi.command">): Promise<CommandOutcome> {
     const { id: _serverId, ...command } = frame.command;
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
+    // Nothing reaches Pi around a compaction in progress (KOBE-213); its entry is read after it.
+    if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
     if (
       command.type === "get_entries" &&
       command.since === undefined &&

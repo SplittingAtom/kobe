@@ -18,7 +18,7 @@
 //   "sh:<command>" run `/bin/sh -c <command>` the way Pi's bash tool does (detached) and report its
 //                  exit code, stdout and stderr as a kobe_test_shell event (KOBE-71 identity tests)
 // `compact` (KOBE-213) is chosen by its customInstructions: "hang" waits for abort, "nothing" and
-// "fail" answer success:false, "token" first asks for the run token as kobe-models does on
+// "fail" answer success:false ("fail-late-token" then asks for the run token anyway), "token" first asks for the run token as kobe-models does on
 // session_before_compact (the answer goes into the summary); anything else appends a compaction
 // entry whose summary names the focus. `get_state` reports the selected model; `set_model` selects
 // only the model the model file named when this process started (what kobe-models registered).
@@ -317,6 +317,19 @@ function compact(cmd) {
       success: false,
       error: "402 budget exhausted at http://gateway.internal",
     });
+  if (focus === "fail-late-token") {
+    // A late token request after the compaction failed (the agent's answer lands in the log).
+    respond(cmd, { success: false, error: "Compaction failed: upstream" });
+    setTimeout(() => {
+      out({
+        type: "extension_ui_request",
+        id: "tok-late",
+        method: "input",
+        title: "kobe.run_token",
+      });
+    }, 50);
+    return;
+  }
   out({ type: "compaction_start", reason: "manual" });
   if (focus === "hang") {
     compacting = cmd;
