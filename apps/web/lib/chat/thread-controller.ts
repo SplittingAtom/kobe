@@ -103,10 +103,10 @@ export class ThreadController {
     return id === null ? null : this.#api.threadUsage(id);
   };
 
-  /** One of this thread's entries with its body (KOBE-208: a large tool output on expand). */
-  readonly entryBody = (entryId: string) => {
+  /** A tool output of this thread in full (KOBE-208: a large one, when its card opens). */
+  readonly toolOutput = (entryId: string) => {
     const id = this.#state.threadId;
-    return id === null ? null : this.#api.getEntry(id, entryId);
+    return id === null ? null : this.#api.toolOutput(id, entryId);
   };
 
   /** The member's budget status (KOBE-42; the chat's warning banner). */

@@ -19,7 +19,7 @@
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, type ParsedEntry } from "./entries";
-import { entryTime, offloadedResults, stepStart, timing, type PartTiming } from "./history";
+import { entryTime, stepStart, timing, type PartTiming } from "./history";
 import type { SentFile } from "./attachments";
 import { splitAttachedFiles } from "./uploads";
 import type { LiveMessage, LiveRun, ToolActivity } from "./live";
@@ -43,8 +43,10 @@ export type KobeMessageMeta =
       readonly kind: "assistant";
       readonly entryIds: readonly string[];
       readonly live: boolean;
-      /** Tool calls whose result is offloaded (toolCallId → entry id): fetched on expand. */
-      readonly offloaded?: Readonly<Record<string, string>> | undefined;
+      /** Tool calls whose output the list trimmed (toolCallId → result entry): read on expand. */
+      readonly fullOutputs?: Readonly<Record<string, string>> | undefined;
+      /** The prompt this answer replies to (past answers it continues): its run's usage. */
+      readonly promptEntryId?: string | undefined;
       /** When the answer's last entry was stored (the footer's timestamp). */
       readonly at?: string | undefined;
     };
@@ -203,9 +205,7 @@ function toolCallPart(
 
 /** What the rich history (KOBE-208) adds to committed parts. */
 interface HistoryContext {
-  /** Offloaded entry id → the tool call it answers (its card fetches it; no notice). */
-  readonly claimed: ReadonlyMap<string, string>;
-  /** When a tool call's result was stored. */
+  /** When Pi stored a tool call's result. */
   readonly resultAt: (toolCallId: string) => number | undefined;
 }
 
@@ -226,7 +226,6 @@ function entryParts(
   history: HistoryContext,
 ): MessagePart[] {
   if (p.kind === "offloaded") {
-    if (history.claimed.has(entry.entryId)) return [];
     return [{ type: "data-kobe-offloaded", data: { entryId: entry.entryId } }];
   }
   if (p.kind !== "assistant") return [];
@@ -313,15 +312,22 @@ export function projectThread(
   }
   const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
   const tools = live?.run.tools ?? {};
-  const offloaded = offloadedResults(treeEntries, parsed, (id) => results.has(id));
-  const claimed = new Map([...offloaded].map(([call, entryId]) => [entryId, call] as const));
-  const byId = new Map(treeEntries.map((e) => [e.entryId, e] as const));
   const history: HistoryContext = {
-    claimed,
     resultAt: (call) => {
-      const stored = resultEntries.get(call) ?? byId.get(offloaded.get(call) ?? "");
+      const stored = resultEntries.get(call);
       return stored ? entryTime(stored) : undefined;
     },
+  };
+  const promptOf = (node: Node): string | undefined => {
+    const seen = new Set<string>();
+    for (let at = node.parentId; at !== null && !seen.has(at);) {
+      seen.add(at);
+      const up = nodes.get(at);
+      if (!up) return undefined;
+      if (up.role === "user") return up.id;
+      at = up.parentId;
+    }
+    return undefined;
   };
 
   const built: ProjectedItem[] = [];
@@ -356,15 +362,18 @@ export function projectThread(
       const content = node.entries.flatMap((e) =>
         entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools, history),
       );
-      const own = node.entries.flatMap((e) => {
-        const call = claimed.get(e.entryId);
-        return call === undefined ? [] : [[call, e.entryId] as const];
+      const trimmed = node.entries.flatMap((e) => {
+        const p = parsed.get(e.entryId);
+        return e.payloadTruncated && p?.kind === "toolResult"
+          ? [[p.toolCallId, e.entryId] as const]
+          : [];
       });
       const meta: KobeMessageMeta = {
         kind: "assistant",
         entryIds: node.entries.map((e) => e.entryId),
         live: false,
-        ...(own.length > 0 ? { offloaded: Object.fromEntries(own) } : {}),
+        ...(trimmed.length > 0 ? { fullOutputs: Object.fromEntries(trimmed) } : {}),
+        promptEntryId: promptOf(node),
         at: (node.entries.at(-1) as ThreadEntry).createdAt,
       };
       indexOf.set(id, built.length);

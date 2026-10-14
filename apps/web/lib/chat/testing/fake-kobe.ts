@@ -876,7 +876,9 @@ export class FakeKobe {
     const thread = id === undefined ? undefined : this.threads.get(id);
     if (!thread) return error(404, "thread_not_found", "No thread with that id.");
     if (action === undefined) return this.#threadItself(method, thread, url, body);
-    if (action === "entries" && sub !== undefined) return this.#entryBody(thread, sub);
+    if (action === "entries" && sub !== undefined && url.pathname.endsWith("/output")) {
+      return this.#toolOutput(thread, sub);
+    }
     if (action === "entries") return json(200, this.#entryPage(thread, url));
     if (action === "usage" && method === "GET") {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
@@ -985,13 +987,40 @@ export class FakeKobe {
     );
   }
 
-  /** `GET /v1/threads/{id}/entries/{entryId}` (KOBE-208): an offloaded body read back. */
-  #entryBody(thread: FakeThread, entryId: string): Response {
+  /** `GET /v1/threads/{id}/entries/{entryId}/output` (KOBE-208): a tool output in full. */
+  #toolOutput(thread: FakeThread, entryId: string): Response {
     const found = thread.entries.find((e) => e.entry_id === entryId);
     if (!found) return error(404, "entry_not_found");
-    if (!found.payload_offloaded) return json(200, { entry_id: entryId, payload: found.payload });
-    const body = this.entryBodies.get(entryId);
-    return body ? json(200, { entry_id: entryId, payload: body }) : error(409, "entry_unavailable");
+    const payload = found.payload_offloaded ? this.entryBodies.get(entryId) : found.payload;
+    if (!payload) return error(409, "entry_unavailable");
+    const message = payload.message as Json | undefined;
+    if (message?.role !== "toolResult") return error(409, "not_a_tool_output");
+    const content = message.content as { type: string; text?: string }[];
+    return json(200, {
+      entry_id: entryId,
+      tool_call_id: message.toolCallId,
+      tool_name: message.toolName,
+      is_error: message.isError === true,
+      text: content.map((p) => p.text ?? "").join(""),
+      truncated: false,
+    });
+  }
+
+  /** The server trims a tool output over 64 KB in the list to a preview (KOBE-208). */
+  #listed(entry: FakeEntry): Json {
+    const message = entry.payload.message as Json | undefined;
+    if (message?.role !== "toolResult" || JSON.stringify(message.content).length <= 65_536) {
+      return entry as unknown as Json;
+    }
+    const text = (message.content as { text?: string }[]).map((p) => p.text ?? "").join("");
+    return {
+      ...entry,
+      payload: {
+        ...entry.payload,
+        message: { ...message, content: [{ type: "text", text: text.slice(0, 2_000) }] },
+      },
+      payload_truncated: true,
+    };
   }
 
   #entryPage(thread: FakeThread, url: URL): Json {
@@ -1000,7 +1029,7 @@ export class FakeKobe {
     const rest = thread.entries.filter((e) => e.seq > after);
     const page = rest.slice(0, limit);
     return {
-      entries: page,
+      entries: page.map((e) => this.#listed(e)),
       next_entries_after: rest.length > limit ? (page.at(-1)?.seq ?? null) : null,
     };
   }

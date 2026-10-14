@@ -21,7 +21,9 @@ import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { MessageFooter } from "./message-footer";
+import { Disclosure, useDisclosure } from "./detail";
 import { Reasoning } from "./reasoning";
+import { FullOutputStatus, Output, useFullOutput } from "./tool-output";
 import { ToolCallCard } from "./tool-call";
 import { useArriving } from "./use-arriving";
 import styles from "./chat.module.css";
@@ -75,8 +77,29 @@ function SkippedActions({ data }: DataMessagePartProps) {
   return <SkippedReportCard text={text} count={count} />;
 }
 
-function Offloaded() {
-  return <p className={styles.notice}>This part of the conversation is too large to show here.</p>;
+/**
+ * An entry whose body is in object storage (D15): its role is unknown until read, so it shows as
+ * its own block, read when opened (a tool output then shows; anything else says it can't).
+ */
+function Offloaded({ data }: DataMessagePartProps) {
+  const { entryId } = data as { readonly entryId?: string };
+  const { open, setOpen } = useDisclosure();
+  const { output, retry } = useFullOutput(entryId, open);
+  return (
+    <Disclosure
+      open={open}
+      onOpenChange={setOpen}
+      className="text-muted-foreground -ms-2 text-sm"
+      bodyClassName="ps-2"
+      summary={<span>A large part of this answer, stored separately</span>}
+    >
+      {output.status === "ready" ? (
+        <Output text={output.text} error={output.isError} truncated={output.truncated} />
+      ) : (
+        <FullOutputStatus output={output} retry={retry} />
+      )}
+    </Disclosure>
+  );
 }
 
 /**

@@ -405,24 +405,42 @@ describe("rich history (KOBE-208)", () => {
     });
   });
 
-  it("hands an offloaded tool result to its card instead of a notice", () => {
+  it("points a trimmed tool output's card at its entry; an offloaded entry stays a notice", () => {
+    const big = { ...toolResult("r1", "a1", "tc1", "preview"), payloadTruncated: true };
     const entries = [
       user("u1", null, "go"),
       stamped(assistant("a1", "u1", toolCall("tc1", "bash")), 2),
-      offloaded("o1", "a1", 9),
+      big,
+      offloaded("o1", "r1", 9),
       assistant("a2", "o1", text("Done")),
     ];
-    const p = projectThread(entries, "a2");
-    const item = must(p.items.find((i) => i.message.id === "a1"));
+    const item = must(projectThread(entries, "a2").items.find((i) => i.message.id === "a1"));
     expect(item.message.content).toEqual([
-      expect.objectContaining({ type: "tool-call", toolCallId: "tc1" }),
+      expect.objectContaining({ type: "tool-call", toolCallId: "tc1", result: "preview" }),
+      { type: "data-kobe-offloaded", data: { entryId: "o1" } },
       { type: "text", text: "Done" },
     ]);
-    expect("result" in must((item.message.content as readonly object[])[0])).toBe(false);
     expect(messageMeta(item.message)).toMatchObject({
       kind: "assistant",
-      offloaded: { tc1: "o1" },
+      fullOutputs: { tc1: "r1" },
+      promptEntryId: "u1",
       at: "2026-10-02T10:00:00.000Z",
     });
+  });
+
+  it("finds an answer's prompt past an answer it continues", () => {
+    // Two branches out of one answer chain: each is an assistant node under an assistant node.
+    const entries = [
+      user("u1", null, "go"),
+      assistant("a1", "u1", text("first")),
+      assistant("a2", "a1", text("left")),
+      assistant("a3", "a1", text("right")),
+    ];
+    const p = projectThread(entries, "a3");
+    const meta = (id: string) =>
+      messageMeta(must(p.items.find((i) => i.message.id === id)).message);
+    expect(p.items.find((i) => i.message.id === "a3")?.parentId).toBe("a1");
+    expect(meta("a3")).toMatchObject({ promptEntryId: "u1" });
+    expect(meta("a1")).toMatchObject({ promptEntryId: "u1" });
   });
 });

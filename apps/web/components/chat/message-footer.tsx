@@ -41,22 +41,22 @@ export function ThreadUsageProvider({ children }: { readonly children: ReactNode
   return <ThreadUsageContext.Provider value={value}>{children}</ThreadUsageContext.Provider>;
 }
 
-/** The runs that answered this prompt (a retry is a second run on the same prompt). */
-function runsOf(usage: ThreadUsage | null, promptId: string | null): readonly RunUsage[] {
-  if (usage === null || promptId === null) return [];
-  return usage.runs.filter((r) => r.userEntryId === promptId);
+/**
+ * The run that wrote this answer: each run commits its own prompt entry (`runs.user_entry_id`;
+ * edit, regenerate and Retry all send a new prompt), so the prompt names exactly one run.
+ */
+function runOf(usage: ThreadUsage | null, promptId: string | undefined): RunUsage | undefined {
+  if (usage === null || promptId === undefined) return undefined;
+  return usage.runs.find((r) => r.userEntryId === promptId);
 }
 
-function usageParts(runs: readonly RunUsage[]): string[] {
-  if (runs.length === 0) return [];
-  const sum = (pick: (r: RunUsage) => number) => runs.reduce((n, r) => n + pick(r), 0);
-  const models = [...new Set(runs.flatMap((r) => r.models))];
-  const priced = sum((r) => r.unpricedCalls) < sum((r) => r.calls);
+function usageParts(run: RunUsage | undefined): string[] {
+  if (!run) return [];
   return [
-    ...(models.length > 0 ? [models.join(", ")] : []),
-    `${formatTokens(sum((r) => r.inputTokens))} in`,
-    `${formatTokens(sum((r) => r.outputTokens))} out`,
-    ...(priced ? [formatUsd(sum((r) => r.costUsd))] : []),
+    ...(run.models.length > 0 ? [run.models.join(", ")] : []),
+    `${formatTokens(run.inputTokens)} in`,
+    `${formatTokens(run.outputTokens)} out`,
+    ...(run.unpricedCalls < run.calls ? [formatUsd(run.costUsd)] : []),
   ];
 }
 
@@ -75,11 +75,10 @@ function clock(iso: string): { readonly short: string; readonly full: string } |
  */
 export function MessageFooter() {
   const meta = useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
-  const promptId = useAuiState((s) => s.message.parentId);
   const usage = useContext(ThreadUsageContext);
   if (meta?.kind !== "assistant" || meta.live || meta.at === undefined) return null;
   const time = clock(meta.at);
-  const parts = usageParts(runsOf(usage, promptId));
+  const parts = usageParts(runOf(usage, meta.promptEntryId));
   if (parts.length === 0 && time === null) return null;
   return (
     <div

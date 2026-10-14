@@ -73,7 +73,7 @@ function recordedThread(): { thread: string; prompt: string; bigEntry: string } 
       content: [{ type: "text", text: BIG }],
       isError: false,
     },
-    { at: at(18), offloaded: true },
+    { at: at(18) },
   );
   fake.addEntry(thread, bigEntry, step([{ type: "text", text: "Here is your chart." }], 18), {
     at: at(20),
@@ -116,8 +116,10 @@ const disclosures = (root: HTMLElement) =>
 const regionOf = (button: HTMLElement) =>
   must(document.getElementById(must(button.getAttribute("aria-controls"))));
 const isShown = (el: HTMLElement) => el.closest("[hidden]") === null;
+const outputPath = (thread: string, entryId: string) =>
+  `/v1/threads/${thread}/entries/${entryId}/output`;
 const bodyReads = (entryId: string) =>
-  fake.requests.filter((r) => r.method === "GET" && r.path.endsWith(`/entries/${entryId}`));
+  fake.requests.filter((r) => r.method === "GET" && r.path.endsWith(`/entries/${entryId}/output`));
 const detailToggle = () => screen.getByRole("button", { name: "Show all details" });
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 
@@ -142,7 +144,9 @@ describe("rendering a recorded thread (ac-1)", () => {
     const { thread } = recordedThread();
     openApp(fake, thread);
     const message = await answer();
-    const reasoning = within(message).getByRole("button", { name: /Thought for 2\.0 s/ });
+    const reasoning = within(message).getByRole("button", { name: /Reasoning.*step 2\.0 s/ });
+    // Pi records when the step ends, not the thinking: the time says it is the step's.
+    expect(within(reasoning).getByText("step 2.0 s").getAttribute("title")).toMatch(/whole step/);
     expect(reasoning.textContent).toContain("Need the CSV first.");
     expect(reasoning.textContent).not.toContain("Then plot it.");
     await userEvent.click(reasoning);
@@ -169,7 +173,7 @@ describe("rendering a recorded thread (ac-1)", () => {
     expect(browserSpaced(card)).toEqual([]);
   });
 
-  it("reads a large output from storage only when its card opens", async () => {
+  it("reads a large output in full only when its card opens", async () => {
     const { thread, bigEntry } = recordedThread();
     openApp(fake, thread);
     const message = await answer();
@@ -177,7 +181,6 @@ describe("rendering a recorded thread (ac-1)", () => {
     const header = within(card).getByRole("button", { expanded: false });
     expect(header.textContent).toContain("sales.csv");
     expect(header.textContent).toContain("12 s");
-    expect(message.textContent).not.toContain("too large to show here");
     expect(bodyReads(bigEntry)).toHaveLength(0);
 
     await userEvent.click(header);
@@ -190,13 +193,71 @@ describe("rendering a recorded thread (ac-1)", () => {
     expect(bodyReads(bigEntry)).toHaveLength(1);
   });
 
-  it("says so when a large output can't be read back", async () => {
+  it("says so when a large output can't be read, and reads it again on Retry", async () => {
     const { thread, bigEntry } = recordedThread();
-    fake.entryBodies.delete(bigEntry);
+    fake.failNext.set(
+      `GET ${outputPath(thread, bigEntry)}`,
+      Response.json({ code: "entry_unavailable", message: "x" }, { status: 409 }),
+    );
+    openApp(fake, thread);
+    const card = within(await answer()).getByRole("region", { name: "Tool call read_file" });
+    await userEvent.click(within(card).getByRole("button", { expanded: false }));
+    const alert = await within(card).findByRole("alert");
+    // The preview stays readable meanwhile.
+    expect(within(card).getByLabelText("Output").textContent).toContain("row,value");
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(within(card).queryByRole("alert")).toBeNull());
+    expect(bodyReads(bigEntry)).toHaveLength(2);
+    await waitFor(() => expect(within(card).queryByRole("status")).toBeNull());
+  });
+
+  it("shows a failure (not a spinner) when the request itself is rejected", async () => {
+    const { thread, bigEntry } = recordedThread();
+    const real = fake.fetch;
+    vi.spyOn(fake, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).endsWith(outputPath(thread, bigEntry))) throw new TypeError("offline");
+      return real(input, init);
+    });
     openApp(fake, thread);
     const card = within(await answer()).getByRole("region", { name: "Tool call read_file" });
     await userEvent.click(within(card).getByRole("button", { expanded: false }));
     expect(await within(card).findByRole("alert")).toBeTruthy();
+    expect(within(card).queryByRole("status")).toBeNull();
+  });
+
+  it("shows an entry stored in object storage as its own block, read when opened", async () => {
+    const thread = fake.addThread("Stored");
+    const prompt = fake.addEntry(thread, null, { role: "user", content: "go" });
+    const call = fake.addEntry(thread, prompt, {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "tc9", name: "bash", arguments: { command: "dump" } }],
+    });
+    const stored = fake.addEntry(
+      thread,
+      call,
+      {
+        role: "toolResult",
+        toolCallId: "tc9",
+        toolName: "bash",
+        content: [{ type: "text", text: "dumped" }],
+        isError: true,
+      },
+      { offloaded: true },
+    );
+    fake.addEntry(thread, stored, {
+      role: "assistant",
+      content: [{ type: "text", text: "All done." }],
+    });
+    openApp(fake, thread);
+    const message = must(
+      (await screen.findByText("All done.")).closest<HTMLElement>('[data-role="assistant"]'),
+    );
+    const block = within(message).getByRole("button", { name: /stored separately/ });
+    expect(bodyReads(stored)).toHaveLength(0);
+    await userEvent.click(block);
+    const output = await within(regionOf(block)).findByLabelText("Output");
+    expect(output.textContent).toBe("dumped");
+    expect(within(regionOf(block)).getByText("Error")).toBeTruthy();
   });
 
   it("puts model, tokens in and out, cost and time in the answer's footer", async () => {
@@ -210,6 +271,41 @@ describe("rendering a recorded thread (ac-1)", () => {
     expect(footer.textContent).toContain("$0.04");
     expect(must(footer.querySelector("time")).getAttribute("datetime")).toBe(at(20));
     expect(browserSpaced(footer)).toEqual([]);
+  });
+
+  it("gives each regenerated answer its own run's usage, not the sum", async () => {
+    const thread = fake.addThread("Two takes");
+    const first = fake.addEntry(thread, null, { role: "user", content: "Name it" });
+    fake.addEntry(thread, first, {
+      role: "assistant",
+      content: [{ type: "text", text: "Take one" }],
+    });
+    const second = fake.addEntry(thread, null, { role: "user", content: "Name it" });
+    fake.addEntry(thread, second, {
+      role: "assistant",
+      content: [{ type: "text", text: "Take two" }],
+    });
+    const run = (id: string, prompt: string, input: number) => ({
+      run_id: id,
+      user_entry_id: prompt,
+      models: ["m"],
+      calls: 1,
+      input_tokens: input,
+      output_tokens: 1,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost_usd: 0,
+      unpriced_calls: 1,
+      estimated_calls: 0,
+    });
+    fake.threadUsage.set(thread, [run("r-1", first, 111), run("r-2", second, 222)]);
+    openApp(fake, thread);
+    const message = must(
+      (await screen.findByText("Take two")).closest<HTMLElement>('[data-role="assistant"]'),
+    );
+    const footer = await within(message).findByLabelText("Answer details");
+    await waitFor(() => expect(footer.textContent).toContain("222 in"));
+    expect(footer.textContent).not.toContain("333");
   });
 });
 

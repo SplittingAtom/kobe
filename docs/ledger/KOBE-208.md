@@ -15,48 +15,44 @@
 
 ## Decisions
 
-- **New server route** `GET /v1/threads/{id}/entries/{entryId}` (`routes/threads.ts`,
-  `threads/entry-body.ts`): `{entry_id, payload}`. No route read offloaded bodies back before
-  (only fork and export touched them). Visibility = `findThread` (owner; project readers once
-  shared); the entry query names `team_id`; the body is read only from the thread's own object
-  tree (`threadKey`), capped at 8 MB and parsed as JSON, else 409 `entry_unavailable`. Inline
-  entries answer as stored. Tests: `thread-sharing.db.test.ts` "offloaded entry bodies".
-- **Usage change** (no new route): `runsUsage` LEFT JOINs `runs` (same `team_id`) for
-  `user_entry_id`, so `GET /v1/threads/{id}/usage` lets the footer put each run under the answer
-  to its prompt (entries carry no run id). Several runs on one prompt (retry) are summed.
-- **Which entry is a large tool result:** an offloaded body's role is unknown client-side. Pi
-  appends results after the calling step in call order, so an offloaded entry under a step
-  (directly or after other results) answers its next unanswered call; anywhere else it stays the
-  "too large" notice. The card reads the body only when opened (Detail toggle included), once.
-- **Timing** uses Pi's clock: reasoning = the step (message `timestamp` → entry `timestamp`;
-  Pi has no separate end of thinking), tool = calling entry → result entry. An offloaded entry
-  has no payload here, so its `created_at` stands in. Live parts show "Thinking…" / no duration
-  until committed.
+- **Large outputs (after review):** no ingest path offloads entries (`sandbox-wire/entries.ts`
+  stores every payload inline; only fork copies an existing `blob_ref`), so outputs over 64 KB
+  live inline. The entry list now trims a tool output over 64 KB to a 2,000-character preview and
+  flags `payload_truncated` (role, `toolCallId`, `isError` kept, so the card maps it exactly, no
+  migration). `GET /v1/threads/{id}/entries/{entryId}/output` answers only the output (text,
+  `is_error`, ids; inline ones extracted in SQL, capped at 1,000,000 characters). Offloaded bodies
+  (legacy or forks) go through one reader shared with the export: thread tree only, 8 MB cap even
+  when the store understates the size, 4 reads at once per process, logged with ids and the
+  error class only. An offloaded entry shows as its own block, read when opened; the client no
+  longer guesses which call it answers.
+- **Visibility** = `findThread` (owner; project readers once shared; owner only while in Trash);
+  entry queries name `team_id` and `thread_id`. Tests: `thread-entry-output.db.test.ts`.
+- **Usage:** `runsUsage` LEFT JOINs `runs` for `user_entry_id`. Each run commits its own prompt
+  (edit, regenerate and Retry send a new one; `bindUserEntry`), so the prompt names exactly one
+  run; the review's "regenerated siblings sum" does not happen (test added). The projection gives
+  each answer its prompt past assistant parents (`promptEntryId`).
+- **Timing:** Pi's clock only (entry and step timestamps); no `createdAt` mixing. Reasoning shows
+  "step N s" with a tooltip saying it is the whole step (Chris's decision).
 - **Collapse model:** each block follows the Detail toggle unless opened or closed by hand since
-  the toggle last changed (a generation counter). Bodies stay mounted with `hidden`, so a fetched
-  output survives closing. Reasoning uses assistant-ui's reasoning part (and its `timing` field);
-  no primitive exists for the disclosure itself, so it is a small `Disclosure` component.
-- **Footer** = run_usage models, tokens in/out, cost (when priced) and the answer's stored time;
-  revealed on hover/focus where hover exists (`group/answer`), always present for touch.
-- Detail command `detail` (Mod+Shift+D, unbound while `SHORTCUTS_BOUND` is false); the toggle is
-  an `IconAction` with `aria-pressed`.
+  it last changed. Bodies stay mounted (`hidden`). A failed full read shows an alert with Retry
+  and is tried again on the next open.
+- Detail command `detail` (Mod+Shift+D, unbound while `SHORTCUTS_BOUND` is false).
 
 ## Open questions (for Chris or the coordinator)
 
-- The PR is ~1,180 net lines (about 560 production, the rest tests). Split if wanted:
-  (1) server + protocol commits (~160), (2) projection + API + FakeKobe (`history.ts`, `tree.ts`,
-  `api.ts`, ~280), (3) components and the fixture test (~740).
-- Reasoning duration is the whole step (thinking plus the text after it): Pi records no end of
-  thinking. Fine for v1.1?
+- The PR is large (see the PR body for the split); kept as one PR at the coordinator's request.
+- LOW-2 (nosniff) is set on the output route only; a global `secureHeaders` is a separate ticket.
 
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `components/chat/rich-history.test.tsx` "rendering a recorded thread" (reasoning first
-  line + duration, tool header + full I/O, large output read only on open and once, failure
-  alert, footer); `lib/chat/history.test.ts`; `lib/chat/tree.test.ts` "rich history".
+  line + step time, tool header + full I/O, large output read only on open and once, failure +
+  Retry, rejected request, offloaded block, footer per run); `lib/chat/history.test.ts`;
+  `lib/chat/tree.test.ts` "rich history".
 - ac-2: `rich-history.test.tsx` "the Detail toggle" (all open/closed, PUT `detail_expanded`,
   restored after reload); `lib/shell/preferences.test.ts`; protocol `ui-preferences.test.ts`.
 - ac-3: `rich-history.test.tsx` "collapsed by default" (answer shown, every block closed, no
   crushed icon buttons).
-- Server: `thread-sharing.db.test.ts` (owner/reader/outsider/other team, foreign key, missing,
-  not JSON), `usage.db.test.ts` (`user_entry_id`).
+- Server: `thread-entry-output.db.test.ts` (list trimming, owner/reader/outsider/other team,
+  Trash, other thread's and team's entry ids, foreign key, missing, not JSON, oversized and
+  understated bodies, nosniff), `usage.db.test.ts` (`user_entry_id`).

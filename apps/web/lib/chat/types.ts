@@ -89,6 +89,8 @@ export interface ThreadEntry {
   readonly payload: Readonly<Record<string, unknown>>;
   /** The body lives in object storage (over 64 KB, D15); `payload` is empty. */
   readonly payloadOffloaded: boolean;
+  /** A tool output over 64 KB cut to a preview (KOBE-208); the full one via `toolOutput`. */
+  readonly payloadTruncated?: boolean | undefined;
   readonly createdAt: string;
 }
 

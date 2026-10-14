@@ -50,10 +50,15 @@ interface RunnablePage {
   readonly nextCursor: string | null;
 }
 
-/** `GET /v1/threads/{id}/entries/{entryId}`: the Pi entry as stored (payload kept verbatim). */
-export interface EntryBody {
+/** `GET /v1/threads/{id}/entries/{entryId}/output`: a tool result's full output (KOBE-208). */
+export interface ToolOutput {
   readonly entryId: string;
-  readonly payload: unknown;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly isError: boolean;
+  readonly text: string;
+  /** Longer than the server answers; `text` is its start. */
+  readonly truncated: boolean;
 }
 
 export interface ChatApi {
@@ -120,8 +125,8 @@ export interface ChatApi {
   runUsage(runId: string): Promise<ApiResult<RunUsage>>;
   /** Tokens and spend of each run of a thread (the answers' footers, KOBE-208). */
   threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
-  /** One entry with its body, an offloaded one read back from storage (KOBE-208). */
-  getEntry(threadId: string, entryId: string): Promise<ApiResult<EntryBody>>;
+  /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
+  toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
   budgetStatus(): Promise<ApiResult<BudgetStatus>>;
   /** One of your approvals with its full input (KOBE-37). */
@@ -239,7 +244,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
-    getEntry: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}`),
+    toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
     requestEgressAccess: (domain, threadId) =>

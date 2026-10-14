@@ -2,11 +2,10 @@
  * Rich history (CE12, KOBE-208): what the reasoning blocks, tool cards and answer footers read
  * from the Pi entries besides their text. Pure helpers; `tree.ts` puts their answers on the parts.
  *
- * Timing uses Pi's own clock: an entry's `timestamp` (ISO, written when Pi appended it) and an
- * assistant message's `timestamp` (epoch ms, when its step started). An offloaded entry has no
- * payload here, so its server `createdAt` stands in.
+ * Timing uses only Pi's own clock, never the server's: an entry's `timestamp` (ISO, written when
+ * Pi appended it) and an assistant message's `timestamp` (epoch ms, when its step started). An
+ * offloaded entry has no payload here, so nothing it ends is timed.
  */
-import { parseEntry, type ParsedEntry } from "./entries";
 import type { ThreadEntry } from "./types";
 
 export interface PartTiming {
@@ -19,9 +18,9 @@ function epoch(value: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-/** When Pi appended the entry; an offloaded entry's server time. */
+/** When Pi appended the entry (unknown for an offloaded one). */
 export function entryTime(entry: ThreadEntry): number | undefined {
-  return entry.payloadOffloaded ? epoch(entry.createdAt) : epoch(entry.payload.timestamp);
+  return epoch(entry.payload.timestamp);
 }
 
 /** When the assistant step that wrote this entry started (Pi's `message.timestamp`). */
@@ -41,40 +40,6 @@ export function timing(
     return undefined;
   }
   return { startedAt, completedAt };
-}
-
-/**
- * Which tool call each offloaded entry answers (toolCallId → entryId). An offloaded body's role is
- * unknown here, but Pi appends tool results right after the step that called them, in call order:
- * an offloaded entry under that step (directly or after other results) answers its first call
- * that has no result yet. An offloaded entry anywhere else stays a notice.
- */
-export function offloadedResults(
-  entries: readonly ThreadEntry[],
-  parsed: ReadonlyMap<string, ParsedEntry>,
-  answered: (toolCallId: string) => boolean,
-): ReadonlyMap<string, string> {
-  const byId = new Map(entries.map((e) => [e.entryId, e] as const));
-  const assigned = new Map<string, string>();
-  for (const entry of entries) {
-    if (parsed.get(entry.entryId)?.kind !== "offloaded") continue;
-    let step = entry.parentId === null ? undefined : byId.get(entry.parentId);
-    const seen = new Set<string>();
-    while (step && !seen.has(step.entryId)) {
-      const kind = parsed.get(step.entryId)?.kind;
-      if (kind !== "toolResult" && kind !== "offloaded") break;
-      seen.add(step.entryId);
-      step = step.parentId === null ? undefined : byId.get(step.parentId);
-    }
-    const p = step ? parsed.get(step.entryId) : undefined;
-    if (p?.kind !== "assistant") continue;
-    const call = p.pieces.find(
-      (piece) =>
-        piece.kind === "toolCall" && !answered(piece.toolCallId) && !assigned.has(piece.toolCallId),
-    );
-    if (call?.kind === "toolCall") assigned.set(call.toolCallId, entry.entryId);
-  }
-  return assigned;
 }
 
 /** The fields a tool's input is usually about, in the order they are preferred for its summary. */
@@ -98,22 +63,4 @@ export function formatDuration(ms: number): string {
   if (seconds < 60) return `${seconds} s`;
   const rest = seconds % 60;
   return `${Math.floor(seconds / 60)} min${rest > 0 ? ` ${rest} s` : ""}`;
-}
-
-/** The tool output in an entry body read back from object storage, if it is a tool result. */
-export function toolResultOf(
-  entryId: string,
-  payload: unknown,
-): { readonly text: string; readonly isError: boolean } | undefined {
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return undefined;
-  const p = parseEntry({
-    entryId,
-    parentId: null,
-    seq: 0,
-    type: "message",
-    payload: payload as Readonly<Record<string, unknown>>,
-    payloadOffloaded: false,
-    createdAt: "",
-  });
-  return p.kind === "toolResult" ? { text: p.text, isError: p.isError } : undefined;
 }

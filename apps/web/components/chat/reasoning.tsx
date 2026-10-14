@@ -16,17 +16,17 @@ function firstLine(text: string): string {
   );
 }
 
-function headline(running: boolean, timing: ReasoningMessagePartProps["timing"]): string {
-  if (running) return "Thinking…";
-  if (timing?.completedAt !== undefined) {
-    return `Thought for ${formatDuration(timing.completedAt - timing.startedAt)}`;
-  }
-  return "Reasoning";
+/** Pi records when a step ends, not when its thinking does: the time shown is the step's. */
+const STEP_HINT = "How long the whole step took: thinking and what the agent wrote after it.";
+
+function stepTime(timing: ReasoningMessagePartProps["timing"]): string | undefined {
+  if (timing?.completedAt === undefined) return undefined;
+  return `step ${formatDuration(timing.completedAt - timing.startedAt)}`;
 }
 
 /**
  * Reasoning (CE12, KOBE-208), rendered for assistant-ui's reasoning part: collapsed to its first
- * line and how long the step took; open, the whole text. While it streams its words arrive as
+ * line and how long its step took (labelled as the step's); open, the whole text. While it streams its words arrive as
  * fading spans (KOBE-207).
  */
 export function Reasoning({ text, status, timing }: ReasoningMessagePartProps) {
@@ -39,7 +39,12 @@ export function Reasoning({ text, status, timing }: ReasoningMessagePartProps) {
       className="text-muted-foreground my-1 -ms-2 text-sm"
       summary={
         <>
-          <span className="shrink-0 font-medium">{headline(arriving, timing)}</span>
+          <span className="shrink-0 font-medium">{arriving ? "Thinking…" : "Reasoning"}</span>
+          {!arriving && stepTime(timing) && (
+            <span className="shrink-0 tabular-nums" title={STEP_HINT}>
+              {stepTime(timing)}
+            </span>
+          )}
           {!open && <span className="min-w-0 truncate">{firstLine(text)}</span>}
         </>
       }
