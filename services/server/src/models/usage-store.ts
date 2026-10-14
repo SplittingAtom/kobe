@@ -279,6 +279,8 @@ export async function siteUsage(db: KobeDb, range: UsageRange): Promise<SiteUsag
 
 export interface RunUsage extends UsageTotals {
   readonly run_id: string;
+  /** The run's prompt entry (`runs.user_entry_id`): the chat shows usage under its answer. */
+  readonly user_entry_id: string | null;
   readonly models: readonly string[];
 }
 
@@ -292,12 +294,15 @@ export async function runsUsage(
     const filter =
       "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
     const res = await tx.execute<Row>(sql`
-      SELECT u.run_id, array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
+      SELECT u.run_id, r.user_entry_id,
+             array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
         FROM run_usage u
+        LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
        WHERE u.team_id = ${teamId}::uuid AND ${filter}
-       GROUP BY u.run_id ORDER BY min(u.at)`);
+       GROUP BY u.run_id, r.user_entry_id ORDER BY min(u.at)`);
     return res.rows.map((r) => ({
       run_id: String(r.run_id),
+      user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
       models: (r.models as string[] | null) ?? [],
       ...totalsOf(r),
     }));

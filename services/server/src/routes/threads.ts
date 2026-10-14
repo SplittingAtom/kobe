@@ -19,6 +19,7 @@ import {
 } from "../agents/versions.js";
 import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
 import { forkThread } from "../threads/fork.js";
+import { findEntry, readEntryBody } from "../threads/entry-body.js";
 import { sharedToProjectFor } from "../threads/share.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
@@ -61,6 +62,7 @@ type ThreadContext = Context<{ Variables: TeamVariables }>;
 const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
   entry_not_found: [404, "That entry is not part of this thread."],
+  entry_unavailable: [409, "That message's full content is not available."],
   entry_offloaded: [
     409,
     "Some very large messages in this conversation could not be copied into a fork.",
@@ -293,6 +295,26 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     return page
       ? c.json({ entries: page.entries, next_entries_after: page.nextAfter })
       : fail(c, "thread_not_found");
+  });
+
+  /**
+   * One entry with its body (KOBE-208): an offloaded body (over 64 KB, D15) is read back from the
+   * thread's own object tree, so the chat loads a large tool output only when it is expanded.
+   * Whoever may read the thread (its owner, project readers once shared) may read its entries.
+   */
+  app.get("/:id/entries/:entryId", async (c) => {
+    const id = threadIdParam(c);
+    const entryId = c.req.param("entryId");
+    if (!id || entryId.length === 0 || entryId.length > 128) return invalidRequest(c);
+    const found = await asViewer(c, async (tx, viewer) => {
+      if (!(await findThread(tx, viewer, id))) return "thread_not_found" as const;
+      return (await findEntry(tx, viewer.teamId, id, entryId)) ?? ("entry_not_found" as const);
+    });
+    if (typeof found === "string") return fail(c, found);
+    if (found.blobRef === null) return c.json({ entry_id: entryId, payload: found.payload });
+    const body = await readEntryBody(deps.blobs, c.get("team").id, id, found.blobRef);
+    const isObject = body !== null && typeof body === "object" && !Array.isArray(body);
+    return isObject ? c.json({ entry_id: entryId, payload: body }) : fail(c, "entry_unavailable");
   });
 
   app.patch("/:id", async (c) => {

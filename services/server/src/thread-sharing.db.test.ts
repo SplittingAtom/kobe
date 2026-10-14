@@ -361,3 +361,60 @@ describe("reader streams", () => {
     }
   });
 });
+
+describe("offloaded entry bodies (KOBE-208)", () => {
+  /** Adds an offloaded entry under the assistant's answer, its body stored at `key`. */
+  async function offload(x: Awaited<ReturnType<typeof world>>, id: string, key: string) {
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
+       VALUES ($1, $2, $3, $4, 'message', '{}', $5)`,
+      [x.w.team, x.threadId, id, x.entries.assistant, key],
+    );
+  }
+  const tree = (x: Awaited<ReturnType<typeof world>>) =>
+    `${PREFIX}teams/${x.w.team}/threads/${x.threadId}/entries/`;
+
+  it("the owner and project readers read a body; outsiders and other teams get 404", async () => {
+    const x = await world();
+    const body = { type: "message", message: { role: "toolResult", content: "y".repeat(70_000) } };
+    objects.objects.set(`${tree(x)}out`, Buffer.from(JSON.stringify(body)));
+    await offload(x, "out", `${tree(x)}out`);
+    const url = `/v1/threads/${x.threadId}/entries/out`;
+
+    const own = await as(x.author).get(url);
+    expect(own.status, JSON.stringify(own.json).slice(0, 200)).toBe(200);
+    expect(own.json).toEqual({ entry_id: "out", payload: body });
+    // A reader only once it is shared; never an outsider of the project or another team.
+    expect((await as(x.reader).get(url)).status).toBe(404);
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+    expect((await as(x.reader).get(url)).json).toEqual({ entry_id: "out", payload: body });
+    const outsider = await as(x.outsider).get(url);
+    expect([outsider.status, outsider.json.code]).toEqual([404, "thread_not_found"]);
+    const other = await f.world();
+    expect((await as(other.owner).get(url)).status).toBe(404);
+  });
+
+  it("answers inline entries as stored and refuses bodies it can't or mustn't read", async () => {
+    const x = await world();
+    const base = `/v1/threads/${x.threadId}/entries`;
+    const inline = await as(x.author).get(`${base}/${x.entries.assistant}`);
+    expect(inline.status).toBe(200);
+    expect(inline.json.entry_id).toBe(x.entries.assistant);
+    expect(inline.json.payload).toMatchObject({ type: "message" });
+
+    const missing = await as(x.author).get(`${base}/nope`);
+    expect([missing.status, missing.json.code]).toEqual([404, "entry_not_found"]);
+    // A reference outside this thread's own tree (another thread's object) is never read.
+    const foreign = `${PREFIX}teams/${x.w.team}/threads/${randomUUID()}/entries/x`;
+    objects.objects.set(foreign, Buffer.from("{}"));
+    await offload(x, "foreign", foreign);
+    const refused = await as(x.author).get(`${base}/foreign`);
+    expect([refused.status, refused.json.code]).toEqual([409, "entry_unavailable"]);
+    // Gone from the bucket, or not JSON.
+    await offload(x, "gone", `${tree(x)}gone`);
+    expect((await as(x.author).get(`${base}/gone`)).json.code).toBe("entry_unavailable");
+    objects.objects.set(`${tree(x)}bad`, Buffer.from("not json"));
+    await offload(x, "bad", `${tree(x)}bad`);
+    expect((await as(x.author).get(`${base}/bad`)).json.code).toBe("entry_unavailable");
+  });
+});

@@ -172,6 +172,12 @@ export const threadEntrySchema = z.object({
 });
 export type ThreadEntry = z.infer<typeof threadEntrySchema>;
 
+/** `GET /v1/threads/{id}/entries/{entryId}` (KOBE-208): one entry, an offloaded body read back. */
+export const entryBodySchema = z.object({
+  entry_id: idSchema,
+  payload: z.record(z.string(), z.unknown()),
+});
+
 export const threadPageSchema = z.object({
   threads: z.array(threadSummarySchema),
   next_cursor: z.string().nullable(),

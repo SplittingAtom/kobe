@@ -4,6 +4,7 @@ import {
   createThreadBodySchema,
   createdThreadSchema,
   entriesQuerySchema,
+  entryBodySchema,
   entryPageSchema,
   errorSchema,
   listThreadsQuerySchema,
@@ -218,6 +219,27 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/entries/{entryId}": {
+      get: {
+        operationId: "getThreadEntry",
+        summary: "One entry with its body, an offloaded body read back from storage",
+        description:
+          "KOBE-208: the chat reads a large tool output (over 64 KB, D15) only when its card " +
+          "opens. Readable by whoever may read the thread. The body is read only from the " +
+          "thread's own object tree, up to 8 MB.",
+        parameters: [
+          idParameter,
+          { name: "entryId", in: "path", required: true, schema: { type: "string" } },
+          teamHeader,
+        ],
+        responses: {
+          "200": json("EntryBody", "The entry's id and its Pi entry as stored."),
+          "404": json("Error", "`thread_not_found` or `entry_not_found`."),
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`entry_unavailable`: the body can't be read back."),
+        },
+      },
+    },
     "/v1/threads/{id}/leaf": {
       post: {
         operationId: "setThreadLeaf",
@@ -308,6 +330,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
+    EntryBody: withoutDialect(output(entryBodySchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
     UpdateThreadBody: withoutDialect(input(updateThreadBodySchema)),
     ShareThreadBody: withoutDialect(input(shareThreadRequestSchema)),
