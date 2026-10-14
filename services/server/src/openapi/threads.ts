@@ -4,7 +4,7 @@ import {
   createThreadBodySchema,
   createdThreadSchema,
   entriesQuerySchema,
-  entryBodySchema,
+  toolOutputSchema,
   entryPageSchema,
   errorSchema,
   listThreadsQuerySchema,
@@ -219,24 +219,33 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
-    "/v1/threads/{id}/entries/{entryId}": {
+    "/v1/threads/{id}/entries/{entryId}/output": {
       get: {
-        operationId: "getThreadEntry",
-        summary: "One entry with its body, an offloaded body read back from storage",
+        operationId: "getToolOutput",
+        summary: "A tool result's full output",
         description:
-          "KOBE-208: the chat reads a large tool output (over 64 KB, D15) only when its card " +
-          "opens. Readable by whoever may read the thread. The body is read only from the " +
-          "thread's own object tree, up to 8 MB.",
+          "KOBE-208: the entry list cuts a tool output over 64 KB to a preview " +
+          "(`payload_truncated`); the chat reads the full one here when its card opens. Readable " +
+          "by whoever may read the thread. An offloaded body (D15) is read only from the " +
+          "thread's own object tree, up to 8 MB; the text is capped at 1,000,000 characters.",
         parameters: [
           idParameter,
-          { name: "entryId", in: "path", required: true, schema: { type: "string" } },
+          {
+            name: "entryId",
+            in: "path",
+            required: true,
+            schema: { type: "string", minLength: 1, maxLength: 128 },
+          },
           teamHeader,
         ],
         responses: {
-          "200": json("EntryBody", "The entry's id and its Pi entry as stored."),
+          "200": json("ToolOutput", "The output's text and whether the tool failed."),
           "404": json("Error", "`thread_not_found` or `entry_not_found`."),
           ...ERROR_RESPONSES,
-          "409": json("Error", "`entry_unavailable`: the body can't be read back."),
+          "409": json(
+            "Error",
+            "`not_a_tool_output`, or `entry_unavailable`: the stored body can't be read back.",
+          ),
         },
       },
     },
@@ -330,7 +339,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
-    EntryBody: withoutDialect(output(entryBodySchema)),
+    ToolOutput: withoutDialect(output(toolOutputSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
     UpdateThreadBody: withoutDialect(input(updateThreadBodySchema)),
     ShareThreadBody: withoutDialect(input(shareThreadRequestSchema)),

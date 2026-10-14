@@ -796,11 +796,11 @@
         }
       }
     },
-    "/v1/threads/{id}/entries/{entryId}": {
+    "/v1/threads/{id}/entries/{entryId}/output": {
       "get": {
-        "operationId": "getThreadEntry",
-        "summary": "One entry with its body, an offloaded body read back from storage",
-        "description": "KOBE-208: the chat reads a large tool output (over 64 KB, D15) only when its card opens. Readable by whoever may read the thread. The body is read only from the thread's own object tree, up to 8 MB.",
+        "operationId": "getToolOutput",
+        "summary": "A tool result's full output",
+        "description": "KOBE-208: the entry list cuts a tool output over 64 KB to a preview (`payload_truncated`); the chat reads the full one here when its card opens. Readable by whoever may read the thread. An offloaded body (D15) is read only from the thread's own object tree, up to 8 MB; the text is capped at 1,000,000 characters.",
         "parameters": [
           {
             "name": "id",
@@ -816,7 +816,9 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
             }
           },
           {
@@ -832,11 +834,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The entry's id and its Pi entry as stored.",
+            "description": "The output's text and whether the tool failed.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EntryBody"
+                  "$ref": "#/components/schemas/ToolOutput"
                 }
               }
             }
@@ -882,7 +884,7 @@
             }
           },
           "409": {
-            "description": "`entry_unavailable`: the body can't be read back.",
+            "description": "`not_a_tool_output`, or `entry_unavailable`: the stored body can't be read back.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3591,6 +3593,10 @@
                 "payload_offloaded": {
                   "type": "boolean"
                 },
+                "payload_truncated": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -3695,6 +3701,10 @@
                 "payload_offloaded": {
                   "type": "boolean"
                 },
+                "payload_truncated": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -3729,7 +3739,7 @@
         "required": ["entries", "next_entries_after"],
         "additionalProperties": false
       },
-      "EntryBody": {
+      "ToolOutput": {
         "type": "object",
         "properties": {
           "entry_id": {
@@ -3738,15 +3748,23 @@
             "maxLength": 128,
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           },
-          "payload": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
+          "tool_call_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "is_error": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
           }
         },
-        "required": ["entry_id", "payload"],
+        "required": ["entry_id", "tool_call_id", "tool_name", "is_error", "text", "truncated"],
         "additionalProperties": false
       },
       "CreateThreadBody": {

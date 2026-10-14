@@ -3,6 +3,7 @@ import { Zip, ZipDeflate, strToU8 } from "fflate";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { threadKey, type BlobStore } from "./blobs.js";
+import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
 import { entryMarkdown, threadHeader, type ThreadHeading } from "./export-markdown.js";
@@ -165,40 +166,20 @@ async function activeBranchIds(
   });
 }
 
-/**
- * An offloaded entry body (D15), only from the thread's own object tree (`threadKey`), read with a
- * byte cap; undefined when unavailable (logged).
- */
+/** An offloaded entry body (D15) via the shared reader; undefined when unavailable (logged). */
 async function offloaded(
   blobs: BlobStore | undefined,
   viewer: ExportViewer,
   threadId: string,
   key: string,
 ): Promise<unknown> {
-  if (!blobs || !threadKey(blobs.prefix, viewer.teamId, threadId, key)) return undefined;
-  try {
-    const object = await blobs.objects.get(key);
-    if (!object) return undefined;
-    if (object.size > MAX_OFFLOADED_BYTES) {
-      object.body.destroy();
-      return undefined;
-    }
-    const chunks: Buffer[] = [];
-    let bytes = 0;
-    for await (const chunk of object.body) {
-      const b = Buffer.from(chunk as Uint8Array);
-      bytes += b.length;
-      if (bytes > MAX_OFFLOADED_BYTES) {
-        object.body.destroy();
-        return undefined;
-      }
-      chunks.push(b);
-    }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-  } catch (err) {
-    logger.warn({ err, teamId: viewer.teamId, threadId }, "export: offloaded entry unreadable");
-    return undefined;
-  }
+  const read = await readOffloadedJson(
+    blobs,
+    { teamId: viewer.teamId, threadId, reader: "export" },
+    key,
+    MAX_OFFLOADED_BYTES,
+  );
+  return read.ok ? read.body : undefined;
 }
 
 /** The stored Pi entry, or a stub that keeps the tree intact when its body is unavailable. */
