@@ -200,6 +200,8 @@ interface RuntimeOf {
 
 interface ActiveRun {
   readonly runId: string;
+  /** A compaction run (KOBE-213): Pi's `compact`, which never emits `turn_end` or settles. */
+  readonly compaction: boolean;
   stopAfterStep: boolean;
   stopping: boolean;
   readonly ended: Promise<void>;
@@ -246,6 +248,11 @@ export class Thread {
 
   get runId(): string | undefined {
     return this.#run?.runId;
+  }
+
+  /** The active run is a compaction (KOBE-213). */
+  get compacting(): boolean {
+    return this.#run?.compaction === true;
   }
 
   get hasProcess(): boolean {
@@ -702,12 +709,15 @@ export class Thread {
     await channel.waitReady(this.#env.policyReadyTimeoutMs ?? POLICY_READY_TIMEOUT_MS);
   }
 
-  /** Stop the Pi process (call inside the lock). Ends the active run, if any. */
-  async stopProcess(): Promise<void> {
+  /**
+   * Stop the Pi process (call inside the lock). Ends the active run, if any, unless `keepRun`: a
+   * compaction restarting Pi on its model keeps its run (KOBE-213), so the thread stays held.
+   */
+  async stopProcess(options: { readonly keepRun?: boolean } = {}): Promise<void> {
     const pi = this.#pi;
     if (pi === undefined) return;
     this.#closing.add(pi);
-    this.#detach(pi);
+    this.#detach(pi, options.keepRun === true);
     await pi.close();
     // Its runtime directory (token, config) is gone before anything else starts.
     await this.#removals.get(pi);
@@ -731,12 +741,12 @@ export class Thread {
     }
   }
 
-  beginRun(runId: string): void {
+  beginRun(runId: string, compaction = false): void {
     let resolveEnded: () => void = () => undefined;
     const ended = new Promise<void>((resolve) => {
       resolveEnded = resolve;
     });
-    this.#run = { runId, stopAfterStep: false, stopping: false, ended, resolveEnded };
+    this.#run = { runId, compaction, stopAfterStep: false, stopping: false, ended, resolveEnded };
     this.onStopDue = undefined;
     this.lastUsed = Date.now();
     this.#hooks.runStarted(runId, this.id);
@@ -920,7 +930,7 @@ export class Thread {
     if (identity !== undefined) identities?.release(identity);
   }
 
-  #detach(pi: PiProcess): void {
+  #detach(pi: PiProcess, keepRun = false): void {
     if (pi !== this.#pi) return;
     this.#pi = undefined;
     this.#policy = undefined;
@@ -932,7 +942,7 @@ export class Thread {
     this.#memoryFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
-    this.endRun();
+    if (!keepRun) this.endRun();
   }
 }
 

@@ -8,6 +8,7 @@ import {
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
+  CAPABILITY_THREAD_COMPACT,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -15,6 +16,7 @@ import {
   type RunStartFrame,
   type SandboxToServerFrame,
   type ServerToSandboxFrame,
+  type ThreadCompactFrame,
 } from "@kobe/protocol";
 import type { Config } from "./config.js";
 import type { PiExit, PiRecord } from "./pi/pi-process.js";
@@ -29,6 +31,7 @@ import type { PushedFile } from "./workspace/sync.js";
 import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
 import { fail, type CommandOutcome } from "./threads/outcome.js";
+import { compactFailure, type CompactReply } from "./threads/compact.js";
 import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js";
 import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
@@ -338,6 +341,8 @@ export class Agent {
       ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
+      // Compaction (KOBE-213) summarizes through the gateway with the run's token: same condition.
+      ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
     ];
     return {
       v: 1,
@@ -391,6 +396,10 @@ export class Agent {
   #onFrame(frame: ServerToSandboxFrame): void {
     if (COMMAND_FRAMES.has(frame.type)) {
       void this.#runCommand(frame);
+      return;
+    }
+    if (frame.type === "thread.compact") {
+      void this.#runCompact(frame);
       return;
     }
     switch (frame.type) {
@@ -480,6 +489,39 @@ export class Agent {
       default:
         return Promise.resolve(fail("internal", "not a command"));
     }
+  }
+
+  /**
+   * `thread.compact` (KOBE-213), answered by exactly one `thread.compact_result` on the connection
+   * it arrived on. Pi's error text goes to the server for its log only (it is never shown).
+   */
+  async #runCompact(frame: ThreadCompactFrame): Promise<void> {
+    const commandId = frame.command_id;
+    if (this.#seenCommands.has(commandId)) return;
+    this.#remember(commandId);
+    const epoch = this.#wire.epoch;
+    let reply: CompactReply;
+    try {
+      reply = await this.#threads.compact(frame);
+    } catch (error) {
+      this.#deps.logger.warn({ err: (error as Error).message }, "compaction failed");
+      reply = compactFailure("internal", "compaction failed in the sandbox agent");
+    }
+    if (!reply.ok) {
+      this.#deps.logger.info(
+        { thread_id: frame.thread_id, run_id: frame.run_id, code: reply.error.code },
+        "compaction refused",
+      );
+    }
+    if (this.#wire.epoch !== epoch || !this.#wire.ready) return;
+    const base = { v: 1, type: "thread.compact_result", command_id: commandId } as const;
+    if (this.#wire.send({ ...base, thread_id: frame.thread_id, ...reply })) return;
+    this.#wire.send({
+      ...base,
+      thread_id: frame.thread_id,
+      ok: false,
+      error: { code: "internal", message: "the compaction result could not be sent" },
+    });
   }
 
   #sendResult(frame: ServerToSandboxFrame, commandId: string, outcome: CommandOutcome): void {

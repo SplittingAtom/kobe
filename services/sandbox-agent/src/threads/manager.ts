@@ -23,6 +23,17 @@ import {
   promptWithAttachments,
 } from "./attachments.js";
 import { fail, ok, type CommandOutcome } from "./outcome.js";
+import {
+  compactCommand,
+  compactFailure,
+  compactModelOf,
+  compactSuccess,
+  compactThrown,
+  piCompactFailure,
+  selectsModel,
+  setModelCommand,
+  type CompactReply,
+} from "./compact.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
 
@@ -201,6 +212,8 @@ export class ThreadManager {
   async steerRun(frame: Frame<"run.steer">): Promise<CommandOutcome> {
     const thread = this.#threads.get(frame.thread_id);
     if (thread?.runId !== frame.run_id) return fail("unknown_run", "run is not active here");
+    // A compaction has no turn to steer (Pi would queue the message for after it).
+    if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
     try {
       const response = await thread.request(
         { type: "steer", message: frame.message },
@@ -218,7 +231,8 @@ export class ThreadManager {
     const thread = this.#threads.get(frame.thread_id);
     if (thread?.runId !== frame.run_id) return fail("unknown_run", "run is not active here");
     const ended = thread.runEnded();
-    if (frame.mode === "after_step") {
+    // A compaction has no step to finish (no turn_end ever comes): after_step aborts it too.
+    if (frame.mode === "after_step" && !thread.compacting) {
       thread.onStopDue = () => void this.#abort(thread);
       thread.markStopAfterStep();
     } else {
@@ -235,6 +249,92 @@ export class ThreadManager {
     }
   }
 
+  /**
+   * `thread.compact` (KOBE-213): Pi's `compact` as the compaction run. Refused while the thread has
+   * any other run (Pi's compact would abort it), checked again under the thread lock; the thread is
+   * busy until Pi answers. The run's model is selected before `compact` (Pi reads it first), its
+   * token is held in memory and handed to kobe-models on request, and the run ends with the answer.
+   */
+  compact(frame: Frame<"thread.compact">): Promise<CompactReply> {
+    return this.#claimed(frame.thread_id, (thread) => this.#compact(thread, frame));
+  }
+
+  async #compact(thread: Thread, frame: Frame<"thread.compact">): Promise<CompactReply> {
+    if (this.#draining) return compactFailure("pi_unavailable", "sandbox is shutting down");
+    if (this.#options.models === undefined) {
+      return compactFailure("model_not_configured", "this sandbox has no model gateway access");
+    }
+    // The thread is the compaction's from the busy check on (under the lock): a run.start that
+    // arrives meanwhile is refused, so it never runs with the model selected below.
+    const busy =
+      busyFor(thread) ??
+      (await thread.withLock(async () => {
+        const held = busyFor(thread);
+        if (held === undefined) thread.beginRun(frame.run_id, true);
+        return held;
+      }));
+    if (busy !== undefined) return busy;
+    const model = compactModelOf(frame);
+    try {
+      const ready = await this.#compactReady(thread, model);
+      if (ready !== undefined) return ready;
+      // Memory only (KOBE-118): kobe-models asks for it when Pi starts summarizing.
+      await thread.attachRun(frame.run_id, model, frame.run_token.token);
+      // Once more with the run's file in place: `compact` goes out right after this.
+      const tampered = await thread.verifyRuntime();
+      if (tampered !== undefined) {
+        await thread.stopTampered(tampered, "compact");
+        return compactFailure("internal", `runtime tampered: ${tampered}`);
+      }
+      const response = await thread.request(compactCommand(frame), PI_SLOW_REQUEST_TIMEOUT_MS);
+      return response.success ? compactSuccess(response.data) : piCompactFailure(response.error);
+    } catch (error) {
+      // Pi may still be summarizing: stop it rather than leave it working without a run.
+      if (thread.runId === frame.run_id) await thread.withLock(() => thread.stopProcess());
+      return compactThrown(error);
+    } finally {
+      if (thread.runId === frame.run_id) thread.endRun();
+    }
+  }
+
+  /**
+   * With the compaction's run begun: a Pi whose selected model is the compaction's. A running Pi
+   * is switched with `set_model` (only after the tripwire found its config as the agent wrote it,
+   * KOBE-169); one that does not know the model (registered for another run) is restarted once
+   * with it in its model file, keeping the run. Undefined when ready.
+   */
+  async #compactReady(thread: Thread, model: RunModel): Promise<CompactReply | undefined> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const started = await thread.withLock(async () => {
+        if (attempt > 0) await thread.stopProcess({ keepRun: true });
+        const failed = await this.#ensureProcess(thread, undefined, model);
+        return failed === undefined || failed.ok
+          ? undefined
+          : compactFailure(compactCode(failed.code), failed.message);
+      });
+      if (started !== undefined) return started;
+      const tampered = await thread.verifyRuntime();
+      if (tampered !== undefined) {
+        await thread.stopTampered(tampered, "compact");
+        return compactFailure("internal", `runtime tampered: ${tampered}`);
+      }
+      if (await this.#selectModel(thread, model)) return undefined;
+    }
+    return compactFailure("model_not_configured", "Pi did not select the compaction's model");
+  }
+
+  async #selectModel(thread: Thread, model: RunModel): Promise<boolean> {
+    const gatewayUrl = this.#options.models?.gatewayUrl;
+    if (gatewayUrl === undefined) return false;
+    const selected = async () => {
+      const state = await thread.request({ type: "get_state" }, PI_REQUEST_TIMEOUT_MS);
+      return state.success && selectsModel(state.data, model, gatewayUrl);
+    };
+    if (await selected()) return true;
+    const set = await thread.request(setModelCommand(model), PI_REQUEST_TIMEOUT_MS);
+    return set.success && (await selected());
+  }
+
   piCommand(frame: Frame<"pi.command">): Promise<CommandOutcome> {
     return this.#claimed(frame.thread_id, (thread) => this.#piCommand(thread, frame));
   }
@@ -242,6 +342,8 @@ export class ThreadManager {
   async #piCommand(thread: Thread, frame: Frame<"pi.command">): Promise<CommandOutcome> {
     const { id: _serverId, ...command } = frame.command;
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
+    // Nothing reaches Pi around a compaction in progress (KOBE-213); its entry is read after it.
+    if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
     if (
       command.type === "get_entries" &&
       command.since === undefined &&
@@ -403,10 +505,7 @@ export class ThreadManager {
   }
 
   /** Run a command with the thread claimed (busy) from arrival to answer. */
-  async #claimed(
-    threadId: string,
-    fn: (thread: Thread) => Promise<CommandOutcome>,
-  ): Promise<CommandOutcome> {
+  async #claimed<T>(threadId: string, fn: (thread: Thread) => Promise<T>): Promise<T> {
     const thread = this.#thread(threadId);
     const release = thread.claim();
     try {
@@ -466,6 +565,7 @@ export class ThreadManager {
   async #ensureProcess(
     thread: Thread,
     frame: RunStartFrame | undefined,
+    model: RunModel | null = runModelOf(frame),
   ): Promise<CommandOutcome | undefined> {
     let skillDirs: readonly string[] = [];
     if (frame !== undefined) {
@@ -529,7 +629,7 @@ export class ThreadManager {
       return fail("pi_unavailable", "too many threads are active in this sandbox");
     }
     try {
-      await thread.spawn(launch, runModelOf(frame));
+      await thread.spawn(launch, model);
     } catch (error) {
       return fail("pi_unavailable", `cannot start Pi: ${(error as Error).message}`);
     } finally {
@@ -647,6 +747,20 @@ function runModelOf(frame: RunStartFrame | undefined): RunModel | null {
           },
         }),
   };
+}
+
+/** A compaction is refused while the thread runs, streams or restores (the server's lock is first). */
+function busyFor(thread: Thread): CompactReply | undefined {
+  if (thread.runId !== undefined || thread.streaming) {
+    return compactFailure("thread_busy", "thread has an active run");
+  }
+  if (thread.restoring) return compactFailure("thread_busy", "session restore in progress");
+  return undefined;
+}
+
+/** A failed Pi start as a `thread.compact_result` code. */
+function compactCode(code: string): "pi_unavailable" | "internal" {
+  return code === "pi_unavailable" ? "pi_unavailable" : "internal";
 }
 
 function dispositionOf(data: unknown): string | undefined {

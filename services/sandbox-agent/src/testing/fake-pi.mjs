@@ -17,6 +17,11 @@
 //   "drop-policy"  close its end of the policy channel (as a broken kobe-policy would), then settle
 //   "sh:<command>" run `/bin/sh -c <command>` the way Pi's bash tool does (detached) and report its
 //                  exit code, stdout and stderr as a kobe_test_shell event (KOBE-71 identity tests)
+// `compact` (KOBE-213) is chosen by its customInstructions: "hang" waits for abort, "nothing" and
+// "fail" answer success:false ("fail-late-token" then asks for the run token anyway), "token" first asks for the run token as kobe-models does on
+// session_before_compact (the answer goes into the summary); anything else appends a compaction
+// entry whose summary names the focus. `get_state` reports the selected model; `set_model` selects
+// only the model the model file named when this process started (what kobe-models registered).
 // Every command received is appended to <session file>.commands.jsonl for assertions.
 // It also plays kobe-policy's side of the fd-3 handshake: on channel.hello it answers channel.ready,
 // unless the last --extension path contains "refuse" (channel.refused) or "silent" (no answer).
@@ -80,6 +85,30 @@ appendFileSync(
 
 let streaming = false;
 let aborted = false;
+let compacting;
+const BASE_PATHS = {
+  "openai-completions": "/v1",
+  "anthropic-messages": "/anthropic",
+  "google-generative-ai": "/genai/v1beta",
+};
+const registered = (() => {
+  try {
+    const file = JSON.parse(readFileSync(process.env.KOBE_MODEL_FILE ?? "", "utf8"));
+    const m = file.model;
+    return m === null
+      ? undefined
+      : {
+          provider: "kobe",
+          id: m.gateway_model,
+          baseUrl: `${file.gateway_url}${BASE_PATHS[m.api]}`,
+          contextWindow: m.context_window ?? 128000,
+          maxTokens: m.max_output_tokens ?? 16384,
+        };
+  } catch {
+    return undefined;
+  }
+})();
+let selectedModel;
 let timer;
 const dialogs = new Map();
 const policy = new Map();
@@ -277,6 +306,68 @@ function runPrompt(message) {
   }
 }
 
+function compact(cmd) {
+  const focus = cmd.customInstructions;
+  if (selectedModel === undefined)
+    return respond(cmd, { success: false, error: "No model selected" });
+  if (focus === "nothing")
+    return respond(cmd, { success: false, error: "Nothing to compact (session too small)" });
+  if (focus === "fail")
+    return respond(cmd, {
+      success: false,
+      error: "402 budget exhausted at http://gateway.internal",
+    });
+  if (focus === "fail-late-token") {
+    // A late token request after the compaction failed (the agent's answer lands in the log).
+    respond(cmd, { success: false, error: "Compaction failed: upstream" });
+    setTimeout(() => {
+      out({
+        type: "extension_ui_request",
+        id: "tok-late",
+        method: "input",
+        title: "kobe.run_token",
+      });
+    }, 50);
+    return;
+  }
+  out({ type: "compaction_start", reason: "manual" });
+  if (focus === "hang") {
+    compacting = cmd;
+    return;
+  }
+  const finish = (summary) => {
+    const all = entries();
+    const id = `cmp-${Date.now()}`;
+    const kept = all.at(-1)?.id ?? id;
+    const entry = {
+      type: "compaction",
+      id,
+      parentId: all.at(-1)?.id ?? null,
+      timestamp: new Date().toISOString(),
+      summary,
+      firstKeptEntryId: kept,
+      tokensBefore: 1234,
+    };
+    appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+    const result = {
+      summary,
+      firstKeptEntryId: kept,
+      tokensBefore: 1234,
+      estimatedTokensAfter: 99,
+      usage,
+      details: { readFiles: [], modifiedFiles: [] },
+    };
+    out({ type: "compaction_end", reason: "manual", result, aborted: false, willRetry: false });
+    respond(cmd, { success: true, data: result });
+  };
+  if (focus === "token") {
+    dialogs.set("tok-c", (answer) => finish(`token:${answer.value ?? "none"}`));
+    out({ type: "extension_ui_request", id: "tok-c", method: "input", title: "kobe.run_token" });
+    return;
+  }
+  finish(focus === undefined ? "Summary." : `Summary. focus=${focus}`);
+}
+
 function entries() {
   if (!existsSync(sessionFile)) return [];
   return readFileSync(sessionFile, "utf8")
@@ -303,13 +394,32 @@ function handle(cmd) {
     case "clear_queue":
       return respond(cmd, { success: true, data: { steering: [], followUp: [] } });
     case "abort":
+      if (compacting !== undefined) {
+        const cmd0 = compacting;
+        compacting = undefined;
+        out({ type: "compaction_end", reason: "manual", aborted: true, willRetry: false });
+        respond(cmd0, { success: false, error: "Compaction cancelled" });
+      }
       if (streaming && !aborted) {
         aborted = true;
         settle();
       }
       return respond(cmd, { success: true });
     case "get_state":
-      return respond(cmd, { success: true, data: { sessionFile, isStreaming: streaming } });
+      return respond(cmd, {
+        success: true,
+        data: { sessionFile, isStreaming: streaming, model: selectedModel ?? null },
+      });
+    case "set_model":
+      if (registered === undefined || cmd.provider !== "kobe" || cmd.modelId !== registered.id)
+        return respond(cmd, {
+          success: false,
+          error: `Model not found: ${cmd.provider}/${cmd.modelId}`,
+        });
+      selectedModel = registered;
+      return respond(cmd, { success: true, data: registered });
+    case "compact":
+      return compact(cmd);
     case "get_entries": {
       // "plant-during": a tool of this Pi plants config while the command is handled (KOBE-169).
       if (cmd.since === "plant-during") {

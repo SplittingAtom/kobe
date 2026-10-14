@@ -19,13 +19,14 @@ it("pins the header name to the protocol's", () => {
 });
 
 async function setup(states: () => ModelFileState, selected: unknown[] = []) {
-  const handlers: ((e: unknown, ctx: InputContextLike) => Promise<void>)[] = [];
+  type Handler = (e: unknown, ctx: InputContextLike) => Promise<void>;
+  const handlers = new Map<string, Handler>();
   const registered: {
     auth: { apiKey: { resolve: () => Promise<{ auth: { headers: object } }> } };
   }[] = [];
   const api = {
     registerProvider: (p: unknown) => void registered.push(p as (typeof registered)[number]),
-    on: (_: "input", h: (typeof handlers)[number]) => void handlers.push(h),
+    on: (event: string, h: Handler) => void handlers.set(event, h),
     setModel: async (m: unknown) => {
       selected.push(m);
       return true;
@@ -43,7 +44,11 @@ async function setup(states: () => ModelFileState, selected: unknown[] = []) {
   });
   const headers = async () =>
     (await registered.at(-1)?.auth.apiKey.resolve())?.auth.headers as Record<string, string>;
-  return { fire: (ctx: InputContextLike) => handlers[0]?.({}, ctx), headers };
+  return {
+    fire: (ctx: InputContextLike) => handlers.get("input")?.({}, ctx),
+    compact: (ctx: InputContextLike) => handlers.get("session_before_compact")?.({}, ctx),
+    headers,
+  };
 }
 
 describe("run token in kobe-models", () => {
@@ -86,6 +91,38 @@ describe("run token in kobe-models", () => {
         },
       },
     });
+    expect(await headers()).not.toHaveProperty("x-kobe-run-token");
+  });
+
+  it("fetches a compaction run's token when Pi starts compacting (no input fires, KOBE-213)", async () => {
+    let current = state(RUN);
+    const asked: string[] = [];
+    const ctx: InputContextLike = {
+      ui: {
+        input: async (title) => {
+          asked.push(title);
+          return `krt1.${current.run_id}.mac`;
+        },
+      },
+    };
+    const { fire, compact, headers } = await setup(() => current);
+    await fire(ctx);
+    // The compaction is a new run: the previous run's token is never reused for it.
+    current = state(RUN_B);
+    expect(await headers()).not.toHaveProperty("x-kobe-run-token");
+    await compact(ctx);
+    expect(asked).toEqual([RUN_TOKEN_UI_TITLE, RUN_TOKEN_UI_TITLE]);
+    expect(await headers()).toMatchObject({ "x-kobe-run-token": `krt1.${RUN_B}.mac` });
+    // Once it ended (run_id null), no token is sent, and none is fetched.
+    current = state(null);
+    await compact(ctx);
+    expect(asked).toHaveLength(2);
+    expect(await headers()).not.toHaveProperty("x-kobe-run-token");
+  });
+
+  it("compacts without a token when the agent cancels the request", async () => {
+    const { compact, headers } = await setup(() => state(RUN));
+    await compact({ ui: { input: async () => undefined } });
     expect(await headers()).not.toHaveProperty("x-kobe-run-token");
   });
 
