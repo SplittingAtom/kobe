@@ -21,6 +21,7 @@ const WAIT_MS = 25_000;
  */
 
 export type RunStart = Extract<ServerToSandboxFrame, { type: "run.start" }>;
+export type ThreadCompact = Extract<ServerToSandboxFrame, { type: "thread.compact" }>;
 
 interface Entry {
   type: string;
@@ -94,6 +95,59 @@ export class FakeWorkspace {
 
   starts(): RunStart[] {
     return this.sb.frames("run.start");
+  }
+
+  /** The `thread.compact` frames received (KOBE-213). */
+  compactions(): ThreadCompact[] {
+    return this.sb.frames("thread.compact");
+  }
+
+  async compacting(timeoutMs = WAIT_MS): Promise<ThreadCompact> {
+    return this.sb.until(() => this.compactions().at(-1), timeoutMs);
+  }
+
+  /**
+   * Pi answers `compact` (KOBE-213): on success a `compaction` entry is appended to the session
+   * (Pi does not announce it) and the result goes back as `thread.compact_result`.
+   */
+  compacted(
+    frame: ThreadCompact,
+    outcome: { readonly summary: string } | { readonly code: string; readonly message: string },
+  ): string | undefined {
+    if ("code" in outcome) {
+      this.sb.send({
+        v: 1,
+        type: "thread.compact_result",
+        command_id: frame.command_id,
+        thread_id: frame.thread_id,
+        ok: false,
+        error: { code: outcome.code, message: outcome.message },
+      });
+      return undefined;
+    }
+    const session = this.sessions.get(frame.thread_id) ?? [];
+    const entry: Entry = {
+      type: "compaction",
+      id: entryId(),
+      parentId: session.at(-1)?.id ?? null,
+      timestamp: new Date().toISOString(),
+      summary: outcome.summary,
+      firstKeptEntryId: session.at(-1)?.id ?? "none",
+      tokensBefore: 4242,
+    };
+    this.sessions.set(frame.thread_id, [...session, entry]);
+    this.sb.send({
+      v: 1,
+      type: "thread.compact_result",
+      command_id: frame.command_id,
+      thread_id: frame.thread_id,
+      ok: true,
+      summary: outcome.summary,
+      first_kept_entry_id: entry.firstKeptEntryId,
+      tokens_before: 4242,
+      estimated_tokens_after: 512,
+    });
+    return entry.id;
   }
 
   async started(runId: string, timeoutMs = WAIT_MS): Promise<RunStart> {
@@ -177,6 +231,8 @@ export class RunFixture {
       readonly streamTimings?: Partial<StreamTimings>;
       /** Limits of models without their own (KOBE-259). */
       readonly modelTokenDefaults?: ModelTokenDefaults;
+      /** Mint run tokens (KOBE-118) for agents announcing `run_token`. */
+      readonly runTokenKey?: Uint8Array;
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
@@ -188,6 +244,7 @@ export class RunFixture {
         : { modelTokenDefaults: options.modelTokenDefaults }),
       sandboxWire: {
         sweep: false,
+        ...(options.runTokenKey === undefined ? {} : { runTokenKey: options.runTokenKey }),
         tuning: {
           batchWindowMs: 20,
           resultPollMs: 100,
@@ -197,6 +254,7 @@ export class RunFixture {
             ...WIRE_DEFAULTS.commandTimeoutMs,
             "run.start": options.startTimeoutMs ?? 5_000,
             "run.stop": 5_000,
+            "thread.compact": options.startTimeoutMs ?? 10_000,
           },
         },
       },

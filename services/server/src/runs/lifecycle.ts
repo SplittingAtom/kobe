@@ -255,7 +255,7 @@ export function requestedModel(
 }
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
-async function resolveForStart(
+export async function resolveForStart(
   tx: KobeTx,
   agents: RunAgentResolver,
   thread: ThreadRow,

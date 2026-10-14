@@ -4,7 +4,7 @@ import { idSchema, runStatusSchema, uuidSchema as wireUuidSchema } from "@kobe/p
 import { withTeam } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { threadRunRows } from "../runs/store.js";
+import { isMessageRun, threadRunRows } from "../runs/store.js";
 import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
@@ -59,6 +59,8 @@ export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
         messages: rows
           // Queued messages are the owner's drafts (editable, maybe deleted): readers of a shared
           // thread see only the prompt of the run in progress, as they will in its entries.
+          // A compaction (KOBE-213) has no prompt to show.
+          .filter(isMessageRun)
           .filter((r) => (r.status === "queued" ? owner : r.userEntryId === null))
           .map((r) => ({
             run_id: r.id,

@@ -10,6 +10,7 @@ import {
   decodeSandboxFrame,
   type ArtifactPutFrame,
   type CommandResultFrame,
+  type ErrorInfo,
   type FileShareFrame,
   type HelloFrame,
   type PiEventFrame,
@@ -313,6 +314,7 @@ export class SandboxConnection implements RegisteredConnection {
     if (type === "pi.event" || type === "command.result") return raw.length <= max.bulk;
     if (type === "policy.check") return raw.length <= max.policyCheck;
     if (type === "artifact.put") return raw.length <= max.artifactPut;
+    if (type === "thread.compact_result") return raw.length <= max.compactResult;
     return false;
   }
 
@@ -404,6 +406,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "command.result":
         this.#onCommandResult(frame);
+        return;
+      case "thread.compact_result":
+        this.#onCompactResult(frame);
         return;
       case "pi.ui_request":
         this.#onUiRequest(frame);
@@ -1071,6 +1076,36 @@ export class SandboxConnection implements RegisteredConnection {
         : { ok: true, data: frame.data }
       : { ok: false, error: frame.error };
     this.#delivery.settle(issued, outcome);
+  }
+
+  /**
+   * The one answer to a `thread.compact` this connection delivered (KOBE-213), for the same thread.
+   * Anything else (an unknown or duplicate command id, another command's id, another thread) is a
+   * lease violation; a mismatched answer still settles its command, as failed, so nobody waits.
+   */
+  #onCompactResult(frame: Extract<SandboxToServerFrame, { type: "thread.compact_result" }>): void {
+    const issued = this.#delivery.takeIssued(frame.command_id);
+    if (issued === "answered") return;
+    const matches =
+      issued !== undefined &&
+      issued.kind === "row" &&
+      issued.commandKind === "thread.compact" &&
+      issued.threadId === frame.thread_id;
+    if (!matches) {
+      if (issued !== undefined) {
+        this.#delivery.settle(issued, {
+          ok: false,
+          error: { code: "malformed_result", message: "a compaction result for another command" },
+        });
+      }
+      this.#violate("unknown_run", "thread.compact_result");
+      return;
+    }
+    const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;
+    this.#delivery.settle(
+      issued,
+      ok ? { ok: true, data: rest } : { ok: false, error: (rest as { error: ErrorInfo }).error },
+    );
   }
 
   #onUiRequest(frame: Extract<SandboxToServerFrame, { type: "pi.ui_request" }>): void {

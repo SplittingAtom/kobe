@@ -131,6 +131,20 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  compactThread(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["compactThread"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "thread.compact", request.threadId, request.runId, options, {
+      run_id: request.runId,
+      thread_id: request.threadId,
+      ...(request.focus === undefined ? {} : { focus: request.focus }),
+      model: request.model,
+      ...(request.modelLimits === undefined ? {} : { model_limits: request.modelLimits }),
+    });
+  }
+
   async isConnected(target: SandboxTarget): Promise<boolean> {
     const live = await withTeam(this.#db, target.teamId, (tx) =>
       liveConnection(tx, target, this.#tuning.staleConnectionMs),
@@ -196,7 +210,8 @@ export class CommandRouter implements SandboxRouter {
       };
     }
     if (!queued.live) {
-      void this.#wakeFor(target, queued.id, timeoutMs, kind === "run.start" ? runId : undefined);
+      const starts = kind === "run.start" || kind === "thread.compact";
+      void this.#wakeFor(target, queued.id, timeoutMs, starts ? runId : undefined);
     } else if (queued.live.replicaId === this.#replicaId) {
       this.#registry.get(queued.live.connectionId)?.pokeCommands();
     }

@@ -211,10 +211,11 @@ export class RunDispatcher {
         SELECT 1 FROM sandbox_run_leases WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
         UNION ALL
         SELECT 1 FROM sandbox_commands
-         WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId} AND kind = 'run.start'
-           AND status IN ('pending', 'delivered')`);
+         WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
+           AND kind IN ('run.start', 'thread.compact') AND status IN ('pending', 'delivered')`);
       if (inFlight.rows.length > 0) return undefined;
-      if (recent) {
+      // A compaction (KOBE-213) is never re-sent: its requester has given up; it fails.
+      if (recent && run.kind === "message") {
         const plan = await restartPlanInTx(tx, this.#h.agents, thread, run);
         if (plan) return { plan };
       }

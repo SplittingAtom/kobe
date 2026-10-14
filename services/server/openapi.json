@@ -2568,6 +2568,136 @@
         }
       }
     },
+    "/v1/threads/{id}/compact": {
+      "post": {
+        "operationId": "compactThread",
+        "summary": "Compact the thread's conversation now",
+        "description": "The owner asks Pi to summarize the idle thread's older conversation (CE15), optionally with a one-line `focus` for the summary. Runs as a compaction run (one active run per thread, budgets and usage apply) in the owner's workspace, which is woken if needed; answers once Pi has written the summary, whose `compaction` entry is then in the thread's entries. Each error code has one fixed message.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompactThreadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Compacted: Pi's summary and token counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactThreadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: bad id or body (focus blank, too long, controls).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`read_only` (a shared reader), `forbidden`, `not_a_team_member`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, or another user's or team's thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`thread_busy`, `nothing_to_compact`, `model_not_configured`; also `thread_in_trash`, `no_active_team`, `team_mismatch` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactThreadError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`budget_exhausted`: the member's or team's budget is used up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`compaction_failed`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactThreadError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`sandbox_unavailable`; also `isolation_unavailable` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactThreadError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/approvals": {
       "get": {
         "operationId": "listApprovals",
@@ -5037,6 +5167,134 @@
         },
         "required": ["runs", "approvals", "truncated"],
         "additionalProperties": false
+      },
+      "CompactThreadRequest": {
+        "type": "object",
+        "properties": {
+          "focus": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompactThreadResponse": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "first_kept_entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "tokens_before": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "estimated_tokens_after": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["thread_id", "first_kept_entry_id", "tokens_before"],
+        "additionalProperties": false
+      },
+      "CompactThreadError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "thread_busy"
+              },
+              "message": {
+                "type": "string",
+                "const": "This thread is busy. Wait for the current run to finish, then compact it."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "sandbox_unavailable"
+              },
+              "message": {
+                "type": "string",
+                "const": "Your workspace is not available right now. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "nothing_to_compact"
+              },
+              "message": {
+                "type": "string",
+                "const": "There is nothing to compact yet: the conversation is short or was just compacted."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "model_not_configured"
+              },
+              "message": {
+                "type": "string",
+                "const": "No model is enabled for your team yet. Ask a team admin to enable one in the team's model settings."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "compaction_failed"
+              },
+              "message": {
+                "type": "string",
+                "const": "The conversation could not be compacted. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        ]
       },
       "Approval": {
         "type": "object",

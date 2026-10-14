@@ -1,7 +1,7 @@
 import { readBudgetStopScope, sql, teams, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
 
-/** A `running` run with no lease and no `run.start` in flight (its starter died). */
+/** A `running` run with no lease and no start (`run.start`, `thread.compact`) in flight. */
 export interface LostStart {
   readonly teamId: string;
   readonly runId: string;
@@ -47,7 +47,8 @@ async function lostStarts(tx: KobeTx, teamId: string, deadlineMs: number): Promi
        AND NOT EXISTS (SELECT 1 FROM sandbox_run_leases l
                         WHERE l.team_id = r.team_id AND l.run_id = r.id)
        AND NOT EXISTS (SELECT 1 FROM sandbox_commands c
-                        WHERE c.team_id = r.team_id AND c.run_id = r.id AND c.kind = 'run.start'
+                        WHERE c.team_id = r.team_id AND c.run_id = r.id
+                          AND c.kind IN ('run.start', 'thread.compact')
                           AND c.status IN ('pending', 'delivered'))`);
   return res.rows.map((r) => ({
     teamId,

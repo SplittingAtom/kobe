@@ -5,12 +5,13 @@ import {
   type RunTransitionCause,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx, type RunKind } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
+import { failureInfo } from "../runs/failure-codes.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -97,9 +98,10 @@ export async function endRunInTx(
   tx: KobeTx,
   teamId: string,
   runId: string,
-  end: RunEnd,
+  requested: RunEnd,
   interruptCause?: InterruptCause,
 ): Promise<{ ended: boolean; threadId?: string }> {
+  let end = requested;
   const head = await tx.execute<{ thread_id: string }>(sql`
     SELECT thread_id FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
   const threadId = head.rows[0]?.thread_id;
@@ -111,12 +113,18 @@ export async function endRunInTx(
     status: RunStatus;
     budget_stop_scope: string | null;
     trigger: "user" | "schedule";
+    kind: RunKind;
   }>(sql`
-    SELECT status, budget_stop_scope, trigger FROM runs
+    SELECT status, budget_stop_scope, trigger, kind FROM runs
      WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
   const from = run.rows[0]?.status;
   const threadRow = thread.rows[0];
   if (from === undefined || threadRow === undefined) return { ended: false };
+  // A compaction (KOBE-213) is never retried: a lost one fails, and the thread goes back to idle
+  // instead of waiting on Retry. Pi keeps its session; a summary it still wrote is mirrored later.
+  if (run.rows[0]?.kind === "compaction" && end.status === "interrupted") {
+    end = { status: "failed", error: failureInfo("compaction_interrupted", "start_failed") };
+  }
   // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped,
   // and so does a run whose next model call the gateway's budget gate refused before the stop
   // reached Pi (`model_budget_exhausted`). Any other failure keeps its own code.
@@ -174,7 +182,7 @@ export async function endRunInTx(
       target: { runId, threadId, scope: budgetScope },
     });
   }
-  if (end.status === "interrupted") {
+  if (requested.status === "interrupted") {
     await recordAudit(tx, {
       action: "run.interrupted",
       actor: SYSTEM_ACTOR,

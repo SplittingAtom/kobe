@@ -638,6 +638,23 @@ export const AUDIT_EVENTS = {
     projectId: id.nullable(),
     entries: z.number().int().nonnegative(),
   }),
+  /**
+   * The owner compacted the thread's Pi session (KOBE-213, CE15): the compaction run and how it
+   * ended. Whether a focus was given, never its text (it is conversation content).
+   */
+  "thread.compacted": event("team", {
+    threadId: id,
+    runId: id,
+    outcome: z.enum([
+      "completed",
+      "thread_busy",
+      "sandbox_unavailable",
+      "nothing_to_compact",
+      "model_not_configured",
+      "compaction_failed",
+    ]),
+    focused: z.boolean(),
+  }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
   "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
   /** `fields` lists which settings changed (names, not values). */

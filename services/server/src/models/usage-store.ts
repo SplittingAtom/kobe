@@ -328,9 +328,10 @@ export interface LatestCall {
 }
 
 /**
- * The thread's newest `run_usage` row that read any input (a call refused before the provider read
- * the prompt says nothing about the context's size); null before its first model call. The ledger
- * has no call kind, so a compaction's summary call counts too: the chat discounts it (KOBE-211).
+ * The thread's newest `run_usage` row of a message run that read any input (a call refused before
+ * the provider read the prompt says nothing about the context's size); null before its first model
+ * call. A compaction's summary calls (KOBE-213, `runs.kind`) read the old context, not the one the
+ * next turn sends, so they are left out here (their spend still counts in the totals and budgets).
  */
 async function latestCallIn(
   tx: KobeTx,
@@ -342,6 +343,8 @@ async function latestCallIn(
       FROM run_usage u
      WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid
        AND u.input_tokens + u.cache_read_tokens + u.cache_write_tokens > 0
+       AND NOT EXISTS (SELECT 1 FROM runs r
+                        WHERE r.team_id = u.team_id AND r.id = u.run_id AND r.kind = 'compaction')
      ORDER BY u.at DESC, u.id DESC LIMIT 1`);
   const r = res.rows[0];
   if (!r) return null;
