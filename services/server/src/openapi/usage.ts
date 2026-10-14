@@ -38,15 +38,21 @@ export const threadUsageResponseSchema = z.strictObject({
   totals: z.strictObject(usageTotals),
   /** Runs with model calls, in the order they first called a model. */
   runs: z.array(runUsageSchema),
-  /** The newest call that read input (prompt plus cache read: the context's size); null before the first. */
+  /**
+   * The newest call that read input; input + cache read + cache write is its prompt (the context's
+   * size). Null before the first call. Any call counts, a compaction's summary call too.
+   */
   latest_call: z
     .strictObject({
+      /** The run that made the call. */
+      run_id: z.uuid(),
       at: z.iso.datetime(),
       /** `<gateway provider>/<model>` as the call named it. */
       model: z.string(),
-      /** Input tokens not read from a prompt cache. */
+      /** Input tokens not read from or written to a prompt cache (the counts are disjoint). */
       input_tokens: count,
       cache_read_tokens: count,
+      cache_write_tokens: count,
     })
     .nullable(),
 });
@@ -65,7 +71,7 @@ export function usageOpenApiPaths(): Record<string, Record<string, unknown>> {
         description:
           "Visible like the thread (its owner, project readers). Attribution to a run relies on " +
           "the sandbox naming it (advisory). `latest_call` is the newest model call that read " +
-          "input: the chat's context gauge shows its input plus cache-read tokens.",
+          "input: the chat's context gauge shows its input plus cache-read and cache-write tokens.",
         parameters: [
           { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
           {

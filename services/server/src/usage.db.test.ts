@@ -304,30 +304,92 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
       return { threadId: thread.id, runId: run.id };
     });
 
-  it("answers the newest call's prompt and cache-read tokens, skipping calls without input", async () => {
+  it("answers the newest call's prompt tokens (input, cache read, cache write), skipping calls without input", async () => {
     const { threadId, runId } = await newThread();
     const t0 = Date.now() - 60_000;
     await recordModelUsage(h.deps.database.db, [
       usage({ runId, at: new Date(t0), inputTokens: 90_000, cacheReadTokens: 0 }),
+      // OpenAI-style: cached tokens split out of the prompt by the gateway.
+      usage({ runId, at: new Date(t0 + 10_000), inputTokens: 2_000, cacheReadTokens: 140_000 }),
+      // Anthropic-style: the whole prompt written to the cache, none of it plain input.
       usage({
         runId,
-        at: new Date(t0 + 10_000),
+        at: new Date(t0 + 20_000),
         model: "kobe-usage/m2",
-        inputTokens: 2_000,
-        cacheReadTokens: 140_000,
+        inputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 150_000,
       }),
       // A call refused before the provider read anything: no input, so not the context's size.
-      usage({ runId, at: new Date(t0 + 20_000), status: 502, inputTokens: 0, outputTokens: 0 }),
+      usage({ runId, at: new Date(t0 + 30_000), status: 502, inputTokens: 0, outputTokens: 0 }),
     ]);
     const r = await as.bob.get(`/v1/threads/${threadId}/usage`);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(r.json.latest_call).toEqual({
-      at: new Date(t0 + 10_000).toISOString(),
+      run_id: runId,
+      at: new Date(t0 + 20_000).toISOString(),
       model: "kobe-usage/m2",
-      input_tokens: 2_000,
-      cache_read_tokens: 140_000,
+      input_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 150_000,
     });
     expect(threadUsageResponseSchema.safeParse(r.json).error).toBeUndefined();
+  });
+
+  it("is visible like the thread: a project reader once shared, never a member it isn't shared with", async () => {
+    const db = h.deps.database.db;
+    const reader = await h.createUser("carol@usage.test");
+    const outsider = await h.createUser("erin@usage.test");
+    await withTeam(db, finance, (tx) =>
+      tx.insert(teamMembers).values([
+        { teamId: finance, userId: reader, role: "member" },
+        { teamId: finance, userId: outsider, role: "member" },
+      ]),
+    );
+    const browsers = {
+      reader: await h.signIn("carol@usage.test"),
+      outsider: await h.signIn("erin@usage.test"),
+    };
+    for (const b of Object.values(browsers)) {
+      expect((await b.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
+      b.team = finance;
+    }
+    const project = await as.alice.post("/v1/projects", {
+      name: "Usage shared",
+      members_mode: "selected",
+      member_user_ids: [reader],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const made = await as.alice.post("/v1/threads", { project_id: project.json.id });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const threadId = made.json.thread_id as string;
+    const [run] = await withTeam(db, finance, (tx) =>
+      tx
+        .insert(runs)
+        .values({
+          teamId: finance,
+          threadId,
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id }),
+    );
+    await recordModelUsage(db, [usage({ runId: run?.id, userId: ids.alice, inputTokens: 5_000 })]);
+    const url = `/v1/threads/${threadId}/usage`;
+
+    // In the project but not shared yet: the reader can't see it.
+    expect((await browsers.reader.get(url)).status).toBe(404);
+    const shared = await as.alice.post(`/v1/threads/${threadId}/share`, { visibility: "project" });
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    const seen = await browsers.reader.get(url);
+    expect(seen.status, JSON.stringify(seen.json)).toBe(200);
+    expect(seen.json.latest_call).toMatchObject({ run_id: run?.id, input_tokens: 5_000 });
+    // A team member outside the project never sees it.
+    const hidden = await browsers.outsider.get(url);
+    expect(hidden.status).toBe(404);
+    expect(hidden.json.code).toBe("thread_not_found");
   });
 
   it("is null before the thread's first model call", async () => {

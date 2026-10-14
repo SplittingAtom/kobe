@@ -12,10 +12,10 @@ import {
 import type { ServerDeps } from "../deps.js";
 import {
   addTotals,
-  latestThreadCall,
   siteUsage,
   runsUsage,
   teamUsage,
+  threadUsage,
   type Bucket,
   type UsageRange,
   type UsageTotals,
@@ -154,17 +154,13 @@ export function threadUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
       const actor = actorOf(c);
       // Visibility: the thread's owner or a project reader (throws thread_not_found otherwise).
       await deps.runs.listThreadRuns(actor, id.data);
-      const db = deps.database.db;
-      const [usage, latest] = await Promise.all([
-        runsUsage(db, actor.team_id, { threadId: id.data }),
-        latestThreadCall(db, actor.team_id, id.data),
-      ]);
+      const usage = await threadUsage(deps.database.db, actor.team_id, id.data);
       return c.json({
         thread_id: id.data,
-        totals: usage.reduce<UsageTotals>((acc, u) => addTotals(acc, u), EMPTY),
-        runs: usage,
+        totals: usage.runs.reduce<UsageTotals>((acc, u) => addTotals(acc, u), EMPTY),
+        runs: usage.runs,
         // KOBE-211: the newest call's prompt size, for the context gauge.
-        latest_call: latest,
+        latest_call: usage.latest_call,
       });
     });
   });

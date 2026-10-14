@@ -2837,7 +2837,7 @@
       "get": {
         "operationId": "getThreadUsage",
         "summary": "Token usage and spend of the thread's runs, and its newest call's prompt size",
-        "description": "Visible like the thread (its owner, project readers). Attribution to a run relies on the sandbox naming it (advisory). `latest_call` is the newest model call that read input: the chat's context gauge shows its input plus cache-read tokens.",
+        "description": "Visible like the thread (its owner, project readers). Attribution to a run relies on the sandbox naming it (advisory). `latest_call` is the newest model call that read input: the chat's context gauge shows its input plus cache-read and cache-write tokens.",
         "parameters": [
           {
             "name": "id",
@@ -5666,6 +5666,11 @@
               {
                 "type": "object",
                 "properties": {
+                  "run_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
                   "at": {
                     "type": "string",
                     "format": "date-time",
@@ -5683,9 +5688,21 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "cache_write_tokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
-                "required": ["at", "model", "input_tokens", "cache_read_tokens"],
+                "required": [
+                  "run_id",
+                  "at",
+                  "model",
+                  "input_tokens",
+                  "cache_read_tokens",
+                  "cache_write_tokens"
+                ],
                 "additionalProperties": false
               },
               {
