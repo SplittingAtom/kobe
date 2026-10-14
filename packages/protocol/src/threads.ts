@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, utf8ByteLength, uuidSchema } from "./common.js";
+import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.js";
 
 /**
  * Thread compaction (KOBE-212, CE15): `POST /v1/threads/{id}/compact` and the shapes the
@@ -136,3 +136,29 @@ export type CompactThreadError = z.infer<typeof compactThreadErrorSchema>;
 /** The error body for `code`. */
 export const compactThreadError = (code: CompactThreadErrorCode): CompactThreadError =>
   compactThreadErrorSchema.parse({ code, message: COMPACT_THREAD_ERROR_MESSAGES[code] });
+
+// --- Organization and fork provenance (KOBE-215) ---------------------------------------------------
+
+/**
+ * Fields a thread summary gains for pin and archive (CE19), the title lock (CE18) and fork
+ * provenance (CE16), mirroring the `threads` columns of migration 0095. Absent decodes as
+ * null/false, so summaries from servers that don't send them yet still parse; the feature tickets
+ * spread `.shape` into the server's `threadSummarySchema`.
+ *
+ * - `pinned_at`: when the owner pinned it (the Pinned group sorts by it); null = not pinned.
+ * - `archived_at`: when it was archived (hidden from the normal groups); null = not archived.
+ * - `title_locked`: the owner renamed it, so auto-titling never touches the title again.
+ * - `forked_from_thread_id`: the thread it was forked from; null for a thread that is not a
+ *   fork, and cleared when the source is purged (the fork itself stays).
+ * - `forked_at_entry_id`: the entry the fork was taken at. The fork copies entries with their
+ *   ids, so it names an entry of the fork itself too and survives the source's purge: a fork
+ *   point without a source thread means "forked from a thread that no longer exists".
+ */
+export const threadOrganizationSchema = z.object({
+  pinned_at: timestampSchema.nullable().default(null),
+  archived_at: timestampSchema.nullable().default(null),
+  title_locked: z.boolean().default(false),
+  forked_from_thread_id: uuidSchema.nullable().default(null),
+  forked_at_entry_id: idSchema.nullable().default(null),
+});
+export type ThreadOrganization = z.infer<typeof threadOrganizationSchema>;

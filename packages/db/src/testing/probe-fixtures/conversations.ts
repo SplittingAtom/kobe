@@ -4,12 +4,16 @@ import { events, runEvents, runs, threadEntries, threads, users } from "../../sc
 import type { conversations } from "../../tenancy/conversations.js";
 import type { ProbeFixture } from "./types.js";
 
-async function insertThread(tx: KobeTx, teamId: string): Promise<string> {
+async function insertThread(
+  tx: KobeTx,
+  teamId: string,
+  values: Partial<typeof threads.$inferInsert> = {},
+): Promise<string> {
   const userId = randomUUID();
   await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
   const [row] = await tx
     .insert(threads)
-    .values({ teamId, ownerUserId: userId, title: "Probe" })
+    .values({ teamId, ownerUserId: userId, title: "Probe", ...values })
     .returning({ id: threads.id });
   if (!row) throw new Error("probe: thread insert returned nothing");
   return row.id;
@@ -27,7 +31,16 @@ async function insertRun(tx: KobeTx, teamId: string): Promise<string> {
 
 export const conversationsFixtures: Record<(typeof conversations.team)[number], ProbeFixture> = {
   threads: async (tx, teamId) => {
-    await insertThread(tx, teamId);
+    // A pinned, archived, renamed fork of another thread (KOBE-215): the fork key is per team.
+    const source = await insertThread(tx, teamId);
+    const now = new Date();
+    await insertThread(tx, teamId, {
+      forkedFromThreadId: source,
+      forkedAtEntryId: "probe",
+      pinnedAt: now,
+      archivedAt: now,
+      titleLocked: true,
+    });
   },
   thread_entries: async (tx, teamId) => {
     const threadId = await insertThread(tx, teamId);
