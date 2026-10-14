@@ -1850,7 +1850,8 @@ for (let i = 0; i < 4; i++) {
   if (login.status !== 429) break;
   await new Promise((r) => setTimeout(r, 11000));
 }
-await call("PUT", "/v1/me/teams/active", { teamId: team });
+out("signin", login.status);
+out("active_team", (await call("PUT", "/v1/me/teams/active", { teamId: team })).status);
 const focus = "keep the e2e numbers";
 // The answer waits for Pi (up to the server's 12 min command deadline): node:http, not fetch,
 // whose headers timeout (5 min) would end it first.
@@ -1875,13 +1876,14 @@ out("entry", (entries.json.entries ?? []).some((e) => e.type === "compaction") ?
 const again = await call("POST", "/v1/threads/" + threadId + "/compact", {});
 out("again", again.status + ":" + (again.json.code ?? "-"));
 JS
-    compact_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$COMPACT_JS" "$E2E_TEAM_ID" "${compact_thread:-none}" 2>&1 | tail -6 || true)
+    compact_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$COMPACT_JS" "$E2E_TEAM_ID" "${compact_thread:-none}" 2>&1 | grep -E '^(signin|active_team|compact|compact_code|summary_by_model|focus_in_summary|entry|again)=' || true)
     printf '     compact: %s\n' "$(printf '%s' "$compact_out" | tr '\n' ' ')"
     if ! grep -q '^compact=200$' <<<"$compact_out"; then
       # Diagnostics: what the server and the Owner's sandbox said about the compaction.
       $KUBECTL -n "$NS" logs deploy/kobe-server -c server --since=20m 2>/dev/null | grep -iE 'compact' | tail -20 || true
       $KUBECTL -n "$TEAM_NS" logs "${owner_pod:-pod/none}" -c agent --since=20m 2>/dev/null | grep -iE 'compact|refused' | tail -20 || true
     fi
+    contains "the compaction check signed in and chose the team" '^active_team=200$' "$compact_out"
     contains "Compact now answered 200" '^compact=200$' "$compact_out"
     contains "Pi wrote the summary with the conversation's model (the fake model's answer)" '^summary_by_model=yes$' "$compact_out"
     contains "the focus reached Pi's summary prompt" '^focus_in_summary=yes$' "$compact_out"
