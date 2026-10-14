@@ -16,8 +16,12 @@ export const OUTPUT_PREVIEW_CHARS = 2_000;
 export const OUTPUT_TEXT_MAX_CHARS = 1_000_000;
 /** Largest offloaded body read back (bytes). */
 export const MAX_OUTPUT_BLOB_BYTES = 8 * 1024 * 1024;
-/** Offloaded bodies read at once per server process; more wait their turn. */
-const BLOB_READS_AT_ONCE = 4;
+/**
+ * Offloaded reads per server process: at most this many at once, this many more waiting (each at
+ * most this long, else 503), and each read (request and body) bounded in time. No S3 read timeout
+ * exists elsewhere to reuse; these keep a stalled store from holding the route for every team.
+ */
+const BLOB_READS = { max: 4, queueMax: 16, waitMs: 5_000, readMs: 15_000 } as const;
 
 export interface ToolOutput {
   readonly tool_call_id: string;
@@ -31,6 +35,23 @@ const record = (v: unknown): Record<string, unknown> | undefined =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : undefined;
+
+/**
+ * The first `max` UTF-16 units of `text`, one fewer when that would split a surrogate pair: the
+ * one cut used for previews and capped outputs, so an emoji is never halved.
+ */
+export function cutText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const code = text.charCodeAt(max - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
+function capped(text: string): { text: string; truncated: boolean } {
+  return {
+    text: cutText(text, OUTPUT_TEXT_MAX_CHARS),
+    truncated: text.length > OUTPUT_TEXT_MAX_CHARS,
+  };
+}
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
@@ -49,7 +70,7 @@ export function trimLargeOutput(payload: unknown): { payload: unknown; truncated
   if (message?.role !== "toolResult") return { payload, truncated: false };
   const size = Buffer.byteLength(JSON.stringify(message.content ?? null), "utf8");
   if (size <= OUTPUT_INLINE_MAX_BYTES) return { payload, truncated: false };
-  const preview = textOf(message.content).slice(0, OUTPUT_PREVIEW_CHARS);
+  const preview = cutText(textOf(message.content), OUTPUT_PREVIEW_CHARS);
   return {
     payload: {
       ...(payload as Record<string, unknown>),
@@ -63,13 +84,11 @@ export function trimLargeOutput(payload: unknown): { payload: unknown; truncated
 export function toolOutputOf(payload: unknown): ToolOutput | undefined {
   const message = record(record(payload)?.message);
   if (message?.role !== "toolResult" || typeof message.toolCallId !== "string") return undefined;
-  const text = textOf(message.content);
   return {
     tool_call_id: message.toolCallId,
     tool_name: typeof message.toolName === "string" ? message.toolName : "",
     is_error: message.isError === true,
-    text: text.slice(0, OUTPUT_TEXT_MAX_CHARS),
-    truncated: text.length > OUTPUT_TEXT_MAX_CHARS,
+    ...capped(textOf(message.content)),
   };
 }
 
@@ -90,7 +109,9 @@ export type OutputLookup =
 
 /**
  * An entry's tool output as stored inline, extracted in SQL (the payload itself is not loaded),
- * or where its offloaded body is. Every predicate names the team and the thread.
+ * or where its offloaded body is. Every predicate names the team and the thread. SQL's `left`
+ * only bounds what is fetched (in code points, enough to tell truncation); the cut itself is
+ * `cutText`'s, the same as everywhere else.
  */
 export async function findToolOutput(
   tx: KobeTx,
@@ -118,46 +139,112 @@ export async function findToolOutput(
   if (!row) return { kind: "missing" };
   if (row.blob_ref !== null) return { kind: "offloaded", blobRef: row.blob_ref };
   if (row.role !== "toolResult" || row.tool_call_id === null) return { kind: "not_a_tool_output" };
-  const text = row.text ?? "";
   return {
     kind: "inline",
     output: {
       tool_call_id: row.tool_call_id,
       tool_name: row.tool_name ?? "",
       is_error: row.is_error === true,
-      text: text.slice(0, OUTPUT_TEXT_MAX_CHARS),
-      truncated: text.length > OUTPUT_TEXT_MAX_CHARS,
+      ...capped(row.text ?? ""),
     },
   };
 }
 
-/** A per-process limit on concurrent reads; a finished read hands its slot to the next waiter. */
-function limiter(max: number) {
+export type Limited<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly reason: "busy" | "aborted" };
+
+interface Waiter {
+  readonly start: () => void;
+}
+
+/**
+ * A per-process limit on concurrent reads. A finished read hands its slot to the next waiter; the
+ * queue is bounded and each wait is timed (both answer `busy`); a waiter whose request is aborted
+ * leaves the queue and never takes a slot.
+ */
+export function createReadLimiter(opts: {
+  readonly max: number;
+  readonly queueMax: number;
+  readonly waitMs: number;
+}) {
   let active = 0;
-  const waiting: (() => void)[] = [];
-  return async <T>(fn: () => Promise<T>): Promise<T> => {
-    if (active < max) active += 1;
-    else await new Promise<void>((resolve) => waiting.push(resolve));
+  const waiting: Waiter[] = [];
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next.start();
+    else active -= 1;
+  };
+  const turn = (signal?: AbortSignal) =>
+    new Promise<"go" | "busy" | "aborted">((resolve) => {
+      if (signal?.aborted) return resolve("aborted");
+      if (active < opts.max) {
+        active += 1;
+        return resolve("go");
+      }
+      if (waiting.length >= opts.queueMax) return resolve("busy");
+      const leave = (reason: "busy" | "aborted") => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        const i = waiting.indexOf(waiter);
+        if (i !== -1) waiting.splice(i, 1);
+        resolve(reason);
+      };
+      const onAbort = () => leave("aborted");
+      const waiter: Waiter = {
+        start: () => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          resolve("go");
+        },
+      };
+      const timer = setTimeout(() => leave("busy"), opts.waitMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      waiting.push(waiter);
+    });
+  return async <T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<Limited<T>> => {
+    const go = await turn(signal);
+    if (go !== "go") return { ok: false, reason: go };
     try {
-      return await fn();
+      return { ok: true, value: await fn() };
     } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else active -= 1;
+      release();
     }
   };
 }
-const blobReads = limiter(BLOB_READS_AT_ONCE);
 
-/** An offloaded tool output, read with the cap and the per-process read limit. */
-export async function readOffloadedOutput(
-  blobs: BlobStore | undefined,
-  ids: { readonly teamId: string; readonly threadId: string; readonly entryId: string },
-  key: string,
-): Promise<ToolOutput | OffloadedFailure | "not_a_tool_output"> {
-  const read = await blobReads(() =>
-    readOffloadedJson(blobs, { ...ids, reader: "tool output" }, key, MAX_OUTPUT_BLOB_BYTES),
-  );
-  if (!read.ok) return read.reason;
-  return toolOutputOf(read.body) ?? "not_a_tool_output";
+export type OffloadedOutput = ToolOutput | OffloadedFailure | "not_a_tool_output" | "busy";
+
+/** Reads offloaded tool outputs within {@link createReadLimiter}'s bounds and a time limit each. */
+export function createOutputReader(opts: {
+  readonly max: number;
+  readonly queueMax: number;
+  readonly waitMs: number;
+  readonly readMs: number;
+}) {
+  const run = createReadLimiter(opts);
+  return async (
+    blobs: BlobStore | undefined,
+    ids: { readonly teamId: string; readonly threadId: string; readonly entryId: string },
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<OffloadedOutput> => {
+    const read = await run(() => {
+      const bound = AbortSignal.timeout(opts.readMs);
+      const both = signal ? AbortSignal.any([signal, bound]) : bound;
+      return readOffloadedJson(
+        blobs,
+        { ...ids, reader: "tool output" },
+        key,
+        MAX_OUTPUT_BLOB_BYTES,
+        both,
+      );
+    }, signal);
+    if (!read.ok) return read.reason;
+    if (!read.value.ok) return read.value.reason;
+    return toolOutputOf(read.value.body) ?? "not_a_tool_output";
+  };
 }
+
+/** An offloaded tool output, read with the cap, the per-process limits and a time limit. */
+export const readOffloadedOutput = createOutputReader(BLOB_READS);

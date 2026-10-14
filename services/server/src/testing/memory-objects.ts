@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import type {
   DeleteOptions,
+  GetOptions,
   ListOptions,
   ListPage,
   ObjectStore,
@@ -31,7 +32,8 @@ export class MemoryObjects implements ObjectStore {
     this.objects.set(key, Buffer.concat(chunks));
   }
 
-  get(key: string): Promise<{ body: Readable; size: number } | null> {
+  get(key: string, options?: GetOptions): Promise<{ body: Readable; size: number } | null> {
+    if (options?.signal?.aborted) return Promise.reject(options.signal.reason as Error);
     const data = this.lost.has(key) ? undefined : this.objects.get(key);
     return Promise.resolve(data ? { body: Readable.from([data]), size: data.length } : null);
   }

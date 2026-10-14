@@ -246,6 +246,11 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
             "Error",
             "`not_a_tool_output`, or `entry_unavailable`: the stored body can't be read back.",
           ),
+          "503": json(
+            "Error",
+            "`output_busy`: too many stored outputs are being read, or the store did not answer " +
+              "in time. Try again.",
+          ),
         },
       },
     },

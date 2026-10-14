@@ -65,6 +65,7 @@ const ERRORS = {
   entry_not_found: [404, "That entry is not part of this thread."],
   entry_unavailable: [409, "That message's full content is not available."],
   not_a_tool_output: [409, "That entry is not a tool's output."],
+  output_busy: [503, "The full output could not be loaded right now. Try again in a moment."],
   entry_offloaded: [
     409,
     "Some very large messages in this conversation could not be copied into a fork.",
@@ -320,8 +321,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const output =
       found.kind === "inline"
         ? found.output
-        : await readOffloadedOutput(deps.blobs, ids, found.blobRef);
+        : await readOffloadedOutput(deps.blobs, ids, found.blobRef, c.req.raw.signal);
     if (output === "not_a_tool_output") return fail(c, "not_a_tool_output");
+    if (output === "busy" || output === "timed_out") return fail(c, "output_busy");
     if (typeof output === "string") return fail(c, "entry_unavailable");
     return c.json({ entry_id: entryId.data, ...output });
   });
