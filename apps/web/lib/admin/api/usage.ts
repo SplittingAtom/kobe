@@ -62,10 +62,22 @@ export interface RunUsage extends UsageTotals {
   readonly models: readonly string[];
 }
 
+/** The thread's newest model call that read input (KOBE-211: the context gauge). */
+export interface LatestCall {
+  readonly at: string;
+  /** `<gateway provider>/<model>` as the call named it. */
+  readonly model: string;
+  /** Input tokens not read from a prompt cache. */
+  readonly inputTokens: number;
+  readonly cacheReadTokens: number;
+}
+
 /** `GET /v1/threads/{id}/usage`: per run, in the order the runs first called a model. */
 export interface ThreadUsage {
   readonly threadId: string;
   readonly runs: readonly RunUsage[];
+  /** Null before the first call; absent on older servers. */
+  readonly latestCall?: LatestCall | null;
 }
 
 export interface UsageQuery {

@@ -46,6 +46,8 @@ export interface FakeTeamModel {
   readonly label: string | null;
   enabled: boolean;
   is_default: boolean;
+  /** Tokens; absent or null: unknown (KOBE-210). */
+  context_window?: number | null;
 }
 
 /** An agent as `GET /v1/agents/runnable` lists it (KOBE-122). */
@@ -320,6 +322,8 @@ export class FakeKobe {
   readonly entryBodies = new Map<string, Json>();
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
   readonly threadUsage = new Map<string, Json[]>();
+  /** Its `latest_call` (KOBE-211, wire casing), by thread id; absent: null. */
+  readonly threadLatestCall = new Map<string, Json>();
 
   #thread(id: string): FakeThread {
     const thread = this.threads.get(id);
@@ -582,6 +586,7 @@ export class FakeKobe {
       if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
       const models = this.teamModels.map((m) => ({
         ...m,
+        context_window: m.context_window ?? null,
         provider_id: "ollama",
         model: m.alias,
         gateway_model: `ollama/${m.alias}`,
@@ -912,7 +917,8 @@ export class FakeKobe {
     if (action === "entries") return json(200, this.#entryPage(thread, url));
     if (action === "usage" && method === "GET") {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
-      return json(200, { thread_id: thread.thread_id, runs });
+      const latest = this.threadLatestCall.get(thread.thread_id) ?? null;
+      return json(200, { thread_id: thread.thread_id, runs, latest_call: latest });
     }
     if (action === "markers" && method === "GET") {
       return json(200, this.threadMarkers.get(thread.thread_id) ?? { runs: [], approvals: [] });

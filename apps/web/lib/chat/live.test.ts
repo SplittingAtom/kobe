@@ -206,3 +206,40 @@ describe("applyRunEvents", () => {
     expect(run.tools.tc1?.files).toHaveLength(MAX_ITEMS);
   });
 });
+
+describe("context tokens (KOBE-211)", () => {
+  const committed = (id: string, message: Record<string, unknown>) =>
+    ev("entry.committed", {
+      entry_id: id,
+      parent_id: null,
+      entry_type: "message",
+      payload: { type: "message", id, parentId: null, message } as never,
+    });
+
+  it("follow each assistant message's usage as it commits; the prompt and offloaded entries leave them", () => {
+    seq = 0;
+    const start = ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null });
+    const first = apply(newLiveRun(RUN), [
+      start,
+      committed("u1", { role: "user", content: "hi" }),
+    ]).run;
+    expect(first.contextTokens).toBeUndefined();
+    const second = apply(first, [
+      committed("a1", { role: "assistant", content: [], usage: { input: 900, cacheRead: 99_100 } }),
+    ]).run;
+    expect(second.contextTokens).toBe(100_000);
+    const third = apply(second, [
+      ev("entry.committed", { entry_id: "a2", parent_id: "a1", entry_type: "message" }),
+      committed("t1", { role: "toolResult", content: [] }),
+    ]).run;
+    expect(third.contextTokens).toBe(100_000);
+    const fourth = apply(third, [
+      committed("a3", {
+        role: "assistant",
+        content: [],
+        usage: { input: 5_000, cacheRead: 100_000 },
+      }),
+    ]).run;
+    expect(fourth.contextTokens).toBe(105_000);
+  });
+});
