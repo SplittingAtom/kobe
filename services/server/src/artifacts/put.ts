@@ -89,14 +89,15 @@ function pgCode(err: unknown): string | undefined {
 
 /** The run is active, in this thread, and owned by the sandbox's user. */
 async function runActive(tx: KobeTx, target: PutTarget, frame: ArtifactPutFrame): Promise<boolean> {
-  const res = await tx.execute<{ status: string }>(sql`
-    SELECT r.status FROM runs r
+  // A compaction (KOBE-213) makes no tool calls: refused from the database, not only the lease.
+  const res = await tx.execute<{ status: string; kind: string }>(sql`
+    SELECT r.status, r.kind FROM runs r
       JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
      WHERE r.team_id = ${target.teamId} AND r.id = ${frame.run_id}
        AND r.thread_id = ${frame.thread_id}
        AND t.team_id = ${target.teamId} AND t.owner_user_id = ${target.userId}`);
-  const status = res.rows[0]?.status;
-  return status === "running" || status === "waiting_approval";
+  const row = res.rows[0];
+  return row?.kind === "message" && (row.status === "running" || row.status === "waiting_approval");
 }
 
 async function existingResult(tx: KobeTx, teamId: string, toolCallId: string) {

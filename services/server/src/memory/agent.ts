@@ -130,13 +130,15 @@ async function loadRun(
   tx: KobeTx,
   c: MemoryCaller,
 ): Promise<{ projectId: string | null } | undefined> {
-  const res = await tx.execute<{ status: string; project_id: string | null }>(sql`
-    SELECT r.status, t.project_id FROM runs r
+  // A compaction (KOBE-213) makes no tool calls: refused from the database, not only the lease.
+  const res = await tx.execute<{ status: string; kind: string; project_id: string | null }>(sql`
+    SELECT r.status, r.kind, t.project_id FROM runs r
       JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
      WHERE r.team_id = ${c.teamId} AND r.id = ${c.runId} AND r.thread_id = ${c.threadId}
        AND t.owner_user_id = ${c.userId}`);
   const row = res.rows[0];
   if (row?.status !== "running" && row?.status !== "waiting_approval") return undefined;
+  if (row.kind !== "message") return undefined;
   return { projectId: row.project_id };
 }
 

@@ -40,7 +40,12 @@ import {
 import { putMemory, readMemory, type MemoryRefusal, type MemoryReply } from "../memory/agent.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
-import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
+import {
+  activeLeasedRuns,
+  endRunInTx,
+  isActiveMessageRun,
+  type InterruptCause,
+} from "./run-state.js";
 import { createRunTranslator } from "./translate.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
@@ -812,7 +817,31 @@ export class SandboxConnection implements RegisteredConnection {
       return;
     }
     this.#webSearches += 1;
-    void this.#ctx.webSearch
+    const { teamId } = this.target;
+    void withTeam(this.#ctx.db, teamId, (tx) =>
+      isActiveMessageRun(tx, teamId, frame.run_id, frame.thread_id),
+    )
+      .then((active) => {
+        if (active) return true;
+        // A compaction (KOBE-213) or an ended run, from the database: no search.
+        this.#webSearches -= 1;
+        refuse("run_not_active", "The run is not an active conversation turn; no search.");
+        return false;
+      })
+      .then((go) => (go ? this.#search(frame, answer, fail) : undefined))
+      .catch((err: unknown) => {
+        this.#webSearches -= 1;
+        this.log.error({ err }, "web_search run check failed");
+        fail("search_failed", "The search could not be run. Try again.");
+      });
+  }
+
+  #search(
+    frame: WebSearchQueryFrame,
+    answer: (result: Parameters<SandboxConnection["send"]>[0]) => unknown,
+    fail: (code: string, message: string) => void,
+  ): Promise<void> {
+    return this.#ctx.webSearch
       .search(this.target.teamId, frame.input, {
         runId: frame.run_id,
         toolCallId: frame.tool_call_id,

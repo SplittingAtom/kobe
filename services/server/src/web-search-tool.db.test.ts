@@ -78,6 +78,18 @@ interface World {
   readonly sandboxId: string;
   readonly token: string;
 }
+/**
+ * KOBE-213: the run becomes a compaction in the database only (this connection's lease still says
+ * a message run), so the refusal below can only come from the store's own database check.
+ */
+const asCompaction = (team: string, runId: string) =>
+  fx.admin.query(
+    `UPDATE runs SET kind = 'compaction', input = '', parent_entry_id = NULL, user_entry_id = NULL,
+            client_key = NULL, retry_of_run_id = NULL
+      WHERE team_id = $1 AND id = $2`,
+    [team, runId],
+  );
+
 async function world(): Promise<World> {
   const owner = await fx.person(`u${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`w-${randomBytes(3).toString("hex")}`, owner);
@@ -260,6 +272,21 @@ describe("web_search.query", () => {
       ["capability_missing", "input_mismatch", "not_allowed"].sort(),
     );
     expect(JSON.stringify(rows)).not.toContain("kobe");
+  });
+
+  it("refuses a compaction run from the database, calling no provider (KOBE-213)", async () => {
+    await clearSite();
+    const w = await world();
+    await configure(w, true);
+    const sb = await started(w);
+    const before = providerCalls.length;
+    expect((await check(sb, w, "c1", { query: "kobe" })).decision).toBe("allow");
+    await asCompaction(w.team, w.runId);
+    expect(await search(sb, w, "c1", { query: "kobe" })).toMatchObject({
+      ok: false,
+      error: { code: "not_allowed" },
+    });
+    expect(providerCalls.length).toBe(before);
   });
 
   it("an allowed call is single use: a replay is refused and the provider is called once", async () => {

@@ -71,6 +71,18 @@ interface World {
   readonly token: string;
 }
 
+/**
+ * KOBE-213: the run becomes a compaction in the database only (this connection's lease still says
+ * a message run), so the refusal below can only come from the store's own database check.
+ */
+const asCompaction = (team: string, runId: string) =>
+  fx.admin.query(
+    `UPDATE runs SET kind = 'compaction', input = '', parent_entry_id = NULL, user_entry_id = NULL,
+            client_key = NULL, retry_of_run_id = NULL
+      WHERE team_id = $1 AND id = $2`,
+    [team, runId],
+  );
+
 async function world(): Promise<World> {
   const owner = await fx.person(`u${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`f-${randomBytes(3).toString("hex")}`, owner);
@@ -405,6 +417,17 @@ describe("file.share: refusals", () => {
     await fx.admin.query(`UPDATE files SET run_id = $2 WHERE team_id = $1`, [w.team, otherRun]);
     expect(errorCode(await share(sb, w, "call-1", { path: "r.txt" }, pushed))).toBe("not_allowed");
     expect(await fileCount(w.team)).toBe(1);
+  });
+
+  it("refuses a compaction run from the database (KOBE-213)", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const pushed = await push(w, "c.txt", "c");
+    expect((await check(sb, w, "call-1", { path: "c.txt" })).decision).toBe("allow");
+    await asCompaction(w.team, w.runId);
+    expect(errorCode(await share(sb, w, "call-1", { path: "c.txt" }, pushed))).toBe("not_allowed");
+    expect(await fileCount(w.team)).toBe(0);
+    expect(await refusals(w.team)).toEqual(["run_not_active"]);
   });
 
   it("stores nothing when the run ended after the policy check", async () => {

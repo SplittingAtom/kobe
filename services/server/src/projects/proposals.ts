@@ -175,13 +175,14 @@ function checkFrame(
 async function gate(tx: KobeTx, deps: ProposeDeps, req: ProposeRequest): Promise<Gate> {
   const checked = checkFrame(deps, req);
   if ("reason" in checked) return refuse(checked.reason, checked.reply);
-  const run = await tx.execute<{ status: string; project_id: string | null }>(sql`
-    SELECT r.status, t.project_id FROM runs r
+  // A compaction (KOBE-213) makes no tool calls: refused from the database, not only the lease.
+  const run = await tx.execute<{ status: string; kind: string; project_id: string | null }>(sql`
+    SELECT r.status, r.kind, t.project_id FROM runs r
       JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
      WHERE r.team_id = ${req.teamId} AND r.id = ${req.runId} AND r.thread_id = ${req.threadId}
        AND t.owner_user_id = ${req.userId}`);
   const row = run.rows[0];
-  if (row?.status !== "running" && row?.status !== "waiting_approval") {
+  if ((row?.status !== "running" && row?.status !== "waiting_approval") || row.kind !== "message") {
     return refuse("run_not_active", NOT_ACTIVE);
   }
   if (row.project_id === null) return refuse("no_project", NO_PROJECT);
