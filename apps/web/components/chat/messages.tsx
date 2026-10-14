@@ -3,7 +3,6 @@
 import {
   ActionBarPrimitive,
   AuiIf,
-  BranchPickerPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
   useAuiState,
@@ -22,6 +21,7 @@ import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { MessageFooter } from "./message-footer";
 import { Disclosure, useDisclosure } from "./detail";
+import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
 import { Reasoning } from "./reasoning";
 import { FullOutputStatus, Output, useFullOutput } from "./tool-output";
 import { ToolCallCard } from "./tool-call";
@@ -113,9 +113,10 @@ function MarkdownText({ text, status }: TextMessagePartProps) {
 const ASSISTANT_PARTS = {
   Text: MarkdownText,
   Reasoning,
-  tools: { Override: ToolCallCard },
+  tools: { Override: withApprovalMarker(ToolCallCard) },
   data: {
     by_name: {
+      "kobe-marker": MarkerPart,
       "kobe-problem": Problem,
       "kobe-offloaded": Offloaded,
       "kobe-skipped": SkippedActions,
@@ -143,25 +144,6 @@ function PendingAction({ command }: { readonly command: "edit" | "regenerate" })
   );
 }
 
-function BranchPicker({ className }: { readonly className?: string }) {
-  return (
-    <BranchPickerPrimitive.Root
-      hideWhenSingleBranch
-      className={cn("text-muted-foreground -ms-2 me-2 inline-flex items-center text-xs", className)}
-    >
-      <BranchPickerPrimitive.Previous asChild>
-        <IconAction command="previous-branch" size="sm" />
-      </BranchPickerPrimitive.Previous>
-      <span className="font-medium">
-        Version <BranchPickerPrimitive.Number /> of <BranchPickerPrimitive.Count />
-      </span>
-      <BranchPickerPrimitive.Next asChild>
-        <IconAction command="next-branch" size="sm" />
-      </BranchPickerPrimitive.Next>
-    </BranchPickerPrimitive.Root>
-  );
-}
-
 export function UserMessage() {
   const meta = useMeta();
   const pending = meta?.kind === "user" && meta.pending;
@@ -179,6 +161,7 @@ export function UserMessage() {
       )}
     >
       <h3 className="sr-only">You said</h3>
+      <MessageMarkers place="before" className="col-span-full col-start-1" />
       {meta?.kind === "user" && meta.attachments && meta.attachments.length > 0 && (
         <div className="col-start-2 min-w-0">
           <SentAttachments files={meta.attachments} />
@@ -212,7 +195,7 @@ export function UserMessage() {
           Sent, waiting for the agent
         </span>
       )}
-      <BranchPicker className="col-span-full col-start-1 -me-1 justify-end" />
+      <MessageMarkers place="after" className="col-span-full col-start-1" />
     </MessagePrimitive.Root>
   );
 }
@@ -238,6 +221,7 @@ export function AssistantMessage() {
       className="group/answer animate-in fade-in slide-in-from-bottom-1 relative duration-150"
     >
       <h3 className="sr-only">The agent said</h3>
+      <MessageMarkers place="before" className="mb-2" />
       <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
         {running && (
@@ -247,7 +231,6 @@ export function AssistantMessage() {
         )}
       </div>
       <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
-        <BranchPicker />
         <ActionBarPrimitive.Root
           hideWhenRunning
           className="text-muted-foreground animate-in fade-in -ms-1 flex gap-1 duration-200"
@@ -273,6 +256,7 @@ export function AssistantMessage() {
         </ActionBarPrimitive.Root>
         {!running && <MessageFooter />}
       </div>
+      <MessageMarkers place="after" className="mt-2" />
     </MessagePrimitive.Root>
   );
 }

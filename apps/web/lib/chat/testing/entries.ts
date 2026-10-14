@@ -79,3 +79,21 @@ export const skippedSummary = (id: string, parent: string, content: string, coun
     createdAt: "2026-10-02T10:00:00.000Z",
   } satisfies ThreadEntry;
 };
+
+/** Pi's `model_change` entry (the model a session switched to). */
+export const modelChange = (id: string, parent: string | null, modelId: string) => ({
+  ...entry(id, parent, null, "model_change"),
+  payload: { type: "model_change", id, parentId: parent, provider: "kobe", modelId },
+});
+
+/** Pi's `compaction` entry: the summary that replaces everything before `firstKeptEntryId`. */
+export const compaction = (
+  id: string,
+  parent: string,
+  summary: string,
+  firstKeptEntryId: string,
+  tokensBefore = 120_000,
+) => ({
+  ...entry(id, parent, null, "compaction"),
+  payload: { type: "compaction", id, parentId: parent, summary, firstKeptEntryId, tokensBefore },
+});

@@ -9,6 +9,7 @@ import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage, ThreadUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import { createMemoryApi } from "../memory/api";
+import type { ThreadMarkers } from "./markers";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
@@ -125,6 +126,8 @@ export interface ChatApi {
   runUsage(runId: string): Promise<ApiResult<RunUsage>>;
   /** Tokens and spend of each run of a thread (the answers' footers, KOBE-208). */
   threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
+  /** Interrupted and budget-stopped runs and decided approvals (inline markers, KOBE-209). */
+  threadMarkers(threadId: string): Promise<ApiResult<ThreadMarkers>>;
   /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
   toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
@@ -244,6 +247,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
+    threadMarkers: (id) => get(`/v1/threads/${enc(id)}/markers`),
     toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),

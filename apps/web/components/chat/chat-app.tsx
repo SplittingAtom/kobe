@@ -22,6 +22,7 @@ import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { DetailProvider } from "./detail";
 import { ThreadUsageProvider } from "./message-footer";
+import { ThreadMarkersProvider } from "./markers";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { FileGoneNotice } from "../files/file-tab";
 import { IconActionProvider } from "../shell/icon-action";
@@ -188,6 +189,7 @@ function ChatWorkspace({
       <RailProvider preferences={layout.preferences} onSave={layout.save}>
         <DetailProvider preferences={layout.preferences} onSave={layout.save}>
           <ThreadUsageProvider>
+            <ThreadMarkersProvider>
             <ArtifactPanelProvider
               teamId={session.teamId}
               threadId={threadId}
@@ -221,6 +223,7 @@ function ChatWorkspace({
                 }
               />
             </ArtifactPanelProvider>
+            </ThreadMarkersProvider>
           </ThreadUsageProvider>
         </DetailProvider>
       </RailProvider>
