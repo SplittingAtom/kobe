@@ -479,9 +479,11 @@ describe("interrupted runs (D14)", () => {
 });
 
 describe("branches: switch, edit and regenerate (D15)", () => {
+  /** Like Pi 1.0: a settings entry at the root, then the conversation with two versions of q2. */
   function branchedThread() {
     const t = fake.addThread("Branches");
-    const u1 = fake.addEntry(t, null, { role: "user", content: "start" });
+    const root = fake.addSystemEntry(t, null, "thinking_level_change", { thinkingLevel: "off" });
+    const u1 = fake.addEntry(t, root, { role: "user", content: "start" });
     const a1 = fake.addEntry(t, u1, { role: "assistant", content: [{ type: "text", text: "a1" }] });
     const u2 = fake.addEntry(t, a1, { role: "user", content: "old question" });
     const a2 = fake.addEntry(t, u2, {
@@ -493,7 +495,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
       role: "assistant",
       content: [{ type: "text", text: "new answer" }],
     });
-    return { t, a1, a2, a2b };
+    return { t, root, a1, a2, a2b };
   }
 
   it("shows the leaf's branch, switches with the branch picker and moves the leaf", async () => {
@@ -522,17 +524,10 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     openApp(fake, t);
     const user = userEvent.setup();
     await screen.findByText("new answer");
-    // The first message has no parent to branch from until root branching exists: its Edit is
-    // shown unavailable, with the reason.
-    const [first, second] = screen.getAllByRole("button", { name: "Edit" });
-    expect(first?.getAttribute("aria-disabled")).toBe("true");
-    expect(
-      document.getElementById(must(first?.getAttribute("aria-describedby")))?.textContent,
-    ).toMatch(/coming soon/);
-    await user.click(must(first));
-    expect(screen.queryByLabelText("Edit your message")).toBeNull();
-    expect(second?.getAttribute("aria-disabled")).toBeNull();
-    await user.click(must(second));
+    const edits = screen.getAllByRole("button", { name: "Edit" });
+    expect(edits.map((b) => b.getAttribute("aria-disabled"))).toEqual([null, null]);
+    expect(screen.queryByText(/coming soon/)).toBeNull();
+    await user.click(must(edits[1]));
     const editor = await screen.findByLabelText("Edit your message");
     await user.clear(editor);
     await user.type(editor, "third question");
@@ -563,7 +558,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     openApp(fake, t);
     await screen.findByText("new answer");
     const regenerate = screen.getAllByRole("button", { name: "Regenerate" });
-    expect(regenerate.map((b) => b.getAttribute("aria-disabled"))).toEqual(["true", null]);
+    expect(regenerate.map((b) => b.getAttribute("aria-disabled"))).toEqual([null, null]);
     await userEvent.setup().click(must(regenerate.at(-1)));
     await waitFor(() =>
       expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
@@ -571,5 +566,127 @@ describe("branches: switch, edit and regenerate (D15)", () => {
         parent_entry_id: a1,
       }),
     );
+  });
+});
+
+describe("root branches: the first message is editable like any other (KOBE-214, CE16)", () => {
+  const ask = (content: string) => ({ role: "user", content });
+  const say = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
+
+  /** Like Pi 1.0: a settings entry at the root, two turns, then a compaction (KOBE-213). */
+  function compactedThread() {
+    const t = fake.addThread("Roots");
+    const root = fake.addSystemEntry(t, null, "thinking_level_change", { thinkingLevel: "off" });
+    const u1 = fake.addEntry(t, root, ask("first question"));
+    const a1 = fake.addEntry(t, u1, say("first answer"));
+    const u2 = fake.addEntry(t, a1, ask("follow-up"));
+    const a2 = fake.addEntry(t, u2, say("follow-up answer"));
+    const c1 = fake.addSystemEntry(t, a2, "compaction", {
+      summary: "We talked it through.",
+      firstKeptEntryId: u2,
+      tokensBefore: 90_000,
+    });
+    return { t, root, c1 };
+  }
+
+  const compactionMarker = () => document.querySelector('[data-kobe-marker="compaction"]');
+  const version = () => screen.getAllByText(/^Version/)[0]?.textContent;
+
+  it("editing the first message starts a sibling root, the picker switches roots and a reload keeps the choice", async () => {
+    const { t, root, c1 } = compactedThread();
+    const first = openApp(fake, t);
+    const user = userEvent.setup();
+    expect(await screen.findByText("follow-up answer")).toBeTruthy();
+    expect(compactionMarker()).toBeTruthy();
+
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = await screen.findByLabelText("Edit your message");
+    await user.clear(editor);
+    await user.type(editor, "a better start");
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
+        content: "a better start",
+        parent_entry_id: root,
+      }),
+    );
+    const run = fake.latestRun(t);
+    await streaming(fake, run.run_id);
+    // Until Pi saves it, the new first message is shown beside the old one, as the head.
+    expect(screen.getByText("a better start")).toBeTruthy();
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+    fake.agent.delta(run.run_id, "m1", "a better");
+    expect(await screen.findByText(streamed("a better"))).toBeTruthy();
+    expect(screen.queryByText("first question")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+    fake.agent.branchMarker(run.run_id);
+    fake.agent.commitPrompt(run.run_id);
+    const answer = fake.agent.commit(run.run_id, say("a better answer"));
+    fake.agent.complete(run.run_id);
+    expect(await screen.findByText("a better answer")).toBeTruthy();
+    // The compaction belongs to the other root's history.
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(compactionMarker()).toBeNull();
+    await waitFor(() => expect(version()).toBe("Version 2 of 2"));
+
+    await user.click(must(screen.getAllByRole("button", { name: "Previous version" })[0]));
+    expect(await screen.findByText("follow-up answer")).toBeTruthy();
+    expect(compactionMarker()).toBeTruthy();
+    // The leaf is the end of that root's branch, compaction included, so Pi continues after it.
+    await waitFor(() => expect(fake.threads.get(t)?.leaf_entry_id).toBe(c1));
+
+    first.unmount();
+    const second = openApp(fake, t);
+    expect(await screen.findByText("follow-up answer")).toBeTruthy();
+    expect(screen.queryByText("a better answer")).toBeNull();
+    expect(version()).toBe("Version 1 of 2");
+
+    await user.click(must(screen.getAllByRole("button", { name: "Next version" })[0]));
+    expect(await screen.findByText("a better answer")).toBeTruthy();
+    await waitFor(() => expect(fake.threads.get(t)?.leaf_entry_id).toBe(answer));
+    second.unmount();
+    openApp(fake, t);
+    expect(await screen.findByText("a better answer")).toBeTruthy();
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+  });
+
+  it("after a reload, a root edit whose run saved nothing is an empty version, not another root", async () => {
+    const { t, root } = compactedThread();
+    // The run ended before Pi saved the prompt: only the agent's branch marker, now the leaf.
+    fake.addSystemEntry(t, root, "custom", { customType: "kobe.branch", data: {} });
+    openApp(fake, t);
+    expect(await screen.findByText(/This version has no messages/)).toBeTruthy();
+    expect(screen.queryByText("follow-up answer")).toBeNull();
+    expect(version()).toBe("Version 2 of 2");
+    await userEvent
+      .setup()
+      .click(must(screen.getAllByRole("button", { name: "Previous version" })[0]));
+    expect(await screen.findByText("follow-up answer")).toBeTruthy();
+  });
+
+  it("Regenerate on the first answer branches from the root", async () => {
+    const { t, root } = compactedThread();
+    openApp(fake, t);
+    await screen.findByText("follow-up answer");
+    await userEvent.setup().click(must(screen.getAllByRole("button", { name: "Regenerate" })[0]));
+    await waitFor(() =>
+      expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
+        content: "first question",
+        parent_entry_id: root,
+      }),
+    );
+  });
+
+  it("a first message with no entry above it (not written by Pi 1.0) offers neither Edit nor Regenerate", async () => {
+    const t = fake.addThread("Bare");
+    const u1 = fake.addEntry(t, null, ask("q1"));
+    fake.addEntry(t, u1, say("a1"));
+    openApp(fake, t);
+    await screen.findByText("a1");
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Regenerate" })).toBeNull();
+    expect(screen.queryByText(/coming soon/)).toBeNull();
   });
 });

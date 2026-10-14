@@ -95,6 +95,8 @@ export interface Projection {
   readonly headId: string | null;
   readonly nodeOfEntry: ReadonlyMap<string, string>;
   readonly lastEntryOfNode: ReadonlyMap<string, string>;
+  /** The tree entries loaded here (an older page may not be). */
+  readonly loaded: ReadonlySet<string>;
 }
 
 export interface LiveOverlay {
@@ -128,6 +130,11 @@ type MessagePart = Exclude<ThreadMessageLike["content"], string>[number];
 const PREFIX_PROMPT = "prompt:";
 const PREFIX_LIVE = "live:";
 const PREFIX_SKIPPED = "skipped:";
+const PREFIX_EMPTY = "empty:";
+
+/** The note of a version whose run ended before Pi saved its message (a root edit, KOBE-214). */
+export const EMPTY_VERSION_NOTE =
+  "This version has no messages: its run ended before the agent saved the message.";
 const PART_MARKER = "data-kobe-marker";
 
 function isAssistantSide(parsed: ParsedEntry): boolean {
@@ -460,13 +467,104 @@ export function projectThread(
 
   // overlayLive appends to this projection's own list below; `built` is not touched again.
   const items = attachSummaries(built, indexOf, summaries, parsed, nodeOfEntry, treeEntries);
-  let headId: string | null =
-    headOf(treeEntries, leafEntryId, nodeOfEntry) ??
-    order.at(-1) ??
-    items.at(-1)?.message.id ??
-    null;
-  if (live) headId = overlayLive(live, items, indexOf, nodeOfEntry, lastEntryOfNode, headId);
-  return { items, headId, nodeOfEntry, lastEntryOfNode };
+  const loaded: ReadonlySet<string> = new Set(treeEntries.map((e) => e.entryId));
+  const place = (entryId: string) => placeIn(entryId, loaded, nodeOfEntry);
+  const leafAt = leafEntryId === null ? undefined : place(leafEntryId);
+  let lastOfNode: ReadonlyMap<string, string> = lastEntryOfNode;
+  let headId: string | null;
+  if (typeof leafAt === "string") headId = leafAt;
+  else if (leafAt === null && leafEntryId !== null && order.length > 0) {
+    // The leaf is a hidden entry at the root: its branch has no message above it.
+    headId = newestBelow(leafEntryId, treeEntries, order) ?? null;
+    const promptShown = live?.prompt !== undefined && !live.run.promptCommitted;
+    if (headId === null && !promptShown) {
+      headId = `${PREFIX_EMPTY}${leafEntryId}`;
+      items.push(emptyVersion(headId));
+      lastOfNode = new Map([...lastEntryOfNode, [headId, leafEntryId]]);
+    }
+  } else headId = order.at(-1) ?? items.at(-1)?.message.id ?? null;
+  if (live) headId = overlayLive(live, items, indexOf, place, lastEntryOfNode, headId);
+  return { items, headId, nodeOfEntry, lastEntryOfNode: lastOfNode, loaded };
+}
+
+/**
+ * Where an entry sits: the message it belongs to, null at the root level (a hidden entry with no
+ * message above it, like Pi's root settings entry), undefined when it isn't loaded.
+ */
+function placeIn(
+  entryId: string,
+  loaded: ReadonlySet<string>,
+  nodeOfEntry: ReadonlyMap<string, string>,
+): string | null | undefined {
+  if (!loaded.has(entryId)) return undefined;
+  return nodeOfEntry.get(entryId) ?? null;
+}
+
+/** The newest message below `entryId` (the last in tree order), if any. */
+function newestBelow(
+  entryId: string,
+  entries: readonly ThreadEntry[],
+  order: readonly string[],
+): string | undefined {
+  const children = new Map<string, string[]>();
+  for (const e of entries) {
+    if (e.parentId === null) continue;
+    const list = children.get(e.parentId);
+    if (list) list.push(e.entryId);
+    else children.set(e.parentId, [e.entryId]);
+  }
+  const below = new Set<string>();
+  const stack = [...(children.get(entryId) ?? [])];
+  while (stack.length > 0) {
+    const id = stack.pop() as string;
+    if (below.has(id)) continue;
+    below.add(id);
+    stack.push(...(children.get(id) ?? []));
+  }
+  return [...order].reverse().find((id) => below.has(id));
+}
+
+/** A version with nothing to show yet: the leaf is a root edit whose prompt Pi never saved. */
+function emptyVersion(id: string): ProjectedItem {
+  const meta: KobeMessageMeta = { kind: "assistant", entryIds: [], live: false };
+  const note = { reason: "empty", message: EMPTY_VERSION_NOTE };
+  return {
+    parentId: null,
+    message: {
+      id,
+      role: "assistant",
+      content: [{ type: "data-kobe-problem", data: note }],
+      status: { type: "complete", reason: "stop" },
+      metadata: { custom: meta },
+    },
+    deps: [id],
+  };
+}
+
+/**
+ * Where a new version of the prompt `messageId` branches from (Edit, Regenerate): its entry's
+ * parent. For the first prompt that is Pi's root settings entry, so the new version is a sibling
+ * root (KOBE-214). Undefined for an answer, a prompt Pi hasn't saved, one with no entry above it
+ * (`parent_entry_id` can't name the root itself), or one whose parent isn't loaded here (the new
+ * version could not be placed beside it).
+ */
+export function branchPoint(
+  projection: Projection,
+  messageId: string | null | undefined,
+): { readonly parentEntryId: string; readonly text: string } | undefined {
+  if (!messageId) return undefined;
+  const item = projection.items.find((i) => i.message.id === messageId);
+  return branchPointOfMeta(projection, item ? messageMeta(item.message) : undefined);
+}
+
+/** `branchPoint` for a message whose metadata is at hand (no lookup). */
+export function branchPointOfMeta(
+  projection: Projection,
+  meta: KobeMessageMeta | undefined,
+): { readonly parentEntryId: string; readonly text: string } | undefined {
+  if (meta?.kind !== "user" || meta.pending || meta.parentEntryId === null) return undefined;
+  if (!projection.loaded.has(meta.parentEntryId)) return undefined;
+  return { parentEntryId: meta.parentEntryId, text: meta.text };
 }
 
 /** The nearest shown message at or above `entryId` (hidden entries belong to none). */
@@ -559,45 +657,30 @@ function attachSummaries(
   ];
 }
 
-/**
- * The message holding the leaf, or, when the leaf isn't shown (a hidden entry at the root) or not
- * loaded, the nearest shown ancestor that is: never a message of another branch.
- */
-function headOf(
-  entries: readonly ThreadEntry[],
-  leafEntryId: string | null,
-  nodeOfEntry: ReadonlyMap<string, string>,
-): string | undefined {
-  if (leafEntryId === null) return undefined;
-  const parentOf = new Map(entries.map((e) => [e.entryId, e.parentId] as const));
-  const seen = new Set<string>();
-  let id: string | null | undefined = leafEntryId;
-  while (id !== null && id !== undefined && !seen.has(id)) {
-    const node = nodeOfEntry.get(id);
-    if (node !== undefined) return node;
-    seen.add(id);
-    id = parentOf.get(id);
-  }
-  return undefined;
-}
-
 /** Adds the run's uncommitted prompt and streaming content; returns the run's tail as the head. */
 function overlayLive(
   live: LiveOverlay,
   items: ProjectedItem[],
   indexOf: Map<string, number>,
-  nodeOfEntry: ReadonlyMap<string, string>,
+  place: (entryId: string) => string | null | undefined,
   lastEntryOfNode: ReadonlyMap<string, string>,
   headId: string | null,
 ): string | null {
   const { run, active } = live;
-  const lastCommitted = [...run.committed].reverse().find((id) => nodeOfEntry.has(id));
+  const nodeOf = (id: string) => {
+    const at = place(id);
+    return typeof at === "string" ? at : undefined;
+  };
+  const lastCommitted = [...run.committed].reverse().find((id) => nodeOf(id) !== undefined);
   let anchor: string | null =
-    lastCommitted === undefined ? headId : (nodeOfEntry.get(lastCommitted) ?? headId);
+    lastCommitted === undefined ? headId : (nodeOf(lastCommitted) ?? headId);
 
   if (!run.promptCommitted && live.prompt) {
     const parentEntryId = live.prompt.parentEntryId;
-    const parentNode = parentEntryId === null ? null : (nodeOfEntry.get(parentEntryId) ?? headId);
+    // A hidden parent at the root (a root edit) puts the prompt beside the first message; an
+    // unloaded one under the head.
+    const at = parentEntryId === null ? null : place(parentEntryId);
+    const parentNode = at === undefined ? headId : at;
     const id = `${PREFIX_PROMPT}${run.runId}`;
     const meta: KobeMessageMeta = {
       kind: "user",

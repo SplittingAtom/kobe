@@ -392,6 +392,27 @@ export class FakeKobe {
     for (const source of this.#sources) source.deliver(run);
   }
 
+  /** Adds a run's next entry below its tip (else its branch point) and streams `entry.committed`. */
+  #commitEntry(
+    runId: string,
+    add: (threadId: string, parentId: string | null) => string,
+    messageId?: string,
+  ): string {
+    const run = this.run(runId);
+    const parentId = run.tip ?? run.parent_entry_id;
+    const entryId = add(run.thread_id, parentId);
+    run.tip = entryId;
+    const entry = this.#thread(run.thread_id).entries.at(-1) as FakeEntry;
+    this.emit(runId, "entry.committed", {
+      entry_id: entryId,
+      parent_id: parentId,
+      entry_type: entry.type,
+      ...(messageId ? { message_id: messageId } : {}),
+      payload: entry.payload as never,
+    });
+    return entryId;
+  }
+
   readonly agent = {
     delta: (runId: string, messageId: string, delta: string, contentIndex = 0) =>
       this.emit(runId, "text.delta", { message_id: messageId, content_index: contentIndex, delta }),
@@ -417,22 +438,26 @@ export class FakeKobe {
         preview,
         truncated: false,
       }),
-    commit: (runId: string, message: Json, messageId?: string) => {
-      const run = this.run(runId);
-      const thread = this.#thread(run.thread_id);
-      const parentId = run.tip ?? run.parent_entry_id;
-      const entryId = this.addEntry(run.thread_id, parentId, message, { leaf: false });
-      run.tip = entryId;
-      const entry = thread.entries.at(-1) as FakeEntry;
-      this.emit(runId, "entry.committed", {
-        entry_id: entryId,
-        parent_id: parentId,
-        entry_type: "message",
-        ...(messageId ? { message_id: messageId } : {}),
-        payload: entry.payload as never,
-      });
-      return entryId;
-    },
+    commit: (runId: string, message: Json, messageId?: string) =>
+      this.#commitEntry(
+        runId,
+        (threadId, parentId) => this.addEntry(threadId, parentId, message, { leaf: false }),
+        messageId,
+      ),
+    /**
+     * The sandbox agent's branch marker (`kobe.branch` custom entry) under the run's branch point,
+     * appended before Pi starts when `run.start` carries `parent_entry_id`; the prompt hangs below it.
+     */
+    branchMarker: (runId: string) =>
+      this.#commitEntry(runId, (threadId, parentId) =>
+        this.addSystemEntry(
+          threadId,
+          parentId,
+          "custom",
+          { customType: "kobe.branch", data: { run_id: runId } },
+          { leaf: false },
+        ),
+      ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
     complete: (runId: string) => {

@@ -11,8 +11,12 @@ import {
 } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat/features";
-import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
+import {
+  branchPoint,
+  branchPointOfMeta,
+  type KobeMessageMeta,
+  type SkippedReport,
+} from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
@@ -128,30 +132,13 @@ function useMeta(): KobeMessageMeta | undefined {
   return useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
 }
 
-/**
- * An action the first exchange can't take yet (root branching, `lib/chat/features.ts`): focusable,
- * announced as unavailable, with the reason as its description and tooltip.
- */
-function PendingAction({ command }: { readonly command: "edit" | "regenerate" }) {
-  return (
-    <IconAction
-      command={command}
-      size="sm"
-      aria-disabled="true"
-      description={ROOT_BRANCHING_PENDING}
-      className="hover:bg-transparent"
-    />
-  );
-}
-
 export function UserMessage() {
   const meta = useMeta();
   const pending = meta?.kind === "user" && meta.pending;
-  const readOnly = isReadOnlyThread(useKobeExtras());
+  const extras = useKobeExtras();
+  const readOnly = isReadOnlyThread(extras);
   const canEdit =
-    !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
-  const firstMessage =
-    !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId === null;
+    !readOnly && extras !== undefined && branchPointOfMeta(extras.projection, meta) !== undefined;
   return (
     <MessagePrimitive.Root
       data-role="user"
@@ -180,7 +167,6 @@ export function UserMessage() {
                 </ActionBarPrimitive.Edit>
               </ActionBarPrimitive.Root>
             )}
-            {firstMessage && !ROOT_BRANCHING_AVAILABLE && <PendingAction command="edit" />}
           </div>
         </div>
       </div>
@@ -201,19 +187,16 @@ export function UserMessage() {
 }
 
 /** Regenerate re-sends the question before this answer from that question's parent entry. */
-function useRegenerate(): "yes" | "root" | "no" {
+function useCanRegenerate(): boolean {
   const parentId = useAuiState((s) => s.message.parentId);
   const extras = useKobeExtras();
-  const parent = extras?.projection.items.find((i) => i.message.id === parentId);
-  const meta = parent ? messageMeta(parent.message) : undefined;
-  if (meta?.kind !== "user" || meta.pending) return "no";
-  return meta.parentEntryId !== null ? "yes" : "root";
+  return extras !== undefined && branchPoint(extras.projection, parentId) !== undefined;
 }
 
 export function AssistantMessage() {
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
-  const regenerate = useRegenerate();
+  const canRegenerate = useCanRegenerate();
   return (
     <MessagePrimitive.Root
       data-role="assistant"
@@ -245,13 +228,10 @@ export function AssistantMessage() {
               </AuiIf>
             </IconAction>
           </ActionBarPrimitive.Copy>
-          {!readOnly && regenerate === "yes" && (
+          {!readOnly && canRegenerate && (
             <ActionBarPrimitive.Reload asChild>
               <IconAction command="regenerate" size="sm" />
             </ActionBarPrimitive.Reload>
-          )}
-          {!readOnly && regenerate === "root" && !ROOT_BRANCHING_AVAILABLE && (
-            <PendingAction command="regenerate" />
           )}
         </ActionBarPrimitive.Root>
         {!running && <MessageFooter />}
