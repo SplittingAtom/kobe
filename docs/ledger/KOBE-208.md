@@ -1,6 +1,6 @@
 # KOBE-208: B4: Rich history: reasoning block, tool cards, hover footer, Detail toggle
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #271)
 - **Branch / worktree:** `kobe-208-rich-history` in `../Kobe-wt208`
 - **Depends on:** KOBE-202 (A6 preferences), KOBE-203 (A7 IconAction, command registry)
 
