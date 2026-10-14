@@ -132,6 +132,7 @@ describe("thread.compact_result (sandbox → server)", () => {
       "model_not_configured",
       "pi_unavailable",
       "internal",
+      "runtime_tampered",
     ]);
   });
 
