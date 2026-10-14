@@ -1,14 +1,14 @@
 # KOBE-213: B9 Compaction: route, sandbox-agent mapping to Pi compact, Compact now dialog
 
-- **Status:** in review (migration PR #275, feature PR pending)
-- **Branch / worktree:** `kobe-213-compact-now` in `../Kobe-wt213`; migration `kobe-213-migration`
-  in `../Kobe-wt213m`
+- **Status:** in review: #275 migration, #276 sandbox agent and #277 server are merged; PR C (web,
+  e2e, this ledger) on `kobe-213-compact-now` in `../Kobe-wt213`
 - **Depends on:** KOBE-212 (contract, #274), KOBE-209 (marker), KOBE-211 (gauge). Spec CE15.
 
 ## Plan
 
-Migration PR first (#275: `runs.kind`, `thread.compact` command kind), then one feature PR with
-server, sandbox-agent and web in separate commits. REVIEW-274 HIGH and MEDIUM points are binding.
+Split at ~2,700 lines (coordinator): #275 migration (`runs.kind`, `thread.compact` command kind),
+#276 sandbox agent, #277 server, PR C web + e2e + ledger. REVIEW-274 HIGH/MEDIUM points binding;
+each PR had an Opus review, its findings fixed in the same PR.
 
 ## Decisions
 
@@ -60,13 +60,25 @@ server, sandbox-agent and web in separate commits. REVIEW-274 HIGH and MEDIUM po
 - **Long request (L6):** the 200 waits for Pi (up to 12 min command timeout). Node's
   `requestTimeout` bounds receiving the request only. The dialog can be closed while it runs.
 
+## Review follow-ups (fixed)
+
+- #276: the compaction's run begins inside the locked busy check, before `set_model` (a racing
+  `run.start` is refused); Pi restarts on the compaction model keeping the run; steer and
+  `pi.command` are refused while compacting; the token is forgotten after a failure (tested).
+- #277: a compaction offered on reconnect is never resumed (ends failed, the agent aborts it, the
+  queue moves on); the run sweep fails and aborts one past 15 min (`timed_out`); `runtime_tampered`
+  added to the wire codes (agent reports it, server stores it as the run's failure, warn log);
+  tool frames, MCP calls and every tool store refuse compaction runs from the database; the
+  lock-timeout `thread_busy` uses the fixed message; the audit outcome records `cancelled`,
+  `budget_stopped`, `timed_out`, `interrupted`. 0094's comment corrected (one transaction: the
+  CHECK scans run under ADD COLUMN's lock).
+
 ## Open questions (for Chris or the coordinator)
 
-- An interrupted thread (waiting on Retry) can't be compacted (`thread_busy`). Is that OK, or
-  should compaction keep the interrupted state?
-- No `budget_exhausted` code in the compact contract: a spent budget answers the usual 429
-  `budget_exhausted` (`RunError`) before anything starts. A budget stop mid-compaction answers
-  `compaction_failed`.
+- An interrupted thread (waiting on Retry) can't be compacted (`thread_busy`). Keep?
+- A spent budget answers the usual 429 `budget_exhausted` before anything starts (the compact
+  contract has no budget code); a budget stop mid-compaction answers `compaction_failed`.
+- Follow-up (coordinator files it): no audit row for `runtime_tampered`, for runs or compactions.
 
 ## Evidence (acceptance criteria → test or command output)
 
