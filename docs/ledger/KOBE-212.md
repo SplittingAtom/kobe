@@ -1,6 +1,6 @@
 # KOBE-212: B8 Contract: thread.compact wire command and POST /v1/threads/{id}/compact
 
-- **Status:** in review
+- **Status:** in review (PR #274)
 - **Branch / worktree:** `kobe-212-compact-contract` in `../Kobe-wt212`
 - **Depends on:** none. Blocks KOBE-213 (server route + agent mapping). Spec CE15.
 
