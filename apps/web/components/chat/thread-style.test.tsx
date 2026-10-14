@@ -46,7 +46,9 @@ describe("assistant-ui thread styling", () => {
 
   it("renders message actions as icon buttons that keep their accessible names", async () => {
     const t = fake.addThread("Sales");
-    const u1 = fake.addEntry(t, null, { role: "user", content: "q1" });
+    // Like Pi 1.0: a settings entry at the root, so the first answer can be regenerated.
+    const root = fake.addSystemEntry(t, null, "thinking_level_change", { thinkingLevel: "off" });
+    const u1 = fake.addEntry(t, root, { role: "user", content: "q1" });
     const a1 = fake.addEntry(t, u1, {
       role: "assistant",
       content: [{ type: "text", text: "a1" }],

@@ -433,6 +433,30 @@ export class FakeKobe {
       });
       return entryId;
     },
+    /**
+     * The sandbox agent's branch marker (`kobe.branch` custom entry) under the run's branch point,
+     * appended before Pi starts when `run.start` carries `parent_entry_id`; the prompt hangs below it.
+     */
+    branchMarker: (runId: string) => {
+      const run = this.run(runId);
+      const parentId = run.parent_entry_id;
+      const entryId = this.addSystemEntry(
+        run.thread_id,
+        parentId,
+        "custom",
+        { customType: "kobe.branch", data: { run_id: runId } },
+        { leaf: false },
+      );
+      run.tip = entryId;
+      const entry = this.#thread(run.thread_id).entries.at(-1) as FakeEntry;
+      this.emit(runId, "entry.committed", {
+        entry_id: entryId,
+        parent_id: parentId,
+        entry_type: "custom",
+        payload: entry.payload as never,
+      });
+      return entryId;
+    },
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
     complete: (runId: string) => {

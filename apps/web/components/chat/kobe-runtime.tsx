@@ -126,7 +126,11 @@ function textOf(message: AppendMessage): string {
     .trim();
 }
 
-/** Where an edit of the user message `id` branches from (its entry's parent), if anywhere. */
+/**
+ * Where an edit of the user message `id` branches from: its entry's parent. For the first message
+ * that is the root settings entry Pi 1.0 writes before the first prompt, so a new first message is
+ * a sibling root (KOBE-214); the server's `run.start` sends it as `parent_entry_id` like any other.
+ */
 function branchPointOf(projection: Projection, id: string | null | undefined) {
   if (!id) return undefined;
   const item = projection.items.find((i) => i.message.id === id);
@@ -142,7 +146,8 @@ function apiErrorOf(err: unknown, fallback: string): ApiError {
 const CANNOT_BRANCH = {
   status: 409,
   code: "cannot_branch",
-  message: "This message starts the conversation, so it can't be edited or regenerated.",
+  message:
+    "This message has nothing above it to branch from, so it can't be edited or regenerated.",
 } as const;
 
 /**
