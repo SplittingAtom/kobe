@@ -21,8 +21,10 @@ probe fixtures, and the additive protocol fields. No route, query or UI change (
   forked_from_thread_id) → threads (team_id, id) `ON DELETE SET NULL (forked_from_thread_id)`.
   The column list exists only on PostgreSQL 15 and later; the chart (CNPG `postgresql:17`) and CI
   (`postgres:17`) both run 17. Deleting the source (retention purge, Trash purge, Delete forever,
-  team deletion) never deletes a fork, never blocks on one, and never nulls `team_id`. It is
-  declared SQL-only, like `threads_schedule_fk`, and documented in `schema/threads.ts`. CHECK
+  team deletion) never deletes a fork, never blocks on one, and never nulls `team_id`. The link is
+  set at INSERT only. Trigger `threads_guard_forked_from` (in 0096, after review L3) refuses any
+  UPDATE except to NULL, which the key's own SET NULL also is, so provenance can't form cycles. The key
+  is declared SQL-only, like `threads_schedule_fk`, and documented in `schema/threads.ts`. CHECK
   `threads_fork_not_self` refuses a thread that forks itself.
 - **`forked_at_entry_id`:** kept as provenance text with no FK. Reasons:
   1. `forkThread` (services/server/src/threads/fork.ts) copies the entries up to the fork point

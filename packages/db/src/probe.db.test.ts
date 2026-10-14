@@ -359,17 +359,26 @@ describe("cross-team references", () => {
     );
     if (!theirs) throw new Error("probe: team B has no thread");
     // Foreign key checks bypass RLS: only the composite key (team_id, id) keeps the link in team A.
-    const err: unknown = await withTeam(app.db, teamA, (tx) =>
-      tx.execute(
-        sql`UPDATE threads SET forked_from_thread_id = ${theirs.id} WHERE team_id = ${teamA}`,
-      ),
-    ).then(
+    // The link is set at INSERT only (an UPDATE is refused by threads_guard_forked_from).
+    const err: unknown = await withTeam(app.db, teamA, async (tx) => {
+      const [owner] = await tx
+        .select({ id: threads.ownerUserId })
+        .from(threads)
+        .where(eq(threads.teamId, teamA))
+        .limit(1);
+      if (!owner) throw new Error("probe: team A has no thread");
+      await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: owner.id, forkedFromThreadId: theirs.id });
+    }).then(
       () => undefined,
       (e: unknown) => e,
     );
-    expect((err as { cause?: { code?: string } } | undefined)?.cause?.code, String(err)).toBe(
-      "23503",
-    );
+    const cause = (err as { cause?: { code?: string; constraint?: string } } | undefined)?.cause;
+    expect({ code: cause?.code, constraint: cause?.constraint }, String(err)).toEqual({
+      code: "23503",
+      constraint: "threads_forked_from_fk",
+    });
   });
 });
 

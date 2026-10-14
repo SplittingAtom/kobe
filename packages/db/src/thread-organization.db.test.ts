@@ -32,15 +32,25 @@ afterAll(async () => {
   await owner.close();
 });
 
-async function sqlState(promise: Promise<unknown>): Promise<string | undefined> {
+/** The Postgres error a write fails with: SQLSTATE and, for key and CHECK errors, the constraint. */
+async function pgError(
+  promise: Promise<unknown>,
+): Promise<{ code?: string; constraint?: string } | undefined> {
   const err: unknown = await promise.then(
     () => undefined,
     (e: unknown) => e,
   );
   if (err === undefined) return undefined;
-  const e = err as { code?: string; cause?: { code?: string } };
-  return e.cause?.code ?? e.code ?? String(err);
+  const e = err as { cause?: { code?: string; constraint?: string } };
+  if (!e.cause?.code) throw err;
+  return { code: e.cause.code, constraint: e.cause.constraint };
 }
+
+const FORK_FK = { code: "23503", constraint: "threads_forked_from_fk" };
+const NOT_SELF = { code: "23514", constraint: "threads_fork_not_self" };
+const ENTRY_LENGTH = { code: "23514", constraint: "threads_forked_at_entry_id_length" };
+/** Raised by the threads_guard_forked_from trigger (no constraint name). */
+const LINK_FROZEN = { code: "428C9", constraint: undefined };
 
 type ThreadValues = Partial<typeof threads.$inferInsert>;
 
@@ -120,29 +130,51 @@ describe("fork provenance (CE16)", () => {
 
   it("can't reference another team's thread (composite key), or a missing one", async () => {
     const theirs = await newThread(teamA);
-    expect(await sqlState(newThread(teamB, forkOf(theirs)))).toBe("23503");
-    expect(await sqlState(newThread(teamB, forkOf(randomUUID())))).toBe("23503");
-    // Nor by moving an existing fork's link across.
-    const mine = await newThread(teamB);
-    const fork = await newThread(teamB, forkOf(mine));
+    expect(await pgError(newThread(teamB, forkOf(theirs)))).toEqual(FORK_FK);
+    expect(await pgError(newThread(teamB, forkOf(randomUUID())))).toEqual(FORK_FK);
+  });
+
+  it("sets the link at creation only: re-pointing is refused, clearing is allowed", async () => {
+    const source = await newThread(teamA);
+    const other = await newThread(teamA);
+    const fork = await newThread(teamA, forkOf(source));
+    const setLink = (to: string | null) =>
+      withTeam(app.db, teamA, (tx) =>
+        tx
+          .update(threads)
+          .set({ forkedFromThreadId: to })
+          .where(and(eq(threads.teamId, teamA), eq(threads.id, fork))),
+      );
+    expect(await pgError(setLink(other))).toEqual(LINK_FROZEN);
+    // A cycle A -> B -> A would need exactly such an update.
     expect(
-      await sqlState(
-        withTeam(app.db, teamB, (tx) =>
+      await pgError(
+        withTeam(app.db, teamA, (tx) =>
           tx
             .update(threads)
-            .set({ forkedFromThreadId: theirs })
-            .where(and(eq(threads.teamId, teamB), eq(threads.id, fork))),
+            .set({ forkedFromThreadId: fork })
+            .where(and(eq(threads.teamId, teamA), eq(threads.id, source))),
         ),
       ),
-    ).toBe("23503");
+    ).toEqual(LINK_FROZEN);
+    // Other columns of a fork stay writable, and the link can be cleared.
+    await withTeam(app.db, teamA, (tx) =>
+      tx
+        .update(threads)
+        .set({ title: "Renamed", titleLocked: true })
+        .where(and(eq(threads.teamId, teamA), eq(threads.id, fork))),
+    );
+    expect(await pgError(setLink(null))).toBeUndefined();
+    expect(await readThread(teamA, fork)).toMatchObject({ forkedFromThreadId: null });
+    expect(await pgError(setLink(source))).toEqual(LINK_FROZEN);
   });
 
   it("refuses a thread forked from itself and a malformed fork point", async () => {
     const id = randomUUID();
-    expect(await sqlState(newThread(teamA, { id, ...forkOf(id) }))).toBe("23514");
+    expect(await pgError(newThread(teamA, { id, ...forkOf(id) }))).toEqual(NOT_SELF);
     const source = await newThread(teamA);
     for (const bad of ["", "x".repeat(129)]) {
-      expect(await sqlState(newThread(teamA, forkOf(source, bad)))).toBe("23514");
+      expect(await pgError(newThread(teamA, forkOf(source, bad)))).toEqual(ENTRY_LENGTH);
     }
   });
 

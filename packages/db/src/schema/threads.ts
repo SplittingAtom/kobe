@@ -113,6 +113,8 @@ export const threads = pgTable(
      * forked_from_thread_id) → threads ON DELETE SET NULL (forked_from_thread_id) is SQL-only
      * (migration `0096_thread_fork_fk.sql`), like `schedule_id`: purging the source (retention,
      * Trash, Delete forever) keeps the fork and only clears the link, never `team_id`.
+     * Set at INSERT only, never re-pointed: trigger `threads_guard_forked_from` (same migration)
+     * refuses any UPDATE except to NULL (the key's own SET NULL), so provenance has no cycles.
      */
     forkedFromThreadId: uuid(),
     /**
