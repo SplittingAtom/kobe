@@ -11,6 +11,7 @@ import {
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
+import { threadCompactFocusSchema, threadCompactResultShape } from "../threads.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import {
   memoryPutFrameSchema,
@@ -199,6 +200,45 @@ export const commandResultFrameSchema = z.union([
   frame("command.result", { command_id: commandId, ok: z.literal(false), error: errorInfoSchema }),
 ]);
 
+/**
+ * Error codes of `thread.compact_result` (KOBE-212). `thread_busy`: the thread has an active run
+ * (Pi's `compact` would abort it). `nothing_to_compact`: Pi's "Nothing to compact (session too
+ * small)" or "Already compacted". `compaction_failed`: any other Pi `success:false` (message = Pi's
+ * error). `model_not_configured`: no gateway model to summarize with.
+ */
+export const THREAD_COMPACT_WIRE_ERROR_CODES = [
+  "thread_busy",
+  "nothing_to_compact",
+  "compaction_failed",
+  "model_not_configured",
+  "pi_unavailable",
+  "internal",
+] as const;
+
+/**
+ * Sandbox -> server: the one answer to `thread.compact` (instead of `command.result`), for the same
+ * `command_id`. Success carries Pi's `compact` response data in Kobe casing (Pi's `usage` and
+ * `details` are dropped: the gateway meters the calls, the mirrored entry keeps `details`). Has its
+ * own size entry (`SANDBOX_FRAME_MAX_BYTES_BY_TYPE`); a summary over the cap is left out.
+ */
+export const threadCompactResultFrameSchema = z.union([
+  frame("thread.compact_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(true),
+    ...threadCompactResultShape,
+  }),
+  frame("thread.compact_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(false),
+    error: z.strictObject({
+      code: z.enum(THREAD_COMPACT_WIRE_ERROR_CODES),
+      message: z.string().max(2000),
+    }),
+  }),
+]);
+
 /** A thread's Pi process exited (crash or after shutdown). Active runs on it are lost. */
 export const piExitedFrameSchema = frame("pi.exited", {
   thread_id: uuidSchema,
@@ -214,6 +254,7 @@ export const sandboxToServerFrameSchema = z.union([
   piUiRequestFrameSchema,
   policyCheckFrameSchema,
   commandResultFrameSchema,
+  threadCompactResultFrameSchema,
   artifactPutFrameSchema,
   fileShareFrameSchema,
   memoryPutFrameSchema,
@@ -425,6 +466,30 @@ export const piCommandFrameSchema = frame("pi.command", {
   command: piBridgeCommandSchema,
 });
 
+/**
+ * Compact a thread's Pi session (KOBE-212, CE15; threads.ts): Pi RPC `compact` with `focus` as
+ * `customInstructions`. Only to agents with hello capability `thread_compact`; answered by exactly
+ * one `thread.compact_result`. The summary is a model call, so the server names the run it is
+ * billed to (`run_id`) with that run's model, limits and token, as `run.start` does; without
+ * `run_id` Pi has no gateway token outside a run and the agent answers `model_not_configured`.
+ * The agent refuses with `thread_busy` while the thread has an active run.
+ */
+export const threadCompactFrameSchema = frame("thread.compact", {
+  command_id: commandId,
+  thread_id: uuidSchema,
+  focus: threadCompactFocusSchema.optional(),
+  run_id: uuidSchema.optional(),
+  model: piThreadConfigSchema.shape.model,
+  model_limits: modelLimitsSchema.optional(),
+  /** Run-bound gateway token, as `run.start.run_token` (capability `run_token`). */
+  run_token: runTokenGrantSchema.optional(),
+}).refine(
+  (f) =>
+    f.run_id !== undefined ||
+    (f.model === undefined && f.model_limits === undefined && f.run_token === undefined),
+  { message: "model, model_limits and run_token need run_id" },
+);
+
 export const piUiResponseFrameSchema = frame("pi.ui_response", {
   thread_id: uuidSchema,
   response: piExtensionUiResponseSchema,
@@ -519,6 +584,7 @@ export const serverToSandboxFrameSchema = z.union([
   runSteerFrameSchema,
   runStopFrameSchema,
   piCommandFrameSchema,
+  threadCompactFrameSchema,
   piUiResponseFrameSchema,
   policyPendingFrameSchema,
   policyResultFrameSchema,
@@ -556,3 +622,5 @@ export type PolicyResultFrame = z.infer<typeof policyResultFrameSchema>;
 export type RunStartFrame = z.infer<typeof runStartFrameSchema>;
 export type RunStopFrame = z.infer<typeof runStopFrameSchema>;
 export type CommandResultFrame = z.infer<typeof commandResultFrameSchema>;
+export type ThreadCompactFrame = z.infer<typeof threadCompactFrameSchema>;
+export type ThreadCompactResultFrame = z.infer<typeof threadCompactResultFrameSchema>;

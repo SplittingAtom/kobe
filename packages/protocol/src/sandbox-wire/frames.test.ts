@@ -594,13 +594,14 @@ describe("contracts cleanup (agent-reported gaps)", () => {
     ).toMatchObject({ ok: true });
   });
 
-  it("states the per-type frame caps (only pi.event, command.result and policy.check are large)", () => {
+  it("states the per-type frame caps (only the listed types are large)", () => {
     expect(SANDBOX_SMALL_FRAME_MAX_BYTES).toBe(256 * 1024);
     expect(SANDBOX_FRAME_MAX_BYTES_BY_TYPE).toEqual({
       "pi.event": SANDBOX_MAX_FRAME_BYTES,
       "command.result": SANDBOX_MAX_FRAME_BYTES,
       "policy.check": 1024 * 1024,
       "artifact.put": 1024 * 1024,
+      "thread.compact_result": 1024 * 1024,
     });
   });
 });
