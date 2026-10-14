@@ -11,6 +11,7 @@ import {
   THREAD_COMPACT_FOCUS_MAX_CHARS,
   THREAD_COMPACT_SUMMARY_MAX_BYTES,
   threadCompactFocusSchema,
+  threadOrganizationSchema,
 } from "./index.js";
 import { EXAMPLE_IDS } from "./testing/index.js";
 
@@ -131,5 +132,59 @@ describe("compact thread errors", () => {
 
   it("gates the wire command on a hello capability", () => {
     expect(CAPABILITY_THREAD_COMPACT).toBe("thread_compact");
+  });
+});
+
+/** KOBE-215 (CE16, CE18, CE19): pin, archive, title lock and fork provenance on a thread summary. */
+describe("thread organization fields", () => {
+  const full = {
+    pinned_at: "2026-10-14T08:00:00Z",
+    archived_at: "2026-10-14T09:30:00.123Z",
+    title_locked: true,
+    forked_from_thread_id: EXAMPLE_IDS.thread,
+    forked_at_entry_id: "c3d4e5f6",
+  };
+
+  it("decodes absent fields as not pinned, not archived, unlocked, not a fork (additive)", () => {
+    expect(threadOrganizationSchema.parse({})).toEqual({
+      pinned_at: null,
+      archived_at: null,
+      title_locked: false,
+      forked_from_thread_id: null,
+      forked_at_entry_id: null,
+    });
+  });
+
+  it("accepts every field set, and nulls", () => {
+    expect(threadOrganizationSchema.parse(full)).toEqual(full);
+    const nulls = {
+      pinned_at: null,
+      archived_at: null,
+      title_locked: false,
+      forked_from_thread_id: null,
+      forked_at_entry_id: null,
+    };
+    expect(threadOrganizationSchema.parse(nulls)).toEqual(nulls);
+  });
+
+  it("keeps a fork point whose source thread is gone (purged source)", () => {
+    const orphan = { ...full, forked_from_thread_id: null };
+    expect(threadOrganizationSchema.parse(orphan)).toEqual(orphan);
+  });
+
+  it("refuses malformed values", () => {
+    for (const bad of [
+      { ...full, pinned_at: "yesterday" },
+      { ...full, archived_at: "2026-10-14T08:00:00+02:00" },
+      { ...full, title_locked: null },
+      { ...full, title_locked: "true" },
+      { ...full, forked_from_thread_id: "not-a-uuid" },
+      { ...full, forked_from_thread_id: EXAMPLE_IDS.thread.toUpperCase() },
+      { ...full, forked_at_entry_id: "" },
+      { ...full, forked_at_entry_id: "x".repeat(129) },
+      { ...full, forked_at_entry_id: "a\nb" },
+    ]) {
+      expect(threadOrganizationSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
   });
 });

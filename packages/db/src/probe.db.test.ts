@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { quoteIdent } from "./roles.js";
-import { teams } from "./schema/index.js";
+import { teams, threads } from "./schema/index.js";
 import { TEAM_TABLES } from "./tenancy.js";
 import { PROBE_FIXTURES } from "./testing/probe-fixtures/index.js";
 import { withTeam } from "./with-team.js";
@@ -349,6 +349,36 @@ describe("site-wide tables", () => {
     );
     expect((err as { code?: string } | undefined)?.code).toBe("42501");
     expect((await teamIdsIn("team_members", teamB)).length).toBeGreaterThan(0);
+  });
+});
+
+describe("cross-team references", () => {
+  it("a fork can't name another team's thread, even by its exact id (KOBE-215)", async () => {
+    const [theirs] = await withTeam(app.db, teamB, (tx) =>
+      tx.select({ id: threads.id }).from(threads).where(eq(threads.teamId, teamB)).limit(1),
+    );
+    if (!theirs) throw new Error("probe: team B has no thread");
+    // Foreign key checks bypass RLS: only the composite key (team_id, id) keeps the link in team A.
+    // The link is set at INSERT only (an UPDATE is refused by threads_guard_forked_from).
+    const err: unknown = await withTeam(app.db, teamA, async (tx) => {
+      const [owner] = await tx
+        .select({ id: threads.ownerUserId })
+        .from(threads)
+        .where(eq(threads.teamId, teamA))
+        .limit(1);
+      if (!owner) throw new Error("probe: team A has no thread");
+      await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: owner.id, forkedFromThreadId: theirs.id });
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    const cause = (err as { cause?: { code?: string; constraint?: string } } | undefined)?.cause;
+    expect({ code: cause?.code, constraint: cause?.constraint }, String(err)).toEqual({
+      code: "23503",
+      constraint: "threads_forked_from_fk",
+    });
   });
 });
 

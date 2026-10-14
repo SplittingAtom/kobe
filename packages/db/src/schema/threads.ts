@@ -102,6 +102,27 @@ export const threads = pgTable(
      * SQL-only (migration `0087_schedules_rls.sql`): drizzle cannot null one column of a key.
      */
     scheduleId: uuid(),
+    /** When the owner pinned the thread (CE19; the Pinned group sorts by it). Null = not pinned. */
+    pinnedAt: timestamp({ withTimezone: true }),
+    /** When the thread was archived (CE19): out of the normal groups, retention unchanged. */
+    archivedAt: timestamp({ withTimezone: true }),
+    /** The owner renamed the thread (CE18): auto-titling never changes the title again. */
+    titleLocked: boolean().notNull().default(false),
+    /**
+     * The thread this one was forked from (CE16, KOBE-215). Foreign key (team_id,
+     * forked_from_thread_id) → threads ON DELETE SET NULL (forked_from_thread_id) is SQL-only
+     * (migration `0096_thread_fork_fk.sql`), like `schedule_id`: purging the source (retention,
+     * Trash, Delete forever) keeps the fork and only clears the link, never `team_id`.
+     * Set at INSERT only, never re-pointed: trigger `threads_guard_forked_from` (same migration)
+     * refuses any UPDATE except to NULL (the key's own SET NULL), so provenance has no cycles.
+     */
+    forkedFromThreadId: uuid(),
+    /**
+     * The entry the fork was taken at. Provenance text, no foreign key: the fork copies entries
+     * with their ids, so this names an entry of the fork too and is kept when the source goes
+     * (null source + entry = "forked from a thread that no longer exists").
+     */
+    forkedAtEntryId: text(),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -142,6 +163,14 @@ export const threads = pgTable(
       columns: [t.teamId, t.projectId],
       foreignColumns: [projects.teamId, projects.id],
     }).onDelete("restrict"),
+    // The Pinned group (CE19): the owner's pinned live threads by pin time.
+    index("threads_owner_pinned_idx")
+      .on(t.teamId, t.ownerUserId, t.pinnedAt.desc(), t.id.desc())
+      .where(sql`${t.pinnedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    // A source's forks: the fork key's ON DELETE SET NULL looks them up on every purge.
+    index("threads_forked_from_idx")
+      .on(t.teamId, t.forkedFromThreadId)
+      .where(sql`${t.forkedFromThreadId} IS NOT NULL`),
     index("threads_schedule_idx")
       .on(t.teamId, t.scheduleId, t.lastActivityAt.desc())
       .where(sql`${t.scheduleId} IS NOT NULL`),
@@ -162,6 +191,11 @@ export const threads = pgTable(
       sql`NOT ${t.isTest} OR (${t.projectId} IS NULL AND NOT ${t.sharedToProject})`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
+    check("threads_fork_not_self", sql`${t.forkedFromThreadId} IS DISTINCT FROM ${t.id}`),
+    check(
+      "threads_forked_at_entry_id_length",
+      sql`${t.forkedAtEntryId} IS NULL OR char_length(${t.forkedAtEntryId}) BETWEEN 1 AND 128`,
+    ),
     check(
       "threads_model_alias",
       sql`${t.modelAlias} IS NULL OR ${t.modelAlias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`,
