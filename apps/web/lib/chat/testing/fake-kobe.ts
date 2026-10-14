@@ -6,6 +6,7 @@
  * rules) so the chat is tested over its real API client, casing layer and stream code.
  * `agent` scripts what Pi would do in a run.
  */
+import { COMPACT_THREAD_ERROR_MESSAGES } from "@kobe/protocol";
 import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 
@@ -137,6 +138,8 @@ export class FakeKobe {
   budgetStatus: Json = { state: "ok", lines: [] };
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
+  /** Compact now (KOBE-213): when set, a compaction answers only once it resolves. */
+  compactGate: Promise<void> | undefined;
   /** The caller's workspace (KOBE-194): path (no leading slash) -> bytes; listed per folder. */
   readonly workspaceFiles = new Map<string, Uint8Array>();
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
@@ -562,6 +565,7 @@ export class FakeKobe {
       body,
     });
     const key = `${method} ${url.pathname}`;
+    if (method === "POST" && url.pathname.endsWith("/compact")) await this.compactGate;
     const forced = this.failNext.get(key);
     if (forced) {
       this.failNext.delete(key);
@@ -931,6 +935,7 @@ export class FakeKobe {
       thread.visibility = body?.visibility === "project" ? "project" : "private";
       return json(200, this.#summary(thread));
     }
+    if (action === "compact" && method === "POST") return this.#compact(thread, body);
     if (action === "fork" && method === "POST") {
       const forkId = this.addThread(thread.title);
       const fork = this.#thread(forkId);
@@ -980,6 +985,43 @@ export class FakeKobe {
       return json(200, this.#threadRuns(thread.thread_id));
     }
     return error(404, "not_found");
+  }
+
+  /** Like the server (KOBE-213): idle threads only; Pi's `compaction` entry becomes the leaf. */
+  #compact(thread: FakeThread, body: Json | undefined): Response {
+    if (thread.read_only)
+      return error(403, "read_only", "This thread is shared with you read-only.");
+    if (thread.status !== "idle" || this.activeRun(thread.thread_id)) {
+      return error(409, "thread_busy", COMPACT_THREAD_ERROR_MESSAGES.thread_busy);
+    }
+    const parent = thread.leaf_entry_id;
+    const id = `kc-${thread.entries.length + 1}`;
+    const focus = typeof body?.focus === "string" ? ` Focus: ${body.focus}` : "";
+    const summary = `Summary of the earlier conversation.${focus}`;
+    thread.entries.push({
+      entry_id: id,
+      parent_id: parent,
+      seq: thread.entries.length + 1,
+      type: "compaction",
+      payload: {
+        type: "compaction",
+        id,
+        parentId: parent,
+        timestamp: NOW,
+        summary,
+        firstKeptEntryId: parent ?? id,
+        tokensBefore: 1234,
+      },
+      payload_offloaded: false,
+      created_at: NOW,
+    });
+    thread.leaf_entry_id = id;
+    return json(200, {
+      thread_id: thread.thread_id,
+      summary,
+      first_kept_entry_id: parent ?? id,
+      tokens_before: 1234,
+    });
   }
 
   #threadItself(method: string, thread: FakeThread, url: URL, body: Json | undefined): Response {

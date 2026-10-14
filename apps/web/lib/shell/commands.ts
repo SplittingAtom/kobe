@@ -15,6 +15,7 @@ import {
   CopyIcon,
   CornerDownRightIcon,
   DownloadIcon,
+  EllipsisIcon,
   EllipsisVerticalIcon,
   FoldVerticalIcon,
   FolderIcon,
@@ -138,9 +139,12 @@ const LIST = [
     scope: "bar",
     shortcut: "Mod+Shift+D",
   },
-  // Beside the context gauge at red (CE14/15), only then: Compact now, bound by B9 (KOBE-213).
-  // It acts on the conversation, and the bar's scope lists only icons the bar always shows.
+  // Compact now (CE15, B9 KOBE-213): beside the context gauge at red, and in the thread's actions
+  // menu; opens the dialog (optional focus). Enabled only while the thread is idle. It acts on the
+  // conversation, and the bar's scope lists only icons the bar always shows. `/compact`: C6.
   { id: "compact-thread", name: "Compact this thread", icon: FoldVerticalIcon, scope: "thread" },
+  // The open thread's actions menu in bar row two (on one column, inside the bar's Menu).
+  { id: "thread-actions", name: "Conversation actions", icon: EllipsisIcon, scope: "thread" },
   // Rail.
   {
     id: "new-thread",

@@ -182,15 +182,20 @@ describe("context gauge", () => {
     );
   });
 
-  it("offers no Compact action at red until compaction lands (B9)", async () => {
+  it("offers Compact this thread at red, disabled while there is nothing to compact (B9)", async () => {
     openApp(fake, threadWith(190_000));
     const gauge = await meter();
     await waitFor(() => expect(valueOf(gauge).level).toBe("full"));
-    expect(screen.queryByRole("button", { name: "Compact this thread" })).toBeNull();
+    const action = await screen.findByRole(
+      "button",
+      { name: "Compact this thread" },
+      { timeout: 10_000 },
+    );
+    expect(action.getAttribute("aria-disabled")).toBe("true");
   });
 });
 
-describe("ContextGauge with a compact handler (B9 wires it)", () => {
+describe("ContextGauge with a compact handler (B9)", () => {
   const renderGauge = (tokens: number, onCompact: () => void) =>
     render(
       <IconActionProvider>

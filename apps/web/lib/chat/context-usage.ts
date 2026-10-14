@@ -44,9 +44,9 @@ interface EntryLike {
 
 /**
  * Pi compacted the context after the newest model call (`entries` in seq order): that call's prompt
- * (often the compaction's own summary call, which `run_usage` can't tell apart) is the size before
- * compaction, and the size after it is unknown until the next call. An offloaded message may be a
- * later answer, so it counts as one.
+ * is the size before compaction (the server leaves the compaction's own summary calls out of
+ * `latest_call`, KOBE-213), and the size after it is unknown until the next call. An offloaded
+ * message may be a later answer, so it counts as one.
  */
 export function compactedSinceLastCall(entries: readonly EntryLike[]): boolean {
   for (let i = entries.length - 1; i >= 0; i -= 1) {

@@ -65,6 +65,8 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "gateway_unavailable",
   // Workspace and team storage full (507, KOBE-148/143): a fixed message; KOBE-199 shows it.
   "quota_exceeded",
+  // Compact now (KOBE-213): the contract's fixed message (502); never the sandbox's text.
+  "compaction_failed",
 ]);
 
 function fallback(status: number): ApiError {
