@@ -38,6 +38,9 @@ interface QueuedRow {
  * `runs_queue_pos_unique` (team, thread, queue_pos) among queued runs is checked per row, so the
  * rewrite runs in two set-based steps: first above every current position (no clash with
  * untouched rows), then down to 1..n (every row already sits above n).
+ *
+ * The queued rows are locked `FOR NO KEY UPDATE` (KOBE-266): only `queue_pos` changes, which is no
+ * key (its unique index is partial), so the lock doesn't block foreign-key checks on those runs.
  */
 export async function reorderQueuedRuns(
   tx: KobeTx,
@@ -48,7 +51,7 @@ export async function reorderQueuedRuns(
   const res = await tx.execute<{ id: string; retry: boolean; queue_pos: number }>(sql`
     SELECT id, retry_of_run_id IS NOT NULL AS retry, queue_pos FROM runs
      WHERE team_id = ${teamId} AND thread_id = ${threadId} AND status = 'queued'
-     FOR UPDATE`);
+     FOR NO KEY UPDATE`);
   const queued: QueuedRow[] = res.rows.map((r) => ({ id: r.id, retry: r.retry }));
   const known = new Set(queued.map((r) => r.id));
   if (queued.length !== runIds.length || !runIds.every((id) => known.has(id))) {

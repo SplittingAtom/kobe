@@ -77,7 +77,19 @@ A new assertion "the policy check was decided, not an error" fails by name when 
   load. Considered and rejected: locking the thread in the ingest's plain flush (more contention on
   every delta batch, and every other appender would need the same).
 
-## Open questions
+## Review round 1 (Opus security/DB review: no blockers, three LOWs fixed)
 
-- `runs/queue-order.ts` takes `FOR UPDATE` on queued run rows (KEY SHARE from run_events FKs could
-  conflict the same way); queued runs get events only under the thread lock, so no cycle today.
+- LOW-1: `#reject` took the in-memory audit throttle before its audit write, so a retried
+  (rolled-back) attempt found the key taken and wrote no `approval.rejected` row. `AuditThrottle`
+  gained `reserve(key)` → `{ decision, undo }`; each `#create` attempt collects its takes and undoes
+  them when the transaction fails, so the retry writes the row. Unit tests in `throttle.test.ts`.
+- LOW-2: `approvals-retry.db.test.ts` drives the retry loop with test triggers that raise a real
+  40P01 inside the broker's transaction (a sequence counts attempts): one deadlock → retried, logged,
+  approval created; a deadlock on every attempt → deny ("Policy could not be evaluated"), two retry
+  log lines, no approval row, run still running; a deadlocked `approval.rejected` → written by the
+  retry (fails without the undo). `ApprovalService` takes an optional `log` for this.
+- LOW-3: `reorderQueuedRuns` locks the queued runs `FOR NO KEY UPDATE` (only `queue_pos` changes;
+  its unique index is partial, so no key). Test: a reorder no longer blocks a `FOR KEY SHARE` on a
+  queued run (55P03 before).
+- Affected DB suites (approvals, approvals-retry, thread-lock-order, runs*, sandbox-wire, mcp,
+  threads): 10 files, 191 tests pass.

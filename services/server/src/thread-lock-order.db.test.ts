@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, type KobeTx } from "@kobe/db";
 import { appendRunEventsInTx, withAppendTx } from "./event-stream/append.js";
+import { reorderQueuedRuns } from "./runs/queue-order.js";
 import { lockRunRow, lockThreadRow } from "./runs/store.js";
 import { findThread } from "./threads/repository.js";
 import { EventStreamFixture, delta, must, type Person } from "./testing/event-stream-fixture.js";
@@ -141,5 +142,37 @@ describe("the thread lock is still the per-thread mutex (D17)", () => {
     release.resolve();
     await first;
     expect(why(must(second[0], "second"))).toMatch(/^rejected 55P03 /);
+  });
+});
+
+describe("queue reorder vs. foreign-key checks (KOBE-266 review)", () => {
+  it("a reorder holding the queued runs does not block a KEY SHARE on them", async () => {
+    const runId = await fx.run(team, owner);
+    const threadId = await threadOf(runId);
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO runs (team_id, thread_id, trigger, status, queue_pos, input)
+       SELECT $1, $2, 'user', 'queued', n, 'q' FROM generate_series(1, 2) n RETURNING id`,
+      [team, threadId],
+    );
+    const queued = rows.map((r) => r.id);
+    const held = deferred();
+    const release = deferred();
+    const reorder = withAppendTx(fx.db, team, async (tx) => {
+      await reorderQueuedRuns(tx, team, threadId, [...queued].reverse());
+      held.resolve();
+      await release.promise;
+    });
+    await held.promise;
+    // What a foreign-key check on a run takes (e.g. inserting one of its child rows).
+    const keyShare = await Promise.allSettled([
+      withAppendTx(fx.db, team, async (tx) => {
+        await tx.execute(sql`SELECT set_config('lock_timeout', '200ms', true)`);
+        await tx.execute(sql`
+          SELECT 1 FROM runs WHERE team_id = ${team} AND id = ${must(queued[0], "run")} FOR KEY SHARE`);
+      }),
+    ]);
+    release.resolve();
+    await reorder;
+    expect(why(must(keyShare[0], "key share"))).toBe("fulfilled");
   });
 });

@@ -204,9 +204,12 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
    */
   async #createWithRetry(req: ApprovalRequest, canonical: string) {
     for (let attempt = 1; ; attempt += 1) {
+      // Throttle takes of this attempt's audit rows: given back if the transaction rolls back.
+      const taken: (() => void)[] = [];
       try {
-        return await this.#create(req, canonical);
+        return await this.#create(req, canonical, taken);
       } catch (err) {
+        for (const undo of taken) undo();
         const code = retryableLockConflict(err);
         if (!code || attempt >= CREATE_ATTEMPTS || req.signal.aborted) throw err;
         this.#ctx.log.warn(
@@ -222,6 +225,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
   async #create(
     req: ApprovalRequest,
     canonical: string,
+    taken: (() => void)[],
   ): Promise<
     | { readonly kind: "created"; readonly id: string; readonly expiresAt: Date }
     | { readonly kind: "inactive" | "replay" | "too_many" | "event_cap" | "scheduled" }
@@ -251,11 +255,11 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
       const limit = limits.rows[0];
       // Room for this request, its resolution and the run's terminal event (as the ingest keeps).
       if (!limit || limit.last_seq + 3 > this.#ctx.runMaxEvents) {
-        await this.#reject(tx, req, "run_event_cap");
+        await this.#reject(tx, req, "run_event_cap", taken);
         return { kind: "event_cap" as const };
       }
       if (limit.approvals >= APPROVALS_MAX_PER_RUN) {
-        await this.#reject(tx, req, "too_many_approvals");
+        await this.#reject(tx, req, "too_many_approvals", taken);
         return { kind: "too_many" as const };
       }
       const id = await insertPendingApproval(tx, {
@@ -273,7 +277,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
       });
       if (id === undefined) {
         // A tampering signal: Pi never reuses a tool call id within a run (KOBE-36 blocks repeats).
-        await this.#reject(tx, req, "replayed_tool_call_id");
+        await this.#reject(tx, req, "replayed_tool_call_id", taken);
         return { kind: "replay" as const };
       }
       const event: NewRunEvent = {
@@ -311,14 +315,23 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     });
   }
 
-  /** `approval.rejected` (server), throttled per tool call and reason; last write of `tx`. */
+  /**
+   * `approval.rejected` (server), throttled per tool call and reason; last write of `tx`. The
+   * throttle take is handed to `taken`: if `tx` rolls back, the take is undone, so a retry still
+   * writes the row (KOBE-266).
+   */
   async #reject(
     tx: KobeTx,
     req: ApprovalRequest,
     reason: "replayed_tool_call_id" | "too_many_approvals" | "run_event_cap",
+    taken: (() => void)[],
   ): Promise<void> {
-    const taken = this.#ctx.throttle.take(`${req.teamId}:${req.runId}:${req.toolCallId}:${reason}`);
-    if (!taken.record) return;
+    const reserved = this.#ctx.throttle.reserve(
+      `${req.teamId}:${req.runId}:${req.toolCallId}:${reason}`,
+    );
+    taken.push(reserved.undo);
+    const decision = reserved.decision;
+    if (!decision.record) return;
     await recordAudit(tx, {
       action: "approval.rejected",
       actor: SYSTEM_ACTOR,
@@ -329,7 +342,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
         tool: req.tool,
         reason,
         enforcementPoint: "server",
-        ...(taken.suppressed > 0 ? { suppressed: taken.suppressed } : {}),
+        ...(decision.suppressed > 0 ? { suppressed: decision.suppressed } : {}),
       },
     });
   }
