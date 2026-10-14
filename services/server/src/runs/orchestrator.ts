@@ -6,6 +6,7 @@ import {
   type ActorContext,
   type ApprovalMode,
   type BudgetStopCommand,
+  type CompactThreadResponse,
   type RunOrchestrator,
   type RunSnapshot,
   type RunTransition,
@@ -15,7 +16,7 @@ import {
   type SubmitMessageResult,
   type UpdateQueuedBody,
 } from "@kobe/protocol";
-import { sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { recordAudit } from "../audit/record.js";
@@ -36,6 +37,7 @@ import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
+import { compactThread } from "./compaction.js";
 import {
   budgetStoppedEvent,
   cancelledEvent,
@@ -64,6 +66,7 @@ import {
   runByClientKey,
   getRunRow,
   insertQueuedRun,
+  isMessageRun,
   lockRunRow,
   lockThreadRow,
   principalActive,
@@ -94,6 +97,11 @@ export interface RunTuning {
    * lost its starter (replica crash): the sweep fails it. Above the wire's run.start deadline.
    */
   readonly startDeadlineMs: number;
+  /**
+   * A compaction run still active this long after it started has lost its requester (KOBE-213):
+   * the sweep fails it and aborts it. Above the `thread.compact` command deadline.
+   */
+  readonly compactionDeadlineMs: number;
   /** A thread with queued runs and nothing active for this long is promoted by the sweep. */
   readonly stallMs: number;
   /** Sweep interval (jittered). */
@@ -112,6 +120,7 @@ export const RUN_DEFAULTS: RunTuning = {
   maxQueuedPerThread: 25,
   stopGraceMs: 10_000,
   startDeadlineMs: 150_000,
+  compactionDeadlineMs: 15 * 60_000,
   stallMs: 30_000,
   sweepMs: 15_000,
   advanceAttempts: 4,
@@ -156,6 +165,11 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   reorderQueue(actor: ActorContext, threadId: string, runIds: readonly string[]): Promise<void>;
   /** The owner holds the queue until resumed or a new message (CE10); no-op with nothing queued. */
   pauseQueue(actor: ActorContext, threadId: string): Promise<void>;
+  /**
+   * Compact now (KOBE-213): a compaction run on the owner's idle thread, answered once Pi did it.
+   * Throws `CompactionError` (a code of the compact contract) or `RunError` (404/403/trash).
+   */
+  compact(actor: ActorContext, threadId: string, focus?: string): Promise<CompactThreadResponse>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
@@ -204,6 +218,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   readonly #agents: RunAgentResolver;
   readonly #budget: RunBudgetGate;
   readonly #tuning: RunTuning;
+  readonly #modelTokenDefaults: ModelTokenDefaults;
   readonly #log: Logger;
   readonly #tasks = new Set<Promise<unknown>>();
   #listeners: readonly RunTransitionListener[] = [];
@@ -219,13 +234,14 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     this.#agents = options.agents ?? PASS_THROUGH_AGENTS;
     this.#budget = options.budget ?? NO_BUDGETS;
     this.#tuning = { ...RUN_DEFAULTS, ...options.tuning };
+    this.#modelTokenDefaults = options.modelTokenDefaults ?? MODEL_TOKEN_DEFAULTS;
     this.#log = options.log ?? rootLogger.child({ component: "runs" });
     this.#dispatch = new RunDispatcher({
       db: this.#db,
       router: this.#router,
       agents: this.#agents,
       tuning: this.#tuning,
-      modelTokenDefaults: options.modelTokenDefaults ?? MODEL_TOKEN_DEFAULTS,
+      modelTokenDefaults: this.#modelTokenDefaults,
       log: this.#log,
       closed: () => this.#closed,
       emit: (teamId, transitions) => this.#emit(teamId, transitions),
@@ -404,7 +420,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       await this.#assertMayRun(tx, actor, false);
       return found.run;
     });
-    if (!isActiveRunStatus(run.status)) {
+    // A compaction (KOBE-213) has no turn to steer.
+    if (!isActiveRunStatus(run.status) || !isMessageRun(run)) {
       throw new RunError("invalid_transition", `A ${run.status} run can't be steered.`);
     }
     const outcome = await this.#router.steerRun(this.#target(actor.team_id, actor.user_id), {
@@ -455,9 +472,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       );
       // Durable: if this replica dies before Pi is told, the sweep sends the abort.
       if (wasActive) await requestStop(tx, teamId, runId, "abort");
-      // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not.
+      // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not, nor
+      // does stopping a compaction (KOBE-213): messages sent meanwhile were not stopped.
       const left = await queuedCount(tx, teamId, thread.id);
-      const queuePaused = wasActive && left > 0;
+      const queuePaused = wasActive && left > 0 && isMessageRun(run);
       if (queuePaused) await setQueuePaused(tx, teamId, thread.id, true);
       // Deleting the last queued message leaves nothing to pause.
       if (!wasActive && left === 0) await setQueuePaused(tx, teamId, thread.id, false);
@@ -627,7 +645,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       return threadRunRows(tx, actor.team_id, threadId);
     });
     if (!rows) throw new RunError("thread_not_found");
-    return rows.map(toSnapshot);
+    // A compaction in progress is not a turn (KOBE-213): the thread's status shows it.
+    return rows.filter(isMessageRun).map(toSnapshot);
   }
 
   /**
@@ -650,6 +669,30 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         (await queuedCount(tx, actor.team_id, threadId)) > 0
       );
     });
+  }
+
+  async compact(
+    actor: ActorContext,
+    threadId: string,
+    focus?: string,
+  ): Promise<CompactThreadResponse> {
+    if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
+    return compactThread(
+      {
+        db: this.#db,
+        router: this.#router,
+        agents: this.#agents,
+        modelTokenDefaults: this.#modelTokenDefaults,
+        log: this.#log,
+        threadTx: (a, fn) => this.#threadTx(a, fn),
+        assertMayRun: (tx, a) => this.#assertMayRun(tx, a),
+        ended: (teamId, runId, id) => this.onRunEnded({ teamId, runId, threadId: id }),
+        abort: (target) => this.#track(this.#dispatch.sendStop(target, "abort")),
+      },
+      actor,
+      threadId,
+      focus,
+    );
   }
 
   // ------------------------------------------------------------------------- internal entry points
@@ -675,6 +718,25 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           const thread = await lockThreadRow(tx, teamId, c.thread_id);
           const run = await lockRunRow(tx, teamId, c.id);
           if (!thread || !run || isTerminalRunStatus(run.status)) return undefined;
+          if (!isMessageRun(run)) {
+            // A compaction has no step to finish (KOBE-213): it ends now and Pi aborts it.
+            const applied = await applyTransition(
+              tx,
+              thread,
+              run,
+              "budget_stopped",
+              "budget_exhausted",
+              budgetStoppedEvent(command.scope),
+            );
+            await requestStop(tx, teamId, run.id, "abort");
+            await recordAudit(tx, {
+              action: "run.budget_stopped",
+              actor: SYSTEM_ACTOR,
+              teamId,
+              target: { runId: run.id, threadId: thread.id, scope: command.scope },
+            });
+            return { transition: applied.transition, active: false, abort: true };
+          }
           if (run.status === "queued") {
             const applied = await applyTransition(
               tx,
@@ -684,7 +746,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
               "budget_exhausted",
               budgetStoppedEvent(command.scope),
             );
-            return { transition: applied.transition, active: false };
+            return { transition: applied.transition, active: false, abort: false };
           }
           // Already budget-stopping (the sweep re-sends its stop), or the user's own Stop is
           // pending (an abort is never downgraded to after-step): nothing to add (KOBE-42 review).
@@ -705,7 +767,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
                   .transition
               : undefined;
           await auditExpiredApprovals(tx, teamId, expired);
-          return { transition: resumed, active: true };
+          return { transition: resumed, active: true, abort: false };
         }),
       ).catch((err: unknown) => {
         // Keep stopping the others; the caller learns that some could not be stopped.
@@ -716,6 +778,16 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (!outcome) continue;
       affected.push(c.id);
       if (outcome.transition) this.#emit(teamId, [outcome.transition]);
+      if (outcome.abort) {
+        this.#track(
+          this.#dispatch.stopThenAdvance({
+            teamId,
+            runId: c.id,
+            threadId: c.thread_id,
+            ownerUserId: c.owner_user_id,
+          }),
+        );
+      }
       if (outcome.active) {
         this.#track(
           this.#dispatch.budgetStopActive(
@@ -827,6 +899,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     };
     for (const lost of result.lostStarts) {
       await each("lost start", lost.runId, () => this.#dispatch.recoverStart(lost));
+    }
+    for (const stale of result.staleCompactions) {
+      await each("stale compaction", stale.runId, () => this.#dispatch.failStaleCompaction(stale));
     }
     for (const stop of result.pendingStops) {
       // In the background: a stop waits for the sandbox's answer.

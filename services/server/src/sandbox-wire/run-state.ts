@@ -5,12 +5,13 @@ import {
   type RunTransitionCause,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx, type RunKind } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
+import { failureInfo } from "../runs/failure-codes.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -97,9 +98,10 @@ export async function endRunInTx(
   tx: KobeTx,
   teamId: string,
   runId: string,
-  end: RunEnd,
+  requested: RunEnd,
   interruptCause?: InterruptCause,
 ): Promise<{ ended: boolean; threadId?: string }> {
+  let end = requested;
   const head = await tx.execute<{ thread_id: string }>(sql`
     SELECT thread_id FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
   const threadId = head.rows[0]?.thread_id;
@@ -111,12 +113,18 @@ export async function endRunInTx(
     status: RunStatus;
     budget_stop_scope: string | null;
     trigger: "user" | "schedule";
+    kind: RunKind;
   }>(sql`
-    SELECT status, budget_stop_scope, trigger FROM runs
+    SELECT status, budget_stop_scope, trigger, kind FROM runs
      WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
   const from = run.rows[0]?.status;
   const threadRow = thread.rows[0];
   if (from === undefined || threadRow === undefined) return { ended: false };
+  // A compaction (KOBE-213) is never retried: a lost one fails, and the thread goes back to idle
+  // instead of waiting on Retry. Pi keeps its session; a summary it still wrote is mirrored later.
+  if (run.rows[0]?.kind === "compaction" && end.status === "interrupted") {
+    end = { status: "failed", error: failureInfo("compaction_interrupted", "start_failed") };
+  }
   // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped,
   // and so does a run whose next model call the gateway's budget gate refused before the stop
   // reached Pi (`model_budget_exhausted`). Any other failure keeps its own code.
@@ -174,7 +182,16 @@ export async function endRunInTx(
       target: { runId, threadId, scope: budgetScope },
     });
   }
-  if (end.status === "interrupted") {
+  // A compaction ended by its sandbox going away (KOBE-213) is audited as one too.
+  if (requested.status === "interrupted" && run.rows[0]?.kind === "compaction") {
+    await recordAudit(tx, {
+      action: "thread.compacted",
+      actor: SYSTEM_ACTOR,
+      teamId,
+      target: { threadId, runId, outcome: "interrupted" },
+    });
+  }
+  if (requested.status === "interrupted") {
     await recordAudit(tx, {
       action: "run.interrupted",
       actor: SYSTEM_ACTOR,
@@ -192,11 +209,29 @@ function expiryCauseOfEnd(to: RunStatus) {
   return "run_interrupted" as const;
 }
 
+/**
+ * The run is an active message run of this thread (KOBE-213): what a tool frame may name. Read
+ * from the database, so a compaction is refused even if a lease's in-memory flag were wrong.
+ */
+export async function isActiveMessageRun(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  threadId: string,
+): Promise<boolean> {
+  const res = await tx.execute<{ ok: boolean }>(sql`
+    SELECT kind = 'message' AND status IN ('running', 'waiting_approval') AS ok
+      FROM runs WHERE team_id = ${teamId} AND id = ${runId} AND thread_id = ${threadId}`);
+  return res.rows[0]?.ok === true;
+}
+
 export interface LeasedRun {
   readonly runId: string;
   readonly threadId: string;
   readonly status: RunStatus;
   readonly sandboxSeq: number;
+  /** A compaction (KOBE-213) is never resumed on a new connection: its command died with the old. */
+  readonly kind: RunKind;
 }
 
 /** Runs leased to the (team, user) sandbox that are still active. */
@@ -210,8 +245,9 @@ export async function activeLeasedRuns(
     thread_id: string;
     status: RunStatus;
     sandbox_seq: number;
+    kind: RunKind;
   }>(sql`
-    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq
+    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq, r.kind
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
      WHERE l.team_id = ${teamId} AND l.user_id = ${userId}
@@ -221,5 +257,6 @@ export async function activeLeasedRuns(
     threadId: r.thread_id,
     status: r.status,
     sandboxSeq: r.sandbox_seq,
+    kind: r.kind,
   }));
 }

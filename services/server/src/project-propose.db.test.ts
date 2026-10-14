@@ -76,6 +76,18 @@ interface World {
   slug?: string;
 }
 
+/**
+ * KOBE-213: the run becomes a compaction in the database only (this connection's lease still says
+ * a message run), so the refusal below can only come from the store's own database check.
+ */
+const asCompaction = (team: string, runId: string) =>
+  fx.admin.query(
+    `UPDATE runs SET kind = 'compaction', input = '', parent_entry_id = NULL, user_entry_id = NULL,
+            client_key = NULL, retry_of_run_id = NULL
+      WHERE team_id = $1 AND id = $2`,
+    [team, runId],
+  );
+
 async function world(): Promise<World> {
   const owner = await fx.person(`m${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`prj-${randomBytes(3).toString("hex")}`, owner);
@@ -345,6 +357,18 @@ describe("project.file_propose (ac-2)", () => {
     expect(await refusals(w.team)).toEqual(["not_allowed", "input_mismatch"]);
     expect(await approvals(w.team)).toEqual([]);
     expect(await fileRows(w.team)).toEqual([]);
+  });
+
+  it("is refused for a compaction run, from the database (KOBE-213)", async () => {
+    const w = await world();
+    await inProject(w);
+    const sb = await started(w);
+    const ref = await pushed(w, "notes/spec.md", "x");
+    await check(sb, w, "k0", input);
+    await asCompaction(w.team, w.runId);
+    expect(errorCode(await propose(sb, w, "k0", input, ref))).toBe("not_allowed");
+    expect(await refusals(w.team)).toEqual(["run_not_active"]);
+    expect(await approvals(w.team)).toEqual([]);
   });
 
   it("is refused without the projects capability", async () => {

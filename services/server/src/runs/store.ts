@@ -10,7 +10,7 @@ import {
   type RunTrigger,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { readBudgetStopScope, sql, type AgentScope, type KobeTx } from "@kobe/db";
+import { readBudgetStopScope, sql, type AgentScope, type KobeTx, type RunKind } from "@kobe/db";
 import {
   auditExpiredApprovals,
   expireRunApprovalsInTx,
@@ -36,6 +36,8 @@ export interface RunRow {
   readonly threadId: string;
   readonly status: RunStatus;
   readonly trigger: RunTrigger;
+  /** `message`, or `compaction` (KOBE-213): never queued, retried or shown as a chat turn. */
+  readonly kind: RunKind;
   readonly queuePos: number | null;
   readonly retryOfRunId: string | null;
   readonly userEntryId: string | null;
@@ -55,6 +57,7 @@ type RawRun = {
   thread_id: string;
   status: RunStatus;
   trigger: RunTrigger;
+  kind: RunKind;
   queue_pos: number | null;
   retry_of_run_id: string | null;
   user_entry_id: string | null;
@@ -78,6 +81,7 @@ function fromRaw(r: RawRun): RunRow {
     threadId: r.thread_id,
     status: r.status,
     trigger: r.trigger,
+    kind: r.kind,
     queuePos: r.queue_pos,
     retryOfRunId: r.retry_of_run_id,
     userEntryId: r.user_entry_id,
@@ -97,7 +101,7 @@ function fromRaw(r: RawRun): RunRow {
  * thread's queued runs).
  */
 const RUN_SELECT = sql`
-  SELECT r.id, r.team_id, r.thread_id, r.status, r.trigger, r.queue_pos, r.retry_of_run_id,
+  SELECT r.id, r.team_id, r.thread_id, r.status, r.trigger, r.kind, r.queue_pos, r.retry_of_run_id,
          r.user_entry_id, r.approval_mode, r.input, r.parent_entry_id, r.budget_stop_scope,
          r.started_at, r.ended_at,
          CASE WHEN r.status = 'queued' THEN (
@@ -106,6 +110,9 @@ const RUN_SELECT = sql`
               AND (q.retry_of_run_id IS NULL, q.queue_pos) <= (r.retry_of_run_id IS NULL, r.queue_pos)
          ) END AS queue_rank
     FROM runs r`;
+
+/** A chat turn (KOBE-213): what the run list, pending messages, Retry and markers show. */
+export const isMessageRun = (run: Pick<RunRow, "kind">): boolean => run.kind === "message";
 
 export function toSnapshot(run: RunRow): RunSnapshot {
   return {
@@ -145,7 +152,11 @@ export async function lockRunRow(
   return getRunRow(tx, teamId, runId);
 }
 
-/** The thread's active run (if any), then its queued runs in start order. */
+/**
+ * The thread's active run (if any), then its queued runs in start order. The active run may be a
+ * compaction (KOBE-213): it holds the thread like any run; callers that list chat turns filter
+ * with `isMessageRun`.
+ */
 export async function threadRunRows(
   tx: KobeTx,
   teamId: string,
@@ -165,11 +176,12 @@ export async function retryCandidates(
   threadId: string,
 ): Promise<{ run_id: string; status: RunStatus; retry_of_run_id?: string }[]> {
   // Runs that ended without ever starting (a deleted or failed queued message) are not "ended
-  // runs" for Retry: they never ran, so they can't hide an interrupted run from it.
+  // runs" for Retry: they never ran, so they can't hide an interrupted run from it. Nor are
+  // compactions (KOBE-213): they are not turns, and are never retried.
   const res = await tx.execute<{ id: string; status: RunStatus; retry_of_run_id: string | null }>(
     sql`
     SELECT id, status, retry_of_run_id FROM runs
-     WHERE team_id = ${teamId} AND thread_id = ${threadId}
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND kind = 'message'
        AND (started_at IS NOT NULL OR status = 'queued')
      ORDER BY created_at, id`,
   );
@@ -553,6 +565,7 @@ export async function latestInterruptedRow(
 ): Promise<RunRow | undefined> {
   const res = await tx.execute<RawRun>(sql`${RUN_SELECT}
      WHERE r.team_id = ${teamId} AND r.thread_id = ${threadId} AND r.status = 'interrupted'
+       AND r.kind = 'message'
        AND EXISTS (SELECT 1 FROM threads t
                     WHERE t.team_id = r.team_id AND t.id = r.thread_id AND t.status = 'interrupted')
      ORDER BY r.ended_at DESC, r.created_at DESC LIMIT 1`);

@@ -15,7 +15,9 @@ import {
   requestStop,
   type AppliedTransition,
 } from "./store.js";
-import type { LostStart, PendingStop } from "./sweeper.js";
+import type { LostStart, PendingStop, StaleCompaction } from "./sweeper.js";
+import { endRunInTx } from "../sandbox-wire/run-state.js";
+import { failureInfo } from "./failure-codes.js";
 
 /** Timings the dispatcher uses (a subset of `RunTuning`). */
 export interface DispatchTuning {
@@ -211,10 +213,11 @@ export class RunDispatcher {
         SELECT 1 FROM sandbox_run_leases WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
         UNION ALL
         SELECT 1 FROM sandbox_commands
-         WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId} AND kind = 'run.start'
-           AND status IN ('pending', 'delivered')`);
+         WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
+           AND kind IN ('run.start', 'thread.compact') AND status IN ('pending', 'delivered')`);
       if (inFlight.rows.length > 0) return undefined;
-      if (recent) {
+      // A compaction (KOBE-213) is never re-sent: its requester has given up; it fails.
+      if (recent && run.kind === "message") {
         const plan = await restartPlanInTx(tx, this.#h.agents, thread, run);
         if (plan) return { plan };
       }
@@ -236,6 +239,35 @@ export class RunDispatcher {
     }
     this.#h.emit(lost.teamId, [out.transition]);
     await this.#h.advance(lost.teamId, lost.threadId);
+  }
+
+  /**
+   * A compaction past its deadline (KOBE-213): nobody will end it any more. It fails, Pi is told
+   * (durably) to abort it if a sandbox still holds it, and the thread's queue moves on.
+   */
+  async failStaleCompaction(stale: StaleCompaction): Promise<void> {
+    const out = await withAppendTx(this.#h.db, stale.teamId, async (tx) => {
+      const { ended } = await endRunInTx(tx, stale.teamId, stale.runId, {
+        status: "failed",
+        error: failureInfo("timeout", "start_failed"),
+      });
+      if (!ended) return { ended, leased: false };
+      const lease = await tx.execute(sql`
+        SELECT 1 FROM sandbox_run_leases WHERE team_id = ${stale.teamId} AND run_id = ${stale.runId}`);
+      const leased = lease.rows.length > 0;
+      if (leased) await requestStop(tx, stale.teamId, stale.runId, "abort");
+      await recordAudit(tx, {
+        action: "thread.compacted",
+        actor: SYSTEM_ACTOR,
+        teamId: stale.teamId,
+        target: { threadId: stale.threadId, runId: stale.runId, outcome: "timed_out" },
+      });
+      return { ended, leased };
+    });
+    if (!out.ended) return;
+    this.#h.log.warn({ run_id: stale.runId }, "failed a compaction run past its deadline");
+    if (out.leased) this.#h.track(this.sendStop(stale, "abort"));
+    await this.#h.advance(stale.teamId, stale.threadId);
   }
 
   /** A stop whose sender died (or that the sandbox didn't answer): send it again, or give up. */

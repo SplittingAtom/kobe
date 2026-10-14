@@ -1,7 +1,10 @@
 -- Compaction runs (KOBE-213, CE15). Expand-only: existing rows (and inserts from a previous
 -- release during the rollout, or after `helm rollback`) get kind 'message', which is what they
--- are; the constant default is metadata-only (no rewrite). The CHECKs are added NOT VALID and then
--- validated, so the scan runs without blocking reads or writes.
+-- are; the constant default is metadata-only (no rewrite). Locking: every statement runs in the
+-- migration's one transaction, so the ACCESS EXCLUSIVE lock of ADD COLUMN is held until commit,
+-- including while the CHECKs validate (NOT VALID then VALIDATE saves nothing here): reads and
+-- writes of `runs` and `sandbox_commands` wait for the scans (bounded by the runner's 10 s
+-- lock_timeout for getting the lock; the scans are short for these tables).
 ALTER TABLE "runs" ADD COLUMN "kind" text DEFAULT 'message' NOT NULL;--> statement-breakpoint
 ALTER TABLE "runs" ADD CONSTRAINT "runs_kind" CHECK ("runs"."kind" IN ('message', 'compaction')) NOT VALID;--> statement-breakpoint
 ALTER TABLE "runs" VALIDATE CONSTRAINT "runs_kind";--> statement-breakpoint

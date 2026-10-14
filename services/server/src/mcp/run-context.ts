@@ -55,6 +55,8 @@ export async function loadActiveRuns(
         JOIN sandbox_run_leases l ON l.team_id = r.team_id AND l.run_id = r.id
        WHERE r.team_id = ${principal.teamId} AND t.team_id = ${principal.teamId}
          AND r.status IN ('running', 'waiting_approval')
+         -- A compaction (KOBE-213) makes no tool calls: no MCP call is attributed to one.
+         AND r.kind = 'message'
          AND t.owner_user_id = ${principal.userId}
          AND l.user_id = ${principal.userId} AND l.sandbox_id = ${principal.sandboxId}
        ORDER BY r.created_at DESC, r.id

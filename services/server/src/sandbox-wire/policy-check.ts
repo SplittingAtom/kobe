@@ -186,6 +186,7 @@ async function buildInput(
   const loaded = await withTeam(deps.db, target.teamId, async (tx) => {
     const res = await tx.execute<{
       status: string;
+      kind: string;
       trigger: "user" | "schedule";
       thread_id: string;
       owner_user_id: string;
@@ -193,7 +194,7 @@ async function buildInput(
       agent_version: number | null;
       project_id: string | null;
     }>(sql`
-      SELECT r.status, r.trigger, r.thread_id, t.owner_user_id, t.agent_id, t.agent_version,
+      SELECT r.status, r.kind, r.trigger, r.thread_id, t.owner_user_id, t.agent_id, t.agent_version,
              t.project_id
         FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
        WHERE r.team_id = ${target.teamId} AND r.id = ${frame.run_id}`);
@@ -213,6 +214,10 @@ async function buildInput(
   }
   if (row.status !== "running" && row.status !== "waiting_approval") {
     return denyReason("run_not_active", "The run has ended.");
+  }
+  // A compaction (KOBE-213) makes no tool calls (the wire refuses them first; second line).
+  if (row.kind !== "message") {
+    return denyReason("run_not_active", "A compaction makes no tool calls.");
   }
   if (!(await accountActive(deps.db, target.userId))) {
     return denyReason("not_a_member", "The account is deactivated.");

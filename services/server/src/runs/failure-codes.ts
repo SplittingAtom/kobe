@@ -51,6 +51,10 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-82: the run has skills, but the workspace's agent is too old to load them.
   skills_unsupported:
     "Your workspace is running an older version that can't load this agent's skills. Ask your admin to upgrade it.",
+  // A compaction run's end (KOBE-213); not a chat turn, so these are seen only in its events.
+  compaction_failed: "The conversation could not be compacted.",
+  nothing_to_compact: "There was nothing to compact.",
+  compaction_interrupted: "The compaction stopped: your workspace was lost before it finished.",
   runtime_tampered:
     "Another process in your workspace changed Pi's private runtime directory, so the run was stopped. Check what is running in your workspace and try again.",
 };

@@ -5,6 +5,7 @@ import type {
   PiBridgeCommand,
   PiExtensionUiRequest,
   PiExtensionUiResponse,
+  PiModelApi,
   PiThreadConfig,
   PolicyDecision,
   PolicyReason,
@@ -77,6 +78,7 @@ export const COMMAND_FAILURES = {
   sandboxLost: "sandbox_lost", // run.start for a run the reconnected sandbox no longer has
   sessionUnavailable: "session_unavailable", // entry sync/restore before run.start failed
   skillsUnsupported: "skills_unsupported", // run.start lists skills, the agent can't load them
+  compactUnsupported: "compact_unsupported", // thread.compact to an agent without it or run tokens
 } as const;
 
 export interface RunStartRequest {
@@ -103,6 +105,23 @@ export interface RunStopRequest {
   readonly threadId: string;
   readonly mode: "abort" | "after_step";
   readonly reason: "user_cancelled" | "budget_exhausted" | "approval_expired";
+}
+
+/**
+ * A compaction run's start (KOBE-213, `thread.compact`): delivered like `run.start` (entry sync or
+ * restore first, lease and run token in the delivery transaction), answered by
+ * `thread.compact_result`. Only to agents announcing `thread_compact` and `run_token`.
+ */
+export interface ThreadCompactRequest {
+  readonly runId: string;
+  readonly threadId: string;
+  readonly focus?: string;
+  readonly model: {
+    readonly alias: string;
+    readonly gateway_model: string;
+    readonly api: PiModelApi;
+  };
+  readonly modelLimits?: { readonly max_output_tokens: number; readonly context_window: number };
 }
 
 export interface PiCommandRequest {
@@ -141,6 +160,12 @@ export interface SandboxRouter {
   piCommand(
     target: SandboxTarget,
     request: PiCommandRequest,
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */
+  compactThread(
+    target: SandboxTarget,
+    request: ThreadCompactRequest,
     options?: SendOptions,
   ): Promise<CommandOutcome>;
   /** True while some replica holds a live (heartbeating) connection of this sandbox. */

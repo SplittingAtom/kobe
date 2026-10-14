@@ -58,7 +58,7 @@ async function runMarkers(tx: KobeTx, teamId: string, threadId: string) {
     SELECT id, status, user_entry_id, parent_entry_id
       FROM runs
      WHERE team_id = ${teamId}::uuid AND thread_id = ${threadId}::uuid
-       AND status IN ('interrupted', 'budget_stopped')
+       AND status IN ('interrupted', 'budget_stopped') AND kind = 'message'
      ORDER BY created_at DESC, id DESC LIMIT ${MAX_MARKERS + 1}`);
   const { rows, truncated } = newest(res.rows);
   return {

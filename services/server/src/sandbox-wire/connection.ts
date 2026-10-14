@@ -10,6 +10,7 @@ import {
   decodeSandboxFrame,
   type ArtifactPutFrame,
   type CommandResultFrame,
+  type ErrorInfo,
   type FileShareFrame,
   type HelloFrame,
   type PiEventFrame,
@@ -39,7 +40,12 @@ import {
 import { putMemory, readMemory, type MemoryRefusal, type MemoryReply } from "../memory/agent.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
-import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
+import {
+  activeLeasedRuns,
+  endRunInTx,
+  isActiveMessageRun,
+  type InterruptCause,
+} from "./run-state.js";
 import { createRunTranslator } from "./translate.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
@@ -55,6 +61,8 @@ interface Lease {
   readonly threadId: string;
   readonly ingest: RunIngest;
   ended: boolean;
+  /** A compaction run (KOBE-213): Pi's compact uses no tools, so no tool frame may name it. */
+  readonly compaction: boolean;
 }
 
 type State = "hello" | "starting" | "ready" | "closed";
@@ -221,13 +229,14 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /** A run.start is about to be delivered here: the run (and its thread) are leased to us. */
-  leaseRun(runId: string, threadId: string, cursor: number): void {
+  leaseRun(runId: string, threadId: string, cursor: number, compaction = false): void {
     const existing = this.#leases.get(runId);
     if (existing && !existing.ended) return;
     this.#threads.add(threadId);
     this.#leases.set(runId, {
       threadId,
       ended: false,
+      compaction,
       ingest: this.#newIngest(runId, threadId, cursor),
     });
   }
@@ -313,6 +322,7 @@ export class SandboxConnection implements RegisteredConnection {
     if (type === "pi.event" || type === "command.result") return raw.length <= max.bulk;
     if (type === "policy.check") return raw.length <= max.policyCheck;
     if (type === "artifact.put") return raw.length <= max.artifactPut;
+    if (type === "thread.compact_result") return raw.length <= max.compactResult;
     return false;
   }
 
@@ -405,6 +415,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "command.result":
         this.#onCommandResult(frame);
         return;
+      case "thread.compact_result":
+        this.#onCompactResult(frame);
+        return;
       case "pi.ui_request":
         this.#onUiRequest(frame);
         return;
@@ -420,6 +433,22 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /** ok | ended (late frame of a run of this connection) | violation (already handled). */
+  /**
+   * `#checkRun` for frames a tool sends (policy checks, artifacts, files, memory, proposals, web
+   * search): a compaction run (KOBE-213) makes no tool calls, so one naming it fails closed, as if
+   * the run had ended, and is logged as a security event.
+   */
+  #checkToolRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
+    const check = this.#checkRun(runId, threadId, frameType);
+    if (check !== "ok" || this.#leases.get(runId)?.compaction !== true) return check;
+    this.log.warn(
+      { run_id: runId, frame_type: frameType, sandbox_id: this.sandboxId, security: true },
+      "tool frame for a compaction run refused",
+    );
+    this.sendError("run_not_active", "a compaction run makes no tool calls", frameType);
+    return "ended";
+  }
+
   #checkRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
     const lease = this.#leases.get(runId);
     if (!lease) {
@@ -473,7 +502,7 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   #onPolicyCheck(frame: PolicyCheckFrame): void {
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "policy.check");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "policy.check");
     if (check === "violation") return;
     if (check === "ended") {
       this.send(
@@ -563,7 +592,7 @@ export class SandboxConnection implements RegisteredConnection {
       );
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "artifact.put");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "artifact.put");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "not_allowed", "The run has ended, so the artifact was not stored.");
@@ -670,7 +699,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce file sharing.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "file.share");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "file.share");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so the file was not shared.");
@@ -760,7 +789,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce web search.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "web_search.query");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "web_search.query");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so the search was not run.");
@@ -788,7 +817,31 @@ export class SandboxConnection implements RegisteredConnection {
       return;
     }
     this.#webSearches += 1;
-    void this.#ctx.webSearch
+    const { teamId } = this.target;
+    void withTeam(this.#ctx.db, teamId, (tx) =>
+      isActiveMessageRun(tx, teamId, frame.run_id, frame.thread_id),
+    )
+      .then((active) => {
+        if (active) return true;
+        // A compaction (KOBE-213) or an ended run, from the database: no search.
+        this.#webSearches -= 1;
+        refuse("run_not_active", "The run is not an active conversation turn; no search.");
+        return false;
+      })
+      .then((go) => (go ? this.#search(frame, answer, fail) : undefined))
+      .catch((err: unknown) => {
+        this.#webSearches -= 1;
+        this.log.error({ err }, "web_search run check failed");
+        fail("search_failed", "The search could not be run. Try again.");
+      });
+  }
+
+  #search(
+    frame: WebSearchQueryFrame,
+    answer: (result: Parameters<SandboxConnection["send"]>[0]) => unknown,
+    fail: (code: string, message: string) => void,
+  ): Promise<void> {
+    return this.#ctx.webSearch
       .search(this.target.teamId, frame.input, {
         runId: frame.run_id,
         toolCallId: frame.tool_call_id,
@@ -860,7 +913,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce memory.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.put");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.put");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so nothing was remembered.");
@@ -941,7 +994,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce projects.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "project.file_propose");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "project.file_propose");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended, so nothing was added.");
@@ -1010,7 +1063,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("capability_missing", "This sandbox did not announce memory.");
       return;
     }
-    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.read");
+    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "memory.read");
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended.");
@@ -1071,6 +1124,36 @@ export class SandboxConnection implements RegisteredConnection {
         : { ok: true, data: frame.data }
       : { ok: false, error: frame.error };
     this.#delivery.settle(issued, outcome);
+  }
+
+  /**
+   * The one answer to a `thread.compact` this connection delivered (KOBE-213), for the same thread.
+   * Anything else (an unknown or duplicate command id, another command's id, another thread) is a
+   * lease violation; a mismatched answer still settles its command, as failed, so nobody waits.
+   */
+  #onCompactResult(frame: Extract<SandboxToServerFrame, { type: "thread.compact_result" }>): void {
+    const issued = this.#delivery.takeIssued(frame.command_id);
+    if (issued === "answered") return;
+    const matches =
+      issued !== undefined &&
+      issued.kind === "row" &&
+      issued.commandKind === "thread.compact" &&
+      issued.threadId === frame.thread_id;
+    if (!matches) {
+      if (issued !== undefined) {
+        this.#delivery.settle(issued, {
+          ok: false,
+          error: { code: "malformed_result", message: "a compaction result for another command" },
+        });
+      }
+      this.#violate("unknown_run", "thread.compact_result");
+      return;
+    }
+    const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;
+    this.#delivery.settle(
+      issued,
+      ok ? { ok: true, data: rest } : { ok: false, error: (rest as { error: ErrorInfo }).error },
+    );
   }
 
   #onUiRequest(frame: Extract<SandboxToServerFrame, { type: "pi.ui_request" }>): void {
@@ -1198,8 +1281,13 @@ export class SandboxConnection implements RegisteredConnection {
     const offered = new Map(hello.runs.map((r) => [r.run_id, r]));
     const { listed, lost, orphans } = await withTeam(ctx.db, teamId, async (tx) => {
       const active = await activeLeasedRuns(tx, teamId, userId);
-      const keep = active.filter((r) => offered.get(r.runId)?.thread_id === r.threadId);
-      const gone = active.filter((r) => offered.get(r.runId)?.thread_id !== r.threadId);
+      // A compaction is never kept (KOBE-213): its `thread.compact` was issued on the old
+      // connection, so no answer can arrive on this one; it ends (failed) and the agent, not
+      // seeing it listed, aborts it. Its thread is released, its queue moves on.
+      const resumable = (r: (typeof active)[number]) =>
+        r.kind === "message" && offered.get(r.runId)?.thread_id === r.threadId;
+      const keep = active.filter(resumable);
+      const gone = active.filter((r) => !resumable(r));
       return {
         listed: keep,
         lost: gone,
@@ -1211,6 +1299,7 @@ export class SandboxConnection implements RegisteredConnection {
       this.#leases.set(run.runId, {
         threadId: run.threadId,
         ended: false,
+        compaction: false, // never kept (above)
         ingest: this.#newIngest(run.runId, run.threadId, run.sandboxSeq),
       });
     }

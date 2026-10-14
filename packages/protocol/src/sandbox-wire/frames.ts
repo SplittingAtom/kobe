@@ -204,7 +204,10 @@ export const commandResultFrameSchema = z.union([
  * Error codes of `thread.compact_result` (KOBE-212). `thread_busy`: the thread has an active run
  * (Pi's `compact` would abort it). `nothing_to_compact`: Pi's "Nothing to compact (session too
  * small)" or "Already compacted". `compaction_failed`: any other Pi `success:false` (message = Pi's
- * error). `model_not_configured`: no gateway model to summarize with.
+ * error). `model_not_configured`: no gateway model to summarize with. `runtime_tampered`
+ * (KOBE-213 review): the agent found Pi's private runtime changed around the compaction and stopped
+ * Pi, as for a run (the server records it as the run's failure; the member sees
+ * `compaction_failed`).
  */
 export const THREAD_COMPACT_WIRE_ERROR_CODES = [
   "thread_busy",
@@ -213,6 +216,7 @@ export const THREAD_COMPACT_WIRE_ERROR_CODES = [
   "model_not_configured",
   "pi_unavailable",
   "internal",
+  "runtime_tampered",
 ] as const;
 
 /**

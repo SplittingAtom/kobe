@@ -6,10 +6,13 @@ import {
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
+  CAPABILITY_THREAD_COMPACT,
   serverToSandboxFrameSchema,
+  threadCompactFrameSchema,
   type PiGetEntriesData,
   type RunStartFrame,
   type ServerToSandboxFrame,
+  type ThreadCompactFrame,
 } from "@kobe/protocol";
 import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
@@ -42,7 +45,8 @@ export interface DeliveryHost {
   hasLease(runId: string): boolean;
   /** The agent advertised this optional feature in `hello.capabilities` (KOBE-82). */
   hasCapability(name: string): boolean;
-  leaseRun(runId: string, threadId: string, cursor: number): void;
+  /** `compaction`: a compaction run's lease (KOBE-213; no tool frames may name it). */
+  leaseRun(runId: string, threadId: string, cursor: number, compaction?: boolean): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
   /** The sandbox has a newer connection: stop and close. */
@@ -332,16 +336,24 @@ export class CommandDelivery {
   }
 
   /** The wire frame for a stored command, with a fresh command id; undefined if invalid. */
-  #frameFor(row: CommandRow, commandId: string): ServerToSandboxFrame | undefined {
+  #frameFor(
+    row: CommandRow,
+    commandId: string,
+  ): ServerToSandboxFrame | Omit<ThreadCompactFrame, "run_token"> | undefined {
     const base = { ...row.frame, v: 1, type: row.kind, command_id: commandId };
     const candidate =
       row.kind === "pi.command"
         ? { ...base, command: { ...(row.frame.command as object), id: commandId } }
         : base;
-    const parsed = serverToSandboxFrameSchema.safeParse(candidate);
+    // A compaction's run token is minted at delivery (KOBE-213): the stored frame has none yet.
+    const parsed =
+      row.kind === "thread.compact"
+        ? threadCompactFrameSchema.omit({ run_token: true }).safeParse(candidate)
+        : serverToSandboxFrameSchema.safeParse(candidate);
     if (!parsed.success) return undefined;
     // The stored frame must be about the row's thread and run (defence in depth).
     const f = parsed.data as { thread_id?: string; run_id?: string };
+    if (row.kind === "thread.compact" && row.runId === null) return undefined;
     if (f.thread_id !== row.threadId) return undefined;
     if (row.runId !== null && f.run_id !== row.runId) return undefined;
     return parsed.data;
@@ -396,7 +408,23 @@ export class CommandDelivery {
       );
       return;
     }
-    if (row.kind === "run.start") {
+    // A compaction summarizes with its run's token: never to an agent that can't take one.
+    if (
+      row.kind === "thread.compact" &&
+      !(
+        ctx.runTokenKey &&
+        this.#host.hasCapability(CAPABILITY_THREAD_COMPACT) &&
+        this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
+      )
+    ) {
+      await this.#failRunStart(
+        row,
+        failure(COMMAND_FAILURES.compactUnsupported, "this sandbox's agent can't compact"),
+      );
+      return;
+    }
+    const starts = row.kind === "run.start" || row.kind === "thread.compact";
+    if (starts) {
       const session = await this.#ensureSession(row.threadId);
       if (!session.ok) {
         await this.#failRunStart(
@@ -414,7 +442,7 @@ export class CommandDelivery {
            AND connection_id = ${this.#host.id} AND closed_at IS NULL
          FOR SHARE`);
       if (current.rowCount !== 1) return "replaced" as const;
-      if (row.kind === "run.start") {
+      if (starts) {
         // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
         // first is seen here (not active → refused); one that commits later finds the lease and
         // its run.stop follows this run.start on the same connection.
@@ -439,6 +467,7 @@ export class CommandDelivery {
         if (leased.rowCount !== 1) return "run_not_active" as const;
         if (!(await markDelivered(tx, teamId, row.id, this.#host.id))) return "gone" as const;
         // Only to agents that can hand it to Pi alone (KOBE-118); older ones keep the legacy path.
+        // A compaction always has one (checked above).
         const runToken =
           ctx.runTokenKey && this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
             ? await mintRunToken(tx, {
@@ -464,8 +493,8 @@ export class CommandDelivery {
       await this.#fail(row, failure("run_not_active", "the run is not active"));
       return;
     }
-    if (row.kind === "run.start" && row.runId !== null) {
-      this.#host.leaseRun(row.runId, row.threadId, claimed.cursor);
+    if (starts && row.runId !== null) {
+      this.#host.leaseRun(row.runId, row.threadId, claimed.cursor, row.kind === "thread.compact");
     }
     this.#host.leaseThread(row.threadId);
     this.#issued.set(commandId, {
@@ -478,9 +507,14 @@ export class CommandDelivery {
     });
     ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
-    let out = claimed.runToken
-      ? ({ ...frame, run_token: claimed.runToken } as typeof frame)
-      : frame;
+    if (row.kind === "thread.compact") {
+      if (claimed.runToken === undefined) throw new Error("compaction delivered without a token");
+      this.#host.send({ ...(frame as ThreadCompactFrame), run_token: claimed.runToken });
+      return;
+    }
+    let out = (
+      claimed.runToken ? { ...frame, run_token: claimed.runToken } : frame
+    ) as ServerToSandboxFrame;
     // Project files: the user's workspace is brought in line with their memberships before the
     // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
     if (row.kind === "run.start") {
@@ -490,18 +524,18 @@ export class CommandDelivery {
     // Memory indexes only reach agents that know the field (KOBE-156).
     if (row.kind === "run.start" && this.#host.hasCapability(CAPABILITY_MEMORY)) {
       const memory = await this.#runMemory(row.threadId);
-      if (memory) out = { ...out, memory } as typeof frame;
+      if (memory) out = { ...out, memory } as ServerToSandboxFrame;
     }
     // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
     // without them rather than failing on an unknown key.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_PROJECTS)) {
       const { project: _project, ...rest } = out as RunStartFrame;
-      out = rest as typeof frame;
+      out = rest as ServerToSandboxFrame;
     }
     // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
       const { mcp: _mcp, ...rest } = out as RunStartFrame;
-      out = rest as typeof frame;
+      out = rest as ServerToSandboxFrame;
     }
     this.#host.send(out);
   }
@@ -536,8 +570,62 @@ export class CommandDelivery {
     if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
   }
 
+  /**
+   * A compaction answered (KOBE-213): Pi appended a `compaction` entry it does not announce, so
+   * the thread's new entries are fetched and mirrored like a settled run's, then the run ends
+   * (its token is revoked by the run end trigger). Pi's error text is logged, never stored.
+   */
+  async #endCompaction(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
+    const { teamId } = this.#host.target;
+    if (!outcome.ok) {
+      const detail = {
+        run_id: runId,
+        code: outcome.error.code,
+        error: outcome.error.message.slice(0, 300),
+      };
+      // A tampered runtime is a security event, logged like a run's (stored as its failure code).
+      if (outcome.error.code === "runtime_tampered") {
+        this.#host.log.warn(
+          { ...detail, sandbox_id: this.#host.sandboxId, security: true },
+          "compaction stopped: Pi's runtime was tampered with",
+        );
+      } else {
+        this.#host.log.info(detail, "compaction failed in the sandbox");
+      }
+    }
+    const entries = outcome.ok ? await this.fetchNewEntries(threadId) : undefined;
+    const end = outcome.ok
+      ? ({ status: "completed" } as const)
+      : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
+    const { ended } = await withAppendTx(this.#ctx.db, teamId, async (tx) => {
+      if (entries !== undefined) {
+        const mirrored = await mirrorEntriesInTx(
+          tx,
+          teamId,
+          threadId,
+          entries,
+          this.#ctx.tuning.threadMaxEntries,
+        );
+        if (mirrored.capped) {
+          this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
+          this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
+        }
+      }
+      return endRunInTx(tx, teamId, runId, end);
+    });
+    this.#host.endLease(runId);
+    if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
+  }
+
   async #record(issued: Extract<IssuedCommand, { kind: "row" }>, outcome: CommandOutcome) {
     const { teamId } = this.#host.target;
+    // The compaction's entry is mirrored and its run ended before its requester hears back; if
+    // that fails the requester still hears back (and ends the run itself).
+    if (issued.commandKind === "thread.compact" && issued.runId !== null) {
+      await this.#endCompaction(issued.runId, issued.threadId, outcome).catch((err: unknown) =>
+        this.#host.log.error({ err, run_id: issued.runId }, "could not end a compaction run"),
+      );
+    }
     await withTeam(this.#ctx.db, teamId, (tx) =>
       completeCommand(tx, this.#ctx.bus, teamId, issued.rowId, outcome, this.#host.id),
     );

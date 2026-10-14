@@ -1,4 +1,5 @@
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
+import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
 import { markersOpenApiPaths, markersOpenApiSchemas } from "./markers.js";
 import { modelsOpenApiPaths, modelsOpenApiSchemas } from "./models.js";
 import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
@@ -25,6 +26,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...runsOpenApiPaths(),
       ...pendingOpenApiPaths(),
       ...markersOpenApiPaths(),
+      ...compactOpenApiPaths(),
       ...approvalsOpenApiPaths(),
       ...usageOpenApiPaths(),
       ...modelsOpenApiPaths(),
@@ -35,6 +37,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...runsOpenApiSchemas(),
         ...pendingOpenApiSchemas(),
         ...markersOpenApiSchemas(),
+        ...compactOpenApiSchemas(),
         ...approvalsOpenApiSchemas(),
         ...usageOpenApiSchemas(),
         ...modelsOpenApiSchemas(),

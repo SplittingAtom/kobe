@@ -85,6 +85,18 @@ interface World {
   readonly token: string;
 }
 
+/**
+ * KOBE-213: the run becomes a compaction in the database only (this connection's lease still says
+ * a message run), so the refusal below can only come from the store's own database check.
+ */
+const asCompaction = (team: string, runId: string) =>
+  fx.admin.query(
+    `UPDATE runs SET kind = 'compaction', input = '', parent_entry_id = NULL, user_entry_id = NULL,
+            client_key = NULL, retry_of_run_id = NULL
+      WHERE team_id = $1 AND id = $2`,
+    [team, runId],
+  );
+
 async function world(): Promise<World> {
   const owner = await fx.person(`m${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`mem-${randomBytes(3).toString("hex")}`, owner);
@@ -350,6 +362,21 @@ describe("memory.put / memory.read: personal memory", () => {
       (await rows(`SELECT 1 FROM memory_doc_versions WHERE team_id = $1`, [w.team])).length,
     ).toBe(1);
     expect(await updates(w)).toHaveLength(1);
+  });
+
+  it("refuses a compaction run from the database, for put and read (KOBE-213)", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const input = { scope: "user", path: "a.md", content: "x" };
+    expect((await check(sb, w, "c1", input)).decision).toBe("allow");
+    expect((await check(sb, w, "rc1", {}, "recall")).decision).toBe("allow");
+    await asCompaction(w.team, w.runId);
+    expect(errorCode(await result(sb, sendPut(sb, w, "c1", input)))).toBe("not_allowed");
+    expect(errorCode(await result(sb, sendRead(sb, w, "rc1", {})))).toBe("not_allowed");
+    expect(await docCount(w.team)).toBe(0);
+    await expect
+      .poll(() => refusals(w.team), AUDIT_POLL)
+      .toEqual(expect.arrayContaining(["put:run_not_active", "read:run_not_active"]));
   });
 
   it("refuses without the capability, an unallowed call, a changed input and an ended run", async () => {
