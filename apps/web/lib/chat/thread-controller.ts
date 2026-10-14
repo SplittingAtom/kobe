@@ -741,17 +741,17 @@ export class ThreadController {
 
   /**
    * Compact now (CE15, KOBE-213): Pi summarizes the older conversation (optional focus); the
-   * thread is then read again, so its `compaction` marker shows the summary. The caller (the
-   * dialog) shows a refusal itself: the server's fixed message per code.
+   * thread is then read again, so its `compaction` marker shows the summary. A refusal (the
+   * server's fixed message per code) is reported like any action's, so it is seen even when the
+   * dialog was closed meanwhile, and the thread is read again (a `thread_busy` means it changed).
    */
   readonly compact = async (focus?: string): Promise<ApiResult<CompactResult>> => {
     const threadId = this.#state.threadId;
     if (threadId === null) return { ok: false, error: NO_THREAD };
     const res = await this.#busy("compact", () => this.#api.compactThread(threadId, focus));
-    if (res.ok) {
-      this.#announce("The conversation was compacted.");
-      await this.refresh();
-    }
+    if (res.ok) this.#announce("The conversation was compacted.");
+    else this.#fail(res.error);
+    await this.refresh();
     return res;
   };
 

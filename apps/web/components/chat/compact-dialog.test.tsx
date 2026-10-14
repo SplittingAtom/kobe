@@ -35,8 +35,8 @@ afterEach(() => {
 });
 
 /** An idle thread with one exchange; `tokens` is its newest call's prompt (red at 85%). */
-function conversation(tokens = 10_000): string {
-  const t = fake.addThread("Report");
+function conversation(tokens = 10_000, title = "Report"): string {
+  const t = fake.addThread(title);
   const question = fake.addEntry(t, null, { role: "user", content: "Sum the numbers" });
   fake.addEntry(t, question, {
     role: "assistant",
@@ -167,5 +167,110 @@ describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
     await screen.findByRole("meter", { name: "Context used" }, WAIT);
     expect(screen.queryByRole("button", { name: "Compact this thread" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  });
+
+  /** A server answer held until `release()`; `answer` is what it then says (default: success). */
+  function hold(t: string, answer?: Response) {
+    let release: () => void = () => undefined;
+    fake.compactGate = new Promise<void>((resolve) => (release = resolve));
+    if (answer) fake.failNext.set(`POST /v1/threads/${t}/compact`, answer);
+    return () => release();
+  }
+  const refusal = (code: keyof typeof COMPACT_THREAD_ERROR_MESSAGES, status: number) =>
+    Response.json({ code, message: COMPACT_THREAD_ERROR_MESSAGES[code] }, { status });
+
+  it("reports a refusal that comes after the dialog was closed, and reopens without it", async () => {
+    const t = conversation();
+    const release = hold(t, refusal("compaction_failed", 502));
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.click(await menuItem());
+    const dialog = await screen.findByRole("dialog", {}, WAIT);
+    await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
+    await within(dialog).findByRole("button", { name: "Compacting…" }, WAIT);
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
+    release();
+    // The thread's error banner says it, though the dialog is gone.
+    expect(
+      await screen.findByText(COMPACT_THREAD_ERROR_MESSAGES.compaction_failed, {}, WAIT),
+    ).toBeTruthy();
+    await user.click(await menuItem());
+    const again = await screen.findByRole("dialog", {}, WAIT);
+    expect(within(again).queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps each thread's dialog to itself: A's progress and focus never reach B", async () => {
+    const a = conversation(10_000, "Alpha");
+    const b = conversation(10_000, "Beta");
+    const release = hold(a);
+    openApp(fake, a);
+    const user = userEvent.setup();
+    await user.click(await menuItem());
+    let dialog = await screen.findByRole("dialog", {}, WAIT);
+    await user.type(within(dialog).getByRole("textbox"), "alpha only");
+    await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
+    await within(dialog).findByRole("button", { name: "Compacting…" }, WAIT);
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    const threads = within(await screen.findByRole("list", { name: "Your threads" }));
+    await user.click(threads.getByRole("button", { name: "Beta" }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${b}`), WAIT);
+    await user.click(await menuItem());
+    dialog = await screen.findByRole("dialog", {}, WAIT);
+    expect((within(dialog).getByRole("textbox") as HTMLInputElement).value).toBe("");
+    expect(within(dialog).getByRole("button", { name: "Compact now" })).toBeTruthy();
+    // A finishes while B's dialog is open: B's stays open and untouched.
+    release();
+    await waitFor(() => expect(compactRequests(a)).toHaveLength(1), WAIT);
+    expect(compactRequests(a)[0]?.body).toEqual({ focus: "alpha only" });
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(compactRequests(b)).toEqual([]);
+  });
+
+  it("reads the thread again after thread_busy, so Compact is no longer offered", async () => {
+    const t = conversation();
+    const release = hold(t, refusal("thread_busy", 409));
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.click(await menuItem());
+    const dialog = await screen.findByRole("dialog", {}, WAIT);
+    await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
+    await within(dialog).findByRole("button", { name: "Compacting…" }, WAIT);
+    // Another tab started a run meanwhile.
+    must(fake.threads.get(t)).status = "running";
+    release();
+    expect((await within(dialog).findByRole("alert", {}, WAIT)).textContent).toBe(
+      COMPACT_THREAD_ERROR_MESSAGES.thread_busy,
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(
+      async () => expect((await menuItem()).getAttribute("aria-disabled")).toBe("true"),
+      WAIT,
+    );
+  });
+
+  it("says why on an interrupted thread: Retry or continue first", async () => {
+    const t = conversation();
+    must(fake.threads.get(t)).status = "interrupted";
+    openApp(fake, t);
+    const item = await waitFor(async () => {
+      const found = await menuItem();
+      expect(found.getAttribute("aria-disabled")).toBe("true");
+      return found;
+    }, WAIT);
+    expect(item.getAttribute("title")).toBe(
+      "Retry the interrupted run, or continue without retry, first.",
+    );
+  });
+
+  it("returns focus to the actions menu's button when the dialog closes", async () => {
+    const t = conversation();
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.click(await menuItem());
+    await screen.findByRole("dialog", {}, WAIT);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Conversation actions");
   });
 });

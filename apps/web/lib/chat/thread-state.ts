@@ -177,6 +177,10 @@ export function compactBlocker(state: ThreadState): string | null {
   if (summary.readOnly === true) return "This conversation is shared with you read-only.";
   if (summary.deletedAt != null) return "Restore the conversation first.";
   if (isBusy(state, "compact")) return "Compacting…";
+  // Waiting on Retry (D14): the server refuses it as busy; say what unblocks it.
+  if (summary.status === "interrupted" || state.interruptedRun !== null) {
+    return "Retry the interrupted run, or continue without retry, first.";
+  }
   const running =
     summary.status !== "idle" || isThreadRunning(state) || state.sending !== undefined;
   if (running) return "Wait for the current run to finish.";

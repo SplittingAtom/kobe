@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
 import { THREAD_COMPACT_FOCUS_MAX_CHARS } from "@kobe/protocol";
 import type { ThreadController } from "../../lib/chat/thread-controller";
@@ -10,23 +10,34 @@ import { Button } from "../ui/button";
  * Compact now (CE15, KOBE-213): asks Pi to summarize the conversation's older part, with an
  * optional one-line focus ("keep the SQL and the final numbers"). Pi writes the summary; the
  * conversation then shows it as a "context compacted" marker. A refusal shows the server's message
- * (one fixed text per code); the dialog stays open while Pi works and can be closed meanwhile.
+ * (one fixed text per code) here and, through the controller, in the thread's error banner, so it
+ * is not lost when the dialog was closed while Pi worked. One dialog per thread (keyed by the
+ * caller): its focus, progress and error never carry over to another thread.
  */
 export function CompactDialog({
   controller,
   open,
   onOpenChange,
+  returnFocus,
 }: {
   readonly controller: Pick<ThreadController, "compact">;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close (the menu item that opened it is gone with its menu). */
+  readonly returnFocus?: (() => HTMLElement | null) | undefined;
 }) {
   const [focus, setFocus] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether the dialog is open now (a refusal arriving after it closed is the banner's alone).
+  const openNow = useRef(open);
+  useEffect(() => {
+    openNow.current = open;
+  }, [open]);
 
+  // A reopened dialog starts without the last refusal (the banner keeps it).
   const change = (next: boolean) => {
-    if (!next) setError(null);
+    setError(null);
     onOpenChange(next);
   };
 
@@ -36,12 +47,11 @@ export function CompactDialog({
     setPending(true);
     setError(null);
     try {
-      const trimmed = focus.trim();
-      const res = await controller.compact(trimmed === "" ? undefined : focus);
+      const res = await controller.compact(focus.trim() || undefined);
       if (res.ok) {
         setFocus("");
         onOpenChange(false);
-      } else {
+      } else if (openNow.current) {
         setError(res.error.message);
       }
     } finally {
@@ -56,6 +66,12 @@ export function CompactDialog({
         <Dialog.Content
           className="bg-background text-foreground fixed top-1/2 left-1/2 z-50 grid w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border p-5 shadow-lg"
           data-compact-dialog
+          onCloseAutoFocus={(e) => {
+            const target = returnFocus?.();
+            if (!target) return;
+            e.preventDefault();
+            target.focus();
+          }}
         >
           <Dialog.Title className="m-0 text-base font-semibold">Compact this thread</Dialog.Title>
           <Dialog.Description className="text-muted-foreground m-0 text-sm">
