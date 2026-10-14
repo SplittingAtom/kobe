@@ -9,35 +9,59 @@ import { useKobeExtras } from "./kobe-runtime";
 
 /** Usage rows land a moment after a run ends (the gateway's flush); read them after this. */
 const USAGE_SETTLE_MS = 1_500;
+/** Reads again (2x, 4x the settle time) while the newest call isn't the ended run's yet. */
+const USAGE_REREADS = 2;
 
-const ThreadUsageContext = createContext<ThreadUsage | null>(null);
+/** A thread usage read and the run whose end it waited for (null: the read on open). */
+export interface ThreadUsageRead {
+  readonly usage: ThreadUsage;
+  readonly afterRun: string | null;
+}
+
+const ThreadUsageContext = createContext<ThreadUsageRead | null>(null);
+
+/** The open thread's latest usage read (the footers; the context gauge, KOBE-211). */
+export function useThreadUsageRead(): ThreadUsageRead | null {
+  return useContext(ThreadUsageContext);
+}
+
+/** After a run ended: its rows may not have landed while the newest call is another run's. */
+function staleAfter(usage: ThreadUsage, ended: string | null): boolean {
+  return ended !== null && usage.latestCall != null && usage.latestCall.runId !== ended;
+}
 
 /**
  * The open thread's usage per run (`GET /v1/threads/{id}/usage`, run_usage), read when the thread
- * opens and again after each run ends, for the answers' footers (CE12, KOBE-208).
+ * opens and again after each run ends, for the answers' footers (CE12, KOBE-208) and the context
+ * gauge (KOBE-211). After a run, a read whose newest call isn't that run's is read again, bounded.
  */
 export function ThreadUsageProvider({ children }: { readonly children: ReactNode }) {
   const extras = useKobeExtras();
   const controller = extras?.controller;
   const threadId = extras?.state.threadId ?? null;
   const ended = extras?.state.live?.terminal ? extras.state.live.runId : null;
-  const [usage, setUsage] = useState<ThreadUsage | null>(null);
+  const [read, setRead] = useState<ThreadUsageRead | null>(null);
   useEffect(() => {
     if (!controller || threadId === null) return;
     let current = true;
-    const read = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = (attempt: number) => {
       void controller.threadUsage()?.then((res) => {
-        if (current && res.ok) setUsage(res.data);
+        if (!current || !res.ok) return;
+        setRead({ usage: res.data, afterRun: ended });
+        if (attempt < USAGE_REREADS && staleAfter(res.data, ended)) {
+          timer = setTimeout(() => read(attempt + 1), USAGE_SETTLE_MS * 2 ** (attempt + 1));
+        }
       });
     };
-    const timer = ended === null ? undefined : setTimeout(read, USAGE_SETTLE_MS);
-    if (ended === null) read();
+    if (ended === null) read(0);
+    else timer = setTimeout(() => read(0), USAGE_SETTLE_MS);
     return () => {
       current = false;
       clearTimeout(timer);
     };
   }, [controller, threadId, ended]);
-  const value = usage !== null && usage.threadId === threadId ? usage : null;
+  const value = read !== null && read.usage.threadId === threadId ? read : null;
   return <ThreadUsageContext.Provider value={value}>{children}</ThreadUsageContext.Provider>;
 }
 
@@ -75,7 +99,7 @@ function clock(iso: string): { readonly short: string; readonly full: string } |
  */
 export function MessageFooter() {
   const meta = useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
-  const usage = useContext(ThreadUsageContext);
+  const usage = useContext(ThreadUsageContext)?.usage ?? null;
   if (meta?.kind !== "assistant" || meta.live || meta.at === undefined) return null;
   const time = clock(meta.at);
   const parts = usageParts(runOf(usage, meta.promptEntryId));

@@ -6,6 +6,7 @@ import { AgentPickerMenu } from "../chat/agent-picker";
 import { DetailToggle } from "../chat/detail";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { ModelPicker } from "../chat/model-picker";
+import { ThreadContextGauge } from "./context-gauge";
 import { FilesButton } from "./rail-state";
 
 /** The thread's agent: the picker while the conversation is new, then its name (and state). */
@@ -32,7 +33,7 @@ export function ContextRow() {
       {canRun && (
         <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
       )}
-      {/* Slot: context gauge (CE14, KOBE-211). */}
+      <ThreadContextGauge />
       <FilesButton />
       <DetailToggle />
       {/* Slot: branch indicator (CE16, KOBE-214/216). */}

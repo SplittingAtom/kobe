@@ -15,6 +15,7 @@ import {
   siteUsage,
   runsUsage,
   teamUsage,
+  threadUsage,
   type Bucket,
   type UsageRange,
   type UsageTotals,
@@ -122,7 +123,7 @@ async function visible(c: Context, fn: () => Promise<Response>): Promise<Respons
 
 /**
  * Usage of one run (`GET /v1/runs/:id/usage`, chat run details) and of a thread
- * (`GET /v1/threads/:id/usage`, per run): whoever may read the run or thread (its owner, project
+ * (`GET /v1/threads/:id/usage`, per run, and the newest call's prompt size): whoever may read the run or thread (its owner, project
  * readers). Attribution to a run relies on the sandbox's advisory `x-kobe-run-id` (KOBE-41).
  */
 export function runUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
@@ -153,11 +154,13 @@ export function threadUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
       const actor = actorOf(c);
       // Visibility: the thread's owner or a project reader (throws thread_not_found otherwise).
       await deps.runs.listThreadRuns(actor, id.data);
-      const usage = await runsUsage(deps.database.db, actor.team_id, { threadId: id.data });
+      const usage = await threadUsage(deps.database.db, actor.team_id, id.data);
       return c.json({
         thread_id: id.data,
-        totals: usage.reduce<UsageTotals>((acc, u) => addTotals(acc, u), EMPTY),
-        runs: usage,
+        totals: usage.runs.reduce<UsageTotals>((acc, u) => addTotals(acc, u), EMPTY),
+        runs: usage.runs,
+        // KOBE-211: the newest call's prompt size, for the context gauge.
+        latest_call: usage.latest_call,
       });
     });
   });

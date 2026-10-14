@@ -1,0 +1,68 @@
+/* The context gauge in bar row two (CE14, KOBE-211). Chat CSS has no preflight: sizes are set here. */
+
+.gauge {
+  --gauge-ok: #2e7d32;
+  --gauge-warn: #b45309;
+  --gauge-full: var(--admin-danger, #a4161a);
+  --gauge-track: var(--admin-border, #d0d0d0);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .gauge {
+    --gauge-ok: #66bb6a;
+    --gauge-warn: #ffa726;
+  }
+}
+
+/* A short horizontal bar; the fill's width is the share of the window used. */
+.meter {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 4.5rem;
+  height: 0.5rem;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--gauge-track);
+  cursor: default;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gauge-ok);
+  transition: width 200ms ease-out;
+}
+
+.meter[data-level="warn"] .fill {
+  background: var(--gauge-warn);
+}
+
+.meter[data-level="full"] .fill {
+  background: var(--gauge-full);
+}
+
+/* No context window in the catalog: the count alone. */
+.tokens {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tooltipLine {
+  display: block;
+  margin-top: 0.25rem;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+}

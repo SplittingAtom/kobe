@@ -284,27 +284,91 @@ export interface RunUsage extends UsageTotals {
   readonly models: readonly string[];
 }
 
+type UsageOf = { readonly runId: string } | { readonly threadId: string };
+
+async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<RunUsage[]> {
+  const filter =
+    "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
+  const res = await tx.execute<Row>(sql`
+    SELECT u.run_id, r.user_entry_id,
+           array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
+      FROM run_usage u
+      LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
+     WHERE u.team_id = ${teamId}::uuid AND ${filter}
+     GROUP BY u.run_id, r.user_entry_id ORDER BY min(u.at)`);
+  return res.rows.map((r) => ({
+    run_id: String(r.run_id),
+    user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
+    models: (r.models as string[] | null) ?? [],
+    ...totalsOf(r),
+  }));
+}
+
 /** Per-run usage of one run, or of every run of a thread (runs without calls are omitted). */
-export async function runsUsage(
+export async function runsUsage(db: KobeDb, teamId: string, of: UsageOf): Promise<RunUsage[]> {
+  return withTeam(db, teamId, (tx) => runsUsageIn(tx, teamId, of));
+}
+
+/**
+ * The prompt size of a thread's newest model call (KOBE-211: the chat's context gauge). The
+ * ledger's counts are disjoint (`input_tokens` excludes cache reads and writes), so the prompt is
+ * input + cache read + cache write.
+ */
+export interface LatestCall {
+  /** The run that made it (the chat compares it with the run it streamed). */
+  readonly run_id: string;
+  /** When the call started. */
+  readonly at: string;
+  /** `<gateway provider>/<model>` as the call named it. */
+  readonly model: string;
+  /** Input tokens not read from or written to a prompt cache. */
+  readonly input_tokens: number;
+  readonly cache_read_tokens: number;
+  readonly cache_write_tokens: number;
+}
+
+/**
+ * The thread's newest `run_usage` row that read any input (a call refused before the provider read
+ * the prompt says nothing about the context's size); null before its first model call. The ledger
+ * has no call kind, so a compaction's summary call counts too: the chat discounts it (KOBE-211).
+ */
+async function latestCallIn(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<LatestCall | null> {
+  const res = await tx.execute<Row>(sql`
+    SELECT u.run_id, u.at, u.model, u.input_tokens, u.cache_read_tokens, u.cache_write_tokens
+      FROM run_usage u
+     WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid
+       AND u.input_tokens + u.cache_read_tokens + u.cache_write_tokens > 0
+     ORDER BY u.at DESC, u.id DESC LIMIT 1`);
+  const r = res.rows[0];
+  if (!r) return null;
+  return {
+    // thread_id implies run_id (check run_usage_thread_needs_run).
+    run_id: String(r.run_id),
+    at: new Date(r.at as string | Date).toISOString(),
+    model: String(r.model),
+    input_tokens: Number(r.input_tokens),
+    cache_read_tokens: Number(r.cache_read_tokens),
+    cache_write_tokens: Number(r.cache_write_tokens),
+  };
+}
+
+export interface ThreadUsage {
+  readonly runs: readonly RunUsage[];
+  readonly latest_call: LatestCall | null;
+}
+
+/** A thread's per-run usage and its newest call, read in one team transaction. */
+export async function threadUsage(
   db: KobeDb,
   teamId: string,
-  of: { readonly runId: string } | { readonly threadId: string },
-): Promise<RunUsage[]> {
-  return withTeam(db, teamId, async (tx) => {
-    const filter =
-      "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
-    const res = await tx.execute<Row>(sql`
-      SELECT u.run_id, r.user_entry_id,
-             array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
-        FROM run_usage u
-        LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
-       WHERE u.team_id = ${teamId}::uuid AND ${filter}
-       GROUP BY u.run_id, r.user_entry_id ORDER BY min(u.at)`);
-    return res.rows.map((r) => ({
-      run_id: String(r.run_id),
-      user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
-      models: (r.models as string[] | null) ?? [],
-      ...totalsOf(r),
-    }));
-  });
+  threadId: string,
+): Promise<ThreadUsage> {
+  return withTeam(db, teamId, async (tx) => ({
+    runs: await runsUsageIn(tx, teamId, { threadId }),
+    latest_call: await latestCallIn(tx, teamId, threadId),
+  }));
 }

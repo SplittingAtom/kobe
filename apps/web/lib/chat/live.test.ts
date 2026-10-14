@@ -206,3 +206,72 @@ describe("applyRunEvents", () => {
     expect(run.tools.tc1?.files).toHaveLength(MAX_ITEMS);
   });
 });
+
+describe("context tokens (KOBE-211)", () => {
+  const committed = (id: string, message: Record<string, unknown>) =>
+    ev("entry.committed", {
+      entry_id: id,
+      parent_id: null,
+      entry_type: "message",
+      payload: { type: "message", id, parentId: null, message } as never,
+    });
+
+  it("follow each assistant message's usage as it commits; the prompt and offloaded entries leave them", () => {
+    seq = 0;
+    const start = ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null });
+    const first = apply(newLiveRun(RUN), [
+      start,
+      committed("u1", { role: "user", content: "hi" }),
+    ]).run;
+    expect(first.contextTokens).toBeUndefined();
+    const second = apply(first, [
+      committed("a1", { role: "assistant", content: [], usage: { input: 900, cacheRead: 99_100 } }),
+    ]).run;
+    expect(second.contextTokens).toBe(100_000);
+    const third = apply(second, [
+      ev("entry.committed", { entry_id: "a2", parent_id: "a1", entry_type: "message" }),
+      committed("t1", { role: "toolResult", content: [] }),
+    ]).run;
+    expect(third.contextTokens).toBe(100_000);
+    const fourth = apply(third, [
+      committed("a3", {
+        role: "assistant",
+        content: [],
+        usage: { input: 5_000, cacheRead: 100_000 },
+      }),
+    ]).run;
+    expect(fourth.contextTokens).toBe(105_000);
+  });
+
+  it("count cache writes, and become unknown after a compaction until the next message", () => {
+    seq = 0;
+    const start = ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null });
+    const written = apply(newLiveRun(RUN), [
+      start,
+      // Anthropic via Pi: the prompt written to the cache is neither input nor cache read.
+      committed("a1", {
+        role: "assistant",
+        content: [],
+        usage: { input: 3, cacheRead: 0, cacheWrite: 180_000 },
+      }),
+    ]).run;
+    expect(written.contextTokens).toBe(180_003);
+    const compacted = apply(written, [
+      ev("entry.committed", {
+        entry_id: "c1",
+        parent_id: "a1",
+        entry_type: "compaction",
+        payload: { type: "compaction", id: "c1", summary: "…", tokensBefore: 180_003 } as never,
+      }),
+    ]).run;
+    expect(compacted.contextTokens).toBeNull();
+    const next = apply(compacted, [
+      committed("a2", {
+        role: "assistant",
+        content: [],
+        usage: { input: 20_000, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ]).run;
+    expect(next.contextTokens).toBe(20_000);
+  });
+});

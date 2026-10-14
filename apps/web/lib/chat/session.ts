@@ -36,6 +36,8 @@ interface Held {
 const TITLE_MAX = 80;
 /** How long the team's model list is reused by the chat's model picker. */
 export const MODELS_TTL_MS = 30_000;
+/** A fresh read this recent answers another fresh request. */
+const MODELS_FRESH_SHARE_MS = 1_000;
 
 /** A thread's first title: the first line of its first message, shortened. */
 export function titleFrom(text: string): string | undefined {
@@ -88,7 +90,13 @@ export class ChatSession {
   #agents:
     | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
     | undefined;
-  #models: { readonly at: number; readonly result: Promise<ApiResult<TeamModels>> } | undefined;
+  #models:
+    | {
+        readonly at: number;
+        readonly fresh: boolean;
+        readonly result: Promise<ApiResult<TeamModels>>;
+      }
+    | undefined;
 
   constructor(options: ChatSessionOptions) {
     this.teamId = options.teamId;
@@ -248,11 +256,14 @@ export class ChatSession {
    */
   models(options: { readonly fresh?: boolean } = {}): Promise<ApiResult<TeamModels>> {
     const now = Date.now();
-    if (!options.fresh && this.#models && now - this.#models.at < MODELS_TTL_MS) {
-      return this.#models.result;
+    const cached = this.#models;
+    if (!options.fresh && cached && now - cached.at < MODELS_TTL_MS) return cached.result;
+    // Several readers asking fresh at once (the picker and the context gauge) share one read.
+    if (options.fresh && cached?.fresh && now - cached.at < MODELS_FRESH_SHARE_MS) {
+      return cached.result;
     }
     const result = this.api.listModels();
-    this.#models = { at: now, result };
+    this.#models = { at: now, fresh: options.fresh === true, result };
     return result;
   }
 

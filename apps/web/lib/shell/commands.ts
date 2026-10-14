@@ -16,6 +16,7 @@ import {
   CornerDownRightIcon,
   DownloadIcon,
   EllipsisVerticalIcon,
+  FoldVerticalIcon,
   FolderIcon,
   FolderKanbanIcon,
   GripVerticalIcon,
@@ -137,6 +138,9 @@ const LIST = [
     scope: "bar",
     shortcut: "Mod+Shift+D",
   },
+  // Beside the context gauge at red (CE14/15), only then: Compact now, bound by B9 (KOBE-213).
+  // It acts on the conversation, and the bar's scope lists only icons the bar always shows.
+  { id: "compact-thread", name: "Compact this thread", icon: FoldVerticalIcon, scope: "thread" },
   // Rail.
   {
     id: "new-thread",
