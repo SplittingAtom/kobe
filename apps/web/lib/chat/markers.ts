@@ -30,28 +30,36 @@ export interface RunMarker {
   readonly status: "interrupted" | "budget_stopped";
   readonly userEntryId: string | null;
   readonly parentEntryId: string | null;
-  readonly endedAt: string | null;
 }
 
 /** A decided approval: its outcome only. */
 export interface ApprovalMarker {
   readonly approvalId: string;
   readonly runId: string;
+  /** The run's prompt: tool call ids are only unique within a run. */
+  readonly userEntryId: string | null;
   readonly toolCallId: string;
   readonly status: "allowed" | "denied" | "expired";
   readonly cause: ApprovalResolutionCause | null;
-  readonly decidedAt: string | null;
 }
 
 export interface ThreadMarkers {
   readonly runs: readonly RunMarker[];
   readonly approvals: readonly ApprovalMarker[];
+  /** Older markers were left out (the server returns the newest 500 of each). */
+  readonly truncated?: boolean | undefined;
+}
+
+/** The key an approval's marker is found by: its run's prompt and the tool call. */
+export function approvalKey(promptEntryId: string | undefined | null, toolCallId: string): string {
+  return `${promptEntryId ?? ""}\u0000${toolCallId}`;
 }
 
 /**
  * How many conversation entries a compaction newly folded: those above its first kept entry, down
  * to the first kept entry of an earlier compaction on the same path (Pi had already folded the
- * rest). Undefined when the first kept entry is not an ancestor that is loaded.
+ * rest), or to that compaction itself when its body is offloaded. Undefined when the first kept
+ * entry is not an ancestor that is loaded.
  */
 function foldedCount(
   entry: ThreadEntry,
@@ -73,8 +81,11 @@ function foldedCount(
   while (id !== null && !seen.has(id)) {
     seen.add(id);
     const p = parsed.get(id);
-    if (p?.kind === "compaction") stop = p.firstKeptEntryId;
-    else if (byId.get(id)?.type === "message") count += 1;
+    if (p?.kind === "compaction") {
+      // An earlier compaction whose body is offloaded: where it cut is unknown, so stop here.
+      if (p.firstKeptEntryId === null) break;
+      stop = p.firstKeptEntryId;
+    } else if (byId.get(id)?.type === "message") count += 1;
     if (id === stop) break;
     id = parentOf.get(id) ?? null;
   }

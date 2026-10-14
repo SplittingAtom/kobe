@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { browserSpaced, crushedIconButtons, openApp } from "./testing";
+import { browserSpaced, composer, crushedIconButtons, openApp, streaming } from "./testing";
 
 /**
  * KOBE-209 (CE12, CE16): thin marker rows between messages for what is not a conversation turn:
@@ -74,7 +74,7 @@ function recordedThread() {
   add(u3b, say("Final version."));
   fake.threadMarkers.set(thread, {
     runs: [run("r-2", "interrupted", u2, a3), run("r-3", "budget_stopped", u3b, m1)],
-    approvals: [approval("tc1", "allowed", "user"), approval("tc2", "denied", "user")],
+    approvals: [approval("tc1", "allowed", "user", u1), approval("tc2", "denied", "user", u1)],
   });
   return { thread, a5 };
 }
@@ -85,18 +85,17 @@ function run(id: string, status: string, userEntryId: string, parentEntryId: str
     status,
     user_entry_id: userEntryId,
     parent_entry_id: parentEntryId,
-    ended_at: "2026-10-02T10:00:00.000Z",
   };
 }
 
-function approval(toolCallId: string, status: string, cause: string) {
+function approval(toolCallId: string, status: string, cause: string, userEntryId: string) {
   return {
-    approval_id: `ap-${toolCallId}`,
-    run_id: "r-1",
+    approval_id: `ap-${userEntryId}-${toolCallId}`,
+    run_id: `run-${userEntryId}`,
+    user_entry_id: userEntryId,
     tool_call_id: toolCallId,
     status,
     cause,
-    decided_at: "2026-10-02T10:00:00.000Z",
   };
 }
 
@@ -180,5 +179,91 @@ describe("fork markers (ac-2)", () => {
     expect(marker("fork").textContent).toContain("Version 1 of 2");
     // The budget stop belonged to the other branch.
     expect(document.querySelector('[data-kobe-marker="budget"]')).toBeNull();
+  });
+});
+
+describe("approval and run outcomes (KOBE-209 review)", () => {
+  /** Two runs whose models both named their first tool call "call_0". */
+  function reusedIds(second: { status: string; cause: string }) {
+    const thread = fake.addThread("Reused ids");
+    const u1 = fake.addEntry(thread, null, ask("first"));
+    const a1 = fake.addEntry(thread, u1, call("call_0", "bash"));
+    const r1 = fake.addEntry(thread, a1, result("call_0", "bash", "ok"));
+    const a2 = fake.addEntry(thread, r1, say("One."));
+    const u2 = fake.addEntry(thread, a2, ask("second"));
+    const a3 = fake.addEntry(thread, u2, call("call_0", "send_email"));
+    const r3 = fake.addEntry(thread, a3, result("call_0", "send_email", "no", true));
+    fake.addEntry(thread, r3, say("Two."));
+    fake.threadMarkers.set(thread, {
+      runs: [],
+      approvals: [
+        approval("call_0", "allowed", "user", u1),
+        approval("call_0", second.status, second.cause, u2),
+      ],
+    });
+    return thread;
+  }
+
+  const afterCard = (name: string) =>
+    screen.getByRole("region", { name: `Tool call ${name}` }).nextElementSibling?.textContent;
+
+  it("keys an approval's outcome by its run, not by a tool call id runs reuse", async () => {
+    openApp(fake, reusedIds({ status: "denied", cause: "user" }));
+    await screen.findByText("Two.");
+    await waitFor(() => expect(afterCard("bash")).toBe("Approval granted"));
+    expect(afterCard("send_email")).toBe("Approval denied");
+  });
+
+  it.each([
+    ["ttl", "Approval expired"],
+    ["run_cancelled", "Approval ended: run stopped"],
+    ["run_interrupted", "Approval ended: run interrupted"],
+    ["budget_exhausted", "Approval ended: budget reached"],
+    ["run_failed", "Approval ended: run failed"],
+  ])("labels an approval that ended with cause %s by its cause", async (cause, label) => {
+    openApp(fake, reusedIds({ status: "expired", cause }));
+    await screen.findByText("Two.");
+    await waitFor(() => expect(afterCard("send_email")).toBe(label));
+  });
+
+  const markerReads = (thread: string) =>
+    fake.requests.filter((r) => r.method === "GET" && r.path === `/v1/threads/${thread}/markers`);
+
+  it("reads the outcomes again when an approval is decided during a run, not while streaming", async () => {
+    const thread = fake.addThread("Live");
+    openApp(fake, thread);
+    const user = userEvent.setup();
+    await user.type(await composer(), "file a ticket{Enter}");
+    await waitFor(() => expect(fake.activeRun(thread)).toBeDefined());
+    const runId = must(fake.activeRun(thread)).run_id;
+    await streaming(fake, runId);
+    await waitFor(() => expect(markerReads(thread).length).toBeGreaterThan(0));
+    const before = markerReads(thread).length;
+    fake.agent.toolCall(runId, "tc1", "bash", { command: "ls" }, "m1");
+    fake.agent.delta(runId, "m1", "Working on it", 1);
+    await screen.findByText(/Working on it/);
+    expect(markerReads(thread)).toHaveLength(before);
+    fake.emit(runId, "approval.resolved", {
+      approval_id: "00000000-0000-4000-8000-000900000001",
+      tool_call_id: "tc1",
+      decision: "allowed",
+      cause: "user",
+      remembered: false,
+    });
+    await waitFor(() => expect(markerReads(thread)).toHaveLength(before + 1));
+  });
+
+  it("tries a failed read once more before giving up quietly", async () => {
+    const { thread } = recordedThread();
+    fake.failNext.set(
+      `GET /v1/threads/${thread}/markers`,
+      Response.json({ code: "unavailable", message: "x" }, { status: 503 }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    openApp(fake, thread);
+    await screen.findByText("Final version.");
+    await waitFor(() => expect(markers().map(([kind]) => kind)).toContain("budget"));
+    expect(markerReads(thread)).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

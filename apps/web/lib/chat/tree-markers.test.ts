@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   assistant,
   compaction,
+  entry,
   modelChange,
   resetEntrySeq,
   text,
@@ -134,13 +135,70 @@ describe("projectThread markers", () => {
   });
 });
 
+describe("projectThread markers (KOBE-209 review)", () => {
+  it("never makes an offloaded entry other than a message part of an answer", () => {
+    const offloaded = (id: string, parent: string, type: string) => ({
+      ...entry(id, parent, null, type),
+      payload: {},
+      payloadOffloaded: true,
+    });
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("a")),
+      offloaded("x1", "a1", "branch_summary"),
+      offloaded("x2", "x1", "custom"),
+      offloaded("x3", "x2", "thinking_level_change"),
+      offloaded("x4", "x3", "model_change"),
+      assistant("a2", "x4", text("b")),
+    ];
+    const p = projectThread(entries, "a2");
+    expect(shape(p)).toEqual([
+      ["u1", null, "user"],
+      ["a1", "u1", "assistant"],
+    ]);
+    expect(must(p.items[1]).message.content).toEqual([
+      { type: "text", text: "a" },
+      { type: "text", text: "b" },
+    ]);
+  });
+
+  it("shows the markers of a branch that ends in system entries when the leaf is there", () => {
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("a")),
+      user("u2", "a1", "branch A"),
+      assistant("a2", "u2", text("A")),
+      modelChange("m1", "a1", "deep"),
+    ];
+    // Leaf on the model change: its run was interrupted before Pi wrote anything else.
+    const atChange = projectThread(entries, "m1");
+    expect(atChange.headId).toBe("a1");
+    expect(meta(atChange, "a1")).toMatchObject({ after: [{ kind: "model", model: "deep" }] });
+    // On the other branch, nothing of it shows.
+    expect(meta(projectThread(entries, "a2"), "a1")).not.toHaveProperty("after");
+  });
+
+  it("stops folding at an earlier compaction whose body is offloaded", () => {
+    const earlier = { ...compaction("c0", "a1", "", "u1"), payload: {}, payloadOffloaded: true };
+    const entries = [
+      user("u1", null, "1"),
+      assistant("a1", "u1", text("1")),
+      earlier,
+      user("u2", "c0", "2"),
+      assistant("a2", "u2", text("2")),
+      compaction("c1", "a2", "second", "a2"),
+    ];
+    const p = projectThread(entries, "c1");
+    expect(meta(p, "a2")).toMatchObject({ after: [{ kind: "compaction", folded: 1 }] });
+  });
+});
+
 describe("placeRunMarkers", () => {
   const run = (over: Partial<RunMarker>): RunMarker => ({
     runId: "r1",
     status: "interrupted",
     userEntryId: null,
     parentEntryId: null,
-    endedAt: null,
     ...over,
   });
 

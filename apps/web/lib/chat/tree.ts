@@ -22,6 +22,14 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, type ParsedEntry } from "./entries";
 import { entryMarker, type EntryMarker } from "./markers";
+import {
+  childCarry,
+  innerMarkers,
+  markerPlacer,
+  nodeMarkers,
+  type Carry,
+  type MarkerBook,
+} from "./marker-placement";
 import { entryTime, stepStart, timing, type PartTiming } from "./history";
 import type { SentFile } from "./attachments";
 import { splitAttachedFiles } from "./uploads";
@@ -108,21 +116,11 @@ interface ToolResultInfo {
   readonly isError: boolean;
 }
 
-/** A marker in a node: after its first `at` listed entries; `entry` is its source (deps). */
-interface PlacedMarker {
-  readonly at: number;
-  readonly marker: EntryMarker;
-  readonly entry: ThreadEntry;
-}
-
 interface Node {
   readonly id: string;
   readonly parentId: string | null;
   readonly role: "user" | "assistant";
   readonly entries: ThreadEntry[];
-  /** Markers carried down from a fork or the root to this, the first message under them. */
-  readonly before: readonly PlacedMarker[];
-  readonly markers: PlacedMarker[];
 }
 
 type MessagePart = Exclude<ThreadMessageLike["content"], string>[number];
@@ -153,16 +151,18 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
   const order: string[] = [];
   const nodeOfEntry = new Map<string, string>();
   const lastEntryOfNode = new Map<string, string>();
+  const placer = markerPlacer();
   const create = (
     id: string,
     parentId: string | null,
     role: Node["role"],
     entry: ThreadEntry,
-    before: readonly PlacedMarker[] | null,
+    carry: Carry,
   ) => {
-    nodes.set(id, { id, parentId, role, entries: [entry], before: before ?? [], markers: [] });
+    nodes.set(id, { id, parentId, role, entries: [entry] });
     order.push(id);
     lastEntryOfNode.set(id, entry.entryId);
+    placer.created(id, carry);
     return id;
   };
   const attach = (nodeId: string, entry: ThreadEntry, listed: boolean) => {
@@ -170,25 +170,25 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     if (lastEntryOfNode.get(nodeId) === entry.parentId) lastEntryOfNode.set(nodeId, entry.entryId);
   };
 
-  /** `pending`: markers on the way to the first node below a fork or the root (null elsewhere). */
   type Frame = {
     entry: ThreadEntry;
     parentNode: string | null;
     group: string | null;
-    pending: readonly PlacedMarker[] | null;
+    carry: Carry;
   };
   const stack: Frame[] = (children.get(null) ?? [])
-    .map((entry) => ({ entry, parentNode: null, group: null, pending: [] }))
+    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [] }))
     .reverse();
   while (stack.length > 0) {
-    const { entry, parentNode, group, pending } = stack.pop() as Frame;
+    const { entry, parentNode, group, carry } = stack.pop() as Frame;
     const p = parsed.get(entry.entryId) as ParsedEntry;
+    const kids = children.get(entry.entryId) ?? [];
     let ctx: string | null;
     let openGroup: string | null;
     let childParent: string | null = parentNode;
-    let carry: readonly PlacedMarker[] | null = null;
+    let next: Carry = null;
     if (p.kind === "user") {
-      ctx = create(entry.entryId, group ?? parentNode, "user", entry, pending);
+      ctx = create(entry.entryId, group ?? parentNode, "user", entry, carry);
       openGroup = null;
       childParent = ctx;
     } else if (isAssistantSide(p)) {
@@ -196,58 +196,43 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
         attach(group, entry, true);
         ctx = group;
       } else {
-        ctx = create(entry.entryId, parentNode, "assistant", entry, pending);
+        ctx = create(entry.entryId, parentNode, "assistant", entry, carry);
       }
       openGroup = ctx;
     } else {
       ctx = group ?? parentNode;
       if (ctx !== null) attach(ctx, entry, false);
       openGroup = group;
-      const marker = entryMarker(entry, parsed, parentOf, byId);
-      const node = ctx === null ? undefined : nodes.get(ctx);
-      carry = pending;
-      if (marker && pending !== null) carry = [...pending, { at: 0, marker, entry }];
-      else if (marker && node) node.markers.push({ at: node.entries.length, marker, entry });
+      next = placer.hidden({
+        entry,
+        marker: entryMarker(entry, parsed, parentOf, byId),
+        ctx,
+        listed: ctx === null ? 0 : (nodes.get(ctx)?.entries.length ?? 0),
+        carry,
+        kids: kids.length,
+      });
     }
     if (ctx !== null) nodeOfEntry.set(entry.entryId, ctx);
 
-    const kids = children.get(entry.entryId) ?? [];
     const branches = kids.length > 1 && openGroup !== null;
-    const childPending = kids.length > 1 ? (carry ?? []) : carry;
+    const childrenCarry = childCarry(next, kids.length);
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({
         entry: kids[i] as ThreadEntry,
         parentNode: branches ? openGroup : childParent,
         group: branches ? null : openGroup,
-        pending: childPending,
+        carry: childrenCarry,
       });
     }
   }
-  return { nodes, order, nodeOfEntry, lastEntryOfNode };
+  return { nodes, order, nodeOfEntry, lastEntryOfNode, markers: placer.book() };
 }
 
-const markersOf = (placed: readonly PlacedMarker[]) => placed.map((m) => m.marker);
-
-/** A node's markers by place, and what they were built from (deps). */
-function nodeMarkers(node: Node) {
-  const end = node.entries.length;
-  const before = markersOf(node.before);
-  const after = markersOf(node.markers.filter((m) => node.role === "user" || m.at >= end));
-  return {
-    ...(before.length > 0 ? { before } : {}),
-    ...(after.length > 0 ? { after } : {}),
-    deps: [...node.before, ...node.markers].flatMap((m) => [
-      m.entry,
-      m.marker.kind === "compaction" ? m.marker.folded : undefined,
-    ]),
-  };
-}
-
-/** Markers inside a turn, after its `index`-th listed entry. */
-function innerMarkerParts(node: Node, index: number): MessagePart[] {
-  return node.markers
-    .filter((m) => m.at === index + 1 && m.at < node.entries.length)
-    .map((m) => ({ type: PART_MARKER, data: m.marker }) as MessagePart);
+/** Markers inside a turn, after its `index`-th listed entry, as message parts. */
+function innerMarkerParts(book: MarkerBook, node: Node, index: number): MessagePart[] {
+  return innerMarkers(book, node.id, index, node.entries.length).map(
+    (data) => ({ type: PART_MARKER, data }) as MessagePart,
+  );
 }
 
 function toolCallPart(
@@ -375,7 +360,15 @@ export function projectThread(
       resultEntries.set(p.toolCallId, entry);
     }
   }
-  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
+  const {
+    nodes,
+    order,
+    nodeOfEntry,
+    lastEntryOfNode,
+    markers: book,
+  } = buildNodes(treeEntries, parsed);
+  const markersOf = (node: Node) =>
+    nodeMarkers(book, { id: node.id, role: node.role, listed: node.entries.length }, leafEntryId);
   const tools = live?.run.tools ?? {};
   const history: HistoryContext = {
     resultAt: (call) => {
@@ -404,7 +397,7 @@ export function projectThread(
       const p = parsed.get(first.entryId);
       const split = splitAttachedFiles(p?.kind === "user" ? p.text : "");
       const text = split.text;
-      const { deps: markerDeps, ...markers } = nodeMarkers(node);
+      const { deps: markerDeps, ...markers } = markersOf(node);
       const meta: KobeMessageMeta = {
         kind: "user",
         entryId: first.entryId,
@@ -428,9 +421,9 @@ export function projectThread(
     } else {
       const content = node.entries.flatMap((e, i) => [
         ...entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools, history),
-        ...innerMarkerParts(node, i),
+        ...innerMarkerParts(book, node, i),
       ]);
-      const { deps: markerDeps, ...markers } = nodeMarkers(node);
+      const { deps: markerDeps, ...markers } = markersOf(node);
       const trimmed = node.entries.flatMap((e) => {
         const p = parsed.get(e.entryId);
         return e.payloadTruncated && p?.kind === "toolResult"

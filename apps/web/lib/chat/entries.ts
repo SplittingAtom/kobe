@@ -180,8 +180,9 @@ export function parseEntry(entry: ThreadEntry): ParsedEntry {
   if (skipped) return skipped;
   const system = systemEntry(entry);
   if (system) return system;
-  if (entry.payloadOffloaded) return { kind: "offloaded" };
+  // Only a message's body is an answer part; any other kind stays a hidden entry.
   if (entry.type !== "message") return { kind: "other", type: entry.type };
+  if (entry.payloadOffloaded) return { kind: "offloaded" };
   const message = record(entry.payload.message);
   if (!message) return { kind: "other", type: entry.type };
   switch (message.role) {

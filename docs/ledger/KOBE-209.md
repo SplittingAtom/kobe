@@ -1,6 +1,6 @@
 # KOBE-209: B5: Inline system markers: model change, compaction, fork, interrupted, budget, approval
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #272)
 - **Branch / worktree:** `kobe-209-inline-markers` in `../Kobe-wt209`
 - **Depends on:** KOBE-208 (merged, main cc6b05d0)
 
@@ -42,6 +42,33 @@ status: allowed|denied|expired, cause, decided_at}]}`.
   reached the tree. Order after a message: how its run ended, then entries Pi wrote after it.
 - **Approval marker** sits right after its tool card (keyed by `tool_call_id`).
 - The client reads markers when the thread opens and after each run ends (like the usage footer).
+
+## Review round (security + code review of PR #272)
+
+- Server: approvals are reached by joining the thread's runs (`runs_thread_idx`, then
+  `approvals_tool_call_key`), not through the user's index. EXPLAIN ANALYZE with 5,000 approvals
+  for the user ran two index scans in 0.04 ms. Each approval carries its run's `user_entry_id`.
+  Runs order by `id` as a tie-break. Timestamps are dropped (unused). A `truncated` flag is set
+  past 500. The route is in `openapi.json` and the document test's thread-route list. Tests cover
+  Trash, unshared project threads and truncation.
+- Web, all ten code-review findings fixed (none disputed):
+  - Offloaded entries become answer parts only for `message`.
+  - Approvals are keyed by (prompt entry, tool call id).
+  - Markers are read again when a run ends, an approval is decided (`approval.resolved`) or the
+    runs list reports an interrupted run. They are not read on null transitions, and there is
+    no polling.
+  - A failed read is retried once, then logged with `console.warn`.
+  - Approvals that ended because of their run are labelled by cause; `ttl` stays "Approval
+    expired".
+  - Placement moved to `lib/chat/marker-placement.ts`, which uses immutable maps; nodes no longer
+    hold markers.
+  - A branch that ends in system entries shows its markers after the nearest message above while
+    the leaf is on it.
+  - Folding stops at an earlier offloaded compaction.
+  - The approvals map is memoized on the markers. Run placement is kept by identity while
+    unchanged.
+- Not covered: a thread whose only entries are system entries (no message at all) still shows no
+  markers; there is no message to hang them on.
 
 ## Open questions (for Chris or the coordinator)
 
