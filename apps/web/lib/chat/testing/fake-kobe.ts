@@ -286,6 +286,36 @@ export class FakeKobe {
     return id;
   }
 
+  /**
+   * Adds a Pi entry that is not a message (`model_change`, `compaction`, …) with its own fields
+   * (KOBE-209 markers); the thread's leaf moves to it unless `leaf` is false.
+   */
+  addSystemEntry(
+    threadId: string,
+    parentId: string | null,
+    type: string,
+    fields: Json,
+    opts: { leaf?: boolean } = {},
+  ): string {
+    const thread = this.#thread(threadId);
+    this.#entryN += 1;
+    const id = `e${this.#entryN}`;
+    thread.entries.push({
+      entry_id: id,
+      parent_id: parentId,
+      seq: thread.entries.length + 1,
+      type,
+      payload: { type, id, parentId, timestamp: NOW, ...fields },
+      payload_offloaded: false,
+      created_at: NOW,
+    });
+    if (opts.leaf !== false) thread.leaf_entry_id = id;
+    return id;
+  }
+
+  /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
+  readonly threadMarkers = new Map<string, { runs: Json[]; approvals: Json[] }>();
+
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
@@ -883,6 +913,9 @@ export class FakeKobe {
     if (action === "usage" && method === "GET") {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
       return json(200, { thread_id: thread.thread_id, runs });
+    }
+    if (action === "markers" && method === "GET") {
+      return json(200, this.threadMarkers.get(thread.thread_id) ?? { runs: [], approvals: [] });
     }
     if (action === "share" && method === "POST") {
       if (thread.read_only)

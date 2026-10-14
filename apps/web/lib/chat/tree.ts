@@ -7,8 +7,10 @@
  * - a `user` message entry is a user message (its id is the entry id);
  * - a chain of assistant-side entries (assistant steps, tool results, offloaded bodies) is one
  *   assistant message, id = its first entry; the chain ends where the tree branches;
- * - other entry types (`model_change`, `compaction`, …) are not shown and belong to the message
- *   around them.
+ * - other entry types (`model_change`, `compaction`, …) belong to the message around them; those
+ *   with a marker (KOBE-209) show it in that message where they sit: inside a turn as a part,
+ *   after its last entry as `after`, or, below a fork or the root, as `before` on the first
+ *   message under them (so a marker shows on its own branch only).
  * - a scheduled run's skipped-actions summary (KOBE-178, written by the server under the run's
  *   last entry) is not part of the tree at all: it becomes a card after the nearest shown message
  *   above it (at the end of an answer, or under a prompt the run never answered), so it is never
@@ -19,6 +21,15 @@
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, type ParsedEntry } from "./entries";
+import { entryMarker, type EntryMarker } from "./markers";
+import {
+  childCarry,
+  innerMarkers,
+  markerPlacer,
+  nodeMarkers,
+  type Carry,
+  type MarkerBook,
+} from "./marker-placement";
 import { entryTime, stepStart, timing, type PartTiming } from "./history";
 import type { SentFile } from "./attachments";
 import { splitAttachedFiles } from "./uploads";
@@ -38,6 +49,9 @@ export type KobeMessageMeta =
       readonly attachments?: readonly ChipFile[] | undefined;
       /** Skipped-actions reports of a run that left no answer after this prompt (KOBE-181). */
       readonly skipped?: readonly SkippedReport[] | undefined;
+      /** Markers above the message (below a fork or the root) and after it (KOBE-209). */
+      readonly before?: readonly EntryMarker[] | undefined;
+      readonly after?: readonly EntryMarker[] | undefined;
     }
   | {
       readonly kind: "assistant";
@@ -49,6 +63,8 @@ export type KobeMessageMeta =
       readonly promptEntryId?: string | undefined;
       /** When the answer's last entry was stored (the footer's timestamp). */
       readonly at?: string | undefined;
+      readonly before?: readonly EntryMarker[] | undefined;
+      readonly after?: readonly EntryMarker[] | undefined;
     };
 
 /** A scheduled run's skipped-actions report (KOBE-178), as the card shows it. */
@@ -112,6 +128,7 @@ type MessagePart = Exclude<ThreadMessageLike["content"], string>[number];
 const PREFIX_PROMPT = "prompt:";
 const PREFIX_LIVE = "live:";
 const PREFIX_SKIPPED = "skipped:";
+const PART_MARKER = "data-kobe-marker";
 
 function isAssistantSide(parsed: ParsedEntry): boolean {
   return parsed.kind === "assistant" || parsed.kind === "toolResult" || parsed.kind === "offloaded";
@@ -120,6 +137,8 @@ function isAssistantSide(parsed: ParsedEntry): boolean {
 /** Builds the nodes; iterative so a long thread can't overflow the stack. */
 function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string, ParsedEntry>) {
   const present = new Set(entries.map((e) => e.entryId));
+  const byId = new Map(entries.map((e) => [e.entryId, e] as const));
+  const parentOf = new Map(entries.map((e) => [e.entryId, e.parentId] as const));
   const children = new Map<string | null, ThreadEntry[]>();
   for (const entry of entries) {
     const key = entry.parentId !== null && present.has(entry.parentId) ? entry.parentId : null;
@@ -132,10 +151,18 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
   const order: string[] = [];
   const nodeOfEntry = new Map<string, string>();
   const lastEntryOfNode = new Map<string, string>();
-  const create = (id: string, parentId: string | null, role: Node["role"], entry: ThreadEntry) => {
+  const placer = markerPlacer();
+  const create = (
+    id: string,
+    parentId: string | null,
+    role: Node["role"],
+    entry: ThreadEntry,
+    carry: Carry,
+  ) => {
     nodes.set(id, { id, parentId, role, entries: [entry] });
     order.push(id);
     lastEntryOfNode.set(id, entry.entryId);
+    placer.created(id, carry);
     return id;
   };
   const attach = (nodeId: string, entry: ThreadEntry, listed: boolean) => {
@@ -143,18 +170,25 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     if (lastEntryOfNode.get(nodeId) === entry.parentId) lastEntryOfNode.set(nodeId, entry.entryId);
   };
 
-  type Frame = { entry: ThreadEntry; parentNode: string | null; group: string | null };
+  type Frame = {
+    entry: ThreadEntry;
+    parentNode: string | null;
+    group: string | null;
+    carry: Carry;
+  };
   const stack: Frame[] = (children.get(null) ?? [])
-    .map((entry) => ({ entry, parentNode: null, group: null }))
+    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [] }))
     .reverse();
   while (stack.length > 0) {
-    const { entry, parentNode, group } = stack.pop() as Frame;
+    const { entry, parentNode, group, carry } = stack.pop() as Frame;
     const p = parsed.get(entry.entryId) as ParsedEntry;
+    const kids = children.get(entry.entryId) ?? [];
     let ctx: string | null;
     let openGroup: string | null;
     let childParent: string | null = parentNode;
+    let next: Carry = null;
     if (p.kind === "user") {
-      ctx = create(entry.entryId, group ?? parentNode, "user", entry);
+      ctx = create(entry.entryId, group ?? parentNode, "user", entry, carry);
       openGroup = null;
       childParent = ctx;
     } else if (isAssistantSide(p)) {
@@ -162,27 +196,43 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
         attach(group, entry, true);
         ctx = group;
       } else {
-        ctx = create(entry.entryId, parentNode, "assistant", entry);
+        ctx = create(entry.entryId, parentNode, "assistant", entry, carry);
       }
       openGroup = ctx;
     } else {
       ctx = group ?? parentNode;
       if (ctx !== null) attach(ctx, entry, false);
       openGroup = group;
+      next = placer.hidden({
+        entry,
+        marker: entryMarker(entry, parsed, parentOf, byId),
+        ctx,
+        listed: ctx === null ? 0 : (nodes.get(ctx)?.entries.length ?? 0),
+        carry,
+        kids: kids.length,
+      });
     }
     if (ctx !== null) nodeOfEntry.set(entry.entryId, ctx);
 
-    const kids = children.get(entry.entryId) ?? [];
     const branches = kids.length > 1 && openGroup !== null;
+    const childrenCarry = childCarry(next, kids.length);
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({
         entry: kids[i] as ThreadEntry,
         parentNode: branches ? openGroup : childParent,
         group: branches ? null : openGroup,
+        carry: childrenCarry,
       });
     }
   }
-  return { nodes, order, nodeOfEntry, lastEntryOfNode };
+  return { nodes, order, nodeOfEntry, lastEntryOfNode, markers: placer.book() };
+}
+
+/** Markers inside a turn, after its `index`-th listed entry, as message parts. */
+function innerMarkerParts(book: MarkerBook, node: Node, index: number): MessagePart[] {
+  return innerMarkers(book, node.id, index, node.entries.length).map(
+    (data) => ({ type: PART_MARKER, data }) as MessagePart,
+  );
 }
 
 function toolCallPart(
@@ -310,7 +360,15 @@ export function projectThread(
       resultEntries.set(p.toolCallId, entry);
     }
   }
-  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
+  const {
+    nodes,
+    order,
+    nodeOfEntry,
+    lastEntryOfNode,
+    markers: book,
+  } = buildNodes(treeEntries, parsed);
+  const markersOf = (node: Node) =>
+    nodeMarkers(book, { id: node.id, role: node.role, listed: node.entries.length }, leafEntryId);
   const tools = live?.run.tools ?? {};
   const history: HistoryContext = {
     resultAt: (call) => {
@@ -339,6 +397,7 @@ export function projectThread(
       const p = parsed.get(first.entryId);
       const split = splitAttachedFiles(p?.kind === "user" ? p.text : "");
       const text = split.text;
+      const { deps: markerDeps, ...markers } = markersOf(node);
       const meta: KobeMessageMeta = {
         kind: "user",
         entryId: first.entryId,
@@ -346,6 +405,7 @@ export function projectThread(
         text,
         pending: false,
         ...(split.files.length > 0 ? { attachments: split.files } : {}),
+        ...markers,
       };
       indexOf.set(id, built.length);
       built.push({
@@ -356,12 +416,14 @@ export function projectThread(
           content: [{ type: "text", text }],
           metadata: { custom: meta },
         },
-        deps: [first],
+        deps: [first, ...markerDeps],
       });
     } else {
-      const content = node.entries.flatMap((e) =>
-        entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools, history),
-      );
+      const content = node.entries.flatMap((e, i) => [
+        ...entryParts(e, parsed.get(e.entryId) as ParsedEntry, results, tools, history),
+        ...innerMarkerParts(book, node, i),
+      ]);
+      const { deps: markerDeps, ...markers } = markersOf(node);
       const trimmed = node.entries.flatMap((e) => {
         const p = parsed.get(e.entryId);
         return e.payloadTruncated && p?.kind === "toolResult"
@@ -375,6 +437,7 @@ export function projectThread(
         ...(trimmed.length > 0 ? { fullOutputs: Object.fromEntries(trimmed) } : {}),
         promptEntryId: promptOf(node),
         at: (node.entries.at(-1) as ThreadEntry).createdAt,
+        ...markers,
       };
       indexOf.set(id, built.length);
       built.push({
@@ -386,7 +449,11 @@ export function projectThread(
           status: { type: "complete", reason: "stop" },
           metadata: { custom: meta },
         },
-        deps: [...node.entries, ...toolDeps(node.entries, parsed, resultEntries, tools)],
+        deps: [
+          ...node.entries,
+          ...toolDeps(node.entries, parsed, resultEntries, tools),
+          ...markerDeps,
+        ],
       });
     }
   }

@@ -6,7 +6,7 @@
  * where `role` is `user` (content: string | parts), `assistant` (parts: text / thinking / toolCall,
  * plus `stopReason` and `errorMessage`) or `toolResult` (`toolCallId`, `toolName`, `content`,
  * `isError`). Other entry types (`model_change`, `compaction`, `branch_summary`, …) are not
- * conversation turns. One entry is the server's, not Pi's: a scheduled run's skipped-actions
+ * conversation turns; `model_change` and `compaction` are shown as markers (KOBE-209). One entry is the server's, not Pi's: a scheduled run's skipped-actions
  * summary (KOBE-178), a `custom_message` with `customType` {@link SKIPPED_SUMMARY_TYPE}.
  */
 import type { ThreadEntry } from "./types";
@@ -49,6 +49,18 @@ export type ParsedEntry =
   | { readonly kind: "skipped"; readonly text: string; readonly count: number }
   /** A message whose body is in object storage (D15); its role is unknown here. */
   | { readonly kind: "offloaded" }
+  /** Pi switched the session's model (KOBE-209 marker). */
+  | { readonly kind: "modelChange"; readonly model: string }
+  /**
+   * Pi folded the context before `firstKeptEntryId` into `summary` (KOBE-209 marker); the summary
+   * is empty when the entry's body is in object storage.
+   */
+  | {
+      readonly kind: "compaction";
+      readonly summary: string;
+      readonly firstKeptEntryId: string | null;
+      readonly tokensBefore?: number | undefined;
+    }
   /** Not a conversation turn: kept in the tree, never rendered. */
   | { readonly kind: "other"; readonly type: string };
 
@@ -142,11 +154,35 @@ function skippedSummary(entry: ThreadEntry): ParsedEntry | undefined {
   };
 }
 
+const MAX_MODEL_NAME = 200;
+
+/** Pi's `model_change` (`provider`, `modelId`) and `compaction` (`summary`, `firstKeptEntryId`). */
+function systemEntry(entry: ThreadEntry): ParsedEntry | undefined {
+  const payload = entry.payload;
+  if (entry.type === "compaction") {
+    const tokens = payload.tokensBefore;
+    return {
+      kind: "compaction",
+      summary: (str(payload.summary) ?? "").slice(0, MAX_SUMMARY),
+      firstKeptEntryId: str(payload.firstKeptEntryId) ?? null,
+      ...(typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0
+        ? { tokensBefore: tokens }
+        : {}),
+    };
+  }
+  if (entry.type !== "model_change" || entry.payloadOffloaded) return undefined;
+  const model = str(payload.modelId) ?? "";
+  return model === "" ? undefined : { kind: "modelChange", model: model.slice(0, MAX_MODEL_NAME) };
+}
+
 export function parseEntry(entry: ThreadEntry): ParsedEntry {
   const skipped = skippedSummary(entry);
   if (skipped) return skipped;
-  if (entry.payloadOffloaded) return { kind: "offloaded" };
+  const system = systemEntry(entry);
+  if (system) return system;
+  // Only a message's body is an answer part; any other kind stays a hidden entry.
   if (entry.type !== "message") return { kind: "other", type: entry.type };
+  if (entry.payloadOffloaded) return { kind: "offloaded" };
   const message = record(entry.payload.message);
   if (!message) return { kind: "other", type: entry.type };
   switch (message.role) {

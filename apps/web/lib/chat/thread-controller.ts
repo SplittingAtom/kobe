@@ -103,6 +103,12 @@ export class ThreadController {
     return id === null ? null : this.#api.threadUsage(id);
   };
 
+  /** How this thread's runs ended and its approvals were decided (KOBE-209); null for a draft. */
+  readonly threadMarkers = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadMarkers(id);
+  };
+
   /** A tool output of this thread in full (KOBE-208: a large one, when its card opens). */
   readonly toolOutput = (entryId: string) => {
     const id = this.#state.threadId;
