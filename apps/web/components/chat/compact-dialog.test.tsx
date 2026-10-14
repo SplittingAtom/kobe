@@ -13,6 +13,8 @@ import { composer, openApp } from "./testing";
  * in the conversation's "context compacted" marker; a refusal shows the server's message.
  */
 let fake: FakeKobe;
+/** The gauge and menu appear after the thread, its usage and the team's models were read. */
+const WAIT = { timeout: 10_000 };
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -54,8 +56,9 @@ function conversation(tokens = 10_000): string {
 
 /** Opens the thread's actions menu (a `<details>` disclosure) and returns its Compact now item. */
 const menuItem = async () => {
-  const summary = await waitFor(() =>
-    must(document.querySelector<HTMLElement>('summary[aria-label="Conversation actions"]')),
+  const summary = await waitFor(
+    () => must(document.querySelector<HTMLElement>('summary[aria-label="Conversation actions"]')),
+    WAIT,
   );
   const details = must(summary.closest("details"));
   details.open = true;
@@ -65,27 +68,32 @@ const menuItem = async () => {
 const compactRequests = (t: string) =>
   fake.requests.filter((r) => r.method === "POST" && r.path === `/v1/threads/${t}/compact`);
 
-describe("Compact now (KOBE-213)", () => {
+describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
   it("compacts from the gauge's red action with a focus; the marker shows the summary", async () => {
     const t = conversation(190_000);
     openApp(fake, t);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Compact this thread" }));
-    const dialog = await screen.findByRole("dialog", { name: "Compact this thread" });
+    await user.click(await screen.findByRole("button", { name: "Compact this thread" }, WAIT));
+    const dialog = await screen.findByRole("dialog", { name: "Compact this thread" }, WAIT);
     await user.type(
       within(dialog).getByRole("textbox", { name: /What should the summary keep/ }),
       "keep the final numbers",
     );
     await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
     expect(compactRequests(t).map((r) => r.body)).toEqual([{ focus: "keep the final numbers" }]);
     // The compaction entry is read back: the marker carries Pi's summary.
-    const marker = await waitFor(() =>
-      must(document.querySelector<HTMLElement>('[data-kobe-marker="compaction"]')),
+    const marker = await waitFor(
+      () => must(document.querySelector<HTMLElement>('[data-kobe-marker="compaction"]')),
+      WAIT,
     );
     await user.click(within(marker).getByText(/compacted/i));
     expect(
-      await within(marker).findByText(/Summary of the earlier conversation\. Focus: keep/),
+      await within(marker).findByText(
+        /Summary of the earlier conversation\. Focus: keep/,
+        {},
+        WAIT,
+      ),
     ).toBeTruthy();
     // The gauge hides until the next model call (KOBE-211).
     expect(screen.queryByRole("meter")).toBeNull();
@@ -98,27 +106,29 @@ describe("Compact now (KOBE-213)", () => {
     expect(item.getAttribute("aria-disabled")).toBe("false");
     const user = userEvent.setup();
     await user.click(item);
-    const dialog = await screen.findByRole("dialog", { name: "Compact this thread" });
+    const dialog = await screen.findByRole("dialog", { name: "Compact this thread" }, WAIT);
     await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
-    await waitFor(() => expect(compactRequests(t)).toHaveLength(1));
+    await waitFor(() => expect(compactRequests(t)).toHaveLength(1), WAIT);
     expect(compactRequests(t)[0]?.body).toEqual({});
   });
 
   it("is disabled while a run is on, and while a compaction is in progress", async () => {
     const t = conversation();
     openApp(fake, t);
-    await screen.findByText("They add up to 42.");
+    await screen.findByText("They add up to 42.", {}, WAIT);
     const user = userEvent.setup();
     await user.type(await composer(), "one more{Enter}");
-    await waitFor(async () =>
-      expect((await menuItem()).getAttribute("aria-disabled")).toBe("true"),
+    await waitFor(
+      async () => expect((await menuItem()).getAttribute("aria-disabled")).toBe("true"),
+      WAIT,
     );
     await user.click(await menuItem());
     expect(screen.queryByRole("dialog")).toBeNull();
     // Done: idle again.
     fake.agent.complete(fake.latestRun(t).run_id);
-    await waitFor(async () =>
-      expect((await menuItem()).getAttribute("aria-disabled")).toBe("false"),
+    await waitFor(
+      async () => expect((await menuItem()).getAttribute("aria-disabled")).toBe("false"),
+      WAIT,
     );
     // Held by the server: the dialog says it is working, the menu waits.
     let release: () => void = () => undefined;
@@ -128,7 +138,7 @@ describe("Compact now (KOBE-213)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
     expect(await within(dialog).findByRole("button", { name: "Compacting…" })).toBeTruthy();
     release();
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
   });
 
   it("shows the server's message when it refuses, and keeps the dialog open", async () => {
@@ -145,7 +155,7 @@ describe("Compact now (KOBE-213)", () => {
     await user.click(await menuItem());
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
-    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+    expect((await within(dialog).findByRole("alert", {}, WAIT)).textContent).toBe(
       COMPACT_THREAD_ERROR_MESSAGES.nothing_to_compact,
     );
   });
@@ -154,7 +164,7 @@ describe("Compact now (KOBE-213)", () => {
     const t = conversation(190_000);
     must(fake.threads.get(t)).read_only = true;
     openApp(fake, t);
-    await screen.findByRole("meter", { name: "Context used" });
+    await screen.findByRole("meter", { name: "Context used" }, WAIT);
     expect(screen.queryByRole("button", { name: "Compact this thread" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
   });

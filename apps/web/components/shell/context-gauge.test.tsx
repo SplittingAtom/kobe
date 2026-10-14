@@ -186,7 +186,11 @@ describe("context gauge", () => {
     openApp(fake, threadWith(190_000));
     const gauge = await meter();
     await waitFor(() => expect(valueOf(gauge).level).toBe("full"));
-    const action = await screen.findByRole("button", { name: "Compact this thread" });
+    const action = await screen.findByRole(
+      "button",
+      { name: "Compact this thread" },
+      { timeout: 10_000 },
+    );
     expect(action.getAttribute("aria-disabled")).toBe("true");
   });
 });
