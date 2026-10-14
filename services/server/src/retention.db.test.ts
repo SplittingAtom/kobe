@@ -60,6 +60,8 @@ interface ThreadSpec {
   /** Object keys stored as entry blob refs (and put into the bucket). */
   readonly blobKeys?: readonly string[];
   readonly entries?: number;
+  /** Created as a fork of this thread at entry e1 (KOBE-215: the link is set at INSERT only). */
+  readonly forkOf?: string;
 }
 
 /** A thread with a chain of user/assistant message entries (superuser fixture). */
@@ -73,8 +75,16 @@ async function thread(spec: ThreadSpec): Promise<string> {
     return real;
   });
   await h.admin.query(
-    `INSERT INTO threads (team_id, id, owner_user_id, title) VALUES ($1, $2, $3, $4)`,
-    [teamId, id, spec.owner, spec.title ?? `t-${id.slice(0, 4)}`],
+    `INSERT INTO threads (team_id, id, owner_user_id, title, forked_from_thread_id, forked_at_entry_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      teamId,
+      id,
+      spec.owner,
+      spec.title ?? `t-${id.slice(0, 4)}`,
+      spec.forkOf ?? null,
+      spec.forkOf ? "e1" : null,
+    ],
   );
   let parent: string | null = null;
   const n = spec.entries ?? 2;
@@ -135,15 +145,6 @@ const named = (name: string): string => {
   if (k === undefined) throw new Error(`no blob named ${name}`);
   return k;
 };
-
-/** Makes `fork` a fork of `source` at entry e1 (KOBE-215). */
-async function forkFrom(fork: string, source: string): Promise<void> {
-  await h.admin.query(
-    `UPDATE threads SET forked_from_thread_id = $3, forked_at_entry_id = 'e1'
-      WHERE team_id = $1 AND id = $2`,
-    [team, fork, source],
-  );
-}
 
 /** The fork links of `team`'s threads, by id. */
 async function forkLinks() {
@@ -484,9 +485,10 @@ describe("the nightly pass (D18)", () => {
     await setPeriod(team, "90d");
     const expired = await thread({ owner: ids.bob, activity: ago(100) });
     const trashed = await thread({ owner: ids.carol, activity: ago(40), deletedAt: ago(31) });
-    const forks = [await thread({ owner: ids.bob }), await thread({ owner: ids.carol })];
-    await forkFrom(forks[0] ?? "", expired);
-    await forkFrom(forks[1] ?? "", trashed);
+    const forks = [
+      await thread({ owner: ids.bob, forkOf: expired }),
+      await thread({ owner: ids.carol, forkOf: trashed }),
+    ];
 
     const result = await pass();
 
@@ -674,8 +676,7 @@ describe("Delete forever (D18: the owner only)", () => {
 
   it("keeps the thread's forks, clearing only their link (KOBE-215)", async () => {
     const source = await thread({ owner: ids.bob, deletedAt: new Date() });
-    const fork = await thread({ owner: ids.carol });
-    await forkFrom(fork, source);
+    const fork = await thread({ owner: ids.carol, forkOf: source });
     expect((await as.bob.post(`/v1/threads/${source}/purge`)).status).toBe(204);
     expect(await threadIds()).toEqual([fork]);
     expect(await forkLinks()).toEqual([

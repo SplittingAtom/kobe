@@ -35,7 +35,7 @@ afterAll(async () => {
 /** The Postgres error a write fails with: SQLSTATE and, for key and CHECK errors, the constraint. */
 async function pgError(
   promise: Promise<unknown>,
-): Promise<{ code?: string; constraint?: string } | undefined> {
+): Promise<{ code: string; constraint: string | undefined } | undefined> {
   const err: unknown = await promise.then(
     () => undefined,
     (e: unknown) => e,
