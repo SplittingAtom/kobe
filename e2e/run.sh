@@ -1820,7 +1820,14 @@ SH
     # billed to the compaction run (its token reaches Pi without a prompt: session_before_compact).
     echo "==> compaction (KOBE-213)"
     compact_thread=$(printf '%s\n' "$chat_out" | sed -n 's/^thread_id=//p')
-    big_out=$(chat_run "big: $(printf 'lorem ipsum dolor %.0s' $(seq 1 5500))" 300000 "" "" "${compact_thread:-none}")
+    # ~100k characters in 50 long words: over the 20k-token window by Pi's estimate (chars / 4), yet
+    # only ~50 streamed chunks (the fake model streams word by word), so the turn and the summary
+    # calls stay quick under gVisor.
+    big_word=$(printf 'a%.0s' $(seq 1 1990))
+    big_msg="big:"
+    for _ in $(seq 1 50); do big_msg+=" $big_word"; done
+    # The echoed text is left out of what is matched (grep -q on it would end the pipe early).
+    big_out=$(chat_run "$big_msg" 300000 "" "" "${compact_thread:-none}" | grep -v '^text=' || true)
     contains "a large turn on the same thread completed" '^terminal=run.completed$' "$big_out"
     read -r -d '' COMPACT_JS <<'JS' || true
 const [team, threadId] = process.argv.slice(1);
@@ -1845,7 +1852,20 @@ for (let i = 0; i < 4; i++) {
 }
 await call("PUT", "/v1/me/teams/active", { teamId: team });
 const focus = "keep the e2e numbers";
-const compacted = await call("POST", "/v1/threads/" + threadId + "/compact", { focus });
+// The answer waits for Pi (up to the server's 12 min command deadline): node:http, not fetch,
+// whose headers timeout (5 min) would end it first.
+const { request } = await import("node:http");
+const longPost = (path, body) => new Promise((resolve, reject) => {
+  const req = request(base + path, { method: "POST", headers: headers(), timeout: 0 }, (res) => {
+    let text = "";
+    res.setEncoding("utf8");
+    res.on("data", (d) => (text += d));
+    res.on("end", () => { let json = {}; try { json = JSON.parse(text); } catch {} resolve({ status: res.statusCode, json }); });
+  });
+  req.on("error", reject);
+  req.end(JSON.stringify(body));
+});
+const compacted = await longPost("/v1/threads/" + threadId + "/compact", { focus });
 out("compact", compacted.status);
 out("compact_code", compacted.json.code ?? "-");
 out("summary_by_model", (compacted.json.summary ?? "").includes("fake-openai:") ? "yes" : "no");
@@ -1855,8 +1875,13 @@ out("entry", (entries.json.entries ?? []).some((e) => e.type === "compaction") ?
 const again = await call("POST", "/v1/threads/" + threadId + "/compact", {});
 out("again", again.status + ":" + (again.json.code ?? "-"));
 JS
-    compact_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$COMPACT_JS" "$E2E_TEAM_ID" "${compact_thread:-none}" 2>&1 | tail -6)
+    compact_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$COMPACT_JS" "$E2E_TEAM_ID" "${compact_thread:-none}" 2>&1 | tail -6 || true)
     printf '     compact: %s\n' "$(printf '%s' "$compact_out" | tr '\n' ' ')"
+    if ! grep -q '^compact=200$' <<<"$compact_out"; then
+      # Diagnostics: what the server and the Owner's sandbox said about the compaction.
+      $KUBECTL -n "$NS" logs deploy/kobe-server -c server --since=20m 2>/dev/null | grep -iE 'compact' | tail -20 || true
+      $KUBECTL -n "$TEAM_NS" logs "${owner_pod:-pod/none}" -c agent --since=20m 2>/dev/null | grep -iE 'compact|refused' | tail -20 || true
+    fi
     contains "Compact now answered 200" '^compact=200$' "$compact_out"
     contains "Pi wrote the summary with the conversation's model (the fake model's answer)" '^summary_by_model=yes$' "$compact_out"
     contains "the focus reached Pi's summary prompt" '^focus_in_summary=yes$' "$compact_out"
