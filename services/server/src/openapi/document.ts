@@ -1,8 +1,10 @@
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
 import { markersOpenApiPaths, markersOpenApiSchemas } from "./markers.js";
+import { modelsOpenApiPaths, modelsOpenApiSchemas } from "./models.js";
 import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
 import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
+import { usageOpenApiPaths, usageOpenApiSchemas } from "./usage.js";
 
 /**
  * The server's OpenAPI 3.1 document, committed as `services/server/openapi.json` and checked for
@@ -24,6 +26,8 @@ export function openApiDocument(): Record<string, unknown> {
       ...pendingOpenApiPaths(),
       ...markersOpenApiPaths(),
       ...approvalsOpenApiPaths(),
+      ...usageOpenApiPaths(),
+      ...modelsOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -32,6 +36,8 @@ export function openApiDocument(): Record<string, unknown> {
         ...pendingOpenApiSchemas(),
         ...markersOpenApiSchemas(),
         ...approvalsOpenApiSchemas(),
+        ...usageOpenApiSchemas(),
+        ...modelsOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

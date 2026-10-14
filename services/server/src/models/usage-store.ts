@@ -308,3 +308,41 @@ export async function runsUsage(
     }));
   });
 }
+
+/** The prompt size of a thread's newest model call (KOBE-211: the chat's context gauge). */
+export interface LatestCall {
+  /** When the call started. */
+  readonly at: string;
+  /** `<gateway provider>/<model>` as the call named it. */
+  readonly model: string;
+  /** Input tokens not read from a prompt cache. */
+  readonly input_tokens: number;
+  readonly cache_read_tokens: number;
+}
+
+/**
+ * The thread's newest `run_usage` row that read any input (a call refused before the provider read
+ * the prompt says nothing about the context's size); null before its first model call.
+ */
+export async function latestThreadCall(
+  db: KobeDb,
+  teamId: string,
+  threadId: string,
+): Promise<LatestCall | null> {
+  return withTeam(db, teamId, async (tx) => {
+    const res = await tx.execute<Row>(sql`
+      SELECT u.at, u.model, u.input_tokens, u.cache_read_tokens
+        FROM run_usage u
+       WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid
+         AND u.input_tokens + u.cache_read_tokens > 0
+       ORDER BY u.at DESC, u.id DESC LIMIT 1`);
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      at: new Date(r.at as string | Date).toISOString(),
+      model: String(r.model),
+      input_tokens: Number(r.input_tokens),
+      cache_read_tokens: Number(r.cache_read_tokens),
+    };
+  });
+}

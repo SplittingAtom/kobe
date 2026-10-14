@@ -15,6 +15,7 @@ import {
 import { runWithAuditContext } from "./audit/context.js";
 import { gatewayTeamName, virtualKeyName } from "./models/desired.js";
 import { ModelGatewaySync } from "./models/sync.js";
+import { teamModelsResponseSchema } from "./openapi/models.js";
 import { FakeBifrost } from "./models/testing/fake-bifrost.js";
 import { createTeamWithAdmin, removeMember } from "./teams/members.js";
 import { deactivateUser } from "./users/deactivation.js";
@@ -453,6 +454,11 @@ describe("catalog and team enablement", () => {
     expect(
       (team.json.models as Record<string, unknown>[]).find((m) => m.alias === "thinker"),
     ).toMatchObject({ max_output_tokens: 100_000, context_window: 400_000, reasoning: true });
+    // The documented shape (KOBE-210 ac-3): a blank context window is null, never absent.
+    expect(teamModelsResponseSchema.safeParse(team.json).error).toBeUndefined();
+    expect(
+      (team.json.models as Record<string, unknown>[]).every((m) => "context_window" in m),
+    ).toBe(true);
     const events = await audit("models.catalog");
     expect(events.at(-1)?.target).toMatchObject({ alias: "thinker", limitsChanged: true });
     expect((await as.siteAdmin.delete(`${MODELS}/catalog/thinker`)).status).toBe(204);

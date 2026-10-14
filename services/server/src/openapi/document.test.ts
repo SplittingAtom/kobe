@@ -4,26 +4,38 @@ import { describe, expect, it } from "vitest";
 import type { ServerDeps } from "../deps.js";
 import { approvalRoutes } from "../routes/approvals.js";
 import { runRoutes, threadRunRoutes } from "../routes/runs.js";
+import { teamModelsRoutes } from "../routes/team-models.js";
 import { threadPendingRoutes } from "../routes/thread-pending.js";
 import { threadMarkerRoutes } from "../routes/thread-markers.js";
 import { threadRoutes } from "../routes/threads.js";
+import { threadUsageRoutes } from "../routes/usage.js";
 import { openApiDocument } from "./document.js";
 
 // Regenerate after changing routes or schemas:
 //   UPDATE_OPENAPI=1 pnpm --filter @kobe/server exec vitest run src/openapi && pnpm format
 const FILE = fileURLToPath(new URL("../../openapi.json", import.meta.url));
 
+interface JsonSchemaNode {
+  readonly required?: readonly string[];
+  readonly anyOf?: readonly unknown[];
+  readonly items?: JsonSchemaNode;
+  readonly properties?: Record<string, JsonSchemaNode>;
+}
+
 const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
-/** Mounted routes of a router as OpenAPI (method, path) pairs; middleware entries are skipped. */
+/**
+ * Mounted routes of a router as OpenAPI (method, path) pairs; middleware entries are skipped, and
+ * a route with per-route middleware (one entry per handler) counts once.
+ */
 function mountedOperations(prefix: string, router: { routes: { method: string; path: string }[] }) {
-  return router.routes
+  const operations = router.routes
     .filter((r) => HTTP_METHODS.has(r.method))
     .map((r) => {
       const path = `${prefix}${r.path === "/" ? "" : r.path}`.replace(/:([A-Za-z]+)/g, "{$1}");
       return `${r.method.toLowerCase()} ${path}`;
-    })
-    .sort();
+    });
+  return [...new Set(operations)].sort();
 }
 
 describe("OpenAPI document (KOBE-34 ac-1)", () => {
@@ -49,8 +61,25 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
         ...mountedOperations("/v1/threads", threadRunRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadPendingRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadMarkerRoutes(fakeDeps)),
+        ...mountedOperations("/v1/threads", threadUsageRoutes(fakeDeps)),
       ].sort(),
     );
+  });
+
+  it("describes exactly the team model routes the server mounts (KOBE-210)", () => {
+    expect(documented("/v1/team/models")).toEqual(
+      mountedOperations("/v1/team/models", teamModelsRoutes(fakeDeps)),
+    );
+  });
+
+  it("documents the context window the chat's gauge reads (KOBE-210/211)", () => {
+    const schemas = (doc.components as { schemas: Record<string, JsonSchemaNode> }).schemas;
+    const teamModel = schemas.TeamModels?.properties?.models?.items;
+    expect(teamModel?.required).toContain("context_window");
+    expect(teamModel?.properties?.context_window?.anyOf).toEqual(
+      expect.arrayContaining([{ type: "null" }]),
+    );
+    expect(schemas.ThreadUsage?.required).toContain("latest_call");
   });
 
   it("describes exactly the run routes the orchestrator mounts (KOBE-30)", () => {

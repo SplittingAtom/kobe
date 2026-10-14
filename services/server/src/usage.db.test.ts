@@ -9,6 +9,7 @@ import {
   type ModelUsageRecord,
 } from "@kobe/db";
 import { runWithAuditContext } from "./audit/context.js";
+import { threadUsageResponseSchema } from "./openapi/usage.js";
 import { createTeamWithAdmin } from "./teams/members.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -277,5 +278,63 @@ describe("site breakdowns across teams (KOBE-43 review)", () => {
   it("returns costs as exact numeric text", async () => {
     const r = await as.alice.get("/v1/team/usage");
     expect(r.json.totals.cost_usd_exact).toMatch(/^\d+\.\d{10}$/);
+  });
+});
+
+describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
+  const newThread = () =>
+    withTeam(h.deps.database.db, finance, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: finance, ownerUserId: ids.bob })
+        .returning({ id: threads.id });
+      if (!thread) throw new Error("no thread");
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: finance,
+          threadId: thread.id,
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      if (!run) throw new Error("no run");
+      return { threadId: thread.id, runId: run.id };
+    });
+
+  it("answers the newest call's prompt and cache-read tokens, skipping calls without input", async () => {
+    const { threadId, runId } = await newThread();
+    const t0 = Date.now() - 60_000;
+    await recordModelUsage(h.deps.database.db, [
+      usage({ runId, at: new Date(t0), inputTokens: 90_000, cacheReadTokens: 0 }),
+      usage({
+        runId,
+        at: new Date(t0 + 10_000),
+        model: "kobe-usage/m2",
+        inputTokens: 2_000,
+        cacheReadTokens: 140_000,
+      }),
+      // A call refused before the provider read anything: no input, so not the context's size.
+      usage({ runId, at: new Date(t0 + 20_000), status: 502, inputTokens: 0, outputTokens: 0 }),
+    ]);
+    const r = await as.bob.get(`/v1/threads/${threadId}/usage`);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json.latest_call).toEqual({
+      at: new Date(t0 + 10_000).toISOString(),
+      model: "kobe-usage/m2",
+      input_tokens: 2_000,
+      cache_read_tokens: 140_000,
+    });
+    expect(threadUsageResponseSchema.safeParse(r.json).error).toBeUndefined();
+  });
+
+  it("is null before the thread's first model call", async () => {
+    const { threadId } = await newThread();
+    const r = await as.bob.get(`/v1/threads/${threadId}/usage`);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json).toMatchObject({ runs: [], latest_call: null });
+    expect(threadUsageResponseSchema.safeParse(r.json).error).toBeUndefined();
   });
 });
