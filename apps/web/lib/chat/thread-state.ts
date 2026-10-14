@@ -166,6 +166,24 @@ export function runToStream(state: ThreadState): string | undefined {
   return queuedRuns(state)[0]?.runId;
 }
 
+/**
+ * Why Compact now (CE15, KOBE-213) is not offered right now, or null when it is: only on the
+ * owner's saved thread, out of Trash, idle (no run, nothing being sent or compacted), with a
+ * conversation to fold. The server decides again (`thread_busy`, `nothing_to_compact`).
+ */
+export function compactBlocker(state: ThreadState): string | null {
+  const summary = state.summary;
+  if (state.threadId === null || state.phase !== "ready" || !summary) return "No conversation yet.";
+  if (summary.readOnly === true) return "This conversation is shared with you read-only.";
+  if (summary.deletedAt != null) return "Restore the conversation first.";
+  if (isBusy(state, "compact")) return "Compacting…";
+  const running =
+    summary.status !== "idle" || isThreadRunning(state) || state.sending !== undefined;
+  if (running) return "Wait for the current run to finish.";
+  if (!state.entries.some((e) => e.type === "message")) return "There is nothing to compact yet.";
+  return null;
+}
+
 export function isBusy(state: ThreadState, action: string): boolean {
   return state.busy.includes(action);
 }

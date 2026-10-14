@@ -5,8 +5,8 @@
  * The server decides everything; this only shows what it says and asks again after each change.
  */
 import { isTerminalRunStatus, type KobeEvent } from "@kobe/protocol";
-import type { ApiError } from "../api/client";
-import type { ChatApi } from "./api";
+import type { ApiError, ApiResult } from "../api/client";
+import type { ChatApi, CompactResult } from "./api";
 import { newIdempotencyKey } from "./keys";
 import {
   browserResumeStore,
@@ -34,6 +34,12 @@ import {
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
 import type { ThreadEntry, ThreadRuns, ThreadSummary } from "./types";
+
+const NO_THREAD: ApiError = {
+  status: 0,
+  code: "thread_not_found",
+  message: "Send a message first: there is no conversation to compact.",
+};
 
 export interface ControllerOptions {
   readonly api: ChatApi;
@@ -731,6 +737,22 @@ export class ThreadController {
         : "Private again. Only you can see this conversation.",
     );
     return true;
+  };
+
+  /**
+   * Compact now (CE15, KOBE-213): Pi summarizes the older conversation (optional focus); the
+   * thread is then read again, so its `compaction` marker shows the summary. The caller (the
+   * dialog) shows a refusal itself: the server's fixed message per code.
+   */
+  readonly compact = async (focus?: string): Promise<ApiResult<CompactResult>> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return { ok: false, error: NO_THREAD };
+    const res = await this.#busy("compact", () => this.#api.compactThread(threadId, focus));
+    if (res.ok) {
+      this.#announce("The conversation was compacted.");
+      await this.refresh();
+    }
+    return res;
   };
 
   /** Forks the thread (any reader, or the owner) and returns the new thread's id. */

@@ -37,6 +37,16 @@ function query(params: Readonly<Record<string, string | number | undefined>>): s
   return text === "" ? "" : `?${text}`;
 }
 
+/** `POST /v1/threads/{id}/compact`'s answer (camelized; KOBE-212 contract). */
+export interface CompactResult {
+  readonly threadId: string;
+  /** Absent when it is too large to echo; the `compaction` entry has it. */
+  readonly summary?: string;
+  readonly firstKeptEntryId: string;
+  readonly tokensBefore: number;
+  readonly estimatedTokensAfter?: number;
+}
+
 /** What the chat shows of the team's retention (`GET /v1/team/retention`, camelized). */
 export interface TeamRetentionNotice {
   readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
@@ -101,6 +111,11 @@ export interface ChatApi {
   /** "Delete forever" from Trash (D18, KOBE-18): the owner only; 204. */
   purgeThread(threadId: string): Promise<ApiResult<void>>;
   setLeaf(threadId: string, entryId: string): Promise<ApiResult<ThreadSummary>>;
+  /**
+   * Compact now (CE15, KOBE-213): Pi summarizes the idle thread's older conversation, with an
+   * optional one-line focus. Answers once done; the `compaction` entry is then in the thread.
+   */
+  compactThread(threadId: string, focus?: string): Promise<ApiResult<CompactResult>>;
   sendMessage(
     threadId: string,
     body: {
@@ -220,6 +235,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     purgeThread: (id) => send("POST", `/v1/threads/${enc(id)}/purge`),
     retention: () => get("/v1/team/retention"),
     setLeaf: (id, entryId) => send("POST", `/v1/threads/${enc(id)}/leaf`, { entry_id: entryId }),
+    compactThread: (id, focus) =>
+      send("POST", `/v1/threads/${enc(id)}/compact`, focus === undefined ? {} : { focus }),
     sendMessage: (id, body, idempotencyKey) =>
       apiRequest(`/v1/threads/${enc(id)}/messages`, {
         method: "POST",

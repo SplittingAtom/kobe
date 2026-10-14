@@ -1815,6 +1815,56 @@ SH
     # KOBE-168: with the tool executor on, the isolation and workspace checks of the paired uid.
     if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then source e2e/executor/isolation.sh; fi
 
+    # KOBE-213 (CE15): Compact now on the Owner's real sandbox and real Pi. A turn larger than
+    # Pi's keepRecentTokens (20k) gives Pi something to fold; the fake model writes the summary,
+    # billed to the compaction run (its token reaches Pi without a prompt: session_before_compact).
+    echo "==> compaction (KOBE-213)"
+    compact_thread=$(printf '%s\n' "$chat_out" | sed -n 's/^thread_id=//p')
+    big_out=$(chat_run "big: $(printf 'lorem ipsum dolor %.0s' $(seq 1 5500))" 300000 "" "" "${compact_thread:-none}")
+    contains "a large turn on the same thread completed" '^terminal=run.completed$' "$big_out"
+    read -r -d '' COMPACT_JS <<'JS' || true
+const [team, threadId] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const headers = () => ({ origin, "content-type": "application/json", "x-kobe-team": team,
+  cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") });
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body) });
+  for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+  const text = await res.text();
+  let json = {}; try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json };
+};
+const out = (k, v) => console.log(k + "=" + v);
+let login;
+for (let i = 0; i < 4; i++) {
+  login = await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" });
+  if (login.status !== 429) break;
+  await new Promise((r) => setTimeout(r, 11000));
+}
+await call("PUT", "/v1/me/teams/active", { teamId: team });
+const focus = "keep the e2e numbers";
+const compacted = await call("POST", "/v1/threads/" + threadId + "/compact", { focus });
+out("compact", compacted.status);
+out("compact_code", compacted.json.code ?? "-");
+out("summary_by_model", (compacted.json.summary ?? "").includes("fake-openai:") ? "yes" : "no");
+out("focus_in_summary", (compacted.json.summary ?? "").includes(focus) ? "yes" : "no");
+const entries = await call("GET", "/v1/threads/" + threadId + "/entries?limit=500");
+out("entry", (entries.json.entries ?? []).some((e) => e.type === "compaction") ? "compaction" : "none");
+const again = await call("POST", "/v1/threads/" + threadId + "/compact", {});
+out("again", again.status + ":" + (again.json.code ?? "-"));
+JS
+    compact_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$COMPACT_JS" "$E2E_TEAM_ID" "${compact_thread:-none}" 2>&1 | tail -6)
+    printf '     compact: %s\n' "$(printf '%s' "$compact_out" | tr '\n' ' ')"
+    contains "Compact now answered 200" '^compact=200$' "$compact_out"
+    contains "Pi wrote the summary with the conversation's model (the fake model's answer)" '^summary_by_model=yes$' "$compact_out"
+    contains "the focus reached Pi's summary prompt" '^focus_in_summary=yes$' "$compact_out"
+    contains "the compaction entry is mirrored into the thread" '^entry=compaction$' "$compact_out"
+    contains "compacting again right away has nothing to compact (409)" '^again=409:nothing_to_compact$' "$compact_out"
+    compact_usage() { psql_kobe "SELECT count(*) FROM run_usage u JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id WHERE u.team_id = '$E2E_TEAM_ID' AND r.thread_id = '${compact_thread:-00000000-0000-4000-8000-000000000000}' AND r.kind = 'compaction' AND r.status = 'completed'"; }
+    contains "the summary call is billed to the completed compaction run" '^[1-9][0-9]*$' "$(wait_for 30 '^[1-9]' compact_usage)"
+
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)

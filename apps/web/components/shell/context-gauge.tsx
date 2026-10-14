@@ -23,8 +23,10 @@ const NAME = "Context used";
 const DRAFT = initialThreadState(null);
 
 export interface ContextGaugeProps extends GaugeReading {
-  /** Compact now (CE15, B9 KOBE-213), offered at red; absent: not offered (until B9 lands). */
+  /** Compact now (CE15, B9 KOBE-213), offered at red; absent: not offered (a reader's thread). */
   readonly onCompact?: (() => void) | undefined;
+  /** Why Compact now is unavailable right now (a run is on): offered, but disabled. */
+  readonly compactBlocker?: string | null | undefined;
 }
 
 /**
@@ -34,7 +36,14 @@ export interface ContextGaugeProps extends GaugeReading {
  * token count only. Content, so text and a meter rather
  * than an IconAction; it shares IconAction's tooltip provider and delay.
  */
-export function ContextGauge({ tokens, window, model, countedBy, onCompact }: ContextGaugeProps) {
+export function ContextGauge({
+  tokens,
+  window,
+  model,
+  countedBy,
+  onCompact,
+  compactBlocker,
+}: ContextGaugeProps) {
   const label = gaugeLabel({ tokens, window, model, countedBy });
   const used = tokens;
   const percent = window === null ? 0 : contextPercent(used, window);
@@ -71,7 +80,15 @@ export function ContextGauge({ tokens, window, model, countedBy, onCompact }: Co
           {offerCompact && <span className={styles.tooltipLine}>Compact this thread</span>}
         </TooltipContent>
       </Tooltip>
-      {offerCompact && <IconAction command="compact-thread" size="sm" onClick={onCompact} />}
+      {offerCompact && (
+        <IconAction
+          command="compact-thread"
+          size="sm"
+          aria-disabled={compactBlocker != null}
+          description={compactBlocker ?? undefined}
+          onClick={compactBlocker == null ? onCompact : undefined}
+        />
+      )}
     </span>
   );
 }
@@ -94,7 +111,10 @@ function counterOf(models: readonly TeamModel[], size: ContextSize): TeamModel |
  * with next (the agent's pin, the thread's choice, else the team default), so a model change
  * re-scales the same fill; when another model counted the tokens, the text says which.
  */
-export function ThreadContextGauge() {
+export function ThreadContextGauge({
+  onCompact,
+  compactBlocker,
+}: Pick<ContextGaugeProps, "onCompact" | "compactBlocker"> = {}) {
   const extras = useKobeExtras();
   const state = extras?.state ?? DRAFT;
   const loaded = useTeamModels(state);
@@ -120,6 +140,8 @@ export function ThreadContextGauge() {
       window={scale?.contextWindow ?? null}
       model={scale ? modelName(scale) : alias}
       countedBy={counterIsScale ? null : name(counter)}
+      onCompact={onCompact}
+      compactBlocker={compactBlocker}
     />
   );
 }
