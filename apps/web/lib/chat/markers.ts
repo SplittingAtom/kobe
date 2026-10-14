@@ -116,8 +116,7 @@ export function placeRunMarkers(
   const answerOf = new Map<string, string>();
   for (const item of projection.items) {
     const custom = item.message.metadata?.custom as
-      | { readonly kind?: string; readonly promptEntryId?: string }
-      | undefined;
+      { readonly kind?: string; readonly promptEntryId?: string } | undefined;
     if (custom?.kind === "assistant" && custom.promptEntryId !== undefined) {
       answerOf.set(custom.promptEntryId, item.message.id);
     }

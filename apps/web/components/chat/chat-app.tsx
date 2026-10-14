@@ -190,39 +190,39 @@ function ChatWorkspace({
         <DetailProvider preferences={layout.preferences} onSave={layout.save}>
           <ThreadUsageProvider>
             <ThreadMarkersProvider>
-            <ArtifactPanelProvider
-              teamId={session.teamId}
-              threadId={threadId}
-              preferences={layout.preferences}
-              onSavePreferences={layout.save}
-            >
-              <FileGoneNotice />
-              <ShellSlot name="search">
-                <ThreadSearch onOpenThread={setThreadId} />
-              </ShellSlot>
-              <ShellSlot name="context">
-                <ContextRow />
-              </ShellSlot>
-              <ShellSlot name="nav">
-                <RailDrawerButton />
-              </ShellSlot>
-              <WorkspaceGrid
-                rail={
-                  <WorkspaceRail
-                    teamName={teamName || "Workspace"}
-                    listError={listError}
-                    filesApi={filesApi}
-                    fetchFn={fetchFn}
-                  />
-                }
-                artifact={<ArtifactPanel filesApi={filesApi} />}
-                conversation={
-                  <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                    <ThreadView onOpenThread={setThreadId} contextInBar />
-                  </main>
-                }
-              />
-            </ArtifactPanelProvider>
+              <ArtifactPanelProvider
+                teamId={session.teamId}
+                threadId={threadId}
+                preferences={layout.preferences}
+                onSavePreferences={layout.save}
+              >
+                <FileGoneNotice />
+                <ShellSlot name="search">
+                  <ThreadSearch onOpenThread={setThreadId} />
+                </ShellSlot>
+                <ShellSlot name="context">
+                  <ContextRow />
+                </ShellSlot>
+                <ShellSlot name="nav">
+                  <RailDrawerButton />
+                </ShellSlot>
+                <WorkspaceGrid
+                  rail={
+                    <WorkspaceRail
+                      teamName={teamName || "Workspace"}
+                      listError={listError}
+                      filesApi={filesApi}
+                      fetchFn={fetchFn}
+                    />
+                  }
+                  artifact={<ArtifactPanel filesApi={filesApi} />}
+                  conversation={
+                    <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                      <ThreadView onOpenThread={setThreadId} contextInBar />
+                    </main>
+                  }
+                />
+              </ArtifactPanelProvider>
             </ThreadMarkersProvider>
           </ThreadUsageProvider>
         </DetailProvider>

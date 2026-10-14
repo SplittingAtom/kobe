@@ -30,8 +30,8 @@
 - **Run / approval outcomes are not in the entry list.** Runs' terminal status and approvals live in
   `runs` / `approvals`. New route (server change, own commit):
   `GET /v1/threads/{id}/markers` → `{runs: [{run_id, status: interrupted|budget_stopped,
-  user_entry_id, parent_entry_id, ended_at}], approvals: [{approval_id, run_id, tool_call_id,
-  status: allowed|denied|expired, cause, decided_at}]}`.
+user_entry_id, parent_entry_id, ended_at}], approvals: [{approval_id, run_id, tool_call_id,
+status: allowed|denied|expired, cause, decided_at}]}`.
   - Visibility like the thread (`findThread`: owner or project reader), team-scoped under RLS,
     `team_id` stated in every query; 404 `thread_not_found` otherwise.
   - Approvals only where `user_id` = caller (the run's user, as `GET /v1/approvals`): a reader of a

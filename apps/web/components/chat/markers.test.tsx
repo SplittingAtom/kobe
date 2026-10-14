@@ -73,10 +73,7 @@ function recordedThread() {
   const u3b = add(m1, ask("Final, please"));
   add(u3b, say("Final version."));
   fake.threadMarkers.set(thread, {
-    runs: [
-      run("r-2", "interrupted", u2, a3),
-      run("r-3", "budget_stopped", u3b, m1),
-    ],
+    runs: [run("r-2", "interrupted", u2, a3), run("r-3", "budget_stopped", u3b, m1)],
     approvals: [approval("tc1", "allowed", "user"), approval("tc2", "denied", "user")],
   });
   return { thread, a5 };
