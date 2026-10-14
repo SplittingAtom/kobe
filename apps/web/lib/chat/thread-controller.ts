@@ -97,6 +97,18 @@ export class ThreadController {
   /** A run's token usage and spend (KOBE-43; run details). */
   readonly runUsage = (runId: string) => this.#api.runUsage(runId);
 
+  /** Usage of each of this thread's runs (KOBE-208: the answers' footers); null for a draft. */
+  readonly threadUsage = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadUsage(id);
+  };
+
+  /** One of this thread's entries with its body (KOBE-208: a large tool output on expand). */
+  readonly entryBody = (entryId: string) => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.getEntry(id, entryId);
+  };
+
   /** The member's budget status (KOBE-42; the chat's warning banner). */
   readonly budgetStatus = () => this.#api.budgetStatus();
 

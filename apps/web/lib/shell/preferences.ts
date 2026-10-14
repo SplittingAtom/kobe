@@ -30,6 +30,8 @@ export interface LayoutPreferences {
   readonly threadsShare?: number;
   /** null: the default, half the space right of the rail. */
   readonly artifactWidth?: number | null;
+  /** The Detail toggle (KOBE-208): every reasoning block and tool card open. */
+  readonly detailExpanded?: boolean;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -39,6 +41,7 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.rail_collapsed !== undefined ? { railCollapsed: p.rail_collapsed } : {}),
   ...(p.threads_share !== undefined ? { threadsShare: p.threads_share } : {}),
   ...(p.artifact_width !== undefined ? { artifactWidth: p.artifact_width } : {}),
+  ...(p.detail_expanded !== undefined ? { detailExpanded: p.detail_expanded } : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -47,6 +50,7 @@ export function toWire(change: LayoutPreferences): UiPreferences {
     ...(change.railCollapsed !== undefined ? { rail_collapsed: change.railCollapsed } : {}),
     ...(change.threadsShare !== undefined ? { threads_share: change.threadsShare } : {}),
     ...(change.artifactWidth !== undefined ? { artifact_width: change.artifactWidth } : {}),
+    ...(change.detailExpanded !== undefined ? { detail_expanded: change.detailExpanded } : {}),
   };
 }
 
@@ -61,6 +65,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       rail_collapsed: raw.railCollapsed,
       threads_share: raw.threadsShare,
       artifact_width: raw.artifactWidth,
+      detail_expanded: raw.detailExpanded,
     }),
   );
 }

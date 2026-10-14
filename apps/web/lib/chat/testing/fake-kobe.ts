@@ -256,28 +256,40 @@ export class FakeKobe {
   /** In-app notifications the bell lists (KOBE-181), newest first. */
   readonly notifications: Json[] = [];
 
-  /** Adds a committed entry directly (history that exists before the test). */
+  /**
+   * Adds a committed entry directly (history that exists before the test). `at` is when Pi
+   * appended it; `offloaded` stores the body as object storage would (KOBE-208), read back by
+   * `GET /v1/threads/{id}/entries/{entryId}`.
+   */
   addEntry(
     threadId: string,
     parentId: string | null,
     message: Json,
-    opts: { leaf?: boolean } = {},
+    opts: { leaf?: boolean; at?: string; offloaded?: boolean } = {},
   ) {
     const thread = this.#thread(threadId);
     this.#entryN += 1;
     const id = `e${this.#entryN}`;
+    const at = opts.at ?? NOW;
+    const payload = { type: "message", id, parentId, timestamp: at, message };
+    if (opts.offloaded) this.entryBodies.set(id, payload);
     thread.entries.push({
       entry_id: id,
       parent_id: parentId,
       seq: thread.entries.length + 1,
       type: "message",
-      payload: { type: "message", id, parentId, timestamp: NOW, message },
-      payload_offloaded: false,
-      created_at: NOW,
+      payload: opts.offloaded ? {} : payload,
+      payload_offloaded: opts.offloaded === true,
+      created_at: at,
     });
     if (opts.leaf !== false) thread.leaf_entry_id = id;
     return id;
   }
+
+  /** Offloaded entry bodies (KOBE-208), by entry id. */
+  readonly entryBodies = new Map<string, Json>();
+  /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
+  readonly threadUsage = new Map<string, Json[]>();
 
   #thread(id: string): FakeThread {
     const thread = this.threads.get(id);
@@ -864,7 +876,12 @@ export class FakeKobe {
     const thread = id === undefined ? undefined : this.threads.get(id);
     if (!thread) return error(404, "thread_not_found", "No thread with that id.");
     if (action === undefined) return this.#threadItself(method, thread, url, body);
+    if (action === "entries" && sub !== undefined) return this.#entryBody(thread, sub);
     if (action === "entries") return json(200, this.#entryPage(thread, url));
+    if (action === "usage" && method === "GET") {
+      const runs = this.threadUsage.get(thread.thread_id) ?? [];
+      return json(200, { thread_id: thread.thread_id, runs });
+    }
     if (action === "share" && method === "POST") {
       if (thread.read_only)
         return error(403, "read_only", "This thread is shared with you read-only.");
@@ -966,6 +983,15 @@ export class FakeKobe {
       "model_not_enabled",
       "That model isn't enabled for your team. Pick one of the team's models, or ask a team admin.",
     );
+  }
+
+  /** `GET /v1/threads/{id}/entries/{entryId}` (KOBE-208): an offloaded body read back. */
+  #entryBody(thread: FakeThread, entryId: string): Response {
+    const found = thread.entries.find((e) => e.entry_id === entryId);
+    if (!found) return error(404, "entry_not_found");
+    if (!found.payload_offloaded) return json(200, { entry_id: entryId, payload: found.payload });
+    const body = this.entryBodies.get(entryId);
+    return body ? json(200, { entry_id: entryId, payload: body }) : error(409, "entry_unavailable");
   }
 
   #entryPage(thread: FakeThread, url: URL): Json {

@@ -8,7 +8,6 @@ import {
   MessagePrimitive,
   useAuiState,
   type DataMessagePartProps,
-  type ReasoningMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon } from "lucide-react";
@@ -17,45 +16,19 @@ import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat
 import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
-import { isStopping } from "../../lib/chat/thread-state";
-import { kobeExtrasOf, useKobeExtras } from "./kobe-runtime";
+import { useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
-import { ArrivingWords } from "./arriving-words";
 import { Markdown } from "./markdown";
+import { MessageFooter } from "./message-footer";
+import { Reasoning } from "./reasoning";
 import { ToolCallCard } from "./tool-call";
+import { useArriving } from "./use-arriving";
 import styles from "./chat.module.css";
 
 /** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
   return <span>{text}</span>;
-}
-
-/**
- * Whether a part is being written, for the arrival fade (KOBE-207): it streams, and Stop was not
- * accepted for its run (KOBE-269: the run's end can arrive seconds after Stop; nothing fades meanwhile).
- */
-function useArriving(status: { readonly type: string }): boolean {
-  const stopping = useAuiState((s) => {
-    const extras = kobeExtrasOf(s);
-    return extras ? isStopping(extras.state) : false;
-  });
-  return status.type === "running" && !stopping;
-}
-
-/** Reasoning as written; while it streams, its words arrive as fading spans (KOBE-207). */
-function Reasoning({ text, status }: ReasoningMessagePartProps) {
-  const arriving = useArriving(status);
-  return (
-    <details className="text-muted-foreground group my-2 text-sm">
-      <summary className="hover:text-foreground cursor-pointer select-none">Reasoning</summary>
-      <div data-kobe-arrive={arriving ? "running" : undefined}>
-        <p className="border-border mt-1 border-s-2 ps-3 whitespace-pre-wrap">
-          <ArrivingWords text={text} />
-        </p>
-      </div>
-    </details>
-  );
 }
 
 function Problem({ data }: DataMessagePartProps) {
@@ -239,7 +212,7 @@ export function AssistantMessage() {
     <MessagePrimitive.Root
       data-role="assistant"
       aria-busy={running}
-      className="animate-in fade-in slide-in-from-bottom-1 relative duration-150"
+      className="group/answer animate-in fade-in slide-in-from-bottom-1 relative duration-150"
     >
       <h3 className="sr-only">The agent said</h3>
       <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
@@ -250,7 +223,7 @@ export function AssistantMessage() {
           </span>
         )}
       </div>
-      <div className="ms-2 flex min-h-7.5 items-center pt-1.5">
+      <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
         <BranchPicker />
         <ActionBarPrimitive.Root
           hideWhenRunning
@@ -275,6 +248,7 @@ export function AssistantMessage() {
             <PendingAction command="regenerate" />
           )}
         </ActionBarPrimitive.Root>
+        {!running && <MessageFooter />}
       </div>
     </MessagePrimitive.Root>
   );

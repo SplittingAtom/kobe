@@ -150,6 +150,7 @@ describe("command registry", () => {
     );
     expect(shortcuts).toEqual({
       files: "Mod+Shift+F",
+      detail: "Mod+Shift+D",
       "new-thread": "Mod+N",
       "toggle-rail": "Mod+B",
       edit: "Mod+Shift+E",

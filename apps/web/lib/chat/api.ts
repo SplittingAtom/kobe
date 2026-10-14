@@ -6,7 +6,7 @@
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
-import type { RunUsage } from "../admin/api/usage";
+import type { RunUsage, ThreadUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import { createMemoryApi } from "../memory/api";
 import type {
@@ -48,6 +48,12 @@ const RUNNABLE_MAX_PAGES = 10;
 interface RunnablePage {
   readonly agents: readonly RunnableAgent[];
   readonly nextCursor: string | null;
+}
+
+/** `GET /v1/threads/{id}/entries/{entryId}`: the Pi entry as stored (payload kept verbatim). */
+export interface EntryBody {
+  readonly entryId: string;
+  readonly payload: unknown;
 }
 
 export interface ChatApi {
@@ -112,6 +118,10 @@ export interface ChatApi {
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
   /** Tokens and spend of one run (KOBE-43), as the model gateway measured them. */
   runUsage(runId: string): Promise<ApiResult<RunUsage>>;
+  /** Tokens and spend of each run of a thread (the answers' footers, KOBE-208). */
+  threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
+  /** One entry with its body, an offloaded one read back from storage (KOBE-208). */
+  getEntry(threadId: string, entryId: string): Promise<ApiResult<EntryBody>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
   budgetStatus(): Promise<ApiResult<BudgetStatus>>;
   /** One of your approvals with its full input (KOBE-37). */
@@ -228,6 +238,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
+    threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
+    getEntry: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
     requestEgressAccess: (domain, threadId) =>
