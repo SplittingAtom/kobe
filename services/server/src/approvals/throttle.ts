@@ -6,6 +6,9 @@
  * keys are pruned, then the oldest go first (a key dropped with pending repeats loses only its
  * count, never its first row).
  */
+export type ThrottleDecision =
+  { readonly record: false } | { readonly record: true; readonly suppressed: number };
+
 export class AuditThrottle {
   readonly #windowMs: number;
   readonly #maxKeys: number;
@@ -22,20 +25,41 @@ export class AuditThrottle {
    * Whether to write a row for `key` now; when yes, how many repeats were suppressed since its
    * last row.
    */
-  take(
-    key: string,
-  ): { readonly record: false } | { readonly record: true; readonly suppressed: number } {
+  take(key: string): ThrottleDecision {
+    return this.reserve(key).decision;
+  }
+
+  /**
+   * `take` for an audit row written inside a transaction that may roll back and be retried
+   * (KOBE-266): `undo` gives the take back, so the retry records the row instead of finding it
+   * already taken. Call it only when the write rolled back. Stale once the key was taken again.
+   */
+  reserve(key: string): { readonly decision: ThrottleDecision; undo(): void } {
     const now = this.#now();
     const entry = this.#seen.get(key);
     if (entry && now - entry.at < this.#windowMs) {
       entry.suppressed += 1;
-      return { record: false };
+      const count = entry.suppressed;
+      return {
+        decision: { record: false },
+        undo: () => {
+          if (this.#seen.get(key) === entry && entry.suppressed === count) entry.suppressed -= 1;
+        },
+      };
     }
     const suppressed = entry?.suppressed ?? 0;
+    const created = { at: now, suppressed: 0 };
     this.#seen.delete(key);
-    this.#seen.set(key, { at: now, suppressed: 0 });
+    this.#seen.set(key, created);
     this.#prune(now);
-    return { record: true, suppressed };
+    return {
+      decision: { record: true, suppressed },
+      undo: () => {
+        if (this.#seen.get(key) !== created || created.suppressed !== 0) return;
+        this.#seen.delete(key);
+        if (entry) this.#seen.set(key, entry);
+      },
+    };
   }
 
   get size(): number {

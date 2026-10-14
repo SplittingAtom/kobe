@@ -1,5 +1,6 @@
 import { APPROVAL_TTL_MS, type ActorContext, type ApprovalResolutionBody } from "@kobe/protocol";
 import type { KobeDb } from "@kobe/db";
+import type { Logger } from "pino";
 import { logger as rootLogger } from "../logger.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { ApprovalBrokerImpl } from "./broker.js";
@@ -25,6 +26,8 @@ export interface ApprovalServiceOptions {
   readonly now?: () => Date;
   /** The wire's run event cap (default `WIRE_DEFAULTS.runMaxEvents`). */
   readonly runMaxEvents?: number;
+  /** Where approvals log (default: the server logger's `approvals` child; tests read it). */
+  readonly log?: Logger;
 }
 
 /**
@@ -41,7 +44,7 @@ export class ApprovalService {
   #timer: NodeJS.Timeout | undefined;
 
   constructor(options: ApprovalServiceOptions) {
-    const log = rootLogger.child({ component: "approvals" });
+    const log = options.log ?? rootLogger.child({ component: "approvals" });
     this.#ctx = {
       db: options.db,
       keys: options.keys,
