@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  compactedSinceLastCall,
   contextPercent,
   gaugeLabel,
   gaugeLevel,
   messageContextTokens,
-  newestContextTokens,
+  newestContextSize,
+  type UsageRead,
 } from "./context-usage";
 
 /** KOBE-211 (CE14): what the context gauge reads and says. */
@@ -13,13 +15,32 @@ const assistant = (usage: Record<string, unknown> | undefined) => ({
   message: { role: "assistant", content: [], ...(usage ? { usage } : {}) },
 });
 
-describe("messageContextTokens", () => {
-  it("is the prompt plus cache-read tokens of an assistant message (Pi usage)", () => {
-    expect(
-      messageContextTokens(
-        assistant({ input: 2_000, output: 300, cacheRead: 140_000, cacheWrite: 50 }),
-      ),
-    ).toBe(142_000);
+describe("messageContextTokens: input + cache read + cache write, each prompt token once", () => {
+  // Pi's Usage as pi-ai 1.0.0 builds it from each provider's report (the three are disjoint).
+  it.each([
+    [
+      "Anthropic (input_tokens 12, cache_read 40k, cache_creation 100k)",
+      { input: 12, output: 300, cacheRead: 40_000, cacheWrite: 100_000 },
+      140_012,
+    ],
+    [
+      "OpenAI chat (prompt_tokens 142k incl. cached_tokens 140k)",
+      { input: 2_000, output: 300, cacheRead: 140_000, cacheWrite: 0 },
+      142_000,
+    ],
+    [
+      "OpenAI responses (input_tokens 150k incl. cached 100k and cache_write 20k)",
+      { input: 30_000, output: 10, cacheRead: 100_000, cacheWrite: 20_000 },
+      150_000,
+    ],
+    [
+      "Gemini (promptTokenCount 90k incl. cachedContentTokenCount 60k)",
+      { input: 30_000, output: 10, cacheRead: 60_000, cacheWrite: 0 },
+      90_000,
+    ],
+    ["a provider without caching", { input: 8_000, output: 10 }, 8_000],
+  ])("%s", (_shape, usage, expected) => {
+    expect(messageContextTokens(assistant(usage))).toBe(expected);
   });
 
   it("ignores other entries, messages without usage and calls that read nothing", () => {
@@ -28,28 +49,79 @@ describe("messageContextTokens", () => {
     expect(messageContextTokens(assistant(undefined))).toBeUndefined();
     expect(messageContextTokens(assistant({ input: 0, cacheRead: 0 }))).toBeUndefined();
     expect(messageContextTokens(assistant({ input: "9", cacheRead: null }))).toBeUndefined();
-    expect(messageContextTokens(assistant({ input: 10 }))).toBe(10);
   });
 });
 
-describe("newestContextTokens", () => {
-  const live = { runId: "r2", contextTokens: 120_000 };
-  const read = (afterRun: string | null, tokens = 150_000) => ({
+describe("compactedSinceLastCall", () => {
+  const e = (type: string, payload: Record<string, unknown> = {}, payloadOffloaded = false) => ({
+    type,
+    payload,
+    payloadOffloaded,
+  });
+  const answer = e("message", assistant({ input: 10 }));
+
+  it("is true when a compaction entry follows the newest answer with usage", () => {
+    expect(compactedSinceLastCall([answer, e("compaction"), e("message", { message: {} })])).toBe(
+      true,
+    );
+    expect(compactedSinceLastCall([e("compaction"), answer])).toBe(false);
+    expect(compactedSinceLastCall([answer])).toBe(false);
+    expect(compactedSinceLastCall([])).toBe(false);
+  });
+
+  it("treats an offloaded message as a possible later answer", () => {
+    expect(compactedSinceLastCall([e("compaction"), e("message", {}, true)])).toBe(false);
+  });
+});
+
+describe("newestContextSize", () => {
+  const read = (afterRun: string | null, runId: string, tokens = 150_000): UsageRead => ({
     afterRun,
-    latestCall: { inputTokens: tokens - 1_000, cacheReadTokens: 1_000 },
+    latestCall: {
+      runId,
+      model: "ollama/kimi",
+      inputTokens: tokens - 11_000,
+      cacheReadTokens: 1_000,
+      cacheWriteTokens: 10_000,
+    },
+  });
+  const live = (contextTokens?: number | null) => ({ runId: "r2", model: "glm", contextTokens });
+  const size = (...args: Parameters<typeof newestContextSize>) =>
+    newestContextSize(...args)?.tokens ?? null;
+
+  it("is unknown before the first call", () => {
+    expect(newestContextSize(undefined, null, false)).toBeNull();
+    expect(newestContextSize(undefined, { afterRun: null, latestCall: null }, false)).toBeNull();
   });
 
-  it("is empty before the first model call", () => {
-    expect(newestContextTokens(undefined, null)).toBeNull();
-    expect(newestContextTokens(undefined, { afterRun: null, latestCall: null })).toBeNull();
+  it("takes run_usage (all three counts) on load, with the gateway model that counted it", () => {
+    expect(newestContextSize(undefined, read(null, "r1"), false)).toEqual({
+      tokens: 150_000,
+      counter: { gatewayModel: "ollama/kimi" },
+    });
   });
 
-  it("takes run_usage on load, the stream during a run, and run_usage again once re-read after it", () => {
-    expect(newestContextTokens(undefined, read(null))).toBe(150_000);
-    expect(newestContextTokens(live, read(null))).toBe(120_000);
-    expect(newestContextTokens({ runId: "r2" }, read(null))).toBe(150_000);
-    expect(newestContextTokens(live, read("r2", 121_000))).toBe(121_000);
-    expect(newestContextTokens(live, { afterRun: "r2", latestCall: null })).toBe(120_000);
+  it("takes the stream during a run, with the run's alias", () => {
+    expect(newestContextSize(live(120_000), read(null, "r1"), false)).toEqual({
+      tokens: 120_000,
+      counter: { alias: "glm" },
+    });
+    // Nothing streamed yet: what was loaded.
+    expect(size(live(), read(null, "r1"), false)).toBe(150_000);
+  });
+
+  it("takes run_usage after the run only when the read holds that run's call", () => {
+    expect(size(live(120_000), read("r2", "r2", 121_000), false)).toBe(121_000);
+    // A stale read (the newest row is still the previous run's) keeps the streamed value.
+    expect(size(live(120_000), read("r2", "r1"), false)).toBe(120_000);
+    // A read from before the run ended, even of this run's call, may predate its last message.
+    expect(size(live(120_000), read(null, "r2", 90_000), false)).toBe(120_000);
+  });
+
+  it("is unknown after a compaction until the next call", () => {
+    expect(newestContextSize(undefined, read(null, "r1"), true)).toBeNull();
+    expect(newestContextSize(live(null), read("r2", "r2"), true)).toBeNull();
+    expect(newestContextSize(live(null), read(null, "r1"), false)).toBeNull();
   });
 });
 
@@ -86,10 +158,9 @@ describe("gaugeLabel", () => {
     );
   });
 
-  it("is empty before the first turn", () => {
-    expect(gaugeLabel({ tokens: null, window: 200_000, model: "Claude" })).toBe(
-      "0 of 200k tokens (0%) · Claude",
-    );
-    expect(gaugeLabel({ tokens: null, window: null, model: null })).toBe("0 tokens");
+  it("says when another model counted the tokens", () => {
+    expect(
+      gaugeLabel({ tokens: 150_000, window: 1_000_000, model: "GLM 5.3", countedBy: "Kimi" }),
+    ).toBe("150k of 1M tokens (15%) · GLM 5.3 · counted by Kimi");
   });
 });

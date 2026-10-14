@@ -1,22 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
+import { modelName, type TeamModel } from "../../lib/admin/api/team/models";
 import { formatTokens } from "../../lib/admin/usage-format";
 import {
+  compactedSinceLastCall,
   contextPercent,
   gaugeLabel,
   gaugeLevel,
-  newestContextTokens,
+  newestContextSize,
+  type ContextSize,
   type GaugeReading,
 } from "../../lib/chat/context-usage";
-import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
+import { initialThreadState } from "../../lib/chat/thread-state";
+import { useKobeExtras } from "../chat/kobe-runtime";
 import { useThreadUsageRead } from "../chat/message-footer";
+import { useTeamModels } from "../chat/use-team-models";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { IconAction } from "./icon-action";
 import styles from "./context-gauge.module.css";
 
 const NAME = "Context used";
+const DRAFT = initialThreadState(null);
 
 export interface ContextGaugeProps extends GaugeReading {
   /** Compact now (CE15, B9 KOBE-213), offered at red; absent: not offered (until B9 lands). */
@@ -25,13 +29,14 @@ export interface ContextGaugeProps extends GaugeReading {
 
 /**
  * How full the thread's context is (CE14, KOBE-211): a short bar, green below 65%, orange from
- * 65%, red from 85%, with "142k of 200k tokens (71%) · <model>" as its tooltip and value text.
- * Without a context window it shows the token count only. Content, so text and a meter rather
+ * 65%, red from 85%, with "142k of 200k tokens (71%) · <model>" as its tooltip and value text
+ * ("· counted by <model>" when another model counted them). Without a context window it shows the
+ * token count only. Content, so text and a meter rather
  * than an IconAction; it shares IconAction's tooltip provider and delay.
  */
-export function ContextGauge({ tokens, window, model, onCompact }: ContextGaugeProps) {
-  const label = gaugeLabel({ tokens, window, model });
-  const used = tokens ?? 0;
+export function ContextGauge({ tokens, window, model, countedBy, onCompact }: ContextGaugeProps) {
+  const label = gaugeLabel({ tokens, window, model, countedBy });
+  const used = tokens;
   const percent = window === null ? 0 : contextPercent(used, window);
   const level = gaugeLevel(percent);
   const offerCompact = window !== null && level === "full" && onCompact !== undefined;
@@ -71,52 +76,50 @@ export function ContextGauge({ tokens, window, model, onCompact }: ContextGaugeP
   );
 }
 
-/** The team's catalog, for the thread model's window and name (cached by the session). */
-function useTeamModels(threadId: string | null): TeamModels | null {
-  const session = useChatSession();
-  const [models, setModels] = useState<TeamModels | null>(null);
-  useEffect(() => {
-    if (threadId === null) return;
-    let current = true;
-    session.models().then(
-      (res) => {
-        if (current) setModels(res.ok ? res.data : null);
-      },
-      () => {
-        if (current) setModels(null);
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [session, threadId]);
-  return models;
+/** The catalog entry that counted the tokens: by alias (streamed) or gateway model (run_usage). */
+function counterOf(models: readonly TeamModel[], size: ContextSize): TeamModel | string | null {
+  const c = size.counter;
+  if (c === null) return null;
+  const found =
+    "alias" in c
+      ? models.find((m) => m.alias === c.alias)
+      : models.find((m) => m.gatewayModel === c.gatewayModel);
+  return found ?? ("alias" in c ? c.alias : c.gatewayModel);
 }
 
 /**
- * The open thread's gauge (bar row two). The value is the newest model call's input: run_usage on
- * load and after each run, each streamed assistant message during one. The scale is the model the
- * thread runs with next (the agent's pin, the thread's choice, else the team default), so a model
- * change re-scales the same fill. A new conversation shows none until it exists.
+ * The open thread's gauge (bar row two). The value is the newest model call's prompt: run_usage on
+ * load and after each run, each streamed assistant message during one; unknown (no gauge) before
+ * the first call and after a compaction until the next. The scale is the model the thread runs
+ * with next (the agent's pin, the thread's choice, else the team default), so a model change
+ * re-scales the same fill; when another model counted the tokens, the text says which.
  */
 export function ThreadContextGauge() {
   const extras = useKobeExtras();
-  const threadId = extras?.state.threadId ?? null;
-  const models = useTeamModels(threadId);
+  const state = extras?.state ?? DRAFT;
+  const loaded = useTeamModels(state);
   const read = useThreadUsageRead();
-  if (!extras || threadId === null || extras.state.phase !== "ready") return null;
-  const { state } = extras;
-  const alias = state.agentModel ?? state.summary?.model ?? models?.default ?? null;
-  const entry = models?.models.find((m) => m.alias === alias);
-  const tokens = newestContextTokens(
+  if (!extras || state.threadId === null || state.phase !== "ready") return null;
+  const size = newestContextSize(
     state.live,
     read && { afterRun: read.afterRun, latestCall: read.usage.latestCall },
+    compactedSinceLastCall(state.entries),
   );
+  if (size === null) return null;
+  const models = loaded.status === "ready" ? loaded.data.models : [];
+  const teamDefault = loaded.status === "ready" ? loaded.data.default : null;
+  const alias = state.agentModel ?? state.summary?.model ?? teamDefault;
+  const scale = models.find((m) => m.alias === alias);
+  const counter = counterOf(models, size);
+  const counterIsScale =
+    counter === null || (typeof counter === "string" ? counter === alias : counter === scale);
+  const name = (m: TeamModel | string) => (typeof m === "string" ? m : modelName(m));
   return (
     <ContextGauge
-      tokens={tokens}
-      window={entry?.contextWindow ?? null}
-      model={entry ? modelName(entry) : alias}
+      tokens={size.tokens}
+      window={scale?.contextWindow ?? null}
+      model={scale ? modelName(scale) : alias}
+      countedBy={counterIsScale ? null : name(counter)}
     />
   );
 }

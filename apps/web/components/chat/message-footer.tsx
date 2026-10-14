@@ -9,6 +9,8 @@ import { useKobeExtras } from "./kobe-runtime";
 
 /** Usage rows land a moment after a run ends (the gateway's flush); read them after this. */
 const USAGE_SETTLE_MS = 1_500;
+/** Reads again (2x, 4x the settle time) while the newest call isn't the ended run's yet. */
+const USAGE_REREADS = 2;
 
 /** A thread usage read and the run whose end it waited for (null: the read on open). */
 export interface ThreadUsageRead {
@@ -23,9 +25,15 @@ export function useThreadUsageRead(): ThreadUsageRead | null {
   return useContext(ThreadUsageContext);
 }
 
+/** After a run ended: its rows may not have landed while the newest call is another run's. */
+function staleAfter(usage: ThreadUsage, ended: string | null): boolean {
+  return ended !== null && usage.latestCall != null && usage.latestCall.runId !== ended;
+}
+
 /**
  * The open thread's usage per run (`GET /v1/threads/{id}/usage`, run_usage), read when the thread
- * opens and again after each run ends, for the answers' footers (CE12, KOBE-208).
+ * opens and again after each run ends, for the answers' footers (CE12, KOBE-208) and the context
+ * gauge (KOBE-211). After a run, a read whose newest call isn't that run's is read again, bounded.
  */
 export function ThreadUsageProvider({ children }: { readonly children: ReactNode }) {
   const extras = useKobeExtras();
@@ -36,13 +44,18 @@ export function ThreadUsageProvider({ children }: { readonly children: ReactNode
   useEffect(() => {
     if (!controller || threadId === null) return;
     let current = true;
-    const read = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = (attempt: number) => {
       void controller.threadUsage()?.then((res) => {
-        if (current && res.ok) setRead({ usage: res.data, afterRun: ended });
+        if (!current || !res.ok) return;
+        setRead({ usage: res.data, afterRun: ended });
+        if (attempt < USAGE_REREADS && staleAfter(res.data, ended)) {
+          timer = setTimeout(() => read(attempt + 1), USAGE_SETTLE_MS * 2 ** (attempt + 1));
+        }
       });
     };
-    const timer = ended === null ? undefined : setTimeout(read, USAGE_SETTLE_MS);
-    if (ended === null) read();
+    if (ended === null) read(0);
+    else timer = setTimeout(() => read(0), USAGE_SETTLE_MS);
     return () => {
       current = false;
       clearTimeout(timer);

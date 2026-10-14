@@ -39,18 +39,23 @@ afterEach(() => {
 
 const meter = () => screen.findByRole("meter", { name: "Context used" });
 
-/** A thread whose newest model call (run_usage) read `tokens`: 1k of them from the cache. */
+const usageReads = (t: string) => (r: { method: string; path: string }) =>
+  r.method === "GET" && r.path === `/v1/threads/${t}/usage`;
+
+/** run_usage's newest call: `tokens` of prompt, 1k read from and 2k written to the cache. */
+const latestCall = (tokens: number, runId = "00000000-0000-4000-8000-0000000000aa") => ({
+  run_id: runId,
+  at: "2026-10-14T10:00:00.000Z",
+  model: "ollama/kimi",
+  input_tokens: tokens - 3_000,
+  cache_read_tokens: 1_000,
+  cache_write_tokens: 2_000,
+});
+
 function threadWith(tokens: number | null, model: string | null = null): string {
   const t = fake.addThread("Report");
   must(fake.threads.get(t)).model = model;
-  if (tokens !== null) {
-    fake.threadLatestCall.set(t, {
-      at: "2026-10-14T10:00:00.000Z",
-      model: "ollama/kimi",
-      input_tokens: tokens - 1_000,
-      cache_read_tokens: 1_000,
-    });
-  }
+  if (tokens !== null) fake.threadLatestCall.set(t, latestCall(tokens));
   return t;
 }
 
@@ -62,18 +67,35 @@ const valueOf = (el: HTMLElement) => ({
 });
 
 describe("context gauge", () => {
-  it("is empty before the first turn, scaled to the thread model's window", async () => {
+  it("is hidden before the first model call", async () => {
     openApp(fake, threadWith(null));
-    const gauge = await meter();
-    await waitFor(() =>
-      expect(valueOf(gauge)).toEqual({
-        now: 0,
-        max: 200_000,
-        text: "0 of 200k tokens (0%) · Kimi K2.7 Code",
-        level: "ok",
-      }),
-    );
-    expect(gauge.getAttribute("aria-valuemin")).toBe("0");
+    await screen.findByRole("combobox", { name: "Model for this conversation" });
+    await screen.findByRole("button", { name: "Files" });
+    expect(screen.queryByRole("meter")).toBeNull();
+    expect(document.querySelector("[data-context-gauge]")).toBeNull();
+  });
+
+  it("is hidden after a compaction that no model call followed yet", async () => {
+    const t = threadWith(190_000);
+    const answer = fake.addEntry(t, null, {
+      role: "assistant",
+      content: [{ type: "text", text: "Done." }],
+      usage: { input: 1_000, cacheRead: 189_000, cacheWrite: 0 },
+    });
+    const thread = must(fake.threads.get(t));
+    thread.entries.push({
+      entry_id: "c1",
+      parent_id: answer,
+      seq: thread.entries.length + 1,
+      type: "compaction",
+      payload: { type: "compaction", id: "c1", parentId: answer, summary: "…", tokensBefore: 1 },
+      payload_offloaded: false,
+      created_at: "2026-10-14T10:01:00.000Z",
+    });
+    openApp(fake, t);
+    await screen.findByRole("button", { name: "Files" });
+    await screen.findByText("Done.");
+    expect(screen.queryByRole("meter")).toBeNull();
   });
 
   it("shows run_usage's newest call on load, follows message usage during a run, then run_usage again", async () => {
@@ -95,16 +117,16 @@ describe("context gauge", () => {
     await waitFor(() => expect(valueOf(gauge).now).toBe(100_000));
     expect(valueOf(gauge).text).toBe("100k of 200k tokens (50%) · Kimi K2.7 Code");
 
-    // The gateway's own count of that call lands in run_usage; the gauge reads it after the run.
-    fake.threadLatestCall.set(t, {
-      at: "2026-10-14T10:05:00.000Z",
-      model: "ollama/kimi",
-      input_tokens: 1_200,
-      cache_read_tokens: 99_000,
-    });
+    // The gateway's count of that call lands in run_usage late: a read that still has only the
+    // previous run's call keeps the streamed value, and the gauge reads again.
     fake.agent.complete(run.run_id);
-    await waitFor(() => expect(valueOf(gauge).now).toBe(100_200), { timeout: 4_000 });
-  });
+    await waitFor(() => expect(fake.requests.filter(usageReads(t))).toHaveLength(2), {
+      timeout: 4_000,
+    });
+    expect(valueOf(gauge).now).toBe(100_000);
+    fake.threadLatestCall.set(t, latestCall(100_200, run.run_id));
+    await waitFor(() => expect(valueOf(gauge).now).toBe(100_200), { timeout: 6_000 });
+  }, 15_000);
 
   it.each([
     [129_000, "ok", "129k of 200k tokens (64%)"],
@@ -153,7 +175,8 @@ describe("context gauge", () => {
       expect(valueOf(gauge)).toEqual({
         now: 150_000,
         max: 1_000_000,
-        text: "150k of 1M tokens (15%) · GLM 5.3",
+        // Kimi's tokenizer counted them; GLM's window is the scale from now on.
+        text: "150k of 1M tokens (15%) · GLM 5.3 · counted by Kimi K2.7 Code",
         level: "ok",
       }),
     );

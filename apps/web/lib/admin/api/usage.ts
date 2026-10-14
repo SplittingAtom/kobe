@@ -64,12 +64,15 @@ export interface RunUsage extends UsageTotals {
 
 /** The thread's newest model call that read input (KOBE-211: the context gauge). */
 export interface LatestCall {
+  /** The run that made it. */
+  readonly runId: string;
   readonly at: string;
   /** `<gateway provider>/<model>` as the call named it. */
   readonly model: string;
-  /** Input tokens not read from a prompt cache. */
+  /** Input tokens not read from or written to a prompt cache (the three counts are disjoint). */
   readonly inputTokens: number;
   readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
 }
 
 /** `GET /v1/threads/{id}/usage`: per run, in the order the runs first called a model. */

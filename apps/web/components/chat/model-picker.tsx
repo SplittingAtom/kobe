@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect, useId, useState, useSyncExternalStore } from "react";
-import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
+import { useId, useState, useSyncExternalStore } from "react";
+import { modelName } from "../../lib/admin/api/team/models";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import { useChatSession } from "./kobe-runtime";
+import { useTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
 /** The `<select>` value of "use the team's default" (an alias is never empty). */
 const DEFAULT = "";
-
-type Loaded =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly data: TeamModels }
-  | { readonly status: "unavailable" };
 
 /**
  * The conversation's model (D30; KOBE-41's open question): one of the team's enabled models, or
@@ -34,45 +30,13 @@ export function ModelPicker({
 }) {
   const id = useId();
   const session = useChatSession();
-  const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
+  const loaded = useTeamModels(state);
   const draftAgent = useSyncExternalStore(
     session.subscribeDraftAgent,
     () => session.draftAgent,
     () => null,
   );
   const [draft, setDraft] = useState<string | null>(() => session.draftModel);
-
-  // Read again for each conversation opened (cached briefly by the session).
-  useEffect(() => {
-    let current = true;
-    session.models().then(
-      (res) => {
-        if (current)
-          setLoaded(res.ok ? { status: "ready", data: res.data } : { status: "unavailable" });
-      },
-      () => {
-        if (current) setLoaded({ status: "unavailable" });
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [session, state.threadId]);
-
-  // A run refused for a disabled model: read the team's models again so the picker shows it.
-  const terminal = state.live?.terminal;
-  const failedForModel =
-    terminal?.type === "run.failed" && terminal.payload.error.code === "agent_model_not_enabled";
-  useEffect(() => {
-    if (!failedForModel) return;
-    let current = true;
-    void session.models({ fresh: true }).then((res) => {
-      if (current && res.ok) setLoaded({ status: "ready", data: res.data });
-    });
-    return () => {
-      current = false;
-    };
-  }, [session, failedForModel]);
 
   if (loaded.status !== "ready") return null;
   const { models, default: teamDefault } = loaded.data;

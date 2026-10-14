@@ -77,10 +77,11 @@ export interface LiveRun {
   /** The run's prompt is in the tree (its first committed user message). */
   readonly promptCommitted: boolean;
   /**
-   * Prompt plus cache-read tokens of this run's newest assistant message (its usage as Pi ended
-   * it): the context gauge's live value (CE14, KOBE-211). Absent until one commits with usage.
+   * Prompt tokens (input + cache read + cache write) of this run's newest assistant message, its
+   * usage as Pi ended it: the context gauge's live value (CE14, KOBE-211). Absent until one commits
+   * with usage; null after a compaction entry, until the next message says the new size.
    */
-  readonly contextTokens?: number | undefined;
+  readonly contextTokens?: number | null | undefined;
   /** Message ids already bound to entries (later deltas for them are ignored); O(1) lookups. */
   readonly bound: Readonly<Record<string, true>>;
   readonly messages: readonly LiveMessage[];
@@ -199,7 +200,10 @@ function commit(run: LiveRun, payload: Payload<"entry.committed">): LiveRun {
       : [...run.committed, payload.entry_id],
     promptCommitted:
       run.promptCommitted || (payload.entry_type === "message" && isUserMessage(entryPayload)),
-    contextTokens: messageContextTokens(entryPayload) ?? run.contextTokens,
+    contextTokens:
+      payload.entry_type === "compaction"
+        ? null
+        : (messageContextTokens(entryPayload) ?? run.contextTokens),
     bound,
     messages,
   };

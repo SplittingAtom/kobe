@@ -242,4 +242,36 @@ describe("context tokens (KOBE-211)", () => {
     ]).run;
     expect(fourth.contextTokens).toBe(105_000);
   });
+
+  it("count cache writes, and become unknown after a compaction until the next message", () => {
+    seq = 0;
+    const start = ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null });
+    const written = apply(newLiveRun(RUN), [
+      start,
+      // Anthropic via Pi: the prompt written to the cache is neither input nor cache read.
+      committed("a1", {
+        role: "assistant",
+        content: [],
+        usage: { input: 3, cacheRead: 0, cacheWrite: 180_000 },
+      }),
+    ]).run;
+    expect(written.contextTokens).toBe(180_003);
+    const compacted = apply(written, [
+      ev("entry.committed", {
+        entry_id: "c1",
+        parent_id: "a1",
+        entry_type: "compaction",
+        payload: { type: "compaction", id: "c1", summary: "…", tokensBefore: 180_003 } as never,
+      }),
+    ]).run;
+    expect(compacted.contextTokens).toBeNull();
+    const next = apply(compacted, [
+      committed("a2", {
+        role: "assistant",
+        content: [],
+        usage: { input: 20_000, cacheRead: 0, cacheWrite: 0 },
+      }),
+    ]).run;
+    expect(next.contextTokens).toBe(20_000);
+  });
 });
