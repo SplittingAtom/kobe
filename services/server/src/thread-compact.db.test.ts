@@ -300,6 +300,21 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
     expect(interrupted.json.interrupted_run ?? null).toBeNull();
   });
 
+  it("answers at once when the sandbox reconnects mid-compaction (its old reply is void)", async () => {
+    const { w, ws, threadId } = await world();
+    const t0 = Date.now();
+    const pending = compact(w, threadId);
+    await ws.compacting();
+    ws.kill();
+    // The agent drops a reply finished after a reconnect (command ids are per connection); the
+    // new connection's hello settles the orphaned command, well before its 10 s deadline here.
+    await f.connect(w, 1, CAPABLE);
+    expectError(await pending, "sandbox_unavailable", 503);
+    expect(Date.now() - t0).toBeLessThan(8_000);
+    expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("failed");
+    expect(await f.threadStatus(w.team, threadId)).toBe("idle");
+  });
+
   it("leaves the compaction's summary call out of the gauge's latest call", async () => {
     const { w, ws, threadId, run } = await world();
     const pending = compact(w, threadId);

@@ -1,3 +1,4 @@
+import type { SandboxCommandKind } from "@kobe/db";
 import {
   MAX_RUN_TOKEN_TTL_SECONDS,
   EVENT_ENTRY_PAYLOAD_MAX_BYTES,
@@ -109,13 +110,8 @@ export interface WireTuning {
   readonly reconnectMinMs: number;
   readonly reconnectMaxMs: number;
   /** Default command deadlines by kind. */
-  readonly commandTimeoutMs: {
-    readonly "run.start": number;
-    readonly "run.steer": number;
-    readonly "run.stop": number;
-    readonly "pi.command": number;
-    readonly "thread.compact": number;
-  };
+  /** One per command kind: a new kind in `SANDBOX_COMMAND_KINDS` must get its own here. */
+  readonly commandTimeoutMs: Readonly<Record<SandboxCommandKind, number>>;
 }
 
 export const WIRE_DEFAULTS: WireTuning = {
@@ -169,7 +165,7 @@ export const WIRE_DEFAULTS: WireTuning = {
     "pi.command": 60_000,
     // KOBE-213: Pi's compact is a slow command (10 min in the agent), plus waking the sandbox.
     "thread.compact": 720_000,
-  },
+  } satisfies Record<SandboxCommandKind, number>,
 };
 
 /** Largest preview of a tool result kept in `tool.result` (the event payload cap is 256 KiB). */
