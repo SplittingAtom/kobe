@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #280)
 - **Branch / worktree:** `kobe-215-thread-org-migration` in `../Kobe-wt215`
 - **Depends on:** — (lands alone, before KOBE-216 fork to thread, 219 auto-titles, 220 pin/archive/move)
 
