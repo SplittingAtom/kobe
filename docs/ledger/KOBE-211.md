@@ -1,6 +1,6 @@
 # KOBE-211: B7: Context gauge in bar row two
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #273)
 - **Branch / worktree:** `kobe-211-context-gauge` in `../Kobe-wt211`
 - **Depends on:** KOBE-210 (closed here, see below), KOBE-197 (bar row two, merged)
 
