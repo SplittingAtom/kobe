@@ -608,9 +608,12 @@ export class CommandDelivery {
 
   async #record(issued: Extract<IssuedCommand, { kind: "row" }>, outcome: CommandOutcome) {
     const { teamId } = this.#host.target;
-    // The compaction's entry is mirrored and its run ended before its requester hears back.
+    // The compaction's entry is mirrored and its run ended before its requester hears back; if
+    // that fails the requester still hears back (and ends the run itself).
     if (issued.commandKind === "thread.compact" && issued.runId !== null) {
-      await this.#endCompaction(issued.runId, issued.threadId, outcome);
+      await this.#endCompaction(issued.runId, issued.threadId, outcome).catch((err: unknown) =>
+        this.#host.log.error({ err, run_id: issued.runId }, "could not end a compaction run"),
+      );
     }
     await withTeam(this.#ctx.db, teamId, (tx) =>
       completeCommand(tx, this.#ctx.bus, teamId, issued.rowId, outcome, this.#host.id),
