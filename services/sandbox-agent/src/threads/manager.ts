@@ -284,7 +284,7 @@ export class ThreadManager {
       const tampered = await thread.verifyRuntime();
       if (tampered !== undefined) {
         await thread.stopTampered(tampered, "compact");
-        return compactFailure("internal", `runtime tampered: ${tampered}`);
+        return compactFailure("runtime_tampered", tampered);
       }
       const response = await thread.request(compactCommand(frame), PI_SLOW_REQUEST_TIMEOUT_MS);
       return response.success ? compactSuccess(response.data) : piCompactFailure(response.error);
@@ -316,7 +316,7 @@ export class ThreadManager {
       const tampered = await thread.verifyRuntime();
       if (tampered !== undefined) {
         await thread.stopTampered(tampered, "compact");
-        return compactFailure("internal", `runtime tampered: ${tampered}`);
+        return compactFailure("runtime_tampered", tampered);
       }
       if (await this.#selectModel(thread, model)) return undefined;
     }
