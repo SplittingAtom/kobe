@@ -43,7 +43,10 @@ export interface InputContextLike {
 /** The slice of Pi's `ExtensionAPI` kobe-models uses (structural, so no Pi package dependency). */
 export interface ExtensionApiLike {
   registerProvider(provider: Provider): void;
-  on(event: "input", handler: (event: unknown, ctx: InputContextLike) => Promise<void>): unknown;
+  on(
+    event: "input" | "session_before_compact",
+    handler: (event: unknown, ctx: InputContextLike) => Promise<void>,
+  ): unknown;
   setModel(model: Model): Promise<boolean>;
 }
 
@@ -100,16 +103,26 @@ export async function registerKobeModels(
       deps.warn(`kobe-models: run token unavailable: ${(error as Error).message}`);
     }
   };
-  let registered = await deps.readState(file);
-  api.registerProvider(build(registered));
-  api.on("input", async (_event, ctx) => {
-    let state: ModelFileState;
+  const readOrWarn = async (): Promise<ModelFileState | undefined> => {
     try {
-      state = await deps.readState(file);
+      return await deps.readState(file);
     } catch (error) {
       deps.warn(`kobe-models: ${(error as Error).message}`);
-      return;
+      return undefined;
     }
+  };
+  let registered = await deps.readState(file);
+  api.registerProvider(build(registered));
+  // A compaction (KOBE-213) sends Pi no prompt, so `input` never fires for it: fetch the
+  // compaction run's token when Pi starts summarizing (before its first model call). The agent
+  // selected the model before sending `compact` (Pi reads it before this hook).
+  api.on("session_before_compact", async (_event, ctx) => {
+    const state = await readOrWarn();
+    if (state !== undefined) await refreshRunToken(state, ctx);
+  });
+  api.on("input", async (_event, ctx) => {
+    const state = await readOrWarn();
+    if (state === undefined) return;
     await refreshRunToken(state, ctx);
     const wanted = state.model;
     if (wanted === null) return;

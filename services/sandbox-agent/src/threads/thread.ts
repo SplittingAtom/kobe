@@ -200,6 +200,8 @@ interface RuntimeOf {
 
 interface ActiveRun {
   readonly runId: string;
+  /** A compaction run (KOBE-213): Pi's `compact`, which never emits `turn_end` or settles. */
+  readonly compaction: boolean;
   stopAfterStep: boolean;
   stopping: boolean;
   readonly ended: Promise<void>;
@@ -246,6 +248,11 @@ export class Thread {
 
   get runId(): string | undefined {
     return this.#run?.runId;
+  }
+
+  /** The active run is a compaction (KOBE-213). */
+  get compacting(): boolean {
+    return this.#run?.compaction === true;
   }
 
   get hasProcess(): boolean {
@@ -731,12 +738,12 @@ export class Thread {
     }
   }
 
-  beginRun(runId: string): void {
+  beginRun(runId: string, compaction = false): void {
     let resolveEnded: () => void = () => undefined;
     const ended = new Promise<void>((resolve) => {
       resolveEnded = resolve;
     });
-    this.#run = { runId, stopAfterStep: false, stopping: false, ended, resolveEnded };
+    this.#run = { runId, compaction, stopAfterStep: false, stopping: false, ended, resolveEnded };
     this.onStopDue = undefined;
     this.lastUsed = Date.now();
     this.#hooks.runStarted(runId, this.id);
