@@ -75,7 +75,10 @@ describe("model wiring (KOBE-41)", () => {
       a === "--extension" ? [launch.argv[i + 1]] : [],
     );
     expect(extensions).toEqual([MODELS_EXTENSION, FAKE_POLICY_EXTENSION]);
-    expect(launch.argv).not.toContain("--model");
+    // Pi starts on the run's model (KOBE-279); later runs switch it through the model file.
+    expect(
+      launch.argv.slice(launch.argv.indexOf("--model"), launch.argv.indexOf("--model") + 2),
+    ).toEqual(["--model", "kobe/openai/gpt-fake"]);
     expect(launch.env.filter((k) => k.startsWith("KOBE_"))).toEqual([
       "KOBE_MODEL_FILE",
       "KOBE_POLICY_FD",
