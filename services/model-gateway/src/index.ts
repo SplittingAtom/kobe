@@ -25,7 +25,7 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
-import { BudgetGate } from "./budget-gate.js";
+import { BudgetGate, SETTLE_HOLD_SLACK_MS } from "./budget-gate.js";
 import { DbReservations } from "./reservations-db.js";
 import { DbUsageSink } from "./usage/sink.js";
 
@@ -64,9 +64,10 @@ const budgets = new BudgetGate(
         .update(`kobe.budget-reservations:${config.sessionKey}`)
         .digest("hex"),
     }),
-    // A settled hold keeps counting until the other replicas' cached spend has caught up, and a
-    // running call extends its hold, so the TTL need not exceed the longest call.
-    settleHoldMs: config.budgetCacheTtlMs,
+    // A settled hold keeps counting until the other replicas' cached spend has caught up, plus
+    // slack for a check queued behind others (KOBE-278), and a running call extends its hold,
+    // so the TTL need not exceed the longest call.
+    settleHoldMs: config.budgetCacheTtlMs + SETTLE_HOLD_SLACK_MS,
     heartbeatMs: Math.floor(config.reservationTtlMs / 2),
     onError: (err) => logger.warn({ err }, "budget reservation could not be ended"),
   },
