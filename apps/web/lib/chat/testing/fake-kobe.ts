@@ -88,6 +88,8 @@ interface FakeRun {
   /** Last entry this run committed (where its next entry hangs). */
   tip: string | null;
   client_key?: string;
+  /** The model alias the server ran it with (the agent's pin, else the thread's; null = default). */
+  model?: string | null;
 }
 
 export interface RecordedRequest {
@@ -462,6 +464,20 @@ export class FakeKobe {
           { leaf: false },
         ),
       ),
+    /**
+     * Pi's `model_change` entry: Pi starts on the run's model and, when the branch was on another
+     * one, records the switch before the prompt (Pi 1.0; KOBE-209 markers, KOBE-217).
+     */
+    modelChange: (runId: string, modelId: string) =>
+      this.#commitEntry(runId, (threadId, parentId) =>
+        this.addSystemEntry(
+          threadId,
+          parentId,
+          "model_change",
+          { provider: "kobe", modelId },
+          { leaf: false },
+        ),
+      ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
     complete: (runId: string) => {
@@ -506,6 +522,7 @@ export class FakeKobe {
     const thread = this.#thread(run.thread_id);
     thread.status = "running";
     run.parent_entry_id ??= thread.leaf_entry_id;
+    run.model = thread.agent_model ?? thread.model;
     this.emit(run.run_id, "run.started", {
       thread_id: run.thread_id,
       agent_id: null,
