@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { chatPortalContainer } from "../../lib/chat/portal-container";
+import { chatPortalContainer } from "./chat-portal";
 import { cn } from "../../lib/utils";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 

@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
-
-/** Radix popovers and tooltips portal to the body: a press there is not "outside" the layer. */
-const PORTALLED = "[data-radix-popper-content-wrapper]";
+import { CHAT_PORTALLED as PORTALLED } from "../ui/chat-portal";
 
 /**
  * Makes everything in the chat outside `el` inert (no focus, no pointer, hidden from assistive

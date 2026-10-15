@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
 import { THREAD_COMPACT_FOCUS_MAX_CHARS } from "@kobe/protocol";
-import { chatPortalContainer } from "../../lib/chat/portal-container";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { Button } from "../ui/button";
+import { chatPortalContainer } from "../ui/chat-portal";
 
 /**
  * Compact now (CE15, KOBE-213): asks Pi to summarize the conversation's older part, with an
@@ -63,10 +63,11 @@ export function CompactDialog({
   return (
     <Dialog.Root open={open} onOpenChange={change}>
       <Dialog.Portal container={chatPortalContainer()}>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" data-kobe-portal />
         <Dialog.Content
           className="bg-background text-foreground fixed top-1/2 left-1/2 z-50 grid w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border p-5 shadow-lg"
           data-compact-dialog
+          data-kobe-portal
           onCloseAutoFocus={(e) => {
             const target = returnFocus?.();
             if (!target) return;
