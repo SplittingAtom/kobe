@@ -360,6 +360,30 @@ function toolDeps(
   return deps;
 }
 
+/**
+ * Empty answers Pi wrote when a run was stopped before its first token (KOBE-290) that a later
+ * run branched beside: Pi keeps them, but they are no version of anything, so they would show as
+ * a fork ("2 branches") on the next message. Hidden unless something hangs below or the member
+ * chose that branch (the leaf).
+ */
+function staleStoppedAnswers(
+  entries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  leafEntryId: string | null,
+): ReadonlySet<string> {
+  const kids = new Map<string | null, number>();
+  for (const e of entries) kids.set(e.parentId, (kids.get(e.parentId) ?? 0) + 1);
+  const stale = new Set<string>();
+  for (const e of entries) {
+    const p = parsed.get(e.entryId);
+    const empty =
+      p?.kind === "assistant" && p.problem?.reason === "aborted" && p.pieces.length === 0;
+    if (!empty || e.entryId === leafEntryId || (kids.get(e.entryId) ?? 0) > 0) continue;
+    if ((kids.get(e.parentId) ?? 0) > 1) stale.add(e.entryId);
+  }
+  return stale;
+}
+
 /** The conversation as assistant-ui messages, with the head on the active branch. */
 export function projectThread(
   entries: readonly ThreadEntry[],
@@ -369,7 +393,11 @@ export function projectThread(
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
   const isSummary = (e: ThreadEntry) => parsed.get(e.entryId)?.kind === "skipped";
   const summaries = entries.filter(isSummary);
-  const treeEntries = summaries.length === 0 ? entries : entries.filter((e) => !isSummary(e));
+  const stale = staleStoppedAnswers(entries, parsed, leafEntryId);
+  const treeEntries =
+    summaries.length === 0 && stale.size === 0
+      ? entries
+      : entries.filter((e) => !isSummary(e) && !stale.has(e.entryId));
   const results = new Map<string, ToolResultInfo>();
   const resultEntries = new Map<string, ThreadEntry>();
   for (const entry of treeEntries) {

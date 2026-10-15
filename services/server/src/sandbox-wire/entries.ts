@@ -22,6 +22,8 @@ export interface MirrorResult {
   readonly inserted: readonly PiSessionEntry[];
   /** Entries skipped because their parent is unknown (a broken or hostile tree). */
   readonly orphans: number;
+  /** Entries skipped because their id is one only the server writes (`ks-`, `ku-`): hostile. */
+  readonly reserved: number;
   /** Entries whose id already exists (normal for overlapping syncs). */
   readonly existing: number;
   /** The thread reached `maxEntries`: later entries were not stored. */
@@ -44,6 +46,11 @@ export function unsentPromptEntryId(runId: string): string {
 
 export function isUnsentPromptEntryId(entryId: string): boolean {
   return entryId.startsWith(UNSENT_PROMPT_PREFIX);
+}
+
+/** Ids only the server writes (the skipped-actions note `ks-`, an unsent prompt `ku-`). */
+export function isServerEntryId(entryId: string): boolean {
+  return entryId.startsWith("ks-") || isUnsentPromptEntryId(entryId);
 }
 
 /**
@@ -136,7 +143,12 @@ export async function mirrorEntriesInTx(
   const inserted: PiSessionEntry[] = [];
   let orphans = 0;
   let existing = 0;
+  let reserved = 0;
   for (const entry of data.entries) {
+    if (isServerEntryId(entry.id)) {
+      reserved += 1;
+      continue;
+    }
     if (known.has(entry.id)) {
       existing += 1;
       continue;
@@ -166,14 +178,17 @@ export async function mirrorEntriesInTx(
       })),
     );
   }
-  const leafId = data.leafId !== null && known.has(data.leafId) ? data.leafId : null;
+  const leafId =
+    data.leafId !== null && known.has(data.leafId) && !isServerEntryId(data.leafId)
+      ? data.leafId
+      : null;
   if (leafId !== null || inserted.length > 0) {
     await tx.execute(sql`
       UPDATE threads
          SET leaf_entry_id = COALESCE(${leafId}, leaf_entry_id), last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  return { inserted, orphans, existing, leafId, capped, bytes };
+  return { inserted, orphans, reserved, existing, leafId, capped, bytes };
 }
 
 function isAssistantMessage(entry: PiSessionEntry): boolean {

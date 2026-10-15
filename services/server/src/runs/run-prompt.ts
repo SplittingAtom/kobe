@@ -2,6 +2,7 @@ import type { PiGetEntriesData, PiSessionEntry } from "@kobe/protocol";
 import { sql, threadEntries, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
+import { findRunPrompt, type FoundPrompt } from "./run-prompt-pi.js";
 import {
   entryCommittedEvents,
   isUnsentPromptEntryId,
@@ -15,18 +16,34 @@ import {
  * run can end first: Stop, a refused or timed-out start, a budget stop. The member's message must
  * still be in the conversation after a reload, once, where Pi has it:
  *
- * - Pi has the prompt: its own entry (Pi's id, parent and branch), from Pi's entries since the
- *   sync cursor, cut after the first user message: nothing else of an ended run is accepted.
- * - Pi never received it (no sandbox ever leased the run, or Pi's entries show no prompt after a
- *   refused start): the server writes it, Pi-shaped, under the run's branch point, with an id Pi
- *   can't have ({@link unsentPromptEntryId}). Pi doesn't know it, so it is never the sync cursor,
- *   never restored, and never where Pi continues from ({@link piBranchPoint}).
- * - Unknown (a sandbox holds the run but its entries can't be read): nothing is written. Pi's
- *   entry comes back with the thread's next sync, never a second copy.
+ * - Pi has the prompt: its own entry (Pi's id, parent and branch), found by the entry tree from
+ *   the run's branch point and checked against `runs.input` ({@link findRunPrompt}); nothing else
+ *   of an ended run is accepted, and it counts against the run's byte budget.
+ * - Pi never received it (no sandbox ever leased the run, or Pi's entries show no prompt of the
+ *   run after a refused start): the server writes it, Pi-shaped, under the run's branch point,
+ *   with an id Pi can't have ({@link unsentPromptEntryId}; the mirror refuses such ids from a
+ *   sandbox). Pi doesn't know it, so it is never the sync cursor, never restored, and never where
+ *   Pi continues from ({@link piBranchPoint}).
+ * - Unknown (a sandbox holds the run but its entries can't be read, or show something else where
+ *   the prompt should be): nothing is written. Pi's entry comes back with the next sync.
  */
 export type PromptSource =
-  | { readonly kind: "pi"; readonly entries: PiGetEntriesData }
+  | {
+      readonly kind: "pi";
+      readonly entries: PiGetEntriesData;
+      /** No valid prompt of the run in Pi's entries: keep nothing, or the server's copy. */
+      readonly otherwise: "nothing" | "unsent";
+    }
   | { readonly kind: "never_reached_pi" };
+
+/** What keeping found: kept, already bound, or why nothing was kept. */
+export type KeepOutcome = "kept" | "bound" | "skipped" | FoundPrompt["kind"];
+
+export interface KeptPrompt {
+  readonly outcome: KeepOutcome;
+  /** `entry.committed` for what was written (appendable while the run has not ended). */
+  readonly events: readonly NewRunEvent[];
+}
 
 /** Whether the run's prompt is where the thread's leaf should go (`if_latest`: no later run). */
 export type LeafMove = "always" | "if_latest";
@@ -55,38 +72,6 @@ export async function bindUserEntry(
   const res = await tx.execute<{ user_entry_id: string | null }>(sql`
     SELECT user_entry_id FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
   return res.rows[0]?.user_entry_id ?? null;
-}
-
-function isUserMessage(entry: PiSessionEntry): boolean {
-  const message = (entry as { message?: { role?: unknown } }).message;
-  return entry.type === "message" && message?.role === "user";
-}
-
-/** The sandbox agent's branch marker (`kobe.branch`, written before a run's prompt reaches Pi). */
-function isBranchMarkerOf(entry: PiSessionEntry, runId: string): boolean {
-  const e = entry as { customType?: unknown; data?: { run_id?: unknown } };
-  return entry.type === "custom" && e.customType === "kobe.branch" && e.data?.run_id === runId;
-}
-
-/**
- * Pi's new entries up to and including the run's prompt: the first user message after the run's
- * branch marker, or (no marker: the thread's first run, or one continuing from Pi's leaf) the
- * first user message. Undefined when Pi has none.
- */
-export function promptPrefix(
-  entries: readonly PiSessionEntry[],
-  runId: string,
-): PiSessionEntry[] | undefined {
-  const from = entries.findIndex((e) => isBranchMarkerOf(e, runId));
-  const at = entries.findIndex((e, i) => i > from && isUserMessage(e));
-  return at < 0 ? undefined : entries.slice(0, at + 1);
-}
-
-/** The source for a run whose entries were read: Pi's prompt if it has one, else none reached Pi. */
-export function promptSourceOf(entries: PiGetEntriesData, runId: string): PromptSource {
-  return promptPrefix(entries.entries, runId) === undefined
-    ? { kind: "never_reached_pi" }
-    : { kind: "pi", entries };
 }
 
 type PromptRun = {
@@ -132,30 +117,67 @@ async function setUserEntry(tx: KobeTx, teamId: string, runId: string, entryId: 
      WHERE team_id = ${teamId} AND id = ${runId} AND user_entry_id IS NULL`);
 }
 
+/** Not already some other run's prompt (a stop-then-resend race, or a forged reuse). */
+async function boundElsewhere(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  run: PromptRun,
+  id: string,
+) {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${run.thread_id} AND id <> ${runId}
+       AND user_entry_id = ${id}
+     LIMIT 1`);
+  return res.rows.length > 0;
+}
+
+/** Adds `bytes` to the run's sandbox bytes if they fit its budget (the active path's rule). */
+async function chargeBytes(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  bytes: number,
+  maxBytes: number,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    UPDATE runs SET sandbox_bytes = sandbox_bytes + ${bytes}
+     WHERE team_id = ${teamId} AND id = ${runId} AND sandbox_bytes + ${bytes} <= ${maxBytes}
+    RETURNING 1`);
+  return res.rows.length === 1;
+}
+
 async function mirrorPiPrompt(
   tx: KobeTx,
   teamId: string,
   runId: string,
   run: PromptRun,
-  entries: PiGetEntriesData,
+  chain: readonly PiSessionEntry[],
   moveLeaf: boolean,
-  maxEntries: number,
-): Promise<NewRunEvent[]> {
-  const prefix = promptPrefix(entries.entries, runId);
-  const prompt = prefix?.at(-1);
-  if (prefix === undefined || prompt === undefined) return [];
+  limits: { readonly maxEntries: number; readonly maxBytes: number },
+): Promise<KeptPrompt> {
+  const prompt = chain.at(-1);
+  if (prompt === undefined || (await boundElsewhere(tx, teamId, runId, run, prompt.id))) {
+    return { outcome: "mismatch", events: [] };
+  }
+  const bytes = chain.reduce((n, e) => n + Buffer.byteLength(JSON.stringify(e), "utf8"), 0);
+  if (!(await chargeBytes(tx, teamId, runId, bytes, limits.maxBytes))) {
+    return { outcome: "skipped", events: [] };
+  }
   const mirrored = await mirrorEntriesInTx(
     tx,
     teamId,
     run.thread_id,
-    { entries: prefix, leafId: moveLeaf ? prompt.id : null },
-    maxEntries,
+    { entries: [...chain], leafId: moveLeaf ? prompt.id : null },
+    limits.maxEntries,
   );
   const stored = await tx.execute(sql`
     SELECT 1 FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${run.thread_id} AND entry_id = ${prompt.id}`);
-  if (stored.rows.length > 0) await setUserEntry(tx, teamId, runId, prompt.id);
-  return entryCommittedEvents(mirrored.inserted, () => undefined);
+  if (stored.rows.length === 0) return { outcome: "skipped", events: [] };
+  await setUserEntry(tx, teamId, runId, prompt.id);
+  return { outcome: "kept", events: entryCommittedEvents(mirrored.inserted, () => undefined) };
 }
 
 async function writeUnsentPrompt(
@@ -214,32 +236,44 @@ async function writeUnsentPrompt(
 
 /**
  * Keeps the prompt of a message run that ends (or ended) before Pi's first `turn_end`, from
- * `source`; without one it only binds `runs.user_entry_id` to a prompt already mirrored. Returns
- * `entry.committed` events for what it wrote: the end transaction appends them before the run's
- * terminal event (a run that has already ended gets none). Locks thread, then run.
+ * `source`; without one it only binds `runs.user_entry_id` to a prompt already mirrored. The
+ * end transaction appends the returned events before the run's terminal event (a run that has
+ * already ended gets none). Locks thread, then run.
  */
 export async function keepRunPromptInTx(
   tx: KobeTx,
   teamId: string,
   runId: string,
   source: PromptSource | undefined,
-  options: { readonly leaf: LeafMove; readonly maxEntries?: number },
-): Promise<NewRunEvent[]> {
+  options: {
+    readonly leaf: LeafMove;
+    readonly maxEntries?: number;
+    readonly maxBytes?: number;
+  },
+): Promise<KeptPrompt> {
   const run = await lockPromptRun(tx, teamId, runId);
-  if (run?.kind !== "message") return [];
-  if ((await bindUserEntry(tx, teamId, runId)) !== null || source === undefined) return [];
+  if (run?.kind !== "message") return { outcome: "skipped", events: [] };
+  if ((await bindUserEntry(tx, teamId, runId)) !== null) return { outcome: "bound", events: [] };
+  if (source === undefined) return { outcome: "skipped", events: [] };
   const moveLeaf = options.leaf === "always" || (await isLatestRun(tx, teamId, runId, run));
-  return source.kind === "pi"
-    ? mirrorPiPrompt(
-        tx,
-        teamId,
-        runId,
-        run,
-        source.entries,
-        moveLeaf,
-        options.maxEntries ?? WIRE_DEFAULTS.threadMaxEntries,
-      )
-    : writeUnsentPrompt(tx, teamId, runId, run, moveLeaf);
+  if (source.kind === "never_reached_pi") {
+    return { outcome: "kept", events: await writeUnsentPrompt(tx, teamId, runId, run, moveLeaf) };
+  }
+  const found = findRunPrompt(source.entries.entries, {
+    id: runId,
+    input: run.input,
+    parentEntryId: run.parent_entry_id,
+  });
+  const kept =
+    found.kind === "valid"
+      ? await mirrorPiPrompt(tx, teamId, runId, run, found.chain, moveLeaf, {
+          maxEntries: options.maxEntries ?? WIRE_DEFAULTS.threadMaxEntries,
+          maxBytes: options.maxBytes ?? WIRE_DEFAULTS.runMaxBytes,
+        })
+      : { outcome: found.kind, events: [] };
+  if (kept.outcome === "kept" || source.otherwise === "nothing") return kept;
+  // A refused start: Pi has no prompt of this run (or not this run's text): the server's copy.
+  return { outcome: "kept", events: await writeUnsentPrompt(tx, teamId, runId, run, moveLeaf) };
 }
 
 /**
@@ -251,17 +285,20 @@ export async function keepPromptAtEndInTx(
   teamId: string,
   runId: string,
   source?: PromptSource,
-): Promise<NewRunEvent[]> {
-  if (source !== undefined) return keepRunPromptInTx(tx, teamId, runId, source, { leaf: "always" });
+): Promise<readonly NewRunEvent[]> {
+  if (source !== undefined) {
+    return (await keepRunPromptInTx(tx, teamId, runId, source, { leaf: "always" })).events;
+  }
   const lease = await tx.execute(sql`
     SELECT 1 FROM sandbox_run_leases WHERE team_id = ${teamId} AND run_id = ${runId}`);
-  return keepRunPromptInTx(
+  const kept = await keepRunPromptInTx(
     tx,
     teamId,
     runId,
     lease.rows.length === 0 ? { kind: "never_reached_pi" } : undefined,
     { leaf: "always" },
   );
+  return kept.events;
 }
 
 /**

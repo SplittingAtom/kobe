@@ -88,6 +88,19 @@ describe.skipIf(!PI_AVAILABLE)("Stop before Pi's first token in real Pi 1.0.0 (K
     const atPrompt = await entries();
     const user = atPrompt.entries.find((e) => roleOf(e) === "user");
     expect(user, JSON.stringify(atPrompt)).toBeDefined();
+    // The exact shape the server accepts from an ended run (findRunPrompt, KOBE-290 review M1).
+    expect(Object.keys(user ?? {}).sort()).toEqual([
+      "id",
+      "message",
+      "parentId",
+      "timestamp",
+      "type",
+    ]);
+    expect(user?.message).toEqual({
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+      timestamp: expect.any(Number),
+    });
     expect(atPrompt.leafId).toBe(user?.id);
     expect(events(harness, RUN).some((e) => e.type === "turn_end")).toBe(false);
 

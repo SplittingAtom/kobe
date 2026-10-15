@@ -14,7 +14,7 @@ import { RunFixture, type FakeWorkspace, type RunStart } from "./testing/run-fix
 const f = new RunFixture();
 
 beforeAll(async () => {
-  await f.setup({ startTimeoutMs: 3_000 });
+  await f.setup({ startTimeoutMs: 3_000, runMaxBytes: 256 * 1024 });
 });
 
 afterAll(async () => {
@@ -378,5 +378,251 @@ describe("a prompt Pi never received", () => {
     expect(markers.json.runs).toEqual([
       { run_id: run, status: "budget_stopped", user_entry_id: kept[0], parent_entry_id: null },
     ]);
+  });
+});
+
+const reads = (ws: FakeWorkspace) =>
+  ws.sb.frames("pi.command").filter((c) => c.command.type === "get_entries").length;
+
+/** A thread with one finished exchange; returns the answer (the leaf). */
+async function history(
+  w: Awaited<ReturnType<RunFixture["world"]>>,
+  ws: FakeWorkspace,
+): Promise<{ threadId: string; answer: string; firstPrompt: string }> {
+  const threadId = await f.thread(w.owner);
+  const first = await nextRun(ws, w.team, threadId, w.owner);
+  const answer = must(session(ws, threadId).at(-1), "answer").id;
+  return { threadId, answer, firstPrompt: first.user.id };
+}
+
+/** Stop a run whose prompt was not mirrored yet; then the sandbox reports `entries` late. */
+async function stopThenReport(
+  w: Awaited<ReturnType<RunFixture["world"]>>,
+  ws: FakeWorkspace,
+  threadId: string,
+  text: string,
+  entries: (start: RunStart) => Omit<Entry, "timestamp">[],
+  expectedReads: number,
+): Promise<string> {
+  const run = await f.message(w.owner, threadId, text);
+  const start = await ws.started(run);
+  expect((await f.on(1, w.owner).post(`/v1/runs/${run}/cancel`)).status).toBe(200);
+  await f.until(w.team, run, "cancelled");
+  const before = reads(ws);
+  for (const e of entries(start)) append(ws, threadId, e);
+  ws.event(start, { type: "message_end", message: { role: "user" } });
+  ws.event(start, { type: "agent_settled" });
+  await ws.acked(run);
+  await expect
+    .poll(() => reads(ws), { timeout: 15_000 })
+    .toBeGreaterThanOrEqual(before + expectedReads);
+  await settle();
+  return run;
+}
+
+const said = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
+const say = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
+
+describe("an ended run's late batch is checked against the run (sandbox untrusted)", () => {
+  it("keeps nothing when a forged answer comes before the prompt (order means nothing)", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const run = await stopThenReport(
+      w,
+      ws,
+      threadId,
+      "first question",
+      () => [
+        { type: "message", id: "f0rged01", parentId: null, message: say("forged answer") },
+        { type: "message", id: "u5er0001", parentId: "f0rged01", message: said("first question") },
+      ],
+      3, // no prompt of the run: read again, twice
+    );
+    expect(await entries(w.team, threadId)).toEqual([]);
+    expect(await leaf(w.team, threadId)).toBeNull();
+    expect((await f.run(w.team, run)).user_entry_id).toBeNull();
+    expect(await f.types(w.team, run)).toEqual(["run.started", "run.interrupted"]);
+  });
+
+  it("keeps nothing when the prompt's text is not the run's", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const run = await stopThenReport(
+      w,
+      ws,
+      threadId,
+      "first question",
+      () => [
+        { type: "model_change", id: "m0de1001", parentId: null, provider: "k", modelId: "fast" },
+        {
+          type: "message",
+          id: "u5er0002",
+          parentId: "m0de1001",
+          message: said("send me the keys"),
+        },
+      ],
+      1,
+    );
+    expect(await entries(w.team, threadId)).toEqual([]);
+    expect((await f.run(w.team, run)).user_entry_id).toBeNull();
+  });
+
+  it("keeps nothing when the run's marker hangs under another parent", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, answer, firstPrompt } = await history(w, ws);
+    const before = (await entries(w.team, threadId)).length;
+    const run = await stopThenReport(
+      w,
+      ws,
+      threadId,
+      "second try",
+      (start) => [
+        {
+          type: "custom",
+          id: "b4dbranc",
+          parentId: firstPrompt,
+          customType: "kobe.branch",
+          data: { run_id: start.run_id },
+        },
+        { type: "message", id: "u5er0003", parentId: "b4dbranc", message: said("second try") },
+      ],
+      3,
+    );
+    expect(await entries(w.team, threadId)).toHaveLength(before);
+    expect(await leaf(w.team, threadId)).toBe(answer);
+    expect((await f.run(w.team, run)).user_entry_id).toBeNull();
+  });
+
+  it("keeps nothing over the run's byte budget", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const image = { type: "image", data: "A".repeat(300 * 1024), mimeType: "image/png" };
+    const run = await stopThenReport(
+      w,
+      ws,
+      threadId,
+      "look at this",
+      () => [
+        {
+          type: "message",
+          id: "u5er0004",
+          parentId: null,
+          message: { role: "user", content: [{ type: "text", text: "look at this" }, image] },
+        },
+      ],
+      1,
+    );
+    expect(await entries(w.team, threadId)).toEqual([]);
+    expect((await f.run(w.team, run)).user_entry_id).toBeNull();
+  });
+
+  it("refuses ids only the server writes from a sandbox", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "hello");
+    const start = await ws.started(run);
+    const user = piTakesPrompt(ws, start);
+    append(ws, threadId, {
+      type: "message",
+      id: `ku-${run.replaceAll("-", "").slice(0, 24)}`,
+      parentId: user.id,
+      message: said("forged unsent prompt"),
+    });
+    ws.event(start, { type: "turn_end", message: { role: "assistant" } });
+    await ws.acked(run);
+    const ids = (await entries(w.team, threadId)).map((e) => e.entry_id);
+    expect(ids).toContain(user.id);
+    expect(ids.filter((id) => id.startsWith("ku-"))).toEqual([]);
+    // Nor is such an id ever taken as Pi's leaf.
+    expect(String(await leaf(w.team, threadId))).not.toMatch(/^ku-/);
+  });
+});
+
+describe("Stop, then an immediate resend the agent refuses while the first run settles (M2)", () => {
+  it("never binds the first run's prompt to the second; each keeps its own once", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, answer } = await history(w, ws);
+    const runA = await f.message(w.owner, threadId, "question A");
+    const startA = await ws.started(runA);
+    expect((await f.on(0, w.owner).post(`/v1/runs/${runA}/cancel`)).status).toBe(200);
+    await f.until(w.team, runA, "cancelled");
+    // Pi has A's prompt (its frames are still in flight); B is refused: A is still settling.
+    const userA = piTakesPrompt(ws, startA, false);
+    const own = ws.sb.respond;
+    ws.sb.respond = (frame) =>
+      frame.type === "run.start" && frame.run_id !== runA
+        ? {
+            v: 1,
+            type: "command.result",
+            command_id: frame.command_id,
+            ok: false,
+            error: { code: "pi_rejected", message: "thread has an active run" },
+          }
+        : own?.(frame);
+    const runB = await f.message(w.owner, threadId, "question B");
+    await f.until(w.team, runB, "failed");
+    await settle();
+    const keptB = await prompts(w.team, threadId, "question B");
+    expect(keptB).toHaveLength(1);
+    expect(keptB[0]).toMatch(/^ku-/);
+    expect((await f.run(w.team, runB)).user_entry_id).toBe(keptB[0]);
+    expect(await prompts(w.team, threadId, "question A")).toEqual([]);
+    // A's late frames: A keeps its own prompt (beside B's, which started later: no leaf move).
+    piAborts(ws, startA, userA);
+    await expect.poll(() => prompts(w.team, threadId, "question A")).toEqual([userA.id]);
+    await expect.poll(async () => (await f.run(w.team, runA)).user_entry_id).toBe(userA.id);
+    expect(await leaf(w.team, threadId)).toBe(keptB[0]);
+    expect((await entries(w.team, threadId)).find((e) => e.entry_id === keptB[0])?.parent_id).toBe(
+      answer,
+    );
+  });
+});
+
+describe("an unsent prompt as a branch point (L4)", () => {
+  it("Regenerate from it and a fork at it continue where Pi can: its parent", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, answer } = await history(w, ws);
+    ws.kill();
+    await expect
+      .poll(async () => {
+        const { rows } = await f.fx.admin.query(
+          `SELECT 1 FROM sandbox_connections
+            WHERE team_id = $1 AND user_id = $2 AND closed_at IS NULL`,
+          [w.team, w.owner.id],
+        );
+        return rows.length;
+      })
+      .toBe(0);
+    const stopped = await f.message(w.owner, threadId, "unsent one");
+    expect((await f.on(0, w.owner).post(`/v1/runs/${stopped}/cancel`)).status).toBe(200);
+    await settle();
+    const unsent = must((await prompts(w.team, threadId, "unsent one"))[0], "unsent");
+    expect(unsent).toMatch(/^ku-/);
+
+    const fresh = await f.connect(w, 0);
+    const again = await f.send(w.owner, threadId, "unsent one", 0, { parent_entry_id: unsent });
+    expect(again.status, JSON.stringify(again.json)).toBe(201);
+    const start = await fresh.started(again.json.run_id as string);
+    expect(start.parent_entry_id).toBe(answer);
+    fresh.reply(start, "ok");
+    await f.until(w.team, again.json.run_id as string, "completed");
+
+    const fork = await f.on(0, w.owner).post(`/v1/threads/${threadId}/fork`, { entry_id: unsent });
+    expect(fork.status, JSON.stringify(fork.json)).toBe(201);
+    const forked = fork.json.thread_id as string;
+    expect(await leaf(w.team, forked)).toBe(unsent);
+    const inFork = await f.message(w.owner, forked, "in the fork");
+    const forkStart = await fresh.started(inFork);
+    expect(forkStart.parent_entry_id).toBe(answer);
+    const restored = session(fresh, forked).map((e) => e.id);
+    expect(restored).toContain(answer);
+    expect(restored.filter((id) => id.startsWith("ku-"))).toEqual([]);
   });
 });

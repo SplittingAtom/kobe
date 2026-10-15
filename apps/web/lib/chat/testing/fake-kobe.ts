@@ -270,17 +270,17 @@ export class FakeKobe {
   /**
    * Adds a committed entry directly (history that exists before the test). `at` is when Pi
    * appended it; `offloaded` stores the body as object storage would (KOBE-208), read back by
-   * `GET /v1/threads/{id}/entries/{entryId}`.
+   * `GET /v1/threads/{id}/entries/{entryId}`; `id` gives it the server's own id (`ku-…`, KOBE-290).
    */
   addEntry(
     threadId: string,
     parentId: string | null,
     message: Json,
-    opts: { leaf?: boolean; at?: string; offloaded?: boolean } = {},
+    opts: { leaf?: boolean; at?: string; offloaded?: boolean; id?: string } = {},
   ) {
     const thread = this.#thread(threadId);
     this.#entryN += 1;
-    const id = `e${this.#entryN}`;
+    const id = opts.id ?? `e${this.#entryN}`;
     const at = opts.at ?? NOW;
     const payload = { type: "message", id, parentId, timestamp: at, message };
     if (opts.offloaded) this.entryBodies.set(id, payload);

@@ -16,7 +16,7 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
-import { keepRunPromptInTx, promptSourceOf } from "../runs/run-prompt.js";
+import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import type { Logger } from "pino";
 import { completeCommand, markDelivered, pendingCommands, type CommandRow } from "./commands.js";
@@ -567,7 +567,8 @@ export class CommandDelivery {
     // A refused start: Pi's entries say whether it holds the prompt (KOBE-290). Network I/O before
     // the transaction; unreadable entries keep nothing (Pi's own entry comes with the next sync).
     const read = outcome.ok ? undefined : await this.fetchNewEntries(threadId);
-    const prompt = read === undefined ? undefined : promptSourceOf(read, runId);
+    const prompt: PromptSource | undefined =
+      read === undefined ? undefined : { kind: "pi", entries: read, otherwise: "unsent" };
     const { ended } = await withAppendTx(this.#ctx.db, teamId, async (tx) => {
       const result = await endRunInTx(tx, teamId, runId, end, undefined, prompt);
       // Ended before (Stop while the sandbox prepared the run): the prompt is kept all the same.
@@ -575,6 +576,7 @@ export class CommandDelivery {
         await keepRunPromptInTx(tx, teamId, runId, prompt, {
           leaf: "if_latest",
           maxEntries: this.#ctx.tuning.threadMaxEntries,
+          maxBytes: this.#ctx.tuning.runMaxBytes,
         });
       }
       return result;
