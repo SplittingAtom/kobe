@@ -1,5 +1,5 @@
 import type { PiEventFrame, PiGetEntriesData } from "@kobe/protocol";
-import { sql, type KobeDb } from "@kobe/db";
+import { sql, withTeam, type KobeDb } from "@kobe/db";
 import {
   appendRunEventsInTx,
   MAX_APPEND_BATCH,
@@ -9,6 +9,7 @@ import {
 import type { WireTuning } from "./constants.js";
 import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
+import { bindUserEntry, keepRunPromptInTx } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
 import type { RunTranslator } from "./translate.js";
 
@@ -285,9 +286,10 @@ export class RunIngest {
     const first = frames[0];
     const last = frames[frames.length - 1];
     if (first === undefined || last === undefined) return;
+    let fetched: { readonly entries?: PiGetEntriesData; readonly lost: boolean } | undefined;
     try {
       // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
-      const fetched = sync ? await this.#fetchEntries(settled) : undefined;
+      fetched = sync ? await this.#fetchEntries(settled) : undefined;
       const entries = fetched?.entries;
       // KOBE-258: a run whose entries could not be saved never ends completed (a model failure
       // is still the reason shown: it is why the run went wrong).
@@ -362,7 +364,38 @@ export class RunIngest {
         host.runEnded(runId, ended ? (end === undefined ? "completed" : "failed") : undefined);
       }
     } catch (err) {
+      if (err instanceof CursorConflict && !err.active)
+        await this.#keepLatePrompt(fetched?.entries);
       this.#recover(err, last);
+    }
+  }
+
+  /**
+   * The first batch after the run ended elsewhere (Stop, a failed or timed-out start, a budget
+   * stop) was refused. If the run's prompt was never mirrored, Pi's entry is kept from Pi's
+   * entries (read now when the batch had none); nothing else of the batch is (KOBE-290).
+   */
+  async #keepLatePrompt(read: PiGetEntriesData | undefined): Promise<void> {
+    const { db, teamId, runId, threadId, host, tuning } = this.#o;
+    try {
+      // Usually mirrored already (Pi announced it while the run was active): no sandbox round trip.
+      if ((await withTeam(db, teamId, (tx) => bindUserEntry(tx, teamId, runId))) !== null) return;
+      const entries = read ?? (await host.fetchNewEntries(threadId));
+      if (entries === undefined) return;
+      await withTeam(db, teamId, (tx) =>
+        keepRunPromptInTx(
+          tx,
+          teamId,
+          runId,
+          { kind: "pi", entries },
+          {
+            leaf: "if_latest",
+            maxEntries: tuning.threadMaxEntries,
+          },
+        ),
+      );
+    } catch (err) {
+      host.log.warn({ err, run_id: runId }, "could not keep the prompt of an ended run");
     }
   }
 
@@ -392,6 +425,7 @@ export class RunIngest {
 
   #recover(err: unknown, last: number): void {
     const { host, runId } = this.#o;
+    const received = this.#next - 1;
     if (err instanceof LimitExceeded) {
       // Nothing of the batch was stored. The run fails and is stopped; frames are acked so the
       // agent can forget them.
@@ -411,10 +445,11 @@ export class RunIngest {
       this.#cursor = err.cursor;
       this.#next = err.cursor + 1;
       if (!err.active) {
-        // Ended elsewhere (Stop, sweep): late frames are acknowledged and not executed.
+        // Ended elsewhere (Stop, sweep): late frames (the queued ones too) are acknowledged and
+        // not executed.
         this.#ended = true;
         host.sendError("run_not_active", "the run has ended", "pi.event");
-        host.sendAck(runId, last);
+        host.sendAck(runId, Math.max(last, received));
         host.runEnded(runId, undefined);
         return;
       }

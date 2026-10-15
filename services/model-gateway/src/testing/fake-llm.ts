@@ -297,6 +297,13 @@ export const TOOL_STEP_MARKER = "kobe-tool-step";
  */
 export const TOOL_STEP_PROMPT_TOKENS = 1_000_000;
 
+/**
+ * A prompt containing this gets no answer for {@link SLOW_START_MS} (KOBE-290 e2e: Stop before the
+ * first token). The wait ends early when the caller goes away (Pi's abort closes the request).
+ */
+export const SLOW_START_MARKER = "kobe-slow-start";
+export const SLOW_START_MS = 120_000;
+
 function openaiToolCall(res: ServerResponse, model: string): void {
   const chunk = (delta: unknown, finish: string | null, usage?: unknown) =>
     `data: ${JSON.stringify({
@@ -481,7 +488,13 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       const toolDone = messages.some((m) => m.role === "tool");
       const toolResult = lastToolResult(body);
       const nextStep = steps?.[stepsDone];
-      if (nextStep) openaiNamedCall(res, nextStep, stream, model);
+      if (text.includes(SLOW_START_MARKER)) {
+        const timer = setTimeout(
+          () => openai(res, `fake-openai: ${text}`, stream, model),
+          SLOW_START_MS,
+        );
+        res.on("close", () => clearTimeout(timer));
+      } else if (nextStep) openaiNamedCall(res, nextStep, stream, model);
       else if (toolStep && !toolDone && stream) openaiToolCall(res, model);
       else if (toolStep) openai(res, "fake-openai: tool step done", stream, model);
       else if (toolResult !== undefined) {

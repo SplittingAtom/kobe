@@ -21,6 +21,9 @@ import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { THREAD_LOCK_TIMEOUT } from "../threads/repository.js";
 import { RunError } from "./errors.js";
+import { bindUserEntry, keepPromptAtEndInTx } from "./run-prompt.js";
+
+export { bindUserEntry };
 
 /**
  * Run rows and the thread lock (KOBE-30). Everything here runs inside the caller's `withTeam`
@@ -435,6 +438,11 @@ export async function applyTransition(
       UPDATE threads SET status = ${threadStatus}, last_activity_at = now()
        WHERE team_id = ${run.teamId} AND id = ${thread.id}`);
   }
+  // A message whose run ends before Pi's first turn_end stays in the conversation (KOBE-290).
+  const kept =
+    terminal && to !== "completed" && isActiveRunStatus(run.status)
+      ? await keepPromptAtEndInTx(tx, run.teamId, run.id)
+      : [];
   if (event) {
     // A scheduled run's denied calls are reported on its terminal event (Stop, start failures).
     const reported = terminal
@@ -445,7 +453,9 @@ export async function applyTransition(
           run.trigger === "schedule",
         )
       : event;
-    await appendRunEventsInTx(tx, run.teamId, run.id, [reported]);
+    await appendRunEventsInTx(tx, run.teamId, run.id, [...kept, reported]);
+  } else if (kept.length > 0) {
+    await appendRunEventsInTx(tx, run.teamId, run.id, kept);
   }
   // A scheduled run's end notifies its owner in this transaction (D32, KOBE-179).
   if (terminal) {
@@ -473,24 +483,6 @@ export async function setThreadStatus(
   await tx.execute(sql`
     UPDATE threads SET status = ${status}, last_activity_at = now()
      WHERE team_id = ${teamId} AND id = ${threadId}`);
-}
-
-/**
- * Records the Pi entry id of the run's prompt once the wire mirrored it (`runs.user_entry_id`):
- * the first user message entry committed during the run. Best effort; never overwrites.
- */
-export async function bindUserEntry(tx: KobeTx, teamId: string, runId: string): Promise<void> {
-  await tx.execute(sql`
-    UPDATE runs r SET user_entry_id = (
-      SELECT e.payload ->> 'entry_id'
-        FROM run_events e
-        JOIN thread_entries te
-          ON te.team_id = e.team_id AND te.thread_id = r.thread_id
-         AND te.entry_id = e.payload ->> 'entry_id'
-       WHERE e.team_id = ${teamId} AND e.run_id = ${runId} AND e.type = 'entry.committed'
-         AND te.type = 'message' AND te.payload -> 'message' ->> 'role' = 'user'
-       ORDER BY e.seq LIMIT 1)
-     WHERE r.team_id = ${teamId} AND r.id = ${runId} AND r.user_entry_id IS NULL`);
 }
 
 /**

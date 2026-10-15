@@ -186,3 +186,52 @@ describe("a prompt over 64 KiB reconciles with its stored entry (ac-2)", () => {
     expect(must(document.querySelector('[data-kobe-scroll="messages"]')).textContent).toBe(live);
   });
 });
+
+describe("after a reload, the prompt of a run that ended before Pi's first turn (KOBE-290)", () => {
+  // The server keeps the prompt in the thread's entries (Pi's own entry, or its own when Pi never
+  // received it, with a `ku-` id) and binds it to the run (`user_entry_id`), so a reload reads it.
+  const ends = {
+    "Stop (cancelled)": async (runId: string) => {
+      await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
+      await waitFor(() => expect(fake.run(runId).status).toBe("cancelled"));
+    },
+    "a failed start": async (runId: string) =>
+      fake.agent.fail(runId, "start_failed", "No sandbox."),
+    "a budget stop": async (runId: string) => fake.agent.budgetStop(runId),
+  };
+
+  for (const [name, end] of Object.entries(ends)) {
+    it(`${name}: the reloaded prompt shows once, as sent, never waiting`, async () => {
+      const t = threadWithHistory();
+      const answer = must(fake.threads.get(t)?.leaf_entry_id);
+      openApp(fake, t);
+      expect(await screen.findByText("a1")).toBeTruthy();
+      const { runId } = await sendAndStart("draw a chart", t);
+      await end(runId);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
+      const status = fake.run(runId).status;
+
+      // What the server stored at the run's end.
+      const prompt = fake.addEntry(t, answer, {
+        role: "user",
+        content: [{ type: "text", text: "draw a chart" }],
+      });
+      if (status === "budget_stopped") {
+        fake.threadMarkers.set(t, {
+          runs: [{ run_id: runId, status, user_entry_id: prompt, parent_entry_id: answer }],
+          approvals: [],
+        });
+      }
+      cleanup();
+      openApp(fake, t);
+      expect(await screen.findByText("draw a chart")).toBeTruthy();
+      expect(screen.getAllByText("draw a chart")).toHaveLength(1);
+      expect(screen.queryByText(WAITING)).toBeNull();
+      expect(screen.queryByText(/^Version/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+      if (status === "budget_stopped") {
+        expect(await screen.findByText("Run stopped by the budget")).toBeTruthy();
+      }
+    });
+  }
+});

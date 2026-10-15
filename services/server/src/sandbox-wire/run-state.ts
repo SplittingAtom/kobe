@@ -12,6 +12,7 @@ import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js
 import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { failureInfo } from "../runs/failure-codes.js";
+import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -100,6 +101,8 @@ export async function endRunInTx(
   runId: string,
   requested: RunEnd,
   interruptCause?: InterruptCause,
+  /** What Pi has of the run's prompt, when the caller read it (KOBE-290; else: leased or not). */
+  prompt?: PromptSource,
 ): Promise<{ ended: boolean; threadId?: string }> {
   let end = requested;
   const head = await tx.execute<{ thread_id: string }>(sql`
@@ -157,8 +160,11 @@ export async function endRunInTx(
     budgetScope && to === "budget_stopped"
       ? budgetStoppedEvent(budgetScope)
       : terminalEvent(end, threadRow.leaf_entry_id);
+  // A message whose run ends before Pi's first turn_end stays in the conversation (KOBE-290).
+  const kept = to === "completed" ? [] : await keepPromptAtEndInTx(tx, teamId, runId, prompt);
   // A scheduled run's denied calls (D32) are reported on its terminal event and in its thread.
   await appendRunEventsInTx(tx, teamId, runId, [
+    ...kept,
     await reportSkippedActionsInTx(
       tx,
       { teamId, runId, threadId },

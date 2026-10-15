@@ -104,6 +104,24 @@ describe("Pi → Kobe translation", () => {
     expect(settled).toMatchObject({ settled: true, syncEntries: true, events: [] });
   });
 
+  it("asks for an entry sync once Pi has written the prompt (KOBE-290), not at its start", async () => {
+    const t = translator();
+    const start = await t.translate(1, {
+      type: "message_start",
+      message: { role: "user" },
+    } as never);
+    expect(start).toMatchObject({ syncEntries: false, events: [] });
+    const end = await t.translate(2, { type: "message_end", message: { role: "user" } } as never);
+    expect(end).toMatchObject({ syncEntries: true, settled: false, events: [] });
+    // An assistant message's end still waits for turn_end (its tool results come first).
+    await t.translate(3, { type: "message_start", message: { role: "assistant" } } as never);
+    const answer = await t.translate(4, {
+      type: "message_end",
+      message: { role: "assistant" },
+    } as never);
+    expect(answer.syncEntries).toBe(false);
+  });
+
   it("ignores unknown types (incl. kobe.event_dropped) and flags malformed known ones", async () => {
     const t = translator();
     expect((await t.translate(1, { type: "kobe.event_dropped" })).events).toEqual([]);

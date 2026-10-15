@@ -801,8 +801,15 @@ out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")
 const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
 out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
 out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
+// KOBE-290: a reload still shows the stopped prompt (Pi never had it: the server keeps it), once;
+// the deleted queued message is gone.
+const reload = await call("GET", "/v1/threads/" + id);
+const said = (text) => (reload.json.entries || []).filter((e) => e.payload?.message?.role === "user" &&
+  JSON.stringify(e.payload.message.content).includes(text));
+out("reload", reload.status + ":" + said("hello").length + ":" + said("again").length + ":" +
+  (said("hello")[0]?.entry_id === reload.json.leaf_entry_id));
 JS
-runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -13)
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -14)
 printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
 contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
 contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
@@ -812,8 +819,9 @@ contains "pending messages: the active prompt, then the queue (KOBE-32)" '^pendi
 contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
 contains "Stop pauses the message queued behind it (KOBE-26)" '^paused=true:queued$' "$runs_out"
 contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
-contains "the event stream records the start and the stop, then ends" '^events=run.started,(sandbox.waking,)?run.interrupted$' "$runs_out"
+contains "the event stream records the start, the kept prompt and the stop, then ends" '^events=run.started,(sandbox.waking,)?entry.committed,run.interrupted$' "$runs_out"
 contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
+contains "KOBE-290: after a reload the stopped prompt is there once, as the leaf; the deleted one is not" '^reload=200:1:0:true$' "$runs_out"
 
 # Throwaway clusters only: this section mints sandbox-wire tokens with the site's real keys.
 # KOBE-26 (Gate 1: "killing a sandbox mid-run yields interrupted + Retry and history survives").
@@ -1891,6 +1899,83 @@ JS
     contains "compacting again right away has nothing to compact (409)" '^again=409:nothing_to_compact$' "$compact_out"
     compact_usage() { psql_kobe "SELECT count(*) FROM run_usage u JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id WHERE u.team_id = '$E2E_TEAM_ID' AND r.thread_id = '${compact_thread:-00000000-0000-4000-8000-000000000000}' AND r.kind = 'compaction' AND r.status = 'completed'"; }
     contains "the summary call is billed to the completed compaction run" '^[1-9][0-9]*$' "$(wait_for 30 '^[1-9]' compact_usage)"
+
+    # KOBE-290: Stop before the first token on real Pi. The fake model holds back its answer to a
+    # `kobe-slow-start` prompt, so the run is stopped once Pi has the prompt (the server mirrors it
+    # when Pi announces it) and before any text. A reload then shows the prompt once.
+    echo "==> Stop before the first token (KOBE-290)"
+    read -r -d '' STOP_EARLY_JS <<'JS' || true
+const [team, content] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const headers = () => ({ origin, "content-type": "application/json", "x-kobe-team": team,
+  cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") });
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body) });
+  for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+  const text = await res.text();
+  let json = {}; try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text };
+};
+const out = (k, v) => console.log(k + "=" + v);
+let login;
+for (let i = 0; i < 4; i++) {
+  login = await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" });
+  if (login.status !== 429) break;
+  await new Promise((r) => setTimeout(r, 11000));
+}
+out("signin", login.status);
+await call("PUT", "/v1/me/teams/active", { teamId: team });
+const thread = await call("POST", "/v1/threads", { title: "kobe-290" });
+const id = thread.json.thread_id;
+const sent = await call("POST", "/v1/threads/" + id + "/messages", { content });
+out("message", sent.status);
+const runId = sent.json.run_id;
+// Follow the run until Pi's prompt is committed (entry.committed, a user message), counting text.
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 240000);
+let committed = false, deltas = 0;
+try {
+  const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (!committed) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const type = (block.match(/^event: (.*)$/m) || [])[1];
+      let payload = {}; try { payload = JSON.parse((block.match(/^data: (.*)$/m) || [])[1]).payload ?? {}; } catch {}
+      if (type === "text.delta") deltas += 1;
+      if (type === "entry.committed" && payload.payload?.message?.role === "user") committed = true;
+    }
+  }
+  controller.abort();
+} catch (e) { if (!committed) out("stream_error", e.name); }
+clearTimeout(timer);
+out("committed", committed + ":" + deltas);
+out("cancel", (await call("POST", "/v1/runs/" + runId + "/cancel")).json.status);
+// Pi settles after the abort; its late frames are refused, the prompt stays.
+await new Promise((r) => setTimeout(r, 5000));
+const reload = await call("GET", "/v1/threads/" + id);
+const entries = reload.json.entries || [];
+const prompts = entries.filter((e) => e.payload?.message?.role === "user" && JSON.stringify(e.payload.message.content).includes(content));
+out("reload", reload.status + ":" + prompts.length + ":" + (prompts[0]?.entry_id === reload.json.leaf_entry_id));
+out("answers", entries.filter((e) => e.payload?.message?.role === "assistant").length);
+const run = await call("GET", "/v1/runs/" + runId);
+out("run", run.json.status + ":" + (run.json.user_entry_id === prompts[0]?.entry_id));
+JS
+    stop_early_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$STOP_EARLY_JS" "$E2E_TEAM_ID" "kobe-slow-start stop me $RANDOM" 2>&1 || true)
+    printf '     stop early: %s\n' "$(tr '\n' ' ' <<<"$stop_early_out")"
+    contains "KOBE-290: the prompt is mirrored once Pi has it, before any text" '^committed=true:0$' "$stop_early_out"
+    contains "KOBE-290: Stop cancels the run before the first token" '^cancel=cancelled$' "$stop_early_out"
+    contains "KOBE-290: after a reload the prompt is there once, as the leaf" '^reload=200:1:true$' "$stop_early_out"
+    contains "KOBE-290: the aborted answer of the stopped run is not stored" '^answers=0$' "$stop_early_out"
+    contains "KOBE-290: the run is bound to its prompt entry" '^run=cancelled:true$' "$stop_early_out"
 
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.

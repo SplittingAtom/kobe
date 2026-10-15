@@ -180,3 +180,32 @@ describe("steps script (KOBE-244: several tool calls in one run)", () => {
     expect(id(a)).not.toBe(id(b));
   });
 });
+
+describe("fake LLM slow start (KOBE-290 e2e)", () => {
+  it("holds back the answer to a 'kobe-slow-start' prompt until the caller goes away", async () => {
+    const abort = new AbortController();
+    const pending = fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-fake",
+        stream: true,
+        messages: [{ role: "user", content: "kobe-slow-start stop me" }],
+      }),
+      signal: abort.signal,
+    }).then(
+      () => "answered",
+      () => "aborted",
+    );
+    const early = await Promise.race([
+      pending,
+      new Promise((resolve) => setTimeout(() => resolve("waiting"), 300)),
+    ]);
+    expect(early).toBe("waiting");
+    abort.abort();
+    expect(await pending).toBe("aborted");
+    // The server still answers others.
+    const res = await chat([{ role: "user", content: "hello" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
+  });
+});

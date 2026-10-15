@@ -1,0 +1,382 @@
+import { randomBytes } from "node:crypto";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { must } from "./testing/event-stream-fixture.js";
+import { RunFixture, type FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
+
+/**
+ * KOBE-290: a prompt whose run ends before Pi's first `turn_end` (Stop, a failed or timed-out
+ * start, a budget stop) stays in the conversation after reload, once, where Pi has it. Pi's own
+ * entry is mirrored as soon as Pi announces it (`message_end`, role user) or, when the run had
+ * already ended, from its first late batch (the prompt only: the rest of a late batch is still
+ * refused). A prompt Pi never received is kept as the server's own entry. Session shapes follow
+ * the real-Pi recording in services/sandbox-agent/src/stop-before-answer.real-pi.test.ts.
+ */
+const f = new RunFixture();
+
+beforeAll(async () => {
+  await f.setup({ startTimeoutMs: 3_000 });
+});
+
+afterAll(async () => {
+  await f.teardown();
+});
+
+interface Entry {
+  type: string;
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+  [k: string]: unknown;
+}
+
+const id = () => randomBytes(4).toString("hex");
+const now = () => new Date().toISOString();
+
+function session(ws: FakeWorkspace, threadId: string): Entry[] {
+  return ws.sessions.get(threadId) ?? [];
+}
+
+function append(ws: FakeWorkspace, threadId: string, entry: Omit<Entry, "timestamp">): Entry {
+  const full = { ...entry, timestamp: now() } as Entry;
+  ws.sessions.set(threadId, [...session(ws, threadId), full]);
+  return full;
+}
+
+/**
+ * Pi takes the prompt (as recorded from Pi 1.0.0): on a new session its setup entries first, on a
+ * branch Kobe's marker, then the user message, announced with `message_end`.
+ */
+function piTakesPrompt(ws: FakeWorkspace, start: RunStart, announce = true): Entry {
+  const threadId = start.thread_id;
+  let parent = session(ws, threadId).at(-1)?.id ?? null;
+  if (start.parent_entry_id !== undefined) {
+    parent = append(ws, threadId, {
+      type: "custom",
+      id: id(),
+      parentId: start.parent_entry_id,
+      customType: "kobe.branch",
+      data: { run_id: start.run_id },
+    }).id;
+  } else if (parent === null) {
+    parent = append(ws, threadId, {
+      type: "model_change",
+      id: id(),
+      parentId: null,
+      provider: "kobe",
+      modelId: "fast",
+    }).id;
+    parent = append(ws, threadId, {
+      type: "thinking_level_change",
+      id: id(),
+      parentId: parent,
+      thinkingLevel: "off",
+    }).id;
+  }
+  const user = append(ws, threadId, {
+    type: "message",
+    id: id(),
+    parentId: parent,
+    message: { role: "user", content: [{ type: "text", text: start.message }] },
+  });
+  if (announce) {
+    ws.event(start, { type: "agent_start" });
+    ws.event(start, { type: "turn_start" });
+    ws.event(start, { type: "message_start", message: { role: "user" } });
+    ws.event(start, { type: "message_end", message: { role: "user" } });
+  }
+  return user;
+}
+
+/** Pi aborts before the first token: an empty `aborted` answer, then the turn and run end. */
+function piAborts(ws: FakeWorkspace, start: RunStart, user: Entry): Entry {
+  const aborted = append(ws, start.thread_id, {
+    type: "message",
+    id: id(),
+    parentId: user.id,
+    message: { role: "assistant", content: [], stopReason: "aborted" },
+  });
+  ws.event(start, { type: "message_start", message: { role: "assistant" } });
+  ws.event(start, { type: "message_end", message: { role: "assistant", stopReason: "aborted" } });
+  ws.event(start, { type: "turn_end", message: { role: "assistant" } });
+  ws.event(start, { type: "agent_settled" });
+  return aborted;
+}
+
+/** The next run: Pi branches where Kobe says, answers, and the turn is mirrored. */
+async function nextRun(
+  ws: FakeWorkspace,
+  team: string,
+  threadId: string,
+  owner: Parameters<RunFixture["message"]>[0],
+): Promise<{ start: RunStart; user: Entry }> {
+  const run = await f.message(owner, threadId, "second question");
+  const start = await ws.started(run);
+  const user = piTakesPrompt(ws, start);
+  append(ws, threadId, {
+    type: "message",
+    id: id(),
+    parentId: user.id,
+    message: { role: "assistant", content: [{ type: "text", text: "answer" }] },
+  });
+  ws.event(start, { type: "message_start", message: { role: "assistant" } });
+  ws.event(start, { type: "message_end", message: { role: "assistant" } });
+  ws.event(start, { type: "turn_end", message: { role: "assistant" } });
+  ws.event(start, { type: "agent_settled" });
+  await f.until(team, run, "completed");
+  return { start, user };
+}
+
+async function entries(team: string, threadId: string) {
+  const { rows } = await f.fx.admin.query<{
+    entry_id: string;
+    parent_id: string | null;
+    type: string;
+    payload: { message?: { role?: string; content?: unknown; stopReason?: string } };
+  }>(
+    `SELECT entry_id, parent_id, type, payload FROM thread_entries
+      WHERE team_id = $1 AND thread_id = $2 ORDER BY seq`,
+    [team, threadId],
+  );
+  return rows;
+}
+
+async function leaf(team: string, threadId: string): Promise<string | null> {
+  const { rows } = await f.fx.admin.query<{ leaf_entry_id: string | null }>(
+    `SELECT leaf_entry_id FROM threads WHERE team_id = $1 AND id = $2`,
+    [team, threadId],
+  );
+  return must(rows[0], "thread").leaf_entry_id;
+}
+
+/** The text of every user message entry with this prompt (the conversation shows each once). */
+async function prompts(team: string, threadId: string, text: string): Promise<string[]> {
+  return (await entries(team, threadId))
+    .filter((e) => e.type === "message" && e.payload.message?.role === "user")
+    .filter((e) => JSON.stringify(e.payload.message?.content).includes(text))
+    .map((e) => e.entry_id);
+}
+
+/** What a reload reads: the thread's entries over the API. */
+async function reloadedPrompts(
+  owner: Parameters<RunFixture["message"]>[0],
+  threadId: string,
+  text: string,
+): Promise<string[]> {
+  const res = await f.on(0, owner).get(`/v1/threads/${threadId}`);
+  expect(res.status).toBe(200);
+  const list = res.json.entries as {
+    entry_id: string;
+    payload: { message?: { role?: string; content?: unknown } };
+  }[];
+  return list
+    .filter((e) => e.payload.message?.role === "user")
+    .filter((e) => JSON.stringify(e.payload.message?.content).includes(text))
+    .map((e) => e.entry_id);
+}
+
+async function settle(): Promise<void> {
+  await f.fx.replica(0).deps.runs.idle();
+  await f.fx.replica(1).deps.runs.idle();
+}
+
+describe("Stop after Pi wrote the prompt", () => {
+  it("mirrors it when Pi announces it; Stop keeps it once, and the next run's sync adds no copy", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    const start = await ws.started(run);
+    const user = piTakesPrompt(ws, start);
+    await ws.acked(run);
+    // Mirrored while the run is active, before any turn ended.
+    expect(await prompts(w.team, threadId, "first question")).toEqual([user.id]);
+    expect(await leaf(w.team, threadId)).toBe(user.id);
+
+    expect((await f.on(1, w.owner).post(`/v1/runs/${run}/cancel`)).status).toBe(200);
+    const aborted = piAborts(ws, start, user);
+    await ws.acked(run);
+    await settle();
+    expect(await f.types(w.team, run)).toEqual([
+      "run.started",
+      "entry.committed",
+      "entry.committed",
+      "entry.committed",
+      "run.interrupted",
+    ]);
+    // The late batch is refused for everything but the prompt: the aborted answer is not stored.
+    expect((await entries(w.team, threadId)).map((e) => e.entry_id)).not.toContain(aborted.id);
+    expect((await f.run(w.team, run)).user_entry_id).toBe(user.id);
+    expect(await reloadedPrompts(w.owner, threadId, "first question")).toEqual([user.id]);
+    const pending = await f.on(0, w.owner).get(`/v1/threads/${threadId}/pending-messages`);
+    expect(pending.json.messages).toEqual([]);
+
+    // The next run continues after the prompt; Pi's sync re-sends the aborted answer, never the prompt.
+    const next = await nextRun(ws, w.team, threadId, w.owner);
+    expect(next.start.parent_entry_id).toBe(user.id);
+    expect(await prompts(w.team, threadId, "first question")).toEqual([user.id]);
+    expect((await entries(w.team, threadId)).map((e) => e.entry_id)).toContain(aborted.id);
+    expect(await leaf(w.team, threadId)).not.toBe(user.id);
+  });
+});
+
+describe("Stop before the prompt was mirrored (late batch)", () => {
+  it("keeps only the prompt of the ended run's late batch, once, where Pi has it", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    const start = await ws.started(run);
+    // Stop while the sandbox prepares the run (Pi has not written anything yet).
+    expect((await f.on(1, w.owner).post(`/v1/runs/${run}/cancel`)).status).toBe(200);
+    await f.until(w.team, run, "cancelled");
+    expect(await prompts(w.team, threadId, "first question")).toEqual([]);
+    // Pi then takes the prompt and aborts: one late batch.
+    const user = piTakesPrompt(ws, start);
+    const aborted = piAborts(ws, start, user);
+    await ws.acked(run);
+    await expect.poll(() => prompts(w.team, threadId, "first question")).toEqual([user.id]);
+    // Nothing else of the late batch: no aborted answer, no run events after the end.
+    expect((await entries(w.team, threadId)).map((e) => e.entry_id)).not.toContain(aborted.id);
+    expect(await f.types(w.team, run)).toEqual(["run.started", "run.interrupted"]);
+    expect(await leaf(w.team, threadId)).toBe(user.id);
+    await expect.poll(async () => (await f.run(w.team, run)).user_entry_id).toBe(user.id);
+    expect(await reloadedPrompts(w.owner, threadId, "first question")).toEqual([user.id]);
+
+    // Re-sync (the recorded sequence): the next run's batch holds the aborted answer, the branch
+    // marker and its own entries, never a second copy of the prompt.
+    const next = await nextRun(ws, w.team, threadId, w.owner);
+    expect(next.start.parent_entry_id).toBe(user.id);
+    expect(await prompts(w.team, threadId, "first question")).toEqual([user.id]);
+    expect(await prompts(w.team, threadId, "second question")).toEqual([next.user.id]);
+  });
+});
+
+describe("a prompt Pi never received", () => {
+  it("stopped while the sandbox wakes: kept as the server's entry and leaf, outside Pi's session", async () => {
+    const w = await f.world(); // no sandbox yet
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    // A queued message deleted with Stop is gone, as before.
+    const queued = await f.message(w.owner, threadId, "never mind");
+    expect((await f.on(0, w.owner).post(`/v1/runs/${queued}/cancel`)).status).toBe(200);
+    expect((await f.on(1, w.owner).post(`/v1/runs/${run}/cancel`)).status).toBe(200);
+    await settle();
+    const kept = await prompts(w.team, threadId, "first question");
+    expect(kept).toHaveLength(1);
+    const unsent = must(kept[0], "unsent prompt");
+    expect(unsent).toMatch(/^ku-/);
+    expect(await prompts(w.team, threadId, "never mind")).toEqual([]);
+    expect(await leaf(w.team, threadId)).toBe(unsent);
+    expect((await f.run(w.team, run)).user_entry_id).toBe(unsent);
+    expect(await f.types(w.team, run)).toEqual([
+      "run.started",
+      "entry.committed",
+      "run.interrupted",
+    ]);
+    expect(await reloadedPrompts(w.owner, threadId, "first question")).toEqual([unsent]);
+
+    // The next run starts where Pi can continue (the unsent prompt's parent: none here), its
+    // first sync asks Pi for everything, and the restore never hands Pi the server's entry.
+    const ws = await f.connect(w, 1);
+    const next = await nextRun(ws, w.team, threadId, w.owner);
+    expect(next.start.parent_entry_id).toBeUndefined();
+    const syncs = ws.sb
+      .frames("pi.command")
+      .filter((c) => c.command.type === "get_entries")
+      .map((c) => (c.command as { since?: string }).since);
+    expect(syncs).not.toContain(unsent);
+    expect(ws.sb.frames("session.restore")).toEqual([]);
+    expect(await prompts(w.team, threadId, "first question")).toEqual([unsent]);
+    expect(await leaf(w.team, threadId)).not.toBe(unsent);
+
+    // Again, after the conversation moved on, and with the sandbox's volume lost: the unsent
+    // prompt hangs where the run started, the restore leaves it out, and a message sent after it
+    // continues where Pi can (its parent).
+    const answer = must(session(ws, threadId).at(-1), "answer").id;
+    ws.kill();
+    await expect
+      .poll(async () => {
+        const { rows } = await f.fx.admin.query(
+          `SELECT 1 FROM sandbox_connections
+            WHERE team_id = $1 AND user_id = $2 AND closed_at IS NULL`,
+          [w.team, w.owner.id],
+        );
+        return rows.length;
+      })
+      .toBe(0);
+    const third = await f.message(w.owner, threadId, "third question");
+    expect((await f.on(0, w.owner).post(`/v1/runs/${third}/cancel`)).status).toBe(200);
+    await settle();
+    const unsent3 = must((await prompts(w.team, threadId, "third question"))[0], "third");
+    expect((await entries(w.team, threadId)).find((e) => e.entry_id === unsent3)?.parent_id).toBe(
+      answer,
+    );
+    expect(await leaf(w.team, threadId)).toBe(unsent3);
+    const fresh = await f.connect(w, 0);
+    const fourth = await f.message(w.owner, threadId, "fourth question");
+    expect((await fresh.started(fourth)).parent_entry_id).toBe(answer);
+    const restored = session(fresh, threadId).map((e) => e.id);
+    expect(restored).toContain(answer);
+    expect(restored.filter((e) => e.startsWith("ku-"))).toEqual([]);
+  });
+
+  it("failed: the sandbox refuses run.start; Pi's session holds no prompt, so the server keeps it", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const own = ws.sb.respond;
+    ws.sb.respond = (frame) =>
+      frame.type === "run.start"
+        ? {
+            v: 1,
+            type: "command.result",
+            command_id: frame.command_id,
+            ok: false,
+            error: { code: "model_not_configured", message: "no model" },
+          }
+        : own?.(frame);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    await f.until(w.team, run, "failed");
+    await settle();
+    const kept = await prompts(w.team, threadId, "first question");
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatch(/^ku-/);
+    expect(await leaf(w.team, threadId)).toBe(kept[0]);
+    expect(await f.types(w.team, run)).toEqual(["run.started", "entry.committed", "run.failed"]);
+  });
+
+  it("timed out: no sandbox answers run.start", async () => {
+    const w = await f.world(); // no sandbox connects
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    await f.until(w.team, run, "failed", 15_000);
+    expect((await f.events(w.team, run)).at(-1)).toMatchObject({
+      type: "run.failed",
+      payload: { error: { code: "timeout" } },
+    });
+    const kept = await prompts(w.team, threadId, "first question");
+    expect(kept).toHaveLength(1);
+    expect(await leaf(w.team, threadId)).toBe(kept[0]);
+    expect(await reloadedPrompts(w.owner, threadId, "first question")).toEqual(kept);
+  });
+
+  it("budget_stopped before the sandbox took the run; its marker sits on the prompt", async () => {
+    const w = await f.world(); // no sandbox: the stop cannot reach Pi
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "first question");
+    await f.fx.replica(1).deps.runs.stopForBudget({
+      team_id: w.team,
+      user_id: w.owner.id,
+      scope: "user",
+    });
+    await f.until(w.team, run, "budget_stopped");
+    await settle();
+    const kept = await prompts(w.team, threadId, "first question");
+    expect(kept).toHaveLength(1);
+    expect(await leaf(w.team, threadId)).toBe(kept[0]);
+    const markers = await f.on(0, w.owner).get(`/v1/threads/${threadId}/markers`);
+    expect(markers.json.runs).toEqual([
+      { run_id: run, status: "budget_stopped", user_entry_id: kept[0], parent_entry_id: null },
+    ]);
+  });
+});
