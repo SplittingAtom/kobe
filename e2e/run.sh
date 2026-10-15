@@ -44,12 +44,12 @@ fail() { echo "FAIL $1"; failed=1; }
 expect() { # name, regex, actual output: passes when every line of actual matches regex
   local got
   got=$(printf '%s\n' "$3" | tail -3)
-  if [[ -n "$3" ]] && ! printf '%s\n' "$3" | grep -Evq "$2"; then ok "$1"; else fail "$1: got [$got]"; fi
+  if [[ -n "$3" ]] && ! grep -Evq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 contains() { # name, regex, actual output: passes when some line matches regex
   local got
   got=$(printf '%s\n' "$3" | tail -3)
-  if printf '%s\n' "$3" | grep -Eq "$2"; then ok "$1"; else fail "$1: got [$got]"; fi
+  if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 
 wait_for() { # seconds regex command... → reruns command until a line matches regex (bounded); prints the last output
@@ -57,7 +57,7 @@ wait_for() { # seconds regex command... → reruns command until a line matches 
   shift 2
   while :; do
     out=$("$@" 2>&1 || true)
-    if printf '%s\n' "$out" | grep -Eq "$re"; then break; fi
+    if grep -Eq "$re" <<<"$out"; then break; fi
     if ((SECONDS >= deadline)); then break; fi
     sleep 2
   done
@@ -1264,7 +1264,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
     local out="" end=$((SECONDS + ${3:-20}))
     while :; do
       out=$(via_proxy "$1")
-      if printf '%s\n' "$out" | grep -Eq "$2" || ((SECONDS >= end)); then break; fi
+      if grep -Eq "$2" <<<"$out" || ((SECONDS >= end)); then break; fi
       sleep 1
     done
     printf '%s\n' "$out"
@@ -1608,7 +1608,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
       local out="" end=$((SECONDS + ${4:-20}))
       while :; do
         out=$(chat "$2" "$3")
-        if printf '%s\n' "$out" | grep -q "^code=$1$" || ((SECONDS >= end)); then break; fi
+        if grep -q "^code=$1$" <<<"$out" || ((SECONDS >= end)); then break; fi
         sleep 1
       done
       printf '%s\n' "$out"
@@ -2100,7 +2100,7 @@ JS
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
     printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
     sf_run=$(printf '%s\n' "$sf_out" | sed -n 's/^run=//p')
-    if ! printf '%s\n' "$sf_out" | grep -Eq '^file_events=[0-9a-f-]{36}:'; then
+    if ! grep -Eq '^file_events=[0-9a-f-]{36}:' <<<"$sf_out"; then
       # KOBE-242/266: no file.shared. Say why: the run's policy decisions and approvals, its audit
       # rows, the server's errors and Postgres's own report of any deadlock.
       echo "     share_file: no file.shared; run $sf_run (events, approvals, audit):"

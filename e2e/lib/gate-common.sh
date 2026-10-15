@@ -2,10 +2,12 @@
 # Expects: KUBECTL, NS, RELEASE, SERVER, CLIENT_JS (the harness client's source), `failed` and PODS.
 ok() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; failed=1; }
+# Here-strings, not pipes: `grep -q` and `head` stop reading at the first match, and with pipefail
+# the writer's SIGPIPE ("printf: write error: Broken pipe") turned a passing check into a FAIL.
 contains() { # name, regex, actual output: passes when some line matches regex
-  if printf '%s\n' "$3" | grep -Eq "$2"; then ok "$1"; else fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"; fi
+  if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$(tail -3 <<<"$3")]"; fi
 }
-field() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; } # key, output → value
+field() { sed -n "s/^$1=//p" <<<"$2" | sed -n 1p; } # key, output → value
 until_ok() { # seconds command... → succeeds as soon as the command does, fails after `seconds`
   local deadline=$((SECONDS + $1))
   shift
