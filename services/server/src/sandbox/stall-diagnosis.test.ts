@@ -68,6 +68,18 @@ describe("classifyStall: definite signals", () => {
       cause: "scheduling",
       definite: true,
     });
+    expect(
+      classify([
+        podEv(
+          "FailedScheduling",
+          "0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.",
+        ),
+      ]),
+    ).toMatchObject({ cause: "scheduling", definite: true });
+    expect(
+      classify([podEv("FailedScheduling", "0/2 nodes are available: 2 Insufficient cpu.")])
+        .definite,
+    ).toBe(true);
   });
 
   it("image pull failures, by event or by container state", () => {
@@ -106,6 +118,77 @@ describe("classifyStall: progress is not a stall", () => {
     expect(
       classify([podEv("FailedScheduling", "pod has unbound PersistentVolumeClaims")]).definite,
     ).toBe(false);
+  });
+
+  // KOBE-277: every FailedScheduling message starts "0/N nodes are available:"; only the reason
+  // after it says whether waiting can help. A workspace PVC that agent-sandbox has not created or
+  // bound yet is the normal race of a first wake, not a full cluster.
+  it("a workspace PVC that is not created or bound yet keeps waiting", () => {
+    for (const message of [
+      '0/1 nodes are available: persistentvolumeclaim "workspace-u-1513cb1d-05bd-4283-afb9-13075aea49e4" not found. not found',
+      "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
+      "0/3 nodes are available: 3 node(s) didn't find available persistent volumes to bind.",
+      // Two nodes wait only on the volume binding: the pod can still land there.
+      "0/3 nodes are available: 1 Insufficient storage, 2 node(s) didn't find available persistent volumes to bind.",
+    ]) {
+      expect(classify([podEv("FailedScheduling", message)]), message).toMatchObject({
+        cause: "scheduling",
+        definite: false,
+      });
+    }
+  });
+
+  it("a workspace PVC still missing after a minute is definite", () => {
+    const missing = podEv(
+      "FailedScheduling",
+      '0/1 nodes are available: persistentvolumeclaim "workspace-u-1" not found. not found',
+      { firstTimestamp: iso(0) },
+    );
+    expect(classify([missing], {}, SINCE + 59_000).definite).toBe(false);
+    expect(classify([missing], {}, SINCE + 61_000)).toMatchObject({
+      cause: "volume_unschedulable",
+      definite: true,
+    });
+  });
+
+  it("the newest FailedScheduling decides: an older full-cluster event does not", () => {
+    const older = podEv("FailedScheduling", "0/2 nodes are available: 2 Insufficient cpu.", {
+      lastTimestamp: iso(500),
+    });
+    const newer = podEv(
+      "FailedScheduling",
+      '0/2 nodes are available: persistentvolumeclaim "workspace-u-1" not found.',
+      { lastTimestamp: iso(1_500) },
+    );
+    expect(classify([older, newer]).definite).toBe(false);
+  });
+});
+
+describe("classifyStall: scheduler reasons waiting cannot clear stay definite (KOBE-277)", () => {
+  it.each([
+    "0/3 nodes are available: 3 Too many pods. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.",
+    "0/4 nodes are available: 4 node(s) had volume node affinity conflict.",
+    "0/2 nodes are available: 2 Insufficient nvidia.com/gpu.",
+    "0/3 nodes are available: 3 node(s) didn't match Pod's node affinity/selector.",
+    "0/1 nodes are available: 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }.",
+    // Every node also lacks memory: the pending volume is not the only blocker.
+    "0/3 nodes are available: 3 Insufficient memory, 3 node(s) didn't find available persistent volumes to bind.",
+  ])("%s", (message) => {
+    expect(classify([podEv("FailedScheduling", message)])).toMatchObject({
+      cause: "scheduling",
+      definite: true,
+    });
+  });
+
+  it("a storage shortage reads as an unschedulable volume", () => {
+    expect(
+      classify([
+        podEv(
+          "FailedScheduling",
+          "0/3 nodes are available: 3 node(s) did not have enough free storage.",
+        ),
+      ]),
+    ).toMatchObject({ cause: "volume_unschedulable", definite: true });
   });
 });
 
