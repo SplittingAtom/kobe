@@ -3,16 +3,13 @@
    phone width up. */
 
 .shell {
-  /* Both themes: app/theme.css (KOBE-282). */
+  /* Both themes: app/theme.css (KOBE-282), which also sets the shared --admin-accent, --admin-danger,
+     --admin-danger-bg and --admin-warn-bg. */
   --admin-fg: var(--kobe-console-fg);
   --admin-muted: var(--kobe-console-muted);
   --admin-bg: var(--kobe-console-bg);
   --admin-panel: var(--kobe-console-panel);
   --admin-border: var(--kobe-console-border);
-  --admin-accent: var(--kobe-accent);
-  --admin-danger: var(--kobe-danger);
-  --admin-danger-bg: var(--kobe-danger-bg);
-  --admin-warn-bg: var(--kobe-warn-bg);
   min-height: 100vh;
   color: var(--admin-fg);
   background: var(--admin-bg);
@@ -48,6 +45,38 @@
   justify-content: space-between;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--admin-border);
+}
+
+/* The header's right end: who is signed in, then the theme toggle (KOBE-282). */
+.headerEnd {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* The chat bar's icon button, without the chat's preflight: reset the browser's button look. */
+.themeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--admin-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.themeToggle:hover {
+  color: var(--admin-fg);
+  background: var(--admin-panel);
+}
+
+.themeToggle svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .brandRow {

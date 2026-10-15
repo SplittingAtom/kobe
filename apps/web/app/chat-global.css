@@ -46,8 +46,9 @@ body:has([data-kobe-chat]) {
   margin: 0;
 }
 
-/* The slice of Tailwind's preflight the components rely on, scoped to the chat. Tooltips render in
-   a portal under <body>, so they carry their own box-sizing. */
+/* The slice of Tailwind's preflight the components rely on, scoped to the chat. The chat's portals
+   (tooltips, dialogs, menus) mount inside the chat root (components/ui/chat-portal.ts), so it
+   applies to them too; tooltips also carry their own box-sizing for any surface without a root. */
 @layer base {
   [data-kobe-chat] *,
   [data-kobe-chat] ::before,

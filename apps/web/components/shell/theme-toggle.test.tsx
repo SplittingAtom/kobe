@@ -6,6 +6,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { openApp } from "../chat/testing";
 import { IconActionProvider } from "./icon-action";
 import { ThemeToggle } from "./theme-toggle";
+import { resetThemeQueryForTests } from "./use-theme";
 
 /**
  * KOBE-282 (ac-2): a bar button flips light/dark. The choice lands on `<html data-theme>` (which
@@ -26,6 +27,7 @@ beforeEach(() => {
   listeners.clear();
   cookies = [];
   delete document.documentElement.dataset.theme;
+  resetThemeQueryForTests();
   const real = window.matchMedia.bind(window);
   vi.stubGlobal("matchMedia", (query: string) =>
     query !== "(prefers-color-scheme: dark)"
@@ -46,6 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetThemeQueryForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete document.documentElement.dataset.theme;

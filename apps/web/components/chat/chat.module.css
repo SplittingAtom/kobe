@@ -2,17 +2,14 @@
    app reads as one; the `--admin-*` names are kept so shared notices (ErrorNotice) match. */
 
 .app {
-  /* The `--admin-*` names map onto the shadcn neutral tokens (app/chat-global.css), so the sidebar,
-     header and Kobe-specific cards match the assistant-ui thread in both themes (app/theme.css). */
+  /* The `--admin-*` neutrals map onto the shadcn tokens (app/theme.css), so the sidebar, header
+     and Kobe-specific cards match the assistant-ui thread in both themes; the accents are shared
+     with the consoles and set in app/theme.css. */
   --admin-fg: var(--foreground);
   --admin-muted: var(--muted-foreground);
   --admin-bg: var(--background);
   --admin-panel: var(--muted);
   --admin-border: var(--border);
-  --admin-accent: var(--kobe-accent);
-  --admin-danger: var(--kobe-danger);
-  --admin-danger-bg: var(--kobe-danger-bg);
-  --admin-warn-bg: var(--kobe-warn-bg);
   display: flex;
   flex-direction: column;
   /* The page never scrolls; the columns do (KOBE-205). dvh tracks the browser's toolbars and, with

@@ -15,8 +15,20 @@ function chosenTheme(): Theme | null {
   return parseTheme(document.documentElement.dataset.theme);
 }
 
+/** One list for the page, shared by `subscribe` and the snapshot; made on first use (never on
+ * the server). `undefined` until then, `null` where matchMedia is missing. */
+let osList: MediaQueryList | null | undefined;
+
 function osQuery(): MediaQueryList | null {
-  return typeof window.matchMedia === "function" ? window.matchMedia(OS_DARK_QUERY) : null;
+  if (osList === undefined) {
+    osList = typeof window.matchMedia === "function" ? window.matchMedia(OS_DARK_QUERY) : null;
+  }
+  return osList;
+}
+
+/** Tests replace `matchMedia` between cases: forget the cached list. */
+export function resetThemeQueryForTests(): void {
+  osList = undefined;
 }
 
 function currentTheme(): Theme {

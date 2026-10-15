@@ -7,6 +7,7 @@ import type { TeamAccess } from "../../lib/admin/nav/types";
 import { TeamSwitcher } from "../../app/team-switcher";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "../admin/console-context";
+import { ConsoleThemeToggle } from "../admin/console-theme-toggle";
 import { ErrorNotice } from "../admin/error-notice";
 import styles from "../admin/admin.module.css";
 import { ChatReturnLink } from "../shell/chat-return-link";
@@ -74,7 +75,10 @@ export function MyAgentsShell({
           </p>
           <TeamSwitcher />
         </div>
-        {state.status === "ready" && <p className={styles.who}>{state.access.user.name}</p>}
+        <div className={styles.headerEnd}>
+          {state.status === "ready" && <p className={styles.who}>{state.access.user.name}</p>}
+          <ConsoleThemeToggle />
+        </div>
       </header>
       <div className={`${styles.body} ${styles.bodySingle}`}>
         <main id="console-main" className={styles.main}>

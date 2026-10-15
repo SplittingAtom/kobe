@@ -11,12 +11,16 @@ import { toggleTheme, useTheme } from "./use-theme";
  * the matching one, so the first paint is right even when the theme follows the OS, which the
  * server cannot know (`aria-pressed` waits for the client).
  */
-export function ThemeToggle() {
+export function ThemeToggle({
+  className = styles.iconLink,
+}: {
+  readonly className?: string | undefined;
+}) {
   const theme = useTheme();
   return (
     <IconAction
       command="theme"
-      className={styles.iconLink}
+      className={className}
       {...(theme === null ? {} : { "aria-pressed": theme === "dark" })}
       onClick={toggleTheme}
     >

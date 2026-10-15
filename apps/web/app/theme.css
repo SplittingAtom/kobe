@@ -32,11 +32,12 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
 
-  /* Shared accents: links, focus rings, errors, warnings (chat and consoles). */
-  --kobe-accent: #2449c7;
-  --kobe-danger: #a4161a;
-  --kobe-danger-bg: #fdecec;
-  --kobe-warn-bg: #fff4d6;
+  /* Shared accents: links, focus rings, errors, warnings. The chat (chat.module.css) and the
+     consoles (admin.module.css) read them under these names; only the neutrals differ. */
+  --admin-accent: #2449c7;
+  --admin-danger: #a4161a;
+  --admin-danger-bg: #fdecec;
+  --admin-warn-bg: #fff4d6;
 
   /* The admin consoles' and My area's neutrals (components/admin/admin.module.css). */
   --kobe-console-fg: #1b1b1f;
@@ -78,10 +79,10 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --kobe-accent: #8fa8ff;
-  --kobe-danger: #ff8a8a;
-  --kobe-danger-bg: #3a1c1e;
-  --kobe-warn-bg: #3a3218;
+  --admin-accent: #8fa8ff;
+  --admin-danger: #ff8a8a;
+  --admin-danger-bg: #3a1c1e;
+  --admin-warn-bg: #3a3218;
   --kobe-console-fg: #ececf1;
   --kobe-console-muted: #a5a5b2;
   --kobe-console-bg: #16161a;
@@ -114,10 +115,10 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --kobe-accent: #8fa8ff;
-    --kobe-danger: #ff8a8a;
-    --kobe-danger-bg: #3a1c1e;
-    --kobe-warn-bg: #3a3218;
+    --admin-accent: #8fa8ff;
+    --admin-danger: #ff8a8a;
+    --admin-danger-bg: #3a1c1e;
+    --admin-warn-bg: #3a3218;
     --kobe-console-fg: #ececf1;
     --kobe-console-muted: #a5a5b2;
     --kobe-console-bg: #16161a;

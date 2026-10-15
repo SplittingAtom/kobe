@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -9,6 +10,8 @@ import { describe, expect, it } from "vitest";
  * border colour) applies, or into a slot of the shell. The tokens themselves are on `:root`
  * (app/theme.css), so colours resolve wherever a popup lands. A new portal fails here until it
  * names its container; the ledger (docs/ledger/KOBE-282.md) lists each popup and its theming.
+ * The sources are parsed (TypeScript's TSX parser), so props holding arrow functions or JSX don't
+ * cut a tag short.
  */
 const WEB = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -20,31 +23,55 @@ function sources(dir: string): string[] {
   });
 }
 
-/** Opening tags that portal, and what each must carry. */
-const PORTALS: [RegExp, RegExp][] = [
+/** Tags that portal, the prop that must name the chat root, and how its value must read. */
+const PORTALS = [
   // Radix portals (Dialog, Tooltip, Popover, DropdownMenu, …).
-  [/<[A-Za-z]+\.Portal\b[^>]*>/g, /container=\{chatPortalContainer\(\)\}/],
+  { tag: /\.Portal$/, prop: "container", value: /^\{chatPortalContainer\(\)\}$/ },
   // assistant-ui's "more" menus (ActionBarMore, ThreadListItemMore) portal inside their Content.
-  [
-    /<[A-Za-z]+MorePrimitive\.Content\b[^>]*>/g,
-    /portalProps=\{\{\s*container:\s*chatPortalContainer\(\)\s*\}\}/,
-  ],
-];
+  {
+    tag: /MorePrimitive\.Content$/,
+    prop: "portalProps",
+    value: /^\{\{\s*container:\s*chatPortalContainer\(\)\s*\}\}$/,
+  },
+] as const;
+
+/** `file: <Tag>` for each portalling element of `code` that does not name the chat root. */
+function unrooted(file: string, code: string): string[] {
+  const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tag = node.tagName.getText(source);
+      const rule = PORTALS.find((p) => p.tag.test(tag));
+      const prop = node.attributes.properties.find(
+        (a): a is ts.JsxAttribute => ts.isJsxAttribute(a) && a.name.getText(source) === rule?.prop,
+      );
+      if (rule && !rule.value.test(prop?.initializer?.getText(source) ?? "")) {
+        out.push(`${file}: <${tag}>`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return out;
+}
 
 describe("popup portals (KOBE-282)", () => {
   const files = [...sources("components"), ...sources("app")];
 
-  it.each(PORTALS.map(([tag, rule]) => [tag.source, tag, rule] as const))(
-    "%s mounts in the chat root",
-    (_name, tag, rule) => {
-      const missing = files.flatMap((f) =>
-        [...readFileSync(join(WEB, f), "utf8").matchAll(tag)]
-          .filter(([open]) => !rule.test(open))
-          .map(([open]) => `${f}: ${open.slice(0, 60)}`),
-      );
-      expect(missing).toEqual([]);
-    },
-  );
+  it("every Radix portal and assistant-ui menu mounts in the chat root", () => {
+    expect(files.flatMap((f) => unrooted(f, readFileSync(join(WEB, f), "utf8")))).toEqual([]);
+  });
+
+  it("reads whole tags, arrow-function props included", () => {
+    const tag = (props: string) =>
+      unrooted("x.tsx", `const x = <Dialog.Portal ${props}><div /></Dialog.Portal>;`);
+    expect(tag("onMount={() => 1 > 0} container={chatPortalContainer()}")).toEqual([]);
+    expect(tag("onMount={() => 1 > 0}")).toEqual(["x.tsx: <Dialog.Portal>"]);
+    expect(
+      unrooted("y.tsx", "const y = <M.ActionBarMorePrimitive.Content onSelect={(e) => e} />;"),
+    ).toEqual(["y.tsx: <M.ActionBarMorePrimitive.Content>"]);
+  });
 
   it("React portals only fill the shell's own slots", () => {
     const users = files.filter((f) => readFileSync(join(WEB, f), "utf8").includes("createPortal("));

@@ -58,9 +58,15 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- The toggle lives only in the chat's utility bar; admin consoles and My area follow the saved
-  choice but have no button. Add one to their headers?
-- No way back to "follow the OS" once a choice is saved (short of clearing the cookie).
+- Resolved (coordinator, review of #289): the toggle is also in the console and My-area headers
+  (`components/admin/console-theme-toggle.tsx`); no "follow the OS" reset for now.
+
+## Review fixes (#289)
+
+- The one-row bar Menu's outside-press check uses `CHAT_PORTALLED`, so a press in the Compact
+  dialog no longer closes the Menu behind it (`compact-dialog.test.tsx`, 390 px case).
+- Shared accents (`--admin-accent/danger/danger-bg/warn-bg`) are set once in `theme.css`.
+- `use-theme.ts` keeps one lazily created `MediaQueryList`; the portal audit parses TSX.
 
 ## Evidence (acceptance criteria → test or command output)
 
