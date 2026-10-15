@@ -14,14 +14,23 @@ Seen in the e2e gate1 concurrency check on PR #281 (1 of 10 users, twice).
 
 ## Decisions
 
-- Definite only for capacity reasons after the prefix: `Insufficient storage|cpu|memory|ephemeral-storage|pods`
-  and "no nodes available".
-- A PVC that is not found, unbound, or has no volume to bind is never definite, even if the same
-  message names another reason; the wake keeps waiting and the normal wake timeout applies.
-- Other scheduling reasons (taints, affinity) fall to the existing non-definite `scheduling` cause.
+- `sandbox/scheduling-message.ts` reads the reasons after "0/N nodes are available:" with their node
+  counts. A reason is _pending_ when it is a workspace volume not created or bound yet
+  (`persistentvolumeclaim "…" not found`, unbound PVCs, no PV to bind, waiting for first consumer).
+- No pending reason: definite, as before (Insufficient cpu/memory/gpu, Too many pods, volume node
+  affinity conflict, node selector, taints). A storage shortage is reported as `volume_unschedulable`.
+- With a pending reason, definite only when blocking reasons cover every node (the volume is not
+  the only problem); otherwise keep waiting. A volume still pending after 60 s is definite
+  (`volume_unschedulable`), like a repeating FailedAttachVolume, so a PVC agent-sandbox never
+  creates does not wait out the whole ready timeout.
+- Only the newest FailedScheduling event counts, so an earlier full-cluster event no longer fails a
+  wake that is now only waiting on its volume. Longhorn's replica scheduling (non-FailedScheduling
+  events) stays definite as before.
+- `/code-review` of #282 (first version) found the narrow allow-list regressed real capacity
+  failures to the full timeout; this version replaces it.
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1, ac-2: `stall-diagnosis.test.ts`, the real event texts from the failing run plus unbound/no-volume/taint
-  cases (not definite) and Insufficient cpu/memory (definite).
+- ac-1, ac-2: `stall-diagnosis.test.ts`: the real event text from the failing run, mixed pending and
+  capacity messages, Too many pods, affinity, GPU, taint, storage, the 60 s escalation and newest-event order.
 - ac-3: e2e (gate1) on this PR and the next PRs through the merge queue.

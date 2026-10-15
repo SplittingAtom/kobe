@@ -1,3 +1,4 @@
+import { judgeScheduling } from "./scheduling-message.js";
 import type { KubeClient } from "./kube.js";
 import type { KubeObject } from "./manifests.js";
 
@@ -35,12 +36,9 @@ const ATTACH_REPEATS = 3;
 const ATTACH_LASTING_MS = 60_000;
 const VOLUME_SCHEDULING = /LocalReplicaSchedulingFailure|insufficient storage|replica scheduling/i;
 const VOLUME_ATTACH = /FailedAttachVolume|AttachVolume\.Attach failed|FailedMount|MountVolume/i;
-// FailedScheduling always reads "0/N nodes are available: <reasons>"; only the reasons tell a full
-// cluster (definite) from a workspace PVC that is not created or bound yet, which the first wake
-// of a sandbox races normally (KOBE-277).
-const NO_CAPACITY = /insufficient (storage|cpu|memory|ephemeral-storage|pods)|no nodes available/i;
-const VOLUME_PENDING =
-  /persistentvolumeclaim\s+"[^"]*"\s+not found|unbound (immediate )?PersistentVolumeClaims|didn't find available persistent volumes/i;
+/** A workspace volume still not created or bound after this long is not the first-wake race. */
+const VOLUME_PENDING_LASTING_MS = 60_000;
+const STORAGE = /insufficient storage|enough free storage/i;
 const IMAGE_PULL = /ErrImagePull|ImagePullBackOff|ErrImageNeverPull|InvalidImageName/i;
 
 interface KubeEvent {
@@ -121,15 +119,22 @@ export function classifyStall(input: {
     ...(volumePhase ? { volumePhase } : {}),
   });
 
-  const replica = pick(VOLUME_SCHEDULING);
-  if (replica) return make("volume_unschedulable", line(replica), true);
-  const noRoom = events.find(
-    (e) =>
-      e.reason === "FailedScheduling" &&
-      NO_CAPACITY.test(e.message) &&
-      !VOLUME_PENDING.test(e.message),
+  // Longhorn's replica scheduling (FailedAttachVolume etc.); the scheduler's own words below.
+  const replica = events.find(
+    (e) => e.reason !== "FailedScheduling" && VOLUME_SCHEDULING.test(`${e.reason} ${e.message}`),
   );
-  if (noRoom) return make("scheduling", line(noRoom), true);
+  if (replica) return make("volume_unschedulable", line(replica), true);
+  // The newest FailedScheduling says where scheduling stands now (KOBE-277).
+  const scheduling = events.find((e) => e.reason === "FailedScheduling");
+  const verdict = scheduling ? judgeScheduling(scheduling.message) : "unknown";
+  if (scheduling && verdict === "blocked") {
+    const cause = STORAGE.test(scheduling.message) ? "volume_unschedulable" : "scheduling";
+    return make(cause, line(scheduling), true);
+  }
+  if (scheduling && verdict === "volume_pending") {
+    const lasting = now - scheduling.first >= VOLUME_PENDING_LASTING_MS;
+    if (lasting) return make("volume_unschedulable", line(scheduling), true);
+  }
   const pull = pick(IMAGE_PULL);
   const pullWaiting = waiting.find((w) => IMAGE_PULL.test(w));
   if (pull || pullWaiting) return make("image_pull", pull ? line(pull) : (pullWaiting ?? ""), true);
