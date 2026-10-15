@@ -4,6 +4,7 @@ import type { NewRunEvent } from "../event-stream/append.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { listRunAttachments } from "../uploads/attach-list.js";
 import { gatewayModelOf } from "./models.js";
+import { sentAgentPrompt } from "./run-prompt-agent.js";
 import { findRunPrompt, type FoundPrompt, type PromptRunRecord } from "./run-prompt-pi.js";
 import {
   entryCommittedEvents,
@@ -137,6 +138,7 @@ async function promptRecord(
     parentEntryId: run.parent_entry_id,
     attachments: await listRunAttachments(tx, teamId, run.thread_id, runId),
     gatewayModel: await gatewayModelOf(tx, alias),
+    systemPrompt: await sentAgentPrompt(tx, teamId, runId, run.thread_id),
   };
 }
 

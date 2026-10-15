@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SandboxToServerFrame } from "@kobe/protocol";
 import {
@@ -90,12 +91,34 @@ describe.skipIf(!PI_AVAILABLE)("Stop before Pi's first token in real Pi 1.0.0 (K
     expect(user, JSON.stringify(atPrompt)).toBeDefined();
     // The exact shapes the server accepts from an ended run (findRunPrompt, KOBE-290 review
     // M1/N2): Pi's setup entries carry these fields and no others. A new session also gets a
-    // `system` message, which the server refuses on that path (its text can't be checked).
+    // `system` message: Pi's own sections, the agent prompt as `addendum` (none here) and the
+    // workspace as `cwd` (the server accepts it only with those predicted values).
     const setupKeys = Object.fromEntries(
       atPrompt.entries
         .filter((e) => e.type !== "message")
         .map((e) => [e.type, Object.keys(e).sort().join(",")]),
     );
+    const system = atPrompt.entries.find((e) => e.message?.role === "system");
+    expect(Object.keys(system ?? {}).sort()).toEqual([
+      "id",
+      "message",
+      "parentId",
+      "timestamp",
+      "type",
+    ]);
+    const sm = system?.message as Record<string, unknown> | undefined;
+    expect(Object.keys(sm ?? {}).sort()).toEqual([
+      "content",
+      "role",
+      "sections",
+      "timestamp",
+      "toolsAdded",
+    ]);
+    expect(sm?.content).toBe("");
+    const sections = sm?.sections as Record<string, string>;
+    expect(Object.keys(sections).sort()).toEqual(["cwd", "docs", "preamble", "rules", "tools"]);
+    expect(sections.cwd).toBe(`<cwd>\n${realpathSync(harness.workspace)}\n</cwd>`);
+    expect(Buffer.byteLength(JSON.stringify(system), "utf8")).toBeLessThan(256 * 1024);
     expect(setupKeys).toEqual({
       model_change: "id,modelId,parentId,provider,timestamp,type",
       thinking_level_change: "id,parentId,thinkingLevel,timestamp,type",

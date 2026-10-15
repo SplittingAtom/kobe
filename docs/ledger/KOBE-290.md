@@ -48,9 +48,16 @@
      looked up in the catalog); `thinking_level_change`: one of Pi's levels. Pi writes these at a
      new session's root and a `model_change` under the marker when the branch's model differs, so
      they are allowed there too (not root-only): their values are fixed;
-   - a `system` message is refused: the server can't check its text. A thread's first run stopped
-     in the short window before the early mirror commits therefore keeps nothing (Pi's prompt comes
-     back with the next sync, as before this ticket);
+   - Pi's `system` entry (final re-review), only on a branch-less run's root path and at most
+     once: exactly Pi's fields (`message`: role, content `""`, sections, timestamp, toolsAdded),
+     Pi's section set (`preamble`, `tools`, `rules`, `docs`, `cwd`, plus `addendum` only when the
+     run had an agent prompt), `addendum` exactly `<addendum>\n…\n</addendum>` around the prompt
+     `run.start` carried (re-derived from the pinned agent version, `runs/run-prompt-agent.ts`;
+     a draft only at the run's revision; unknown: refused), `cwd` exactly `/workspace`, at most
+     256 KiB. Pi's own sections can't be checked; the early mirror takes them as they come, so this
+     is no looser. Any other `system` entry, or one under a branched run's marker (Pi writes one
+     there after a system-prompt change), is still refused: such a run stopped before the early
+     mirror commits keeps nothing until the next sync;
    - the prompt: text exactly `runs.input`, or `runs.input` plus the block `promptWithAttachments`
      builds from the run's own attachments (`listRunAttachments`: order, path and type as sent; the
      "shown to you as an image" note only for inline image types, else the fixed by-path note);
@@ -111,7 +118,8 @@ No migration (no schema change).
   `runs/run-prompt.test.ts`.
 - Review fixes: `run-prompt.db.test.ts` "late batch is checked against the run" (forged answer
   before the prompt, altered text, marker under another parent, over the byte budget, `ku-` id from
-  a sandbox, a files block on a run without files, a system message on the path), "Stop, then an immediate resend the agent refuses" (M2), "unsent prompt as a branch
+  a sandbox, a files block on a run without files, a forged system message on the path, a first
+  run kept below Pi's real-shaped system entry, a system entry with another cwd), "Stop, then an immediate resend the agent refuses" (M2), "unsent prompt as a branch
   point" (Regenerate from it, fork at it); unit `runs/run-prompt-pi.test.ts` (injected, extra,
   renamed and reordered file lines, extra, mistyped or oversized images, forged setup entries); the
   real-Pi test asserts Pi's prompt and setup entry fields.

@@ -11,12 +11,13 @@ import type { PiSessionEntry } from "@kobe/protocol";
  * - `model_change` to the run's gateway model under the `kobe` provider, `thinking_level_change`
  *   to one of Pi's levels (Pi writes these at a new session's root, and a `model_change` under the
  *   marker when the branch's model differs);
+ * - at a branch-less run's root only, Pi's `system` entry ({@link isRunSystemEntry});
  * - one user message whose text is `runs.input`, followed by exactly the attached-files block
  *   `promptWithAttachments` (sandbox-agent) builds from the run's own attachments, and one inline
  *   image per attachment the block says is shown, of that attachment's type and bounded size.
  *
- * Anything else (an answer, a tool result, a `system` message whose text the server can't check,
- * another run's prompt, extra fields) refuses the prompt.
+ * Anything else (an answer, a tool result, any other `system` message, another run's prompt, extra
+ * fields) refuses the prompt.
  */
 export type FoundPrompt =
   /** The run's setup entries and its prompt, in parent order, as Pi wrote them. */
@@ -42,6 +43,11 @@ export interface PromptRunRecord {
   readonly attachments: readonly PromptAttachment[];
   /** The run's gateway model (Pi's `model_change.modelId`); undefined: none can be accepted. */
   readonly gatewayModel: string | undefined;
+  /**
+   * The agent prompt the server sent in `run.start` (`config.system_prompt`): null when it sent
+   * none, undefined when its record is gone (then no `system` entry can be accepted).
+   */
+  readonly systemPrompt: string | null | undefined;
 }
 
 /** Image types the agent inlines (`NATIVE_IMAGE_TYPES` there and in `uploads/attach-list.ts`). */
@@ -121,6 +127,43 @@ export function isRunSetup(entry: PiSessionEntry, gatewayModel: string | undefin
     );
   }
   return false;
+}
+
+/** The sandbox's workspace (`KOBE_WORKSPACE_DIR`), as Pi records its cwd. */
+const WORKSPACE = "/workspace";
+/** Pi's own system entry is a few KB (its tools' schemas included); MCP tools add some. */
+const SYSTEM_ENTRY_MAX_BYTES = 256 * 1024;
+const PI_SECTIONS = ["preamble", "tools", "rules", "docs", "cwd"] as const;
+
+/**
+ * Pi's `system` entry at a branch-less run's root (a new session): exactly Pi's fields, its own
+ * sections as plain text, the addendum exactly the agent prompt the server sent in `run.start`,
+ * the sandbox's workspace as cwd, and a bounded size. Pi's own sections (preamble, tools, rules,
+ * docs) can't be checked; the early mirror of an active run takes them as they come, so this is
+ * no looser.
+ */
+export function isRunSystemEntry(
+  entry: PiSessionEntry,
+  systemPrompt: string | null | undefined,
+): boolean {
+  const m = message(entry);
+  if (systemPrompt === undefined || entry.type !== "message" || m === undefined) return false;
+  if (!entryShape(entry, ["message"])) return false;
+  if (Buffer.byteLength(JSON.stringify(entry), "utf8") > SYSTEM_ENTRY_MAX_BYTES) return false;
+  if (!exactKeys(m, ["role", "content", "sections", "timestamp", "toolsAdded"])) return false;
+  if (m.role !== "system" || m.content !== "" || typeof m.timestamp !== "number") return false;
+  const sections = m.sections as Loose | null;
+  const keys = systemPrompt === null ? [...PI_SECTIONS] : [...PI_SECTIONS, "addendum"];
+  if (typeof sections !== "object" || sections === null || !exactKeys(sections, keys)) return false;
+  if (!Object.values(sections).every((v) => typeof v === "string")) return false;
+  if (sections.cwd !== `<cwd>\n${WORKSPACE}\n</cwd>`) return false;
+  if (systemPrompt !== null && sections.addendum !== `<addendum>\n${systemPrompt}\n</addendum>`)
+    return false;
+  const tools = m.toolsAdded;
+  return (
+    Array.isArray(tools) &&
+    tools.every((t) => typeof t === "object" && t !== null && typeof (t as Loose).name === "string")
+  );
 }
 
 /** The lines Pi's prompt may hold for one attachment (inlined or not is the agent's choice). */
@@ -218,7 +261,12 @@ export function findRunPrompt(
         ? { kind: "valid", chain: [...chain, next] }
         : { kind: "mismatch" };
     }
-    if (!isRunSetup(next, run.gatewayModel)) return { kind: "mismatch" };
+    // Pi's system entry only on a new session's root path (a branch-less run), at most once.
+    const system =
+      run.parentEntryId === null &&
+      !chain.some((e) => e.type === "message") &&
+      isRunSystemEntry(next, run.systemPrompt);
+    if (!system && !isRunSetup(next, run.gatewayModel)) return { kind: "mismatch" };
     chain.push(next);
     at = next.id;
   }
