@@ -5,6 +5,7 @@ import { COMPACT_THREAD_ERROR_MESSAGES } from "@kobe/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
+import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
 import { composer, openApp } from "./testing";
 
 /**
@@ -99,6 +100,31 @@ describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
     ).toBeTruthy();
     // The gauge hides until the next model call (KOBE-211).
     expect(screen.queryByRole("meter")).toBeNull();
+  });
+
+  it("under 768 px the bar Menu stays open behind the dialog while it is used (KOBE-282)", async () => {
+    resizeWindow(390);
+    try {
+      const t = conversation(190_000);
+      openApp(fake, t);
+      const user = userEvent.setup();
+      const header = await screen.findByRole("banner");
+      await waitFor(() => expect(header.getAttribute("data-bar-layout")).toBe("single"), WAIT);
+      const menu = within(header).getByRole("button", { name: "Menu" });
+      await user.click(menu);
+      await user.click(
+        await within(header).findByRole("button", { name: "Compact this thread" }, WAIT),
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Compact this thread" }, WAIT);
+      // A press inside the dialog (portalled out of the bar) is not "outside" the Menu: closing it
+      // would hide the gauge's button that the dialog hands focus back to.
+      await user.click(
+        within(dialog).getByRole("textbox", { name: /What should the summary keep/ }),
+      );
+      expect(menu.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      resizeWindow(DESKTOP_WIDTH);
+    }
   });
 
   it("offers Compact now in the thread's actions menu and sends no focus when left empty", async () => {

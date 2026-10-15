@@ -11,4 +11,13 @@ describe("server render", () => {
     expect(html).toContain('data-bar-row="1"');
     expect(html).toContain('data-bar-row="2"');
   });
+
+  it("renders the theme toggle with both icons; CSS picks one before any script runs (KOBE-282)", () => {
+    const html = renderToString(<ChatApp />);
+    const button = /<button[^>]*data-command="theme"[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0] ?? "";
+    expect(button).toContain('data-theme-icon="light"');
+    expect(button).toContain('data-theme-icon="dark"');
+    // The server cannot know the OS setting: the pressed state waits for the client.
+    expect(button).not.toContain("aria-pressed");
+  });
 });

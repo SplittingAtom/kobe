@@ -86,6 +86,16 @@ describe("site console", () => {
     expect(within(nav).getByRole("list", { name: "People" })).toBeTruthy();
   });
 
+  it("offers the theme toggle in the header, as the chat bar does (KOBE-282)", async () => {
+    render(
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("owner")}>
+        <Page />
+      </ConsoleShell>,
+    );
+    const header = await screen.findByRole("banner");
+    expect(within(header).getByRole("button", { name: "Dark theme" })).toBeTruthy();
+  });
+
   it("refuses a plain user and never mounts the page", async () => {
     render(
       <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("user")}>

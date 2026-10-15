@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
@@ -151,6 +151,10 @@ describe("My agents shell", () => {
     );
     expect(await screen.findByText("inside")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Kobe" }).getAttribute("href")).toBe("/");
+    // The theme toggle, as in the chat bar (KOBE-282).
+    expect(
+      within(screen.getByRole("banner")).getByRole("button", { name: "Dark theme" }),
+    ).toBeTruthy();
   });
 
   it("explains a failed access check instead of rendering the page", async () => {

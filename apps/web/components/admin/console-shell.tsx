@@ -17,6 +17,7 @@ import { TeamSwitcher } from "../../app/team-switcher";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "./console-context";
 import { ConsoleNav } from "./console-nav";
+import { ConsoleThemeToggle } from "./console-theme-toggle";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
 import styles from "./admin.module.css";
@@ -202,7 +203,10 @@ function Frame({
           {/* Top-left, as everywhere (D9). Switching reloads, so access is checked again. */}
           {switcher && <TeamSwitcher />}
         </div>
-        {access && <Who access={access} />}
+        <div className={styles.headerEnd}>
+          {access && <Who access={access} />}
+          <ConsoleThemeToggle />
+        </div>
       </header>
       <div className={access ? styles.body : `${styles.body} ${styles.bodySingle}`}>{children}</div>
     </div>

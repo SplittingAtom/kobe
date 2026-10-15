@@ -3,25 +3,28 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TeamSwitcher } from "../../app/team-switcher";
 import { NotificationBell } from "../chat/notification-bell";
+import { CHAT_PORTALLED } from "../ui/chat-portal";
 import { AreaLinks, ConsoleIconLinks } from "./bar-links";
 import { IconAction } from "./icon-action";
 import { ProfileMenu } from "./profile-menu";
 import { useShellBand } from "./shell-band";
+import { ThemeToggle } from "./theme-toggle";
 import { ShellSlotTarget, useBarMenu } from "./shell-slots";
 import styles from "./shell.module.css";
 
 const MENU_ID = "kobe-bar-menu";
 const CONTEXT_ID = "kobe-bar-context";
-/** Radix popovers (the agent picker's) portal to the body: pressing one stays in the menu. */
-const PORTALLED = "[data-radix-popper-content-wrapper]";
 
-/** The one-row bar's menu closes on a press outside the bar and on Escape (focus to its button). */
+/**
+ * The one-row bar's menu closes on a press outside the bar and on Escape (focus to its button). A
+ * press in content portalled out of the bar (Radix popovers, the Compact dialog) stays in the menu.
+ */
 function useMenuDismiss(header: RefObject<HTMLElement | null>, open: boolean, close: () => void) {
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      if (!target || header.current?.contains(target) || target.closest(PORTALLED)) return;
+      if (!target || header.current?.contains(target) || target.closest(CHAT_PORTALLED)) return;
       close();
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -41,8 +44,9 @@ function useMenuDismiss(header: RefObject<HTMLElement | null>, open: boolean, cl
 
 /**
  * The two-row utility bar (CE3, KOBE-197), about 96 px. Row one (56 px): team switcher, wordmark,
- * thread search, then the member's areas, the consoles (role-gated), notifications and the profile
- * menu. Row two (40 px): the open thread's context, filled by the workspace through its slot.
+ * thread search, then the member's areas, the consoles (role-gated), notifications, the theme
+ * toggle (KOBE-282) and the profile menu. Row two (40 px): the open thread's context, filled by the
+ * workspace through its slot.
  *
  * Under 768 px (CE8, KOBE-201) it is one 56 px row: the rail's drawer button (filled by the
  * workspace), the team switcher, the title and a Menu that discloses the rest, row two included.
@@ -97,6 +101,7 @@ export function UtilityBar({
             {teamId !== null && (
               <NotificationBell teamId={teamId} fetchFn={fetchFn} onOpenThread={onOpenThread} />
             )}
+            <ThemeToggle />
             <ProfileMenu />
           </div>
         </div>

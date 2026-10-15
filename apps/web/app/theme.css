@@ -1,0 +1,132 @@
+/* The one theme source (KOBE-282), loaded by the root layout on every page. Tokens live on :root,
+   so content portalled anywhere (dialogs, menus, tooltips) resolves them too.
+
+   - `<html data-theme="light|dark">`: the member's saved choice (cookie `kobe-theme`, read on the
+     server by app/layout.tsx; the bar's toggle sets both).
+   - No data-theme: follow the OS (prefers-color-scheme).
+
+   `color-scheme` follows the theme, so native controls (select popups, scrollbars, date pickers)
+   and the pages that use browser defaults (sign-in, setup) switch too. The two dark blocks below
+   must stay identical (app/theme-css.test.ts); other stylesheets only read these tokens. */
+
+:root {
+  color-scheme: light dark;
+
+  /* shadcn "neutral" tokens: the chat (assistant-ui components, Tailwind utilities). */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* Shared accents: links, focus rings, errors, warnings. The chat (chat.module.css) and the
+     consoles (admin.module.css) read them under these names; only the neutrals differ. */
+  --admin-accent: #2449c7;
+  --admin-danger: #a4161a;
+  --admin-danger-bg: #fdecec;
+  --admin-warn-bg: #fff4d6;
+
+  /* The admin consoles' and My area's neutrals (components/admin/admin.module.css). */
+  --kobe-console-fg: #1b1b1f;
+  --kobe-console-muted: #5b5b66;
+  --kobe-console-bg: #ffffff;
+  --kobe-console-panel: #f4f4f6;
+  --kobe-console-border: #d9d9df;
+
+  /* The context gauge (components/shell/context-gauge.module.css). */
+  --kobe-gauge-ok: #2e7d32;
+  --kobe-gauge-warn: #b45309;
+
+  /* `display` for content shown in one theme only (the toggle's icon). */
+  --kobe-when-light: block;
+  --kobe-when-dark: none;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --admin-accent: #8fa8ff;
+  --admin-danger: #ff8a8a;
+  --admin-danger-bg: #3a1c1e;
+  --admin-warn-bg: #3a3218;
+  --kobe-console-fg: #ececf1;
+  --kobe-console-muted: #a5a5b2;
+  --kobe-console-bg: #16161a;
+  --kobe-console-panel: #202027;
+  --kobe-console-border: #3a3a45;
+  --kobe-gauge-ok: #66bb6a;
+  --kobe-gauge-warn: #ffa726;
+  --kobe-when-light: none;
+  --kobe-when-dark: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --admin-accent: #8fa8ff;
+    --admin-danger: #ff8a8a;
+    --admin-danger-bg: #3a1c1e;
+    --admin-warn-bg: #3a3218;
+    --kobe-console-fg: #ececf1;
+    --kobe-console-muted: #a5a5b2;
+    --kobe-console-bg: #16161a;
+    --kobe-console-panel: #202027;
+    --kobe-console-border: #3a3a45;
+    --kobe-gauge-ok: #66bb6a;
+    --kobe-gauge-warn: #ffa726;
+    --kobe-when-light: none;
+    --kobe-when-dark: block;
+  }
+}

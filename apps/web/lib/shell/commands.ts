@@ -36,6 +36,7 @@ import {
   ServerCogIcon,
   SquareIcon,
   SquarePenIcon,
+  SunIcon,
   Trash2Icon,
   UsersIcon,
   XIcon,
@@ -131,6 +132,9 @@ const LIST = [
   },
   { id: "notifications", name: "Notifications", icon: BellIcon, scope: "bar" },
   { id: "profile", name: "Profile", icon: CircleUserIcon, scope: "bar" },
+  // KOBE-282: flips light/dark; a toggle (aria-pressed while dark). The call site shows the
+  // current theme's icon, sun or moon.
+  { id: "theme", name: "Dark theme", icon: SunIcon, scope: "bar" },
   // Bar, row two: the open thread's context. Files shows the rail's Files section.
   { id: "files", name: "Files", icon: FolderIcon, scope: "bar", shortcut: "Mod+Shift+F" },
   // CE12 (KOBE-208): opens or closes every reasoning block and tool card; a toggle (aria-pressed).
