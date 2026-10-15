@@ -3,34 +3,21 @@
    phone width up. */
 
 .shell {
-  --admin-fg: #1b1b1f;
-  --admin-muted: #5b5b66;
-  --admin-bg: #ffffff;
-  --admin-panel: #f4f4f6;
-  --admin-border: #d9d9df;
-  --admin-accent: #2449c7;
-  --admin-danger: #a4161a;
-  --admin-danger-bg: #fdecec;
-  --admin-warn-bg: #fff4d6;
+  /* Both themes: app/theme.css (KOBE-282). */
+  --admin-fg: var(--kobe-console-fg);
+  --admin-muted: var(--kobe-console-muted);
+  --admin-bg: var(--kobe-console-bg);
+  --admin-panel: var(--kobe-console-panel);
+  --admin-border: var(--kobe-console-border);
+  --admin-accent: var(--kobe-accent);
+  --admin-danger: var(--kobe-danger);
+  --admin-danger-bg: var(--kobe-danger-bg);
+  --admin-warn-bg: var(--kobe-warn-bg);
   min-height: 100vh;
   color: var(--admin-fg);
   background: var(--admin-bg);
   font-family: system-ui, sans-serif;
   line-height: 1.5;
-}
-
-@media (prefers-color-scheme: dark) {
-  .shell {
-    --admin-fg: #ececf1;
-    --admin-muted: #a5a5b2;
-    --admin-bg: #16161a;
-    --admin-panel: #202027;
-    --admin-border: #3a3a45;
-    --admin-accent: #8fa8ff;
-    --admin-danger: #ff8a8a;
-    --admin-danger-bg: #3a1c1e;
-    --admin-warn-bg: #3a3218;
-  }
 }
 
 .shell a {

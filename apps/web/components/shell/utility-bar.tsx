@@ -7,6 +7,7 @@ import { AreaLinks, ConsoleIconLinks } from "./bar-links";
 import { IconAction } from "./icon-action";
 import { ProfileMenu } from "./profile-menu";
 import { useShellBand } from "./shell-band";
+import { ThemeToggle } from "./theme-toggle";
 import { ShellSlotTarget, useBarMenu } from "./shell-slots";
 import styles from "./shell.module.css";
 
@@ -42,7 +43,7 @@ function useMenuDismiss(header: RefObject<HTMLElement | null>, open: boolean, cl
 /**
  * The two-row utility bar (CE3, KOBE-197), about 96 px. Row one (56 px): team switcher, wordmark,
  * thread search, then the member's areas, the consoles (role-gated), notifications and the profile
- * menu. Row two (40 px): the open thread's context, filled by the workspace through its slot.
+ * menu, after the theme toggle (KOBE-282). Row two (40 px): the open thread's context, filled by the workspace through its slot.
  *
  * Under 768 px (CE8, KOBE-201) it is one 56 px row: the rail's drawer button (filled by the
  * workspace), the team switcher, the title and a Menu that discloses the rest, row two included.
@@ -97,6 +98,7 @@ export function UtilityBar({
             {teamId !== null && (
               <NotificationBell teamId={teamId} fetchFn={fetchFn} onOpenThread={onOpenThread} />
             )}
+            <ThemeToggle />
             <ProfileMenu />
           </div>
         </div>

@@ -75,6 +75,15 @@
   background: var(--admin-panel);
 }
 
+/* The theme toggle's icons (KOBE-282): the current theme's one, from app/theme.css. */
+.whenLight {
+  display: var(--kobe-when-light);
+}
+
+.whenDark {
+  display: var(--kobe-when-dark);
+}
+
 /* --- thread search ------------------------------------------------------------------------- */
 
 .search {

@@ -7,6 +7,7 @@ import { modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
 import { canRegenerateWith } from "../../lib/chat/thread-state";
 import { branchPoint } from "../../lib/chat/tree";
 import { IconAction } from "../shell/icon-action";
+import { chatPortalContainer } from "../ui/chat-portal";
 import { useKobeExtras } from "./kobe-runtime";
 import { useThreadTeamModels } from "./use-team-models";
 
@@ -60,7 +61,9 @@ export function RegenerateWith() {
       <ActionBarMorePrimitive.Trigger asChild disabled={!ready}>
         <IconAction command="regenerate-with" size="sm" />
       </ActionBarMorePrimitive.Trigger>
+      {/* In the chat root, where the preflight slice applies (KOBE-282); the tokens are global. */}
       <ActionBarMorePrimitive.Content
+        portalProps={{ container: chatPortalContainer() }}
         align="start"
         sideOffset={4}
         className="bg-background z-50 min-w-44 rounded-lg border p-1 shadow-md"

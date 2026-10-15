@@ -1,20 +1,13 @@
 /* The context gauge in bar row two (CE14, KOBE-211). Chat CSS has no preflight: sizes are set here. */
 
 .gauge {
-  --gauge-ok: #2e7d32;
-  --gauge-warn: #b45309;
+  --gauge-ok: var(--kobe-gauge-ok);
+  --gauge-warn: var(--kobe-gauge-warn);
   --gauge-full: var(--admin-danger, #a4161a);
   --gauge-track: var(--admin-border, #d0d0d0);
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .gauge {
-    --gauge-ok: #66bb6a;
-    --gauge-warn: #ffa726;
-  }
 }
 
 /* A short horizontal bar; the fill's width is the share of the window used. */

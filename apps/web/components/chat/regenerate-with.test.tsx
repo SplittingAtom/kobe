@@ -95,6 +95,8 @@ describe("Regenerate with another model (KOBE-217)", () => {
     const user = userEvent.setup();
     await user.click(await trigger());
     const menu = await screen.findByRole("menu", { name: "Regenerate with…" });
+    // Portalled into the chat root, where the theme tokens and the preflight slice apply (KOBE-282).
+    expect(menu.closest("[data-kobe-chat]")).not.toBeNull();
     expect(
       within(menu)
         .getAllByRole("menuitem")
