@@ -88,7 +88,18 @@ describe.skipIf(!PI_AVAILABLE)("Stop before Pi's first token in real Pi 1.0.0 (K
     const atPrompt = await entries();
     const user = atPrompt.entries.find((e) => roleOf(e) === "user");
     expect(user, JSON.stringify(atPrompt)).toBeDefined();
-    // The exact shape the server accepts from an ended run (findRunPrompt, KOBE-290 review M1).
+    // The exact shapes the server accepts from an ended run (findRunPrompt, KOBE-290 review
+    // M1/N2): Pi's setup entries carry these fields and no others. A new session also gets a
+    // `system` message, which the server refuses on that path (its text can't be checked).
+    const setupKeys = Object.fromEntries(
+      atPrompt.entries
+        .filter((e) => e.type !== "message")
+        .map((e) => [e.type, Object.keys(e).sort().join(",")]),
+    );
+    expect(setupKeys).toEqual({
+      model_change: "id,modelId,parentId,provider,timestamp,type",
+      thinking_level_change: "id,parentId,thinkingLevel,timestamp,type",
+    });
     expect(Object.keys(user ?? {}).sort()).toEqual([
       "id",
       "message",

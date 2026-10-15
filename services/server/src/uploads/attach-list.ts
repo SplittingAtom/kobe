@@ -3,7 +3,7 @@ import { sql, type KobeTx } from "@kobe/db";
 import { attachmentPaths } from "./attach-names.js";
 
 /** Image types the agent passes inline (its own list, `threads/attachments.ts`, must agree). */
-const NATIVE_IMAGE_TYPES: ReadonlySet<string> = new Set([
+export const NATIVE_IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",

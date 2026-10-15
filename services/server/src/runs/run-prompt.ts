@@ -2,7 +2,9 @@ import type { PiGetEntriesData, PiSessionEntry } from "@kobe/protocol";
 import { sql, threadEntries, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
-import { findRunPrompt, type FoundPrompt } from "./run-prompt-pi.js";
+import { listRunAttachments } from "../uploads/attach-list.js";
+import { gatewayModelOf } from "./models.js";
+import { findRunPrompt, type FoundPrompt, type PromptRunRecord } from "./run-prompt-pi.js";
 import {
   entryCommittedEvents,
   isUnsentPromptEntryId,
@@ -115,6 +117,27 @@ async function setUserEntry(tx: KobeTx, teamId: string, runId: string, entryId: 
   await tx.execute(sql`
     UPDATE runs SET user_entry_id = ${entryId}
      WHERE team_id = ${teamId} AND id = ${runId} AND user_entry_id IS NULL`);
+}
+
+/** What the server itself knows of the run's prompt: its text, branch, files and model. */
+async function promptRecord(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  run: PromptRun,
+): Promise<PromptRunRecord> {
+  const started = await tx.execute<{ model: string | null }>(sql`
+    SELECT payload ->> 'model' AS model FROM run_events
+     WHERE team_id = ${teamId} AND run_id = ${runId} AND type = 'run.started'
+     ORDER BY seq LIMIT 1`);
+  const alias = started.rows[0]?.model ?? undefined;
+  return {
+    id: runId,
+    input: run.input,
+    parentEntryId: run.parent_entry_id,
+    attachments: await listRunAttachments(tx, teamId, run.thread_id, runId),
+    gatewayModel: await gatewayModelOf(tx, alias),
+  };
 }
 
 /** Not already some other run's prompt (a stop-then-resend race, or a forged reuse). */
@@ -259,11 +282,7 @@ export async function keepRunPromptInTx(
   if (source.kind === "never_reached_pi") {
     return { outcome: "kept", events: await writeUnsentPrompt(tx, teamId, runId, run, moveLeaf) };
   }
-  const found = findRunPrompt(source.entries.entries, {
-    id: runId,
-    input: run.input,
-    parentEntryId: run.parent_entry_id,
-  });
+  const found = findRunPrompt(source.entries.entries, await promptRecord(tx, teamId, runId, run));
   const kept =
     found.kind === "valid"
       ? await mirrorPiPrompt(tx, teamId, runId, run, found.chain, moveLeaf, {

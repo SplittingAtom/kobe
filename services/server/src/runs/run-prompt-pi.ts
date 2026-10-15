@@ -3,18 +3,34 @@ import type { PiSessionEntry } from "@kobe/protocol";
 /**
  * Finding a run's prompt in Pi's entries after the run has ended (KOBE-290). The sandbox is
  * untrusted and the run is over, so nothing of what it reports is taken on its word: the prompt is
- * located by the entry tree from the run's expected branch point (never by array order), its text
- * must be the run's own input (`runs.input`, the server's record), and only Pi's setup entries may
- * sit between the branch point and the prompt. Anything else (an answer, a tool result, a second
- * prompt, another run's prompt) is refused.
+ * located by the entry tree from the run's expected branch point (never by array order), and every
+ * entry on the way must have exactly the shape Pi writes, with values the server can predict from
+ * its own records:
+ *
+ * - the run's `kobe.branch` marker (the sandbox agent's, `data.run_id` = the run);
+ * - `model_change` to the run's gateway model under the `kobe` provider, `thinking_level_change`
+ *   to one of Pi's levels (Pi writes these at a new session's root, and a `model_change` under the
+ *   marker when the branch's model differs);
+ * - one user message whose text is `runs.input`, followed by exactly the attached-files block
+ *   `promptWithAttachments` (sandbox-agent) builds from the run's own attachments, and one inline
+ *   image per attachment the block says is shown, of that attachment's type and bounded size.
+ *
+ * Anything else (an answer, a tool result, a `system` message whose text the server can't check,
+ * another run's prompt, extra fields) refuses the prompt.
  */
 export type FoundPrompt =
   /** The run's setup entries and its prompt, in parent order, as Pi wrote them. */
   | { readonly kind: "valid"; readonly chain: readonly PiSessionEntry[] }
-  /** Pi's entries hold no prompt of this run. */
+  /** Pi's entries hold nothing for this run (no marker, or nothing under it yet). */
   | { readonly kind: "absent" }
-  /** Where this run's prompt should be there is a prompt, but not this run's (text or shape). */
+  /** Where this run's prompt should be there is something else (text, shape or entry). */
   | { readonly kind: "mismatch" };
+
+/** A file attached to the run, as `run.start.attachments` named it (`listRunAttachments`). */
+export interface PromptAttachment {
+  readonly path: string;
+  readonly mime_type: string;
+}
 
 export interface PromptRunRecord {
   readonly id: string;
@@ -22,17 +38,46 @@ export interface PromptRunRecord {
   readonly input: string;
   /** Where the run branched (`kobe.branch` marker's parent); null: a branch-less run. */
   readonly parentEntryId: string | null;
+  /** The run's attachments, in `run.start` order. */
+  readonly attachments: readonly PromptAttachment[];
+  /** The run's gateway model (Pi's `model_change.modelId`); undefined: none can be accepted. */
+  readonly gatewayModel: string | undefined;
 }
 
-/** Setup entries Pi writes before a prompt (a new session: model, thinking level, system). */
-const MAX_SETUP = 8;
+/** Image types the agent inlines (`NATIVE_IMAGE_TYPES` there and in `uploads/attach-list.ts`). */
+export const INLINE_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+/** The agent's `NATIVE_IMAGE_MAX_BYTES`: larger images are listed by path, never inlined. */
+const INLINE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const INLINE_IMAGE_MAX_BASE64 = Math.ceil(INLINE_IMAGE_MAX_BYTES / 3) * 4;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
-/** `promptWithAttachments` (sandbox-agent) appends this block, one line per attached file. */
 const ATTACHED = "\n\nAttached files:\n";
-const ATTACHMENT_LINE =
-  /^- [^\n]{1,1024} \([^()\n]{1,255}\)( - shown to you as an image| - not shown inline; open it from this path)?$/;
+const SHOWN = " - shown to you as an image";
+const BY_PATH = " - not shown inline; open it from this path";
+
+const KOBE_PROVIDER = "kobe";
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+/** Setup entries Pi writes before a prompt. */
+const MAX_SETUP = 4;
+const MAX_TIMESTAMP = 64;
 
 type Loose = Record<string, unknown>;
+
+const exactKeys = (o: Loose, keys: readonly string[]) =>
+  Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
+
+const ENTRY_KEYS = ["type", "id", "parentId", "timestamp"] as const;
+
+function entryShape(entry: PiSessionEntry, extra: readonly string[]): boolean {
+  return (
+    exactKeys(entry as Loose, [...ENTRY_KEYS, ...extra]) && entry.timestamp.length <= MAX_TIMESTAMP
+  );
+}
 
 function message(entry: PiSessionEntry): Loose | undefined {
   const m = (entry as Loose).message;
@@ -43,55 +88,111 @@ function isUserMessage(entry: PiSessionEntry): boolean {
   return entry.type === "message" && message(entry)?.role === "user";
 }
 
-function isBranchMarkerOf(entry: PiSessionEntry, runId: string): boolean {
-  const e = entry as { customType?: unknown; data?: { run_id?: unknown } };
-  return entry.type === "custom" && e.customType === "kobe.branch" && e.data?.run_id === runId;
-}
-
-function isSetup(entry: PiSessionEntry): boolean {
+function isRunMarker(entry: PiSessionEntry, runId: string): boolean {
+  const e = entry as { customType?: unknown; data?: unknown };
+  const data = e.data as Loose | null | undefined;
   return (
-    entry.type === "model_change" ||
-    entry.type === "thinking_level_change" ||
-    (entry.type === "message" && message(entry)?.role === "system")
+    entry.type === "custom" &&
+    entryShape(entry, ["customType", "data"]) &&
+    e.customType === "kobe.branch" &&
+    typeof data === "object" &&
+    data !== null &&
+    exactKeys(data, ["run_id"]) &&
+    data.run_id === runId
   );
 }
 
-/** The prompt's text is the input, or the input plus the attached-files block. */
-function isRunText(text: string, input: string): boolean {
-  if (text === input) return true;
-  if (!text.startsWith(input + ATTACHED)) return false;
+/** `model_change` to the run's model, or `thinking_level_change` to one of Pi's levels. */
+export function isRunSetup(entry: PiSessionEntry, gatewayModel: string | undefined): boolean {
+  const e = entry as Loose;
+  if (entry.type === "model_change") {
+    return (
+      gatewayModel !== undefined &&
+      entryShape(entry, ["provider", "modelId"]) &&
+      e.provider === KOBE_PROVIDER &&
+      e.modelId === gatewayModel
+    );
+  }
+  if (entry.type === "thinking_level_change") {
+    return (
+      entryShape(entry, ["thinkingLevel"]) &&
+      typeof e.thinkingLevel === "string" &&
+      THINKING_LEVELS.has(e.thinkingLevel)
+    );
+  }
+  return false;
+}
+
+/** The lines Pi's prompt may hold for one attachment (inlined or not is the agent's choice). */
+function attachmentLines(a: PromptAttachment): readonly string[] {
+  const base = `- ${a.path} (${a.mime_type})`;
+  if (INLINE_IMAGE_TYPES.has(a.mime_type)) return [base + SHOWN, base + BY_PATH];
+  if (a.mime_type.startsWith("image/") || a.mime_type === "application/pdf")
+    return [base + BY_PATH];
+  return [base];
+}
+
+/** The attachments the text says are shown inline, or undefined if it is not the run's text. */
+function shownAttachments(
+  text: string,
+  input: string,
+  attachments: readonly PromptAttachment[],
+): PromptAttachment[] | undefined {
+  if (attachments.length === 0) return text === input ? [] : undefined;
+  if (!text.startsWith(input + ATTACHED)) return undefined;
   const lines = text.slice(input.length + ATTACHED.length).split("\n");
-  return lines.length > 0 && lines.every((line) => ATTACHMENT_LINE.test(line));
+  if (lines.length !== attachments.length) return undefined;
+  const shown: PromptAttachment[] = [];
+  for (const [i, a] of attachments.entries()) {
+    const line = lines[i] ?? "";
+    if (!attachmentLines(a).includes(line)) return undefined;
+    if (line.endsWith(SHOWN)) shown.push(a);
+  }
+  return shown;
 }
 
-const only = (o: Loose, keys: readonly string[]) => Object.keys(o).every((k) => keys.includes(k));
-
-/** Pi's user message entry for exactly this input: text first, then inline images, nothing else. */
-export function isRunPrompt(entry: PiSessionEntry, input: string): boolean {
-  const m = message(entry);
-  if (!isUserMessage(entry) || m === undefined) return false;
-  if (!only(entry as Loose, ["type", "id", "parentId", "timestamp", "message"])) return false;
-  if (!only(m, ["role", "content", "timestamp"])) return false;
-  if (m.timestamp !== undefined && typeof m.timestamp !== "number") return false;
-  if (typeof m.content === "string") return isRunText(m.content, input);
-  if (!Array.isArray(m.content) || m.content.length === 0) return false;
-  const [first, ...rest] = m.content as Loose[];
-  if (first?.type !== "text" || typeof first.text !== "string" || !only(first, ["type", "text"]))
-    return false;
-  const images = rest.every(
-    (p) =>
-      p.type === "image" &&
-      typeof p.data === "string" &&
-      typeof p.mimeType === "string" &&
-      only(p, ["type", "data", "mimeType"]),
+function isInlineImage(part: Loose, attachment: PromptAttachment | undefined): boolean {
+  return (
+    attachment !== undefined &&
+    exactKeys(part, ["type", "data", "mimeType"]) &&
+    part.type === "image" &&
+    part.mimeType === attachment.mime_type &&
+    typeof part.data === "string" &&
+    part.data.length <= INLINE_IMAGE_MAX_BASE64 &&
+    BASE64.test(part.data)
   );
-  return images && isRunText(first.text, input);
+}
+
+/**
+ * Pi's user message entry for exactly this run: its text (`runs.input` and the run's own
+ * attached-files block, or nothing after the input), then one image per attachment shown inline.
+ */
+export function isRunPrompt(
+  entry: PiSessionEntry,
+  run: Pick<PromptRunRecord, "input" | "attachments">,
+): boolean {
+  const m = message(entry);
+  if (!isUserMessage(entry) || m === undefined || !entryShape(entry, ["message"])) return false;
+  const keys = m.timestamp === undefined ? ["role", "content"] : ["role", "content", "timestamp"];
+  if (!exactKeys(m, keys)) return false;
+  if (m.timestamp !== undefined && typeof m.timestamp !== "number") return false;
+  if (typeof m.content === "string") {
+    return shownAttachments(m.content, run.input, run.attachments)?.length === 0;
+  }
+  if (!Array.isArray(m.content) || m.content.length === 0) return false;
+  const [first, ...images] = m.content as Loose[];
+  if (first === undefined || !exactKeys(first, ["type", "text"]) || first.type !== "text")
+    return false;
+  if (typeof first.text !== "string") return false;
+  const shown = shownAttachments(first.text, run.input, run.attachments);
+  if (shown === undefined || images.length !== shown.length) return false;
+  return images.every((part, i) => isInlineImage(part, shown[i]));
 }
 
 /**
  * The run's prompt in Pi's new entries: from the run's own `kobe.branch` marker under its branch
- * point (required when it has one; a branch-less run starts at the root), through setup entries
- * only, to the first user message, which must be {@link isRunPrompt}.
+ * point (required when it has one; a branch-less run starts at the root), through the run's setup
+ * entries only, to its prompt ({@link isRunPrompt}). Any other entry there refuses it.
  */
 export function findRunPrompt(
   entries: readonly PiSessionEntry[],
@@ -100,25 +201,26 @@ export function findRunPrompt(
   const chain: PiSessionEntry[] = [];
   let at: string | null = null;
   if (run.parentEntryId !== null) {
-    const marker = entries.find(
-      (e) => isBranchMarkerOf(e, run.id) && e.parentId === run.parentEntryId,
-    );
+    const marker = entries.find((e) => e.parentId === run.parentEntryId && isRunMarker(e, run.id));
     if (marker === undefined) return { kind: "absent" };
     chain.push(marker);
     at = marker.id;
   }
   for (let step = 0; step <= MAX_SETUP; step += 1) {
     const children = entries.filter((e) => e.parentId === at);
-    const prompt = children.find(isUserMessage);
-    if (prompt !== undefined) {
-      return isRunPrompt(prompt, run.input)
-        ? { kind: "valid", chain: [...chain, prompt] }
+    // Under the run's marker nothing but this run's entries may hang (it is new); at the root a
+    // branch-less run's session holds only what Pi wrote for it.
+    if (children.length === 0) return { kind: "absent" };
+    if (children.length > 1) return { kind: "mismatch" };
+    const [next] = children as [PiSessionEntry];
+    if (isUserMessage(next)) {
+      return isRunPrompt(next, run)
+        ? { kind: "valid", chain: [...chain, next] }
         : { kind: "mismatch" };
     }
-    const setup = children.find(isSetup);
-    if (setup === undefined) return { kind: "absent" };
-    chain.push(setup);
-    at = setup.id;
+    if (!isRunSetup(next, run.gatewayModel)) return { kind: "mismatch" };
+    chain.push(next);
+    at = next.id;
   }
-  return { kind: "absent" };
+  return { kind: "mismatch" };
 }

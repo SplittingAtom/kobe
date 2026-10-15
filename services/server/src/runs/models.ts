@@ -114,6 +114,29 @@ export async function resolveRunModel(
  * Whether the catalog says a model accepts image input (KOBE-191). The catalog is site-wide,
  * so no team context is needed; an alias that is not in it (or none) accepts text only.
  */
+/**
+ * The gateway model a catalog alias names (`<gateway provider>/<model>`), as `run.start` passes
+ * it and Pi records it (`model_change.modelId` under the `kobe` provider); undefined if unknown.
+ */
+export async function gatewayModelOf(
+  tx: KobeTx,
+  alias: string | undefined,
+): Promise<string | undefined> {
+  if (alias === undefined) return undefined;
+  const [row] = await tx
+    .select({
+      providerId: modelCatalog.providerId,
+      model: modelCatalog.model,
+      kind: modelProviders.kind,
+    })
+    .from(modelCatalog)
+    .innerJoin(modelProviders, eq(modelProviders.id, modelCatalog.providerId))
+    .where(eq(modelCatalog.alias, alias));
+  return row === undefined
+    ? undefined
+    : `${gatewayProviderName(row.providerId, row.kind)}/${row.model}`;
+}
+
 export async function modelAcceptsImages(tx: KobeTx, alias: string | undefined): Promise<boolean> {
   if (alias === undefined) return false;
   const [row] = await tx

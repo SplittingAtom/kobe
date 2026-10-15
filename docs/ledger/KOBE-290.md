@@ -38,16 +38,28 @@
 2. **Late batch of an ended run** (`ingest.ts`): the CAS still refuses the batch and rolls it back.
    Then, if the run's prompt was never bound, Pi's entries (the batch's, else read now, up to three
    reads while Pi has not written it yet) go through `findRunPrompt` (`runs/run-prompt-pi.ts`,
-   review M1/M2): the prompt is found by the entry tree, never by array order, from the run's own
-   `kobe.branch` marker under `runs.parent_entry_id` (required when the run has one; a branch-less
-   run starts at the root), through Pi's setup entries only (`model_change`,
-   `thinking_level_change`, a `system` message), to exactly one user message whose text is
-   `runs.input` (or `runs.input` plus the agent's "Attached files:" block, each line in its fixed
-   format), with no fields beyond Pi's and only text and image parts. Only that chain is mirrored,
-   in its own `withTeam` transaction, charged to `runs.sandbox_bytes` under `runMaxBytes`; the leaf
-   moves only if no later run started, and `user_entry_id` is set only if the entry is not another
-   run's prompt. Otherwise nothing is kept. Answers, tool results and anything else of the late
-   batch stay refused.
+   review M1/M2, re-review N1/N2): the prompt is found by the entry tree, never by array order,
+   from the run's own `kobe.branch` marker under `runs.parent_entry_id` (required when the run has
+   one; a branch-less run starts at the root), through setup entries, to exactly one user message.
+   Every entry on the path must be the only child of its parent and carry exactly Pi's fields
+   (real-Pi recording) with values the server predicts:
+   - marker: `customType: kobe.branch`, `data: {run_id}` of this run;
+   - `model_change`: provider `kobe`, `modelId` the run's gateway model (the `run.started` alias
+     looked up in the catalog); `thinking_level_change`: one of Pi's levels. Pi writes these at a
+     new session's root and a `model_change` under the marker when the branch's model differs, so
+     they are allowed there too (not root-only): their values are fixed;
+   - a `system` message is refused: the server can't check its text. A thread's first run stopped
+     in the short window before the early mirror commits therefore keeps nothing (Pi's prompt comes
+     back with the next sync, as before this ticket);
+   - the prompt: text exactly `runs.input`, or `runs.input` plus the block `promptWithAttachments`
+     builds from the run's own attachments (`listRunAttachments`: order, path and type as sent; the
+     "shown to you as an image" note only for inline image types, else the fixed by-path note);
+     nothing may follow the input of a run without files; one inline image per file the block
+     says is shown, of that file's type, base64, at most 5 MiB.
+     The chain is mirrored in its own `withTeam` transaction, charged to `runs.sandbox_bytes` under
+     `runMaxBytes`; the leaf moves only if no later run started, and `user_entry_id` is set only if
+     the entry is not another run's prompt. Otherwise nothing is kept. Answers, tool results and
+     anything else of the late batch stay refused.
 3. **Pi never had it** (`runs/run-prompt.ts`, hooked into `applyTransition` and `endRunInTx`, the
    two places a run ends): an active run with no `sandbox_run_leases` row was never delivered
    (delivery checks the run under `FOR SHARE` before writing the lease, so the end's row lock makes
@@ -99,8 +111,10 @@ No migration (no schema change).
   `runs/run-prompt.test.ts`.
 - Review fixes: `run-prompt.db.test.ts` "late batch is checked against the run" (forged answer
   before the prompt, altered text, marker under another parent, over the byte budget, `ku-` id from
-  a sandbox), "Stop, then an immediate resend the agent refuses" (M2), "unsent prompt as a branch
-  point" (Regenerate from it, fork at it); unit `runs/run-prompt-pi.test.ts`.
+  a sandbox, a files block on a run without files, a system message on the path), "Stop, then an immediate resend the agent refuses" (M2), "unsent prompt as a branch
+  point" (Regenerate from it, fork at it); unit `runs/run-prompt-pi.test.ts` (injected, extra,
+  renamed and reordered file lines, extra, mistyped or oversized images, forged setup entries); the
+  real-Pi test asserts Pi's prompt and setup entry fields.
 - ac-3: `apps/web/components/chat/run-end.test.tsx` "after a reload…" (Stop, failed start, budget
   stop): the prompt shows once, no "Sent, waiting for the agent", no versions, and its end-state
   row; a `ku-` prompt edits from its parent; the next run shows no second version.
