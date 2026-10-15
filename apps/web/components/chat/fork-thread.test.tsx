@@ -56,6 +56,8 @@ describe("fork to a new thread from a message (ac-1)", () => {
     await user.click(must(forks[0]));
 
     const dialog = await screen.findByRole("dialog", { name: "Fork to a new thread" });
+    // Inside the chat root, where the theme tokens live (dark mode).
+    expect(dialog.closest("[data-kobe-chat]")).not.toBeNull();
     const title = within(dialog).getByLabelText("Title of the new thread") as HTMLInputElement;
     expect(title.value).toBe("Quarterly plan");
     await user.clear(title);

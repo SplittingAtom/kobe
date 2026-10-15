@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
 import { THREAD_COMPACT_FOCUS_MAX_CHARS } from "@kobe/protocol";
+import { chatPortalContainer } from "../../lib/chat/portal-container";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { Button } from "../ui/button";
 
@@ -61,7 +62,7 @@ export function CompactDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={change}>
-      <Dialog.Portal>
+      <Dialog.Portal container={chatPortalContainer()}>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
         <Dialog.Content
           className="bg-background text-foreground fixed top-1/2 left-1/2 z-50 grid w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border p-5 shadow-lg"

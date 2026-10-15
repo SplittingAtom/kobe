@@ -4,6 +4,7 @@ import { createContext, useContext, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
 import { THREAD_TITLE_MAX } from "@kobe/protocol";
 import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
+import { chatPortalContainer } from "../../lib/chat/portal-container";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
@@ -81,7 +82,7 @@ function ForkDialog({
 
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
-      <Dialog.Portal>
+      <Dialog.Portal container={chatPortalContainer()}>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
         <Dialog.Content
           className="bg-background text-foreground fixed top-1/2 left-1/2 z-50 grid w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border p-5 shadow-lg"
