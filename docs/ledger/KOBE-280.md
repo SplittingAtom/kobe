@@ -45,13 +45,21 @@ thinking_level_change → system`. Regenerating the first answer branches at `sy
    marker, before and after a reload. On gate1 it fails until a build with this fix is deployed,
    because gate1 runs main.
 
+6. **Chains of model markers net out (coordinator decision, second commit).** Regenerating
+   version 2 branches below its `model_change`, so version 3 used to show "Model: A · Model changed to
+   B · Model changed to A". Now model markers with no message between them show only the net model
+   for the next message (`netModelMarkers` in `marker-placement.ts`).
+   - The net model is judged against the model in effect where the row starts (`from`): after the
+     message above, or at the fork the row is carried from.
+   - When it equals that model, the row shows nothing. Otherwise it shows one "Model changed to X".
+   - The branch's first model always shows as "Model: X" (ac-1) and is the base for the changes
+     after it. So version 3 back on A shows only "Model: A", version 3 on C shows "Model: A · Model
+     changed to C", and the first Regenerate with… still shows exactly one "Model changed to".
+   - Same-model entries are now dropped by the same rule instead of at creation.
+
 ## Open questions (for Chris or the coordinator)
 
-- Regenerating **version 2** (itself a switch) branches below its `model_change`, because the
-  prompt's parent is that entry. So version 3 back on A shows "Model: A · Model changed to B · Model
-  changed to A" above its prompt. That is accurate to the entries, but noisy.
-  `regenerate-with.test.tsx` ac-3 pins it. Collapsing a chain of model markers with no messages
-  between them would need its own rule (ticket?).
+- none
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -64,7 +72,8 @@ thinking_level_change → system`. Regenerating the first answer branches at `sy
   `lib/chat/tree-model-markers.test.ts` covers the projection, and `regenerate-with.test.tsx` covers
   the flow (`Model: kimi`, `Model changed to glm`).
 - **ac-2:** `markers.test.tsx` › "a same-model model_change shows no marker" (real LOW 2 order);
-  `tree-model-markers.test.ts` (repeat, switch back, an answer's model as the record, branches).
+  `tree-model-markers.test.ts` (repeat, switch back, an answer's model as the record, branches,
+  and chains: back on A, on C, mid-thread, below a fork); `regenerate-with.test.tsx` ac-3.
 - **ac-3:** `packages/protocol/src/sandbox-wire/gateway-model.test.ts`;
   `services/sandbox-agent/src/kobe-models/protocol.test.ts` (pin and 191/192 agreement).
 - Without the web fix, the new web tests fail (8 failed). With it: `pnpm verify` passes, and so

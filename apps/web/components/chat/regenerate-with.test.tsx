@@ -143,7 +143,7 @@ describe("Regenerate with another model (KOBE-217)", () => {
     expect(modelMarkers()).toEqual(["Model: kimi"]);
   });
 
-  it("switching back is a visible marker of its own (ac-3)", async () => {
+  it("switching back to the thread's first model shows it as the thread's model (ac-3)", async () => {
     const { t } = oneTurn();
     openApp(fake, t);
     await screen.findByText("kimi answer");
@@ -156,12 +156,9 @@ describe("Regenerate with another model (KOBE-217)", () => {
     await answer(t, "kimi", "kimi again");
     await waitFor(() => expect(version()).toBe("Version 3 of 3"));
     expect(markerAbovePrompt("kimi")).toBe(true);
-    // Version 2's prompt hangs below its switch, so version 3 branches after it (like real Pi).
-    expect(modelMarkers()).toEqual([
-      "Model: kimi",
-      "Model changed to glm",
-      "Model changed to kimi",
-    ]);
+    // Version 3 branches below version 2's switch (like real Pi); the chain kimi → glm → kimi has
+    // no message between, so it nets out to the thread's first model: no change shows (KOBE-280).
+    expect(modelMarkers()).toEqual(["Model: kimi"]);
     await waitFor(async () => expect((await picker()).value).toBe("kimi"));
   });
 

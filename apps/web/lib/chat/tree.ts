@@ -21,7 +21,7 @@
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, recordedModel, type ParsedEntry } from "./entries";
-import { entryMarker, type EntryMarker } from "./markers";
+import { entryMarker, type BranchModels, type EntryMarker } from "./markers";
 import {
   childCarry,
   innerMarkers,
@@ -182,14 +182,15 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     parentNode: string | null;
     group: string | null;
     carry: Carry;
-    /** The model the branch records above this entry (KOBE-280); null: none yet. */
-    model: string | null;
+    /** The models the branch records above this entry (KOBE-280). */
+    models: BranchModels;
   };
+  const none: BranchModels = { model: null, from: null };
   const stack: Frame[] = (children.get(null) ?? [])
-    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [], model: null }))
+    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [], models: none }))
     .reverse();
   while (stack.length > 0) {
-    const { entry, parentNode, group, carry, model } = stack.pop() as Frame;
+    const { entry, parentNode, group, carry, models } = stack.pop() as Frame;
     const p = parsed.get(entry.entryId) as ParsedEntry;
     const kids = children.get(entry.entryId) ?? [];
     let ctx: string | null;
@@ -214,7 +215,7 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
       openGroup = group;
       next = placer.hidden({
         entry,
-        marker: entryMarker(entry, parsed, parentOf, byId, model),
+        marker: entryMarker(entry, parsed, parentOf, byId, models),
         ctx,
         listed: ctx === null ? 0 : (nodes.get(ctx)?.entries.length ?? 0),
         carry,
@@ -225,14 +226,18 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
 
     const branches = kids.length > 1 && openGroup !== null;
     const childrenCarry = childCarry(next, kids.length);
-    const childModel = recordedModel(entry, p) ?? model;
+    // A message, or a fork that starts carrying, starts a new row of markers below it.
+    const model = recordedModel(entry, p) ?? models.model;
+    const message = p.kind === "user" || isAssistantSide(p);
+    const startsRow = message || (kids.length > 1 && next === null);
+    const childModels: BranchModels = { model, from: startsRow ? model : models.from };
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({
         entry: kids[i] as ThreadEntry,
         parentNode: branches ? openGroup : childParent,
         group: branches ? null : openGroup,
         carry: childrenCarry,
-        model: childModel,
+        models: childModels,
       });
     }
   }

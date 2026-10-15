@@ -19,6 +19,12 @@ export type EntryMarker =
       readonly model: string;
       /** The branch records no model above it: "Model: X", not a change (KOBE-280). */
       readonly first: boolean;
+      /**
+       * The model in effect where the marker's row of markers starts (after the message above it,
+       * or at the fork it is carried from); null: none yet. A chain of model markers is shown as
+       * its net change from this model (`netModelMarkers`).
+       */
+      readonly from: string | null;
     }
   | {
       readonly kind: "compaction";
@@ -98,22 +104,35 @@ function foldedCount(
   return count;
 }
 
+/** The models a branch records above an entry (KOBE-280); null: none yet. */
+export interface BranchModels {
+  /** The latest one (`recordedModel`). */
+  readonly model: string | null;
+  /** The one in effect where the entry's row of markers starts. */
+  readonly from: string | null;
+}
+
 /**
- * The marker an entry shows, if it shows one. `branchModel` is the model its branch records above
- * it (`recordedModel`): a `model_change` to that same model shows none (KOBE-280: a KOBE-259 limits
- * re-select, or a Pi started without a model and then reused, records one although nothing changed).
+ * The marker an entry shows, if it shows one. A model marker that changes nothing (a KOBE-259
+ * limits re-select, a Pi started without a model and then reused) is dropped when its row is shown
+ * (`netModelMarkers`).
  */
 export function entryMarker(
   entry: ThreadEntry,
   parsed: ReadonlyMap<string, ParsedEntry>,
   parentOf: ReadonlyMap<string, string | null>,
   byId: ReadonlyMap<string, ThreadEntry>,
-  branchModel: string | null,
+  branch: BranchModels,
 ): EntryMarker | undefined {
   const p = parsed.get(entry.entryId);
   if (p?.kind === "modelChange") {
-    if (p.model === branchModel) return undefined;
-    return { kind: "model", entryId: entry.entryId, model: p.model, first: branchModel === null };
+    return {
+      kind: "model",
+      entryId: entry.entryId,
+      model: p.model,
+      first: branch.model === null,
+      from: branch.from,
+    };
   }
   if (p?.kind !== "compaction") return undefined;
   const folded =
