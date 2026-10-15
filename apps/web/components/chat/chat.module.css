@@ -219,6 +219,18 @@
   border-radius: 0.5rem;
 }
 
+/* "Forked from <thread> at <message>" above a fork's conversation (KOBE-216). */
+.forkOrigin {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0.25rem 0;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
 .dismissibleBanner {
   display: flex;
   align-items: flex-start;

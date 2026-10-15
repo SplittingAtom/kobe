@@ -18,7 +18,8 @@ import {
   resolveDraftPin,
 } from "../agents/versions.js";
 import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
-import { forkThread } from "../threads/fork.js";
+import { FORK_RATE, forkThread } from "../threads/fork.js";
+import { hitRateLimit } from "../rate-limit.js";
 import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
 import { sharedToProjectFor } from "../threads/share.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
@@ -34,7 +35,7 @@ import {
   restoreThread,
   setLeaf,
   switchAgentVersion,
-  toSummary,
+  summarizeOne,
   trashThread,
   updateThread,
   type Page,
@@ -90,6 +91,8 @@ const ERRORS = {
   thread_in_trash: [409, "The thread is in Trash. Restore it first."],
   not_in_trash: [409, "The thread is not in Trash."],
   not_in_project: [409, "Only threads in a project can be shared to it."],
+  nothing_to_fork: [409, "The thread has no messages to fork."],
+  rate_limited: [429, "Too many forks. Wait a few minutes and try again."],
   invalid_cursor: [400, "The cursor is not valid. Start from the first page."],
   invalid_query: [400, "The search needs at least one term that is not excluded with -."],
   search_timeout: [503, "The search took too long. Try more specific terms."],
@@ -274,7 +277,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
           )
         : null;
       return {
-        ...toSummary(found.thread),
+        ...(await summarizeOne(tx, viewer, found.thread)),
         read_only: found.access !== "owner",
         agent_name: pinned?.frontmatter.name ?? null,
         agent_status: pinned === null ? null : agentStatusOf(pinned),
@@ -348,6 +351,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const id = threadIdParam(c);
     const body = await parseBody(c, forkThreadRequestSchema);
     if (!id || !body) return invalidRequest(c, "Give entry_id and/or title (or {}).");
+    if (!(await hitRateLimit(db, `thread-fork:${c.get("user").id}`, FORK_RATE))) {
+      return fail(c, "rate_limited");
+    }
     const result = await forkThread((fn) => asViewer(c, fn), deps.blobs, id, {
       entryId: body.entry_id,
       title: body.title,

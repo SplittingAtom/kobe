@@ -9,6 +9,8 @@ import styles from "./chat.module.css";
 function ThreadItem({ archived }: { readonly archived: boolean }) {
   const aui = useAui();
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
+  // "Forked from …" on hover (CE16), from the list answer (`metadataOf`).
+  const forkHint = useAuiState((s) => s.threadListItem.custom?.["forkHint"]);
   const [draft, setDraft] = useState<string | null>(null);
 
   const save = (e: FormEvent) => {
@@ -22,7 +24,10 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
     <li>
       <ThreadListItemPrimitive.Root className={styles.threadItem}>
         {draft === null ? (
-          <ThreadListItemPrimitive.Trigger className={styles.threadTrigger}>
+          <ThreadListItemPrimitive.Trigger
+            className={styles.threadTrigger}
+            title={typeof forkHint === "string" ? forkHint : undefined}
+          >
             <ThreadListItemPrimitive.Title fallback="Untitled conversation" />
           </ThreadListItemPrimitive.Trigger>
         ) : (

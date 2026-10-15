@@ -62,6 +62,7 @@ export type ThreadError =
   | "not_in_project"
   | "entry_not_found"
   | "entry_offloaded"
+  | "nothing_to_fork"
   | "project_not_found"
   | "no_agent"
   | "model_not_enabled"
@@ -77,13 +78,8 @@ const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
  */
 export const THREAD_LOCK_TIMEOUT = "2s";
 
-/** Postgres lock_not_available: `lock_timeout` expired. */
-const LOCK_NOT_AVAILABLE = "55P03";
-
-export function isLockTimeout(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.code === LOCK_NOT_AVAILABLE || e?.cause?.code === LOCK_NOT_AVAILABLE;
-}
+/** Postgres lock_not_available (`lock_timeout` expired); the shared reader in `@kobe/db`. */
+export { isLockTimeout } from "@kobe/db";
 const DAY_MS = 86_400_000;
 
 type TimeColumn = typeof threads.lastActivityAt | typeof threads.deletedAt;
@@ -108,6 +104,8 @@ const summaryColumns = {
   deletedAt: threads.deletedAt,
   isTest: threads.isTest,
   scheduleId: threads.scheduleId,
+  forkedFromThreadId: threads.forkedFromThreadId,
+  forkedAtEntryId: threads.forkedAtEntryId,
 };
 
 type SummaryRow = {
@@ -127,8 +125,14 @@ type SummaryRow = {
   deletedAt: Date | null;
   isTest: boolean;
   scheduleId?: string | null;
+  forkedFromThreadId?: string | null;
+  forkedAtEntryId?: string | null;
 };
 
+/**
+ * The summary without the viewer: a fork shows its fork point but never names its source, which
+ * only {@link summarize} resolves for a viewer who may open it (KOBE-216, review-280 L2).
+ */
 export function toSummary(row: SummaryRow): ThreadSummary {
   return {
     thread_id: row.id,
@@ -146,6 +150,9 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     created_at: row.createdAt.toISOString(),
     is_test: row.isTest,
     schedule_id: row.scheduleId ?? null,
+    forked_from_thread_id: null,
+    forked_from_title: null,
+    forked_at_entry_id: row.forkedAtEntryId ?? null,
     deleted_at: row.deletedAt?.toISOString() ?? null,
     purge_after: row.deletedAt
       ? new Date(row.deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS).toISOString()
@@ -168,6 +175,40 @@ function readableBy(viewer: Viewer): SQL {
   return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR ${shared})`;
 }
 
+/**
+ * The summaries as `viewer` sees them (CE16, KOBE-216): a fork names its source (id and title) only
+ * while the viewer may open it, resolved by {@link findThreads} like `findThread`. Otherwise (the
+ * share was revoked, the source moved or was purged) only `forked_at_entry_id` shows, which names
+ * an entry of the fork itself. One hop: provenance is never walked further.
+ */
+export async function summarize(
+  tx: KobeTx,
+  viewer: Viewer,
+  rows: readonly SummaryRow[],
+): Promise<ThreadSummary[]> {
+  const ids = new Set(rows.flatMap((r) => (r.forkedFromThreadId ? [r.forkedFromThreadId] : [])));
+  const sources =
+    ids.size === 0 ? new Map<string, SummaryRow>() : await findThreads(tx, viewer, [...ids]);
+  return rows.map((row) => {
+    const source = row.forkedFromThreadId ? sources.get(row.forkedFromThreadId) : undefined;
+    const summary = toSummary(row);
+    return source
+      ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
+      : summary;
+  });
+}
+
+/** {@link summarize} for one row. */
+export async function summarizeOne(
+  tx: KobeTx,
+  viewer: Viewer,
+  row: SummaryRow,
+): Promise<ThreadSummary> {
+  const [summary] = await summarize(tx, viewer, [row]);
+  if (!summary) throw new Error("summarize returned no summary");
+  return summary;
+}
+
 /** Keyset predicate for (column DESC, id DESC) after `cursor`. */
 function after(column: TimeColumn, c: ActivityCursor): SQL {
   return sql`(${column}, ${threads.id}) < (timestamptz 'epoch' + ${c.micros}::bigint * interval '1 microsecond', ${c.id}::uuid)`;
@@ -178,14 +219,16 @@ export interface Page<T> {
   readonly next: ActivityCursor | null;
 }
 
-function toPage(
+async function toPage(
+  tx: KobeTx,
+  viewer: Viewer,
   rows: readonly (SummaryRow & { position: string })[],
   limit: number,
-): Page<ThreadSummary> {
+): Promise<Page<ThreadSummary>> {
   const items = rows.slice(0, limit);
   const last = items.at(-1);
   return {
-    items: items.map(toSummary),
+    items: await summarize(tx, viewer, items),
     next: rows.length > limit && last ? { micros: last.position, id: last.id } : null,
   };
 }
@@ -217,7 +260,7 @@ export async function listThreads(
     )
     .orderBy(desc(threads.lastActivityAt), desc(threads.id))
     .limit(options.limit + 1);
-  return toPage(rows, options.limit);
+  return toPage(tx, viewer, rows, options.limit);
 }
 
 /** The viewer's Trash, most recently deleted first; only threads still restorable. */
@@ -239,7 +282,7 @@ export async function listTrash(
     )
     .orderBy(desc(threads.deletedAt), desc(threads.id))
     .limit(options.limit + 1);
-  return toPage(rows, options.limit);
+  return toPage(tx, viewer, rows, options.limit);
 }
 
 export async function createThread(
@@ -261,13 +304,20 @@ export async function createThread(
     title: string | null;
     /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
     modelAlias?: string | null;
+    /**
+     * A fork's provenance (CE16): its source and the entry it was taken at. Set here only: the
+     * link is never updated afterwards (trigger `threads_guard_forked_from`, KOBE-215).
+     */
+    forkedFrom?: { readonly threadId: string; readonly entryId: string };
   },
 ): Promise<ThreadSummary> {
-  const { agent, modelAlias, isTest, ...rest } = input;
+  const { agent, modelAlias, isTest, forkedFrom, ...rest } = input;
   const [row] = await tx
     .insert(threads)
     .values({
       ...rest,
+      forkedFromThreadId: forkedFrom?.threadId ?? null,
+      forkedAtEntryId: forkedFrom?.entryId ?? null,
       modelAlias: modelAlias ?? null,
       isTest: isTest ?? false,
       agentScope: agent?.agentScope ?? null,
@@ -299,6 +349,23 @@ export async function findThread(
   const [row] = await (options.lock ? query.for("no key update") : query);
   if (!row) return null;
   return { thread: row, access: row.ownerUserId === viewer.userId ? "owner" : "reader" };
+}
+
+/**
+ * The threads among `ids` the viewer may read, by id: {@link findThread} for many ids at once
+ * (the same predicate, no lock). Ids the viewer may not read are simply absent.
+ */
+export async function findThreads(
+  tx: KobeTx,
+  viewer: Viewer,
+  ids: readonly string[],
+): Promise<Map<string, SummaryRow>> {
+  if (ids.length === 0) return new Map();
+  const rows = await tx
+    .select(summaryColumns)
+    .from(threads)
+    .where(and(inArray(threads.id, [...ids]), readableBy(viewer)));
+  return new Map(rows.map((r) => [r.id, r]));
 }
 
 /** Locks the thread for a change by its owner, or says why the viewer can't change it. */
@@ -391,7 +458,7 @@ export async function updateThread(
       target: { threadId: id, from: locked.thread.modelAlias, to: row.modelAlias },
     });
   }
-  return { ok: true, thread: toSummary(row) };
+  return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
 /**
@@ -429,7 +496,7 @@ export async function setLeaf(
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
-  return { ok: true, thread: toSummary(row) };
+  return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
 /**
@@ -462,7 +529,7 @@ export async function switchAgentVersion(
   );
   if (!pin.ok) return pin;
   if (pin.value.agentVersion === thread.agentVersion)
-    return { ok: true, thread: toSummary(thread) };
+    return { ok: true, thread: await summarizeOne(tx, viewer, thread) };
   const [row] = await tx
     .update(threads)
     .set({ agentVersion: pin.value.agentVersion })
@@ -480,7 +547,7 @@ export async function switchAgentVersion(
       toVersion: pin.value.agentVersion,
     },
   });
-  return { ok: true, thread: toSummary(row) };
+  return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
 const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STATUSES];
@@ -492,7 +559,8 @@ const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STAT
 export async function trashThread(tx: KobeTx, viewer: Viewer, id: string): Promise<ThreadResult> {
   const locked = await lockForChange(tx, viewer, id);
   if (!locked.ok) return locked;
-  if (locked.thread.deletedAt) return { ok: true, thread: toSummary(locked.thread) };
+  if (locked.thread.deletedAt)
+    return { ok: true, thread: await summarizeOne(tx, viewer, locked.thread) };
   if (await hasRunIn(tx, viewer, id, PENDING_RUN_STATUSES))
     return { ok: false, error: "thread_busy" };
   const [row] = await tx
@@ -506,7 +574,7 @@ export async function trashThread(tx: KobeTx, viewer: Viewer, id: string): Promi
     teamId: viewer.teamId,
     target: { threadId: id },
   });
-  return { ok: true, thread: toSummary(row) };
+  return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
 /** Restores a thread from Trash within the 30-day window; past it the thread awaits purge. */
@@ -533,7 +601,7 @@ export async function restoreThread(tx: KobeTx, viewer: Viewer, id: string): Pro
     teamId: viewer.teamId,
     target: { threadId: id },
   });
-  return { ok: true, thread: toSummary(row) };
+  return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
 /** One page of the thread's entries in append order (`seq`), after `afterSeq`. */

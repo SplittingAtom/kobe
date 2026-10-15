@@ -1,7 +1,6 @@
 import { recordAudit } from "../audit/record.js";
-import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { isLockConflict, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
-import { isLockTimeout } from "../threads/repository.js";
 import { purgeThreads, type PurgeBatchResult } from "./purge.js";
 
 /**
@@ -89,8 +88,9 @@ export async function deleteForever(
     return { ok: true, purged: outcome.counts.threads > 0 };
   } catch (err) {
     // The request is committed: the thread has left Trash and the nightly Trash purge finishes
-    // the job, so the user's answer is the same (review L2).
-    if (!isLockTimeout(err)) throw err;
+    // the job, so the user's answer is the same (review L2). A purge left out because one of the
+    // thread's forks is busy (KOBE-216) ends the same way, as does a lock conflict.
+    if (!isLockConflict(err)) throw err;
     return { ok: true, purged: false };
   }
 }

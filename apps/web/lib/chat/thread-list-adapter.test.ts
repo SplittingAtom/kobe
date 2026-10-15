@@ -30,7 +30,12 @@ describe("thread list adapter", () => {
     ]);
     expect(page.nextCursor).toBeUndefined();
     // The rail groups by this (CE5).
-    expect(page.threads[0]?.custom).toEqual({ projectId: null, scheduled: false, shared: false });
+    expect(page.threads[0]?.custom).toEqual({
+      projectId: null,
+      scheduled: false,
+      shared: false,
+      forkHint: null,
+    });
   });
 
   it("creates a thread with the pending title and seeds its controller", async () => {

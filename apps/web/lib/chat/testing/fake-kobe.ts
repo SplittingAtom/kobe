@@ -38,6 +38,10 @@ interface FakeThread {
   read_only?: boolean;
   /** Set on a thread a schedule started (KOBE-173); absent = a normal thread. */
   schedule_id?: string | null;
+  /** Fork provenance (KOBE-216): the source only when the viewer may open it. */
+  forked_from_thread_id?: string | null;
+  forked_from_title?: string | null;
+  forked_at_entry_id?: string | null;
   entries: FakeEntry[];
 }
 
@@ -962,11 +966,23 @@ export class FakeKobe {
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);
     if (action === "fork" && method === "POST") {
-      const forkId = this.addThread(thread.title);
+      // Root to the entry (default: the leaf), with the source as provenance (KOBE-216).
+      const at = typeof body?.entry_id === "string" ? body.entry_id : thread.leaf_entry_id;
+      const byId = new Map(thread.entries.map((e) => [e.entry_id, e]));
+      if (at !== null && !byId.has(at)) return error(404, "entry_not_found", "Entry not found.");
+      const path: FakeEntry[] = [];
+      for (let e = at === null ? undefined : byId.get(at); e;) {
+        path.unshift(e);
+        e = e.parent_id === null ? undefined : byId.get(e.parent_id);
+      }
+      const forkId = this.addThread(typeof body?.title === "string" ? body.title : thread.title);
       const fork = this.#thread(forkId);
       fork.project_id = thread.project_id ?? null;
-      fork.entries = [...thread.entries];
-      fork.leaf_entry_id = thread.leaf_entry_id;
+      fork.entries = path.map((e, i) => ({ ...e, seq: i + 1 }));
+      fork.leaf_entry_id = at;
+      fork.forked_from_thread_id = thread.thread_id;
+      fork.forked_from_title = thread.title;
+      fork.forked_at_entry_id = at;
       return json(201, { thread_id: forkId });
     }
     if (action === "leaf") {

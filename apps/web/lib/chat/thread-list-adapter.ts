@@ -7,6 +7,7 @@
 import type { RemoteThreadListAdapter } from "@assistant-ui/react";
 import type { ApiError, ApiResult } from "../api/client";
 import type { ChatSession } from "./session";
+import { forkHint, forkOrigin } from "./fork";
 import { placementCustom } from "./thread-groups";
 import type { ThreadSummary } from "./types";
 
@@ -29,8 +30,9 @@ export function metadataOf(thread: ThreadSummary): RemoteThreadMetadata {
     remoteId: thread.threadId,
     title: thread.title ?? undefined,
     lastMessageAt: new Date(thread.lastActivityAt),
-    // The rail's groups read this (CE5): project, Scheduled, Shared with me.
-    custom: placementCustom(thread),
+    // The rail's groups read this (CE5): project, Scheduled, Shared with me; and the item's fork
+    // provenance (CE16), as the server resolved it for the viewer.
+    custom: { ...placementCustom(thread), forkHint: forkHint(forkOrigin(thread)) ?? null },
   };
 }
 

@@ -5,7 +5,7 @@ import {
   type JsonObject,
   type PolicyReason,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, sql, withTeam, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, pgCodeOf, sql, withTeam, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx, type NewRunEvent } from "../event-stream/append.js";
 import { applyTransition, lockRunRow, lockThreadRow } from "../runs/store.js";
@@ -37,20 +37,8 @@ export const APPROVALS_MAX_PER_RUN = 100;
 
 const CREATE_ATTEMPTS = 3;
 
-/** The first SQLSTATE in `err` or its causes (Drizzle wraps the driver's error). */
-function pgCodeOf(err: unknown): string | undefined {
-  for (let e: unknown = err, depth = 0; e && depth < 5; depth += 1) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) return code;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
-
 /** Postgres lock_not_available (`lock_timeout` expired), possibly wrapped by Drizzle. */
-export function isLockTimeout(err: unknown): boolean {
-  return pgCodeOf(err) === "55P03";
-}
+export { isLockTimeout } from "@kobe/db";
 
 /**
  * A lock conflict that rolled the whole transaction back, so running it again is safe: a lock

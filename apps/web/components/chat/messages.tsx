@@ -24,6 +24,7 @@ import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { MessageFooter } from "./message-footer";
+import { ForkAction } from "./fork-dialog";
 import { Disclosure, useDisclosure } from "./detail";
 import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
 import { Reasoning } from "./reasoning";
@@ -160,13 +161,14 @@ export function UserMessage() {
         </div>
         <div className="absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
           <div className="text-muted-foreground flex items-center [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within/user:opacity-100 [@media(hover:hover)]:group-hover/user:opacity-100">
-            {canEdit && (
-              <ActionBarPrimitive.Root hideWhenRunning>
+            <ActionBarPrimitive.Root hideWhenRunning className="flex items-center">
+              {canEdit && (
                 <ActionBarPrimitive.Edit asChild>
                   <IconAction command="edit" size="sm" />
                 </ActionBarPrimitive.Edit>
-              </ActionBarPrimitive.Root>
-            )}
+              )}
+              <ForkAction meta={meta} />
+            </ActionBarPrimitive.Root>
           </div>
         </div>
       </div>
@@ -194,6 +196,7 @@ function useCanRegenerate(): boolean {
 }
 
 export function AssistantMessage() {
+  const meta = useMeta();
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
   const canRegenerate = useCanRegenerate();
@@ -233,6 +236,7 @@ export function AssistantMessage() {
               <IconAction command="regenerate" size="sm" />
             </ActionBarPrimitive.Reload>
           )}
+          <ForkAction meta={meta} />
         </ActionBarPrimitive.Root>
         {!running && <MessageFooter />}
       </div>

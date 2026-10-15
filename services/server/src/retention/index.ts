@@ -40,6 +40,8 @@ export interface DepartedPurgeResult {
  * batched in short transactions, audited as `retention.purged` (reason `offboarding`, `userId`,
  * counts only) and `retention.blobs_deleted`. Refuses (`StillAMemberError`) while the user is an
  * active member of the team (a deactivated member's threads may go). Workspace volumes and the workspace S3 copy are KOBE-28's own step.
+ * Complete only when `threads.status` is `done`: `partial` (a thread with a busy fork was left out,
+ * KOBE-216), `busy`, `budget` and `held` leave threads behind for a later call.
  */
 export async function purgeDepartedMember(
   db: KobeDb,

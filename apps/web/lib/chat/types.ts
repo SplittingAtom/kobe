@@ -36,6 +36,14 @@ export interface ThreadSummary {
   readonly model?: string | null;
   /** Set when a schedule started the thread (KOBE-173); drives the Scheduled folder. */
   readonly scheduleId?: string | null;
+  /**
+   * Fork provenance (CE16, KOBE-216). The source's id and title only while you may open it;
+   * `forkedAtEntryId` is an entry of this thread itself (set on every fork, kept after the source
+   * is gone). A fork point without a source: "forked from a thread you can't open".
+   */
+  readonly forkedFromThreadId?: string | null;
+  readonly forkedFromTitle?: string | null;
+  readonly forkedAtEntryId?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;

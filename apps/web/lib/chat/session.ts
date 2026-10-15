@@ -75,6 +75,7 @@ export class ChatSession {
   readonly #held = new Map<string, Held>();
   /** Title for the thread `initialize` creates next (taken from the message being sent). */
   #nextTitle: string | undefined;
+  readonly #composerDrafts = new Map<string, string>();
   readonly #createdListeners = new Set<() => void>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
@@ -157,6 +158,20 @@ export class ChatSession {
 
   peek(threadId: string): ThreadController | undefined {
     return this.#held.get(threadId)?.controller;
+  }
+
+  /**
+   * Text to put in a thread's composer when it opens, once (a fork at a prompt, KOBE-216): a
+   * draft to edit or send, never sent by itself.
+   */
+  setComposerDraft(threadId: string, text: string): void {
+    this.#composerDrafts.set(threadId, text);
+  }
+
+  takeComposerDraft(threadId: string): string | undefined {
+    const text = this.#composerDrafts.get(threadId);
+    this.#composerDrafts.delete(threadId);
+    return text;
   }
 
   setNextTitle(text: string): void {

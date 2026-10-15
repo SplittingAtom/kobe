@@ -2,6 +2,7 @@ import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
   isLegalHoldViolation,
+  isLockConflict,
   lockLegalHolds,
   sql,
   withTeam,
@@ -24,6 +25,12 @@ import { readMaximumLayer, readTeamLayer } from "./settings.js";
  *  4. the audit event is the transaction's last write.
  * Threads with a queued or active run are skipped (the next pass retries), and rows another
  * transaction holds are skipped (`SKIP LOCKED`), so a purge never waits on a live conversation.
+ * That includes a source's forks (KOBE-215/216): deleting a source clears its forks' link
+ * (`ON DELETE SET NULL`), which locks each fork's row. The batch locks those forks first, with
+ * `SKIP LOCKED`, and leaves out every source whose forks it could not all lock (a run on the fork
+ * holds its row); the next pass retries it, and the loop ends `partial`, not `done`. Should a lock
+ * still time out or deadlock (55P03, 40P01), the loop stops as `busy`: nothing is lost, and the
+ * next pass continues.
  */
 
 /** Which threads a batch purges. */
@@ -156,9 +163,37 @@ async function countOwned(tx: KobeTx, teamId: string, ids: readonly string[]) {
   return { entries: num(row?.entries), runs: num(row?.runs), events: num(row?.events) };
 }
 
+/**
+ * Locks the forks of the picked sources (`FOR NO KEY UPDATE SKIP LOCKED`, the lock the source's
+ * `ON DELETE SET NULL` would wait for) and returns the sources whose forks were not all locked.
+ * Forks this batch picked itself are already its own rows. A new fork can't appear meanwhile: its
+ * foreign-key check needs a share lock on the source, which this batch holds `FOR UPDATE`.
+ */
+async function sourcesWithBusyForks(
+  tx: KobeTx,
+  teamId: string,
+  sources: readonly string[],
+): Promise<string[]> {
+  if (sources.length === 0) return [];
+  const res = await tx.execute<{ source: string }>(sql`
+    WITH locked AS (
+      SELECT f.id FROM threads f
+       WHERE f.team_id = ${teamId} AND f.forked_from_thread_id = ANY(${uuidArray(sources)})
+       ORDER BY f.id
+       FOR NO KEY UPDATE SKIP LOCKED)
+    SELECT f.forked_from_thread_id AS source FROM threads f
+      LEFT JOIN locked l ON l.id = f.id
+     WHERE f.team_id = ${teamId} AND f.forked_from_thread_id = ANY(${uuidArray(sources)})
+     GROUP BY f.forked_from_thread_id
+    HAVING count(l.id) < count(*)`);
+  return res.rows.map((r) => r.source);
+}
+
 export interface PurgeBatchResult extends PurgeCounts {
   /** The threads purged (ids). */
   readonly threadIds: readonly string[];
+  /** Picked sources left out because another transaction holds one of their forks. */
+  readonly skipped: readonly string[];
   /** More candidates may remain (the batch was full). */
   readonly more: boolean;
 }
@@ -173,6 +208,8 @@ export async function purgeBatchInTx(
   selection: PurgeSelection,
   limits: BatchLimits,
   record: (tx: KobeTx, counts: PurgeBatchResult) => Promise<void>,
+  /** Sources an earlier batch of this loop left out (busy forks): not picked again. */
+  exclude: readonly string[] = [],
 ): Promise<PurgeBatchResult> {
   // Before the hold lock: a pending hold approval must not make a purge wait without bound.
   await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
@@ -183,12 +220,13 @@ export async function purgeBatchInTx(
       PERIOD_DAYS[
         effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date())
       ];
-    if (days === null) return { ...NO_PURGE, threadIds: [], more: false };
+    if (days === null) return { ...NO_PURGE, threadIds: [], skipped: [], more: false };
     retentionDays = days;
   }
   const found = await tx.execute<Candidate>(sql`
     SELECT t.id, t.owner_user_id, t.last_entry_seq FROM threads t
      WHERE t.team_id = ${teamId} AND ${predicate(selection, retentionDays)}
+       ${exclude.length > 0 ? sql`AND NOT (t.id = ANY(${uuidArray(exclude)}))` : sql``}
        AND NOT public.legal_hold_covers(t.team_id, t.owner_user_id)
        AND NOT EXISTS (
          SELECT 1 FROM runs r
@@ -198,9 +236,15 @@ export async function purgeBatchInTx(
      LIMIT ${limits.threads}
      FOR UPDATE OF t SKIP LOCKED`);
   const picked = withinBudget(found.rows, limits);
-  const more = found.rows.length >= limits.threads || picked.length < found.rows.length;
-  if (picked.length === 0) return { ...NO_PURGE, threadIds: [], more: false };
-  const ids = picked.map((r) => r.id);
+  const skipped = await sourcesWithBusyForks(
+    tx,
+    teamId,
+    picked.map((r) => r.id),
+  );
+  const ids = picked.map((r) => r.id).filter((id) => !skipped.includes(id));
+  const more =
+    found.rows.length >= limits.threads || picked.length < found.rows.length || skipped.length > 0;
+  if (ids.length === 0) return { ...NO_PURGE, threadIds: [], skipped, more };
   const owned = await countOwned(tx, teamId, ids);
   const blobs = await queueBlobs(tx, teamId, ids);
   // Cascades to entries, runs, run events, approvals and the wire's thread rows (all keyed on
@@ -212,6 +256,7 @@ export async function purgeBatchInTx(
     ...owned,
     blobs,
     threadIds: ids,
+    skipped,
     more,
   };
   await auditTimeout(tx);
@@ -224,7 +269,14 @@ export type PurgeOutcome =
   /** A legal hold refused a delete (KH001): nothing more was purged for this selection. */
   | { readonly status: "held"; readonly counts: PurgeCounts }
   /** The time or batch budget ran out; the next pass continues. */
-  | { readonly status: "budget"; readonly counts: PurgeCounts };
+  | { readonly status: "budget"; readonly counts: PurgeCounts }
+  /** A batch timed out on a lock or deadlocked (55P03, 40P01): rolled back, the next pass retries. */
+  | { readonly status: "busy"; readonly counts: PurgeCounts }
+  /**
+   * Not complete: `skipped` sources were left out because a fork of theirs was busy (KOBE-216);
+   * everything else the selection matched was purged. The next pass retries them.
+   */
+  | { readonly status: "partial"; readonly counts: PurgeCounts; readonly skipped: number };
 
 export interface PurgeLoopOptions {
   readonly limits?: BatchLimits;
@@ -258,6 +310,7 @@ export async function purgeThreads(
   const limits = options.limits ?? DEFAULT_BATCH;
   const maxBatches = options.maxBatches ?? 1000;
   let counts = NO_PURGE;
+  let skipped: readonly string[] = [];
   for (let batch = 0; batch < maxBatches; batch++) {
     if (options.stop?.()) {
       return { status: "budget", counts };
@@ -265,14 +318,20 @@ export async function purgeThreads(
     let result: PurgeBatchResult;
     try {
       result = await withTeam(db, teamId, (tx) =>
-        purgeBatchInTx(tx, teamId, selection, limits, record),
+        purgeBatchInTx(tx, teamId, selection, limits, record, skipped),
       );
     } catch (err) {
       if (isLegalHoldViolation(err)) return { status: "held", counts };
+      if (isLockConflict(err)) return { status: "busy", counts };
       throw err;
     }
     counts = add(counts, result);
-    if (!result.more) return { status: "done", counts };
+    skipped = [...skipped, ...result.skipped];
+    if (!result.more) {
+      return skipped.length > 0
+        ? { status: "partial", counts, skipped: skipped.length }
+        : { status: "done", counts };
+    }
   }
   return { status: "budget", counts };
 }
