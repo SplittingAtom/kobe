@@ -176,7 +176,11 @@ function ToolList({
   if (tools.length === 0) return <p className={styles.hint}>No tools are approved yet.</p>;
   return (
     <>
-      <p className={styles.hint}>Unannotated tools count as write and open-world.</p>
+      <p className={styles.hint}>
+        A tool that doesn&apos;t declare itself read-only is treated as able to change data, and one
+        that doesn&apos;t say otherwise as able to reach outside systems. Read-only exposure offers
+        only tools that declare themselves read-only.
+      </p>
       <ul aria-label="Tools">
         {tools.map((t) => {
           const drifted = t.status === "drifted";
