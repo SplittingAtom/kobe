@@ -68,6 +68,18 @@ describe("classifyStall: definite signals", () => {
       cause: "scheduling",
       definite: true,
     });
+    expect(
+      classify([
+        podEv(
+          "FailedScheduling",
+          "0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.",
+        ),
+      ]),
+    ).toMatchObject({ cause: "scheduling", definite: true });
+    expect(
+      classify([podEv("FailedScheduling", "0/2 nodes are available: 2 Insufficient cpu.")])
+        .definite,
+    ).toBe(true);
   });
 
   it("image pull failures, by event or by container state", () => {
@@ -106,6 +118,23 @@ describe("classifyStall: progress is not a stall", () => {
     expect(
       classify([podEv("FailedScheduling", "pod has unbound PersistentVolumeClaims")]).definite,
     ).toBe(false);
+  });
+
+  // KOBE-277: every FailedScheduling message starts "0/N nodes are available:"; only the reason
+  // after it says whether waiting can help. A workspace PVC that agent-sandbox has not created or
+  // bound yet is the normal race of a first wake, not a full cluster.
+  it("a workspace PVC that is not created or bound yet keeps waiting", () => {
+    for (const message of [
+      '0/1 nodes are available: persistentvolumeclaim "workspace-u-1513cb1d-05bd-4283-afb9-13075aea49e4" not found. not found',
+      "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/4 nodes are available: 4 Preemption is not helpful for scheduling.",
+      "0/3 nodes are available: 3 node(s) didn't find available persistent volumes to bind.",
+      "0/1 nodes are available: 1 node(s) had untolerated taint {node.kubernetes.io/not-ready: }.",
+    ]) {
+      expect(classify([podEv("FailedScheduling", message)]), message).toMatchObject({
+        cause: "scheduling",
+        definite: false,
+      });
+    }
   });
 });
 

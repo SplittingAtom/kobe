@@ -35,7 +35,12 @@ const ATTACH_REPEATS = 3;
 const ATTACH_LASTING_MS = 60_000;
 const VOLUME_SCHEDULING = /LocalReplicaSchedulingFailure|insufficient storage|replica scheduling/i;
 const VOLUME_ATTACH = /FailedAttachVolume|AttachVolume\.Attach failed|FailedMount|MountVolume/i;
-const NO_CAPACITY = /insufficient storage|no nodes available|nodes are available/i;
+// FailedScheduling always reads "0/N nodes are available: <reasons>"; only the reasons tell a full
+// cluster (definite) from a workspace PVC that is not created or bound yet, which the first wake
+// of a sandbox races normally (KOBE-277).
+const NO_CAPACITY = /insufficient (storage|cpu|memory|ephemeral-storage|pods)|no nodes available/i;
+const VOLUME_PENDING =
+  /persistentvolumeclaim\s+"[^"]*"\s+not found|unbound (immediate )?PersistentVolumeClaims|didn't find available persistent volumes/i;
 const IMAGE_PULL = /ErrImagePull|ImagePullBackOff|ErrImageNeverPull|InvalidImageName/i;
 
 interface KubeEvent {
@@ -118,7 +123,12 @@ export function classifyStall(input: {
 
   const replica = pick(VOLUME_SCHEDULING);
   if (replica) return make("volume_unschedulable", line(replica), true);
-  const noRoom = events.find((e) => e.reason === "FailedScheduling" && NO_CAPACITY.test(e.message));
+  const noRoom = events.find(
+    (e) =>
+      e.reason === "FailedScheduling" &&
+      NO_CAPACITY.test(e.message) &&
+      !VOLUME_PENDING.test(e.message),
+  );
   if (noRoom) return make("scheduling", line(noRoom), true);
   const pull = pick(IMAGE_PULL);
   const pullWaiting = waiting.find((w) => IMAGE_PULL.test(w));
