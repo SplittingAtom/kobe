@@ -3,8 +3,9 @@
  * conversation turn. Two sources:
  * - entries of the Pi tree (`model_change`, `compaction`), placed by the tree projection where
  *   they sit (`tree.ts`), so they never become messages or branches of their own;
- * - what only the server knows (`GET /v1/threads/{id}/markers`): runs that ended interrupted or
- *   budget-stopped, and decided approvals, placed on the messages the projection already has.
+ * - what only the server knows (`GET /v1/threads/{id}/markers`): runs that ended interrupted,
+ *   budget-stopped, stopped or failed, and decided approvals, placed on the messages the
+ *   projection already has.
  * Forks need no data: assistant-ui knows each message's branches (`markers.tsx`).
  */
 import type { ApprovalResolutionCause } from "@kobe/protocol";
@@ -36,10 +37,12 @@ export type EntryMarker =
       readonly tokensBefore?: number | undefined;
     };
 
-/** A run that ended without finishing its answer (`runs.status`). */
+/** A run that ended without finishing its answer (`runs.status`); stopped or failed: KOBE-290. */
 export interface RunMarker {
   readonly runId: string;
-  readonly status: "interrupted" | "budget_stopped";
+  readonly status: "interrupted" | "budget_stopped" | "cancelled" | "failed";
+  /** A failed run's message (the server's text for its failure code). */
+  readonly message?: string | undefined;
   readonly userEntryId: string | null;
   readonly parentEntryId: string | null;
 }

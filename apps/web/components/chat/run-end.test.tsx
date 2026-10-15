@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { announcement, composer, openApp, streamed, streaming } from "./testing";
+import { announcement, chatRequests, composer, openApp, streamed, streaming } from "./testing";
 
 /**
  * KOBE-288: what the conversation shows once a run has ended, in the event orders the server
@@ -201,7 +201,7 @@ describe("after a reload, the prompt of a run that ended before Pi's first turn 
   };
 
   for (const [name, end] of Object.entries(ends)) {
-    it(`${name}: the reloaded prompt shows once, as sent, never waiting`, async () => {
+    it(`${name}: the reloaded prompt shows once, never waiting, with the run's end`, async () => {
       const t = threadWithHistory();
       const answer = must(fake.threads.get(t)?.leaf_entry_id);
       openApp(fake, t);
@@ -216,12 +216,13 @@ describe("after a reload, the prompt of a run that ended before Pi's first turn 
         role: "user",
         content: [{ type: "text", text: "draw a chart" }],
       });
-      if (status === "budget_stopped") {
-        fake.threadMarkers.set(t, {
-          runs: [{ run_id: runId, status, user_entry_id: prompt, parent_entry_id: answer }],
-          approvals: [],
-        });
-      }
+      const failure = status === "failed" ? { message: "The run could not start." } : {};
+      fake.threadMarkers.set(t, {
+        runs: [
+          { run_id: runId, status, ...failure, user_entry_id: prompt, parent_entry_id: answer },
+        ],
+        approvals: [],
+      });
       cleanup();
       openApp(fake, t);
       expect(await screen.findByText("draw a chart")).toBeTruthy();
@@ -229,9 +230,70 @@ describe("after a reload, the prompt of a run that ended before Pi's first turn 
       expect(screen.queryByText(WAITING)).toBeNull();
       expect(screen.queryByText(/^Version/)).toBeNull();
       expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
-      if (status === "budget_stopped") {
-        expect(await screen.findByText("Run stopped by the budget")).toBeTruthy();
-      }
+      // The run's end state, as a marker row under the prompt.
+      const rows: Record<string, string> = {
+        cancelled: "Stopped",
+        failed: "Run failed: The run could not start.",
+        budget_stopped: "Run stopped by the budget",
+      };
+      expect(await screen.findByText(must(rows[status]))).toBeTruthy();
     });
   }
+});
+
+describe("the stopped prompt later in the conversation (KOBE-290)", () => {
+  it("after the next run, Pi's empty stopped answer beside it is no second version", async () => {
+    const t = threadWithHistory();
+    const a1 = must(fake.threads.get(t)?.leaf_entry_id);
+    const prompt = fake.addEntry(t, a1, {
+      role: "user",
+      content: [{ type: "text", text: "stopped prompt" }],
+    });
+    // Pi's aborted answer (re-sent by the next run's sync) and the next run's branch.
+    fake.addEntry(
+      t,
+      prompt,
+      { role: "assistant", content: [], stopReason: "aborted" },
+      { leaf: false },
+    );
+    const marker = fake.addSystemEntry(t, prompt, "custom", {
+      customType: "kobe.branch",
+      data: { run_id: "r2" },
+    });
+    const next = fake.addEntry(t, marker, { role: "user", content: "next question" });
+    fake.addEntry(t, next, say("next answer"));
+    openApp(fake, t);
+    expect(await screen.findByText("next answer")).toBeTruthy();
+    expect(screen.getAllByText("stopped prompt")).toHaveLength(1);
+    expect(screen.queryByText(/^Version/)).toBeNull();
+    expect(screen.queryByText(/branches/)).toBeNull();
+    expect(screen.queryByText("This step was stopped.")).toBeNull();
+  });
+
+  it("a prompt the server kept (ku- id) shows like any prompt, and Edit branches from its parent", async () => {
+    const t = threadWithHistory();
+    const a1 = must(fake.threads.get(t)?.leaf_entry_id);
+    fake.addEntry(
+      t,
+      a1,
+      { role: "user", content: [{ type: "text", text: "never sent" }] },
+      { id: "ku-0123456789abcdef01234567" },
+    );
+    openApp(fake, t);
+    expect(await screen.findByText("never sent")).toBeTruthy();
+    expect(screen.queryByText(WAITING)).toBeNull();
+    const user = userEvent.setup();
+    const edits = screen.getAllByRole("button", { name: "Edit" });
+    await user.click(must(edits.at(-1)));
+    const editor = await screen.findByLabelText("Edit your message");
+    await user.clear(editor);
+    await user.type(editor, "sent now");
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
+        content: "sent now",
+        parent_entry_id: a1,
+      }),
+    );
+  });
 });

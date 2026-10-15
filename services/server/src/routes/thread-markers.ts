@@ -18,7 +18,10 @@ export const MAX_MARKERS = 500;
 
 const runMarkerSchema = z.strictObject({
   run_id: wireUuidSchema,
-  status: z.enum(["interrupted", "budget_stopped"]),
+  /** How a message run that started ended without finishing (KOBE-290 adds Stop and failures). */
+  status: z.enum(["interrupted", "budget_stopped", "cancelled", "failed"]),
+  /** A failed run's message: the server's own text for its failure code (never the sandbox's). */
+  message: z.string().optional(),
   /** The prompt the run answered (Pi entry id), once mirrored; null if it never was. */
   user_entry_id: idSchema.nullable(),
   /** Where the run continued from; places a run whose prompt never reached the tree. */
@@ -53,22 +56,35 @@ function newest(rows: readonly Row[]): { rows: Row[]; truncated: boolean } {
   return { rows: rows.slice(0, MAX_MARKERS).reverse(), truncated: rows.length > MAX_MARKERS };
 }
 
+type RunMarkerStatus = z.infer<typeof runMarkerSchema>["status"];
+
 async function runMarkers(tx: KobeTx, teamId: string, threadId: string) {
+  // Stopped and failed only once started: a deleted or never-started queued message is no turn.
   const res = await tx.execute<Row>(sql`
-    SELECT id, status, user_entry_id, parent_entry_id
-      FROM runs
-     WHERE team_id = ${teamId}::uuid AND thread_id = ${threadId}::uuid
-       AND status IN ('interrupted', 'budget_stopped') AND kind = 'message'
-     ORDER BY created_at DESC, id DESC LIMIT ${MAX_MARKERS + 1}`);
+    SELECT r.id, r.status, r.user_entry_id, r.parent_entry_id, f.message
+      FROM runs r
+      LEFT JOIN LATERAL (
+        SELECT e.payload -> 'error' ->> 'message' AS message FROM run_events e
+         WHERE e.team_id = r.team_id AND e.run_id = r.id AND r.status = 'failed'
+           AND e.type = 'run.failed'
+         ORDER BY e.seq DESC LIMIT 1) f ON true
+     WHERE r.team_id = ${teamId}::uuid AND r.thread_id = ${threadId}::uuid AND r.kind = 'message'
+       AND (r.status IN ('interrupted', 'budget_stopped')
+            OR (r.status IN ('cancelled', 'failed') AND r.started_at IS NOT NULL))
+     ORDER BY r.created_at DESC, r.id DESC LIMIT ${MAX_MARKERS + 1}`);
   const { rows, truncated } = newest(res.rows);
   return {
     truncated,
-    runs: rows.map((r) => ({
-      run_id: String(r.id),
-      status: r.status as "interrupted" | "budget_stopped",
-      user_entry_id: text(r.user_entry_id),
-      parent_entry_id: text(r.parent_entry_id),
-    })),
+    runs: rows.map((r) => {
+      const message = text(r.message);
+      return {
+        run_id: String(r.id),
+        status: r.status as RunMarkerStatus,
+        ...(r.status === "failed" && message !== null ? { message } : {}),
+        user_entry_id: text(r.user_entry_id),
+        parent_entry_id: text(r.parent_entry_id),
+      };
+    }),
   };
 }
 
@@ -106,7 +122,8 @@ async function approvalMarkers(tx: KobeTx, teamId: string, threadId: string, use
 
 /**
  * `GET /v1/threads/{id}/markers` (KOBE-209, CE12/CE16): what the chat marks between messages that
- * the entry tree doesn't hold: runs that ended `interrupted` or `budget_stopped`, and decided
+ * the entry tree doesn't hold: runs that ended `interrupted` or `budget_stopped`, or that started
+ * and were stopped (`cancelled`) or failed (KOBE-290), and decided
  * approvals (outcome and cause only, never the checked input or reasons). Newest 500 of each,
  * oldest first; `truncated` says older ones were left out. Visible like the thread
  * (`findThread`); approvals only to the run's user, as `GET /v1/approvals` (a reader of a shared

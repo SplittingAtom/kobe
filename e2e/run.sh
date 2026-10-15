@@ -1968,6 +1968,8 @@ out("reload", reload.status + ":" + prompts.length + ":" + (prompts[0]?.entry_id
 out("answers", entries.filter((e) => e.payload?.message?.role === "assistant").length);
 const run = await call("GET", "/v1/runs/" + runId);
 out("run", run.json.status + ":" + (run.json.user_entry_id === prompts[0]?.entry_id));
+const markers = await call("GET", "/v1/threads/" + id + "/markers");
+out("marker", (markers.json.runs || []).map((r) => r.status + ":" + (r.user_entry_id === prompts[0]?.entry_id)).join(",") || "-");
 JS
     stop_early_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$STOP_EARLY_JS" "$E2E_TEAM_ID" "kobe-slow-start stop me $RANDOM" 2>&1 || true)
     printf '     stop early: %s\n' "$(tr '\n' ' ' <<<"$stop_early_out")"
@@ -1976,6 +1978,7 @@ JS
     contains "KOBE-290: after a reload the prompt is there once, as the leaf" '^reload=200:1:true$' "$stop_early_out"
     contains "KOBE-290: the aborted answer of the stopped run is not stored" '^answers=0$' "$stop_early_out"
     contains "KOBE-290: the run is bound to its prompt entry" '^run=cancelled:true$' "$stop_early_out"
+    contains "KOBE-290: after a reload the prompt carries a Stopped marker" '^marker=cancelled:true$' "$stop_early_out"
 
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.

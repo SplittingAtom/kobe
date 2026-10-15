@@ -115,6 +115,29 @@ const markers = () =>
 const marker = (kind: string) =>
   must(document.querySelector<HTMLElement>(`[data-kobe-marker="${kind}"]`));
 
+describe("how a stopped or failed run ended, after a reload (KOBE-290)", () => {
+  it("shows Stopped after the stopped run's answer and Run failed under a prompt without one", async () => {
+    const thread = fake.addThread("Ends");
+    const u1 = fake.addEntry(thread, null, ask("Long task"));
+    const a1 = fake.addEntry(thread, u1, say("Partial answer"));
+    const u2 = fake.addEntry(thread, a1, ask("Try again"));
+    fake.threadMarkers.set(thread, {
+      runs: [
+        run("r-1", "cancelled", u1, "root"),
+        { ...run("r-2", "failed", u2, a1), message: "The run could not start." },
+      ],
+      approvals: [],
+    });
+    openApp(fake, thread);
+    await screen.findByText("Try again");
+    await waitFor(() => expect(markers().map(([kind]) => kind)).toContain("failed"));
+    expect(markers()).toEqual([
+      ["stopped", "Stopped"],
+      ["failed", "Run failed: The run could not start."],
+    ]);
+  });
+});
+
 describe("inline markers on a recorded thread (ac-1, ac-3)", () => {
   it("renders each kind in place, between the messages it sits between", async () => {
     const { thread } = recordedThread();

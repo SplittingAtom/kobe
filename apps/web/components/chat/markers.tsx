@@ -7,6 +7,8 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import {
+  CircleStopIcon,
+  CircleXIcon,
   CpuIcon,
   FoldVerticalIcon,
   GitForkIcon,
@@ -236,16 +238,36 @@ export function MarkerPart({ data }: DataMessagePartProps) {
   ) : null;
 }
 
+/** A failed run's message, short enough for one marker row. */
+const MAX_FAILURE_TEXT = 300;
+
 function RunMarkerRow({ run }: { readonly run: RunMarker }) {
-  return run.status === "interrupted" ? (
-    <MarkerRow kind="run" icon={UnplugIcon} tone="warn">
-      Run interrupted
-    </MarkerRow>
-  ) : (
-    <MarkerRow kind="budget" icon={WalletIcon} tone="warn">
-      Run stopped by the budget
-    </MarkerRow>
-  );
+  switch (run.status) {
+    case "interrupted":
+      return (
+        <MarkerRow kind="run" icon={UnplugIcon} tone="warn">
+          Run interrupted
+        </MarkerRow>
+      );
+    case "budget_stopped":
+      return (
+        <MarkerRow kind="budget" icon={WalletIcon} tone="warn">
+          Run stopped by the budget
+        </MarkerRow>
+      );
+    case "cancelled":
+      return (
+        <MarkerRow kind="stopped" icon={CircleStopIcon}>
+          Stopped
+        </MarkerRow>
+      );
+    case "failed":
+      return (
+        <MarkerRow kind="failed" icon={CircleXIcon} tone="warn">
+          {run.message ? `Run failed: ${run.message.slice(0, MAX_FAILURE_TEXT)}` : "Run failed"}
+        </MarkerRow>
+      );
+  }
 }
 
 /** Why an approval that nobody decided ended: the run's end, or its hour ran out (D29). */
