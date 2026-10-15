@@ -44,7 +44,10 @@ export type KobeMessageMeta =
       /** Where an edit of this message branches from (its entry's parent). */
       readonly parentEntryId: string | null;
       readonly text: string;
+      /** Not an entry yet: the run's prompt as sent, shown until Pi saves it (no edit, no fork). */
       readonly pending: boolean;
+      /** Its run still holds the thread ("Sent, waiting for the agent"); never once it ended. */
+      readonly waiting?: boolean | undefined;
       /** Files sent with it (chips): from the send while pending, from Pi's text once committed. */
       readonly attachments?: readonly ChipFile[] | undefined;
       /** Skipped-actions reports of a run that left no answer after this prompt (KOBE-181). */
@@ -696,6 +699,7 @@ function overlayLive(
       parentEntryId,
       text: live.prompt.text,
       pending: true,
+      waiting: active,
       ...(live.prompt.files && live.prompt.files.length > 0
         ? { attachments: live.prompt.files }
         : {}),
@@ -709,7 +713,7 @@ function overlayLive(
         content: [{ type: "text", text: live.prompt.text }],
         metadata: { custom: meta },
       },
-      deps: [live.prompt.text, parentNode, live.prompt.files],
+      deps: [live.prompt.text, parentNode, live.prompt.files, active],
     });
     anchor = id;
   }

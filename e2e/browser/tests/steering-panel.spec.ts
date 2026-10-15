@@ -1,4 +1,4 @@
-import { RUN_START_TIMEOUT_MS } from "./support/constants.js";
+import { RUN_START_TIMEOUT_MS, WAITING_FOR_AGENT } from "./support/constants.js";
 import { expect, test } from "./support/chat.js";
 
 /** Runs long enough for every queue action below to happen while it streams. */
@@ -64,4 +64,6 @@ test("steering panel: queue, keyboard reorder, pause and resume, delete, stop", 
   await chat.waitForIdle();
   await expect(panel).toHaveAttribute("data-state", "idle");
   await expect(chat.userMessages).toHaveCount(1);
+  // The stopped run's message no longer waits for the agent (KOBE-288).
+  await expect(page.getByText(WAITING_FOR_AGENT)).toHaveCount(0);
 });

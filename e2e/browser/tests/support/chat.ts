@@ -1,5 +1,10 @@
 import { expect, test as base, type Locator, type Page } from "@playwright/test";
-import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "./constants.js";
+import {
+  RUN_START_TIMEOUT_MS,
+  RUN_TIMEOUT_MS,
+  SHELL_TIMEOUT_MS,
+  WAITING_FOR_AGENT,
+} from "./constants.js";
 
 /** The chat's address parameter for the open thread (`/?thread=<id>`). */
 const THREAD_PARAM = "thread";
@@ -83,9 +88,8 @@ export class Chat {
   }
 
   /**
-   * Waits until nothing runs: the steering panel idle and no answer streaming. Checked twice a
-   * moment apart, so a queued message starting in between counts. ("Sent, waiting for the agent"
-   * is not a signal: on gate1 it can outlive the run, see docs/ledger/KOBE-285.md.)
+   * Waits until nothing runs: the steering panel idle, no answer streaming and no message waiting
+   * for the agent. Checked twice a moment apart, so a queued message starting in between counts.
    */
   async waitForIdle(timeout = RUN_TIMEOUT_MS): Promise<void> {
     for (let pass = 0; pass < 2; pass += 1) {
@@ -93,6 +97,7 @@ export class Chat {
       await expect(this.page.locator('[data-role="assistant"][aria-busy="true"]')).toHaveCount(0, {
         timeout,
       });
+      await expect(this.page.getByText(WAITING_FOR_AGENT)).toHaveCount(0, { timeout });
       await this.page.waitForTimeout(1_500);
     }
   }

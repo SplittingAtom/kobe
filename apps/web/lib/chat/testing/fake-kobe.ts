@@ -6,7 +6,7 @@
  * rules) so the chat is tested over its real API client, casing layer and stream code.
  * `agent` scripts what Pi would do in a run.
  */
-import { COMPACT_THREAD_ERROR_MESSAGES } from "@kobe/protocol";
+import { COMPACT_THREAD_ERROR_MESSAGES, EVENT_ENTRY_PAYLOAD_MAX_BYTES } from "@kobe/protocol";
 import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 
@@ -409,12 +409,16 @@ export class FakeKobe {
     const entryId = add(run.thread_id, parentId);
     run.tip = entryId;
     const entry = this.#thread(run.thread_id).entries.at(-1) as FakeEntry;
+    // Like the server: an entry over 64 KiB is stored but not streamed (no `payload`).
+    const small =
+      new TextEncoder().encode(JSON.stringify(entry.payload)).length <=
+      EVENT_ENTRY_PAYLOAD_MAX_BYTES;
     this.emit(runId, "entry.committed", {
       entry_id: entryId,
       parent_id: parentId,
       entry_type: entry.type,
       ...(messageId ? { message_id: messageId } : {}),
-      payload: entry.payload as never,
+      ...(small ? { payload: entry.payload as never } : {}),
     });
     return entryId;
   }
@@ -490,6 +494,14 @@ export class FakeKobe {
     },
     fail: (runId: string, code: string, message: string) => {
       this.#end(this.run(runId), "failed", "run.failed", { error: { code, message } });
+      this.#advance(this.run(runId).thread_id);
+    },
+    /** A budget ran out mid-run (KOBE-42): the run stops, the queue advances. */
+    budgetStop: (runId: string) => {
+      this.#end(this.run(runId), "budget_stopped", "run.budget_stopped", {
+        scope: "user",
+        message: "The run stopped because your budget is used up.",
+      });
       this.#advance(this.run(runId).thread_id);
     },
     /** The sandbox died mid-run (D14): interrupted, Retry offered, the queue waits. */

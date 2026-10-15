@@ -38,15 +38,7 @@ test("the message list follows the stream, holds when scrolled up, and Jump to l
     await page.waitForTimeout(700);
   }
 
-  // Save tokens: stop the answer if it is still streaming. The rest runs on a settled list: once
-  // on gate1 a wheel-up around the end of the run did not unpin (ledger, KOBE-285).
-  const stop = chat.steering.getByRole("button", { name: "Stop", exact: true });
-  if (await stop.isVisible()) await stop.click();
-  await chat.waitForIdle();
-  await expect(list).toHaveAttribute("data-kobe-follow", "pinned");
-  await expect.poll(gap, { timeout: 10_000 }).toBeLessThan(FOLLOW_SLACK_PX);
-
-  // A small scroll up unpins at once, and the position holds.
+  // A small scroll up unpins at once, while the answer streams or just as it ends (KOBE-288).
   const box = await list.boundingBox();
   if (box === null) throw new Error("the message list has no box");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -57,7 +49,14 @@ test("the message list follows the stream, holds when scrolled up, and Jump to l
   await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
   const jump = page.getByRole("button", { name: /^Jump to latest/ });
   await expect(jump).toBeVisible();
-  await page.waitForTimeout(500);
+
+  // Save tokens: stop the answer if it is still streaming. The run's end leaves the list unpinned
+  // and the position where the member left it.
+  const stop = chat.steering.getByRole("button", { name: "Stop", exact: true });
+  if (await stop.isVisible()) await stop.click();
+  await chat.waitForIdle();
+  await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
+  await expect(jump).toBeVisible();
   const heldAt = await list.evaluate((el) => el.scrollTop);
   await page.waitForTimeout(2_500);
   expect(Math.abs((await list.evaluate((el) => el.scrollTop)) - heldAt)).toBeLessThan(4);

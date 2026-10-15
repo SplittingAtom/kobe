@@ -1,4 +1,4 @@
-import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { RUN_TIMEOUT_MS } from "./support/constants.js";
 import { expect, test } from "./support/chat.js";
 
 /** Compaction reads the whole conversation with a real model: allow for a slow one. */
@@ -38,11 +38,10 @@ test("Compact now folds the older turns into a summary marker", async ({ chat, p
   await chat.open();
   await chat.ask("No tools. In two sentences: what is a lighthouse? Mention the number 4217.");
   await chat.ask(`No tools. Reply only with the word OK. A long log to keep in mind: ${FILLER}`);
-  // On gate1 the long message's optimistic copy can linger as a phantom "version 1 of 2" that
-  // waits for the agent (ledger, KOBE-285); a reload shows the thread as the server keeps it.
-  await page.reload();
-  await expect(chat.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await chat.waitForIdle();
+  // The long message is streamed without its body (over 64 KiB): the copy shown from the send
+  // must give way to the stored entry, with no second version and nothing waiting (KOBE-288).
+  await expect(page.getByText(/^Version \d+ of \d+$/)).toHaveCount(0);
+  await expect(chat.userMessages).toHaveCount(2);
 
   await openDialog();
   await dialog

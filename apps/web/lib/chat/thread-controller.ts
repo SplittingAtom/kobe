@@ -417,6 +417,9 @@ export class ThreadController {
       // A queued run started: it leaves the queue and its prompt shows in the conversation.
       this.#announce("The agent is working on your message.");
       void this.refresh();
+    } else if (applied.entries.some((e) => e.payload === undefined)) {
+      // An entry over 64 KiB is streamed without its body (a long prompt, KOBE-288): read it.
+      void this.refresh();
     }
   }
 

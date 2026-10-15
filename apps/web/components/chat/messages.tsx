@@ -136,7 +136,7 @@ function useMeta(): KobeMessageMeta | undefined {
 
 export function UserMessage() {
   const meta = useMeta();
-  const pending = meta?.kind === "user" && meta.pending;
+  const waiting = meta?.kind === "user" && meta.waiting === true;
   const extras = useKobeExtras();
   const readOnly = isReadOnlyThread(extras);
   const canEdit =
@@ -146,7 +146,7 @@ export function UserMessage() {
       data-role="user"
       className={cn(
         "group/user animate-in fade-in slide-in-from-bottom-1 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2",
-        pending && "opacity-75",
+        waiting && "opacity-75",
       )}
     >
       <h3 className="sr-only">You said</h3>
@@ -179,7 +179,7 @@ export function UserMessage() {
             <SkippedReportCard text={report.text} count={report.count} />
           </div>
         ))}
-      {pending && (
+      {waiting && (
         <span className="text-muted-foreground col-span-full col-start-1 justify-self-end text-xs">
           Sent, waiting for the agent
         </span>
