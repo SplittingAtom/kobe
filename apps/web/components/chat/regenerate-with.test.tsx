@@ -88,7 +88,7 @@ function markerAbovePrompt(model: string): boolean {
 }
 
 describe("Regenerate with another model (KOBE-217)", () => {
-  it("offers the team's enabled models only, the thread's current one marked", async () => {
+  it("offers the team default and the enabled models only, the thread's current choice marked", async () => {
     const { t } = oneTurn();
     openApp(fake, t);
     await screen.findByText("kimi answer");
@@ -99,7 +99,7 @@ describe("Regenerate with another model (KOBE-217)", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((i) => i.textContent),
-    ).toEqual(["Kimi K2.7 Code (current)", "GLM 5.3"]);
+    ).toEqual(["Team default (Kimi K2.7 Code) (current)", "Kimi K2.7 Code", "GLM 5.3"]);
   });
 
   it("switches the thread's model, then regenerates as a sibling with a model marker above it (ac-1)", async () => {
@@ -148,14 +148,60 @@ describe("Regenerate with another model (KOBE-217)", () => {
     await waitFor(async () => expect((await picker()).value).toBe("kimi"));
   });
 
-  it("the thread's current model regenerates without a model change", async () => {
+  it("the thread's current choice regenerates without a model change", async () => {
     const { t } = oneTurn();
     openApp(fake, t);
     await screen.findByText("kimi answer");
-    await chooseModel("Kimi K2.7 Code (current)");
+    await chooseModel("Team default (Kimi K2.7 Code) (current)");
     await waitFor(() => expect(messagePosts()).toHaveLength(1));
     expect(chatRequests(fake, "PATCH")).toHaveLength(0);
     expect(fake.threads.get(t)?.model).toBeNull();
+  });
+
+  it("the team default entry makes the thread follow the default again, not pin its alias", async () => {
+    const { t } = oneTurn();
+    must(fake.threads.get(t)).model = "glm";
+    openApp(fake, t);
+    await screen.findByText("kimi answer");
+    await chooseModel("Team default (Kimi K2.7 Code)");
+    await waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(chatRequests(fake, "PATCH").map((r) => r.body)).toEqual([{ model: null }]);
+    await waitFor(async () => expect((await picker()).value).toBe(""));
+  });
+
+  it("a regenerate that can't be sent puts the model back and shows why", async () => {
+    const { t } = oneTurn();
+    fake.failNext.set(
+      `POST /v1/threads/${t}/messages`,
+      new Response(
+        JSON.stringify({ code: "thread_busy", message: "The server could not take it." }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ),
+    );
+    openApp(fake, t);
+    await screen.findByText("kimi answer");
+    await chooseModel("GLM 5.3");
+    expect(await screen.findByText(/The server could not take it/)).toBeTruthy();
+    await waitFor(() =>
+      expect(chatRequests(fake, "PATCH").map((r) => r.body)).toEqual([
+        { model: "glm" },
+        { model: null },
+      ]),
+    );
+    expect(fake.threads.get(t)?.model).toBeNull();
+    await waitFor(async () => expect((await picker()).value).toBe(""));
+  });
+
+  it("is disabled like Regenerate for a thread in Trash, and changes nothing", async () => {
+    const { t } = oneTurn();
+    must(fake.threads.get(t)).deleted_at = "2026-10-14T10:00:00.000Z";
+    openApp(fake, t);
+    await screen.findByText("kimi answer");
+    const button = await trigger();
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.setup().click(button);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(chatRequests(fake, "PATCH")).toHaveLength(0);
   });
 
   it("a model disabled since the list was read fails with the server's error and nothing runs", async () => {

@@ -14,7 +14,7 @@ import {
 import { initialThreadState } from "../../lib/chat/thread-state";
 import { useKobeExtras } from "../chat/kobe-runtime";
 import { useThreadUsageRead } from "../chat/message-footer";
-import { useTeamModels } from "../chat/use-team-models";
+import { useThreadTeamModels } from "../chat/use-team-models";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { IconAction } from "./icon-action";
 import styles from "./context-gauge.module.css";
@@ -117,7 +117,7 @@ export function ThreadContextGauge({
 }: Pick<ContextGaugeProps, "onCompact" | "compactBlocker"> = {}) {
   const extras = useKobeExtras();
   const state = extras?.state ?? DRAFT;
-  const loaded = useTeamModels(state);
+  const loaded = useThreadTeamModels();
   const read = useThreadUsageRead();
   if (!extras || state.threadId === null || state.phase !== "ready") return null;
   const size = newestContextSize(

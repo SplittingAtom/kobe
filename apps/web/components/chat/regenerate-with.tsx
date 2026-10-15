@@ -1,57 +1,63 @@
 "use client";
 
-import { ActionBarMorePrimitive, useAui } from "@assistant-ui/react";
-import { modelName, type TeamModel } from "../../lib/admin/api/team/models";
-import { initialThreadState } from "../../lib/chat/thread-state";
+import { ActionBarMorePrimitive, useAuiState } from "@assistant-ui/react";
+import { useRef } from "react";
+import { modelName } from "../../lib/admin/api/team/models";
+import { modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
+import { canRegenerateWith } from "../../lib/chat/thread-state";
+import { branchPoint } from "../../lib/chat/tree";
 import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
-import { useTeamModels } from "./use-team-models";
-
-const DRAFT_STATE = initialThreadState(null);
+import { useThreadTeamModels } from "./use-team-models";
 
 const ITEM =
   "hover:bg-muted focus:bg-muted flex cursor-pointer items-center rounded-md px-2 py-1.5 text-sm outline-none select-none";
 
-/**
- * The team's enabled models to regenerate with, the thread's current one (its choice, else the
- * team default) first-class but marked; empty while loading, unreadable, or for a pinned agent.
- */
-function useChoices(): { readonly models: readonly TeamModel[]; readonly current: string | null } {
-  const extras = useKobeExtras();
-  const loaded = useTeamModels(extras?.state ?? DRAFT_STATE);
-  if (loaded.status !== "ready" || !extras || extras.state.agentModel != null) {
-    return { models: [], current: null };
-  }
-  return {
-    models: loaded.data.models.filter((m) => m.enabled),
-    current: extras.state.summary?.model ?? loaded.data.default,
-  };
-}
+const CURRENT = " (current)";
 
 /**
- * Regenerate's split half (CE17, KOBE-217): "Regenerate with…" lists the team's enabled models.
- * Choosing one switches the thread's model the way the picker does (CE17: the next turns use it
- * too; no one-off model per message), then regenerates this answer as a sibling. Pi records the
- * switch as a `model_change` entry on the new branch, so its marker shows above the new version.
- * A refused switch (`model_not_enabled`, the server's fixed text) shows in the thread's error
- * banner and nothing runs. The thread's current model regenerates without a switch. Hidden for a
- * pinned agent's thread (its model never changes) and when there is no model to list.
+ * Regenerate's split half (CE17, KOBE-217): "Regenerate with…" lists the team default and the
+ * team's enabled models, the conversation's current choice marked. Choosing one saves it on the
+ * thread the way the picker does (CE17: the next turns use it too; the team default stays "follow
+ * the default", never its alias), then regenerates this answer as a sibling from the same branch
+ * point as Regenerate (`ThreadController.regenerateWith`). Pi records the switch as a
+ * `model_change` entry on the new branch, so its marker shows above the new version.
+ *
+ * Offered once the thread is read, disabled whenever plain Regenerate is (a run going or queued,
+ * a message being sent, Trash) and while a model change is in flight; hidden for a pinned agent's
+ * thread (its model never changes) and while the team's models are unknown.
  */
 export function RegenerateWith() {
-  const aui = useAui();
   const extras = useKobeExtras();
-  const { models, current } = useChoices();
+  const loaded = useThreadTeamModels();
+  const parentId = useAuiState((s) => s.message.parentId);
+  const pending = useRef(false);
   const controller = extras?.controller;
-  if (!controller || models.length === 0) return null;
+  const state = extras?.state;
+  if (!controller || !state?.summary || loaded.status !== "ready") return null;
+  const choices = modelChoices(loaded.data, state.summary.model ?? null, state.agentModel ?? null);
+  if (choices.pinned !== null || choices.enabled.length === 0) return null;
+  const ready = canRegenerateWith(state);
 
-  const regenerateWith = async (alias: string) => {
-    if (alias !== current && !(await controller.setModel(alias))) return;
-    aui.message().reload();
+  const choose = (model: string | null) => {
+    const point = branchPoint(extras.projection, parentId);
+    if (pending.current || !ready || point === undefined) return;
+    pending.current = true;
+    controller
+      .regenerateWith(model, point.text, point.parentEntryId)
+      .catch(() => controller.reportError(NOT_SENT))
+      .finally(() => {
+        pending.current = false;
+      });
   };
 
+  const options = [
+    { key: "", model: null, name: teamDefaultLabel(choices) },
+    ...choices.enabled.map((m) => ({ key: m.alias, model: m.alias, name: modelName(m) })),
+  ];
   return (
     <ActionBarMorePrimitive.Root>
-      <ActionBarMorePrimitive.Trigger asChild>
+      <ActionBarMorePrimitive.Trigger asChild disabled={!ready}>
         <IconAction command="regenerate-with" size="sm" />
       </ActionBarMorePrimitive.Trigger>
       <ActionBarMorePrimitive.Content
@@ -59,17 +65,24 @@ export function RegenerateWith() {
         sideOffset={4}
         className="bg-background z-50 min-w-44 rounded-lg border p-1 shadow-md"
       >
-        {models.map((m) => (
+        {options.map((o) => (
           <ActionBarMorePrimitive.Item
-            key={m.alias}
+            key={o.key}
             className={ITEM}
-            onSelect={() => void regenerateWith(m.alias)}
+            disabled={!ready}
+            onSelect={() => choose(o.model)}
           >
-            {modelName(m)}
-            {m.alias === current ? " (current)" : ""}
+            {o.name}
+            {o.model === choices.chosen ? CURRENT : ""}
           </ActionBarMorePrimitive.Item>
         ))}
       </ActionBarMorePrimitive.Content>
     </ActionBarMorePrimitive.Root>
   );
 }
+
+const NOT_SENT = {
+  status: 0,
+  code: "client_error",
+  message: "The answer could not be regenerated. Try again.",
+} as const;

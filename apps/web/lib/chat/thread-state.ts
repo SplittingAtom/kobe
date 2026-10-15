@@ -192,6 +192,24 @@ export function isBusy(state: ThreadState, action: string): boolean {
   return state.busy.includes(action);
 }
 
+/**
+ * "Regenerate with…" (CE17, KOBE-217) may run: when plain Regenerate may (the thread is read, out
+ * of Trash, no run going and nothing being sent), with no queued run (the model change would
+ * apply to it too) and no model change in flight.
+ */
+export function canRegenerateWith(state: ThreadState): boolean {
+  const summary = state.summary;
+  return (
+    state.phase === "ready" &&
+    summary !== undefined &&
+    summary.deletedAt == null &&
+    !isThreadRunning(state) &&
+    state.sending === undefined &&
+    queuedRuns(state).length === 0 &&
+    !isBusy(state, "model")
+  );
+}
+
 /** What the conversation shows on top of the entries: the streaming run or a message being sent. */
 export function liveOverlay(state: ThreadState): LiveOverlay | undefined {
   const sending = state.sending;
