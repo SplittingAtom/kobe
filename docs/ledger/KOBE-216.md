@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #281)
 - **Branch / worktree:** `kobe-216-fork-thread` in `../Kobe-wt216`
 - **Depends on:** KOBE-215 (provenance columns, merged), KOBE-209, KOBE-213, KOBE-214
 
