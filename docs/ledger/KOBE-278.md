@@ -1,6 +1,8 @@
 # KOBE-278: two-replica site budget overshoot (covers duplicate KOBE-261)
 
 - **Status:** committed on `group-1-fixes` (ticket group G1; no PR of its own)
+- **Superseded in part by KOBE-286:** the reservation now reads the spend itself; the re-check,
+  its 503 and the TTL + 2 s settled hold below were removed (see `KOBE-286.md`). The tests stay.
 - **Branch / worktree:** `group-1-fixes` in `../Kobe-g1`
 - **Depends on:** KOBE-120 (shared reservations), KOBE-121 (the test)
 

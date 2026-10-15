@@ -9,8 +9,9 @@ import {
 /**
  * Reservations in Postgres (KOBE-120), shared by every gateway replica. One statement each:
  * `kobe_reserve_budget` checks the live (unexpired) reservations and inserts under transaction
- * advisory locks, so two replicas cannot both take the last of a budget; `kobe_settle_budget`
- * deletes or shortens. A reservation carries an expiry, so a replica that crashes mid-call
+ * advisory locks, so two replicas cannot both take the last of a budget, and judges each line
+ * on the spend it reads itself (the line's period; the caller's `spent` is ignored, KOBE-286);
+ * `kobe_settle_budget` deletes or shortens. A reservation carries an expiry, so a replica that crashes mid-call
  * frees its reservations by itself, and expired rows never count.
  */
 export class DbReservations implements ReservationStore {
@@ -24,6 +25,7 @@ export class DbReservations implements ReservationStore {
     const lines = JSON.stringify(
       r.lines.map((l) => ({
         scope: l.scope,
+        period: l.period,
         unit: l.unit,
         limit: l.limitExact ?? String(l.limit),
         spent: l.spentExact ?? String(l.spent),

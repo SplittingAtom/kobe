@@ -2,12 +2,7 @@ import { exhaustedLine, type BudgetLine, type MemberBudgetState, type ModelPrice
 import { randomUUID } from "node:crypto";
 import { TtlCache } from "./cache.js";
 import { MemoryReservations } from "./reservations-memory.js";
-import {
-  MEMBER_SHARE,
-  type Cost,
-  type ReservationStore,
-  type ReserveVerdict,
-} from "./reservations.js";
+import { MEMBER_SHARE, type Cost, type ReservationStore } from "./reservations.js";
 import { chargedOutput } from "./usage/charge.js";
 import type { CallContext, CallGate, GateDecision } from "./seams.js";
 
@@ -28,9 +23,9 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   cannot together overshoot a budget on one shim replica by more than the last admitted
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
  *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
- *   replica's reservations free themselves), memory for tests. Across replicas the bound
- *   holds for a check that ends within `settleHoldMs` of its spend read; a later one is
- *   repeated on a fresh read (KOBE-278).
+ *   replica's reservations free themselves), memory for tests. In Postgres the check reads
+ *   each line's spend itself, in one snapshot with the reservations (KOBE-286), so the cached
+ *   spend below only refuses early; it never admits a call the database would refuse.
  * - **A request larger than the whole budget** (KOBE-259): a call whose input estimate alone (with
  *   no output at all) exceeds a budget's limit itself (not what is left) could never fit, so it is
  *   refused at once, alone or not, with a final 402 `budget_below_call`. A budget below one call's
@@ -49,12 +44,6 @@ export interface BudgetStore {
 export { MEMBER_SHARE };
 /** A reservation whose ledger row never lands (lost write) ends after this long. */
 export const SETTLE_TIMEOUT_MS = 30_000;
-/**
- * How much longer than the budget cache TTL production keeps a settled hold (KOBE-278): a check
- * may then land this late after its cached spend read (pool or advisory-lock queue under load)
- * and still be proven without a fresh read.
- */
-export const SETTLE_HOLD_SLACK_MS = 2_000;
 
 const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
   site: "The site's",
@@ -82,43 +71,8 @@ interface Bucket {
   at: number;
 }
 
-/** A member's budget state and when (monotonic clock) the gate began reading it. */
-interface Snapshot {
-  readonly state: MemberBudgetState;
-  readonly readFrom: number;
-}
-
-/** A check-and-hold's answer, against the lines it was checked with. */
-type Held =
-  | { readonly verdict: ReserveVerdict; readonly lines: readonly BudgetLine[] }
-  /** Two checks in a row ended too long after their spend reads to prove anything. */
-  | "unproven";
-
-/**
- * KOBE-278: a check that ended `settleHoldMs` or more after its spend read, and what its repeat
- * on a fresh read gave: `admitted`, `refused` (the fresh spend or check said no) or `unproven`
- * (slow again: 503, fail closed).
- */
-export interface RecheckEvent {
-  readonly teamId: string;
-  readonly userId: string;
-  /** How long after its spend read the first check ended (monotonic ms). */
-  readonly firstMs: number;
-  /** The same for the repeat; undefined when the fresh spend alone refused the call. */
-  readonly freshMs: number | undefined;
-  readonly outcome: "admitted" | "refused" | "unproven";
-}
-
-const UNAVAILABLE: GateDecision = {
-  ok: false,
-  status: 503,
-  code: "budget_unavailable",
-  message: "The budget check is unavailable; retry shortly.",
-  retryAfterSeconds: 2,
-};
-
 export class BudgetGate implements CallGate {
-  private readonly states: TtlCache<Snapshot>;
+  private readonly states: TtlCache<MemberBudgetState>;
   private readonly buckets = new Map<string, Bucket>();
   private readonly reservations: ReservationStore;
   private readonly onError: (err: unknown) => void;
@@ -126,46 +80,34 @@ export class BudgetGate implements CallGate {
   private readonly heartbeatMs: number | undefined;
   private readonly priceCache: TtlCache<ReadonlyMap<string, ModelPrice>>;
   private readonly now: () => number;
-  private readonly monotonic: () => number;
-  private readonly onRecheck: (event: RecheckEvent) => void;
 
   constructor(
     private readonly store: BudgetStore,
     options: {
       readonly ttlMs: number;
       readonly now?: () => number;
-      /**
-       * A clock that never steps back, for how long a check took since its spend read (KOBE-278:
-       * a wall clock stepped back would make an unproven check look proven). Default
-       * `performance.now`.
-       */
-      readonly monotonic?: () => number;
       readonly maxEntries?: number;
       /** Where reservations live; default: this process's memory (tests, no shared state). */
       readonly reservations?: ReservationStore;
       /**
-       * How long a settled reservation keeps counting (KOBE-120): the other replicas' cached
-       * spend may not show the call's cost yet. Default 0 (ended at once); production passes
-       * the budget cache TTL plus {@link SETTLE_HOLD_SLACK_MS}. A check whose spend read is older than this when it ends is made
-       * again against a fresh read (KOBE-278).
+       * How long a settled reservation keeps counting. Default 0 (ended at once), as production
+       * runs: the database check reads the spend itself (KOBE-286), so a written call counts
+       * there and a longer hold would only count it twice. Only for stores judged on the
+       * caller's spend.
        */
       readonly settleHoldMs?: number;
       /** Extend the reservations of calls still running this often (a TTL/2 heartbeat). */
       readonly heartbeatMs?: number;
-      /** A reservation call failed: reserve (then 503), fresh read, or end (it then expires). */
+      /** A reservation call failed: a reserve (then 503) or an end (it then expires by itself). */
       readonly onError?: (err: unknown) => void;
-      /** A check was repeated on a fresh read (KOBE-278), for logs and traces. */
-      readonly onRecheck?: (event: RecheckEvent) => void;
     },
   ) {
     this.now = options.now ?? Date.now;
-    this.monotonic = options.monotonic ?? (() => performance.now());
-    this.onRecheck = options.onRecheck ?? (() => undefined);
     this.reservations = options.reservations ?? new MemoryReservations();
     this.onError = options.onError ?? (() => undefined);
     this.settleHoldMs = options.settleHoldMs ?? 0;
     this.heartbeatMs = options.heartbeatMs;
-    this.states = new TtlCache<Snapshot>({
+    this.states = new TtlCache<MemberBudgetState>({
       ttlMs: options.ttlMs,
       now: this.now,
       ...(options.maxEntries !== undefined ? { maxEntries: options.maxEntries } : {}),
@@ -175,30 +117,20 @@ export class BudgetGate implements CallGate {
 
   async admit(call: CallContext): Promise<GateDecision> {
     const key = `${call.teamId}:${call.userId}`;
-    const snap = await this.snapshot(call, key);
+    const state = await this.states.get(key, () => this.store.load(call.teamId, call.userId));
     const prices =
-      snap.state.lines.length === 0
+      state.lines.length === 0
         ? new Map<string, ModelPrice>()
         : await this.priceCache.get("prices", () => this.store.prices());
-    return this.decide(call, key, snap, prices);
-  }
-
-  /** The member's state, cached; `fresh` reads it again whatever the cache holds. */
-  private snapshot(call: CallContext, key: string, fresh = false): Promise<Snapshot> {
-    const load = async (): Promise<Snapshot> => {
-      const readFrom = this.monotonic();
-      return { readFrom, state: await this.store.load(call.teamId, call.userId) };
-    };
-    return this.states.get(key, load, fresh);
+    return this.decide(call, key, state, prices);
   }
 
   private async decide(
     call: CallContext,
     key: string,
-    snap: Snapshot,
+    state: MemberBudgetState,
     prices: ReadonlyMap<string, ModelPrice>,
   ): Promise<GateDecision> {
-    const { state } = snap;
     const used = exhaustedLine(state.lines);
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
@@ -225,20 +157,28 @@ export class BudgetGate implements CallGate {
     }
     if (state.lines.length === 0) return { ok: true };
     const callId = call.callId ?? randomUUID();
-    let held: Held;
+    let verdict;
     try {
-      held = await this.hold(call, key, callId, snap, prices);
+      // One atomic check-and-hold against the reservations of every replica.
+      verdict = await this.reservations.reserve({
+        teamId: call.teamId,
+        userId: call.userId,
+        callId,
+        cost: this.costOf(call, prices),
+        lines: state.lines,
+      });
     } catch (err) {
       // Fail closed: without the reservations an overspend cannot be ruled out.
       this.onError(err);
       this.giveBack(key);
-      return UNAVAILABLE;
+      return {
+        ok: false,
+        status: 503,
+        code: "budget_unavailable",
+        message: "The budget check is unavailable; retry shortly.",
+        retryAfterSeconds: 2,
+      };
     }
-    if (held === "unproven") {
-      this.giveBack(key);
-      return UNAVAILABLE;
-    }
-    const { verdict, lines } = held;
     if (!verdict.ok) {
       this.giveBack(key);
       if (verdict.verdict === "own_share") {
@@ -250,7 +190,7 @@ export class BudgetGate implements CallGate {
           retryAfterSeconds: 2,
         };
       }
-      const l = lines[verdict.line] ?? lines[0];
+      const l = state.lines[verdict.line] ?? state.lines[0];
       return {
         ok: false,
         status: 402,
@@ -259,65 +199,6 @@ export class BudgetGate implements CallGate {
       };
     }
     return { ok: true, release: this.releaser(call, callId) };
-  }
-
-  /**
-   * One atomic check-and-hold against the reservations of every replica (KOBE-120). Calls
-   * written after the spend read count only through their settled holds, which last
-   * `settleHoldMs` from their settle, so a check proves the budget only if it ended within
-   * `settleHoldMs` of the read (KOBE-278). One that may have run later (an old cache entry plus a
-   * slow pool or advisory-lock queue under load) is ended and made once more against a fresh
-   * read; if that one is slow too, the call is refused (fail closed).
-   */
-  private async hold(
-    call: CallContext,
-    key: string,
-    callId: string,
-    snap: Snapshot,
-    prices: ReadonlyMap<string, ModelPrice>,
-  ): Promise<Held> {
-    const first = await this.reserveOn(call, callId, snap.state.lines, prices);
-    const firstMs = this.monotonic() - snap.readFrom;
-    if (!first.ok || this.proven(firstMs)) return { verdict: first, lines: snap.state.lines };
-    const report = (freshMs: number | undefined, outcome: RecheckEvent["outcome"]) =>
-      this.onRecheck({ teamId: call.teamId, userId: call.userId, firstMs, freshMs, outcome });
-    await this.reservations.end(call.teamId, [callId]);
-    const fresh = await this.snapshot(call, key, true);
-    const { lines } = fresh.state;
-    const used = exhaustedLine(lines);
-    if (used) {
-      report(undefined, "refused");
-      return { verdict: { ok: false, verdict: "full", line: lines.indexOf(used) }, lines };
-    }
-    const again = await this.reserveOn(call, callId, lines, prices);
-    const freshMs = this.monotonic() - fresh.readFrom;
-    if (!again.ok || this.proven(freshMs)) {
-      report(freshMs, again.ok ? "admitted" : "refused");
-      return { verdict: again, lines };
-    }
-    await this.reservations.end(call.teamId, [callId]);
-    report(freshMs, "unproven");
-    return "unproven";
-  }
-
-  private reserveOn(
-    call: CallContext,
-    callId: string,
-    lines: readonly BudgetLine[],
-    prices: ReadonlyMap<string, ModelPrice>,
-  ): Promise<ReserveVerdict> {
-    return this.reservations.reserve({
-      teamId: call.teamId,
-      userId: call.userId,
-      callId,
-      cost: this.costOf(call, prices),
-      lines,
-    });
-  }
-
-  /** The check ended within `settleHoldMs` of the read (without settled holds: nothing to prove). */
-  private proven(elapsedMs: number): boolean {
-    return this.settleHoldMs <= 0 || elapsedMs < this.settleHoldMs;
   }
 
   /** The call's input alone, at no output (KOBE-259 `budget_below_call`). */
@@ -360,8 +241,8 @@ export class BudgetGate implements CallGate {
   }
 
   /**
-   * The ledger rows of these calls were written: their reservations end, after
-   * `settleHoldMs`, so that replicas whose cached spend predates the rows still count them.
+   * The ledger rows of these calls were written: their reservations end (after `settleHoldMs`,
+   * 0 in production: the database check now sees the rows' spend instead, KOBE-286).
    */
   settle(teamId: string, callIds: readonly string[]): void {
     const hold = this.settleHoldMs > 0 ? this.settleHoldMs : undefined;

@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { hostname } from "node:os";
 import {
   MODELS_ENSURE_PREFIX,
   MODELS_RESYNC,
@@ -18,7 +17,7 @@ import {
 } from "@kobe/db";
 import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
-import { annotate, initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { createModelGateway } from "./gateway.js";
 import { TtlCache } from "./cache.js";
@@ -26,7 +25,7 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
-import { BudgetGate, SETTLE_HOLD_SLACK_MS, type RecheckEvent } from "./budget-gate.js";
+import { BudgetGate } from "./budget-gate.js";
 import { DbReservations } from "./reservations-db.js";
 import { DbUsageSink } from "./usage/sink.js";
 
@@ -48,24 +47,6 @@ const principals = new PrincipalCache(
   new SecretBox(config.virtualKeySecret, VIRTUAL_KEY_PURPOSE),
   { ttlMs: config.cacheTtlMs },
 );
-/** The pod name, so a re-check in the logs names the replica it ran on. */
-const replica = hostname();
-/**
- * A budget check repeated on a fresh read (KOBE-278): logged (warn when it ended in a 503) and
- * put on the call's span, so how rare re-checks are can be seen in production.
- */
-const reportRecheck = (e: RecheckEvent) => {
-  const fields = { replica, teamId: e.teamId, firstMs: e.firstMs, freshMs: e.freshMs };
-  if (e.outcome === "unproven") {
-    logger.warn(fields, "budget check too slow twice after its spend read; refused (503)");
-  } else {
-    logger.info({ ...fields, outcome: e.outcome }, "budget check repeated on a fresh spend read");
-  }
-  annotate(
-    { teamId: e.teamId, userId: e.userId },
-    { "kobe.budget.recheck": e.outcome, "kobe.budget.check_ms": e.firstMs },
-  );
-};
 /** Budgets and per-user rate limits (KOBE-42), enforced before Bifrost. */
 const budgets = new BudgetGate(
   {
@@ -83,13 +64,10 @@ const budgets = new BudgetGate(
         .update(`kobe.budget-reservations:${config.sessionKey}`)
         .digest("hex"),
     }),
-    // A settled hold keeps counting until the other replicas' cached spend has caught up, plus
-    // slack for a check queued behind others (KOBE-278), and a running call extends its hold,
-    // so the TTL need not exceed the longest call.
-    settleHoldMs: config.budgetCacheTtlMs + SETTLE_HOLD_SLACK_MS,
+    // Settled reservations end at once: the reservation reads the spend itself (KOBE-286). A
+    // running call extends its hold, so the TTL need not exceed the longest call.
     heartbeatMs: Math.floor(config.reservationTtlMs / 2),
-    onError: (err) => logger.warn({ err, replica }, "budget reservation call failed"),
-    onRecheck: reportRecheck,
+    onError: (err) => logger.warn({ err }, "budget reservation call failed"),
   },
 );
 const listener = new ModelsListener({
