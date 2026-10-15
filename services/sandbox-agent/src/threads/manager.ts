@@ -612,6 +612,7 @@ export class ThreadManager {
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
       mcp: frame?.mcp,
+      model,
     });
     if (thread.hasProcess) {
       // `mcp` can arrive without `config` (an agent that lost all its connectors): still a change.

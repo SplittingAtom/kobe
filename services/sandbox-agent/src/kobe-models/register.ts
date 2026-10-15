@@ -38,6 +38,51 @@ export interface InputContextLike {
   readonly ui?: {
     readonly input?: (title: string, placeholder?: string) => Promise<string | undefined>;
   };
+  /** Pi's session (read-only): the branch the prompt extends, from the root to the leaf. */
+  readonly sessionManager?: { readonly getBranch: () => readonly unknown[] };
+}
+
+/** A model as a session records it (`model_change`, or an answer's `provider` and `model`). */
+export interface RecordedModel {
+  readonly provider: string;
+  readonly modelId: string;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+
+/**
+ * The model a session branch is on, the way Pi 1.0.0 restores it on resume (`getBranchSelection`,
+ * without virtual models, which Kobe never registers): the latest `model_change` or answer on the
+ * branch, whichever is nearer the leaf. Undefined when the branch records none.
+ */
+export function branchModel(branch: readonly unknown[]): RecordedModel | undefined {
+  for (let i = branch.length - 1; i >= 0; i -= 1) {
+    const entry = branch[i];
+    if (!isRecord(entry)) continue;
+    if (entry.type === "model_change") {
+      const { provider, modelId } = entry;
+      return typeof provider === "string" && typeof modelId === "string"
+        ? { provider, modelId }
+        : undefined;
+    }
+    const message = entry.type === "message" ? entry.message : undefined;
+    if (isRecord(message) && message.role === "assistant") {
+      const { provider, model } = message;
+      return typeof provider === "string" && typeof model === "string"
+        ? { provider, modelId: model }
+        : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** The branch is on `gatewayModel` (or records no model, so there is no switch to record). */
+function branchIsOn(ctx: InputContextLike, gatewayModel: string): boolean {
+  const recorded = branchModel(ctx.sessionManager?.getBranch() ?? []);
+  return (
+    recorded === undefined ||
+    (recorded.provider === KOBE_PROVIDER_ID && recorded.modelId === gatewayModel)
+  );
 }
 
 /** The slice of Pi's `ExtensionAPI` kobe-models uses (structural, so no Pi package dependency). */
@@ -129,7 +174,13 @@ export async function registerKobeModels(
     const selected = ctx.model?.provider === KOBE_PROVIDER_ID ? ctx.model.id : undefined;
     // Limits changed (KOBE-259: an admin edited the catalog) re-select the same model.
     const sameLimits = registered.model !== null && sameModelLimits(registered.model, wanted);
-    if (selected === wanted.gateway_model && sameLimits) return;
+    // KOBE-279: a Pi started on a branch point knows only the run's model (the model file), so it
+    // cannot restore the branch's and starts on the run's without recording a switch. Selecting
+    // it again records the `model_change` on the branch (after the agent's `kobe.branch` marker,
+    // before the prompt: `input` runs first), so the chat shows the change where it happened.
+    if (selected === wanted.gateway_model && sameLimits && branchIsOn(ctx, wanted.gateway_model)) {
+      return;
+    }
     if (registered.model?.gateway_model !== wanted.gateway_model || !sameLimits) {
       api.registerProvider(build(state));
       registered = state;

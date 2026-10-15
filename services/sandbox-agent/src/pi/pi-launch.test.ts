@@ -224,6 +224,29 @@ describe("buildPiLaunch", () => {
     expect(a.env.PATH).toBe("/usr/local/bin:/usr/bin:/bin");
   });
 
+  it("starts Pi on the run's model with kobe-models, outside the launch key (KOBE-279)", () => {
+    const on = (gatewayModel: string | null) =>
+      buildPiLaunch({
+        ...base,
+        parentEnv: {},
+        modelsExtension: MODELS,
+        model: gatewayModel === null ? null : { gatewayModel, api: "openai-completions" as const },
+      });
+    const a = on("openai/gpt-fake");
+    const b = on("anthropic/claude-fake");
+    const none = on(null);
+    expect(a.args.slice(a.args.indexOf("--model"))).toEqual(["--model", "kobe/openai/gpt-fake"]);
+    expect(none.args).not.toContain("--model");
+    expect(new Set([a.key, b.key, none.key]).size).toBe(1);
+    // Without kobe-models there is no kobe provider to start on.
+    const bare = buildPiLaunch({
+      ...base,
+      parentEnv: {},
+      model: { gatewayModel: "openai/gpt-fake", api: "openai-completions" },
+    });
+    expect(bare.args).not.toContain("--model");
+  });
+
   it("hands the system prompt over as launch data, never as an argument (KOBE-123)", () => {
     const text = "Be brief. $(touch /tmp/x) `id` ; rm -rf /";
     const launch = buildPiLaunch({ ...base, parentEnv, config: { system_prompt: text } });

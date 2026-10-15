@@ -1,6 +1,8 @@
 import path from "node:path";
 import { KOBE_TOOLS_FD, type PiThreadConfig, type RunMcpContext } from "@kobe/protocol";
 import { EXEC_FD, EXEC_FD_ENV } from "../kobe-exec/protocol.js";
+import { KOBE_PROVIDER_ID } from "../kobe-models/protocol.js";
+import type { RunModel } from "../models/types.js";
 
 /**
  * How a thread's `pi --mode rpc` process is started.
@@ -78,10 +80,18 @@ export interface PiLaunchInput {
   readonly home: string;
   /**
    * kobe-models (KOBE-41): a root-owned, read-only file, loaded right before kobe-policy when the
-   * sandbox has model gateway access. The model itself is not a launch argument: it travels in the
-   * per-process model file, so a model change between runs never restarts Pi.
+   * sandbox has model gateway access. The model travels in the per-process model file and is not
+   * part of the launch key, so a model change between runs never restarts Pi.
    */
   readonly modelsExtension?: string | undefined;
+  /**
+   * The model Pi starts on (KOBE-279), with {@link modelsExtension}: `--model kobe/<gateway
+   * model>`, outside the launch key. Without it a Pi restarted on a session resumes the branch's
+   * model, which only works when Pi's asynchronous auth check of the extension's provider happened
+   * to finish first; otherwise Pi starts with no model and the run's selection is recorded as a
+   * model change that never happened.
+   */
+  readonly model?: RunModel | null | undefined;
   /**
    * kobe-tools (KOBE-128): a root-owned, read-only file that registers Kobe's own tools, loaded
    * right before kobe-policy (which therefore checks its calls) and given the channel on fd 4.
@@ -158,6 +168,11 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   for (const dir of input.skillDirs ?? []) args.push("--skill", path.resolve(dir));
   const config = input.config;
   if (config?.thinking_level !== undefined) args.push("--thinking", config.thinking_level);
+  // Not in the key (below): the model file carries the run's model to a running Pi.
+  const keyArgs = [...args];
+  if (models !== undefined && input.model != null) {
+    args.push("--model", `${KOBE_PROVIDER_ID}/${input.model.gatewayModel}`);
+  }
   // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62. The system prompt is
   // wired at spawn (see `PiLaunch.systemPrompt`). All change `key`, so a thread restarts Pi when
   // its config changes.
@@ -189,7 +204,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
-    args,
+    args: keyArgs,
     agent: config?.agent ?? null,
     system_prompt: config?.system_prompt ?? null,
     skills: config?.skills ?? null,
