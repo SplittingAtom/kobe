@@ -70,16 +70,22 @@ async function start(): Promise<Harness> {
   return h;
 }
 
+interface ModelLimits {
+  readonly max_output_tokens: number;
+  readonly context_window: number;
+}
+
 async function run(
   harness: Harness,
   runId: string,
   message: string,
   model: typeof OPENAI,
   parentEntryId?: string,
+  modelLimits?: ModelLimits,
 ): Promise<void> {
   const extra = {
     run_id: runId,
-    config: { model },
+    config: modelLimits === undefined ? { model } : { model, model_limits: modelLimits },
     ...(parentEntryId === undefined ? {} : { parent_entry_id: parentEntryId }),
   };
   const result = await harness.server.command(runStart(message, extra), 60_000);
@@ -186,6 +192,57 @@ describe.skipIf(!PI_AVAILABLE)("model_change entries in real Pi (KOBE-279)", () 
     ]);
     expect(userEntry(all, "two")).toHaveLength(3);
   }, 240_000);
+
+  // KOBE-280: the web's marker fixtures (apps/web/lib/chat/testing/pi-sequences.ts) copy these.
+  it("regenerating the first answer on another model branches below the session's setup entries", async () => {
+    const harness = await start();
+    await run(harness, RUN, "one", OPENAI);
+    const before = await entries(harness);
+    const prompt = userEntry(before, "one")[0] as Entry;
+    const oldBranch = branch(before, lastAssistant(before).id);
+    expect(oldBranch).toEqual([
+      "model_change openai/gpt-fake",
+      "thinking_level_change",
+      "system",
+      "user one",
+      "assistant openai/gpt-fake",
+    ]);
+
+    // Regenerate with…: the branch point is the prompt's parent, Pi's last setup entry.
+    await run(harness, RUN_2, "one", ANTHROPIC, prompt.parentId as string);
+    const all = await entries(harness);
+    // One model_change on the new branch; the root one (Pi's setup) is shared by both versions.
+    expect(branch(all, lastAssistant(all).id)).toEqual([
+      "model_change openai/gpt-fake",
+      "thinking_level_change",
+      "system",
+      "custom kobe.branch",
+      "model_change anthropic/claude-fake",
+      "user one",
+      "assistant anthropic/claude-fake",
+    ]);
+    expect(branch(all, lastAssistantOf(all, "one", 0))).toEqual(oldBranch);
+  }, 180_000);
+
+  it("a limits re-select on the same model records a same-model model_change (KOBE-259)", async () => {
+    const harness = await start();
+    await run(harness, RUN, "one", OPENAI, undefined, {
+      max_output_tokens: 1_000,
+      context_window: 100_000,
+    });
+    await run(harness, RUN_2, "two", OPENAI, undefined, {
+      max_output_tokens: 2_000,
+      context_window: 100_000,
+    });
+    const all = await entries(harness);
+    expect(afterSetup(branch(all, lastAssistant(all).id))).toEqual([
+      "user one",
+      "assistant openai/gpt-fake",
+      "model_change openai/gpt-fake",
+      "user two",
+      "assistant openai/gpt-fake",
+    ]);
+  }, 180_000);
 });
 
 /** The assistant entry answering the `n`th prompt with `text`. */

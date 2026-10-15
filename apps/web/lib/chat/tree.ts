@@ -20,7 +20,7 @@
  * message is the head) and `lastEntryOfNode` (the entry to continue from when a branch is chosen).
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
-import { parseEntry, type ParsedEntry } from "./entries";
+import { parseEntry, recordedModel, type ParsedEntry } from "./entries";
 import { entryMarker, type EntryMarker } from "./markers";
 import {
   childCarry,
@@ -182,12 +182,14 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     parentNode: string | null;
     group: string | null;
     carry: Carry;
+    /** The model the branch records above this entry (KOBE-280); null: none yet. */
+    model: string | null;
   };
   const stack: Frame[] = (children.get(null) ?? [])
-    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [] }))
+    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [], model: null }))
     .reverse();
   while (stack.length > 0) {
-    const { entry, parentNode, group, carry } = stack.pop() as Frame;
+    const { entry, parentNode, group, carry, model } = stack.pop() as Frame;
     const p = parsed.get(entry.entryId) as ParsedEntry;
     const kids = children.get(entry.entryId) ?? [];
     let ctx: string | null;
@@ -212,7 +214,7 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
       openGroup = group;
       next = placer.hidden({
         entry,
-        marker: entryMarker(entry, parsed, parentOf, byId),
+        marker: entryMarker(entry, parsed, parentOf, byId, model),
         ctx,
         listed: ctx === null ? 0 : (nodes.get(ctx)?.entries.length ?? 0),
         carry,
@@ -223,12 +225,14 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
 
     const branches = kids.length > 1 && openGroup !== null;
     const childrenCarry = childCarry(next, kids.length);
+    const childModel = recordedModel(entry, p) ?? model;
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({
         entry: kids[i] as ThreadEntry,
         parentNode: branches ? openGroup : childParent,
         group: branches ? null : openGroup,
         carry: childrenCarry,
+        model: childModel,
       });
     }
   }

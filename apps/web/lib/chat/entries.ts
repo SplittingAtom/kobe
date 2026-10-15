@@ -175,6 +175,17 @@ function systemEntry(entry: ThreadEntry): ParsedEntry | undefined {
   return model === "" ? undefined : { kind: "modelChange", model: model.slice(0, MAX_MODEL_NAME) };
 }
 
+/**
+ * The model an entry records for its branch, as Pi resolves a branch's model (its latest
+ * `model_change` or answer): a `model_change`'s model, or the model an answer came from.
+ */
+export function recordedModel(entry: ThreadEntry, parsed: ParsedEntry): string | undefined {
+  if (parsed.kind === "modelChange") return parsed.model;
+  if (parsed.kind !== "assistant") return undefined;
+  const model = str(record(entry.payload.message)?.model);
+  return model === undefined || model === "" ? undefined : model.slice(0, MAX_MODEL_NAME);
+}
+
 export function parseEntry(entry: ThreadEntry): ParsedEntry {
   const skipped = skippedSummary(entry);
   if (skipped) return skipped;

@@ -219,9 +219,11 @@ function CompactionMarker({ marker }: { readonly marker: EntryMarker & { kind: "
 
 export function EntryMarkerRow({ marker }: { readonly marker: EntryMarker }) {
   if (marker.kind === "compaction") return <CompactionMarker marker={marker} />;
+  // The branch's first model is the one it started on, not a change (KOBE-280).
   return (
     <MarkerRow kind="model" icon={CpuIcon}>
-      Model changed to <span className="text-foreground font-medium">{marker.model}</span>
+      {marker.first ? "Model:" : "Model changed to"}{" "}
+      <span className="text-foreground font-medium">{marker.model}</span>
     </MarkerRow>
   );
 }

@@ -13,7 +13,13 @@ import type { Projection } from "./tree";
 import type { ThreadEntry } from "./types";
 
 export type EntryMarker =
-  | { readonly kind: "model"; readonly entryId: string; readonly model: string }
+  | {
+      readonly kind: "model";
+      readonly entryId: string;
+      readonly model: string;
+      /** The branch records no model above it: "Model: X", not a change (KOBE-280). */
+      readonly first: boolean;
+    }
   | {
       readonly kind: "compaction";
       readonly entryId: string;
@@ -92,15 +98,23 @@ function foldedCount(
   return count;
 }
 
-/** The marker an entry shows, if it shows one. */
+/**
+ * The marker an entry shows, if it shows one. `branchModel` is the model its branch records above
+ * it (`recordedModel`): a `model_change` to that same model shows none (KOBE-280: a KOBE-259 limits
+ * re-select, or a Pi started without a model and then reused, records one although nothing changed).
+ */
 export function entryMarker(
   entry: ThreadEntry,
   parsed: ReadonlyMap<string, ParsedEntry>,
   parentOf: ReadonlyMap<string, string | null>,
   byId: ReadonlyMap<string, ThreadEntry>,
+  branchModel: string | null,
 ): EntryMarker | undefined {
   const p = parsed.get(entry.entryId);
-  if (p?.kind === "modelChange") return { kind: "model", entryId: entry.entryId, model: p.model };
+  if (p?.kind === "modelChange") {
+    if (p.model === branchModel) return undefined;
+    return { kind: "model", entryId: entry.entryId, model: p.model, first: branchModel === null };
+  }
   if (p?.kind !== "compaction") return undefined;
   const folded =
     p.firstKeptEntryId === null

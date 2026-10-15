@@ -3,6 +3,11 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import {
+  REGENERATE_FIRST_WITH_OTHER_MODEL,
+  SAME_MODEL_RESELECT,
+  type PiLine,
+} from "../../lib/chat/testing/pi-sequences";
 import { must } from "../../lib/testing/must";
 import { browserSpaced, composer, crushedIconButtons, openApp, streaming } from "./testing";
 
@@ -117,7 +122,7 @@ describe("inline markers on a recorded thread (ac-1, ac-3)", () => {
     await screen.findByText("Final version.");
     await waitFor(() => expect(markers().map(([kind]) => kind)).toContain("budget"));
     expect(markers()).toEqual([
-      ["model", "Model changed to kobe/fast"],
+      ["model", "Model: kobe/fast"],
       ["approval", "Approval granted"],
       ["approval", "Approval denied"],
       ["run", "Run interrupted"],
@@ -179,6 +184,45 @@ describe("fork markers (ac-2)", () => {
     expect(marker("fork").textContent).toContain("Version 1 of 2");
     // The budget stop belonged to the other branch.
     expect(document.querySelector('[data-kobe-marker="budget"]')).toBeNull();
+  });
+});
+
+/** Real Pi entries (`pi-sequences.ts`) stored on a new thread; the leaf ends on the last one. */
+function piThread(lines: readonly PiLine[]) {
+  const thread = fake.addThread("Real Pi");
+  const ids = new Map<string, string>();
+  for (const { type, id, parentId, ...fields } of lines) {
+    const parent = parentId === null ? null : must(ids.get(parentId));
+    const stored =
+      type === "message"
+        ? fake.addEntry(thread, parent, fields.message as Record<string, unknown>)
+        : fake.addSystemEntry(thread, parent, type, fields);
+    ids.set(id, stored);
+  }
+  return thread;
+}
+
+describe("model markers on real Pi entry orders (KOBE-280)", () => {
+  it("Regenerate with… another model shows the thread's model and one change on version 2 (ac-1)", async () => {
+    openApp(fake, piThread(REGENERATE_FIRST_WITH_OTHER_MODEL));
+    await screen.findByText("anthropic one");
+    expect(markers()).toEqual([
+      ["fork", expect.stringMatching(/^Forked here · 2 branches/)],
+      ["model", "Model: openai/gpt-fake"],
+      ["model", "Model changed to anthropic/claude-fake"],
+    ]);
+    await userEvent.click(within(marker("fork")).getByRole("button", { name: "Previous version" }));
+    await screen.findByText("openai one");
+    expect(markers()).toEqual([
+      ["fork", expect.stringMatching(/^Forked here · 2 branches/)],
+      ["model", "Model: openai/gpt-fake"],
+    ]);
+  });
+
+  it("a same-model model_change shows no marker (ac-2)", async () => {
+    openApp(fake, piThread(SAME_MODEL_RESELECT));
+    await screen.findByText("openai two");
+    expect(markers()).toEqual([["model", "Model: openai/gpt-fake"]]);
   });
 });
 
