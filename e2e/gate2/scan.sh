@@ -108,7 +108,7 @@ generic_unexpected_by_kind() {
 # ok, and the scan ends with one FAIL naming the failed controls.
 SCAN_BAD=""
 scan_control() { # name regex actual: a precondition of the scan
-  if printf '%s\n' "$3" | grep -Eq "$2"; then
+  if grep -Eq "$2" <<<"$3"; then
     ok "$1"
   else
     fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"
@@ -119,7 +119,7 @@ scan_ok() { # name: a negative result, ok only when every control passed
   if [[ -n "$SCAN_BAD" ]]; then echo "INVALID $1 (not shown: a control failed)"; else ok "$1"; fi
 }
 scan_check() { # name regex actual: like contains, with scan_ok for the pass
-  if printf '%s\n' "$3" | grep -Eq "$2"; then scan_ok "$1"; else fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"; fi
+  if grep -Eq "$2" <<<"$3"; then scan_ok "$1"; else fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"; fi
 }
 scan_verdict() {
   [[ -z "$SCAN_BAD" ]] && return 0

@@ -39,7 +39,7 @@ sbx_summary() {
     echo "claim $uid has no pod"
     return
   fi
-  IFS=$'\t' read -r name phase ready reasons <<<"$(printf '%s\n' "$state" | head -1)"
+  IFS=$'\t' read -r name phase ready reasons <<<"$(sed -n 1p <<<"$state")"
   reasons=$(printf '%s' "$reasons" | sed -E 's/[a-z0-9-]+: //g; s/ +$//')
   echo "pod $name phase=${phase:-unknown} ready=${ready:-False}${reasons:+ ($reasons)}"
 }

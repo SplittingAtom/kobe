@@ -5,7 +5,7 @@
 owner_claim_uid() { $KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
 owner_pod_now() { $KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=$(owner_claim_uid)" -o name 2>/dev/null | head -1; }
 in_owner() { $KUBECTL -n "$TEAM_NS" exec "$(owner_pod_now)" -c agent -- sh -c "$1" 2>&1 || true; }
-tool_said() { printf '%s\n' "$1" | sed -n 's/^text=fake-openai: tool said: //p' | head -1; } # chat_run output → the tool's one line
+tool_said() { sed -n 's/^text=fake-openai: tool said: //p' <<<"$1" | sed -n 1p; } # chat_run output → the tool's one line
 EXEC_LABEL=$([[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]] && echo on || echo off)
 owner_lifecycle() { # hibernate|wake → the CLI's answer
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
@@ -18,7 +18,7 @@ percentile() { # p (0-100) values... → nearest-rank percentile
   shift
   printf '%s\n' "$@" | sort -n | awk -v p="$p" '{ a[NR] = $1 } END { i = int((p / 100) * NR + 0.999999); if (i < 1) i = 1; print a[i] }'
 }
-field_of() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; } # key, chat_run output → value
+field_of() { sed -n "s/^$1=//p" <<<"$2" | sed -n 1p; } # key, chat_run output → value
 
 # A slow wake leaves its evidence here: the server logs run for hours and are rolled by later chart
 # upgrades, so the job's final diagnostics no longer hold the window (KOBE-168: one 34 s trial).

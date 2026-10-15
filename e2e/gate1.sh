@@ -112,7 +112,7 @@ if [[ "$STEPS" == *" chat-real "* ]]; then
   printf '%s\n' "$real" | grep -v '^runs=' | sed 's/^/     /'
   contains "ten users chatted at once" '^users=10$' "$real"
   if ((MODELS)); then real_end='run.completed error=- .*text.delta'; else real_end='(run.completed error=-|run.failed error=(pi_rejected|model_not_configured))'; fi
-  if ((MODELS)) && printf '%s\n' "$real" | grep -q "^chat user=.* terminal=run.failed"; then shim_refusals; fi
+  if ((MODELS)) && grep -q "^chat user=.* terminal=run.failed" <<<"$real"; then shim_refusals; fi
   for k in $KEYS; do
     contains "$k: the run reached the user's own Pi and ended$( ((MODELS)) && echo " with a streamed model answer")" \
       "^chat user=$k terminal=$real_end" "$(printf '%s\n' "$real" | grep "^chat user=$k ")"
@@ -136,7 +136,7 @@ if [[ "$STEPS" == *" chat-real "* ]]; then
   done
 fi
 
-sandbox_of() { printf '%s\n' "$conns_all" | sed -n "s/^conn $1 open=[0-9]* sandbox=\([0-9a-f-]*\):.*/\1/p" | head -1; }
+sandbox_of() { sed -n "s/^conn $1 open=[0-9]* sandbox=\([0-9a-f-]*\):.*/\1/p" <<<"$conns_all" | sed -n 1p; }
 suspend() { # key → its Sandbox suspended (pod gone, claim and volume kept, row stays running)
   local ns name
   ns=$(team_ns "$1")
