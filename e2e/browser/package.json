@@ -1,0 +1,16 @@
+{
+  "name": "kobe-browser-e2e",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Playwright browser suite for the chat surfaces, run against a deployment (not in CI).",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0",
+    "@types/node": "24.19.0",
+    "typescript": "6.0.3"
+  }
+}
