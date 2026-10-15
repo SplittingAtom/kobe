@@ -1,6 +1,6 @@
 # KOBE-282: Light/dark theme toggle in the top bar; every popup themed in both themes
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #289)
 - **Branch / worktree:** `kobe-282-theme-toggle` in `../Kobe-wt282`
 - **Depends on:** KOBE-281 (PR #287: chat dialogs portalled into the chat root, `chat-portal.ts`)
 
