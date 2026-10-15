@@ -58,7 +58,9 @@ describe("Team connectors (KOBE-105)", () => {
     const create = jira.getByRole("listitem", { name: "create_issue tool" });
     expect(within(create).getByText("Write")).toBeTruthy();
     expect(within(create).getByText("Open-world")).toBeTruthy();
-    expect(jira.getByText(/unannotated tools count as write and open-world/i)).toBeTruthy();
+    expect(
+      jira.getByText(/doesn.t declare itself read-only is treated as able to change data/i),
+    ).toBeTruthy();
   });
 
   it("shows drifted tools as unavailable", async () => {
