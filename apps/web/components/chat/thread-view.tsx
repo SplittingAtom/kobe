@@ -14,6 +14,8 @@ import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
 import { ComposerDictationProvider } from "./composer-steer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
+import { OpenThreadContext } from "./fork-dialog";
+import { ForkOriginNote } from "./fork-origin";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
@@ -247,6 +249,7 @@ export function ThreadView({
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
         {state.threadId === null && <DraftProjectNote />}
+        <ForkOriginNote extras={extras} onOpenThread={onOpenThread} />
       </div>
       <ArtifactList />
       {state.phase === "error" && state.loadError && (
@@ -259,9 +262,11 @@ export function ThreadView({
           )}
         </div>
       )}
-      <ThreadPrimitive.ViewportProvider>
-        <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
-      </ThreadPrimitive.ViewportProvider>
+      <OpenThreadContext.Provider value={onOpenThread}>
+        <ThreadPrimitive.ViewportProvider>
+          <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
+        </ThreadPrimitive.ViewportProvider>
+      </OpenThreadContext.Provider>
       <p role="status" aria-live="polite" className="sr-only">
         {state.announcement}
         {/* A changing no-break space makes a repeated message a change screen readers announce. */}

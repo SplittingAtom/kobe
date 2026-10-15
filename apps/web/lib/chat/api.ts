@@ -88,8 +88,14 @@ export interface ChatApi {
     threadId: string,
     visibility: "private" | "project",
   ): Promise<ApiResult<ThreadSummary>>;
-  /** Copies the thread into a new private thread of yours (`POST /v1/threads/:id/fork`). */
-  forkThread(threadId: string): Promise<ApiResult<{ readonly threadId: string }>>;
+  /**
+   * Copies the thread into a new private thread of yours (`POST /v1/threads/:id/fork`): its
+   * entries up to `entryId` (default: the leaf), titled `title` (default: the source's).
+   */
+  forkThread(
+    threadId: string,
+    options?: ForkOptions,
+  ): Promise<ApiResult<{ readonly threadId: string }>>;
   /** Agents the user can start a chat with in this team, every page (KOBE-122). */
   runnableAgents(): Promise<ApiResult<readonly RunnableAgent[]>>;
   /** Clears the caller's builder test threads of one agent (KOBE-85); they go to Trash, hidden. */
@@ -184,6 +190,12 @@ export interface ChatApi {
   ): Promise<ApiResult<{ readonly requests: readonly EgressRequest[] }>>;
 }
 
+/** Where a fork ends and what it is called (CE16); both optional. */
+export interface ForkOptions {
+  readonly entryId?: string;
+  readonly title?: string;
+}
+
 /** The chat API for one team; `teamId` goes in `X-Kobe-Team` on every request. */
 export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
   const get = <T>(path: string) => apiRequest<T>(path, { teamId, fetchFn });
@@ -196,7 +208,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
     shareThread: (id, visibility) => send("POST", `/v1/threads/${enc(id)}/share`, { visibility }),
-    forkThread: (id) => send("POST", `/v1/threads/${enc(id)}/fork`, {}),
+    forkThread: (id, options = {}) =>
+      send("POST", `/v1/threads/${enc(id)}/fork`, {
+        ...(options.entryId === undefined ? {} : { entry_id: options.entryId }),
+        ...(options.title === undefined ? {} : { title: options.title }),
+      }),
     createThread: (title, model, agent, projectId) =>
       send("POST", "/v1/threads", {
         ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),

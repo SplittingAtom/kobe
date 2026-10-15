@@ -34,7 +34,7 @@ import {
   restoreThread,
   setLeaf,
   switchAgentVersion,
-  toSummary,
+  summarizeOne,
   trashThread,
   updateThread,
   type Page,
@@ -274,7 +274,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
           )
         : null;
       return {
-        ...toSummary(found.thread),
+        ...(await summarizeOne(tx, viewer, found.thread)),
         read_only: found.access !== "owner",
         agent_name: pinned?.frontmatter.name ?? null,
         agent_status: pinned === null ? null : agentStatusOf(pinned),

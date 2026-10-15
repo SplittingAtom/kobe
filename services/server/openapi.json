@@ -3389,6 +3389,42 @@
                 "type": "null"
               }
             ]
+          },
+          "forked_from_thread_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_at_entry_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_from_title": {
+            "type": ["string", "null"]
           }
         },
         "required": [
@@ -3408,7 +3444,10 @@
           "created_at",
           "deleted_at",
           "purge_after",
-          "schedule_id"
+          "schedule_id",
+          "forked_from_thread_id",
+          "forked_at_entry_id",
+          "forked_from_title"
         ],
         "additionalProperties": false
       },
@@ -3575,6 +3614,42 @@
                       "type": "null"
                     }
                   ]
+                },
+                "forked_from_thread_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "forked_at_entry_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "forked_from_title": {
+                  "type": ["string", "null"]
                 }
               },
               "required": [
@@ -3594,7 +3669,10 @@
                 "created_at",
                 "deleted_at",
                 "purge_after",
-                "schedule_id"
+                "schedule_id",
+                "forked_from_thread_id",
+                "forked_at_entry_id",
+                "forked_from_title"
               ],
               "additionalProperties": false
             }
@@ -3770,6 +3848,42 @@
                     }
                   ]
                 },
+                "forked_from_thread_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "forked_at_entry_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "forked_from_title": {
+                  "type": ["string", "null"]
+                },
                 "matched_entry_id": {
                   "anyOf": [
                     {
@@ -3828,6 +3942,9 @@
                 "deleted_at",
                 "purge_after",
                 "schedule_id",
+                "forked_from_thread_id",
+                "forked_at_entry_id",
+                "forked_from_title",
                 "matched_entry_id",
                 "snippet",
                 "score"
@@ -4001,6 +4118,42 @@
               }
             ]
           },
+          "forked_from_thread_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_at_entry_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_from_title": {
+            "type": ["string", "null"]
+          },
           "agent_name": {
             "type": ["string", "null"]
           },
@@ -4128,6 +4281,9 @@
           "deleted_at",
           "purge_after",
           "schedule_id",
+          "forked_from_thread_id",
+          "forked_at_entry_id",
+          "forked_from_title",
           "agent_name",
           "read_only",
           "agent_status",
@@ -4544,6 +4700,42 @@
                 "type": "null"
               }
             ]
+          },
+          "forked_from_thread_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_at_entry_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "forked_from_title": {
+            "type": ["string", "null"]
           }
         },
         "required": [
@@ -4563,7 +4755,10 @@
           "created_at",
           "deleted_at",
           "purge_after",
-          "schedule_id"
+          "schedule_id",
+          "forked_from_thread_id",
+          "forked_at_entry_id",
+          "forked_from_title"
         ],
         "additionalProperties": false
       },

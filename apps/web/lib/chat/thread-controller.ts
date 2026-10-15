@@ -6,7 +6,7 @@
  */
 import { isTerminalRunStatus, type KobeEvent } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
-import type { ChatApi, CompactResult } from "./api";
+import type { ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
 import {
   browserResumeStore,
@@ -755,16 +755,16 @@ export class ThreadController {
     return res;
   };
 
-  /** Forks the thread (any reader, or the owner) and returns the new thread's id. */
-  readonly fork = async (): Promise<string | null> => {
+  /**
+   * Forks the thread (any reader, or the owner) and returns the new thread's id: up to an entry
+   * with a title ("Fork to a new thread", CE16), or the whole branch by default.
+   */
+  readonly fork = async (options?: ForkOptions): Promise<ApiResult<{ threadId: string }>> => {
     const threadId = this.#state.threadId;
-    if (threadId === null) return null;
-    const res = await this.#busy("fork", () => this.#api.forkThread(threadId));
-    if (!res.ok) {
-      this.#fail(res.error);
-      return null;
-    }
-    return res.data.threadId;
+    if (threadId === null) return { ok: false, error: NO_THREAD };
+    const res = await this.#busy("fork", () => this.#api.forkThread(threadId, options));
+    if (!res.ok) this.#fail(res.error);
+    return res;
   };
 
   /** Shows another branch (assistant-ui's branch picker) and makes it the thread's leaf. */

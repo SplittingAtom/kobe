@@ -75,8 +75,11 @@ function toWire(hit: SearchHit): ThreadSearchHit {
     visibility: visibilityOf(hit),
     // Search never returns test threads (KOBE-85).
     is_test: false,
-    // Search does not read the marker; the thread list carries it.
+    // Search does not read the marker or the fork provenance; the thread list carries them.
     schedule_id: null,
+    forked_from_thread_id: null,
+    forked_at_entry_id: null,
+    forked_from_title: null,
     model: hit.modelAlias,
     leaf_entry_id: hit.leafEntryId,
     last_activity_at: hit.lastActivityAt.toISOString(),

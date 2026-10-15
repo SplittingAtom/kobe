@@ -52,6 +52,13 @@ export function forkedBlobKey(prefix: string, teamId: string, threadId: string, 
  * hold is read like any other; the copies belong to the new thread and follow its retention. If
  * the rows can't be stored the copies are deleted again. Without object storage, or when a body
  * is not in the source's tree, the fork is refused `entry_offloaded`.
+ *
+ * The fork records its provenance (CE16): `forked_from_thread_id` = the source and
+ * `forked_at_entry_id` = the last copied entry, set at INSERT only (KOBE-215). Pi's own `fork` verb
+ * is not bridged (it moves Pi to a new session file, `pi-rpc.ts`): the server copies the entries,
+ * and the fork's Pi session is rebuilt from them (`session.restore`) when it first runs, so neither
+ * thread's sandbox needs to be awake. If the source is purged before the row is written, the
+ * foreign key on the link refuses it (23503): answered `thread_not_found`, copies deleted.
  */
 export async function forkThread(
   run: RunAsViewer,
@@ -59,15 +66,21 @@ export async function forkThread(
   id: string,
   options: { entryId?: string | undefined; title?: string | undefined },
 ): Promise<ForkResult> {
-  const planned = await run(async (tx, viewer) => {
-    const plan = await planFork(tx, viewer, id, options);
-    if (!plan.ok) return plan;
-    // Nothing offloaded: plan and store in one transaction.
-    if (plan.value.path.every((e) => e.blobRef === null)) {
-      return { ok: true as const, done: await storeFork(tx, viewer, plan.value, new Map()) };
-    }
-    return { ok: true as const, plan: plan.value };
-  });
+  let planned;
+  try {
+    planned = await run(async (tx, viewer) => {
+      const plan = await planFork(tx, viewer, id, options);
+      if (!plan.ok) return plan;
+      // Nothing offloaded: plan and store in one transaction.
+      if (plan.value.path.every((e) => e.blobRef === null)) {
+        return { ok: true as const, done: await storeFork(tx, viewer, plan.value, new Map()) };
+      }
+      return { ok: true as const, plan: plan.value };
+    });
+  } catch (err) {
+    if (isSourceGone(err)) return { ok: false, error: "thread_not_found" };
+    throw err;
+  }
   if (!planned.ok) return planned;
   if ("done" in planned) return planned.done;
 
@@ -91,8 +104,18 @@ export async function forkThread(
     return stored;
   } catch (err) {
     await removeCopies(blobs, copies);
+    if (isSourceGone(err)) return { ok: false, error: "thread_not_found" };
     throw err;
   }
+}
+
+/** The fork-link foreign key refused the insert: the source was purged meanwhile (23503). */
+function isSourceGone(err: unknown): boolean {
+  type PgError = { code?: unknown; constraint?: unknown };
+  const e = err as (PgError & { cause?: PgError }) | null | undefined;
+  return [e, e?.cause].some(
+    (x) => x?.code === "23503" && x.constraint === "threads_forked_from_fk",
+  );
 }
 
 async function removeCopies(blobs: BlobStore, copies: ReadonlyMap<string, string>): Promise<void> {
@@ -177,6 +200,7 @@ async function storeFork(
     agent: pin.value,
     title: plan.title ?? source.title,
     modelAlias: model,
+    forkedFrom: { threadId: source.id, entryId: path.at(-1)?.entryId ?? null },
   });
   if (path.length > 0) {
     await tx.insert(threadEntries).values(
@@ -206,5 +230,14 @@ async function storeFork(
       entries: path.length,
     },
   });
-  return { ok: true, thread: { ...created, leaf_entry_id: path.at(-1)?.entryId ?? null } };
+  return {
+    ok: true,
+    thread: {
+      ...created,
+      leaf_entry_id: path.at(-1)?.entryId ?? null,
+      // The viewer just read the source.
+      forked_from_thread_id: source.id,
+      forked_from_title: source.title,
+    },
+  };
 }

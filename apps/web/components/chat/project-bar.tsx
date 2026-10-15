@@ -30,10 +30,10 @@ export function ProjectBar({
 
   if (summary.readOnly === true) {
     const fork = async () => {
-      const id = await controller.fork();
-      if (id === null) return;
+      const res = await controller.fork();
+      if (!res.ok) return;
       session.threadCreated(); // the list reads again: the fork is yours
-      onOpenThread?.(id);
+      onOpenThread?.(res.data.threadId);
     };
     return (
       <div className={styles.banner} role="note" aria-label="Shared thread">

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   idSchema,
   scheduleThreadMarkerSchema,
+  threadOrganizationSchema,
   threadStatusSchema,
   timestampSchema,
   threadVisibilitySchema,
@@ -155,6 +156,15 @@ export const threadSummarySchema = z.object({
   purge_after: timestamp.nullable(),
   /** The schedule that created the thread (the web "Scheduled" folder), null otherwise (KOBE-173). */
   ...scheduleThreadMarkerSchema.shape,
+  /**
+   * Fork provenance (CE16, KOBE-216). `forked_from_thread_id` names the source only while the
+   * viewer may open it (else null, as after the source's purge); `forked_at_entry_id` is an entry
+   * of this thread itself (the fork copies entries with their ids). Source null with a fork point
+   * means "forked from a thread you can't open".
+   */
+  ...threadOrganizationSchema.pick({ forked_from_thread_id: true, forked_at_entry_id: true }).shape,
+  /** The source's title when the viewer may open it (null: untitled, not a fork, or no access). */
+  forked_from_title: z.string().nullable(),
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 

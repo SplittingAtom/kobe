@@ -139,6 +139,9 @@ function logHeld(deps: PassDeps, teamId: string, step: string, outcome: PurgeOut
   // only happens when a guard caught something the selection missed. Logged without details.
   if (outcome.status === "held")
     deps.logger.warn({ teamId, step }, "retention purge skipped: held");
+  // A lock wait or deadlock rolled one batch back (KOBE-216): not a failure, the next pass retries.
+  if (outcome.status === "busy")
+    deps.logger.info({ teamId, step }, "retention purge stopped early: busy");
 }
 
 /** The team's effective retention window in days (null: forever), read at the start of the step. */
