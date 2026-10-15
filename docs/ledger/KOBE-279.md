@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #286)
 - **Branch / worktree:** `kobe-279-model-change-entry` in `../Kobe-wt279`
 - **Depends on:** KOBE-209 (markers), KOBE-217 (Regenerate with…)
 
