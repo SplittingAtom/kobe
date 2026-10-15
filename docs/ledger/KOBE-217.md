@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #283)
 - **Branch / worktree:** `kobe-217-regenerate-model` in `../Kobe-wt217`
 - **Depends on:** KOBE-209 (markers), KOBE-214 (root branching, `branchPoint`), KOBE-44 (thread model)
 
