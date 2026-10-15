@@ -55,6 +55,19 @@
 - The frame race is reproduced by doing growth, wheel, scroll and resize inside one `act()` (React
   does not commit in between), which is deterministic; no fake timers were needed.
 
+## Review follow-ups (second commit)
+
+- The send's re-pin wait is not armed when a failure shows at the event (a send refused before it
+  rendered, e.g. files still uploading: the failure renders before assistant-ui's microtask
+  event), is dropped when a failure arrives later (thread creation failed) and expires after
+  `SEND_RENDER_WAIT_MS` (5 s). Test: `scroll.test.tsx` "a send that fails before it renders
+  re-pins nothing later (a Retry starting)" (failed before).
+- The controller reads the thread only for a body-less `message` entry with no stream message id
+  while the run's prompt is not known saved; large answers and tool outputs read nothing extra.
+  Test: `run-end.test.tsx` "reads the thread for a body-less prompt only" (failed before: one
+  extra read). No timer test for the 5 s expiry (the failure paths cover the cases found).
+- The prompt lost on Stop before the first `turn_end` is KOBE-290, not fixed here.
+
 ## Playwright workarounds removed (e2e/browser)
 
 - `support/chat.ts` `waitForIdle` checks again that no "Sent, waiting for the agent" shows.

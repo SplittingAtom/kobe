@@ -15,7 +15,7 @@ import {
   saveResumePoint,
   type ResumeStore,
 } from "./resume";
-import { applyRunEvents, newLiveRun } from "./live";
+import { applyRunEvents, newLiveRun, type CommittedEntry } from "./live";
 import {
   openRunStream,
   type EventSourceFactory,
@@ -28,6 +28,7 @@ import {
   initialThreadState,
   mergeCommittedEntries,
   mergeServerEntries,
+  promptSaved,
   queuedRuns,
   runToStream,
   settleStop,
@@ -417,10 +418,26 @@ export class ThreadController {
       // A queued run started: it leaves the queue and its prompt shows in the conversation.
       this.#announce("The agent is working on your message.");
       void this.refresh();
-    } else if (applied.entries.some((e) => e.payload === undefined)) {
-      // An entry over 64 KiB is streamed without its body (a long prompt, KOBE-288): read it.
+    } else if (this.#mayBeUnsavedPrompt(applied.entries)) {
+      // A prompt over 64 KiB is streamed without its body (KOBE-288): read it, so the stored
+      // entry replaces the copy shown from the send.
       void this.refresh();
     }
+  }
+
+  /**
+   * A body-less message entry that may be the run's prompt: no stream message bound to it (an
+   * answer has one) while the prompt is not known to be saved. Large answers and tool outputs
+   * once the prompt is saved are left to the reads that follow the run.
+   */
+  #mayBeUnsavedPrompt(entries: readonly CommittedEntry[]): boolean {
+    const s = this.#state;
+    if (s.live === undefined || s.livePrompt === undefined || promptSaved(s.live, s.entries)) {
+      return false;
+    }
+    return entries.some(
+      (e) => e.payload === undefined && e.type === "message" && e.messageId === undefined,
+    );
   }
 
   #onTerminal(terminal: NonNullable<ThreadState["live"]>["terminal"]): void {

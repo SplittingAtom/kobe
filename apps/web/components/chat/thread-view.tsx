@@ -136,7 +136,12 @@ function MessagesAndComposer({
   const { state } = extras;
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const hasMessages = useAuiState((s) => s.thread.messages.length > 0);
-  const follow = useFollowLatest(viewport, state.threadId, state.phase === "ready" && hasMessages);
+  const follow = useFollowLatest(
+    viewport,
+    state.threadId,
+    state.phase === "ready" && hasMessages,
+    state.actionError,
+  );
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">

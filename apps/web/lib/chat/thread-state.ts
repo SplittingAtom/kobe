@@ -236,7 +236,7 @@ export function liveOverlay(state: ThreadState): LiveOverlay | undefined {
  * committed. The second covers a prompt over 64 KiB, streamed without its body (KOBE-288): only
  * the thread read shows its role, and the copy shown from the send must give way to it.
  */
-function promptSaved(live: LiveRun, entries: readonly ThreadEntry[]): boolean {
+export function promptSaved(live: LiveRun, entries: readonly ThreadEntry[]): boolean {
   if (live.promptCommitted) return true;
   if (live.committed.length === 0) return false;
   const committed = new Set(live.committed);

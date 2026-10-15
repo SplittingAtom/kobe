@@ -34,11 +34,14 @@ type Viewport = NonNullable<ReturnType<typeof useThreadViewportStore>>;
  * - Opening a thread restores this tab's position for it (sessionStorage), else the bottom.
  *
  * Call inside `ThreadPrimitive.ViewportProvider`. `ready`: the thread's messages are on screen.
+ * `failure`: the thread's last failed action (a new value each time), so a send that failed stops
+ * waiting to re-pin.
  */
 export function useFollowLatest(
   el: HTMLElement | null,
   threadId: string | null,
   ready: boolean,
+  failure?: unknown,
 ): FollowMode {
   const viewport = useThreadViewportStore();
   const [mode, setModeState] = useState<FollowMode>("pending");
@@ -99,7 +102,7 @@ export function useFollowLatest(
     return () => cancelAnimationFrame(frame);
   }, [el, ready, threadId, setMode, requestBottom]);
 
-  useRepinOnSend(viewport);
+  useRepinOnSend(viewport, failure);
   return mode;
 }
 
@@ -193,29 +196,51 @@ function useMemberScroll(el: HTMLElement | null, s: MemberScrollState) {
   }, [el, setMode, requestBottom, modeRef, committedRef, threadRef, isRestored, saver]);
 }
 
+/** How long a send that has not rendered yet may still re-pin when it does. */
+export const SEND_RENDER_WAIT_MS = 5_000;
+
 /**
  * Sending re-pins: at once, and again when the sent message has rendered (the list grew after the
  * first jump). Instant, so `scroll-smooth` never animates towards a bottom that has since moved.
  * assistant-ui delivers `composer.send` in a microtask, usually after the message has rendered
  * (the thread runs at once); only a send that has not rendered yet (a new thread is created
- * first) waits for the next render. A wait left open would re-pin at the run's end, when the
- * answer's placeholder goes, over the member's scroll up (KOBE-288).
+ * first) waits for the next render, and only until it fails or `SEND_RENDER_WAIT_MS` pass. A
+ * wait left open would re-pin at some later change in the list, such as a queued run starting or
+ * a run's end, over the member's scroll up (KOBE-288).
  */
-function useRepinOnSend(viewport: Viewport) {
+function useRepinOnSend(viewport: Viewport, failure: unknown) {
   const count = useAuiState((s) => s.thread.messages.length);
   const running = useAuiState((s) => s.thread.isRunning);
   const runningRef = useRef(running);
+  const failureRef = useRef(failure);
   useLayoutEffect(() => {
     runningRef.current = running;
-  }, [running]);
+    failureRef.current = failure;
+  }, [running, failure]);
   const awaitingRender = useRef(false);
+  const expiry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stopWaiting = useCallback(() => {
+    awaitingRender.current = false;
+    clearTimeout(expiry.current);
+    expiry.current = undefined;
+  }, []);
+  useEffect(() => stopWaiting, [stopWaiting]);
   useAuiEvent({ scope: "*", event: "composer.send" }, () => {
-    awaitingRender.current = !runningRef.current;
+    stopWaiting();
+    // Running: the message is on screen. A failure shown: this send failed before the event came
+    // (files not ready), or an older one still shows; either way nothing is worth waiting for.
+    if (!runningRef.current && failureRef.current === undefined) {
+      awaitingRender.current = true;
+      expiry.current = setTimeout(stopWaiting, SEND_RENDER_WAIT_MS);
+    }
     viewport.getState().scrollToBottom({ behavior: "instant" });
   });
   useEffect(() => {
+    if (failure !== undefined) stopWaiting();
+  }, [failure, stopWaiting]);
+  useEffect(() => {
     if (!awaitingRender.current) return;
-    awaitingRender.current = false;
+    stopWaiting();
     viewport.getState().scrollToBottom({ behavior: "instant" });
-  }, [count, viewport]);
+  }, [count, viewport, stopWaiting]);
 }

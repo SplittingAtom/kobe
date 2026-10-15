@@ -264,6 +264,36 @@ describe("a scroll up in the last frames of a stream (KOBE-288)", () => {
     expect(list().scrollTop).toBe(200);
   });
 
+  it("a send that fails before it renders re-pins nothing later (a Retry starting)", async () => {
+    const t = threadWithHistory("Sales");
+    // An upload that never finishes holds the send back (it fails with "Wait for the files…").
+    openApp(kobe, t, () => new Promise(() => {}));
+    expect(await screen.findByText("Sales answer")).toBeTruthy();
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+    const runId = await startRun(t, "draw a chart");
+    act(() => kobe.agent.loseSandbox(runId));
+    const retry = await screen.findByRole("button", { name: "Retry from last entry" });
+
+    // Not running, so the send waits for its message to render; it never does.
+    const user = userEvent.setup();
+    await user.upload(await screen.findByLabelText("Choose files to attach"), [
+      new File(["abc"], "notes.txt", { type: "text/plain" }),
+    ]);
+    await send("with the file");
+    expect((await screen.findAllByText(/Wait for the files to finish/)).length).toBeGreaterThan(0);
+
+    scrollTo(200);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+    // Retry is not a send: its run's prompt joins the list without asking for the bottom.
+    await user.click(retry);
+    await waitFor(() => expect(kobe.latestRun(t).retry_of_run_id).toBe(runId));
+    await streaming(kobe, kobe.latestRun(t).run_id);
+    act(() => kobe.agent.delta(kobe.latestRun(t).run_id, "m1", "Second attempt"));
+    await waitFor(() => expect(list().textContent).toContain("Second attempt"));
+    expect(list().dataset.kobeFollow).toBe("unpinned");
+    expect(list().scrollTop).toBe(200);
+  });
+
   it("still unpins when the run's end shrinks the list onto the member's position", async () => {
     const t = threadWithHistory("Sales");
     await openAtBottom(t, "Sales");

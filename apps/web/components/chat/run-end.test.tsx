@@ -127,6 +127,47 @@ describe("a prompt over 64 KiB reconciles with its stored entry (ac-2)", () => {
     ).toHaveLength(1);
   });
 
+  it("reads the thread for a body-less prompt only, not for large answers or tool outputs", async () => {
+    const t = threadWithHistory();
+    openApp(fake, t);
+    expect(await screen.findByText("a1")).toBeTruthy();
+    const { runId } = await sendAndStart(LONG, t);
+    const reads = () =>
+      fake.requests.filter(
+        (r) =>
+          r.method === "GET" &&
+          r.path.startsWith(`/v1/threads/${t}?`) &&
+          r.path.includes("limit=500"),
+      ).length;
+    const before = reads();
+    fake.agent.commitPrompt(runId);
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    await waitFor(() => expect(screen.queryByText(WAITING)).toBeNull());
+
+    const big = "x".repeat(70_000);
+    fake.agent.commit(
+      runId,
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "tc1", name: "bash", arguments: { cmd: "cat" } }],
+      },
+      "m1",
+    );
+    fake.agent.commit(runId, {
+      role: "toolResult",
+      toolCallId: "tc1",
+      toolName: "bash",
+      content: [{ type: "text", text: big }],
+      isError: false,
+    });
+    fake.agent.commit(runId, say(big), "m2");
+    expect(
+      (fake.run(runId).events.at(-1)?.payload as { payload?: unknown }).payload,
+    ).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads()).toBe(before + 1);
+  });
+
   it("matches the server's tree after the run without a reload", async () => {
     const t = threadWithHistory();
     const first = openApp(fake, t);
