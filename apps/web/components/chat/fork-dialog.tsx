@@ -7,6 +7,7 @@ import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
+import { chatPortalContainer } from "../ui/chat-portal";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
 
 /** Opens a thread in the chat (the `?thread=` URL); provided by `ThreadView`. */
@@ -81,11 +82,12 @@ function ForkDialog({
 
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" />
+      <Dialog.Portal container={chatPortalContainer()}>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30" data-kobe-portal />
         <Dialog.Content
           className="bg-background text-foreground fixed top-1/2 left-1/2 z-50 grid w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border p-5 shadow-lg"
           data-fork-dialog
+          data-kobe-portal
         >
           <Dialog.Title className="m-0 text-base font-semibold">Fork to a new thread</Dialog.Title>
           <Dialog.Description className="text-muted-foreground m-0 text-sm">

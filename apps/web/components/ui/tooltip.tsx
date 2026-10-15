@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { chatPortalContainer } from "./chat-portal";
 import { cn } from "../../lib/utils";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 
@@ -23,16 +24,6 @@ function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root
 
 function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
-}
-
-/**
- * The shadcn tokens are scoped to the chat shell, so the tooltip portals into it rather than
- * under <body> (where its colors would resolve to undefined variables).
- */
-function chatPortalContainer(): HTMLElement | undefined {
-  // Rendered on the server too (the bar's icon links, KOBE-197): no document there.
-  if (typeof document === "undefined") return undefined;
-  return document.querySelector<HTMLElement>("[data-kobe-chat]") ?? undefined;
 }
 
 function TooltipContent({

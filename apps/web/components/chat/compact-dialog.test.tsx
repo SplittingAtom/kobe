@@ -75,6 +75,8 @@ describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Compact this thread" }, WAIT));
     const dialog = await screen.findByRole("dialog", { name: "Compact this thread" }, WAIT);
+    // Inside the chat root, where the theme tokens live (dark mode).
+    expect(dialog.closest("[data-kobe-chat]")).not.toBeNull();
     await user.type(
       within(dialog).getByRole("textbox", { name: /What should the summary keep/ }),
       "keep the final numbers",
