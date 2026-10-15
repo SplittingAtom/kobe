@@ -2350,6 +2350,113 @@ JS
     contains "projects: archived projects are listed only when asked" '^archived_listed=false$' "$pr_out"
     contains "projects: ...and are listed when asked" '^archived_listed_when_asked=true$' "$pr_out"
 
+    # KOBE-284 (Gate B ac-2): KOBE-216's "Fork to a new thread" at a chosen message, with a title.
+    # The Owner has a private thread with two exchanges and forks it at the first answer: the new
+    # thread has the title, the history up to that answer only and the fork provenance, and the
+    # source is unchanged. The fork's first run continues from the copied history (Pi rebuilds the
+    # session from the copied entries; the fake model echoes the conversation it was given for
+    # "history?"). The reader, a team member who cannot open the source, is refused (404).
+    echo "==> fork at a message (KOBE-284)"
+    read -r -d '' FORK_JS <<'JS' || true
+const [team, mode, readerEmail, sourceId, markerA, markerB, title, forkArg, chosenArg] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const out = (k, v) => console.log(k + "=" + v);
+const session = async (email) => {
+  const jar = new Map();
+  const call = async (method, path, body) => {
+    const headers = { origin, "x-kobe-team": team, cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+    const text = await res.text();
+    let json = {}; try { json = JSON.parse(text); } catch {}
+    return { status: res.status, json, text };
+  };
+  let login;
+  for (let i = 0; i < 4; i++) { // sign-in is rate limited (3 per 10 s): wait out a 429
+    login = await call("POST", "/api/auth/sign-in/email", { email, password: "e2e owner password" });
+    if (login.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 11000));
+  }
+  await call("PUT", "/v1/me/teams/active", { teamId: team });
+  call.login = login.status;
+  return call;
+};
+const ids = (detail) => (detail.json.entries ?? []).map((e) => e.entry_id);
+const sig = (detail) => ids(detail).length + ":" + detail.json.leaf_entry_id + ":" + detail.json.title + ":" + detail.json.forked_from_thread_id;
+const owner = await session("owner@e2e.test");
+const src = "/v1/threads/" + sourceId;
+if (mode === "fork") {
+  const reader = await session(readerEmail);
+  out("signin", owner.login + ":" + reader.login);
+  const before = await owner("GET", src);
+  const all = ids(before);
+  const isAnswer = (e, marker) => e.type === "message" && e.payload?.message?.role === "assistant" && JSON.stringify(e.payload).includes(marker);
+  const chosen = before.json.entries?.find((e) => isAnswer(e, markerA))?.entry_id;
+  const second = before.json.entries?.find((e) => isAnswer(e, markerB))?.entry_id;
+  out("chosen_id", chosen ?? "-");
+  out("chosen_is_middle", chosen !== undefined && second !== undefined && all.indexOf(chosen) < all.indexOf(second) && before.json.leaf_entry_id === second);
+  out("source_sig", sig(before));
+  const fork = await owner("POST", src + "/fork", { entry_id: chosen, title });
+  out("fork", fork.status);
+  out("fork_id", fork.json.thread_id ?? "-");
+  const mine = await owner("GET", "/v1/threads/" + fork.json.thread_id);
+  out("fork_title", mine.status + ":" + (mine.json.title === title));
+  out("fork_history", chosen !== undefined && ids(mine).join(",") === all.slice(0, all.indexOf(chosen) + 1).join(",") ? "prefix" : ids(mine).join(",") + " vs " + all.join(","));
+  out("fork_leaf", mine.json.leaf_entry_id === chosen && ids(mine).at(-1) === chosen);
+  out("fork_without_second", !JSON.stringify(mine.json.entries ?? []).includes(markerB));
+  out("provenance", (mine.json.forked_from_thread_id === sourceId) + ":" + (mine.json.forked_at_entry_id === chosen) + ":" + (mine.json.forked_from_title === before.json.title));
+  out("source_after_fork", sig(await owner("GET", src)));
+  const refused = await reader("POST", src + "/fork", { entry_id: chosen, title: "not yours" });
+  out("reader_fork", refused.status + ":" + (refused.json.code ?? "-"));
+} else {
+  out("signin", owner.login);
+  const mine = await owner("GET", "/v1/threads/" + forkArg);
+  const next = (mine.json.entries ?? []).find((e) => e.parent_id === chosenArg);
+  out("fork_continued", mine.status + ":" + (next !== undefined && mine.json.leaf_entry_id !== chosenArg));
+  out("source_after_run", sig(await owner("GET", src)));
+}
+JS
+    fork_js() { # mode source-id marker-a marker-b title [fork-id] [chosen-id] → the FORK_JS output
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- \
+        node --input-type=module -e "$FORK_JS" "$E2E_TEAM_ID" "$1" reader@e2e.test "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" 2>&1 | tail -16
+    }
+    fk_id="$(date +%s)-$RANDOM"
+    fk_a="fork-first-$fk_id" fk_b="fork-second-$fk_id" fk_title="E2E fork $fk_id"
+    fk_chat=$(chat_run "$fk_a" 300000)
+    fk_src=$(sed -n 's/^thread_id=//p' <<<"$fk_chat")
+    contains "fork: the source's first exchange completed" '^terminal=run.completed$' "$fk_chat"
+    contains "fork: the source's second exchange completed" '^terminal=run.completed$' \
+      "$(chat_run "$fk_b" 300000 "" "" "${fk_src:-00000000-0000-4000-8000-000000000000}")"
+    fk_out=$(fork_js fork "${fk_src:-00000000-0000-4000-8000-000000000000}" "$fk_a" "$fk_b" "$fk_title")
+    printf '     fork: %s\n' "$(tr '\n' ' ' <<<"$fk_out" | cut -c1-900)"
+    fk_chosen=$(sed -n 's/^chosen_id=//p' <<<"$fk_out")
+    fk_thread=$(sed -n 's/^fork_id=//p' <<<"$fk_out")
+    fk_sig=$(sed -n 's/^source_sig=//p' <<<"$fk_out")
+    contains "fork: both users signed in" '^signin=200:200$' "$fk_out"
+    contains "fork: the chosen entry is the first answer, before the second exchange" '^chosen_is_middle=true$' "$fk_out"
+    contains "fork: the Owner forks at that entry with a title (201)" '^fork=201$' "$fk_out"
+    contains "fork: the new thread has the title" '^fork_title=200:true$' "$fk_out"
+    contains "fork: its history is the source's up to the chosen entry" '^fork_history=prefix$' "$fk_out"
+    contains "fork: its history ends at the chosen entry" '^fork_leaf=true$' "$fk_out"
+    contains "fork: the second exchange is not in it" '^fork_without_second=true$' "$fk_out"
+    contains "fork: forked_from_thread_id, forked_at_entry_id (and the source title) are set" \
+      '^provenance=true:true:true$' "$fk_out"
+    if [[ -n "$fk_sig" ]] && grep -qxF "source_after_fork=$fk_sig" <<<"$fk_out"; then ok "fork: the source thread is unchanged"
+    else fail "fork: the source thread is unchanged (before $fk_sig)"; fi
+    contains "fork: a member who cannot open the source is refused (404)" '^reader_fork=404:thread_not_found$' "$fk_out"
+    fk_run=$(chat_run "history?" 300000 "" "" "${fk_thread:-00000000-0000-4000-8000-000000000000}")
+    contains "fork: the fork's first run completed" '^terminal=run.completed$' "$fk_run"
+    contains "fork: the model is given the copied history" "^text=fake-openai: history said: .*user: $fk_a \| assistant: fake-openai: $fk_a" "$fk_run"
+    if grep -qF "$fk_b" <<<"$fk_run"; then fail "fork: the model is not given the exchange after the fork point"
+    else ok "fork: the model is not given the exchange after the fork point"; fi
+    fk_after=$(fork_js after "${fk_src:-00000000-0000-4000-8000-000000000000}" "$fk_a" "$fk_b" "$fk_title" \
+      "${fk_thread:-00000000-0000-4000-8000-000000000000}" "${fk_chosen:--}")
+    contains "fork: the run continued the fork from the chosen entry" '^fork_continued=200:true$' "$fk_after"
+    if [[ -n "$fk_sig" ]] && grep -qxF "source_after_run=$fk_sig" <<<"$fk_after"; then ok "fork: the fork's run left the source unchanged"
+    else fail "fork: the fork's run left the source unchanged (before $fk_sig)"; fi
+
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the
     # Owner's real sandbox reads it under /workspace/uploads/<thread>/ (the fake model answers

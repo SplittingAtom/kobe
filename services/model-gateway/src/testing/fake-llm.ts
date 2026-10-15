@@ -21,6 +21,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * System prompt echo (OpenAI chat API only, KOBE-89 e2e): a last user message `system?` is answered
  * with `fake-openai: system said: <the system/developer messages, one line>`, so a test can see
  * what agent prompt reached the model.
+ *
+ * History echo (OpenAI chat API only, KOBE-284 e2e): a last user message `history?` is answered with
+ * `fake-openai: history said: <the earlier user and assistant texts as "role: text", " | " joined>`,
+ * so a test can see which conversation the model was given (a fork's copied history).
  */
 export interface SeenRequest {
   readonly method: string;
@@ -120,6 +124,8 @@ export function parseStepsPrompt(
 
 const SYSTEM_ECHO = "system?";
 const TOOLS_ECHO = "tools?";
+const HISTORY_ECHO = "history?";
+const HISTORY_ECHO_MAX = 4_000;
 
 /** The names of the tools a chat request offers (`tools[].function.name`), sorted. */
 export function toolNames(body: unknown): string[] {
@@ -153,6 +159,34 @@ export function systemText(body: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, SYSTEM_ECHO_MAX);
+}
+
+/** A chat message's text (a string, or the text of its content parts), whitespace collapsed. */
+function messageText(content: unknown): string {
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p) => ((p as Record<string, unknown>).text as string | undefined) ?? "")
+            .join("")
+        : "";
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** The user and assistant messages before the last one, as `role: text` joined by ` | `. */
+export function historyText(body: unknown): string {
+  const messages = ((body ?? {}) as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return "";
+  return messages
+    .slice(0, -1)
+    .map((m) => (m ?? {}) as Record<string, unknown>)
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: String(m.role), text: messageText(m.content) }))
+    .filter((m) => m.text !== "")
+    .map((m) => `${m.role}: ${m.text}`)
+    .join(" | ")
+    .slice(0, HISTORY_ECHO_MAX);
 }
 
 /** The last message's text when it is a tool result (OpenAI `role: "tool"`), else undefined. */
@@ -456,6 +490,8 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         openai(res, `fake-openai: tools said: ${toolNames(body).join(",")}`, stream, model);
       } else if (text === SYSTEM_ECHO) {
         openai(res, `fake-openai: system said: ${systemText(body)}`, stream, model);
+      } else if (text === HISTORY_ECHO) {
+        openai(res, `fake-openai: history said: ${historyText(body)}`, stream, model);
       } else if (text.startsWith(BASH_PREFIX)) {
         const args = { command: text.slice(BASH_PREFIX.length) };
         openaiNamedCall(res, { id: "call_fake_bash", name: "bash", args }, stream, model);

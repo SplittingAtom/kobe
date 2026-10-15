@@ -112,6 +112,27 @@ describe("fake LLM tool list echo (KOBE-158)", () => {
   });
 });
 
+describe("fake LLM history echo (KOBE-284)", () => {
+  it("answers 'history?' with the earlier user and assistant messages on one line", async () => {
+    const res = await chat([
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "first  question" },
+      { role: "assistant", content: [{ type: "text", text: "first\nanswer" }] },
+      { role: "assistant", content: null, tool_calls: [] },
+      { role: "user", content: [{ type: "text", text: "second" }] },
+      { role: "user", content: "history?" },
+    ]);
+    expect(res.choices[0]?.message.content).toBe(
+      "fake-openai: history said: user: first question | assistant: first answer | user: second",
+    );
+  });
+
+  it("says nothing when the conversation starts with the question", async () => {
+    const res = await chat([{ role: "user", content: "history?" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: history said: ");
+  });
+});
+
 describe("steps script (KOBE-244: several tool calls in one run)", () => {
   const steps = [
     { name: "bash", args: { command: "echo one" } },
