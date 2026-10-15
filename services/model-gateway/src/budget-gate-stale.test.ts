@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BudgetLine, MemberBudgetState } from "@kobe/db";
 import { describe, expect, it } from "vitest";
-import { BudgetGate } from "./budget-gate.js";
+import { BudgetGate, type RecheckEvent } from "./budget-gate.js";
 import { MemoryReservations } from "./reservations-memory.js";
 import type { ReservationStore, ReserveRequest, ReserveVerdict } from "./reservations.js";
 import type { CallContext } from "./seams.js";
@@ -10,7 +10,8 @@ import type { CallContext } from "./seams.js";
  * KOBE-278 / KOBE-261: a check counts the calls written after the gate read the spend only
  * through their settled holds, which last `settleHoldMs` from the settle. A check that ran later
  * than that after the read (an old cache entry plus a slow pool or advisory-lock queue) may
- * miss them, so the gate checks again against a fresh spend. Fake clock throughout.
+ * miss them, so the gate checks again against a fresh spend. Fake clocks throughout: `now.t` is
+ * monotonic time, `wall.step` how far the wall clock has been stepped from it.
  */
 const HOLD = 300;
 const teamId = randomUUID();
@@ -36,17 +37,23 @@ const site = (spent: number): BudgetLine => ({
   spent,
 });
 
-/** Memory reservations whose reserve takes `delays[i]` ms on the fake clock (queue, lock). */
+/**
+ * Memory reservations whose reserve takes `delays[i]` ms on the fake clock (queue, lock), during
+ * which the wall clock is stepped by `steps[i]` ms (NTP).
+ */
 class SlowStore implements ReservationStore {
   readonly inner = new MemoryReservations();
   readonly requests: ReserveRequest[] = [];
   readonly ended: { ids: readonly string[]; keepMs: number | undefined }[] = [];
+  readonly steps: number[] = [];
   constructor(
     private readonly now: { t: number },
+    private readonly wall: { step: number },
     private readonly delays: number[],
   ) {}
   async reserve(r: ReserveRequest): Promise<ReserveVerdict> {
     this.now.t += this.delays.shift() ?? 0;
+    this.wall.step += this.steps.shift() ?? 0;
     this.requests.push(r);
     return this.inner.reserve(r);
   }
@@ -61,7 +68,9 @@ class SlowStore implements ReservationStore {
 
 function setup(delays: number[], spends: number[], settleHoldMs = HOLD) {
   const now = { t: 0 };
-  const store = new SlowStore(now, delays);
+  const wall = { step: 0 };
+  const store = new SlowStore(now, wall, delays);
+  const rechecks: RecheckEvent[] = [];
   let loads = 0;
   const g = new BudgetGate(
     {
@@ -72,16 +81,34 @@ function setup(delays: number[], spends: number[], settleHoldMs = HOLD) {
       },
       prices: async () => new Map(),
     },
-    { ttlMs: HOLD, now: () => now.t, reservations: store, settleHoldMs },
+    {
+      ttlMs: HOLD,
+      now: () => now.t + wall.step,
+      monotonic: () => now.t,
+      reservations: store,
+      settleHoldMs,
+      onRecheck: (e) => rechecks.push(e),
+    },
   );
-  return { g, now, store, loads: () => loads };
+  return { g, now, store, rechecks, loads: () => loads };
 }
 
 describe("BudgetGate: a spend read older than the settled holds (KOBE-278)", () => {
   it("a check that ends within the hold window needs no fresh read", async () => {
-    const { g, loads } = setup([HOLD - 1], [0]);
+    const { g, loads, rechecks } = setup([HOLD - 1], [0]);
     expect((await g.admit(call(randomUUID()))).ok).toBe(true);
     expect(loads()).toBe(1);
+    expect(rechecks).toEqual([]);
+  });
+
+  it("times the check on the monotonic clock: a wall clock stepped back does not prove it", async () => {
+    // The check ends HOLD after the read, but NTP stepped the wall clock back 1.5 s meanwhile:
+    // on the wall clock it took HOLD - 1500 ms.
+    const { g, store, loads, rechecks } = setup([HOLD, 0], [0, 1_000]);
+    store.steps.push(-1_500);
+    expect(await g.admit(call(randomUUID()))).toMatchObject({ code: "budget_exhausted" });
+    expect(loads()).toBe(2);
+    expect(rechecks).toMatchObject([{ firstMs: HOLD, freshMs: undefined, outcome: "refused" }]);
   });
 
   it("a slow check is repeated against a fresh spend, and refused when that is used up", async () => {
@@ -97,10 +124,11 @@ describe("BudgetGate: a spend read older than the settled holds (KOBE-278)", () 
   });
 
   it("a slow check is repeated against a fresh spend, and admitted when that leaves room", async () => {
-    const { g, store, loads } = setup([HOLD + 50, 0], [0, 500]);
+    const { g, store, loads, rechecks } = setup([HOLD + 50, 0], [0, 500]);
     const d = await g.admit(call(randomUUID()));
     expect(d.ok).toBe(true);
     expect(loads()).toBe(2);
+    expect(rechecks).toMatchObject([{ firstMs: HOLD + 50, freshMs: 0, outcome: "admitted" }]);
     expect(store.requests.map((r) => r.lines[0]?.spent)).toEqual([0, 500]);
   });
 
@@ -115,7 +143,7 @@ describe("BudgetGate: a spend read older than the settled holds (KOBE-278)", () 
   });
 
   it("fails closed (503) when the repeated check is slow too, and holds nothing", async () => {
-    const { g, store } = setup([HOLD, HOLD], [0, 0]);
+    const { g, store, rechecks } = setup([HOLD, HOLD], [0, 0]);
     const c = call(randomUUID());
     expect(await g.admit(c)).toMatchObject({
       ok: false,
@@ -125,6 +153,9 @@ describe("BudgetGate: a spend read older than the settled holds (KOBE-278)", () 
     expect(store.ended.filter((e) => e.ids[0] === c.callId && e.keepMs === undefined)).toHaveLength(
       2,
     );
+    expect(rechecks).toEqual([
+      { teamId, userId: c.userId, firstMs: HOLD, freshMs: HOLD, outcome: "unproven" },
+    ]);
     expect(await setupFreshAdmit(store)).toBe(true);
   });
 

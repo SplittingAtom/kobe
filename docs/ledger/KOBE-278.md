@@ -37,10 +37,43 @@ Both: a real product race, plus test timing in the crash test.
   rows land and settle late (slow settle), their holds expire; then B's checks run. Before the
   fix 4 late admits, overshoot 450; after, all refused `budget_exhausted`.
 
+## Review of 9d6770d4 (Opus) and follow-up commit
+
+- M1 fixed: elapsed time since the spend read is measured on a monotonic clock (`monotonic`
+  option, default `performance.now`); the wall clock only drives cache TTLs and rate buckets.
+  Unit test: wall clock stepped back 1.5 s during a slow check still re-checks (fails with
+  `Date.now`). No extra safety margin: NTP slew is ~1.5 ms over 3 s.
+- M3 fixed: `onRecheck` reports every re-check; index.ts logs it (info; warn on the 503) with
+  `replica` (pod hostname), team, `firstMs`/`freshMs`, and sets `kobe.budget.recheck` and
+  `kobe.budget.check_ms` on the call's span. The gateway has no metrics/counters, only spans.
+  `onError` now logs "budget reservation call failed" (it also covers reserve and fresh-read
+  failures).
+- M2 **not fixed, needs SQL**. `kobe_settle_budget` can only shorten a hold's expiry; changing
+  its amount to the charged cost needs an amount parameter (or reading spend inside
+  `kobe_reserve_budget`, which allows H = 0). Re-calling `kobe_reserve_budget` as an upsert would
+  refuse with `full` exactly near the limit and adds a site-lock round trip per settle. Numbers:
+  a settled call counts twice (spend + its estimate: input + output allowance, default 8,192
+  output tokens) for H. H went from TTL (1 s default) to TTL + 2 s = 3 s, so the double count
+  triples: at 2 calls/s with ~$0.27 estimates, ~$0.54 -> ~$1.62 counted extra. Member holds are
+  capped at 25 % of what is left, so a false `full` needs ~4+ active members or one member near
+  the end of the budget; the 402 is then turned into a permanent `budget_stopped` run by the
+  server (run-state.ts). Cheapest mitigation without SQL: a smaller `SETTLE_HOLD_SLACK_MS`
+  (1 s still covers a ~1 s queued check). Coordinator files the SQL follow-up.
+- L3 fixed: an inconclusive admitted healthy check is released before the retry; the first
+  attempt is made slow on purpose so the retry runs every time; late admits in the KOBE-278 test
+  are released before asserting (no cascade into the crash test).
+- L1 (residual, rollout only): the bound needs the settling replica's H >= the checker's. During
+  the rollout from main, old pods settle with H = TTL and do not re-check.
+- L2 (residual, pre-existing): a ledger row landing more than `SETTLE_TIMEOUT_MS` (30 s) after
+  release gets no hold; stale checks miss it. "A slow settle is not the cause" holds up to 30 s.
+- Info, not changed: an older in-flight cache load can overwrite a fresh one (safe, `readFrom`
+  is per snapshot; may cause extra re-checks); a heartbeat `extend` racing `settle` can re-extend
+  a settled hold to the reservation TTL (over-reserves only).
+
 ## Open questions (for Chris or the coordinator)
 
-- A fully round-trip-free proof would read the spend inside `kobe_reserve_budget` (under the lock);
-  that needs a SQL change and was not done.
+- SQL follow-up (M2): settle with the charged amount, or read the spend inside
+  `kobe_reserve_budget` under the lock (benchmark the site-lock hold time).
 
 ## Evidence (acceptance criteria → test or command output)
 

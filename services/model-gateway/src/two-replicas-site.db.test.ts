@@ -223,6 +223,8 @@ describe("two gate replicas, one site-wide hard budget (KOBE-121 ac-1)", () => {
     await noLiveHolds();
     b.reservations.unpark();
     const decisions = await Promise.all(late);
+    // Free any late admit before asserting, so a failure here leaves no hold to later tests.
+    for (const d of decisions) if (d.ok) d.release?.(false);
     await b.reservations.idle();
     const admittedLate = decisions.filter((d) => d.ok).length;
     ledger.spent += admittedLate * CALL;
@@ -238,9 +240,11 @@ describe("two gate replicas, one site-wide hard budget (KOBE-121 ac-1)", () => {
     const healthy = replica(60_000);
     // The crashing replica takes the whole budget (20 calls and a half) and then dies. Its holds
     // are certainly all live at the healthy replica's check only if that check ended within the
-    // TTL of the first hold: a run slower than that proves nothing and is made again.
+    // TTL of the first hold: a run slower than that proves nothing and is made again. The first
+    // attempt is made that slow on purpose, so the retry path runs every time.
     let blocked: GateDecision | undefined;
-    for (let attempt = 0; attempt < 3 && blocked === undefined; attempt++) {
+    let attempts = 0;
+    for (; attempts < 4 && blocked === undefined; attempts++) {
       // Wait out the previous tests' (or attempt's) holds.
       await noLiveHolds();
       ledger.spent = 0;
@@ -249,11 +253,19 @@ describe("two gate replicas, one site-wide hard budget (KOBE-121 ac-1)", () => {
       await untilAdmitted(ALLOWED + 1, (i) =>
         crashing.gate.admit(call(teamIds[i % 3] ?? "", randomUUID())),
       );
+      if (attempts === 0) await sleep(CRASH_TTL_MS);
       const d = await healthy.gate.admit(call(teamIds[0] ?? "", randomUUID()));
       // A 503 (a check slowed past the hold twice, KOBE-278) is not the refusal under test.
       const inTime = Date.now() - started < CRASH_TTL_MS;
-      if (inTime && (d.ok || d.code !== "budget_unavailable")) blocked = d;
+      if (inTime && (d.ok || d.code !== "budget_unavailable")) {
+        blocked = d;
+      } else if (d.ok) {
+        // Inconclusive and admitted: free its hold so the next attempt starts clean.
+        d.release?.(false);
+        await healthy.reservations.idle();
+      }
     }
+    expect(attempts).toBeGreaterThan(1);
     expect(blocked).toMatchObject({ ok: false, code: "budget_exhausted" });
     // The holds expire by themselves (database clock), then the budget is free again.
     await noLiveHolds();

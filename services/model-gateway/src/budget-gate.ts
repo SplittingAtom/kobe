@@ -82,7 +82,7 @@ interface Bucket {
   at: number;
 }
 
-/** A member's budget state and when (gate clock) the gate began reading it. */
+/** A member's budget state and when (monotonic clock) the gate began reading it. */
 interface Snapshot {
   readonly state: MemberBudgetState;
   readonly readFrom: number;
@@ -93,6 +93,21 @@ type Held =
   | { readonly verdict: ReserveVerdict; readonly lines: readonly BudgetLine[] }
   /** Two checks in a row ended too long after their spend reads to prove anything. */
   | "unproven";
+
+/**
+ * KOBE-278: a check that ended `settleHoldMs` or more after its spend read, and what its repeat
+ * on a fresh read gave: `admitted`, `refused` (the fresh spend or check said no) or `unproven`
+ * (slow again: 503, fail closed).
+ */
+export interface RecheckEvent {
+  readonly teamId: string;
+  readonly userId: string;
+  /** How long after its spend read the first check ended (monotonic ms). */
+  readonly firstMs: number;
+  /** The same for the repeat; undefined when the fresh spend alone refused the call. */
+  readonly freshMs: number | undefined;
+  readonly outcome: "admitted" | "refused" | "unproven";
+}
 
 const UNAVAILABLE: GateDecision = {
   ok: false,
@@ -111,29 +126,41 @@ export class BudgetGate implements CallGate {
   private readonly heartbeatMs: number | undefined;
   private readonly priceCache: TtlCache<ReadonlyMap<string, ModelPrice>>;
   private readonly now: () => number;
+  private readonly monotonic: () => number;
+  private readonly onRecheck: (event: RecheckEvent) => void;
 
   constructor(
     private readonly store: BudgetStore,
     options: {
       readonly ttlMs: number;
       readonly now?: () => number;
+      /**
+       * A clock that never steps back, for how long a check took since its spend read (KOBE-278:
+       * a wall clock stepped back would make an unproven check look proven). Default
+       * `performance.now`.
+       */
+      readonly monotonic?: () => number;
       readonly maxEntries?: number;
       /** Where reservations live; default: this process's memory (tests, no shared state). */
       readonly reservations?: ReservationStore;
       /**
        * How long a settled reservation keeps counting (KOBE-120): the other replicas' cached
        * spend may not show the call's cost yet. Default 0 (ended at once); production passes
-       * the budget cache TTL. A check whose spend read is older than this when it ends is made
+       * the budget cache TTL plus {@link SETTLE_HOLD_SLACK_MS}. A check whose spend read is older than this when it ends is made
        * again against a fresh read (KOBE-278).
        */
       readonly settleHoldMs?: number;
       /** Extend the reservations of calls still running this often (a TTL/2 heartbeat). */
       readonly heartbeatMs?: number;
-      /** A reservation could not be ended (it then expires on its own). */
+      /** A reservation call failed: reserve (then 503), fresh read, or end (it then expires). */
       readonly onError?: (err: unknown) => void;
+      /** A check was repeated on a fresh read (KOBE-278), for logs and traces. */
+      readonly onRecheck?: (event: RecheckEvent) => void;
     },
   ) {
     this.now = options.now ?? Date.now;
+    this.monotonic = options.monotonic ?? (() => performance.now());
+    this.onRecheck = options.onRecheck ?? (() => undefined);
     this.reservations = options.reservations ?? new MemoryReservations();
     this.onError = options.onError ?? (() => undefined);
     this.settleHoldMs = options.settleHoldMs ?? 0;
@@ -159,7 +186,7 @@ export class BudgetGate implements CallGate {
   /** The member's state, cached; `fresh` reads it again whatever the cache holds. */
   private snapshot(call: CallContext, key: string, fresh = false): Promise<Snapshot> {
     const load = async (): Promise<Snapshot> => {
-      const readFrom = this.now();
+      const readFrom = this.monotonic();
       return { readFrom, state: await this.store.load(call.teamId, call.userId) };
     };
     return this.states.get(key, load, fresh);
@@ -250,15 +277,26 @@ export class BudgetGate implements CallGate {
     prices: ReadonlyMap<string, ModelPrice>,
   ): Promise<Held> {
     const first = await this.reserveOn(call, callId, snap.state.lines, prices);
-    if (!first.ok || this.proven(snap)) return { verdict: first, lines: snap.state.lines };
+    const firstMs = this.monotonic() - snap.readFrom;
+    if (!first.ok || this.proven(firstMs)) return { verdict: first, lines: snap.state.lines };
+    const report = (freshMs: number | undefined, outcome: RecheckEvent["outcome"]) =>
+      this.onRecheck({ teamId: call.teamId, userId: call.userId, firstMs, freshMs, outcome });
     await this.reservations.end(call.teamId, [callId]);
     const fresh = await this.snapshot(call, key, true);
     const { lines } = fresh.state;
     const used = exhaustedLine(lines);
-    if (used) return { verdict: { ok: false, verdict: "full", line: lines.indexOf(used) }, lines };
+    if (used) {
+      report(undefined, "refused");
+      return { verdict: { ok: false, verdict: "full", line: lines.indexOf(used) }, lines };
+    }
     const again = await this.reserveOn(call, callId, lines, prices);
-    if (!again.ok || this.proven(fresh)) return { verdict: again, lines };
+    const freshMs = this.monotonic() - fresh.readFrom;
+    if (!again.ok || this.proven(freshMs)) {
+      report(freshMs, again.ok ? "admitted" : "refused");
+      return { verdict: again, lines };
+    }
     await this.reservations.end(call.teamId, [callId]);
+    report(freshMs, "unproven");
     return "unproven";
   }
 
@@ -278,8 +316,8 @@ export class BudgetGate implements CallGate {
   }
 
   /** The check ended within `settleHoldMs` of the read (without settled holds: nothing to prove). */
-  private proven(snap: Snapshot): boolean {
-    return this.settleHoldMs <= 0 || this.now() - snap.readFrom < this.settleHoldMs;
+  private proven(elapsedMs: number): boolean {
+    return this.settleHoldMs <= 0 || elapsedMs < this.settleHoldMs;
   }
 
   /** The call's input alone, at no output (KOBE-259 `budget_below_call`). */
