@@ -7,6 +7,7 @@ import {
   BotIcon,
   BrainIcon,
   CalendarClockIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
@@ -186,6 +187,8 @@ const LIST = [
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
   { id: "edit", name: "Edit", icon: PencilIcon, scope: "message", shortcut: "Mod+Shift+E" },
   { id: "regenerate", name: "Regenerate", icon: RefreshCwIcon, scope: "message" },
+  // Regenerate's split half (CE17, KOBE-217): the team's models to regenerate with.
+  { id: "regenerate-with", name: "Regenerate with…", icon: ChevronDownIcon, scope: "message" },
   { id: "fork-thread", name: "Fork to a new thread", icon: GitForkIcon, scope: "message" },
   { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },

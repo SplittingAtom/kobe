@@ -2,10 +2,11 @@
 
 import { useId, useState, useSyncExternalStore } from "react";
 import { modelName } from "../../lib/admin/api/team/models";
+import { aliasName, modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import { useChatSession } from "./kobe-runtime";
-import { useTeamModels } from "./use-team-models";
+import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
 /** The `<select>` value of "use the team's default" (an alias is never empty). */
@@ -30,7 +31,7 @@ export function ModelPicker({
 }) {
   const id = useId();
   const session = useChatSession();
-  const loaded = useTeamModels(state);
+  const loaded = useThreadTeamModels();
   const draftAgent = useSyncExternalStore(
     session.subscribeDraftAgent,
     () => session.draftAgent,
@@ -39,12 +40,16 @@ export function ModelPicker({
   const [draft, setDraft] = useState<string | null>(() => session.draftModel);
 
   if (loaded.status !== "ready") return null;
-  const { models, default: teamDefault } = loaded.data;
-  const enabled = models.filter((m) => m.enabled);
-  const chosen = isNew ? draft : (state.summary?.model ?? null);
-  const unavailable = chosen !== null && !enabled.some((m) => m.alias === chosen);
-  const chosenModel = models.find((m) => m.alias === chosen);
-  const defaultModel = models.find((m) => m.alias === teamDefault && m.enabled);
+  // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
+  // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
+  const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
+  const choices = modelChoices(
+    loaded.data,
+    isNew ? draft : (state.summary?.model ?? null),
+    agentModel,
+  );
+  const { enabled, chosen, unavailable, pinned } = choices;
+  const chosenName = chosen === null ? null : aliasName(loaded.data, chosen);
   const disabled =
     state.summary?.deletedAt != null || isBusy(state, "model") || (!isNew && !controller);
 
@@ -58,18 +63,14 @@ export function ModelPicker({
     void controller?.setModel(model);
   };
 
-  // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
-  // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
-  const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
-  if (agentModel !== null) {
-    const pinned = models.find((m) => m.alias === agentModel);
-    const name = pinned ? modelName(pinned) : agentModel;
+  if (pinned !== null) {
+    const name = aliasName(loaded.data, pinned);
     return (
       <>
         <label className={styles.modelPicker}>
           <span className={styles.visuallyHidden}>Model for this conversation</span>
-          <select value={agentModel} disabled aria-describedby={`${id}-pinned`}>
-            <option value={agentModel}>{name}</option>
+          <select value={pinned} disabled aria-describedby={`${id}-pinned`}>
+            <option value={pinned}>{name}</option>
           </select>
         </label>
         <span id={`${id}-pinned`} className={styles.hint}>
@@ -98,25 +99,21 @@ export function ModelPicker({
           aria-describedby={unavailable ? `${id}-unavailable` : undefined}
           onChange={(e) => choose(e.target.value)}
         >
-          <option value={DEFAULT}>
-            {defaultModel ? `Team default (${modelName(defaultModel)})` : "Team default"}
-          </option>
+          <option value={DEFAULT}>{teamDefaultLabel(choices)}</option>
           {enabled.map((m) => (
             <option key={m.alias} value={m.alias}>
               {modelName(m)}
             </option>
           ))}
-          {unavailable && (
-            <option value={chosen}>
-              {chosenModel ? modelName(chosenModel) : chosen} (unavailable)
-            </option>
+          {unavailable && chosen !== null && (
+            <option value={chosen}>{chosenName} (unavailable)</option>
           )}
         </select>
       </label>
       {unavailable && (
         <p id={`${id}-unavailable`} role="alert" className={styles.modelWarning}>
-          {chosenModel ? modelName(chosenModel) : chosen} isn&apos;t enabled for your team any more,
-          so messages here can&apos;t run. Pick another model, or ask a team admin to enable it.
+          {chosenName} isn&apos;t enabled for your team any more, so messages here can&apos;t run.
+          Pick another model, or ask a team admin to enable it.
         </p>
       )}
     </>

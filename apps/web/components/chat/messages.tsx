@@ -25,6 +25,7 @@ import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { MessageFooter } from "./message-footer";
 import { ForkAction } from "./fork-dialog";
+import { RegenerateWith } from "./regenerate-with";
 import { Disclosure, useDisclosure } from "./detail";
 import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
 import { Reasoning } from "./reasoning";
@@ -232,9 +233,12 @@ export function AssistantMessage() {
             </IconAction>
           </ActionBarPrimitive.Copy>
           {!readOnly && canRegenerate && (
-            <ActionBarPrimitive.Reload asChild>
-              <IconAction command="regenerate" size="sm" />
-            </ActionBarPrimitive.Reload>
+            <>
+              <ActionBarPrimitive.Reload asChild>
+                <IconAction command="regenerate" size="sm" />
+              </ActionBarPrimitive.Reload>
+              <RegenerateWith />
+            </>
           )}
           <ForkAction meta={meta} />
         </ActionBarPrimitive.Root>

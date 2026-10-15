@@ -22,6 +22,7 @@ import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { DetailProvider } from "./detail";
 import { ThreadUsageProvider } from "./message-footer";
+import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { FileGoneNotice } from "../files/file-tab";
@@ -189,41 +190,43 @@ function ChatWorkspace({
       <RailProvider preferences={layout.preferences} onSave={layout.save}>
         <DetailProvider preferences={layout.preferences} onSave={layout.save}>
           <ThreadUsageProvider>
-            <ThreadMarkersProvider>
-              <ArtifactPanelProvider
-                teamId={session.teamId}
-                threadId={threadId}
-                preferences={layout.preferences}
-                onSavePreferences={layout.save}
-              >
-                <FileGoneNotice />
-                <ShellSlot name="search">
-                  <ThreadSearch onOpenThread={setThreadId} />
-                </ShellSlot>
-                <ShellSlot name="context">
-                  <ContextRow />
-                </ShellSlot>
-                <ShellSlot name="nav">
-                  <RailDrawerButton />
-                </ShellSlot>
-                <WorkspaceGrid
-                  rail={
-                    <WorkspaceRail
-                      teamName={teamName || "Workspace"}
-                      listError={listError}
-                      filesApi={filesApi}
-                      fetchFn={fetchFn}
-                    />
-                  }
-                  artifact={<ArtifactPanel filesApi={filesApi} />}
-                  conversation={
-                    <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                      <ThreadView onOpenThread={setThreadId} contextInBar />
-                    </main>
-                  }
-                />
-              </ArtifactPanelProvider>
-            </ThreadMarkersProvider>
+            <TeamModelsProvider>
+              <ThreadMarkersProvider>
+                <ArtifactPanelProvider
+                  teamId={session.teamId}
+                  threadId={threadId}
+                  preferences={layout.preferences}
+                  onSavePreferences={layout.save}
+                >
+                  <FileGoneNotice />
+                  <ShellSlot name="search">
+                    <ThreadSearch onOpenThread={setThreadId} />
+                  </ShellSlot>
+                  <ShellSlot name="context">
+                    <ContextRow />
+                  </ShellSlot>
+                  <ShellSlot name="nav">
+                    <RailDrawerButton />
+                  </ShellSlot>
+                  <WorkspaceGrid
+                    rail={
+                      <WorkspaceRail
+                        teamName={teamName || "Workspace"}
+                        listError={listError}
+                        filesApi={filesApi}
+                        fetchFn={fetchFn}
+                      />
+                    }
+                    artifact={<ArtifactPanel filesApi={filesApi} />}
+                    conversation={
+                      <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                        <ThreadView onOpenThread={setThreadId} contextInBar />
+                      </main>
+                    }
+                  />
+                </ArtifactPanelProvider>
+              </ThreadMarkersProvider>
+            </TeamModelsProvider>
           </ThreadUsageProvider>
         </DetailProvider>
       </RailProvider>

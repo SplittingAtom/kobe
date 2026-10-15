@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import type { ThreadState } from "../../lib/chat/thread-state";
-import { useChatSession } from "./kobe-runtime";
+import { useChatSession, useKobeExtras } from "./kobe-runtime";
 
 export type TeamModelsLoad =
   | { readonly status: "loading" }
@@ -12,11 +12,10 @@ export type TeamModelsLoad =
 
 /**
  * The team's models (`GET /v1/team/models`, cached briefly by the session) for the conversation on
- * screen: the model picker and the context gauge (KOBE-211) share it. Read again for each
- * conversation opened, and fresh when a run was refused because its model was disabled
- * (`agent_model_not_enabled`), so both show the change.
+ * screen. Read again for each conversation opened, and fresh when a run was refused because its
+ * model was disabled (`agent_model_not_enabled`), so every reader shows the change.
  */
-export function useTeamModels(state: ThreadState): TeamModelsLoad {
+function useTeamModels(state: ThreadState | undefined): TeamModelsLoad {
   const session = useChatSession();
   const [loaded, setLoaded] = useState<TeamModelsLoad>({ status: "loading" });
 
@@ -34,9 +33,9 @@ export function useTeamModels(state: ThreadState): TeamModelsLoad {
     return () => {
       current = false;
     };
-  }, [session, state.threadId]);
+  }, [session, state?.threadId]);
 
-  const terminal = state.live?.terminal;
+  const terminal = state?.live?.terminal;
   const failedForModel =
     terminal?.type === "run.failed" && terminal.payload.error.code === "agent_model_not_enabled";
   useEffect(() => {
@@ -51,4 +50,20 @@ export function useTeamModels(state: ThreadState): TeamModelsLoad {
   }, [session, failedForModel]);
 
   return loaded;
+}
+
+const TeamModelsContext = createContext<TeamModelsLoad>({ status: "loading" });
+
+/**
+ * Loads the team's models once for the conversation on screen (not once per reader: the picker,
+ * the context gauge and every answer's "Regenerate with…" menu, KOBE-217, share this read).
+ */
+export function TeamModelsProvider({ children }: { readonly children: ReactNode }) {
+  const loaded = useTeamModels(useKobeExtras()?.state);
+  return <TeamModelsContext.Provider value={loaded}>{children}</TeamModelsContext.Provider>;
+}
+
+/** The team's models for the conversation on screen (`TeamModelsProvider`). */
+export function useThreadTeamModels(): TeamModelsLoad {
+  return useContext(TeamModelsContext);
 }

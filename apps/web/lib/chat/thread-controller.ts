@@ -23,6 +23,7 @@ import {
   type StreamSignal,
 } from "./stream";
 import {
+  canRegenerateWith,
   currentRunId,
   initialThreadState,
   mergeCommittedEntries,
@@ -54,6 +55,12 @@ export interface ControllerOptions {
 
 const MAX_REOPEN_ATTEMPTS = 5;
 const MAX_ENTRY_PAGES = 40;
+const REGENERATE_NOT_SENT: ApiError = {
+  status: 0,
+  code: "regenerate_not_sent",
+  message: "The answer could not be regenerated, so the model was not changed. Try again.",
+};
+
 const CLIENT_ERROR: ApiError = {
   status: 0,
   code: "client_error",
@@ -720,6 +727,43 @@ export class ThreadController {
     this.#announce(model === null ? "The team's default model is used." : "Model changed.");
     return true;
   };
+
+  /**
+   * Regenerate with another model (CE17, KOBE-217): saves `model` as the thread's (null: follow
+   * the team default), as the picker does, then sends `text` from `parentEntryId` as a new
+   * version. Refused unless `canRegenerateWith`, so two choices can't race. A refused model
+   * change runs nothing; a message that doesn't go puts the previous model back and keeps the
+   * failure in the banner, so the thread is never left switched without its new version.
+   */
+  readonly regenerateWith = async (
+    model: string | null,
+    text: string,
+    parentEntryId: string,
+  ): Promise<boolean> => {
+    if (!canRegenerateWith(this.#state)) return false;
+    const previous = this.#state.summary?.model ?? null;
+    const switching = model !== previous;
+    try {
+      // No await before these: each marks the thread busy at once (`model`, then `sending`).
+      if (switching && !(await this.setModel(model))) return false;
+      if (await this.send(text, parentEntryId)) return true;
+    } catch {
+      this.#fail(CLIENT_ERROR);
+    }
+    if (switching) await this.#restoreModel(previous);
+    return false;
+  };
+
+  /** Puts the thread's previous model back after a failed regenerate, keeping its error shown. */
+  async #restoreModel(previous: string | null): Promise<void> {
+    const threadId = this.#state.threadId;
+    const failure = this.#state.actionError ?? { error: REGENERATE_NOT_SENT };
+    if (threadId !== null) {
+      const res = await this.#busy("model", () => this.#api.setThreadModel(threadId, previous));
+      if (res.ok) this.#set((s) => ({ ...s, summary: res.data }));
+    }
+    this.#set((s) => ({ ...s, actionError: failure }));
+  }
 
   /** Shares the thread to its project or makes it private again (owner only; the server decides). */
   readonly setVisibility = async (visibility: "private" | "project"): Promise<boolean> => {
