@@ -21,20 +21,41 @@ every replica's cache, the KOBE-278 re-check and its 503 stay). (a) is simpler a
   counters commit together (trigger, same transaction) at w; the gateway deletes the reservation
   only after that commit (settle, s > w). A snapshot taken before w sees the reservation (its
   deletion commits later), one taken after w sees the spend. So X counts at least once, whatever
-  the gateway cached, however late the check runs. Twice only between w and s (the sink's settle
-  right after the write: milliseconds, not the cache TTL).
-- The advisory locks still serialise reservers (team, then site); the spend is read after them.
+  the gateway cached, however late the check runs, **provided its reservation is still live at
+  w**. Twice only between w and s (the sink's settle right after the write: one pool round trip).
+- Where X counts zero times until its row lands (review L1): its reservation expired first, i.e.
+  a crashed gateway (the row then never lands either), or heartbeats that failed for a whole
+  reservation TTL mid-call. `release(true)` no longer caps the hold at 30 s: it renews it for a
+  full reservation TTL (10 min default) and the settle ends it, so a slow or retried sink write no
+  longer opens that gap. Cost: a row that never lands (lost write) keeps its hold up to the TTL.
+- Locks (review M1): the team and member lines are judged under the team lock alone; the site
+  lock is taken afterwards, only for the site lines and the inserts. Order stays team -> site;
+  atomic as before, because everything a team/member line reads is written only under that
+  team's lock (reservations) or only grows (spend). When several lines are used up, the verdict
+  may now name a team/member line before the site line (the 402 is the same).
+- Each branch (site, team, member; reservations by scope) has plain predicates, so a generic
+  plan still uses the indexes (review L3).
+- Malformed lines are refused with 22023 before any lock (review L4): unknown or missing scope or
+  unit, unknown period, missing/null/NaN limit, no period and no spent, a non-object line. Before,
+  most of these were admitted.
 - KOBE-120 rules kept: invoker's rights (no SECURITY DEFINER), `search_path` pinned, team set with
   transaction-local `set_config`, a different team in force refused, sweep unchanged.
 - Rollout: a line without `period` (a gateway of the release before) is judged on its own `spent`
-  as before, so old pods keep working during the upgrade. An unknown period is refused (22023).
+  as before, so old pods keep working during the upgrade.
+- Mixed rollout (review L2): while old and new gateway pods run together, new pods end holds at
+  settle, so old pods (judged on their cached spend) can overshoot within their cache TTL again
+  (the KOBE-278 bug); and new pods count old pods' TTL + 2 s settled holds next to the spend
+  (false 402 near the limit, M2). Accepted: the window is one rolling update and only matters
+  near a limit. Guidance: migrate first (the function stays compatible with old pods), then roll
+  the model-gateway in one quick rollout, not during a site near its budget.
 
 ## Gateway (ac-3)
 
 - KOBE-278's re-check, its 503 path, the monotonic clock and the re-check logging are removed:
   nothing in the gate depends on cache freshness any more (the cached spend only refuses early).
 - The TTL + 2 s settled hold is reverted to none: production passes no `settleHoldMs`, so settle
-  deletes the reservation once the row has landed. `release(true)` still keeps it 30 s until then.
+  deletes the reservation once the row has landed. `release(true)` renews it for a full TTL until
+  then (`SETTLE_TIMEOUT_MS` removed).
 - `DbReservations` sends each line's `period`. The `onError` log line reads "budget reservation
   call failed" (it also covers reserve failures; review Info).
 
@@ -42,7 +63,7 @@ every replica's cache, the KOBE-278 re-check and its 503 stay). (a) is simpler a
 
 - `packages/db` `budget-reservations-spend.db.test.ts`: member/team/site lines judged on the
   counters, not the caller's spend; a written and settled call counts once; a line without period
-  uses its own spend; unknown period refused. 4 of 5 fail on the old function.
+  uses its own spend; 10 malformed-line cases refused with 22023 (9 were admitted before).
 - `two-replicas-site.db.test.ts` now writes real ledger rows (the counters are site-wide, so each
   test counts from the site's spend at its start), no settle hold (as production):
   - KOBE-121 load test, KOBE-278 step-by-step stale check, crash test: pass. Without migration
@@ -61,16 +82,28 @@ Interleaved in one database, old behaviour = lines without `period` (no spend re
 | before (no spend read) | 3.7 / 5.8-6.3 ms     | 21-22 / 34-37 ms       |
 | after (spend read)     | 4.3-4.4 / 6.1-6.6 ms | 28 / 35-40 ms          |
 
-Server-side execution p50 2.1 -> 2.6 ms. The extra time sits inside the site advisory lock, so
-concurrent reservers queue ~0.7 ms longer each. An index on `(team_id, user_id, day)` did not
-help measurably, so none was added.
+Server-side execution p50 2.1 -> 2.6 ms. An index on `(team_id, user_id, day)` did not help
+measurably, so none was added.
+
+After review M1 (team lines out of the site lock), 8 teams x 200 members x 15 days, one reserver
+per team (8 concurrent, contending only on the site lock), 5 lines each:
+
+|                                 | sequential p50 / p95 | 8 teams p50 / p95 | reserves/s |
+| ------------------------------- | -------------------- | ----------------- | ---------- |
+| 0097 first version (60f84cb4)   | 4.7 / 6.2-6.8 ms     | 31 / 59-68 ms     | ~215       |
+| team lines before the site lock | 5.0 / 6.5-7.4 ms     | 16.5 / 18-23 ms   | ~410       |
+
+Server-side execution p50 3.0 -> 3.4 ms (one more statement), and 2.6 ms with
+`plan_cache_mode = force_generic_plan` (review L3: no generic-plan blow-up).
 
 ## Open questions (for Chris or the coordinator)
 
 - Remaining double count: between a row's commit and its settle (ms). Settling inside the usage
   write's transaction would remove it; not needed now.
-- Residuals from the KOBE-278 review that still apply: rows landing more than 30 s after release
-  get no hold (L2); heartbeat `extend` racing a settle can re-extend a hold (over-reserves only).
+- A heartbeat or release `extend` that lands after a settle that only shortened a hold can
+  re-extend it (over-reserves only); production settles by deleting, so it is a no-op there.
+- Not changed (review Info): the 402 message names the cached line's spend (I6); at UTC midnight
+  the gateway clock (`at`) and DB clock (`v_today`) can disagree briefly (I1, I5).
 
 ## Evidence
 

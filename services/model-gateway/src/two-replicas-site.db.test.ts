@@ -84,7 +84,7 @@ const call = (teamId: string, userId: string): CallContext => ({
 });
 
 /**
- * Tracks every end() (the gate's release and settle are fire-and-forget) so a test can wait for
+ * Tracks every end() and extend() (the gate's release and settle are fire-and-forget) so a test can wait for
  * them; `park()` holds each reserve before it reaches the database until `unpark()`.
  */
 class TrackedReservations extends DbReservations {
@@ -92,10 +92,15 @@ class TrackedReservations extends DbReservations {
   private parked: Promise<void> | undefined;
   private unparkAll: (() => void) | undefined;
   waiting = 0;
-  override end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
-    const p = super.end(teamId, callIds, keepMs);
+  private track(p: Promise<void>): Promise<void> {
     this.pending.add(p);
     return p.finally(() => this.pending.delete(p));
+  }
+  override end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
+    return this.track(super.end(teamId, callIds, keepMs));
+  }
+  override extend(teamId: string, callIds: readonly string[]): Promise<void> {
+    return this.track(super.extend(teamId, callIds));
   }
   override async reserve(r: ReserveRequest): Promise<ReserveVerdict> {
     if (this.parked) {

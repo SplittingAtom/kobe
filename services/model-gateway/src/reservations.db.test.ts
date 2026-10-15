@@ -33,13 +33,18 @@ const call = (userId: string): CallContext => ({
   outputAllowance: 100,
   callId: randomUUID(),
 });
-/** Records every end() so a test can wait for the gate's fire-and-forget release/settle. */
+/** Records every end() and extend() so a test can wait for the gate's fire-and-forget calls. */
 class TrackedReservations extends DbReservations {
   readonly pending = new Set<Promise<void>>();
-  override end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
-    const p = super.end(teamId, callIds, keepMs);
+  private track(p: Promise<void>): Promise<void> {
     this.pending.add(p);
     return p.finally(() => this.pending.delete(p));
+  }
+  override end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
+    return this.track(super.end(teamId, callIds, keepMs));
+  }
+  override extend(teamId: string, callIds: readonly string[]): Promise<void> {
+    return this.track(super.extend(teamId, callIds));
   }
   async idle(): Promise<void> {
     await Promise.allSettled([...this.pending]);

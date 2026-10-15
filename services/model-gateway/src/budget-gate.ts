@@ -42,8 +42,6 @@ export interface BudgetStore {
 }
 
 export { MEMBER_SHARE };
-/** A reservation whose ledger row never lands (lost write) ends after this long. */
-export const SETTLE_TIMEOUT_MS = 30_000;
 
 const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
   site: "The site's",
@@ -220,9 +218,10 @@ export class BudgetGate implements CallGate {
 
   /**
    * The release of one reservation. `written`: the call's ledger row is on its way, so the
-   * reservation stays until {@link settle} (the row landed and the cached spend was dropped, so
-   * the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most; otherwise it ends now. A
-   * failure to end it is only logged: the reservation then expires by itself.
+   * reservation is renewed for a full reservation TTL and stays until {@link settle} ends it
+   * once the row landed (cut short, a row landing late would count nowhere; counted twice
+   * meanwhile is harmless, KOBE-286); otherwise it ends now. A failure is only logged: the
+   * reservation then expires by itself.
    */
   private releaser(call: CallContext, callId: string): (written: boolean) => void {
     // A call still running keeps its reservation alive (no expiry while it streams).
@@ -235,8 +234,11 @@ export class BudgetGate implements CallGate {
     beat?.unref();
     return (written) => {
       if (beat) clearInterval(beat);
-      const keep = written && call.callId ? SETTLE_TIMEOUT_MS : undefined;
-      this.reservations.end(call.teamId, [callId], keep).catch(this.onError);
+      if (written && call.callId) {
+        this.reservations.extend(call.teamId, [callId]).catch(this.onError);
+      } else {
+        this.reservations.end(call.teamId, [callId]).catch(this.onError);
+      }
     };
   }
 
