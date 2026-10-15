@@ -133,11 +133,27 @@ describe("kobe_reserve_budget reads the spend itself (KOBE-286)", () => {
     );
   });
 
-  it("refuses an unknown period", async () => {
-    const err: unknown = await reserve(alice, randomUUID(), 10, [line("user", "week", 300)]).then(
+  /** The SQLSTATE a reserve with these lines fails with (undefined: it answered). */
+  const failure = (lines: unknown[]) =>
+    reserve(alice, randomUUID(), 10, lines).then(
       () => undefined,
-      (e: unknown) => e,
+      (e: unknown) => (e as { cause?: { code?: string } }).cause?.code,
     );
-    expect((err as { cause?: { code?: string } } | undefined)?.cause?.code).toBe("22023");
+
+  it.each([
+    ["an unknown period", { scope: "user", unit: "tokens", limit: "300", period: "week" }],
+    ["an unknown scope", { scope: "galaxy", unit: "tokens", limit: "300", period: "day" }],
+    ["no scope", { unit: "tokens", limit: "300", period: "day" }],
+    ["an unknown unit", { scope: "user", unit: "eur", limit: "300", period: "day" }],
+    ["no unit", { scope: "user", limit: "300", period: "day" }],
+    ["no limit", { scope: "user", unit: "tokens", period: "day" }],
+    ["a null limit", { scope: "user", unit: "tokens", limit: null, period: "day" }],
+    ["a NaN limit", { scope: "user", unit: "tokens", limit: "NaN", period: "day" }],
+    ["no period and no spend", { scope: "user", unit: "tokens", limit: "300" }],
+    ["a line that is not an object", "site"],
+  ])("refuses a malformed line (22023), never admits it: %s", async (_, bad) => {
+    // Alone, and after a valid site line (the site pass must not run first and admit).
+    expect(await failure([bad])).toBe("22023");
+    expect(await failure([line("site", "month", 1e12), bad])).toBe("22023");
   });
 });
