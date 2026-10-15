@@ -266,4 +266,20 @@ describe("network policies", () => {
     expect(shim?.egress[2].to[0].podSelector.matchLabels).toEqual({ "cnpg.io/cluster": "kobe-pg" });
     expect(shim?.egress).toHaveLength(3);
   });
+
+  it("the shim reaches a trace collector only through modelGateway.networkPolicy.extraEgress (KOBE-273)", () => {
+    const collector = {
+      to: [
+        {
+          namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "langfuse" } },
+          podSelector: { matchLabels: { app: "web" } },
+        },
+      ],
+      ports: [{ protocol: "TCP", port: 3000 }],
+    };
+    const ms = render({}, { "modelGateway.networkPolicy.extraEgress": [collector] });
+    const shim = find(ms, "NetworkPolicy", "kobe-model-gateway")?.spec;
+    expect(shim?.egress).toHaveLength(4);
+    expect(shim?.egress).toContainEqual(collector);
+  });
 });

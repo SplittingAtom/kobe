@@ -45,7 +45,13 @@ propagate traces yet.
 
 - **Tempo**: point `endpoint` at an OpenTelemetry Collector (OTLP in, Tempo out), or at Tempo's
   OTLP/HTTP receiver (port 4318).
-- **Langfuse**: `endpoint: https://<host>/api/public/otel`, `headersSecret` with
-  `Authorization=Basic <base64 public:secret>`; enable `captureContent` to see prompts.
+- **Langfuse**: `endpoint: https://<host>/api/public/otel` (in-cluster, the web Service on port
+  3000 with the same path), `headersSecret` whose `headers` key is
+  `Authorization=Basic <base64 of public-key:secret-key>`; enable `captureContent` to see prompts.
+  Langfuse v4 stores spans in ClickHouse as events and has no traces list API: look at them in
+  the UI. A self-hosted Langfuse is its own install (its own Postgres, ClickHouse, Valkey and S3),
+  never part of this chart. If you use its chart's bundled SeaweedFS, set
+  `global.seaweedfs.createClusterRole: false`: otherwise it grants pod create/delete in every
+  namespace, including team sandbox namespaces.
 - **Phoenix**: `endpoint: http://phoenix:6006` (OTLP/HTTP at `/v1/traces`), optional
   `Authorization=Bearer <key>` header.

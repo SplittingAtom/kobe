@@ -27,7 +27,8 @@ spec:
         - protocol: TCP
           port: 8080
   {{- if $g.networkPolicy.restrictEgress }}
-  # The shim's own egress: DNS, Bifrost, Postgres. Nothing else (it never talks to providers).
+  # The shim's own egress: DNS, Bifrost, Postgres, plus extraEgress (a trace collector, KOBE-273).
+  # It never talks to providers.
   egress:
     - to:
         - namespaceSelector:
@@ -68,5 +69,8 @@ spec:
     - ports:
         - protocol: TCP
           port: {{ int $g.networkPolicy.databasePort }}
+    {{- end }}
+    {{- with $g.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}

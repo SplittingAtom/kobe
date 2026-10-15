@@ -244,7 +244,7 @@ envelope:
 # only; captureContent adds prompts, tool input/output and query strings (install-level opt-in).
 telemetry:
   # OTLP/HTTP base URL of a collector or backend, e.g. http://otel-collector.observability:4318
-  # (Tempo, Langfuse, Phoenix: see docs/operations/tracing.md).
+  # (Tempo, Langfuse, Phoenix: see docs/tracing.md).
   endpoint: ""
   # Existing Secret with key `headers` (name=value,name=value) for hosted backends; optional.
   headersSecret: ""
@@ -337,6 +337,9 @@ modelGateway:
     # External Postgres only: NetworkPolicy peers of your database (as for egressProxy).
     databasePeers: []
     databasePort: 5432
+    # More egress rules (NetworkPolicy egress items), e.g. to a trace collector when
+    # telemetry.endpoint is set (KOBE-273). Nothing else needs it: the shim never calls providers.
+    extraEgress: []
 
 # Model gateway (spec D4, D30), always installed: Bifrost (Apache-2.0) holds the provider keys and
 # enforces each member's model allowlist. Kobe is the source of truth (Site console and
