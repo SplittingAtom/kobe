@@ -29,9 +29,11 @@ export function ForkOriginNote({
         Forked from{" "}
         {origin.kind === "source" ? (
           <InlineLink
-            href={`/?thread=${origin.threadId}`}
+            href={`/?thread=${encodeURIComponent(origin.threadId)}`}
             onClick={(e) => {
-              if (!onOpenThread) return;
+              // A modified or non-primary click keeps the browser's own (new tab, new window).
+              const plain = e.button === 0 && !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey);
+              if (!onOpenThread || !plain) return;
               e.preventDefault();
               onOpenThread(origin.threadId);
             }}

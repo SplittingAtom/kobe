@@ -62,6 +62,7 @@ export type ThreadError =
   | "not_in_project"
   | "entry_not_found"
   | "entry_offloaded"
+  | "nothing_to_fork"
   | "project_not_found"
   | "no_agent"
   | "model_not_enabled"
@@ -77,13 +78,8 @@ const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
  */
 export const THREAD_LOCK_TIMEOUT = "2s";
 
-/** Postgres lock_not_available: `lock_timeout` expired. */
-const LOCK_NOT_AVAILABLE = "55P03";
-
-export function isLockTimeout(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string } } | undefined;
-  return e?.code === LOCK_NOT_AVAILABLE || e?.cause?.code === LOCK_NOT_AVAILABLE;
-}
+/** Postgres lock_not_available (`lock_timeout` expired); the shared reader in `@kobe/db`. */
+export { isLockTimeout } from "@kobe/db";
 const DAY_MS = 86_400_000;
 
 type TimeColumn = typeof threads.lastActivityAt | typeof threads.deletedAt;
@@ -312,7 +308,7 @@ export async function createThread(
      * A fork's provenance (CE16): its source and the entry it was taken at. Set here only: the
      * link is never updated afterwards (trigger `threads_guard_forked_from`, KOBE-215).
      */
-    forkedFrom?: { readonly threadId: string; readonly entryId: string | null };
+    forkedFrom?: { readonly threadId: string; readonly entryId: string };
   },
 ): Promise<ThreadSummary> {
   const { agent, modelAlias, isTest, forkedFrom, ...rest } = input;

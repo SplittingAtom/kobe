@@ -29,6 +29,16 @@ export {
 } from "./legal-hold/index.js";
 export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
+  PG_DEADLOCK_DETECTED,
+  PG_FOREIGN_KEY_VIOLATION,
+  PG_LOCK_NOT_AVAILABLE,
+  isForeignKeyViolation,
+  isLockConflict,
+  isLockTimeout,
+  pgCodeOf,
+  pgErrorOf,
+} from "./pg-errors.js";
+export {
   createDb,
   type CreateDbOptions,
   type KobeDatabase,

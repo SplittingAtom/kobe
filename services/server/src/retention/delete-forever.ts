@@ -1,7 +1,6 @@
 import { recordAudit } from "../audit/record.js";
-import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { isLockConflict, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
-import { isLockConflict } from "./locks.js";
 import { purgeThreads, type PurgeBatchResult } from "./purge.js";
 
 /**

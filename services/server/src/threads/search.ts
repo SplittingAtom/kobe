@@ -6,7 +6,7 @@ import {
   type ThreadSearchHit as SearchHit,
 } from "@kobe/db";
 import { visibilityOf } from "./share.js";
-import type { Viewer } from "./repository.js";
+import { findThreads, type Viewer } from "./repository.js";
 import type { ThreadSearchHit } from "./schemas.js";
 
 /**
@@ -53,7 +53,12 @@ export async function searchThreadList(
       cursor: input.cursor,
       limit: Math.min(input.limit, THREAD_SEARCH_MAX_LIMIT),
     });
-    return { ok: true, body: { threads: page.hits.map(toWire), next_cursor: page.nextCursor } };
+    // Fork provenance with the list's access rule: the source is named only if the viewer may
+    // open it (`findThreads`, KOBE-216).
+    const sourceIds = [...new Set(page.hits.flatMap((h) => h.forkedFromThreadId ?? []))];
+    const sources = await findThreads(tx, viewer, sourceIds);
+    const threads = page.hits.map((hit) => toWire(hit, sources));
+    return { ok: true, body: { threads, next_cursor: page.nextCursor } };
   } catch (err) {
     // `failed`/`no_team` are server faults: rethrown to the 500 handler (messages carry no SQL).
     const failure = err instanceof ThreadSearchError ? FAILURES[err.code] : undefined;
@@ -62,7 +67,11 @@ export async function searchThreadList(
   }
 }
 
-function toWire(hit: SearchHit): ThreadSearchHit {
+function toWire(
+  hit: SearchHit,
+  sources: ReadonlyMap<string, { title: string | null }>,
+): ThreadSearchHit {
+  const source = hit.forkedFromThreadId ? sources.get(hit.forkedFromThreadId) : undefined;
   return {
     thread_id: hit.threadId,
     title: hit.title,
@@ -75,11 +84,11 @@ function toWire(hit: SearchHit): ThreadSearchHit {
     visibility: visibilityOf(hit),
     // Search never returns test threads (KOBE-85).
     is_test: false,
-    // Search does not read the marker or the fork provenance; the thread list carries them.
+    // Search does not read the marker; the thread list carries it.
     schedule_id: null,
-    forked_from_thread_id: null,
-    forked_at_entry_id: null,
-    forked_from_title: null,
+    forked_from_thread_id: source ? hit.forkedFromThreadId : null,
+    forked_from_title: source?.title ?? null,
+    forked_at_entry_id: hit.forkedAtEntryId,
     model: hit.modelAlias,
     leaf_entry_id: hit.leafEntryId,
     last_activity_at: hit.lastActivityAt.toISOString(),

@@ -1,7 +1,8 @@
-import { auditTimeout, isLockConflict } from "./locks.js";
+import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
   isLegalHoldViolation,
+  isLockConflict,
   lockLegalHolds,
   sql,
   withTeam,
@@ -27,8 +28,9 @@ import { readMaximumLayer, readTeamLayer } from "./settings.js";
  * That includes a source's forks (KOBE-215/216): deleting a source clears its forks' link
  * (`ON DELETE SET NULL`), which locks each fork's row. The batch locks those forks first, with
  * `SKIP LOCKED`, and leaves out every source whose forks it could not all lock (a run on the fork
- * holds its row); the next pass retries it. Should a lock still time out or deadlock (55P03,
- * 40P01), the loop stops as `busy`: nothing is lost, and the next pass continues.
+ * holds its row); the next pass retries it, and the loop ends `partial`, not `done`. Should a lock
+ * still time out or deadlock (55P03, 40P01), the loop stops as `busy`: nothing is lost, and the
+ * next pass continues.
  */
 
 /** Which threads a batch purges. */
@@ -269,7 +271,12 @@ export type PurgeOutcome =
   /** The time or batch budget ran out; the next pass continues. */
   | { readonly status: "budget"; readonly counts: PurgeCounts }
   /** A batch timed out on a lock or deadlocked (55P03, 40P01): rolled back, the next pass retries. */
-  | { readonly status: "busy"; readonly counts: PurgeCounts };
+  | { readonly status: "busy"; readonly counts: PurgeCounts }
+  /**
+   * Not complete: `skipped` sources were left out because a fork of theirs was busy (KOBE-216);
+   * everything else the selection matched was purged. The next pass retries them.
+   */
+  | { readonly status: "partial"; readonly counts: PurgeCounts; readonly skipped: number };
 
 export interface PurgeLoopOptions {
   readonly limits?: BatchLimits;
@@ -320,7 +327,11 @@ export async function purgeThreads(
     }
     counts = add(counts, result);
     skipped = [...skipped, ...result.skipped];
-    if (!result.more) return { status: "done", counts };
+    if (!result.more) {
+      return skipped.length > 0
+        ? { status: "partial", counts, skipped: skipped.length }
+        : { status: "done", counts };
+    }
   }
   return { status: "budget", counts };
 }

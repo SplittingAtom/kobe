@@ -24,14 +24,20 @@ export function ProjectBar({
   readonly onOpenThread?: ((threadId: string) => void) | undefined;
 }) {
   const session = useChatSession();
+  // A refused fork shows here, once (the thread's error banner stays for the thread's own errors).
+  const [forkError, setForkError] = useState<string | null>(null);
   const { controller, state } = extras;
   const summary = state.summary;
   if (!summary || !controller || summary.deletedAt != null) return null;
 
   if (summary.readOnly === true) {
     const fork = async () => {
+      setForkError(null);
       const res = await controller.fork();
-      if (!res.ok) return;
+      if (!res.ok) {
+        setForkError(res.error.message);
+        return;
+      }
       session.threadCreated(); // the list reads again: the fork is yours
       onOpenThread?.(res.data.threadId);
     };
@@ -44,6 +50,7 @@ export function ProjectBar({
         <button type="button" disabled={isBusy(state, "fork")} onClick={() => void fork()}>
           Fork into my conversations
         </button>
+        {forkError !== null && <p role="alert">{forkError}</p>}
       </div>
     );
   }

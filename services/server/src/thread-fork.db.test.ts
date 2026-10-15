@@ -223,6 +223,15 @@ describe("the back-link is resolved for the viewer only (ac-6)", () => {
       forked_from_title: "plan",
     });
 
+    const hit = async () =>
+      ((await as(x.reader).get(`/v1/threads?q=plan`)).json.threads as { thread_id: string }[]).find(
+        (t) => t.thread_id === fork,
+      );
+    expect(await hit()).toMatchObject({
+      forked_from_thread_id: x.threadId,
+      forked_from_title: "plan",
+    });
+
     // Unshared: the reader's fork keeps its fork point but no longer names the source.
     await as(x.author).post(`${url}/share`, { visibility: "private" });
     const neutral = {
@@ -233,6 +242,7 @@ describe("the back-link is resolved for the viewer only (ac-6)", () => {
     expect((await as(x.reader).get(`/v1/threads/${fork}`)).json).toMatchObject(neutral);
     const list = (await as(x.reader).get(`/v1/threads`)).json.threads;
     expect(list.find((t: { thread_id: string }) => t.thread_id === fork)).toMatchObject(neutral);
+    expect(await hit()).toMatchObject(neutral);
     const renamed = await as(x.reader).patch(`/v1/threads/${fork}`, { title: "mine" });
     expect(renamed.json).toMatchObject(neutral);
 
@@ -260,30 +270,55 @@ describe("the back-link is resolved for the viewer only (ac-6)", () => {
   });
 });
 
+/**
+ * While it exists, a fork titled "race" deletes its source right before its own row is written
+ * (after every access check), so the insert's check on threads_forked_from_fk fails (23503).
+ */
+async function withPurgeRace(fn: () => Promise<void>): Promise<void> {
+  await f.fx.admin.query(`
+    CREATE FUNCTION test_purge_fork_source() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.title = 'race' THEN
+        DELETE FROM threads WHERE team_id = NEW.team_id AND id = NEW.forked_from_thread_id;
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER test_purge_fork_source BEFORE INSERT ON threads
+      FOR EACH ROW EXECUTE FUNCTION test_purge_fork_source();`);
+  try {
+    await fn();
+  } finally {
+    await f.fx.admin.query(`
+      DROP TRIGGER test_purge_fork_source ON threads;
+      DROP FUNCTION test_purge_fork_source();`);
+  }
+}
+
+/** An offloaded entry `big` under a2 whose body sits in the source's tree. */
+async function offloaded(team: string, threadId: string): Promise<string> {
+  const key = `${PREFIX}teams/${team}/threads/${threadId}/entries/big`;
+  objects.objects.set(key, Buffer.from("{}"));
+  await f.fx.admin.query(
+    `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
+     VALUES ($1, $2, 'big', 'a2', 'message', '{}', $3)`,
+    [team, threadId, key],
+  );
+  return key;
+}
+
 describe("a fork racing its source's purge (ac-5)", () => {
+  it("answers thread_not_found on the fork-link 23503 in the single transaction", async () => {
+    const x = await world();
+    await withPurgeRace(async () => {
+      const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, { title: "race" });
+      expect([res.status, res.json.code]).toEqual([404, "thread_not_found"]);
+    });
+  });
+
   it("answers thread_not_found and removes the copied bodies on the fork-link 23503", async () => {
     const x = await world();
-    const team = x.w.team;
-    const sourceKey = `${PREFIX}teams/${team}/threads/${x.threadId}/entries/big`;
-    objects.objects.set(sourceKey, Buffer.from("{}"));
-    await f.fx.admin.query(
-      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
-       VALUES ($1, $2, 'big', 'a2', 'message', '{}', $3)`,
-      [team, x.threadId, sourceKey],
-    );
-    // The source goes after the fork's last access check, right before its row is written: the
-    // insert's foreign-key check on threads_forked_from_fk then fails (23503).
-    await f.fx.admin.query(`
-      CREATE FUNCTION test_purge_fork_source() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN
-        IF NEW.title = 'race' THEN
-          DELETE FROM threads WHERE team_id = NEW.team_id AND id = NEW.forked_from_thread_id;
-        END IF;
-        RETURN NEW;
-      END $$;
-      CREATE TRIGGER test_purge_fork_source BEFORE INSERT ON threads
-        FOR EACH ROW EXECUTE FUNCTION test_purge_fork_source();`);
-    try {
+    await offloaded(x.w.team, x.threadId);
+    await withPurgeRace(async () => {
       const before = new Set(objects.objects.keys());
       const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, {
         entry_id: "big",
@@ -291,10 +326,78 @@ describe("a fork racing its source's purge (ac-5)", () => {
       });
       expect([res.status, res.json.code]).toEqual([404, "thread_not_found"]);
       expect(new Set(objects.objects.keys())).toEqual(before);
+    });
+  });
+
+  it("answers thread_not_found when the source and its bodies go while they are copied", async () => {
+    const x = await world();
+    await offloaded(x.w.team, x.threadId);
+    const before = new Set(objects.objects.keys());
+    const real = objects.copy.bind(objects);
+    objects.copy = async () => {
+      await f.fx.admin.query(`DELETE FROM threads WHERE team_id = $1 AND id = $2`, [
+        x.w.team,
+        x.threadId,
+      ]);
+      throw new Error("NoSuchKey");
+    };
+    try {
+      const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, { entry_id: "big" });
+      expect([res.status, res.json.code]).toEqual([404, "thread_not_found"]);
+      expect(new Set(objects.objects.keys())).toEqual(before);
     } finally {
-      await f.fx.admin.query(`
-        DROP TRIGGER test_purge_fork_source ON threads;
-        DROP FUNCTION test_purge_fork_source();`);
+      objects.copy = real;
     }
+  });
+});
+
+describe("fork limits (review-281 L1, L3)", () => {
+  it("refuses a title with control characters like create and rename", async () => {
+    const x = await world();
+    for (const title of ["a\u0000b", "line\nbreak"]) {
+      const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, { title });
+      expect(res.status, JSON.stringify(title)).toBe(400);
+    }
+  });
+
+  it("copies a path longer than one INSERT can hold", async () => {
+    const x = await world();
+    // 2,500 more entries after a2 (one INSERT of 8 columns caps out near 8,190 rows).
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       SELECT $1, $2, 'n' || i, CASE WHEN i = 1 THEN 'a2' ELSE 'n' || (i - 1) END, 'custom',
+              jsonb_build_object('type', 'custom', 'id', 'n' || i, 'timestamp', '2026-10-14T10:00:00Z',
+                                 'parentId', CASE WHEN i = 1 THEN 'a2' ELSE 'n' || (i - 1) END)
+         FROM generate_series(1, 2500) AS i`,
+      [x.w.team, x.threadId],
+    );
+    const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, { entry_id: "n2500" });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const { rows } = await f.fx.admin.query<{ n: string; last: string }>(
+      `SELECT count(*) AS n, (array_agg(entry_id ORDER BY seq DESC))[1] AS last
+         FROM thread_entries WHERE team_id = $1 AND thread_id = $2`,
+      [x.w.team, res.json.thread_id],
+    );
+    expect(rows[0]).toEqual({ n: "2506", last: "n2500" });
+  });
+
+  it("refuses to fork a thread with nothing in it", async () => {
+    const x = await world();
+    const empty = await as(x.author).post("/v1/threads", { title: "empty" });
+    const res = await as(x.author).post(`/v1/threads/${empty.json.thread_id}/fork`, {});
+    expect([res.status, res.json.code]).toEqual([409, "nothing_to_fork"]);
+  });
+
+  it("rate-limits forks per user", async () => {
+    const x = await world();
+    const url = `/v1/threads/${x.threadId}/fork`;
+    for (let i = 0; i < 30; i += 1) {
+      expect((await as(x.author).post(url, { entry_id: "u1" })).status).toBe(201);
+    }
+    const res = await as(x.author).post(url, { entry_id: "u1" });
+    expect([res.status, res.json.code]).toEqual([429, "rate_limited"]);
+    // Another member is not affected.
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+    expect((await as(x.reader).post(url, { entry_id: "u1" })).status).toBe(201);
   });
 });

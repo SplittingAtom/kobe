@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, threadEntries, threads, type KobeTx } from "@kobe/db";
+import { and, asc, eq, isForeignKeyViolation, threadEntries, threads, type KobeTx } from "@kobe/db";
+import type { RateLimitRule } from "../rate-limit.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { resolveAgentPin } from "../agents/versions.js";
 import { recordAudit } from "../audit/record.js";
@@ -9,6 +10,12 @@ import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { createThread, findThread, type ThreadError, type Viewer } from "./repository.js";
 import type { ThreadSummary } from "./schemas.js";
+
+/** Entry rows per INSERT (8 columns each: far below Postgres' 65,535 bind parameters). */
+const INSERT_CHUNK = 1_000;
+
+/** Forks per user per window (`POST /v1/threads/:id/fork`): each one copies rows and objects. */
+export const FORK_RATE: RateLimitRule = { windowMs: 10 * 60_000, max: 30 };
 
 export type ForkResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
 
@@ -42,7 +49,8 @@ export function forkedBlobKey(prefix: string, teamId: string, threadId: string, 
 /**
  * Forks a thread the viewer may read (their own, or one shared to their project: D23) into a new
  * private thread they own: the entries from the root to `entryId` (default: the leaf) are copied
- * with their ids, so the new thread continues from there. Workspace files are not copied. The
+ * with their ids, so the new thread continues from there. Workspace files and the source's uploads
+ * are not copied (they stay the source's, under its retention and holds; review-281 L4). The
  * fork stays in the source's project when the viewer may still create in it, and pins the same
  * agent when they can still start it (else the project's or the team's default).
  *
@@ -78,44 +86,53 @@ export async function forkThread(
       return { ok: true as const, plan: plan.value };
     });
   } catch (err) {
-    if (isSourceGone(err)) return { ok: false, error: "thread_not_found" };
+    if (isForeignKeyViolation(err, FORK_LINK_FK)) return { ok: false, error: "thread_not_found" };
     throw err;
   }
   if (!planned.ok) return planned;
   if ("done" in planned) return planned.done;
-
-  const plan = planned.plan;
-  const teamId = plan.teamId;
   if (!blobs) return { ok: false, error: "entry_offloaded" };
+  return forkWithBodies(run, blobs, id, planned.plan);
+}
+
+/** The fork's link to its source; a 23503 on it means the source was purged meanwhile. */
+const FORK_LINK_FK = "threads_forked_from_fk";
+
+/** Copies the offloaded bodies into the fork's tree, then stores the rows (see `forkThread`). */
+async function forkWithBodies(
+  run: RunAsViewer,
+  blobs: BlobStore,
+  id: string,
+  plan: Plan,
+): Promise<ForkResult> {
   const copies = new Map<string, string>();
   try {
     for (const e of plan.path) {
       if (e.blobRef === null) continue;
-      if (!threadKey(blobs.prefix, teamId, id, e.blobRef)) {
+      if (!threadKey(blobs.prefix, plan.teamId, id, e.blobRef)) {
         await removeCopies(blobs, copies);
         return { ok: false, error: "entry_offloaded" };
       }
-      const to = forkedBlobKey(blobs.prefix, teamId, plan.newId, e.entryId);
+      const to = forkedBlobKey(blobs.prefix, plan.teamId, plan.newId, e.entryId);
       await blobs.objects.copy(e.blobRef, to);
       copies.set(e.entryId, to);
     }
+  } catch (err) {
+    await removeCopies(blobs, copies);
+    // The source may have been purged, its bodies with it, while they were copied (review-281 L2).
+    const gone = await run(async (tx, viewer) => (await findThread(tx, viewer, id)) === null);
+    if (gone) return { ok: false, error: "thread_not_found" };
+    throw err;
+  }
+  try {
     const stored = await run((tx, viewer) => storeFork(tx, viewer, plan, copies));
     if (!stored.ok) await removeCopies(blobs, copies);
     return stored;
   } catch (err) {
     await removeCopies(blobs, copies);
-    if (isSourceGone(err)) return { ok: false, error: "thread_not_found" };
+    if (isForeignKeyViolation(err, FORK_LINK_FK)) return { ok: false, error: "thread_not_found" };
     throw err;
   }
-}
-
-/** The fork-link foreign key refused the insert: the source was purged meanwhile (23503). */
-function isSourceGone(err: unknown): boolean {
-  type PgError = { code?: unknown; constraint?: unknown };
-  const e = err as (PgError & { cause?: PgError }) | null | undefined;
-  return [e, e?.cause].some(
-    (x) => x?.code === "23503" && x.constraint === "threads_forked_from_fk",
-  );
 }
 
 async function removeCopies(blobs: BlobStore, copies: ReadonlyMap<string, string>): Promise<void> {
@@ -160,6 +177,8 @@ async function planFork(
     path.unshift(at);
     at = at.parentId === null ? undefined : byId.get(at.parentId);
   }
+  // Every fork has a fork point, so it can always say it is one (even once its source is gone).
+  if (path.length === 0) return { ok: false, error: "nothing_to_fork" };
   return {
     ok: true,
     value: { source, teamId: viewer.teamId, newId: randomUUID(), title: options.title, path },
@@ -173,6 +192,8 @@ async function storeFork(
   copies: ReadonlyMap<string, string>,
 ): Promise<ForkResult> {
   const { source, path } = plan;
+  const forkPoint = path.at(-1)?.entryId;
+  if (forkPoint === undefined) return { ok: false, error: "nothing_to_fork" };
   if (copies.size > 0) {
     // Time passed while the bodies were copied: the viewer must still be able to read the source.
     const again = await findThread(tx, viewer, source.id);
@@ -200,11 +221,12 @@ async function storeFork(
     agent: pin.value,
     title: plan.title ?? source.title,
     modelAlias: model,
-    forkedFrom: { threadId: source.id, entryId: path.at(-1)?.entryId ?? null },
+    forkedFrom: { threadId: source.id, entryId: forkPoint },
   });
-  if (path.length > 0) {
+  // In chunks, in path order (append order): one INSERT is capped at 65,535 bind parameters.
+  for (let i = 0; i < path.length; i += INSERT_CHUNK) {
     await tx.insert(threadEntries).values(
-      path.map((e) => ({
+      path.slice(i, i + INSERT_CHUNK).map((e) => ({
         teamId: viewer.teamId,
         threadId: created.thread_id,
         entryId: e.entryId,
@@ -215,11 +237,11 @@ async function storeFork(
         createdAt: e.createdAt,
       })),
     );
-    await tx
-      .update(threads)
-      .set({ leafEntryId: path[path.length - 1]?.entryId ?? null })
-      .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, created.thread_id)));
   }
+  await tx
+    .update(threads)
+    .set({ leafEntryId: forkPoint })
+    .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, created.thread_id)));
   await recordAudit(tx, {
     action: "thread.forked",
     teamId: viewer.teamId,
@@ -234,7 +256,7 @@ async function storeFork(
     ok: true,
     thread: {
       ...created,
-      leaf_entry_id: path.at(-1)?.entryId ?? null,
+      leaf_entry_id: forkPoint,
       // The viewer just read the source.
       forked_from_thread_id: source.id,
       forked_from_title: source.title,

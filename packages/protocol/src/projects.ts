@@ -1,6 +1,12 @@
 import { z } from "zod";
 import type { teamRoleSchema } from "./common.js";
-import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.js";
+import {
+  idSchema,
+  threadTitleSchema,
+  timestampSchema,
+  utf8ByteLength,
+  uuidSchema,
+} from "./common.js";
 import { sha256HexSchema, workspacePathSchema } from "./sandbox-wire/workspace-sync.js";
 import { uploadFileNameSchema } from "./uploads.js";
 
@@ -259,7 +265,8 @@ export type ShareThreadRequest = z.infer<typeof shareThreadRequestSchema>;
  */
 export const forkThreadRequestSchema = z.strictObject({
   entry_id: idSchema.optional(),
-  title: z.string().trim().min(1).max(200).optional(),
+  /** Same rules as create and rename: no control characters (a NUL would be a 500). */
+  title: threadTitleSchema.optional(),
 });
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 export const forkThreadResponseSchema = z.strictObject({ thread_id: uuidSchema });

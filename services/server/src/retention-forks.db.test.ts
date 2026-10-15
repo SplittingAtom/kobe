@@ -3,7 +3,7 @@ import pg from "pg";
 import pino from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runWithAuditContext } from "./audit/context.js";
-import { purgeThreads, runRetentionPass } from "./retention/index.js";
+import { purgeDepartedMember, purgeThreads, runRetentionPass } from "./retention/index.js";
 import { createTeamWithAdmin } from "./teams/members.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -24,13 +24,22 @@ const ago = (days: number) => new Date(Date.now() - days * DAY);
 const noAudit = async () => {};
 
 /** A thread with one entry (superuser fixture); a fork's link is set at INSERT (KOBE-215). */
-async function thread(spec: { deletedAt?: Date; forkOf?: string } = {}): Promise<string> {
+async function thread(
+  spec: { deletedAt?: Date; forkOf?: string; owner?: string } = {},
+): Promise<string> {
   const id = randomUUID();
   await h.admin.query(
     `INSERT INTO threads (team_id, id, owner_user_id, title, deleted_at,
                           forked_from_thread_id, forked_at_entry_id)
      VALUES ($1, $2, $3, 't', $4, $5, $6)`,
-    [team, id, ids.bob, spec.deletedAt ?? null, spec.forkOf ?? null, spec.forkOf ? "e1" : null],
+    [
+      team,
+      id,
+      spec.owner ?? ids.bob,
+      spec.deletedAt ?? null,
+      spec.forkOf ?? null,
+      spec.forkOf ? "e1" : null,
+    ],
   );
   await h.admin.query(
     `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
@@ -112,10 +121,11 @@ describe("purging a source whose fork is busy (KOBE-216 ac-4)", () => {
       const outcome = await trashPurge();
       // Never waits for the lock (lock_timeout is 5 s): skipped, not failed.
       expect(Date.now() - started).toBeLessThan(3_000);
-      expect(outcome).toMatchObject({ status: "done", counts: { threads: 1 } });
+      // Not complete: the source was left out, the other Trash thread went.
+      expect(outcome).toMatchObject({ status: "partial", skipped: 1, counts: { threads: 1 } });
       expect(await threadIds()).toEqual([source, fork].sort());
+      expect(await threadIds()).not.toContain(other);
       expect(await link(fork)).toBe(source);
-      expect(other).not.toBe(source);
     } finally {
       await held.release();
     }
@@ -135,7 +145,7 @@ describe("purging a source whose fork is busy (KOBE-216 ac-4)", () => {
         limits: { threads: 1, entries: 1_000 },
         maxBatches: 10,
       });
-      expect(outcome).toMatchObject({ status: "done", counts: { threads: 1 } });
+      expect(outcome).toMatchObject({ status: "partial", skipped: 2, counts: { threads: 1 } });
       expect(await threadIds()).not.toContain(idle);
     } finally {
       await Promise.all(holds.map((x) => x.release()));
@@ -166,6 +176,25 @@ describe("purging a source whose fork is busy (KOBE-216 ac-4)", () => {
     }
     expect(await threadIds()).toEqual([source, fork].sort());
     await runRetentionPass({ db: h.deps.database.db, logger: log });
+    expect(await threadIds()).toEqual([fork]);
+  });
+
+  it("offboarding is not complete while a departed member's thread has a busy fork", async () => {
+    const departed = await h.createUser(`gone-${randomUUID().slice(0, 8)}@forks.test`);
+    const source = await thread({ owner: departed });
+    const fork = await thread({ forkOf: source });
+    const held = await holdRow(fork);
+    try {
+      const result = await purgeDepartedMember(h.deps.database.db, {
+        teamId: team,
+        userId: departed,
+      });
+      expect(result.threads).toMatchObject({ status: "partial", skipped: 1 });
+    } finally {
+      await held.release();
+    }
+    const again = await purgeDepartedMember(h.deps.database.db, { teamId: team, userId: departed });
+    expect(again.threads).toMatchObject({ status: "done", counts: { threads: 1 } });
     expect(await threadIds()).toEqual([fork]);
   });
 

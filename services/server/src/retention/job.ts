@@ -134,14 +134,22 @@ function compactionRecorder(teamId: string) {
   };
 }
 
-function logHeld(deps: PassDeps, teamId: string, step: string, outcome: PurgeOutcome): void {
+function logOutcome(deps: PassDeps, teamId: string, step: string, outcome: PurgeOutcome): void {
   // Expected when a hold covers part of the team: the selection excludes held threads, so this
   // only happens when a guard caught something the selection missed. Logged without details.
   if (outcome.status === "held")
     deps.logger.warn({ teamId, step }, "retention purge skipped: held");
-  // A lock wait or deadlock rolled one batch back (KOBE-216): not a failure, the next pass retries.
+  // Not failures, but not complete either (KOBE-216): the next pass retries what is left.
   if (outcome.status === "busy")
-    deps.logger.info({ teamId, step }, "retention purge stopped early: busy");
+    deps.logger.warn(
+      { teamId, step, purged: outcome.counts.threads },
+      "retention purge stopped early: a lock wait timed out or deadlocked",
+    );
+  if (outcome.status === "partial")
+    deps.logger.warn(
+      { teamId, step, purged: outcome.counts.threads, skipped: outcome.skipped },
+      "retention purge left out threads whose forks are busy",
+    );
 }
 
 /** The team's effective retention window in days (null: forever), read at the start of the step. */
@@ -201,7 +209,7 @@ async function teamPass(
     const outcome = await purgeThreads(db, teamId, selection, purgeRecorder(teamId, reason), {
       stop,
     });
-    logHeld(deps, teamId, reason, outcome);
+    logOutcome(deps, teamId, reason, outcome);
     return outcome.counts;
   };
 

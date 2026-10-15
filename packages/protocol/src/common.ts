@@ -38,6 +38,16 @@ export const toolInputSchema: z.ZodType<JsonObject> = z
  */
 // eslint-disable-next-line no-control-regex
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]+$/u;
+
+/** Longest thread title (create, rename and fork; the web's title fields use it too). */
+export const THREAD_TITLE_MAX = 200;
+/** A thread title as a client sends it: trimmed, 1 to {@link THREAD_TITLE_MAX}, no control characters. */
+export const threadTitleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(THREAD_TITLE_MAX)
+  .regex(NO_CONTROL_CHARS);
 export const idSchema = z.string().min(1).max(128).regex(NO_CONTROL_CHARS);
 
 /**

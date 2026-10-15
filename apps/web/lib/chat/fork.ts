@@ -13,13 +13,28 @@ const EXCERPT_MAX = 80;
 /** Neutral text for a fork whose source the viewer can't open (or that no longer exists). */
 export const HIDDEN_SOURCE = "a thread you can't open";
 
+/** Where a message forks: the entry the fork ends at, and a prompt to re-send there. */
+export interface ForkPoint {
+  readonly entryId: string;
+  /** Forking at a prompt: its text, put in the new thread's composer (not sent). */
+  readonly draft?: string;
+}
+
 /**
- * The entry a message forks at: a prompt's own entry, or an answer's last entry (its tool calls
- * and results come along). None while the prompt is pending or the answer is still being written.
+ * Where a message forks. An answer: at its last entry (its tool calls and results come along). A
+ * prompt: at the entry before it, with the prompt as the new thread's draft, so the fork doesn't
+ * end on an unanswered prompt (the next send would chain two user turns). None while a prompt is
+ * pending or an answer is still being written, nor for a prompt with nothing above it.
  */
-export function forkEntryOf(meta: KobeMessageMeta | undefined): string | undefined {
-  if (meta?.kind === "user") return meta.pending ? undefined : meta.entryId;
-  if (meta?.kind === "assistant") return meta.live ? undefined : meta.entryIds.at(-1);
+export function forkPointOf(meta: KobeMessageMeta | undefined): ForkPoint | undefined {
+  if (meta?.kind === "user") {
+    if (meta.pending || meta.entryId === undefined || meta.parentEntryId === null) return undefined;
+    return { entryId: meta.parentEntryId, draft: meta.text };
+  }
+  if (meta?.kind === "assistant") {
+    const last = meta.live ? undefined : meta.entryIds.at(-1);
+    return last === undefined ? undefined : { entryId: last };
+  }
   return undefined;
 }
 

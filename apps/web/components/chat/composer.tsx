@@ -2,7 +2,14 @@
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { MicIcon } from "lucide-react";
-import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type KeyboardEvent,
+} from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
@@ -43,6 +50,12 @@ export function Composer({
   const blocker = session.attachments.blocker(draft);
   const picker = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  // A fork at a prompt opens with that prompt as its draft (KOBE-216), once.
+  useEffect(() => {
+    if (remoteId === undefined) return;
+    const prefill = session.takeComposerDraft(remoteId);
+    if (prefill !== undefined) aui.composer.setText(prefill);
+  }, [remoteId, session, aui]);
 
   const attach = (list: FileList | null) => {
     if (list && list.length > 0) session.attachments.add(draft, [...list], remoteId);

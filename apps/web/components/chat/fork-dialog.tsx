@@ -2,34 +2,33 @@
 
 import { createContext, useContext, useState, type FormEvent } from "react";
 import { Dialog } from "radix-ui";
-import { forkEntryOf } from "../../lib/chat/fork";
+import { THREAD_TITLE_MAX } from "@kobe/protocol";
+import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
-
-/** Same limit as the server's thread titles. */
-const TITLE_MAX = 200;
 
 /** Opens a thread in the chat (the `?thread=` URL); provided by `ThreadView`. */
 export const OpenThreadContext = createContext<((threadId: string) => void) | undefined>(undefined);
 
 /**
  * "Fork to a new thread" on a message (CE16, KOBE-216): asks for a title, then the server copies
- * the conversation up to this message into a new thread of yours in the same project and opens
- * it. Shown for committed messages only (a pending prompt or a live answer has no entry yet).
+ * the conversation into a new thread of yours in the same project and opens it: up to an answer,
+ * or up to just before a prompt, which then waits in the new thread's composer (`forkPointOf`).
+ * Shown for committed messages only (a pending prompt or a live answer has no entry yet).
  */
 export function ForkAction({ meta }: { readonly meta: KobeMessageMeta | undefined }) {
   const [open, setOpen] = useState(false);
   const extras = useKobeExtras();
-  const entryId = forkEntryOf(meta);
-  if (entryId === undefined || !extras?.controller || extras.state.threadId === null) return null;
+  const point = forkPointOf(meta);
+  if (point === undefined || !extras?.controller || extras.state.threadId === null) return null;
   return (
     <>
       <IconAction command="fork-thread" size="sm" onClick={() => setOpen(true)} />
       {open && (
         <ForkDialog
-          entryId={entryId}
+          point={point}
           defaultTitle={extras.state.summary?.title ?? ""}
           onOpenChange={setOpen}
         />
@@ -39,11 +38,11 @@ export function ForkAction({ meta }: { readonly meta: KobeMessageMeta | undefine
 }
 
 function ForkDialog({
-  entryId,
+  point,
   defaultTitle,
   onOpenChange,
 }: {
-  readonly entryId: string;
+  readonly point: ForkPoint;
   readonly defaultTitle: string;
   readonly onOpenChange: (open: boolean) => void;
 }) {
@@ -62,12 +61,17 @@ function ForkDialog({
     setError(null);
     try {
       const name = title.trim();
-      const res = await controller.fork({ entryId, ...(name === "" ? {} : { title: name }) });
+      const res = await controller.fork({
+        entryId: point.entryId,
+        ...(name === "" ? {} : { title: name }),
+      });
       if (!res.ok) {
         setError(res.error.message);
         return;
       }
       onOpenChange(false);
+      // Forked at a prompt: it waits in the new thread's composer, to edit or send.
+      if (point.draft) session.setComposerDraft(res.data.threadId, point.draft);
       session.threadCreated(); // the list reads again: the fork is yours
       openThread?.(res.data.threadId);
     } finally {
@@ -85,8 +89,10 @@ function ForkDialog({
         >
           <Dialog.Title className="m-0 text-base font-semibold">Fork to a new thread</Dialog.Title>
           <Dialog.Description className="text-muted-foreground m-0 text-sm">
-            The new thread starts with this conversation up to this message and continues on its
-            own. This thread stays as it is.
+            {point.draft === undefined
+              ? "The new thread starts with this conversation up to this answer and continues on its own."
+              : "The new thread starts with this conversation up to just before this message, which waits in its message box for you to edit or send."}{" "}
+            Attached files are not copied. This thread stays as it is.
           </Dialog.Description>
           <form onSubmit={(e) => void submit(e)} className="grid gap-3">
             <label className="grid gap-1 text-sm">
@@ -94,7 +100,7 @@ function ForkDialog({
               <input
                 type="text"
                 value={title}
-                maxLength={TITLE_MAX}
+                maxLength={THREAD_TITLE_MAX}
                 disabled={pending}
                 autoFocus
                 onChange={(e) => setTitle(e.target.value)}

@@ -4436,7 +4436,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           },
           "model": {
             "anyOf": [
@@ -4465,7 +4465,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200,
-                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
               },
               {
                 "type": "null"
@@ -4513,7 +4513,8 @@
           "title": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 200
+            "maxLength": 200,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
         "additionalProperties": false

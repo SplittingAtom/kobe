@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { forkEntryOf, forkHint, forkOrigin } from "./fork";
+import { forkHint, forkOrigin, forkPointOf } from "./fork";
 import type { ThreadSummary } from "./types";
 
 const summary = (over: Partial<ThreadSummary>): ThreadSummary => ({
@@ -19,28 +19,34 @@ const summary = (over: Partial<ThreadSummary>): ThreadSummary => ({
   ...over,
 });
 
-describe("forkEntryOf (KOBE-216)", () => {
-  it("forks at a committed prompt or an answer's last entry", () => {
+describe("forkPointOf (KOBE-216)", () => {
+  it("forks a prompt at the entry before it, with the prompt as the draft", () => {
     expect(
-      forkEntryOf({ kind: "user", entryId: "u1", parentEntryId: null, text: "q", pending: false }),
-    ).toBe("u1");
-    expect(forkEntryOf({ kind: "assistant", entryIds: ["a1", "t1", "a2"], live: false })).toBe(
-      "a2",
-    );
+      forkPointOf({ kind: "user", entryId: "u2", parentEntryId: "a1", text: "q", pending: false }),
+    ).toEqual({ entryId: "a1", draft: "q" });
   });
 
-  it("offers nothing while the prompt is pending or the answer is live", () => {
+  it("forks an answer at its last entry", () => {
+    expect(forkPointOf({ kind: "assistant", entryIds: ["a1", "t1", "a2"], live: false })).toEqual({
+      entryId: "a2",
+    });
+  });
+
+  it("offers nothing while pending or live, or for a prompt with nothing above it", () => {
     expect(
-      forkEntryOf({
+      forkPointOf({
         kind: "user",
         entryId: undefined,
-        parentEntryId: null,
+        parentEntryId: "a1",
         text: "",
         pending: true,
       }),
     ).toBeUndefined();
-    expect(forkEntryOf({ kind: "assistant", entryIds: ["a1"], live: true })).toBeUndefined();
-    expect(forkEntryOf(undefined)).toBeUndefined();
+    expect(
+      forkPointOf({ kind: "user", entryId: "u1", parentEntryId: null, text: "q", pending: false }),
+    ).toBeUndefined();
+    expect(forkPointOf({ kind: "assistant", entryIds: ["a1"], live: true })).toBeUndefined();
+    expect(forkPointOf(undefined)).toBeUndefined();
   });
 });
 
