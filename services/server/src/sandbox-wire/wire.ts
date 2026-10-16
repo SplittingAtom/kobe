@@ -8,7 +8,7 @@ import {
   type ToolRegistry,
 } from "@kobe/protocol";
 import { z } from "zod";
-import { telemetryState } from "@kobe/telemetry";
+import { recordRunRootSpan, spanRelay, telemetryState } from "@kobe/telemetry";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
@@ -30,6 +30,7 @@ import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
 import { CommandRouter } from "./router.js";
 import { RelayBudget } from "./trace-budget.js";
+import { TraceIntake } from "./trace-intake.js";
 import { sweepOnce, type SweepResult } from "./sweeper.js";
 import type {
   ApprovalBroker,
@@ -203,9 +204,14 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   const traceRelay =
     telemetry.enabled && options.traceSpanKey
       ? {
-          key: options.traceSpanKey,
-          budget: new RelayBudget(),
-          captureContent: telemetry.captureContent,
+          runs: new TraceIntake({
+            key: options.traceSpanKey,
+            budget: new RelayBudget(),
+            captureContent: telemetry.captureContent,
+            counters: metrics,
+            offer: (spans) => spanRelay()?.offer(spans) ?? 0,
+            recordRoot: recordRunRootSpan,
+          }),
         }
       : undefined;
   const router = new CommandRouter({
@@ -523,6 +529,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       router.close();
       // Sandboxes reconnect to another replica and resume from their durable cursors.
       for (const c of registry.all()) c.close("internal", "server shutting down");
+      // Ended runs' roots now (their grace timers would outlive the replica).
+      traceRelay?.runs.close();
       await bus.close();
     },
   };

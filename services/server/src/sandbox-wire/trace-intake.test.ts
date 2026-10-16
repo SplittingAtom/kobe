@@ -3,7 +3,7 @@ import { deriveTraceSpanKey, mapSandboxSpanId } from "@kobe/protocol/node";
 import type { RelaySpan, RunRootSpan } from "@kobe/telemetry";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayBudget } from "./trace-budget.js";
-import { TraceIntake, type TraceCounters } from "./trace-intake.js";
+import { TraceFrameRate, TraceIntake, type TraceCounters } from "./trace-intake.js";
 
 const TEAM = "0b6f1c2e-6d1a-4c56-9a43-1f0e2d3c4b5a";
 const USER = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
@@ -14,6 +14,7 @@ const COMMAND = "c0c0c0c0c0c0c0c0";
 const KEY = deriveTraceSpanKey(new TextEncoder().encode("k".repeat(32)));
 const T0 = 1_792_000_000_000;
 const map = (id: string) => mapSandboxSpanId(KEY, RUN, id);
+const OWNER = { teamId: TEAM, userId: USER, sandboxId: SANDBOX };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -31,9 +32,6 @@ function setup(over: { captureContent?: boolean; budget?: RelayBudget; now?: () 
   const intake = new TraceIntake({
     key: KEY,
     budget: over.budget ?? new RelayBudget(),
-    teamId: TEAM,
-    userId: USER,
-    sandboxId: SANDBOX,
     counters,
     captureContent: over.captureContent ?? false,
     offer: (spans) => {
@@ -43,7 +41,7 @@ function setup(over: { captureContent?: boolean; budget?: RelayBudget; now?: () 
     recordRoot: (root) => roots.push(root),
     now: over.now ?? (() => now),
   });
-  intake.track(RUN, THREAD, new Date(T0));
+  intake.track(RUN, THREAD, new Date(T0), OWNER);
   intake.traced(RUN, COMMAND);
   return {
     intake,
@@ -92,7 +90,7 @@ describe("TraceIntake (KOBE-274)", () => {
   it("exports spans in the run's trace with remapped ids and server-stamped identity", () => {
     const { intake, exported, counters } = setup();
     intake.noteToolCall(RUN, "call_1", "bash");
-    intake.accept(frame([span(), tool()]));
+    intake.accept(frame([span(), tool()]), OWNER);
     expect(counters.traceSpansRelayed).toBe(2);
     const [run, call] = exported;
     expect(run).toMatchObject({
@@ -119,24 +117,24 @@ describe("TraceIntake (KOBE-274)", () => {
 
   it("strips content at intake with capture off, keeps it with capture on (ac-4)", () => {
     const off = setup();
-    off.intake.accept(frame([tool()]));
+    off.intake.accept(frame([tool()]), OWNER);
     expect(JSON.stringify(off.exported)).not.toMatch(/SECRET/);
     const on = setup({ captureContent: true });
-    on.intake.accept(frame([tool()]));
+    on.intake.accept(frame([tool()]), OWNER);
     expect(on.exported[0]?.attributes["kobe.tool.input"]).toBe("SECRET INPUT");
   });
 
   it("names a tool only from the server's decision; an unknown call id is dropped", () => {
     const { intake, exported } = setup();
-    intake.accept(frame([tool()]));
+    intake.accept(frame([tool()]), OWNER);
     expect(exported[0]?.attributes["kobe.tool.name"]).toBe("unknown");
     expect(exported[0]?.attributes).not.toHaveProperty("kobe.tool.call_id");
   });
 
   it("drops invalid spans one by one, duplicates across frames, and counts them", () => {
     const { intake, exported, counters, roots, advance } = setup();
-    intake.accept(frame([span(), { junk: true }, span({ span_id: "ZZ" })], { dropped: 4 }));
-    intake.accept(frame([span()]));
+    intake.accept(frame([span(), { junk: true }, span({ span_id: "ZZ" })], { dropped: 4 }), OWNER);
+    intake.accept(frame([span()]), OWNER);
     expect(exported).toHaveLength(1);
     expect(counters.traceSpansDropped).toBe(3);
     intake.ended(RUN);
@@ -163,6 +161,7 @@ describe("TraceIntake (KOBE-274)", () => {
         }),
         span({ span_id: "1111111111111111", parent_span_id: "9999999999999999" }),
       ]),
+      OWNER,
     );
     expect(exported.map((s) => s.spanId)).toEqual([
       map("aaaaaaaaaaaaaaaa"),
@@ -178,6 +177,7 @@ describe("TraceIntake (KOBE-274)", () => {
         span({ start_ms: 1e12, end_ms: T0 + 100 }),
         span({ span_id: "3333333333333333", start_ms: T0 + 9e9, end_ms: T0 + 9e9 }),
       ]),
+      OWNER,
     );
     expect(exported[0]?.startMs).toBe(T0 - 60_000);
     expect(exported[1]?.startMs).toBe(T0 + 60_000);
@@ -187,9 +187,9 @@ describe("TraceIntake (KOBE-274)", () => {
   it("takes nothing for a run started without a trace context or a foreign thread", () => {
     const { intake, exported, counters } = setup();
     const other = "9e8d7c6b-5a49-4382-b170-6f5e4d3c2b1a";
-    intake.track(other, THREAD, null);
-    intake.accept(frame([span()], { run_id: other }));
-    intake.accept(frame([span()], { thread_id: other }));
+    intake.track(other, THREAD, null, OWNER);
+    intake.accept(frame([span()], { run_id: other }), OWNER);
+    intake.accept(frame([span()], { thread_id: other }), OWNER);
     expect(exported).toHaveLength(0);
     expect(counters.traceFramesDropped).toBe(2);
   });
@@ -200,10 +200,22 @@ describe("TraceIntake (KOBE-274)", () => {
       () => T0,
     );
     const { intake, exported } = setup({ budget });
-    intake.accept(frame([0, 1, 2, 3].map((i) => span({ span_id: `${i + 1}`.padStart(16, "0") }))));
+    intake.accept(
+      frame([0, 1, 2, 3].map((i) => span({ span_id: `${i + 1}`.padStart(16, "0") }))),
+      OWNER,
+    );
     expect(exported).toHaveLength(2);
+    const rate = new TraceFrameRate(
+      intake.tuning,
+      {
+        traceSpansRelayed: 0,
+        traceSpansDropped: 0,
+        traceFramesDropped: 0,
+      },
+      () => T0,
+    );
     let admitted = 0;
-    for (let i = 0; i < 30; i++) if (intake.admitFrame()) admitted++;
+    for (let i = 0; i < 30; i++) if (rate.admit()) admitted++;
     expect(admitted).toBe(20);
   });
 
@@ -211,7 +223,7 @@ describe("TraceIntake (KOBE-274)", () => {
     vi.useFakeTimers();
     const { intake, roots } = setup({ now: () => Date.now() });
     intake.ended(RUN);
-    expect(intake.recentlyEnded(RUN, THREAD)).toBe(true);
+    expect(intake.recentlyEnded(RUN, THREAD, OWNER)).toBe(true);
     expect(roots).toHaveLength(0);
     vi.advanceTimersByTime(30_000);
     expect(roots[0]).toMatchObject({
@@ -219,8 +231,49 @@ describe("TraceIntake (KOBE-274)", () => {
       startMs: T0,
       attributes: { "session.id": THREAD, "user.id": USER, "kobe.run_id": RUN },
     });
-    expect(intake.recentlyEnded(RUN, THREAD)).toBe(false);
+    expect(intake.recentlyEnded(RUN, THREAD, OWNER)).toBe(false);
     expect(runRootSpanId(RUN)).toHaveLength(16);
+  });
+});
+
+describe("TraceIntake per replica (KOBE-274 review SF3, N1, N4)", () => {
+  it("keeps a run's seen-set and command spans when the run is leased again (reconnect)", () => {
+    const { intake, exported } = setup();
+    intake.accept(frame([span()]), OWNER);
+    intake.track(RUN, THREAD, new Date(T0), { ...OWNER, sandboxId: SANDBOX });
+    intake.accept(frame([span(), span({ span_id: "5555555555555555" })]), OWNER);
+    expect(exported.map((s) => s.spanId)).toEqual([
+      map("1111111111111111"),
+      map("5555555555555555"),
+    ]);
+    expect(exported[1]?.parentSpanId).toBe(COMMAND);
+  });
+
+  it("takes nothing for a run of another team, whatever the frame says", () => {
+    const { intake, exported } = setup();
+    intake.accept(frame([span()]), { ...OWNER, teamId: "9e8d7c6b-5a49-4382-b170-6f5e4d3c2b1a" });
+    expect(exported).toHaveLength(0);
+  });
+
+  it("caps the agent's reported drop count per run", () => {
+    const { intake, roots } = setup();
+    intake.accept(frame([span()], { dropped: 1_000_000 }), OWNER);
+    intake.accept(frame([span({ span_id: "6666666666666666" })], { dropped: 1_000_000 }), OWNER);
+    intake.ended(RUN);
+    intake.close();
+    expect(roots[0]?.attributes["kobe.trace.sandbox_spans_dropped"]).toBe(100_000);
+  });
+
+  it("exports a decided call id only when it is a plain id", () => {
+    const { intake, exported } = setup();
+    const odd = "call with spaces: the secret plan";
+    intake.noteToolCall(RUN, odd, "bash");
+    intake.accept(
+      frame([tool({ attributes: { "kobe.tool.call_id": odd, "kobe.tool.outcome": "ok" } })]),
+      OWNER,
+    );
+    expect(exported[0]?.attributes["kobe.tool.name"]).toBe("bash");
+    expect(exported[0]?.attributes).not.toHaveProperty("kobe.tool.call_id");
   });
 });
 

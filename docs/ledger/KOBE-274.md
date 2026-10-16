@@ -70,6 +70,20 @@ workspace_sync`), strict attribute set per name; no token counts on sandbox span
   model-gateway image; CI's k3d install has no collector. Tracing is on for the whole e2e suite
   (endpoint at install; the sink rule merged into the proxies' later extraEgress overrides).
 
+- **Security review fixes (SF1–SF5):** the trace frame rate is charged on the decoded type (no
+  prefix sniff) and the replica budget before any span parse or HMAC; the public API no longer
+  joins a caller's trace; per-run state (cap, seen-set, command spans) lives per replica and
+  survives reconnects there (cross-replica resume starts afresh, documented); `mcp.tools/call`
+  names the tool from the server's decision (`unknown` before) and drops the sandbox's thread
+  header; negative tests added (relay off, listener wiring, key order, e2e sandbox → sink blocked).
+- **Review nits:** call ids exported only as plain tokens (N1); agent drop counts capped per run
+  (N4); late frame after both the 256 ended-lease cap and the 30 s grace stays a violation,
+  commented (N2); a resumed run on another replica is marked traced (N3, same run and team);
+  the gateway maps every incoming parent through the HMAC, the agent never sends the command id
+  (N5); `user.id` equal on both sides because delivery refuses a run whose `ownerUserId` is not
+  the connection's user (N6); tracing is on for the whole e2e suite, so the off path has unit and
+  DB tests but no e2e run (N8).
+
 ## Open questions (for Chris or the coordinator)
 
 - ac-2 e2e is written (`e2e/run.sh` "run traces (KOBE-274)", after KOBE-41's chat) but not run

@@ -1812,6 +1812,7 @@ const sessioned = spans.filter((s) => ["kobe.run", "sandbox.command", "sandbox.r
 out("session", sessioned.length >= 4 && sessioned.every((s) => s.attributes["session.id"] === threadId && s.attributes["user.id"] === userId) ? "ok" : "no");
 out("content_keys", spans.flatMap((s) => Object.keys(s.attributes)).filter((k) => /^(gen_ai\.(prompt|completion)|kobe\.tool\.(input|output)|url\.query)/.test(k)).length);
 out("emails", JSON.stringify(spans).includes("@e2e.test") ? 1 : 0);
+out("names", /"(E2E owner|Owner)"/i.test(JSON.stringify(spans)) ? 1 : 0);
 JS
     chat_thread=$(printf '%s\n' "$chat_out" | sed -n 's/^thread_id=//p')
     traces=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$TRACE_JS" \
@@ -1827,6 +1828,19 @@ JS
     contains "every run span carries the thread as session.id and the owner as user.id" '^session=ok$' "$traces"
     contains "no content attribute left the server with capture off" '^content_keys=0$' "$traces"
     contains "no email in any span" '^emails=0$' "$traces"
+    contains "no display name in any span" '^names=0$' "$traces"
+    # ac-3 at the network level: the sandbox cannot reach the collector at all (NetworkPolicy; it
+    # has no DNS, so dial the sink's ClusterIP directly).
+    sink_ip=$($KUBECTL -n "$OTEL_NS" get svc otlp -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+    trace_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    trace_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=${trace_claim:-none}" -o name 2>/dev/null | head -1)
+    sink_probe=$($KUBECTL -n "$TEAM_NS" exec "${trace_pod:-pod/none}" -c agent -- node -e "
+      const s = require('net').connect({ host: '${sink_ip:-0.0.0.0}', port: 4318, timeout: 3000 });
+      s.on('connect', () => { console.log('sink=REACHED'); process.exit(0); });
+      s.on('timeout', () => { console.log('sink=BLOCKED'); process.exit(0); });
+      s.on('error', () => { console.log('sink=BLOCKED'); process.exit(0); });" 2>&1 || true)
+    contains "control: the OTLP sink has a ClusterIP (and took the server's spans above)" '^[0-9a-f.:]+$' "$sink_ip"
+    contains "the sandbox cannot reach the OTLP sink (NetworkPolicy)" '^sink=BLOCKED$' "$sink_probe"
     seen_now=$(probe "$NS" "$(answers "$LLM/_seen")")
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"

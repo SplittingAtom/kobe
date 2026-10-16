@@ -24,10 +24,13 @@ import {
 import type { RelayBudget } from "./trace-budget.js";
 
 /**
- * Relayed sandbox spans, one instance per sandbox connection (KOBE-274; contract in
- * `@kobe/protocol` sandbox-wire/trace-frames.ts). The connection checks the lease first; this
- * class takes what the lease allowed, re-attributes it and hands it to the relay queue. It never
- * blocks and never throws at the connection: everything it refuses is dropped and counted.
+ * Relayed sandbox spans, one instance per replica (KOBE-274; contract in `@kobe/protocol`
+ * sandbox-wire/trace-frames.ts). Per-run state (span cap, seen-set, command span ids) lives here,
+ * not on a connection, so a reconnect to this replica keeps it; it is bounded and freed after the
+ * run's grace period. A run resumed on another replica starts afresh there (documented). The
+ * connection checks the lease and the frame rate first ({@link TraceFrameRate}); this class takes
+ * what the lease allowed, re-attributes it and hands it to the relay queue. It never blocks and
+ * never throws at the connection: everything it refuses is dropped and counted.
  */
 export interface TraceIntakeTuning {
   readonly framesPerSecond: number;
@@ -36,8 +39,10 @@ export interface TraceIntakeTuning {
   readonly lateGraceMs: number;
   readonly clockSkewMs: number;
   readonly maxDepth: number;
-  /** Runs tracked per connection; the oldest ended one goes first. */
+  /** Runs tracked per replica; ended ones go first, then the oldest. */
   readonly maxRuns: number;
+  /** Most agent-reported drops counted per run (the number is the sandbox's). */
+  readonly maxAgentDropped: number;
 }
 
 export const TRACE_INTAKE_DEFAULTS: TraceIntakeTuning = {
@@ -47,7 +52,8 @@ export const TRACE_INTAKE_DEFAULTS: TraceIntakeTuning = {
   lateGraceMs: TRACE_SPANS_LATE_GRACE_MS,
   clockSkewMs: TRACE_SPAN_CLOCK_SKEW_MS,
   maxDepth: TRACE_SPAN_MAX_DEPTH,
-  maxRuns: 512,
+  maxRuns: 4_096,
+  maxAgentDropped: 100_000,
 };
 
 export interface TraceCounters {
@@ -59,10 +65,6 @@ export interface TraceCounters {
 export interface TraceIntakeDeps {
   readonly key: Uint8Array;
   readonly budget: RelayBudget;
-  readonly teamId: string;
-  /** The sandbox's member, who owns every thread leased to it (`user.id`). */
-  readonly userId: string;
-  readonly sandboxId: string;
   readonly counters: TraceCounters;
   /** Content capture (site setting): off strips content keys at intake already. */
   readonly captureContent: boolean;
@@ -73,7 +75,16 @@ export interface TraceIntakeDeps {
   readonly tuning?: Partial<TraceIntakeTuning>;
 }
 
+/** Who a run belongs to, from the connection that holds its lease (never from a frame). */
+export interface RunOwner {
+  readonly teamId: string;
+  /** The sandbox's member, who owns every thread leased to it (`user.id`). */
+  readonly userId: string;
+  readonly sandboxId: string;
+}
+
 interface RunTrace {
+  owner: RunOwner;
   readonly threadId: string;
   readonly startedAtMs: number;
   /** The run's start carried a trace context (only then are its frames taken). */
@@ -87,32 +98,43 @@ interface RunTrace {
   /** Tool call id → tool name, from the server's own policy decisions. */
   readonly tools: Map<string, string>;
   dropped: number;
+  agentDropped: number;
   endedAtMs: number | undefined;
   rootTimer: NodeJS.Timeout | undefined;
 }
 
 const UNKNOWN_TOOL = "unknown";
+/** A tool call id worth exporting: a short plain token, never free text. */
+const CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 export class TraceIntake {
   readonly #deps: TraceIntakeDeps;
   readonly #tuning: TraceIntakeTuning;
   readonly #now: () => number;
   readonly #runs = new Map<string, RunTrace>();
-  #tokens: number;
-  #tokensAt: number;
 
   constructor(deps: TraceIntakeDeps) {
     this.#deps = deps;
     this.#tuning = { ...TRACE_INTAKE_DEFAULTS, ...deps.tuning };
     this.#now = deps.now ?? Date.now;
-    this.#tokens = this.#tuning.framesBurst;
-    this.#tokensAt = this.#now();
   }
 
-  /** A run leased to this connection (every run gets a `kobe.run` root when it ends here). */
-  track(runId: string, threadId: string, startedAt: Date | null): void {
-    if (this.#runs.has(runId)) return;
+  get tuning(): TraceIntakeTuning {
+    return this.#tuning;
+  }
+
+  /**
+   * A run leased to a connection of this replica (every run gets a `kobe.run` root when it ends
+   * here). Leased again after a reconnect: its state is kept, only the holder is updated.
+   */
+  track(runId: string, threadId: string, startedAt: Date | null, owner: RunOwner): void {
+    const known = this.#runs.get(runId);
+    if (known) {
+      if (known.threadId === threadId && known.owner.teamId === owner.teamId) known.owner = owner;
+      return;
+    }
     this.#runs.set(runId, {
+      owner,
       threadId,
       startedAtMs: startedAt?.getTime() ?? this.#now(),
       traced: false,
@@ -121,10 +143,16 @@ export class TraceIntake {
       runSpanId: undefined,
       tools: new Map(),
       dropped: 0,
+      agentDropped: 0,
       endedAtMs: undefined,
       rootTimer: undefined,
     });
     this.#evict();
+  }
+
+  /** Whether the replica already knows the run as traced (a resume on this replica). */
+  isTraced(runId: string): boolean {
+    return this.#runs.get(runId)?.traced === true;
   }
 
   /**
@@ -156,27 +184,18 @@ export class TraceIntake {
     run.rootTimer.unref();
   }
 
-  /** A run of this connection that ended less than the grace period ago (lease maybe forgotten). */
-  recentlyEnded(runId: string, threadId: string): boolean {
+  /**
+   * A run of this team, on this sandbox, that ended less than the grace period ago (its lease may
+   * be forgotten by the connection's count cap; a late frame for it is dropped, not a violation).
+   */
+  recentlyEnded(runId: string, threadId: string, owner: RunOwner): boolean {
     const run = this.#runs.get(runId);
-    return run?.endedAtMs !== undefined && run.threadId === threadId;
-  }
-
-  /** Per-connection frame rate, checked before the frame is parsed; false = drop it. */
-  admitFrame(): boolean {
-    const now = this.#now();
-    const elapsed = Math.max(0, now - this.#tokensAt) / 1000;
-    this.#tokensAt = now;
-    this.#tokens = Math.min(
-      this.#tuning.framesBurst,
-      this.#tokens + elapsed * this.#tuning.framesPerSecond,
+    return (
+      run?.endedAtMs !== undefined &&
+      run.threadId === threadId &&
+      run.owner.teamId === owner.teamId &&
+      run.owner.sandboxId === owner.sandboxId
     );
-    if (this.#tokens < 1) {
-      this.#deps.counters.traceFramesDropped += 1;
-      return false;
-    }
-    this.#tokens -= 1;
-    return true;
   }
 
   /** Counts a frame the connection refused (no capability, unknown run within grace). */
@@ -188,30 +207,36 @@ export class TraceIntake {
   }
 
   /** A frame whose run and thread the connection checked against its leases. */
-  accept(frame: TraceSpansFrame): void {
+  accept(frame: TraceSpansFrame, owner: RunOwner): void {
     const run = this.#runs.get(frame.run_id);
-    if (!run || !run.traced || run.threadId !== frame.thread_id) {
+    if (
+      !run ||
+      !run.traced ||
+      run.threadId !== frame.thread_id ||
+      run.owner.teamId !== owner.teamId
+    ) {
       this.dropFrame(frame.run_id, frame.spans.length);
       return;
     }
-    run.dropped += frame.dropped ?? 0;
+    const reported = Math.min(frame.dropped ?? 0, this.#tuning.maxAgentDropped - run.agentDropped);
+    run.agentDropped += reported;
+    run.dropped += reported;
+    // The replica budget first: spans it refuses cost no parse and no HMAC.
+    const allowed = this.#deps.budget.take(run.owner.teamId, frame.spans.length);
     const converted: RelaySpan[] = [];
-    for (const raw of frame.spans) {
+    for (const raw of frame.spans.slice(0, allowed)) {
       const span = parseSandboxSpan(raw);
       const relay = span === undefined ? undefined : this.#convert(frame.run_id, run, span);
-      if (relay === undefined) run.dropped += 1;
-      else converted.push(relay);
+      if (relay !== undefined) converted.push(relay);
     }
-    const allowed = this.#deps.budget.take(this.#deps.teamId, converted.length);
-    const taken = allowed === 0 ? 0 : this.#deps.offer(converted.slice(0, allowed));
-    const invalid = frame.spans.length - converted.length;
-    const lost = converted.length - taken;
+    const taken = converted.length === 0 ? 0 : this.#deps.offer(converted);
+    const lost = frame.spans.length - taken;
     run.dropped += lost;
     this.#deps.counters.traceSpansRelayed += taken;
-    this.#deps.counters.traceSpansDropped += invalid + lost;
+    this.#deps.counters.traceSpansDropped += lost;
   }
 
-  /** The connection closed: roots of ended runs now; live runs may resume on another connection. */
+  /** The replica shuts down: roots of ended runs now; live runs may resume elsewhere. */
   close(): void {
     for (const [runId, run] of this.#runs) {
       if (run.endedAtMs !== undefined) {
@@ -231,14 +256,15 @@ export class TraceIntake {
       startMs: run.startedAtMs,
       endMs: run.endedAtMs ?? this.#now(),
       attributes: {
-        ...this.#identity(runId, run.threadId),
+        ...this.#identity(runId, run),
         ...(run.dropped > 0 ? { [TRACE_DROPPED_ATTRIBUTE]: run.dropped } : {}),
       },
     });
   }
 
-  #identity(runId: string, threadId: string): Attributes {
-    const { teamId, userId, sandboxId } = this.#deps;
+  #identity(runId: string, run: RunTrace): Attributes {
+    const { teamId, userId, sandboxId } = run.owner;
+    const threadId = run.threadId;
     return {
       ...idAttributes({ teamId, userId, threadId, runId, sandboxId }),
       ...sessionAttributes({ threadId, userId }),
@@ -268,7 +294,7 @@ export class TraceIntake {
       attributes: {
         ...this.#attributes(run, span),
         ...(span.error_type === undefined ? {} : { "error.type": span.error_type }),
-        ...this.#identity(runId, run.threadId),
+        ...this.#identity(runId, run),
       },
     };
   }
@@ -308,12 +334,14 @@ export class TraceIntake {
     );
     if (span.name === "sandbox.tool") {
       const callId = span.attributes["kobe.tool.call_id"];
+      // Kept only for a call the server decided, and only as a plain id (some models write it).
       const name = run.tools.get(callId);
+      const plainId = CALL_ID.test(callId);
       const { "kobe.tool.call_id": _callId, ...rest } = raw;
       return this.#withoutContent({
         ...rest,
         "kobe.tool.name": name ?? UNKNOWN_TOOL,
-        ...(name === undefined ? {} : { "kobe.tool.call_id": callId }),
+        ...(name === undefined || !plainId ? {} : { "kobe.tool.call_id": callId }),
       });
     }
     return this.#withoutContent(raw);
@@ -325,6 +353,7 @@ export class TraceIntake {
     return Object.fromEntries(Object.entries(attributes).filter(([k]) => !content.has(k)));
   }
 
+  /** Over the cap: ended runs first (their roots recorded now), then the oldest live ones. */
   #evict(): void {
     if (this.#runs.size <= this.#tuning.maxRuns) return;
     for (const [runId, run] of this.#runs) {
@@ -333,5 +362,50 @@ export class TraceIntake {
       this.#finish(runId);
       if (this.#runs.size <= this.#tuning.maxRuns) return;
     }
+    for (const runId of this.#runs.keys()) {
+      this.#runs.delete(runId);
+      if (this.#runs.size <= this.#tuning.maxRuns) return;
+    }
+  }
+}
+
+/**
+ * The per-connection frame rate for `trace.spans` (KOBE-274), charged after the frame decoded (the
+ * type is the parsed one, whatever the key order), before its spans are parsed.
+ */
+export class TraceFrameRate {
+  readonly #tuning: Pick<TraceIntakeTuning, "framesPerSecond" | "framesBurst">;
+  readonly #counters: TraceCounters;
+  readonly #now: () => number;
+  #tokens: number;
+  #at: number;
+
+  constructor(
+    tuning: Pick<TraceIntakeTuning, "framesPerSecond" | "framesBurst">,
+    counters: TraceCounters,
+    now: () => number = Date.now,
+  ) {
+    this.#tuning = tuning;
+    this.#counters = counters;
+    this.#now = now;
+    this.#tokens = tuning.framesBurst;
+    this.#at = now();
+  }
+
+  /** False: drop the frame (counted). */
+  admit(): boolean {
+    const now = this.#now();
+    const elapsed = Math.max(0, now - this.#at) / 1000;
+    this.#at = now;
+    this.#tokens = Math.min(
+      this.#tuning.framesBurst,
+      this.#tokens + elapsed * this.#tuning.framesPerSecond,
+    );
+    if (this.#tokens < 1) {
+      this.#counters.traceFramesDropped += 1;
+      return false;
+    }
+    this.#tokens -= 1;
+    return true;
   }
 }

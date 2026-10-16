@@ -90,7 +90,9 @@ export interface AppOptions {
 export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   const { isolation } = options;
   const app = new Hono();
-  app.use("*", honoTracing());
+  // Never the caller's trace (KOBE-274): run trace ids are predictable, so joining would let anyone
+  // who knows a run id write into that run's trace. Every request starts its own trace.
+  app.use("*", honoTracing({ joinCallerTrace: false }));
   // An audited action that couldn't get the audit chain lock in time rolled back: retryable.
   app.onError((err, c) => {
     if (err instanceof AuditBusyError) {

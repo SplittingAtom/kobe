@@ -25,7 +25,6 @@ import {
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
-import { recordRunRootSpan, spanRelay } from "@kobe/telemetry";
 import { withAppendTx } from "../event-stream/append.js";
 import type WebSocket from "ws";
 import { completeCommand, orphanedDeliveries } from "./commands.js";
@@ -51,7 +50,7 @@ import {
   type InterruptCause,
 } from "./run-state.js";
 import { createRunTranslator } from "./translate.js";
-import { TraceIntake } from "./trace-intake.js";
+import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
 export interface ConnectionClaims {
@@ -132,8 +131,10 @@ export class SandboxConnection implements RegisteredConnection {
   #registered = false;
   /** `hello.capabilities` of the agent on this connection (none from older agents). */
   #capabilities: ReadonlySet<string> = new Set();
-  /** Relayed sandbox spans (KOBE-274); absent when the replica does not relay them. */
+  /** Relayed sandbox spans (KOBE-274): the replica's run state; absent when it does not relay. */
   readonly #traces: TraceIntake | undefined;
+  readonly #traceRate: TraceFrameRate | undefined;
+  readonly #owner: RunOwner;
   readonly #tokenExpiresAt: number;
 
   constructor(
@@ -151,18 +152,10 @@ export class SandboxConnection implements RegisteredConnection {
     this.#tokens = ctx.tuning.frameBurst;
     this.#byteTokens = ctx.tuning.byteBurst;
     this.#delivery = new CommandDelivery(ctx, this);
-    this.#traces = ctx.traceRelay
-      ? new TraceIntake({
-          key: ctx.traceRelay.key,
-          budget: ctx.traceRelay.budget,
-          captureContent: ctx.traceRelay.captureContent,
-          teamId: claims.teamId,
-          userId: claims.userId,
-          sandboxId: claims.sandboxId,
-          counters: ctx.metrics,
-          offer: (spans) => spanRelay()?.offer(spans) ?? 0,
-          recordRoot: recordRunRootSpan,
-        })
+    this.#owner = { teamId: claims.teamId, userId: claims.userId, sandboxId: claims.sandboxId };
+    this.#traces = ctx.traceRelay?.runs;
+    this.#traceRate = this.#traces
+      ? new TraceFrameRate(this.#traces.tuning, ctx.metrics)
       : undefined;
   }
 
@@ -259,7 +252,7 @@ export class SandboxConnection implements RegisteredConnection {
     const existing = this.#leases.get(runId);
     if (existing && !existing.ended) return;
     this.#threads.add(threadId);
-    this.#traces?.track(runId, threadId, startedAt);
+    this.#traces?.track(runId, threadId, startedAt, this.#owner);
     this.#leases.set(runId, {
       threadId,
       ended: false,
@@ -386,14 +379,6 @@ export class SandboxConnection implements RegisteredConnection {
     }
     if (!this.#sizeOk(raw)) {
       this.#overLimit("frame_size", "frame too large for its type");
-      return;
-    }
-    // Span frames (KOBE-274) are cheap to refuse before parsing: no relay, no capability, over rate.
-    if (
-      FRAME_PREFIX.exec(raw.subarray(0, 64).toString("latin1"))?.[1] === "trace.spans" &&
-      this.#state === "ready" &&
-      !this.#admitTraceFrame()
-    ) {
       return;
     }
     const text = raw.toString("utf8");
@@ -546,28 +531,27 @@ export class SandboxConnection implements RegisteredConnection {
     this.#leases.get(frame.run_id)?.ingest.push(frame, bytes);
   }
 
-  /** False: drop a span frame unread (no relay here, capability not announced, over its rate). */
-  #admitTraceFrame(): boolean {
-    if (this.#traces === undefined || !this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
-      this.#ctx.metrics.traceFramesDropped += 1;
-      return false;
-    }
-    return this.#traces.admitFrame();
-  }
-
   /**
    * `trace.spans` (KOBE-274): never answered, never closing the connection, except for a run or
-   * thread this connection never held (a lease violation like any other frame's).
+   * thread this connection never held (a lease violation like any other frame's). Classified by
+   * the decoded type (key order cannot skip the rate); the spans are parsed later, one by one.
    */
   #onTraceSpans(frame: TraceSpansFrame): void {
     const traces = this.#traces;
-    if (traces === undefined || !this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
+    if (
+      traces === undefined ||
+      this.#traceRate === undefined ||
+      !this.#capabilities.has(CAPABILITY_TRACE_SPANS)
+    ) {
       this.#ctx.metrics.traceFramesDropped += 1;
       return;
     }
+    if (!this.#traceRate.admit()) return;
     const lease = this.#leases.get(frame.run_id);
     if (lease === undefined) {
-      if (traces.recentlyEnded(frame.run_id, frame.thread_id)) {
+      // Note: a late frame for a run whose lease the ended-lease count cap evicted AND whose 30 s
+      // trace grace passed is a violation; that needs 256 ended runs on one connection meanwhile.
+      if (traces.recentlyEnded(frame.run_id, frame.thread_id, this.#owner)) {
         traces.dropFrame(frame.run_id, frame.spans.length);
       } else {
         this.#violate("unknown_run", "trace.spans");
@@ -578,7 +562,7 @@ export class SandboxConnection implements RegisteredConnection {
       this.#violate("unknown_thread", "trace.spans");
       return;
     }
-    traces.accept(frame);
+    traces.accept(frame, this.#owner);
   }
 
   #onPolicyCheck(frame: PolicyCheckFrame): void {
@@ -1386,9 +1370,14 @@ export class SandboxConnection implements RegisteredConnection {
         compaction: false, // never kept (above)
         ingest: this.#newIngest(run.runId, run.threadId, run.sandboxSeq),
       });
-      // A resumed run keeps the trace context its agent got on the old connection (KOBE-274).
-      this.#traces?.track(run.runId, run.threadId, run.startedAt);
-      if (this.#capabilities.has(CAPABILITY_TRACE_SPANS)) this.#traces?.traced(run.runId);
+      // A resumed run keeps the trace context its agent got on the old connection (KOBE-274):
+      // on this replica its state (command spans, cap, seen-set) is still known; on another one
+      // it starts afresh, marked traced (harmless: same run, same team).
+      const knownTraced = this.#traces?.isTraced(run.runId) === true;
+      this.#traces?.track(run.runId, run.threadId, run.startedAt, this.#owner);
+      if (!knownTraced && this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
+        this.#traces?.traced(run.runId);
+      }
     }
     // Runs the sandbox no longer has (Pi or agent restarted, volume lost): interrupted, never
     // resumed (D14). Runs it offers that we don't list are aborted by the agent.
@@ -1497,7 +1486,6 @@ export class SandboxConnection implements RegisteredConnection {
     this.#policyPending.clear();
     this.#memoryAbort.abort();
     for (const lease of this.#leases.values()) lease.ingest.close();
-    this.#traces?.close();
     this.#delivery.close();
     if (this.#registered) {
       // Runs stay leased: a reconnect within the grace period resumes them; the sweep

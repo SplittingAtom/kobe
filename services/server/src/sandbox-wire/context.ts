@@ -11,7 +11,7 @@ import type { WebSearchService } from "../web-search/service.js";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
-import type { RelayBudget } from "./trace-budget.js";
+import type { TraceIntake } from "./trace-intake.js";
 import type { ArtifactPutDeps } from "../artifacts/put.js";
 import type { FileShareDeps } from "../files/share.js";
 import type { MemoryAgentDeps } from "../memory/agent.js";
@@ -76,10 +76,8 @@ export type LeaseViolation = "unknown_run" | "unknown_thread" | "unknown_command
 
 /** What every connection of a replica shares for relayed sandbox spans (KOBE-274). */
 export interface TraceRelayContext {
-  /** `k_trace`: remaps sandbox span ids. */
-  readonly key: Uint8Array;
-  readonly budget: RelayBudget;
-  readonly captureContent: boolean;
+  /** Per-run relay state of this replica (cap, seen-set, command spans; survives reconnects). */
+  readonly runs: TraceIntake;
 }
 
 /** Everything a connection shares with its replica. */

@@ -28,6 +28,7 @@ start, steer, stop, compaction), `mcp.tools/call`, `model_gateway.request` (GenA
 the sandbox's `sandbox.run`, `sandbox.turn`, `sandbox.tool`, `sandbox.compaction` and
 `sandbox.workspace_sync` (relayed, below). Tool spans carry the tool's name only as the server's
 policy decision knows it (`unknown` otherwise) and the outcome; error codes are closed enums.
+`mcp.tools/call` likewise names the tool only once the server resolved it to a pinned tool.
 
 ## Run traces and sessions
 
@@ -56,8 +57,10 @@ not captured. Header values are never exported.
 
 ## Propagation
 
-W3C `traceparent` only (no baggage). The browser-facing API and the server's internal listener
-join the caller's trace. **No listener a sandbox can reach joins a caller's trace** (the model
+W3C `traceparent` only (no baggage). Only the server's internal listener (behind its internal key)
+joins a caller's trace. The public API does not: run trace ids are predictable, so joining would let
+anyone who knows a run id write spans into that run's trace; every request starts its own trace.
+Likewise **no listener a sandbox can reach joins a caller's trace** (the model
 gateway, the MCP proxy, the egress proxy, the server's sandbox routes and WebSocket upgrade): run
 trace ids are predictable, so a sandbox could otherwise write spans into any run's trace. The model
 gateway opens `model_gateway.request` only after it attributed the call to a run (run token,
@@ -83,8 +86,10 @@ span's id), drops duplicates and cycles, clamps times to the run, stamps team, u
 sandbox and the session itself, and strips content attributes when capture is off. Relayed spans
 go through their own bounded export queue (service name `kobe-sandbox-agent`), behind a per-replica
 budget with a per-team share, so they never delay or evict the server's own spans; drops are
-counted. Limits: 64 spans per frame, 10 frames per second per connection, 2048 spans per run, 512
-buffered spans in the agent. The contract is `packages/protocol/src/sandbox-wire/trace-frames.ts`.
+counted. Limits: 64 spans per frame, 10 frames per second per connection (counted on the decoded
+frame type), 2048 spans per run, 512 buffered spans in the agent. A run's cap, seen-set and command
+spans are kept per server replica, so a reconnect to the same replica keeps them; a run resumed on
+another replica starts afresh there. The contract is `packages/protocol/src/sandbox-wire/trace-frames.ts`.
 
 ## Backends
 

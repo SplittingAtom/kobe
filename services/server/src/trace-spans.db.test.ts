@@ -41,10 +41,11 @@ beforeAll(async () => {
       relayQueue: { maxQueue: 1000, batchSize: 100, intervalMs: 60_000 },
     },
   );
-  await fx.setup([{}, {}], () => ({
+  // Replica 1 relays no spans (no `k_trace`): tracing off for sandbox spans there (ac-5).
+  await fx.setup([{}, {}], (replica) => ({
     sandboxWire: {
       sweep: false,
-      traceSpanKey: KEY,
+      ...(replica === 0 ? { traceSpanKey: KEY } : {}),
       tuning: {
         batchWindowMs: 20,
         resultPollMs: 200,
@@ -58,6 +59,7 @@ beforeAll(async () => {
     },
   }));
   listeners.push(await sandboxListener(fx.replica(0).deps, auth));
+  listeners.push(await sandboxListener(fx.replica(1).deps, auth));
 });
 
 afterAll(async () => {
@@ -90,14 +92,36 @@ async function world(): Promise<World> {
   return { team, owner, runId, threadId, sandboxId, token };
 }
 
-async function started(w: World, capabilities: string[] = [CAPABILITY_TRACE_SPANS]) {
-  const sb = await FakeSandbox.connect(must(listeners[0], "listener").url, w.token);
+async function connect(
+  w: World,
+  options: {
+    holder?: number;
+    capabilities?: string[];
+    runs?: { run_id: string; thread_id: string; last_seq: number }[];
+    headers?: Record<string, string>;
+  } = {},
+) {
+  const sb = await FakeSandbox.connect(
+    must(listeners[options.holder ?? 0], "listener").url,
+    w.token,
+    options.headers ? { headers: options.headers } : {},
+  );
   if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
   sandboxes.push(sb);
-  sb.hello(w.sandboxId, [], "1.0.0", capabilities);
+  sb.hello(
+    w.sandboxId,
+    options.runs ?? [],
+    "1.0.0",
+    options.capabilities ?? [CAPABILITY_TRACE_SPANS],
+  );
   await sb.ready();
+  return sb;
+}
+
+async function started(w: World, capabilities: string[] = [CAPABILITY_TRACE_SPANS], holder = 0) {
+  const sb = await connect(w, { capabilities, holder });
   const result = await fx
-    .replica(1)
+    .replica(1 - holder)
     .deps.sandboxWire.router.startRun(
       { teamId: w.team, userId: w.owner.id },
       { runId: w.runId, threadId: w.threadId, message: "hello" },
@@ -258,5 +282,103 @@ describe("trace.spans over the wire (KOBE-274)", () => {
     await waitExported(w.runId);
     expect(sb.frames("error")).toHaveLength(0);
     expect(sb.closed).toBeUndefined();
+  });
+
+  it("rate-limits span frames by their decoded type, whatever the key order (review SF1)", async () => {
+    const w = await world();
+    const { sb, start } = await started(w);
+    const parent = must(
+      parseTraceparent(must(start.trace, "trace").traceparent),
+      "tp",
+    ).parentSpanId;
+    const before = fx.replica(0).deps.sandboxWire.metrics().traceFramesDropped;
+    for (let i = 0; i < 40; i++) {
+      const span = runSpan(parent, { span_id: (i + 1).toString(16).padStart(16, "0") });
+      // `type` before `v`: no prefix sniffing can classify this frame.
+      sb.sendRaw(
+        JSON.stringify({
+          type: "trace.spans",
+          v: 1,
+          run_id: w.runId,
+          thread_id: w.threadId,
+          spans: [span],
+        }),
+      );
+    }
+    await waitExported(w.runId);
+    await new Promise((r) => setTimeout(r, 300));
+    const exported = await exportedFor(w.runId);
+    expect(exported.length).toBeGreaterThan(0);
+    expect(exported.length).toBeLessThan(30);
+    expect(fx.replica(0).deps.sandboxWire.metrics().traceFramesDropped - before).toBeGreaterThan(0);
+    expect(sb.closed).toBeUndefined();
+  });
+
+  it("keeps a run's seen-set across a reconnect: a reused span id is not exported again (review SF3)", async () => {
+    const w = await world();
+    const { sb, start } = await started(w);
+    const parent = must(
+      parseTraceparent(must(start.trace, "trace").traceparent),
+      "tp",
+    ).parentSpanId;
+    const send = (s: FakeSandbox, spans: unknown[]) =>
+      s.send({ v: 1, type: "trace.spans", run_id: w.runId, thread_id: w.threadId, spans });
+    send(sb, [runSpan(parent)]);
+    await waitExported(w.runId);
+    sb.close();
+    await sb.waitClosed();
+    const again = await connect(w, {
+      runs: [{ run_id: w.runId, thread_id: w.threadId, last_seq: 0 }],
+    });
+    expect((await again.ready()).runs.map((r) => r.run_id)).toContain(w.runId);
+    send(again, [
+      runSpan(parent),
+      runSpan(parent, {
+        span_id: "2222222222222222",
+        name: "sandbox.turn",
+        attributes: { "kobe.turn.index": 0 },
+      }),
+    ]);
+    const deadline = Date.now() + 5_000;
+    while ((await exportedFor(w.runId)).length < 2 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const ids = (await exportedFor(w.runId)).map((s) => s.spanContext().spanId).sort();
+    expect(ids).toEqual(
+      [
+        mapSandboxSpanId(KEY, w.runId, "1111111111111111"),
+        mapSandboxSpanId(KEY, w.runId, "2222222222222222"),
+      ].sort(),
+    );
+    // The command span the run started under is still known after the reconnect.
+    const turn = (await exportedFor(w.runId)).find((s) => s.name === "sandbox.turn");
+    expect(turn?.parentSpanContext?.spanId).toBe(parent);
+  });
+
+  it("with sandbox span relay off on the replica, sends no trace context and ignores span frames (ac-5)", async () => {
+    const w = await world();
+    const { sb, start } = await started(w, [CAPABILITY_TRACE_SPANS], 1);
+    expect(start.trace).toBeUndefined();
+    sb.send({
+      v: 1,
+      type: "trace.spans",
+      run_id: w.runId,
+      thread_id: w.threadId,
+      spans: [runSpan("aaaaaaaaaaaaaaaa")],
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await exportedFor(w.runId)).toHaveLength(0);
+    expect(sb.frames("error")).toHaveLength(0);
+    expect(sb.closed).toBeUndefined();
+  });
+
+  it("the WebSocket upgrade never joins a sandbox's traceparent (listener rule)", async () => {
+    const w = await world();
+    const caller = runTraceId(w.runId);
+    await connect(w, { headers: { traceparent: `00-${caller}-${runRootSpanId(w.runId)}-01` } });
+    const upgrades = own.getFinishedSpans().filter((s) => s.name === "sandbox.ws.upgrade");
+    expect(upgrades.length).toBeGreaterThan(0);
+    expect(upgrades.every((s) => s.spanContext().traceId !== caller)).toBe(true);
   });
 });
