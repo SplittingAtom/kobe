@@ -46,8 +46,14 @@ export function ContextRow() {
   const openCompact =
     canRun && controller !== null && threadId !== null ? () => setCompactFor(threadId) : undefined;
   // `/compact` (KOBE-224) runs what the gauge's action and the actions menu run.
-  const bindings: MenuBindings = openCompact
-    ? { "compact-thread": { onSelect: openCompact, blocker } }
+  // Bound whenever a thread is on screen, so `/compact` always says why it can't run.
+  const bindings: MenuBindings = state
+    ? {
+        "compact-thread": {
+          onSelect: () => openCompact?.(),
+          blocker: openCompact ? blocker : (blocker ?? "Opening the conversation…"),
+        },
+      }
     : {};
   useBindCommands(bindings);
   if (!extras || !state) return null;

@@ -3,8 +3,7 @@
 import { useAuiState } from "@assistant-ui/react";
 import { useState } from "react";
 import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
-import { stopBinding } from "../../lib/chat/thread-commands";
-import { placementOf } from "../../lib/chat/thread-groups";
+import { NO_THREAD, stopBinding, threadReadOnly } from "../../lib/chat/thread-commands";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { useBindCommands, useCommandsWanted } from "../shell/command-bindings";
@@ -25,6 +24,29 @@ function useLastAnswerMeta(): KobeMessageMeta | undefined {
   );
 }
 
+const noop = () => {};
+
+/**
+ * The row menu binds Pin or Unpin, Archive or Unarchive (whichever applies); the listings know
+ * both words, so the other one says why it doesn't apply.
+ */
+function withCounterparts(menu: MenuBindings): MenuBindings {
+  const missing = (reason: string) => ({ onSelect: noop, blocker: reason });
+  return {
+    ...(menu["pin-thread"]
+      ? {}
+      : {
+          "pin-thread": missing(
+            menu["unpin-thread"] ? "It is pinned already." : "Unarchive it first.",
+          ),
+        }),
+    ...(menu["unpin-thread"] ? {} : { "unpin-thread": missing("It isn't pinned.") }),
+    ...(menu["archive-thread"] ? {} : { "archive-thread": missing("It is archived already.") }),
+    ...(menu["unarchive-thread"] ? {} : { "unarchive-thread": missing("It isn't archived.") }),
+    ...menu,
+  };
+}
+
 function Bindings({
   extras,
   threadId,
@@ -40,7 +62,7 @@ function Bindings({
   const wanted = useCommandsWanted();
   const point = forkPointOf(useLastAnswerMeta());
   const [forking, setForking] = useState<ForkPoint | null>(null);
-  const readOnly = placementOf(custom).shared || state.summary?.readOnly === true;
+  const readOnly = threadReadOnly(custom, state);
   const menu = useThreadMenuBindings({
     threadId,
     title: listed || state.summary?.title || UNTITLED,
@@ -54,7 +76,7 @@ function Bindings({
     controller === null
       ? {}
       : {
-          ...menu,
+          ...withCounterparts(menu),
           stop: stopBinding(controller, state),
           "fork-thread": {
             onSelect: () => {
@@ -81,12 +103,33 @@ function Bindings({
  * The open thread's actions for the command listings (KOBE-224): its menu's bindings (the rail
  * row's `useThreadMenuBindings`: Copy, Regenerate (with), Pin, Move, Archive, Share), Stop (the
  * steering panel's), and Fork at the last answer (the answer's own Fork dialog). Results are
- * spoken in a polite status line, as the rail row speaks them. Nothing renders for a draft.
+ * spoken in a polite status line, as the rail row speaks them. A draft binds them blocked.
  */
+/** A draft: the thread's actions are known, and say why they wait. */
+const DRAFT_IDS = [
+  "copy-thread",
+  "regenerate-thread",
+  "regenerate-thread-with",
+  "pin-thread",
+  "move-thread",
+  "archive-thread",
+  "share-thread",
+  "stop",
+  "fork-thread",
+] as const;
+const DRAFT: MenuBindings = Object.fromEntries(
+  DRAFT_IDS.map((id) => [id, { onSelect: () => {}, blocker: NO_THREAD }]),
+);
+
+function DraftBindings() {
+  useBindCommands(DRAFT);
+  return null;
+}
+
 export function ThreadCommands({ extras }: { readonly extras: KobeThreadExtras }) {
   const [said, setSaid] = useState("");
   const threadId = extras.state.threadId;
-  if (threadId === null) return null;
+  if (threadId === null) return <DraftBindings />;
   return (
     <RailAnnounce.Provider value={setSaid}>
       <Bindings

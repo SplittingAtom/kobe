@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import type { ComponentProps } from "react";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { must } from "../../lib/testing/must";
+import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
+import { ChatApp } from "./chat-app";
 import { chatRequests, composer, openApp } from "./testing";
 
 /**
@@ -45,6 +50,9 @@ function conversation(title = "Report") {
 const menu = () => screen.findByRole("listbox", { name: "Actions" }, WAIT);
 const noMenu = () => expect(screen.queryByRole("listbox")).toBeNull();
 const messagePosts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
+/** What the menu last said to screen readers (a no-break space marks a repeat). */
+const slashStatus = () =>
+  (document.querySelector("[data-kobe-slash-status]")?.textContent ?? "").replace(/\u00a0/g, "");
 const sent = () => messagePosts().map((r) => (r.body as { content?: string }).content);
 
 async function opened(t: string) {
@@ -73,9 +81,6 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
     const names = options.map((o) => o.getAttribute("aria-label"));
     // Registry order; each binding's own state (no projects to move to yet).
     expect(names).toEqual([
-      "/memory, My memory",
-      "/schedules, My schedules",
-      "/agents, My agents",
       "/files, Files",
       "/compact, Compact this thread",
       "/model model, Model for this conversation",
@@ -84,12 +89,17 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
       "/regenerate, Regenerate",
       "/regenerate-with model, Regenerate with",
       "/pin, Pin",
+      "/unpin, Unpin, unavailable: It isn't pinned.",
       "/move project, Move to project, unavailable: You have no projects to move it to.",
       "/archive, Archive",
+      "/unarchive, Unarchive, unavailable: It isn't archived.",
       "/share with, Share",
       "/rename, Rename",
       "/fork, Fork to a new thread",
       "/stop, Stop, unavailable: Nothing is running.",
+      "/memory, My memory",
+      "/schedules, My schedules",
+      "/agents, My agents",
     ]);
     // Stop is listed but unavailable while nothing runs.
     const stop = within(list).getByRole("option", { name: /^\/stop/ });
@@ -194,11 +204,7 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
     await user.type(input, "/stop");
     await menu();
     await user.keyboard("{Enter}");
-    await waitFor(() =>
-      expect(document.querySelector("[data-kobe-slash-status]")?.textContent).toBe(
-        "Stop: Nothing is running.",
-      ),
-    );
+    await waitFor(() => expect(slashStatus()).toBe("Stop: Nothing is running."));
     expect(input.value).toBe("/stop");
     expect(messagePosts()).toEqual([]);
   });
@@ -245,5 +251,204 @@ describe("text that is no action is a message (ac-2)", { timeout: 30_000 }, () =
     await user.clear(input);
     await user.type(input, "hi{Shift>}{Enter}{/Shift}/comp");
     noMenu();
+  });
+});
+
+describe("a known /word is never sent as a message (CE22)", { timeout: 30_000 }, () => {
+  it("in a new conversation, /compact lists why it waits and Enter sends nothing", async () => {
+    openApp(fake);
+    const input = await composer();
+    const user = userEvent.setup();
+    await user.type(input, "/compact");
+    const option = within(await menu()).getByRole("option", { name: /^\/compact/ });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(slashStatus()).toMatch(/^Compact this thread: /));
+    expect(input.value).toBe("/compact");
+    expect(chatRequests(fake, "POST")).toEqual([]);
+  });
+
+  it("/new works at phone width too, where the rail is a drawer", async () => {
+    const { t } = conversation();
+    resizeWindow(390);
+    try {
+      openApp(fake, t);
+      await screen.findByText("They add up to 42.");
+      const input = await composer();
+      const user = userEvent.setup();
+      await user.type(input, "/new");
+      await menu();
+      await user.keyboard("{Enter}");
+      await waitFor(() =>
+        expect(new URLSearchParams(window.location.search).get("thread")).toBeNull(),
+      );
+      expect(messagePosts()).toEqual([]);
+    } finally {
+      resizeWindow(DESKTOP_WIDTH);
+    }
+  });
+
+  it("a known word whose argument matches nothing keeps a no-match row; Enter sends nothing", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/model gml");
+    const list = await screen.findByRole("listbox", { name: "model for /model" }, WAIT);
+    expect(within(list).getByRole("option").textContent).toBe("No model matches “gml”.");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(slashStatus()).toBe("No model matches “gml”."));
+    expect(input.value).toBe("/model gml");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("/model gml");
+    expect(messagePosts()).toEqual([]);
+  });
+
+  it("Enter on a bare / picks nothing until the list is moved through", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/");
+    await menu();
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("/");
+    await menu();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.keyboard("{ArrowDown}{Enter}");
+    // The second entry, Compact, ran.
+    expect(await screen.findByRole("dialog", { name: "Compact this thread" })).toBeTruthy();
+    expect(input.value).toBe("");
+  });
+});
+
+describe("how the text arrives (ac-3)", { timeout: 30_000 }, () => {
+  it("one fast burst, /compact and Enter, runs Compact and sends nothing", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    await userEvent.setup({ delay: null }).type(input, "/compact{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Compact this thread" })).toBeTruthy();
+    expect(input.value).toBe("");
+    expect(messagePosts()).toEqual([]);
+  });
+
+  it("a pasted /compact opens the menu; Enter runs it", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.paste("/compact");
+    await menu();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Compact this thread" })).toBeTruthy();
+    expect(messagePosts()).toEqual([]);
+  });
+
+  it("Enter while an IME composes is the IME's, not a pick", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/comp");
+    await menu();
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.compositionEnd(input);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(input.value).toBe("/comp");
+    expect(messagePosts()).toEqual([]);
+  });
+
+  it("a click pick keeps the focus in the composer", async () => {
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/pin");
+    await user.click(within(await menu()).getByRole("option", { name: /^\/pin,/ }));
+    await waitFor(() => expect(fake.threads.get(t)?.pinned_at).toBeTruthy());
+    expect(input.value).toBe("");
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("after a thread switch, an action runs on the thread now open", async () => {
+    const { t: first } = conversation("First");
+    const { t: second } = conversation("Second");
+    const input = await opened(first);
+    const user = userEvent.setup();
+    const row = await waitFor(() =>
+      must(document.querySelector<HTMLElement>(`[data-kobe-thread="${second}"]`)),
+    );
+    await user.click(within(row).getByText("Second"));
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("thread")).toBe(second),
+    );
+    await screen.findByRole("heading", { name: "Second" });
+    const now = await composer();
+    await user.type(now, "/pin");
+    await menu();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(fake.threads.get(second)?.pinned_at).toBeTruthy());
+    expect(fake.threads.get(first)?.pinned_at ?? null).toBeNull();
+    expect(input).toBeTruthy();
+  });
+
+  it("an unknown /word with an @ mention is sent as text with the mention listed", async () => {
+    fake.workspaceFiles.set("reports/summary.md", new Uint8Array(10));
+    const { t } = conversation();
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/hello see @sum");
+    await user.click(
+      within(await screen.findByRole("listbox", { name: "Workspace files" })).getByRole("option", {
+        name: /summary\.md/,
+      }),
+    );
+    await waitFor(() => expect(input.value).toBe("/hello see @file(reports/summary.md) "));
+    noMenu();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(messagePosts()[0]?.body).toMatchObject({
+      content: "/hello see @file(reports/summary.md)",
+      mentions: ["reports/summary.md"],
+    });
+  });
+});
+
+describe("navigation actions (S2)", { timeout: 30_000 }, () => {
+  it("/memory navigates client-side and keeps the draft's attachments", async () => {
+    const push = vi.fn();
+    const router = {
+      push,
+      replace: vi.fn(),
+      prefetch: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      refresh: vi.fn(),
+    };
+    const { t } = conversation();
+    window.history.replaceState(null, "", `/?thread=${t}`);
+    const transport: NonNullable<ComponentProps<typeof ChatApp>["uploadTransport"]> = () =>
+      new Promise(() => {});
+    render(
+      <AppRouterContext.Provider
+        value={router as unknown as ComponentProps<typeof AppRouterContext.Provider>["value"]}
+      >
+        <ChatApp
+          fetchFn={fake.fetch}
+          eventSource={fake.eventSource}
+          reopenDelayMs={() => 0}
+          uploadTransport={transport}
+        />
+      </AppRouterContext.Provider>,
+    );
+    const user = userEvent.setup();
+    const input = await composer();
+    await user.upload(
+      await screen.findByLabelText("Choose files to attach"),
+      new File(["a"], "a.txt"),
+    );
+    await screen.findByRole("list", { name: "Attached files" });
+    await user.type(input, "/mem");
+    await menu();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/memory"));
+    expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
   });
 });

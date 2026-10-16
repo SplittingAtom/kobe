@@ -114,6 +114,8 @@ export function MentionPicker({
               key={item.id}
               item={item}
               index={index}
+              // The input keeps the focus on a click pick (the option unmounts).
+              onMouseDown={(e) => e.preventDefault()}
               className="data-[highlighted]:bg-muted flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-start text-sm"
             >
               <FileIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />

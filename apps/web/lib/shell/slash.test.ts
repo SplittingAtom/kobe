@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { COMMANDS } from "./commands";
 import type { MenuBindings } from "./menu";
 import {
+  NOT_HERE,
+  READ_ONLY_HERE,
+  SLASH_NO_MATCH,
   SLASH_TRIGGER,
   hrefBindings,
   slashEntries,
@@ -63,21 +66,33 @@ const bindings: MenuBindings = {
   "trash-thread": { onSelect: run },
 };
 
-describe("slashEntries: registered, bound actions in registry order", () => {
-  it("lists only commands with a / word and a binding", () => {
-    const ids = slashEntries(bindings, { readOnly: false }).map((e) => e.command.id);
-    expect(ids).toEqual([
-      "compact-thread",
-      "copy-thread",
-      "regenerate-thread-with",
-      "move-thread",
-      "stop",
-    ]);
+const blockers = (readOnly: boolean) =>
+  Object.fromEntries(
+    slashEntries(bindings, { readOnly }).map((e) => [e.command.id, e.blocker] as const),
+  );
+
+describe("slashEntries: every registered / word, known whether bound or not", () => {
+  it("lists every command with a / word, thread actions first and navigation last", () => {
+    const entries = slashEntries(bindings, { readOnly: false });
+    const words = COMMANDS.flatMap((c) => (c.slash === undefined ? [] : [c.slash]));
+    expect(entries.map((e) => e.slash).sort()).toEqual([...words].sort());
+    expect(entries.map((e) => e.slash).slice(-3)).toEqual(["memory", "schedules", "agents"]);
+    expect(entries.map((e) => e.command.id)).not.toContain("trash-thread");
   });
 
-  it("a reader of a shared thread sees only the read-only-safe ones", () => {
-    const ids = slashEntries(bindings, { readOnly: true }).map((e) => e.command.id);
-    expect(ids).toEqual(["copy-thread"]);
+  it("an unbound action is listed as not available here; a bound one carries its blocker", () => {
+    const b = blockers(false);
+    expect(b["compact-thread"]).toBeNull();
+    expect(b["stop"]).toBe("No run to stop.");
+    expect(b["pin-thread"]).toBe(NOT_HERE);
+    expect(b["new-thread"]).toBe(NOT_HERE);
+  });
+
+  it("a reader of a shared thread gets the others blocked as read-only", () => {
+    const b = blockers(true);
+    expect(b["copy-thread"]).toBeNull();
+    expect(b["compact-thread"]).toBe(READ_ONLY_HERE);
+    expect(b["move-thread"]).toBe(READ_ONLY_HERE);
   });
 
   it("every / word is unique and a single lowercase word", () => {
@@ -89,28 +104,22 @@ describe("slashEntries: registered, bound actions in registry order", () => {
 
 describe("slashItems", () => {
   const entries = slashEntries(bindings, { readOnly: false });
+  const labels = (name: string, arg?: string) =>
+    slashItems({ offset: 0, name, arg }, entries).map((i) => i.label);
 
   it("lists the actions whose word starts with the query, with their argument and state", () => {
     const items = slashItems({ offset: 0, name: "", arg: undefined }, entries);
-    expect(items.map((i) => i.label)).toEqual([
-      "/compact",
-      "/copy",
-      "/regenerate-with",
-      "/move",
-      "/stop",
-    ]);
+    expect(items[0]?.label).toBe("/files");
     const move = items.find((i) => i.label === "/move");
     expect(move?.metadata).toMatchObject({ arg: "project", blocker: null });
     const stop = items.find((i) => i.label === "/stop");
     expect(stop?.metadata).toMatchObject({ blocker: "No run to stop." });
-    expect(
-      slashItems({ offset: 0, name: "CO", arg: undefined }, entries).map((i) => i.label),
-    ).toEqual(["/compact", "/copy"]);
+    expect(labels("CO")).toEqual(["/compact", "/copy"]);
   });
 
-  it("an unknown word lists nothing, so Enter sends the text", () => {
-    expect(slashItems({ offset: 0, name: "hello", arg: undefined }, entries)).toEqual([]);
-    expect(slashItems({ offset: 0, name: "hello", arg: "" }, entries)).toEqual([]);
+  it("only a word no action has lists nothing, so Enter sends the text", () => {
+    expect(labels("hello")).toEqual([]);
+    expect(labels("hello", "")).toEqual([]);
   });
 
   it("after the word and a space, lists the argument's choices matching what follows", () => {
@@ -119,16 +128,19 @@ describe("slashItems", () => {
       ["No project", "current"],
       ["Budget 2026", undefined],
     ]);
-    const some = slashItems({ offset: 0, name: "move", arg: "bud" }, entries);
-    expect(some.map((i) => i.label)).toEqual(["Budget 2026"]);
-    expect(slashItems({ offset: 0, name: "move", arg: "zzz" }, entries)).toEqual([]);
+    expect(labels("move", "bud")).toEqual(["Budget 2026"]);
   });
 
-  it("an action without an argument still matches with a trailing space, not with words", () => {
-    expect(
-      slashItems({ offset: 0, name: "compact", arg: "" }, entries).map((i) => i.label),
-    ).toEqual(["/compact"]);
-    expect(slashItems({ offset: 0, name: "compact", arg: "now" }, entries)).toEqual([]);
+  it("a known word whose argument matches nothing keeps one disabled row", () => {
+    const [none] = slashItems({ offset: 0, name: "move", arg: "zzz" }, entries);
+    expect(none).toMatchObject({ type: SLASH_NO_MATCH, label: "No project matches “zzz”." });
+    expect(labels("compact", "now")).toEqual(["/compact takes no argument."]);
+    expect(labels("compact", "")).toEqual(["/compact"]);
+  });
+
+  it("a blocked or unbound known word keeps its own row, whatever follows", () => {
+    expect(labels("regenerate-with", "glm")).toEqual(["/regenerate-with"]);
+    expect(labels("pin", "x")).toEqual(["/pin"]);
   });
 });
 
@@ -138,8 +150,7 @@ describe("slashOutcome", () => {
     slashItems({ offset: 0, name, arg }, entries)[0] ?? { id: "x", type: "command", label: "" };
 
   it("runs the binding's own handler", () => {
-    const out = slashOutcome(pick("compact"), entries);
-    expect(out).toEqual({ kind: "run", run });
+    expect(slashOutcome(pick("compact"), entries)).toEqual({ kind: "run", run });
   });
 
   it("completes an action that takes an argument (Tab or Enter), then runs the choice", () => {
@@ -150,17 +161,22 @@ describe("slashOutcome", () => {
     });
   });
 
-  it("refuses an action that can't run now, with the reason", () => {
+  it("refuses an action that can't run now, a no-match row and an unbound action", () => {
     expect(slashOutcome(pick("stop"), entries)).toEqual({
       kind: "blocked",
       reason: "Stop: No run to stop.",
     });
     expect(slashOutcome(pick("regenerate-with"), entries)).toMatchObject({ kind: "blocked" });
-  });
-
-  it("an item of no listed action does nothing", () => {
-    expect(slashOutcome({ id: "gone", type: "command", label: "/gone" }, entries)).toEqual({
-      kind: "none",
+    expect(slashOutcome(pick("move", "zzz"), entries)).toEqual({
+      kind: "blocked",
+      reason: "No project matches “zzz”.",
+    });
+    expect(slashOutcome(pick("pin"), entries)).toEqual({
+      kind: "blocked",
+      reason: `Pin: ${NOT_HERE}`,
+    });
+    expect(slashOutcome({ id: "gone", type: "command", label: "/gone" }, entries)).toMatchObject({
+      kind: "blocked",
     });
   });
 });

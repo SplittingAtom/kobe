@@ -4,11 +4,17 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { createCommandBindings, type CommandBindingsStore } from "../../lib/shell/command-bindings";
+import {
+  bindingsSignature,
+  createCommandBindings,
+  relayBindings,
+  type CommandBindingsStore,
+} from "../../lib/shell/command-bindings";
 import type { MenuBindings } from "../../lib/shell/menu";
 
 /**
@@ -24,14 +30,23 @@ export function CommandBindingsProvider({ children }: { readonly children: React
 
 /**
  * Publishes what the caller's own buttons do (the same handlers), while it is mounted. Pass the
- * bindings the buttons use, so a listing runs exactly what a click runs.
+ * bindings the buttons use, so a listing runs exactly what a click runs. Republished only when
+ * what a listing shows changes (`bindingsSignature`); the handlers always call the latest render's.
  */
 export function useBindCommands(bindings: MenuBindings): void {
   const store = useContext(Bindings);
   const [source] = useState(() => Symbol("command bindings"));
+  const latest = useRef(bindings);
   useEffect(() => {
-    store?.set(source, bindings);
-  }, [store, source, bindings]);
+    latest.current = bindings;
+  });
+  const signature = bindingsSignature(bindings);
+  useEffect(() => {
+    store?.set(
+      source,
+      relayBindings(latest.current, () => latest.current),
+    );
+  }, [store, source, signature]);
   useEffect(() => () => store?.remove(source), [store, source]);
 }
 

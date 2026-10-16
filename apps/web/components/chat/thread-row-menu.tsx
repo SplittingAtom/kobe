@@ -2,7 +2,7 @@
 
 import { useAuiState } from "@assistant-ui/react";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { placementOf } from "../../lib/chat/thread-groups";
+import { threadReadOnly } from "../../lib/chat/thread-commands";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
@@ -42,11 +42,10 @@ export function ThreadRowMenu() {
   const threadId = useAuiState((s) => s.threadListItem.remoteId);
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
   const custom = useAuiState((s) => s.threadListItem.custom);
-  const listedShared = placementOf(custom).shared;
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useHeldThread(threadId, open);
-  const readOnly = listedShared || state?.summary?.readOnly === true;
+  const readOnly = threadReadOnly(custom, state);
   const bindings = useThreadMenuBindings({
     threadId,
     title,

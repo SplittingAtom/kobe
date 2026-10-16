@@ -21,9 +21,14 @@ reason (`aria-disabled`).
 - An action with an argument (`/model`, `/regenerate-with`, `/move`, `/share`) completes to
   `/word ` and lists the binding's `choices`, filtered by what follows; picking one runs that
   choice's `onSelect`.
-- An unknown word, or an argument that matches no choice, lists nothing, so the popover stays
-  closed and Enter sends the text as a message (AC2). A `/` later in the text never opens it.
-- A blocked action puts the text back, keeps the menu open and speaks the reason.
+- **A known word is never sent** (review M1, S3): every registry word is listed, bound or not.
+  Unbound (a draft thread, a control not read yet) reads "Not available here right now.", a draft
+  thread's actions "Send a first message to start the conversation."; a known word whose
+  argument matches nothing, or that takes none, gets one disabled "no match" row. Picking any of
+  these puts the text back, keeps the menu open and speaks the reason (re-announced on repeat).
+- Only a word no action has lists nothing, so the popover stays closed and Enter sends the text
+  as a message (AC2). A `/` later in the text never opens it.
+- Enter or Tab on a bare `/` picks nothing until the member arrows through the list (S2).
 
 ## Registry design (for KOBE-225: palette and shortcuts)
 
@@ -41,13 +46,21 @@ Two layers, both keyed by `CommandId`:
    listing says it is open (`useWantCommands` / `useCommandsWanted`). No provider (builder test
    pane): publishing is a no-op and listings are empty.
 
+Publishers republish only when what a listing shows changes (`bindingsSignature`: ids, labels,
+blockers, choices); the published handlers relay to the latest render's (`relayBindings`), so
+the menu's items and highlight stay put while a run streams (review S1). Two sources binding one
+command: the later-mounted wins.
+
 Publishers: `ThreadCommands` (thread view: the row menu's `useThreadMenuBindings`, extracted from
 `ThreadRowMenu` and shared by both, plus Stop via `stopBinding` (also the steering panel's Stop)
 and Fork at the last answer via the answer's `ForkDialog`); `ContextRow` (compact: the gauge's
 and actions menu's `openCompact`); `ThreadTitle` (rename: the pencil's `open`); `ModelPicker`
-(`/model`: its `choose`); `FilesButton` (`/files`); the rail's `CollapsedIcons` (`/new`:
-`aui.threads.switchToNewThread`, what `ThreadListPrimitive.New` calls). Navigation commands with
-a word (`/memory`, `/schedules`, `/agents`) get `hrefBindings` (full navigation to their href).
+(`/model`: its `choose`); `AppCommands` in the chat app, mounted whatever the layout (`/new`:
+`aui.threads.switchToNewThread`, what `ThreadListPrimitive.New` calls; `/files`: the Files
+button's `rail.reveal("files")`). A draft thread binds its thread actions blocked; Pin/Unpin and
+Archive/Unarchive bind the inapplicable word with its reason. Navigation commands with
+a word (`/memory`, `/schedules`, `/agents`) get `hrefBindings`, listed last, navigating with
+Next's router like the bar links (a full load only outside the app router).
 Pure listing logic: `lib/shell/slash.ts` (`slashQueryAt`, `slashMatcher`, `slashEntries`,
 `slashItems`, `slashOutcome`).
 
@@ -61,8 +74,9 @@ palette and the key handlers; `choices` become a second palette step.
   runs only once a choice is picked. Blocked actions stay listed (disabled, with the reason)
   rather than hidden, so members learn why.
 - Shared-thread readers get no composer (KOBE-221 banner), so they never see the menu;
-  `slashEntries({ readOnly: true })` keeps only read-only-safe actions (copy, fork, new, files,
-  navigation) for the palette.
+  `slashEntries({ readOnly: true })` blocks all but the read-only-safe actions (copy, fork, new,
+  files, navigation) for the palette; `threadReadOnly` is the one derivation the row menu and the
+  open thread's bindings share. `slashEntries` honours `available(ctx)` (consoles).
 - `ThreadCommands` speaks its results (Copied, Moved …) in its own polite status line, via the
   rail's `RailAnnounce` context.
 
@@ -71,8 +85,8 @@ palette and the key handlers; `choices` become a second palette step.
 - `/steer` (needs the composer text it would steer with), `/new <agent>` (agent argument), export
   (its button lives in the rail's Threads header, unmounted while the rail is collapsed), delete
   (no `/` word on purpose: no confirm), pin/archive of other threads.
-- Navigation via `/memory` etc. is a full page load (`window.location.assign`), the bar links are
-  Next `Link`s.
+- Review nits not done: N4 (query derived in an effect: one frame unfiltered, visual only), N8
+  (one shared announcer instead of three status lines).
 
 ## Open questions
 
@@ -86,9 +100,13 @@ palette and the key handlers; `choices` become a second palette step.
   does and announces the same text); `lib/shell/slash.test.ts`, `lib/shell/command-bindings.test.ts`.
 - ac-2: same file, "text that is no action is a message" (`/hello there` sent; `see /comp`;
   leading whitespace vs a second line); `slash.test.ts` matcher cases.
+- Review round: same file: `/compact` in a draft, `/new` at 390 px, `/model gml` no-match,
+  bare `/` + Enter, burst typing, paste, IME Enter, click pick keeps focus, thread switch then
+  `/pin`, `/hello … @file` with `mentions`, `/memory` via the router keeps attachments;
+  `command-bindings.test.ts` signature and relay.
 - ac-3: `/compact`, `/fork`, `/regenerate-with`, `/move` leave the composer empty with no
   message posted (or only the regenerate's own re-send).
 - Browser (gate1, later): `e2e/browser/tests/slash-menu.spec.ts` (`/fork` dialog and empty
   composer; Escape keeps `/comp`; `/hello …` sent and answered).
-- Commands: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, web vitest (146 files, 1363
+- Commands: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, web vitest (146 files, 1377
   tests) all green.

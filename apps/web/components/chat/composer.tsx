@@ -142,7 +142,7 @@ export function Composer({
           className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
         >
           <MentionPicker draft={draft} input={input} />
-          <SlashMenu input={input} readOnly={state.summary?.readOnly === true} />
+          <SlashMenu input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <label htmlFor="kobe-composer" className="sr-only">

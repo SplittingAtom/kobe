@@ -16,6 +16,7 @@ import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
+import { AppCommands } from "../shell/app-commands";
 import { CommandBindingsProvider } from "../shell/command-bindings";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
@@ -213,6 +214,7 @@ function ChatWorkspace({
                     onSavePreferences={layout.save}
                   >
                     <FileGoneNotice />
+                    <AppCommands />
                     <ShellSlot name="search">
                       <ThreadSearch onOpenThread={setThreadId} />
                     </ShellSlot>

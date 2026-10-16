@@ -3,6 +3,7 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { ThreadController } from "../../lib/chat/thread-controller";
+import { renameBlocker } from "../../lib/chat/thread-commands";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { useBindCommands } from "../shell/command-bindings";
 import { IconAction } from "../shell/icon-action";
@@ -97,8 +98,10 @@ export function ThreadTitle({
     void controller?.refresh();
   };
 
-  // `/rename` (KOBE-224) opens the same field as the pencil.
-  useBindCommands(editable && canRename(state) ? { "rename-thread": { onSelect: open } } : {});
+  // `/rename` (KOBE-224) opens the same field as the pencil, or says why it can't.
+  useBindCommands(
+    editable ? { "rename-thread": { onSelect: open, blocker: renameBlocker(state) } } : {},
+  );
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
