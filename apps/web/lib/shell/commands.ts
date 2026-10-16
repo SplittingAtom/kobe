@@ -16,6 +16,7 @@ import {
   CircleXIcon,
   ClipboardCopyIcon,
   CopyIcon,
+  CpuIcon,
   CornerDownRightIcon,
   DownloadIcon,
   EllipsisIcon,
@@ -60,7 +61,10 @@ import type { ConsoleKind } from "../admin/nav/types";
  *
  * Handlers: a navigation command carries its `href`. The others are bound where they render
  * (assistant-ui's action-bar and thread-list primitives own copy, edit, regenerate, rename, Trash),
- * because they act on the message or thread on screen; C6/C7 add a handler map for the palette.
+ * because they act on the message or thread on screen. A component that owns an action also
+ * publishes its binding (`MenuBinding`: handler, blocker, argument choices) with
+ * `useBindCommands` (`components/shell/command-bindings.tsx`); the `/` menu (KOBE-224) and the
+ * palette (KOBE-225) run those same bindings. A command with a `slash` word is offered there.
  */
 
 /**
@@ -91,6 +95,12 @@ export interface Command {
   readonly href?: string;
   /** Absent means always available. */
   readonly available?: (ctx: CommandContext) => boolean;
+  /** Its word in the `/` menu (CE22, KOBE-224): one lowercase word, unique in the registry. */
+  readonly slash?: string;
+  /** The argument it takes after its `/` word (its binding's `choices`), named for the menu. */
+  readonly arg?: string;
+  /** Offered to a reader of a shared thread (KOBE-221): it changes nothing of the owner's. */
+  readonly readOnlySafe?: boolean;
 }
 
 /**
@@ -108,6 +118,8 @@ const LIST = [
     icon: BrainIcon,
     scope: "bar",
     href: "/me/memory",
+    slash: "memory",
+    readOnlySafe: true,
   },
   {
     id: "my-schedules",
@@ -116,6 +128,8 @@ const LIST = [
     icon: CalendarClockIcon,
     scope: "bar",
     href: "/me/schedules",
+    slash: "schedules",
+    readOnlySafe: true,
   },
   {
     id: "my-agents",
@@ -124,6 +138,8 @@ const LIST = [
     icon: BotIcon,
     scope: "bar",
     href: "/me/agents",
+    slash: "agents",
+    readOnlySafe: true,
   },
   {
     id: "team-console",
@@ -149,7 +165,15 @@ const LIST = [
   // current theme's icon, sun or moon.
   { id: "theme", name: "Dark theme", icon: SunIcon, scope: "bar" },
   // Bar, row two: the open thread's context. Files shows the rail's Files section.
-  { id: "files", name: "Files", icon: FolderIcon, scope: "bar", shortcut: "Mod+Shift+F" },
+  {
+    id: "files",
+    name: "Files",
+    icon: FolderIcon,
+    scope: "bar",
+    shortcut: "Mod+Shift+F",
+    slash: "files",
+    readOnlySafe: true,
+  },
   // CE12 (KOBE-208): opens or closes every reasoning block and tool card; a toggle (aria-pressed).
   {
     id: "detail",
@@ -160,8 +184,23 @@ const LIST = [
   },
   // Compact now (CE15, B9 KOBE-213): beside the context gauge at red, and in the thread's actions
   // menu; opens the dialog (optional focus). Enabled only while the thread is idle. It acts on the
-  // conversation, and the bar's scope lists only icons the bar always shows. `/compact`: C6.
-  { id: "compact-thread", name: "Compact this thread", icon: FoldVerticalIcon, scope: "thread" },
+  // conversation, and the bar's scope lists only icons the bar always shows.
+  {
+    id: "compact-thread",
+    name: "Compact this thread",
+    icon: FoldVerticalIcon,
+    scope: "thread",
+    slash: "compact",
+  },
+  // The conversation's model (D30): the model picker's choices, bound by `ModelPicker`.
+  {
+    id: "choose-model",
+    name: "Model for this conversation",
+    icon: CpuIcon,
+    scope: "thread",
+    slash: "model",
+    arg: "model",
+  },
   // The open thread's actions menu in bar row two (on one column, inside the bar's Menu).
   { id: "thread-actions", name: "Conversation actions", icon: EllipsisIcon, scope: "thread" },
   // Rail.
@@ -171,6 +210,8 @@ const LIST = [
     icon: SquarePenIcon,
     scope: "rail",
     shortcut: "Mod+N",
+    slash: "new",
+    readOnlySafe: true,
   },
   {
     id: "toggle-rail",
@@ -196,21 +237,62 @@ const LIST = [
   // The thread row's menu (KOBE-292), in menu order. Copy: the branch on screen as Markdown.
   // Regenerate (with): the thread's last answer. Pin, Archive and Move (CE19, KOBE-220): a row
   // binds Pin or Unpin, Archive or Unarchive; Move lists the projects as a submenu.
-  { id: "copy-thread", name: "Copy", icon: CopyIcon, scope: "thread-menu" },
-  { id: "regenerate-thread", name: "Regenerate", icon: RefreshCwIcon, scope: "thread-menu" },
+  {
+    id: "copy-thread",
+    name: "Copy",
+    icon: CopyIcon,
+    scope: "thread-menu",
+    slash: "copy",
+    readOnlySafe: true,
+  },
+  {
+    id: "regenerate-thread",
+    name: "Regenerate",
+    icon: RefreshCwIcon,
+    scope: "thread-menu",
+    slash: "regenerate",
+  },
   {
     id: "regenerate-thread-with",
     name: "Regenerate with",
     icon: RefreshCcwDotIcon,
     scope: "thread-menu",
+    slash: "regenerate-with",
+    arg: "model",
   },
-  { id: "pin-thread", name: "Pin", icon: PinIcon, scope: "thread-menu" },
-  { id: "unpin-thread", name: "Unpin", icon: PinOffIcon, scope: "thread-menu" },
-  { id: "move-thread", name: "Move to project", icon: FolderInputIcon, scope: "thread-menu" },
-  { id: "archive-thread", name: "Archive", icon: ArchiveIcon, scope: "thread-menu" },
-  { id: "unarchive-thread", name: "Unarchive", icon: ArchiveRestoreIcon, scope: "thread-menu" },
+  { id: "pin-thread", name: "Pin", icon: PinIcon, scope: "thread-menu", slash: "pin" },
+  { id: "unpin-thread", name: "Unpin", icon: PinOffIcon, scope: "thread-menu", slash: "unpin" },
+  {
+    id: "move-thread",
+    name: "Move to project",
+    icon: FolderInputIcon,
+    scope: "thread-menu",
+    slash: "move",
+    arg: "project",
+  },
+  {
+    id: "archive-thread",
+    name: "Archive",
+    icon: ArchiveIcon,
+    scope: "thread-menu",
+    slash: "archive",
+  },
+  {
+    id: "unarchive-thread",
+    name: "Unarchive",
+    icon: ArchiveRestoreIcon,
+    scope: "thread-menu",
+    slash: "unarchive",
+  },
   // Share (CE20, KOBE-221): a submenu of scopes (only you, the project's members, the team).
-  { id: "share-thread", name: "Share", icon: Share2Icon, scope: "thread-menu" },
+  {
+    id: "share-thread",
+    name: "Share",
+    icon: Share2Icon,
+    scope: "thread-menu",
+    slash: "share",
+    arg: "with",
+  },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.
@@ -219,7 +301,7 @@ const LIST = [
   { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
   { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "file-menu" },
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
-  { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread" },
+  { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread", slash: "rename" },
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
   // Closes a notice banner (retention, a file that left the workspace).
@@ -232,7 +314,15 @@ const LIST = [
   { id: "regenerate", name: "Regenerate", icon: RefreshCwIcon, scope: "message" },
   // Regenerate's split half (CE17, KOBE-217): the team's models to regenerate with.
   { id: "regenerate-with", name: "Regenerate with…", icon: ChevronDownIcon, scope: "message" },
-  { id: "fork-thread", name: "Fork to a new thread", icon: GitForkIcon, scope: "message" },
+  // `/fork` forks at the thread's last answer (KOBE-224); a reader may fork a shared thread.
+  {
+    id: "fork-thread",
+    name: "Fork to a new thread",
+    icon: GitForkIcon,
+    scope: "message",
+    slash: "fork",
+    readOnlySafe: true,
+  },
   { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
   { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
@@ -241,7 +331,14 @@ const LIST = [
   { id: "attach", name: "Attach files", icon: PaperclipIcon, scope: "composer" },
   { id: "dictate", name: "Dictate", icon: MicIcon, scope: "composer" },
   { id: "send", name: "Send", icon: ArrowUpIcon, scope: "composer" },
-  { id: "stop", name: "Stop", icon: SquareIcon, scope: "composer", shortcut: "Mod+." },
+  {
+    id: "stop",
+    name: "Stop",
+    icon: SquareIcon,
+    scope: "composer",
+    shortcut: "Mod+.",
+    slash: "stop",
+  },
   // The steering panel above the input (CE10, KOBE-206): bound in the composer while a run is on.
   {
     id: "steer",
