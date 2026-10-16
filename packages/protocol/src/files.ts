@@ -112,12 +112,14 @@ export type WorkspaceListResponse = z.infer<typeof workspaceListResponseSchema>;
 
 /** Most files one `GET /v1/workspace/files/search` answers (KOBE-223). */
 export const WORKSPACE_SEARCH_MAX_RESULTS = 50;
-export const WORKSPACE_SEARCH_QUERY_MAX = 200;
+export const WORKSPACE_SEARCH_QUERY_MAX = 100;
 
 /**
  * `GET /v1/workspace/files/search?q=&limit=` (KOBE-223, the composer's `@` picker): the caller's
  * own synced files whose path contains `q` (case-insensitive; absent = every file), files only,
- * those whose name starts with `q` first, then newest first. `limit` defaults to and is capped at
+ * those whose name starts with `q` first, then newest first. Files whose path cannot be mentioned
+ * (`mentionPathIssue`: invisible or format characters) are left out. The scan is bounded (a
+ * workspace past the bound may miss files) and rate-limited per member (429 `rate_limited`). `limit` defaults to and is capped at
  * {@link WORKSPACE_SEARCH_MAX_RESULTS}. Answers {@link workspaceSearchResponseSchema}.
  */
 export const workspaceSearchQuerySchema = z.strictObject({

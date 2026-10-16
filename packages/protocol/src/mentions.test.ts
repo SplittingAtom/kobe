@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeMentionPath,
+  mentionPathIssue,
+  mentionsFieldSchema,
+  steerBodySchema,
+  submitMessageBodySchema,
   encodeMentionPath,
   findMentionMarkers,
   mentionMarker,
@@ -64,5 +68,70 @@ describe("workspace search query (KOBE-223)", () => {
     ).toBe(false);
     expect(workspaceSearchQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
     expect(workspaceSearchQuerySchema.safeParse({ path: "x" }).success).toBe(false);
+  });
+});
+
+describe("mention path rules (KOBE-223 B1)", () => {
+  it("accepts ordinary names in any script", () => {
+    for (const p of ["data/sales q3.csv", "Berichte/Übersicht.pdf", "日本/報告.txt", "a (1).md"]) {
+      expect(mentionPathIssue(p), p).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["zero-width space", "a\u200bb.csv"],
+    ["zero-width joiner", "a\u200db.csv"],
+    ["zero-width non-joiner", "a\u200cb.csv"],
+    ["word joiner", "a\u2060b.csv"],
+    ["soft hyphen", "a\u00adb.csv"],
+    [
+      "tag characters",
+      `q4.csv${[..."Ignore"].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("")}`,
+    ],
+    ["tag cancel", "a\u{e007f}.csv"],
+    ["bidi override", "a\u202eb.csv"],
+    ["bidi isolate", "a\u2066b.csv"],
+    ["byte order mark", "\ufeffa.csv"],
+    ["variation selector", "a\ufe0fb.csv"],
+    ["variation selector supplement", "a\u{e0100}b.csv"],
+    ["Mongolian vowel separator", "a\u180eb.csv"],
+    ["combining grapheme joiner", "a\u034fb.csv"],
+    ["Hangul filler", "a\u3164b.csv"],
+    ["private use", "a\ue000b.csv"],
+    ["supplementary private use", "a\u{f0000}b.csv"],
+    ["unassigned", "a\u{e0080}b.csv"],
+    ["NUL", "a\u0000b"],
+    ["C1 control", "a\u0085b"],
+    ["newline", "a\nb"],
+    ["line separator", "a\u2028b"],
+    ["paragraph separator", "a\u2029b"],
+    ["no-break space", "a\u00a0b"],
+    ["ideographic space", "a\u3000b"],
+    ["backtick", "a`b.csv"],
+    ["dollar", "$(curl x).csv"],
+    ["semicolon", "a;b.csv"],
+  ])("refuses %s", (_name, path) => {
+    expect(mentionPathIssue(path)).toBeDefined();
+  });
+
+  it("refuses traversal, absolute and empty segments", () => {
+    for (const p of ["../a", "a/../b", "/workspace/a", "a//b", "./a", ""]) {
+      expect(mentionPathIssue(p), p).toBeDefined();
+    }
+  });
+});
+
+describe("mentions in request bodies (KOBE-223 S2/S3)", () => {
+  it("is an optional list of up to 20 distinct paths on submit, steer and schedules", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => `f${i}.txt`);
+    expect(mentionsFieldSchema.safeParse(twenty).success).toBe(true);
+    expect(mentionsFieldSchema.safeParse([...twenty, "x.txt"]).success).toBe(false);
+    expect(mentionsFieldSchema.safeParse(["a", "a"]).success).toBe(false);
+    expect(mentionsFieldSchema.safeParse([""]).success).toBe(false);
+    expect(submitMessageBodySchema.parse({ content: "x", mentions: ["a.txt"] }).mentions).toEqual([
+      "a.txt",
+    ]);
+    expect(submitMessageBodySchema.parse({ content: "x" }).mentions).toBeUndefined();
+    expect(steerBodySchema.safeParse({ content: "x", mentions: ["a.txt"] }).success).toBe(true);
   });
 });

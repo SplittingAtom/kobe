@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { timestampSchema, uuidSchema } from "./common.js";
+import { mentionsFieldSchema } from "./mentions.js";
 
 /**
  * Schedules contract (KOBE-171 = 64a of KOBE-64, spec D32; wire shapes in docs/ledger/KOBE-171.md).
@@ -164,6 +165,12 @@ export const schedulePromptSchema = z
 export const createScheduleBodySchema = z.strictObject({
   agent_id: uuidSchema,
   prompt: schedulePromptSchema,
+  /**
+   * `@file` mentions in `prompt` (KOBE-223, mentions.ts), checked against the owner's workspace
+   * when saved; at each run their markers become `/workspace/...` paths (a file gone by then
+   * stays literal text and the run goes ahead).
+   */
+  mentions: mentionsFieldSchema.default([]),
   recurrence: scheduleRecurrenceSchema,
   tz: scheduleTimezoneSchema,
   /** Creating an active schedule counts against {@link MAX_ACTIVE_SCHEDULES_PER_USER}. */
@@ -177,6 +184,7 @@ export const patchScheduleBodySchema = z
   .strictObject({
     agent_id: uuidSchema,
     prompt: schedulePromptSchema,
+    mentions: mentionsFieldSchema,
     recurrence: scheduleRecurrenceSchema,
     tz: scheduleTimezoneSchema,
     active: z.boolean(),
@@ -204,6 +212,7 @@ export const scheduleResponseSchema = z.strictObject({
   user_id: uuidSchema,
   agent_id: uuidSchema,
   prompt: schedulePromptSchema,
+  mentions: z.array(z.string()),
   recurrence: scheduleRecurrenceSchema,
   tz: scheduleTimezoneSchema,
   active: z.boolean(),
@@ -232,6 +241,8 @@ export const SCHEDULE_ERROR_CODES = [
   "invalid_recurrence",
   "invalid_timezone",
   "agent_not_runnable",
+  /** A `mentions` path is malformed, invisible-character, or not a file of the workspace. */
+  "invalid_mention",
 ] as const;
 export const scheduleErrorCodeSchema = z.enum(SCHEDULE_ERROR_CODES);
 export type ScheduleErrorCode = z.infer<typeof scheduleErrorCodeSchema>;
@@ -241,6 +252,7 @@ export const SCHEDULE_ERROR_HTTP_STATUS = {
   invalid_recurrence: 422,
   invalid_timezone: 422,
   agent_not_runnable: 422,
+  invalid_mention: 422,
 } as const satisfies Record<ScheduleErrorCode, number>;
 
 export const scheduleErrorSchema = z.strictObject({

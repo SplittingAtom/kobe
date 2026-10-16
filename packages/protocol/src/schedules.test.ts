@@ -31,6 +31,7 @@ describe("constants", () => {
       "invalid_recurrence",
       "invalid_timezone",
       "agent_not_runnable",
+      "invalid_mention",
     ]);
     expect(SCHEDULE_ERROR_HTTP_STATUS.schedule_cap_reached).toBe(409);
     expect(Object.keys(SCHEDULE_ERROR_HTTP_STATUS).sort()).toEqual(
@@ -121,6 +122,13 @@ describe("bodies", () => {
     expect(parsed.notify_email).toBe(false);
   });
   it("create rejects empty/long prompts and unknown keys", () => {
+    expect(createScheduleBodySchema.parse(base).mentions).toEqual([]);
+    expect(createScheduleBodySchema.parse({ ...base, mentions: ["a.txt"] }).mentions).toEqual([
+      "a.txt",
+    ]);
+    expect(createScheduleBodySchema.safeParse({ ...base, mentions: ["a", "a"] }).success).toBe(
+      false,
+    );
     expect(createScheduleBodySchema.safeParse({ ...base, prompt: "" }).success).toBe(false);
     expect(createScheduleBodySchema.safeParse({ ...base, prompt: " " }).success).toBe(false);
     expect(
@@ -151,6 +159,7 @@ describe("responses", () => {
     team_id: EXAMPLE_IDS.team,
     user_id: EXAMPLE_IDS.user,
     ...base,
+    mentions: [],
     active: true,
     notify_email: false,
     next_due_at: "2026-10-12T06:00:00Z",
