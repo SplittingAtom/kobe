@@ -41,6 +41,15 @@ export const schedules = pgTable(
     /** The agent to run. No foreign key: agents live in two tables; the runner re-checks it. */
     agentId: uuid().notNull(),
     prompt: text().notNull(),
+    /**
+     * `@file` mentions the owner picked for the prompt (KOBE-223): workspace paths, at most 20.
+     * Validated when the schedule is saved; at each run the prompt's `@file(...)` markers of
+     * these paths are rewritten to `/workspace/...` (a file gone by then stays literal text).
+     */
+    mentions: text()
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     /** `scheduleRecurrenceSchema` (cron | daily | weekdays | weekly); `tz` is a sibling. */
     recurrence: jsonb().$type<Record<string, unknown>>().notNull(),
     /** Derived from `recurrence` by the server (presets map to a cron too). */
@@ -63,6 +72,7 @@ export const schedules = pgTable(
     primaryKey({ columns: [t.teamId, t.id] }),
     check("schedules_prompt", sql`char_length(btrim(${t.prompt})) BETWEEN 1 AND 10000`),
     check("schedules_tz", sql`char_length(${t.tz}) BETWEEN 1 AND 64`),
+    check("schedules_mentions", sql`cardinality(${t.mentions}) <= 20`),
     check("schedules_paused_by", sql`${t.pausedBy} IN ('team_admin', 'deactivation')`),
     check("schedules_paused_inactive", sql`${t.pausedBy} IS NULL OR NOT ${t.active}`),
     // The runner's due scan, team by team under RLS (active schedules by next occurrence).
