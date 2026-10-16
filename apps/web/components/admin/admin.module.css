@@ -249,10 +249,25 @@
   margin: 1rem 0;
 }
 
-.form label {
+/* A field's caption stacks above its control. A choice (checkbox or radio) is left out: it stays
+   inline before its text, wherever it sits in a form (KOBE-283). Stacking it put each box on its own
+   row, stretched and so drawn centred above its label. */
+.form label:not(:has(input:is([type="checkbox"], [type="radio"]))) {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+}
+
+/* Choices side by side in a fieldset (exposure, retention period) keep apart. */
+.shell fieldset label:has(input:is([type="checkbox"], [type="radio"])) {
+  margin-inline-end: 1rem;
+}
+
+/* A connector's tool list: no bullets, so its checkboxes lead each row. */
+.choiceList {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
 }
 
 .hint {

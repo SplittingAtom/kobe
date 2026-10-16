@@ -34,7 +34,8 @@
   font-weight: 600;
 }
 
-.field input,
+/* Text-like controls fill the field; a checkbox or radio keeps its own size (KOBE-283). */
+.field input:not([type="checkbox"], [type="radio"]),
 .field select,
 .field textarea,
 .prompt {

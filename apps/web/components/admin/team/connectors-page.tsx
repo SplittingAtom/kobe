@@ -181,7 +181,7 @@ function ToolList({
         that doesn&apos;t say otherwise as able to reach outside systems. Read-only exposure offers
         only tools that declare themselves read-only.
       </p>
-      <ul aria-label="Tools">
+      <ul aria-label="Tools" className={styles.choiceList}>
         {tools.map((t) => {
           const drifted = t.status === "drifted";
           return (
