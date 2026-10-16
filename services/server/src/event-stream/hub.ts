@@ -91,7 +91,13 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     for (const runId of byRun.keys()) {
       const fire = () => {
         const current = byRun.get(runId);
-        if (current) for (const s of [...current]) s.resync();
+        if (current) {
+          for (const s of [...current]) {
+            s.resync();
+            // Access hints may have been missed too (KOBE-221): recheck the viewers.
+            s.revalidate?.();
+          }
+        }
       };
       if (windowMs <= 0) fire();
       else setTimeout(fire, Math.random() * windowMs).unref();

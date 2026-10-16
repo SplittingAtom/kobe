@@ -251,6 +251,11 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
         lastReadAt = Date.now();
         const page = await input.source.read(lastSent);
         if (ended) return;
+        // An access hint arrived during the read: recheck before sending anything it returned.
+        if (revalidateDue) {
+          dirty = true;
+          continue;
+        }
         if (!page.run || page.run.compacted) {
           endReason ??= "gone";
           continue;
@@ -301,6 +306,9 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
     start(ctrl) {
       controller = ctrl;
       unsubscribe = input.hub.subscribe(input.runId, subscriber);
+      // Check the viewer once now that access hints reach this stream (KOBE-221): a revoke that
+      // committed between the route's check and this subscribe sent its hint to nobody.
+      revalidateDue = true;
       if (input.epilogue) waitForEpilogue(input.epilogue);
       ctrl.enqueue(encoder.encode(formatSseRetry(t.retryMs)));
       lastChunkAt = Date.now();

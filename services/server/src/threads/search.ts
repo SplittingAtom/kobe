@@ -6,7 +6,14 @@ import {
   type ThreadSearchHit as SearchHit,
 } from "@kobe/db";
 import { visibilityOf } from "./share.js";
-import { findThreads, ownOrganization, sharerNames, type Viewer } from "./repository.js";
+import {
+  findThreads,
+  maskedProject,
+  ownOrganization,
+  sharerNames,
+  viewableProjects,
+  type Viewer,
+} from "./repository.js";
 import type { ThreadSearchHit } from "./schemas.js";
 
 /**
@@ -58,13 +65,20 @@ export async function searchThreadList(
     const sourceIds = [...new Set(page.hits.flatMap((h) => h.forkedFromThreadId ?? []))];
     const sources = await findThreads(tx, viewer, sourceIds);
     const owners = await sharerNames(tx, viewer, page.hits);
-    const threads = page.hits.map((hit) => {
+    const viewable = await viewableProjects(tx, viewer, page.hits);
+    // Filtered by a project the viewer may not open: only their own threads in it (CE20).
+    const hits =
+      input.projectId === undefined || viewable.has(input.projectId)
+        ? page.hits
+        : page.hits.filter((hit) => hit.ownerUserId === viewer.userId);
+    const threads = hits.map((hit) => {
       // Someone else's thread is shared with the viewer (CE20): read-only, by its sharer.
       const own = hit.ownerUserId === viewer.userId;
       return {
         ...ownOrganization(toWire(hit, sources), viewer),
         read_only: !own,
         owner_name: own ? null : (owners.get(hit.ownerUserId) ?? null),
+        ...maskedProject(hit, viewer, viewable),
       };
     });
     return { ok: true, body: { threads, next_cursor: page.nextCursor } };

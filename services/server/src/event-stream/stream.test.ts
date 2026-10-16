@@ -329,6 +329,41 @@ describe("run event stream", () => {
     expect(ends).toEqual(["revoked"]);
   });
 
+  it("checks access once it is subscribed: a revoke before the subscribe is not missed (KOBE-221)", async () => {
+    const log = new FakeLog();
+    log.append(3);
+    // The route's check passed, then the share was revoked before the stream subscribed: that
+    // hint reached nobody, and the periodic recheck is a minute away.
+    log.allowed = false;
+    const { reader, ends } = open(log, new FakeHub(), 0, { ...FAST, revalidateMs: 60_000 });
+    expect(await reader.rest()).toEqual([]);
+    expect(ends).toEqual(["revoked"]);
+  });
+
+  it("sends nothing a read returned when an access hint arrived during it (KOBE-221)", async () => {
+    const log = new FakeLog();
+    const hub = new FakeHub();
+    log.append(1);
+    const { reader, ends } = open(log, hub, 0, { ...FAST, revalidateMs: 60_000 });
+    expect((await reader.nextEvent())?.seq).toBe(1);
+    // The next read hangs until released; the revoke's hint lands while it is in flight.
+    let release: () => void = () => undefined;
+    const read = log.source.read;
+    log.source.read = async (after) => {
+      await new Promise<void>((r) => (release = r));
+      log.source.read = read;
+      return read(after);
+    };
+    log.append(2);
+    hub.hint(3);
+    await new Promise((r) => setTimeout(r, 30));
+    log.allowed = false;
+    hub.accessChanged();
+    release();
+    expect(await reader.rest()).toEqual([]);
+    expect(ends).toEqual(["revoked"]);
+  });
+
   it("ends when the run disappears or is compacted", async () => {
     const log = new FakeLog();
     log.append(1);

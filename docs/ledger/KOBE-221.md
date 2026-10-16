@@ -49,10 +49,28 @@ project ∈ viewer's projects) AND deleted_at IS NULL`, always with `team_id`. E
   says so with Make private. The rail lists `/v1/threads/shared` in Shared with me; a project-scoped
   one is also in its project group. The header's Conversation actions menu still holds Compact only.
 
-## Open questions (for Chris or the coordinator)
+## Review fixes (review-221)
 
-- A member who leaves the team keeps their team-shared threads visible to the team (as project
-  shares stay visible to project members); revisit with offboarding if that is unwanted.
+- **S1:** a stream checks access once right after it subscribes to the hub, so a revoke that
+  committed between the route's check and the subscribe is not missed (`stream.ts` `start`).
+- **S2 (fail closed):** removing a member ends every share of their threads in the team, in the
+  removal's transaction (`endSharesOf`, `share-scope.ts`, called from `teams/members.ts`), each
+  audited `thread.sharing_changed` with the system actor and with the access hint sent. Deactivation
+  does the same per team right after its transaction (one `withTeam` per team: a transaction can
+  hold only one team); a team that fails is logged. Reactivation does not share again. No admin
+  write action.
+- **S3:** team-scope tests for tool output, pending drafts, shared files (meta and content),
+  artifact detail/content/frame, an approval by a reader, a test thread, and the real Trash and
+  move paths sending the hint (LISTEN in the test). A reader's approval attempt is 404 (decided by
+  its asker only, as for project readers since KOBE-163), not 403.
+- **N1:** a hint that arrives during a read discards that page and rechecks first. **N2:** comment
+  fixed; the `ended_at` bound stays (old replay streams rely on the 30 s check). **N3:** the hub's
+  resync also rechecks access. **N4:** others' summaries and search hits hide `project_id` when the
+  viewer may not open the project (as the markers do), and listing or searching such a project shows
+  them only their own threads.
+- **Noted, unchanged:** N5, a reader sees the name and status of the owner's pinned agent (detail
+  and card), as project readers already did; N6, storage is a second boolean (`shared_to_team`)
+  next to `shared_to_project` instead of CE20's `threads.shared_scope`; flag for the spec owner.
 
 ## Evidence (acceptance criteria → test)
 
@@ -80,3 +98,6 @@ Mailpit, and pass `KOBE_USER2`/`KOBE_PW2` with the other variables. Without them
 `pnpm format`, `lint`, `typecheck`, unit tests green; `@kobe/db test:db` 1128 and `@kobe/server
 test:db` 1471 green (probe suite included). Known: `@kobe/cli test:db` pg_dump failures; one run of
 `gateway-client.test.ts` "does not follow redirects" failed under full-suite load and passes alone.
+
+After the review fixes: format, lint, typecheck and every package's unit tests green;
+`@kobe/db test:db` 1128 and `@kobe/server test:db` 1478 green.

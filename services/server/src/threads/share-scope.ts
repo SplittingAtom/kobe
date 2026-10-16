@@ -1,5 +1,5 @@
 import type { ThreadVisibility } from "@kobe/protocol";
-import type { KobeTx } from "@kobe/db";
+import { and, eq, sql, SYSTEM_ACTOR, threads, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
 import { canCreateInProject } from "./references.js";
@@ -64,4 +64,58 @@ export async function recordShareScope(
     },
   });
   if (narrows(from, to)) await notifyThreadAccess(tx, viewer.teamId, after.id);
+}
+
+/**
+ * Ends every share of a member's threads in the team (KOBE-221, fail closed): called when they are
+ * removed from the team or deactivated, inside that change's transaction (`withTeam` of `teamId`).
+ * Nobody else may change their threads, so a share would otherwise outlive the member with no one
+ * able to revoke it. Each is audited (`thread.sharing_changed`, system actor) and open reader
+ * streams recheck at once. Returns how many threads were made private.
+ */
+export async function endSharesOf(tx: KobeTx, teamId: string, userId: string): Promise<number> {
+  const shared = await tx
+    .select({
+      id: threads.id,
+      projectId: threads.projectId,
+      sharedToProject: threads.sharedToProject,
+      sharedToTeam: threads.sharedToTeam,
+    })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.teamId, teamId),
+        eq(threads.ownerUserId, userId),
+        sql`(${threads.sharedToProject} OR ${threads.sharedToTeam})`,
+      ),
+    )
+    .orderBy(threads.id)
+    .for("no key update");
+  if (shared.length === 0) return 0;
+  await tx
+    .update(threads)
+    .set({ sharedToProject: false, sharedToTeam: false })
+    .where(
+      and(
+        eq(threads.teamId, teamId),
+        eq(threads.ownerUserId, userId),
+        sql`(${threads.sharedToProject} OR ${threads.sharedToTeam})`,
+      ),
+    );
+  for (const thread of shared) {
+    await notifyThreadAccess(tx, teamId, thread.id);
+    await recordAudit(tx, {
+      action: "thread.sharing_changed",
+      teamId,
+      actor: SYSTEM_ACTOR,
+      target: {
+        threadId: thread.id,
+        projectId: thread.projectId,
+        shared: false,
+        visibility: "private",
+        from: visibilityOf(thread),
+      },
+    });
+  }
+  return shared.length;
 }

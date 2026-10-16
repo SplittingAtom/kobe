@@ -29,6 +29,7 @@ import {
   type PinError,
 } from "../agents/versions.js";
 import { visibilityOf } from "./share.js";
+import { loadAccess } from "../projects/access.js";
 import { applyShareScope, recordShareScope, shareScopeRefusal } from "./share-scope.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
 import type { ThreadVisibility } from "@kobe/protocol";
@@ -212,6 +213,7 @@ export async function summarize(
   const sources =
     ids.size === 0 ? new Map<string, SummaryRow>() : await findThreads(tx, viewer, [...ids]);
   const owners = await sharerNames(tx, viewer, rows);
+  const viewable = await viewableProjects(tx, viewer, rows);
   return rows.map((row) => {
     const source = row.forkedFromThreadId ? sources.get(row.forkedFromThreadId) : undefined;
     // Pin and archive are the owner's own organization (CE19): a reader never sees them.
@@ -220,11 +222,47 @@ export async function summarize(
       ...ownOrganization(toSummary(row), viewer),
       read_only: !own,
       owner_name: own ? null : (owners.get(row.ownerUserId) ?? null),
+      ...maskedProject(row, viewer, viewable),
     };
     return source
       ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
       : summary;
   });
+}
+
+/**
+ * The projects of others' `rows` the viewer may open (member, or team admin), as the markers decide
+ * (`project-moves.ts`). A team share can reach people outside the thread's project (CE20): they
+ * see the thread, not which project it is in.
+ */
+export async function viewableProjects(
+  tx: KobeTx,
+  viewer: Viewer,
+  rows: readonly { readonly ownerUserId: string; readonly projectId: string | null }[],
+): Promise<ReadonlySet<string>> {
+  const visible = new Set(viewer.projectIds);
+  const unknown = new Set(
+    rows.flatMap((r) =>
+      r.ownerUserId !== viewer.userId && r.projectId !== null && !visible.has(r.projectId)
+        ? [r.projectId]
+        : [],
+    ),
+  );
+  for (const projectId of unknown) {
+    if ((await loadAccess(tx, viewer, projectId))?.can.view) visible.add(projectId);
+  }
+  return visible;
+}
+
+/** `project_id: null` for someone else's thread in a project the viewer may not open. */
+export function maskedProject(
+  row: { readonly ownerUserId: string; readonly projectId: string | null },
+  viewer: Viewer,
+  viewable: ReadonlySet<string>,
+): { project_id?: null } {
+  const hidden =
+    row.ownerUserId !== viewer.userId && row.projectId !== null && !viewable.has(row.projectId);
+  return hidden ? { project_id: null } : {};
 }
 
 /**
@@ -302,8 +340,17 @@ export async function listThreads(
   viewer: Viewer,
   options: { projectId?: string | undefined; cursor: ActivityCursor | null; limit: number },
 ): Promise<Page<ThreadSummary>> {
+  // Others' threads of a project only for those who may open it: a team share is no way to list
+  // the threads of a project one can't see (CE20).
+  const projectOpen =
+    options.projectId !== undefined &&
+    (viewer.projectIds.includes(options.projectId) ||
+      (await loadAccess(tx, viewer, options.projectId))?.can.view === true);
   const scope = options.projectId
-    ? and(eq(threads.projectId, options.projectId), readableBy(viewer))
+    ? and(
+        eq(threads.projectId, options.projectId),
+        projectOpen ? readableBy(viewer) : eq(threads.ownerUserId, viewer.userId),
+      )
     : and(
         eq(threads.teamId, viewer.teamId),
         eq(threads.ownerUserId, viewer.userId),

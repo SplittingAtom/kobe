@@ -3,8 +3,10 @@ import { sql, type KobeTx } from "@kobe/db";
 import { RUN_EVENTS_CHANNEL } from "./notify.js";
 
 /**
- * Streams can still be open on a run this long after it ended: the epilogue window (KOBE-234)
- * plus a margin. Older runs have no open stream (a reconnect answers 204).
+ * Live streams follow a run this long after it ended: the epilogue window (KOBE-234) plus a
+ * margin. An older ended run can still be streamed as a replay (a client behind its last event);
+ * such a stream gets no hint and is cut by the periodic revalidation (30 s), which keeps a revoke
+ * from sending one NOTIFY per run of a long thread.
  */
 const OPEN_AFTER_END_MS = SERVER_CALL_EPILOGUE_MAX_MS + 60_000;
 

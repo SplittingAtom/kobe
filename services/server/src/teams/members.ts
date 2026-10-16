@@ -14,6 +14,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
+import { endSharesOf } from "../threads/share-scope.js";
 
 export interface TeamMember {
   readonly userId: string;
@@ -155,6 +156,8 @@ export async function removeMember(
     await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
     // Egress proxies close the user's open tunnels in this team (KOBE-38).
     await notifyEgressUserChanged(tx, userId);
+    // Their shared threads go private: nobody else could revoke them (KOBE-221).
+    await endSharesOf(tx, teamId, userId);
     await recordAudit(tx, {
       action: "identity.member.removed",
       teamId,

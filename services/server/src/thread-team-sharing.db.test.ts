@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
 import { SseReader } from "./testing/sse.js";
@@ -282,8 +282,8 @@ describe("team admins and other teams (ac-3)", () => {
 });
 
 describe("revocation reaches open streams at once", () => {
-  it("ends a reader's live stream on revoke, on narrowing to the project and on Trash", async () => {
-    for (const how of ["revoke", "narrow", "trash"] as const) {
+  it("ends a reader's live stream on revoke and on narrowing to the project", async () => {
+    for (const how of ["revoke", "narrow"] as const) {
       const x = await world(false);
       if (how === "narrow") {
         const project = await as(x.admin).post("/v1/projects", {
@@ -305,16 +305,55 @@ describe("revocation reaches open streams at once", () => {
       expect((await sse.nextEvent())?.run_id).toBe(x.runId);
       if (how === "revoke") await share(x.author, x.threadId, "private");
       if (how === "narrow") await share(x.author, x.threadId, "project");
-      if (how === "trash") {
-        // A live run keeps the thread out of Trash: end the run's hold by hand.
-        await f.fx.admin.query(
-          `UPDATE threads SET deleted_at = now() WHERE team_id = $1 AND id = $2`,
-          [x.w.team, x.threadId],
-        );
-        await f.fx.admin.query(`SELECT pg_notify('kobe_run_events', 'access:' || $1)`, [x.runId]);
-      }
       // revalidateMs is 60 s here: only the access hint ends it this fast.
       expect(await endsWithin(sse, 5_000), how).toBe(true);
+    }
+  });
+
+  it("sends the access hint from the real Trash and move paths, for a run that just ended", async () => {
+    const heard: string[] = [];
+    const listen = (msg: { channel: string; payload?: string | undefined }) => {
+      if (msg.channel === "kobe_run_events" && msg.payload?.startsWith("access:")) {
+        heard.push(msg.payload);
+      }
+    };
+    f.fx.admin.on("notification", listen);
+    await f.fx.admin.query("LISTEN kobe_run_events");
+    try {
+      // Trash of a team-shared thread.
+      const a = await world();
+      await share(a.author, a.threadId, "team");
+      heard.length = 0;
+      expect((await as(a.author).delete(`/v1/threads/${a.threadId}`)).status).toBe(200);
+      await expect.poll(() => heard, { timeout: 2_000 }).toContain(`access:${a.runId}`);
+
+      // A move ending a project share.
+      const b = await world();
+      const project = await as(b.admin).post("/v1/projects", {
+        name: `M${randomBytes(2).toString("hex")}`,
+        members_mode: "selected",
+        member_user_ids: [b.author.id, b.reader.id],
+      });
+      expect(project.status, JSON.stringify(project.json)).toBe(201);
+      await as(b.author).post(`/v1/threads/${b.threadId}/move`, { project_id: project.json.id });
+      await share(b.author, b.threadId, "project");
+      heard.length = 0;
+      const moved = await as(b.author).post(`/v1/threads/${b.threadId}/move`, {
+        project_id: null,
+      });
+      expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+      await expect.poll(() => heard, { timeout: 2_000 }).toContain(`access:${b.runId}`);
+      expect((await as(b.reader).get(`/v1/threads/${b.threadId}`)).status).toBe(404);
+
+      // Nothing is sent for a private thread's Trash (no reader to tell).
+      const c = await world();
+      heard.length = 0;
+      await as(c.author).delete(`/v1/threads/${c.threadId}`);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(heard).not.toContain(`access:${c.runId}`);
+    } finally {
+      f.fx.admin.off("notification", listen);
+      await f.fx.admin.query("UNLISTEN kobe_run_events");
     }
   });
 
@@ -327,5 +366,176 @@ describe("revocation reaches open streams at once", () => {
     expect((await sse.nextEvent())?.run_id).toBe(x.runId);
     await share(x.author, x.threadId, "private");
     expect(await endsWithin(sse, 1_000)).toBe(false);
+  });
+});
+
+describe("more read paths (S3)", () => {
+  it("follows the scope for tool output, pending drafts, shared files and artifacts", async () => {
+    const x = await world(false);
+    // A queued draft of the author's: never shown to a reader.
+    const queued = await f.send(x.author, x.threadId, "a second question");
+    expect(queued.status, JSON.stringify(queued.json)).toBe(201);
+    const fileId = randomUUID();
+    await f.fx.admin.query(
+      `INSERT INTO files (team_id, id, user_id, thread_id, kind, name, size_bytes, sha256, mime_type, blob_ref)
+       VALUES ($1, $2, $3, $4, 'shared', 'r.txt', 1, $5, 'text/plain', 'k')`,
+      [x.w.team, fileId, x.author.id, x.threadId, "a".repeat(64)],
+    );
+    const artifactId = randomUUID();
+    await f.fx.admin.query(
+      `INSERT INTO artifacts (team_id, id, thread_id, created_by, kind, title)
+       VALUES ($1, $2, $3, $4, 'markdown', 'Notes')`,
+      [x.w.team, artifactId, x.threadId, x.author.id],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO artifact_versions (team_id, artifact_id, version, thread_id, blob_ref, size_bytes,
+                                      sha256, run_id, tool_call_id)
+       VALUES ($1, $2, 1, $3, 'k', 1, $4, $5, $6)`,
+      [x.w.team, artifactId, x.threadId, "b".repeat(64), x.runId, `tc-${artifactId}`],
+    );
+    const t = `/v1/threads/${x.threadId}`;
+    const statuses = async (p: Person) => {
+      const b = as(p);
+      return [
+        (await b.get(`${t}/entries/${x.entries.user}/output`)).status,
+        (await b.get(`${t}/pending-messages`)).status,
+        (await b.get(`/v1/files/${fileId}`)).status,
+        (await b.get(`/v1/files/${fileId}/content`)).status,
+        (await b.get(`/v1/artifacts/${artifactId}`)).status,
+        (await b.get(`/v1/artifacts/${artifactId}/versions/1/content`)).status,
+        (await b.get(`/v1/artifacts/${artifactId}/versions/1/frame?team=${x.w.team}`)).status,
+      ];
+    };
+    // Shared: past the access check (a user message is no tool output; no object storage here).
+    const open = [409, 200, 200, 503, 200, 503, 503];
+    const closed = [404, 404, 404, 404, 404, 404, 404];
+    expect(await statuses(x.author)).toEqual(open);
+    expect(await statuses(x.reader)).toEqual(closed);
+    await share(x.author, x.threadId, "team");
+    expect(await statuses(x.reader)).toEqual(open);
+    // The author's queued draft is theirs only; a reader sees at most the running prompt.
+    const queuedOf = async (p: Person) =>
+      ((await as(p).get(`${t}/pending-messages`)).json.messages as { status: string }[]).filter(
+        (m) => m.status === "queued",
+      );
+    expect(await queuedOf(x.reader)).toEqual([]);
+    expect(await queuedOf(x.author)).toHaveLength(1);
+    await share(x.author, x.threadId, "private");
+    expect(await statuses(x.reader)).toEqual(closed);
+  });
+
+  it("never lets a team reader decide the author's approval", async () => {
+    const x = await world();
+    await share(x.author, x.threadId, "team");
+    const approvalId = randomUUID();
+    await f.fx.admin.query(
+      `INSERT INTO approvals (team_id, id, run_id, thread_id, user_id, connection_id, tool_call_id,
+                              tool, input_canonical, risk, reasons, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, gen_random_uuid(), 'tc-1', 'bash', '{}', 'write', '[]',
+               'pending', now() + interval '1 hour')`,
+      [x.w.team, approvalId, x.runId, x.threadId, x.author.id],
+    );
+    // Decided by its asker only: to anyone else it does not exist (as for project readers).
+    const tried = await as(x.reader).post(`/v1/approvals/${approvalId}`, { decision: "allow" });
+    expect(tried.status).toBe(404);
+    expect((await as(x.reader).get("/v1/approvals")).json.approvals).toEqual([]);
+    const still = await f.fx.admin.query(`SELECT status FROM approvals WHERE id = $1`, [
+      approvalId,
+    ]);
+    expect(still.rows[0]).toEqual({ status: "pending" });
+  });
+
+  it("refuses to share a builder test thread", async () => {
+    const x = await world();
+    await f.fx.admin.query(`UPDATE threads SET is_test = true WHERE team_id = $1 AND id = $2`, [
+      x.w.team,
+      x.threadId,
+    ]);
+    const refused = await share(x.author, x.threadId, "team");
+    expect([refused.status, refused.json.code]).toEqual([409, "test_thread"]);
+  });
+
+  it("hides the project of a team-shared thread from someone who can't open it (N4)", async () => {
+    const x = await world();
+    const project = await as(x.admin).post("/v1/projects", {
+      name: `H${randomBytes(2).toString("hex")}`,
+      members_mode: "selected",
+      member_user_ids: [x.author.id],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const projectId = project.json.id as string;
+    await as(x.author).post(`/v1/threads/${x.threadId}/move`, { project_id: projectId });
+    await share(x.author, x.threadId, "team");
+    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).json.project_id).toBeNull();
+    const listed = (await as(x.reader).get("/v1/threads/shared")).json.threads as {
+      thread_id: string;
+      project_id: string | null;
+    }[];
+    expect(listed.find((r) => r.thread_id === x.threadId)?.project_id).toBeNull();
+    const found = (await as(x.reader).get("/v1/threads?q=wombat")).json.threads as {
+      thread_id: string;
+      project_id: string | null;
+    }[];
+    expect(found.find((r) => r.thread_id === x.threadId)?.project_id).toBeNull();
+    // Listing or searching that project shows them nothing of it.
+    expect((await as(x.reader).get(`/v1/threads?project_id=${projectId}`)).json.threads).toEqual(
+      [],
+    );
+    expect(
+      (await as(x.reader).get(`/v1/threads?q=wombat&project_id=${projectId}`)).json.threads,
+    ).toEqual([]);
+    // The author and a team admin (who may open every project) still see it.
+    expect((await as(x.author).get(`/v1/threads/${x.threadId}`)).json.project_id).toBe(projectId);
+    expect((await as(x.admin).get(`/v1/threads/${x.threadId}`)).json.project_id).toBe(projectId);
+  });
+});
+
+describe("a member who leaves (S2)", () => {
+  it("ends their shares when they are removed from the team, audited as the system", async () => {
+    const x = await world();
+    await share(x.author, x.threadId, "team");
+    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).status).toBe(200);
+    const removed = await as(x.admin).delete(`/v1/team/members/${x.author.id}`);
+    expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
+    expect(await sharedIds(x.reader)).not.toContain(x.threadId);
+    expect(await sharedIds(x.admin)).not.toContain(x.threadId);
+    const { rows } = await f.fx.admin.query<{
+      actor_kind: string;
+      target: Record<string, unknown>;
+    }>(
+      `SELECT actor_kind, target FROM audit_log
+        WHERE team_id = $1 AND action = 'thread.sharing_changed' ORDER BY seq DESC LIMIT 1`,
+      [x.w.team],
+    );
+    expect(rows[0]).toEqual({
+      actor_kind: "system",
+      target: {
+        threadId: x.threadId,
+        projectId: null,
+        shared: false,
+        visibility: "private",
+        from: "team",
+      },
+    });
+  });
+
+  it("ends their shares when their account is deactivated", async () => {
+    const x = await world();
+    await share(x.author, x.threadId, "team");
+    const siteAdmin = await f.member(x.w.team);
+    await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [
+      siteAdmin.id,
+    ]);
+    const off = await as(siteAdmin).post(`/v1/site/users/${x.author.id}/deactivate`, {});
+    expect(off.status, JSON.stringify(off.json)).toBeLessThan(300);
+    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
+    expect(await audit(x.w.team)).toContainEqual({
+      threadId: x.threadId,
+      projectId: null,
+      shared: false,
+      visibility: "private",
+      from: "team",
+    });
   });
 });
