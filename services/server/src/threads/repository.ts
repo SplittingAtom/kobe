@@ -1,6 +1,7 @@
 import {
   ACTIVE_RUN_STATUSES,
   and,
+  approvals,
   asc,
   desc,
   eq,
@@ -228,6 +229,7 @@ export async function summarize(
     ids.size === 0 ? new Map<string, SummaryRow>() : await findThreads(tx, viewer, [...ids]);
   const owners = await sharerNames(tx, viewer, rows);
   const viewable = await viewableProjects(tx, viewer, rows);
+  const waiting = await awaitingViewer(tx, viewer, rows);
   return rows.map((row) => {
     const source = row.forkedFromThreadId ? sources.get(row.forkedFromThreadId) : undefined;
     // Pin and archive are the owner's own organization (CE19): a reader never sees them.
@@ -237,6 +239,7 @@ export async function summarize(
       read_only: !own,
       owner_name: own ? null : (owners.get(row.ownerUserId) ?? null),
       ...maskedProject(row, viewer, viewable),
+      ...(waiting.has(row.id) ? { pending_approval: true } : {}),
     };
     return source
       ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
@@ -309,6 +312,35 @@ export async function sharerNames(
     )
     .where(inArray(users.id, ids));
   return new Map(found.map((u) => [u.id, u.name]));
+}
+
+/**
+ * Which of `rows` hold an approval waiting for the viewer (KOBE-301: the rail's amber dot): pending
+ * and not yet expired, on a run the viewer started, since only the run's user may decide it
+ * (KOBE-37). One query on the partial `approvals_pending_idx`, team-scoped like every read here.
+ */
+export async function awaitingViewer(
+  tx: KobeTx,
+  viewer: Viewer,
+  rows: readonly { readonly id: string }[],
+): Promise<ReadonlySet<string>> {
+  if (rows.length === 0) return new Set();
+  const found = await tx
+    .selectDistinct({ threadId: approvals.threadId })
+    .from(approvals)
+    .where(
+      and(
+        eq(approvals.teamId, viewer.teamId),
+        eq(approvals.userId, viewer.userId),
+        eq(approvals.status, "pending"),
+        sql`${approvals.expiresAt} > now()`,
+        inArray(
+          approvals.threadId,
+          rows.map((r) => r.id),
+        ),
+      ),
+    );
+  return new Set(found.map((r) => r.threadId));
 }
 
 /** The summary with `pinned_at` / `archived_at` only for its owner (CE19, KOBE-220). */

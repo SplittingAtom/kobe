@@ -4137,6 +4137,10 @@
           "owner_name": {
             "type": ["string", "null"]
           },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -4395,6 +4399,10 @@
                 },
                 "owner_name": {
                   "type": ["string", "null"]
+                },
+                "pending_approval": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "is_test": {
                   "type": "boolean"
@@ -4662,6 +4670,10 @@
                 },
                 "owner_name": {
                   "type": ["string", "null"]
+                },
+                "pending_approval": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "is_test": {
                   "type": "boolean"
@@ -4966,6 +4978,10 @@
           },
           "owner_name": {
             "type": ["string", "null"]
+          },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
           },
           "is_test": {
             "type": "boolean"
@@ -5675,6 +5691,10 @@
           },
           "owner_name": {
             "type": ["string", "null"]
+          },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
           },
           "is_test": {
             "type": "boolean"

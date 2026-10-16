@@ -160,6 +160,11 @@ export const threadSummarySchema = z.object({
    * team. Always null for the caller's own threads; never an email address.
    */
   owner_name: z.string().nullable().optional(),
+  /**
+   * Computed for the caller (KOBE-301): true while the thread holds an approval only they can
+   * decide (pending, not expired, on their run). Absent otherwise.
+   */
+  pending_approval: z.literal(true).optional(),
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
