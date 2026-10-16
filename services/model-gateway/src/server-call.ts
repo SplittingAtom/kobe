@@ -8,7 +8,9 @@ import {
   type ServerCallClaims,
 } from "@kobe/protocol";
 import { verifyServerCallToken } from "@kobe/protocol/node";
+import type { ServerCallRunClaim } from "@kobe/db";
 import { CREDENTIAL_HEADERS } from "./credentials.js";
+import type { CallLimiter, RequestRate } from "./limits.js";
 import type { Route } from "./routes.js";
 
 /**
@@ -23,7 +25,26 @@ export interface ServerCallOptions {
   /** `deriveServerCallTokenKey` over the gateway's session key (the server derives the same). */
   readonly key: Uint8Array;
   readonly replay: ServerCallReplay;
+  /**
+   * The token's run is a completed run of its thread, leased to its member (review L1): one
+   * indexed read (`serverCallRunMatches`), so a server bug cannot charge another member.
+   */
+  readonly runMatches: (claim: ServerCallRunClaim) => Promise<boolean>;
+  /**
+   * Server calls' own request rate and concurrency, per team (review L4): a team whose sandboxes
+   * are busy still gets its titles, and server calls cannot crowd out its sandboxes.
+   */
+  readonly limiter: CallLimiter;
+  readonly rate: RequestRate;
 }
+
+/** Defaults for {@link ServerCallOptions} limits, per team: about one call per completed run. */
+export const SERVER_CALL_LIMIT_DEFAULTS = {
+  concurrentPerTeam: 8,
+  concurrentTotal: 64,
+  burstPerTeam: 20,
+  perSecondPerTeam: 5,
+} as const;
 
 /**
  * Single use per replica: a `jti` is refused once seen, until its token expires. Bounded: past

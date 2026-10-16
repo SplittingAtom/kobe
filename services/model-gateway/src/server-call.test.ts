@@ -56,7 +56,7 @@ function serverToken(over: Partial<ServerCallClaims> = {}, key = SC_KEY): string
     model: MODEL,
     max_output_tokens: 48,
     iat: now() - 1,
-    exp: now() + 30,
+    exp: now() + 29,
     jti: randomUUID(),
     ...over,
   });
@@ -144,6 +144,8 @@ let loadedSandboxes: (string | undefined)[] = [];
 let records: CallRecord[] = [];
 let admitted: CallContext[] = [];
 let gate: CallGate = OPEN_GATE;
+let runMatches = true;
+let runChecks: unknown[] = [];
 let shim: Server;
 let base = "";
 
@@ -153,6 +155,8 @@ beforeEach(async () => {
   admitted = [];
   loadedSandboxes = [];
   gate = OPEN_GATE;
+  runMatches = true;
+  runChecks = [];
   vk = `sk-bf-${randomUUID()}`;
   principal = {
     member: true,
@@ -176,7 +180,16 @@ beforeEach(async () => {
     principals,
     isRunLeased: async () => true,
     runTokens: { key: RUN_KEY, isActive: async () => true, require: false },
-    serverCalls: { key: SC_KEY, replay: new ServerCallReplay() },
+    serverCalls: {
+      key: SC_KEY,
+      replay: new ServerCallReplay(),
+      runMatches: async (c) => {
+        runChecks.push(c);
+        return runMatches;
+      },
+      limiter: new CallLimiter({ perSandbox: 2, total: 4 }),
+      rate: new RequestRate({ burst: 1000, perSecond: 1000 }),
+    },
     bifrostUrl,
     limiter: new CallLimiter({ perSandbox: 4, total: 10 }),
     bytes: new ByteBudget({ perSandbox: 1 << 20, total: 1 << 21 }),
@@ -314,7 +327,7 @@ describe("server calls: refused (KOBE-234 ac-2)", () => {
   });
 
   it("refuses an expired token and a replay of a used one", async () => {
-    const expired = serverToken({ iat: now() - 40, exp: now() - 1 });
+    const expired = serverToken({ iat: now() - 20, exp: now() - 1 });
     expect((await post("/v1/chat/completions", asServer(expired))).code).toBe(
       "invalid_server_call_token",
     );
@@ -361,6 +374,21 @@ describe("server calls: refused (KOBE-234 ac-2)", () => {
     expect(hits).toEqual([]);
   });
 
+  it("refuses a token whose run is not a completed run of its thread and member (review L1)", async () => {
+    runMatches = false;
+    const r = await post("/v1/chat/completions", asServer());
+    expect([r.status, r.code]).toEqual([403, "server_call_run_mismatch"]);
+    expect(runChecks).toEqual([{ teamId: team, runId: run, threadId: thread, userId: user }]);
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses a body over the server-call limit (64 KiB)", async () => {
+    const big = { ...BODY, messages: [{ role: "user", content: "x".repeat(70_000) }] };
+    const r = await post("/v1/chat/completions", asServer(), big);
+    expect(r.status).toBe(413);
+    expect(hits).toEqual([]);
+  });
+
   it("refuses a member who left the team", async () => {
     principal = { ...principal, member: false };
     const r = await post("/v1/chat/completions", asServer());
@@ -378,5 +406,32 @@ describe("ServerCallReplay", () => {
     expect(replay.claim("c", 100, 60)).toBe(false);
     // Once they expired, room again (and "a" is not a replay any more: its token has expired).
     expect(replay.claim("c", 200, 100)).toBe(true);
+  });
+});
+
+describe("server calls: their own limits (review L4)", () => {
+  it("a team's busy sandboxes do not use up the server calls' concurrency, and vice versa", async () => {
+    // The sandbox limiter is per sandbox (4 here); server calls have their own per-team limiter (2).
+    // Two slow server calls hold both server slots; a third is refused, while a sandbox call passes.
+    gate = {
+      admit: async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return { ok: true };
+      },
+    };
+    const slow = [
+      post("/v1/chat/completions", asServer()),
+      post("/v1/chat/completions", asServer()),
+    ];
+    await new Promise((r) => setTimeout(r, 100));
+    const third = await post("/v1/chat/completions", asServer());
+    expect([third.status, third.code]).toEqual([429, "too_many_concurrent_calls"]);
+    const sandboxCall = post(
+      "/v1/chat/completions",
+      { authorization: `Bearer ${sessionToken()}` },
+      { model: MODEL, messages: [] },
+    );
+    expect((await sandboxCall).status).toBe(200);
+    expect((await Promise.all(slow)).map((r) => r.status)).toEqual([200, 200]);
   });
 });

@@ -13,6 +13,7 @@ import {
   isRunTokenActive,
   loadGatewayPrincipal,
   notifyModels,
+  serverCallRunMatches,
   recordModelUsage,
 } from "@kobe/db";
 import { deriveRunTokenKey, deriveServerCallTokenKey } from "@kobe/protocol/node";
@@ -25,7 +26,7 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
-import { ServerCallReplay } from "./server-call.js";
+import { SERVER_CALL_LIMIT_DEFAULTS as SC, ServerCallReplay } from "./server-call.js";
 import { BudgetGate } from "./budget-gate.js";
 import { DbReservations } from "./reservations-db.js";
 import { DbUsageSink } from "./usage/sink.js";
@@ -124,6 +125,9 @@ const server = createModelGateway({
   serverCalls: {
     key: deriveServerCallTokenKey(new TextEncoder().encode(config.sessionKey)),
     replay: new ServerCallReplay(),
+    runMatches: (claim) => serverCallRunMatches(db, claim),
+    limiter: new CallLimiter({ perSandbox: SC.concurrentPerTeam, total: SC.concurrentTotal }),
+    rate: new RequestRate({ burst: SC.burstPerTeam, perSecond: SC.perSecondPerTeam }),
   },
   bifrostUrl: config.bifrostUrl,
   limiter: new CallLimiter({ perSandbox: config.maxCallsPerSandbox, total: config.maxCalls }),

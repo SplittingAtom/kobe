@@ -23,8 +23,7 @@
 
 - **Identity:** per-call server-call token `ksc1.` (HMAC-SHA256, HKDF info
   `kobe/server-call-token/v1` over the gateway session key the server already holds), audience
-  `kobe.model-gateway.server-call`, header `x-kobe-server-call` alone, TTL ≤ 60 s (server uses
-  30 s), single use per gateway replica (in-memory jti set, fails closed when full). Binds purpose,
+  `kobe.model-gateway.server-call`, header `x-kobe-server-call` alone, TTL ≤ 30 s, single use per gateway replica (in-memory jti set, fails closed when full). Binds purpose,
   team, user, thread, triggering run, model, output cap. Rejected: a static server credential
   (unbound, long-lived); a session token with a fake sandbox (indistinguishable in ledger/gate).
 - **Attribution and the 80 % rule:** the triggering run's member and team, same `BudgetGate` /
@@ -50,6 +49,22 @@
 - **Replay across replicas** is bounded (TTL, cap, budget), not prevented: single use across
   replicas needs a shared table, which the CE spec rules out. Judged sufficient for a token that
   only travels server → gateway inside the cluster. Flag for the security review.
+
+## Review (Opus security/DB, approve with changes) and fixes
+
+- M1: 0099's CHECKs are `NOT VALID` (no VALIDATE; existing rows pass by construction), so the
+  migration is now **hand-written** (`-- kobe:hand-written`): within G3 it must merge before any
+  other schema-changing migration, or be renumbered by hand (parallel-work.md).
+- M2: the server's append guard allows after a terminal event only the announced epilogue types,
+  once each, inside the window (`epilogue_refused` / `run_finished`); tests in
+  `services/server/src/event-stream.db.test.ts`.
+- L1: the gateway checks the token's run (`serverCallRunMatches`: completed run of that thread,
+  leased to that member) → 403 `server_call_run_mismatch`.
+- L2: the 80 % rule is judged by `kobe_reserve_budget` at 80 % of each line (its own spend read).
+- L3: `services/model-gateway/src/server-call-budget.db.test.ts` (server calls through the real
+  reservation, stale cache); a 413 test at the 64 KiB server-call body limit.
+- L4: server calls have their own per-team rate/concurrency limiter; skips are logged at warn.
+- Replay: accepted; threat model in the design doc. TTL cap lowered to 30 s.
 
 ## Acceptance text for KOBE-219 (coordinator applies in Hadron)
 

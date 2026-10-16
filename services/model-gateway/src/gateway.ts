@@ -299,16 +299,32 @@ export function createModelGateway(options: GatewayOptions): Server {
       return;
     }
     const { identity, serverCall } = caller;
-    // Limits are per sandbox; a team's server calls share one key.
+    // Limits are per sandbox; server calls have their own, per team (review L4).
     const limitKey = identity.sandboxId ?? `server-call:${identity.teamId}`;
+    const limits = serverCall && options.serverCalls ? options.serverCalls : options;
+    const skipped = (reason: string) => {
+      if (serverCall) {
+        logger.warn(
+          {
+            teamId: identity.teamId,
+            runId: serverCall.run_id,
+            purpose: serverCall.purpose,
+            reason,
+          },
+          "server call skipped",
+        );
+      }
+    };
 
     // 3. Per-sandbox request rate and concurrent calls, before anything touches the database.
-    if (!options.rate.allow(limitKey)) {
+    if (!limits.rate.allow(limitKey)) {
+      skipped("rate_limited");
       sendError(res, kind, 429, "rate_limited", "Too many model requests; slow down.", 1);
       return;
     }
-    const release = options.limiter.acquire(limitKey);
+    const release = limits.limiter.acquire(limitKey);
     if (!release) {
+      skipped("too_many_concurrent_calls");
       sendError(res, kind, 429, "too_many_concurrent_calls", "Too many concurrent model calls.", 1);
       return;
     }
@@ -346,13 +362,28 @@ export function createModelGateway(options: GatewayOptions): Server {
 
       // 5. Run attribution: the run token when sent (it must verify, no fallback), else the legacy
       // advisory header, unless enforcement makes the token mandatory (KOBE-118).
-      // A server call's run is its token's (the run that ended and triggered it).
+      // A server call's run is its token's: the completed run that triggered it, of the token's
+      // thread and member in the record (review L1).
       const attribution = serverCall
-        ? ({ ok: true, runId: serverCall.run_id } as const)
-        : await resolveRunAttribution(options, req.headers, {
-            teamId: identity.teamId,
-            sandboxId: limitKey, // a sandbox call's limit key is its sandbox id
-          });
+        ? (await options.serverCalls?.runMatches({
+            teamId: serverCall.team_id,
+            runId: serverCall.run_id,
+            threadId: serverCall.thread_id,
+            userId: serverCall.user_id,
+          }))
+          ? ({ ok: true, runId: serverCall.run_id } as const)
+          : ({
+              ok: false,
+              status: 403,
+              code: "server_call_run_mismatch",
+              message: "That run is not a completed run of this thread and member.",
+            } as const)
+        : identity.sandboxId === undefined
+          ? NO_SESSION
+          : await resolveRunAttribution(options, req.headers, {
+              teamId: identity.teamId,
+              sandboxId: identity.sandboxId,
+            });
       if (!attribution.ok) {
         status = attribution.status;
         sendError(res, kind, attribution.status, attribution.code, attribution.message);
@@ -456,6 +487,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       const decision = await options.gate.admit(call);
       if (decision.ok && decision.release) releaseGate = decision.release;
       if (!decision.ok) {
+        skipped(decision.code);
         status = decision.status;
         sendError(
           res,

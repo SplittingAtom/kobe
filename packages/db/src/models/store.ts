@@ -196,3 +196,44 @@ export async function isActiveRunLeasedTo(
     return rows.length > 0;
   });
 }
+
+/** What a server-call token claims about the run that triggered it (KOBE-234). */
+export interface ServerCallRunClaim {
+  readonly teamId: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly userId: string;
+}
+
+/**
+ * Whether a server call's claims match the record (KOBE-234 review L1): the run is a completed run
+ * of that thread, leased to that member (`sandbox_run_leases`, kept after the run ends), so a
+ * server bug cannot charge another member's budget for a thread's title or follow-ups. One read
+ * by primary keys, in the team's RLS context.
+ */
+export async function serverCallRunMatches(
+  db: KobeDb,
+  claim: ServerCallRunClaim,
+): Promise<boolean> {
+  return withTeam(db, claim.teamId, async (tx) => {
+    const rows = await tx
+      .select({ runId: runs.id })
+      .from(runs)
+      .innerJoin(
+        sandboxRunLeases,
+        and(eq(sandboxRunLeases.teamId, runs.teamId), eq(sandboxRunLeases.runId, runs.id)),
+      )
+      .where(
+        and(
+          eq(runs.teamId, claim.teamId),
+          eq(runs.id, claim.runId),
+          eq(runs.threadId, claim.threadId),
+          eq(runs.status, "completed"),
+          eq(sandboxRunLeases.userId, claim.userId),
+          eq(sandboxRunLeases.threadId, claim.threadId),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  });
+}

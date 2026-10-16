@@ -20,6 +20,7 @@ import {
   modelProviders,
   recordModelUsage,
   runUsage,
+  serverCallRunMatches,
   sandboxes,
   teamModels,
   teamMembers,
@@ -149,7 +150,13 @@ beforeAll(async () => {
       { ttlMs: 0, keyWaitMs: 100, keyPollMs: 20 },
     ),
     isRunLeased: (t, r, s) => isActiveRunLeasedTo(db, t, r, s),
-    serverCalls: { key: SC_KEY, replay: new ServerCallReplay() },
+    serverCalls: {
+      key: SC_KEY,
+      replay: new ServerCallReplay(),
+      runMatches: (c) => serverCallRunMatches(db, c),
+      limiter: new CallLimiter({ perSandbox: 2, total: 4 }),
+      rate: new RequestRate({ burst: 10, perSecond: 10 }),
+    },
     bifrostUrl: `http://127.0.0.1:${(bifrost.address() as AddressInfo).port}`,
     limiter: new CallLimiter({ perSandbox: 4, total: 16 }),
     bytes: new ByteBudget({ perSandbox: 65_536, total: 65_536 }),
@@ -309,6 +316,13 @@ describe("server calls against the real store and ledger (KOBE-234)", () => {
           endedAt: new Date(),
         })
         .returning({ id: runs.id });
+      await tx.insert(sandboxRunLeases).values({
+        teamId: team,
+        runId: run?.id ?? "",
+        userId: user,
+        threadId: thread?.id ?? "",
+        sandboxId,
+      });
       // The member's sandbox hibernated after the run: a server call does not need it.
       await tx
         .update(sandboxes)
@@ -331,6 +345,29 @@ describe("server calls against the real store and ledger (KOBE-234)", () => {
       exp: iat + 30,
       jti: randomUUID(),
     });
+    // Review L1: a token naming another member (or thread) for that run is refused.
+    const mate = randomUUID();
+    await app.db.insert(users).values({ id: mate, name: "O", email: `${mate}@g.test` });
+    await withTeam(app.db, team, (tx) =>
+      tx.insert(teamMembers).values({ teamId: team, userId: mate, role: "member" }),
+    );
+    expect(
+      await serverCallRunMatches(app.db, { teamId: team, runId, threadId, userId: mate }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, {
+        teamId: team,
+        runId,
+        threadId: randomUUID(),
+        userId: user,
+      }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, { teamId: other, runId, threadId, userId: user }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, { teamId: team, runId, threadId, userId: user }),
+    ).toBe(true);
     const before = seenVks.length;
     recorded.length = 0;
     const res = await fetch(`${base}/v1/chat/completions`, {

@@ -85,6 +85,39 @@ describe("BudgetGate: server calls (KOBE-234)", () => {
     expect(await g.admit(server(user, "followups"))).toMatchObject({ ok: true });
   });
 
+  it("judges follow-ups in the reservation at 80 % of each line, not on the cached spend (review L2)", async () => {
+    const seen: BudgetLine[][] = [];
+    const store: ReservationStore = {
+      reserve: async (r) => {
+        seen.push([...r.lines]);
+        // The database's own read: spend + reservations reach the (scaled) limit.
+        return { ok: false, verdict: "full", line: 0 };
+      },
+      extend: async () => undefined,
+      end: async () => undefined,
+    };
+    const g = new BudgetGate(
+      {
+        // Stale cache: 10 % spent.
+        load: async () => ({
+          lines: [line({ limit: 1_000, spent: 100, limitExact: "1000.5", spentExact: "100" })],
+          requestsPerMinute: 1_000,
+        }),
+        prices: async () => new Map([["openai/m", { input: 1_000_000, output: 1_000_000 }]]),
+      },
+      { ttlMs: 1_000, now: () => 0, reservations: store },
+    );
+    expect(await g.admit(server(randomUUID(), "followups"))).toMatchObject({
+      ok: false,
+      status: 402,
+      code: "budget_soft_limit",
+    });
+    expect(seen[0]?.[0]).toMatchObject({ limit: 800, limitExact: "800.400000000000" });
+    // Titles and sandbox calls are judged on the full limit.
+    await g.admit(server(randomUUID(), "title"));
+    expect(seen[1]?.[0]).toMatchObject({ limit: 1_000, limitExact: "1000.5" });
+  });
+
   it("stops titles at 100 % like any call", async () => {
     const { g } = gate(() => at(1_000));
     expect(await g.admit(server(randomUUID(), "title"))).toMatchObject({
