@@ -36,16 +36,34 @@ type ThreadPin = {
   readonly user_id: string | null;
 };
 
+/** Who a server call is for and to which model, read at call time (KOBE-234). */
+export interface ServerCallTarget {
+  /** The member the run was leased to: the call's budget line and virtual key. */
+  readonly userId: string;
+  /** `<gateway provider>/<model>`. */
+  readonly model: string;
+  /** The site catalog marks the model as reasoning (KOBE-259; the call's headroom, KOBE-219). */
+  readonly reasoning: boolean;
+  /** The thread has no title and no rename lock. */
+  readonly untitled: boolean;
+}
+
+export type ServerCallTargetResult =
+  | { readonly ok: true; readonly target: ServerCallTarget }
+  | { readonly ok: false; readonly reason: "titled" | "no_thread" | "no_lease" | "no_model" };
+
 /**
- * The title call's member, model and prompt. The model is the thread's resolved one: an agent's
- * pin wins, then the thread's choice, else the team default (`resolveRunModel`, as `run.start`);
- * a model no longer enabled is a skip.
+ * A server call's member and model (KOBE-219, KOBE-222). The model is the thread's resolved one:
+ * an agent's pin wins, then the thread's choice, else the team default (`resolveRunModel`, as
+ * `run.start`); a model no longer enabled is a skip.
  */
-export async function loadTitleSource(
+export async function loadServerCallTarget(
   tx: KobeTx,
   agents: RunAgentResolver,
   ids: { readonly teamId: string; readonly runId: string; readonly threadId: string },
-): Promise<TitleSourceResult> {
+  /** Stop before resolving the model when the thread is titled (the title call's early out). */
+  needsUntitled = false,
+): Promise<ServerCallTargetResult> {
   const { teamId, runId, threadId } = ids;
   const res = await tx.execute<ThreadPin>(sql`
     SELECT t.owner_user_id, t.agent_scope, t.agent_id, t.agent_version, t.model_alias,
@@ -55,7 +73,8 @@ export async function loadTitleSource(
         ON l.team_id = t.team_id AND l.run_id = ${runId} AND l.thread_id = t.id
      WHERE t.team_id = ${teamId} AND t.id = ${threadId}`);
   const thread = res.rows[0];
-  if (!thread?.untitled) return { ok: false, reason: "titled" };
+  if (!thread) return { ok: false, reason: needsUntitled ? "titled" : "no_thread" };
+  if (needsUntitled && !thread.untitled) return { ok: false, reason: "titled" };
   if (thread.user_id === null) return { ok: false, reason: "no_lease" };
   const pinned = await agents.pinnedModel?.(tx, {
     teamId,
@@ -67,16 +86,34 @@ export async function loadTitleSource(
   });
   const resolution = await resolveRunModel(tx, teamId, pinned ?? thread.model_alias ?? undefined);
   if (!resolution.ok || resolution.model === undefined) return { ok: false, reason: "no_model" };
-  const first = await firstUserMessage(tx, teamId, threadId);
-  if (!first || first.text === "") return { ok: false, reason: "no_message" };
-  const answer = await firstAnswerAfter(tx, teamId, threadId, first.seq);
   return {
     ok: true,
-    source: {
+    target: {
       userId: thread.user_id,
       model: resolution.model.gateway_model,
       reasoning: resolution.limits?.reasoning === true,
-      messages: titleMessages(first.text, answer),
+      untitled: thread.untitled,
     },
+  };
+}
+
+/** The title call's member, model and prompt (the shared target, then the first exchange). */
+export async function loadTitleSource(
+  tx: KobeTx,
+  agents: RunAgentResolver,
+  ids: { readonly teamId: string; readonly runId: string; readonly threadId: string },
+): Promise<TitleSourceResult> {
+  const { teamId, threadId } = ids;
+  const loaded = await loadServerCallTarget(tx, agents, ids, true);
+  if (!loaded.ok) {
+    return { ok: false, reason: loaded.reason === "no_thread" ? "titled" : loaded.reason };
+  }
+  const first = await firstUserMessage(tx, teamId, threadId);
+  if (!first || first.text === "") return { ok: false, reason: "no_message" };
+  const answer = await firstAnswerAfter(tx, teamId, threadId, first.seq);
+  const { userId, model, reasoning } = loaded.target;
+  return {
+    ok: true,
+    source: { userId, model, reasoning, messages: titleMessages(first.text, answer) },
   };
 }

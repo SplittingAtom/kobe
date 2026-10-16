@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { ShieldAlertIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
 import { visible } from "../../lib/security/visible";
+import { cn } from "../../lib/utils";
+import { toneClass } from "../ui/status";
 import styles from "./chat.module.css";
 
 type Requested = KobeEventPayload<"approval.requested">;
@@ -97,6 +100,26 @@ function ApprovedInput({ tool, input }: { readonly tool: string; readonly input:
   );
 }
 
+/** Smooth unless the member asked for less motion. */
+function scrollBehavior(): ScrollBehavior {
+  const reduce =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return reduce ? "auto" : "smooth";
+}
+
+/** The message list follows the latest message (KOBE-288's `data-kobe-follow`, use-follow.ts). */
+function followsLatest(el: Element): boolean {
+  return el.closest("[data-kobe-follow]")?.getAttribute("data-kobe-follow") === "pinned";
+}
+
+/** Brings the first approval still waiting into view (the steering panel's Show button). */
+export function scrollToPendingApproval(root: ParentNode = document): void {
+  root
+    .querySelector<HTMLElement>('[data-kobe-approval="pending"]')
+    ?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+}
+
 /** Anything outside printable ASCII in a tool name (lookalike letters, hidden characters). */
 const NON_ASCII = /[^\x20-\x7e]/;
 
@@ -118,11 +141,14 @@ export function ApprovalCard({
   resolved,
   api,
   now = () => Date.now(),
+  readOnly = false,
 }: {
   readonly requested: Requested;
   readonly resolved: Resolved | undefined;
   readonly api: Pick<ChatApi, "decideApproval" | "getApproval"> | undefined;
   readonly now?: () => number;
+  /** The viewer reads a thread shared with them: the run's user decides, not them. */
+  readonly readOnly?: boolean;
 }) {
   const ids = useId();
   const [busy, setBusy] = useState(false);
@@ -139,6 +165,18 @@ export function ApprovalCard({
     inputMissing ? "loading" : "ready",
   );
   const [attempt, setAttempt] = useState(0);
+  const card = useRef<HTMLElement>(null);
+  const expired = Date.parse(requested.expires_at) <= now();
+  const askable = resolved === undefined && !expired && !readOnly;
+  // A request that arrives is brought into view once (KOBE-301), only while the list follows the
+  // latest message: a member reading further up keeps their place (KOBE-288), and the steering
+  // panel's Show brings it when they choose. Never for a reader, who cannot decide it.
+  useEffect(() => {
+    const el = card.current;
+    if (askable && el !== null && followsLatest(el)) {
+      el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+    }
+  }, [approvalId, askable]);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
@@ -167,7 +205,6 @@ export function ApprovalCard({
       </p>
     );
   }
-  const expired = Date.parse(requested.expires_at) <= now();
   // Every unicode-escaped character of the name, so lookalikes can't pass for another tool.
   const toolShown = visible(requested.tool).replace(
     /[^\x20-\x7e]/gu,
@@ -193,12 +230,15 @@ export function ApprovalCard({
 
   return (
     <section
+      ref={card}
       className={styles.approval}
       role="group"
       aria-labelledby={`${ids}-title`}
       aria-describedby={`${ids}-why`}
+      data-kobe-approval={expired || sent ? "answered" : "pending"}
     >
       <p id={`${ids}-title`} className={styles.approvalTitle}>
+        <ShieldAlertIcon aria-hidden className={cn(styles.approvalIcon, toneClass("attention"))} />
         <strong>Approval needed</strong> to run <span className={styles.toolName}>{toolShown}</span>{" "}
         <span className={styles.badge}>{RISK_LABEL[requested.risk]}</span>
       </p>

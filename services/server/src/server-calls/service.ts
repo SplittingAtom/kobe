@@ -5,6 +5,7 @@ import type { BackgroundTasks } from "../background.js";
 import { appendRunEvents } from "../event-stream/append.js";
 import { ServerCallError, type ServerCallClient } from "../models/gateway-client.js";
 import type { RunAgentResolver } from "../runs/seams.js";
+import { loadFollowupsSource, parseFollowups } from "../threads/followups.js";
 import { loadTitleSource } from "../threads/title-source.js";
 import {
   lastTitleAttempt,
@@ -15,7 +16,7 @@ import {
 import { runEpilogue } from "./epilogue.js";
 
 /**
- * The server's post-run model calls (KOBE-234 contract; KOBE-219 titles). The run-end
+ * The server's post-run model calls (KOBE-234 contract; KOBE-219 titles, KOBE-222 follow-ups). The run-end
  * transaction announces them in `run.completed.epilogue` (only the purposes in {@link
  * ServerCalls.purposes}); after it commits, {@link ServerCalls.afterRunCompleted} reads what was
  * announced and runs the calls off the run's path. Nothing here can change the run: it has ended,
@@ -125,15 +126,43 @@ export function createServerCalls(options: ServerCallsOptions): ServerCalls {
     ]).catch(() => log.info({ purpose: "title" }, "fallback title saved; its event was not"));
   };
 
+  /** The follow-up call (KOBE-222): up to three lines, or a {@link ServerCallError} saying why not. */
+  const followupsCall = async (ids: Ids, signal: AbortSignal) => {
+    const { teamId, runId, threadId } = ids;
+    const loaded = await withTeam(db, teamId, (tx) => loadFollowupsSource(tx, agents, ids));
+    if (!loaded.ok) throw new ServerCallError(loaded.reason);
+    const { source } = loaded;
+    const reply = await client.complete({
+      purpose: "followups",
+      teamId,
+      userId: source.userId,
+      threadId,
+      runId,
+      model: source.model,
+      reasoning: source.reasoning,
+      messages: source.messages,
+      signal,
+    });
+    const suggestions = parseFollowups(reply);
+    if (suggestions === undefined) {
+      throw new ServerCallError("schema_reject", 200, { model: source.model });
+    }
+    return suggestions;
+  };
+
   const run = async (ids: Ids): Promise<void> => {
     const { teamId, runId, threadId } = ids;
     const announced = await announcedEpilogue(db, teamId, runId);
-    if (!announced.includes("title")) return;
+    const wantsTitle = announced.includes("title");
+    const wantsFollowups = announced.includes("followups");
+    if (!wantsTitle && !wantsFollowups) return;
     const log = options.log.child({ run_id: runId });
     const seen: { code?: string } = {};
+    // Both start together (runEpilogue), so the epilogue window covers the longer one.
     const result = await runEpilogue({
       threadId,
-      title: (signal) => titleCall(ids, signal, seen),
+      ...(wantsTitle ? { title: (signal: AbortSignal) => titleCall(ids, signal, seen) } : {}),
+      ...(wantsFollowups ? { followups: (signal: AbortSignal) => followupsCall(ids, signal) } : {}),
       saveTitle: (title) => saveGeneratedTitle(db, teamId, threadId, title),
       append: async (event) => {
         await appendRunEvents(db, teamId, runId, [event]);
@@ -146,7 +175,7 @@ export function createServerCalls(options: ServerCallsOptions): ServerCalls {
   };
 
   return {
-    purposes: ["title"],
+    purposes: ["title", "followups"],
     afterRunCompleted({ teamId, runId, threadId }) {
       background.run("server call epilogue failed", () => run({ teamId, runId, threadId }), {
         run_id: runId,

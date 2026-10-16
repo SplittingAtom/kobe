@@ -135,7 +135,10 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
 
   beforeAll(async () => {
     teamAgent = await published("bob", "team", "Ledger Bot");
-    pinned = await published("bob", "team", "Pinned Bot", { model: "smart" });
+    pinned = await published("bob", "team", "Pinned Bot", {
+      model: "smart",
+      starters: ["Summarise last month", "Plot revenue by region"],
+    });
     carolPersonal = await published("carol", "personal", "Carol Helper");
     suspendedTeam = await published("bob", "team", "Paused Team Bot");
     suspendedPersonal = await published("carol", "personal", "Paused Personal");
@@ -180,10 +183,13 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
       name: "Pinned Bot",
       scope: "team",
       model: "smart",
+      // The current version's starters (KOBE-222: the welcome screen's chips).
+      starters: ["Summarise last month", "Plot revenue by region"],
     });
     expect(items.find((a) => a.id === teamAgent)).toMatchObject({
       description: "Ledger Bot does things",
       model: null,
+      starters: [],
     });
     expect(items.find((a) => a.id === gallery)?.scope).toBe("gallery");
     expect(items.find((a) => a.id === gallery)).toMatchObject({ galleryKey: "gallery-bot" });

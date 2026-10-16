@@ -14,6 +14,7 @@ import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
+import { followupsDecisionInTx } from "../threads/followups.js";
 import { saveFallbackTitleInTx, titleDecisionInTx } from "../threads/title.js";
 import type { RunEnd } from "./types.js";
 
@@ -229,7 +230,7 @@ export async function endRunInTx(
  * qualifies for. Decided here, in the transaction that completes the run, so a stream that sees
  * the terminal event knows whether to wait. An untitled thread no title call will ever come for
  * (titles not configured, or past its attempts) gets the first line of its first prompt now
- * (KOBE-219 review M3).
+ * (KOBE-219 review M3). Follow-ups (KOBE-222) are announced beside a title; both run together.
  */
 async function epilogueOf(
   tx: KobeTx,
@@ -241,7 +242,12 @@ async function epilogueOf(
   const ids = { teamId, runId, threadId };
   const decision = await titleDecisionInTx(tx, ids, serverCalls.includes("title"));
   if (decision === "fallback") await saveFallbackTitleInTx(tx, ids);
-  return decision === "announce" ? ["title"] : [];
+  // Follow-ups (KOBE-222): team switch on, a member's run, every budget line under 80 %.
+  const followups = await followupsDecisionInTx(tx, ids, serverCalls.includes("followups"));
+  return [
+    ...(decision === "announce" ? (["title"] as const) : []),
+    ...(followups ? (["followups"] as const) : []),
+  ];
 }
 
 function expiryCauseOfEnd(to: RunStatus) {

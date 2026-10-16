@@ -13,6 +13,8 @@ export interface DueSchedule {
   readonly userId: string;
   readonly agentId: string;
   readonly prompt: string;
+  /** Workspace paths of the prompt's `@file` mentions (KOBE-223). */
+  readonly mentions: readonly string[];
   readonly dueAt: Date;
 }
 

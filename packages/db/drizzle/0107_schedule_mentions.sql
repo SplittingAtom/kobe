@@ -1,0 +1,2 @@
+ALTER TABLE "schedules" ADD COLUMN "mentions" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "schedules" ADD CONSTRAINT "schedules_mentions" CHECK (cardinality("schedules"."mentions") <= 20);

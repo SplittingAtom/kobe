@@ -11,6 +11,7 @@ import {
   workspaceDownloadQuerySchema,
   workspaceListQuerySchema,
   workspacePathSchema,
+  workspaceSearchQuerySchema,
   workspaceUploadFieldsSchema,
   type WorkspaceFileError,
 } from "@kobe/protocol";
@@ -18,6 +19,7 @@ import { recordAudit } from "../audit/record.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
+import { hitRateLimit } from "../rate-limit.js";
 import { openUpload } from "../uploads/parse.js";
 import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import type { SandboxWaker } from "../sandbox-wire/types.js";
@@ -35,12 +37,16 @@ import {
   joinPath,
 } from "../workspace-files/paths.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
+import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { currentEntry } from "../workspace-sync/store.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type ErrStatus = 400 | 403 | 404 | 409 | 411 | 413 | 415 | 422 | 502 | 503 | 507;
+
+/** File searches (the `@` picker types fast; KOBE-223 S1): per member, per minute. */
+export const SEARCH_RATE_LIMIT = { windowMs: 60_000, max: 300 };
 
 /** Largest folder delete in one request (all-or-nothing, one transaction). */
 const DELETE_MAX_FILES = 10_000;
@@ -111,6 +117,25 @@ export function workspaceFileRoutes(
       entries: listing.entries,
       ...(listing.nextCursor === undefined ? {} : { next_cursor: listing.nextCursor }),
     });
+  });
+
+  /** The `@` picker (KOBE-223): the caller's own files whose path contains `q`. */
+  app.get("/files/search", async (c) => {
+    const query = workspaceSearchQuerySchema.safeParse(queryOf(c));
+    if (!query.success) {
+      return c.json({ code: "invalid_request", message: "That is not a valid search." }, 400);
+    }
+    const owner = ownerOf(c);
+    if (!(await hitRateLimit(db, `workspace-search:${owner.userId}`, SEARCH_RATE_LIMIT))) {
+      return c.json(
+        { code: "rate_limited", message: "Too many file searches. Wait a moment and try again." },
+        429,
+      );
+    }
+    const entries = await withTeam(db, owner.teamId, (tx) =>
+      searchFiles(tx, owner, query.data.q ?? "", query.data.limit),
+    );
+    return c.json({ entries });
   });
 
   app.get("/file", async (c) => {

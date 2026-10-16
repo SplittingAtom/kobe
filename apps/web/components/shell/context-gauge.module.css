@@ -3,7 +3,7 @@
 .gauge {
   --gauge-ok: var(--kobe-gauge-ok);
   --gauge-warn: var(--kobe-gauge-warn);
-  --gauge-full: var(--admin-danger, #a4161a);
+  --gauge-full: var(--kobe-gauge-full);
   --gauge-track: var(--admin-border, #d0d0d0);
   display: inline-flex;
   align-items: center;

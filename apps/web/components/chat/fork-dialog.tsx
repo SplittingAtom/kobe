@@ -38,7 +38,8 @@ export function ForkAction({ meta }: { readonly meta: KobeMessageMeta | undefine
   );
 }
 
-function ForkDialog({
+/** The fork dialog: the answer's Fork button and `/fork` (KOBE-224, the last answer) open it. */
+export function ForkDialog({
   point,
   defaultTitle,
   onOpenChange,

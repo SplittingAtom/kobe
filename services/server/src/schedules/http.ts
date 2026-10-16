@@ -46,6 +46,7 @@ const MESSAGES: Record<ScheduleErrorCode, string> = {
   invalid_timezone: "That timezone is not a known IANA zone name.",
   agent_not_runnable:
     "That agent cannot be scheduled: it is suspended, unpublished or not available to you here.",
+  invalid_mention: "A mentioned file is not in your workspace.",
 };
 
 /** A contract error (`scheduleErrorSchema`) with its documented HTTP status. */

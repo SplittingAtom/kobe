@@ -6,7 +6,7 @@ import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useDictation, type Dictation } from "../../lib/chat/dictation";
 import { isBusy } from "../../lib/chat/thread-state";
 import { useDraftFiles } from "./attachment-chips";
-import type { KobeThreadExtras } from "./kobe-runtime";
+import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 
 const DictationContext = createContext<Dictation | null>(null);
 
@@ -44,6 +44,7 @@ export function useSteer(extras: KobeThreadExtras): Steer {
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const files = useDraftFiles(remoteId ?? NEW_DRAFT);
   const dictation = useComposerDictation();
+  const session = useChatSession();
   const { controller, state } = extras;
   const content = text.trim();
   const unavailable =
@@ -57,7 +58,11 @@ export function useSteer(extras: KobeThreadExtras): Steer {
   const steer = async () => {
     if (!controller || unavailable !== undefined) return;
     dictation.stop();
-    if (await controller.steer(content)) aui.composer.setText("");
+    const draft = remoteId ?? NEW_DRAFT;
+    if (await controller.steer(content, session.mentions.forText(draft, content))) {
+      session.mentions.clear(draft);
+      aui.composer.setText("");
+    }
   };
   return { steer, unavailable };
 }

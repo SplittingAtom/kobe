@@ -70,6 +70,8 @@ export interface FakeRunnableAgent {
   readonly name: string;
   readonly description?: string;
   readonly model: string | null;
+  /** The current version's starters (KOBE-222); default none. */
+  readonly starters?: readonly string[];
 }
 
 interface FakeEntry {
@@ -501,8 +503,11 @@ export class FakeKobe {
       ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
-    /** `epilogue`: the server will title the thread after the run (KOBE-219). */
-    complete: (runId: string, options: { readonly epilogue?: readonly "title"[] } = {}) => {
+    /** `epilogue`: the server will title the thread / suggest follow-ups after the run. */
+    complete: (
+      runId: string,
+      options: { readonly epilogue?: readonly ("title" | "followups")[] } = {},
+    ) => {
       const run = this.run(runId);
       // Like the server: the leaf moves in the same transaction as the terminal event.
       this.#thread(run.thread_id).leaf_entry_id =
@@ -518,6 +523,14 @@ export class FakeKobe {
       const run = this.run(runId);
       this.#thread(run.thread_id).title = title;
       this.emit(runId, "thread.updated", { thread_id: run.thread_id, title });
+    },
+    /** The server's follow-up call answered (KOBE-222): `thread.suggestions` on the run. */
+    suggest: (runId: string, suggestions: readonly string[]) => {
+      const run = this.run(runId);
+      this.emit(runId, "thread.suggestions", {
+        thread_id: run.thread_id,
+        suggestions: [...suggestions],
+      });
     },
     fail: (runId: string, code: string, message: string) => {
       this.#end(this.run(runId), "failed", "run.failed", { error: { code, message } });
@@ -553,6 +566,11 @@ export class FakeKobe {
     const wasActive = ACTIVE.has(run.status);
     run.status = status;
     if (wasActive) thread.status = status === "interrupted" ? "interrupted" : "idle";
+    // Like the server: a run's undecided approvals expire with it.
+    for (const approval of this.approvals.values()) {
+      if (approval.runId === run.run_id && approval.status === "pending")
+        approval.status = "expired";
+    }
     this.emit(run.run_id, type, payload);
   }
 
@@ -668,6 +686,13 @@ export class FakeKobe {
     return json(200, this.#summary(thread));
   }
 
+  /** A pending approval on the thread (the fake has one member: the run's user). */
+  #awaitsApproval(threadId: string): boolean {
+    return [...this.approvals.values()].some(
+      (a) => a.status === "pending" && this.runs.get(a.runId)?.thread_id === threadId,
+    );
+  }
+
   #summary(thread: FakeThread): Json {
     const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
     return {
@@ -685,6 +710,10 @@ export class FakeKobe {
       is_test: thread.is_test ?? false,
       shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
+      // KOBE-301: an approval waits for the caller (the fake has one member: the run's user).
+      ...(thread.read_only !== true && this.#awaitsApproval(thread.thread_id)
+        ? { pending_approval: true }
+        : {}),
     };
   }
 
@@ -765,12 +794,42 @@ export class FakeKobe {
         agents: page.map((a) => ({
           slug: a.name.toLowerCase().replace(/\W+/g, "-"),
           current_version: 1,
+          starters: [],
           ...a,
         })),
         next_cursor: next < this.runnableAgents.length ? String(next) : null,
       });
     }
     if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
+    if (url.pathname === "/v1/workspace/files/search" && method === "GET") {
+      // KOBE-223: path contains q (case-insensitive), names starting with it first.
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const name = (path: string) => path.split("/").at(-1) ?? "";
+      const entries = [...this.workspaceFiles]
+        .filter(([path]) => path.toLowerCase().includes(q))
+        .sort(
+          ([a], [b]) =>
+            Number(name(b).toLowerCase().startsWith(q)) -
+            Number(name(a).toLowerCase().startsWith(q)),
+        )
+        .slice(0, limit)
+        .map(([path, bytes]) => ({
+          name: name(path),
+          path,
+          type: "file",
+          size_bytes: bytes.length,
+          mtime: NOW,
+          source: "synced",
+          owner: path.startsWith("uploads/") || path.startsWith("projects/") ? "server" : "sandbox",
+          area: path.startsWith("uploads/")
+            ? "uploads"
+            : path.startsWith("projects/")
+              ? "projects"
+              : "workspace",
+        }));
+      return json(200, { entries });
+    }
     if (url.pathname === "/v1/workspace/files" && method === "GET") {
       const dir = url.searchParams.get("path") ?? "";
       this.workspaceListings.push(dir);
@@ -1051,6 +1110,22 @@ export class FakeKobe {
         .filter((t) => t.deleted_at === null && t.read_only === true)
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
+    }
+    if (id === "activity" && method === "GET") {
+      // KOBE-301: the caller's own live threads with a run going; `approval` when one waits.
+      const active = [...this.threads.values()].filter(
+        (t) =>
+          t.deleted_at === null &&
+          t.read_only !== true &&
+          t.is_test !== true &&
+          t.status === "running",
+      );
+      return json(200, {
+        threads: active.map((t) => ({
+          thread_id: t.thread_id,
+          activity: this.#awaitsApproval(t.thread_id) ? "approval" : "running",
+        })),
+      });
     }
     if (id === "trash" && method === "GET") {
       const trash = [...this.threads.values()].filter((t) => t.deleted_at !== null);

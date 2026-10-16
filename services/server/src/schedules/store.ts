@@ -25,6 +25,7 @@ export const toResponse = (row: Row): ScheduleResponse => ({
   user_id: row.userId,
   agent_id: row.agentId,
   prompt: row.prompt,
+  mentions: row.mentions,
   recurrence: row.recurrence as ScheduleRecurrence,
   tz: row.tz,
   active: row.active,
@@ -103,6 +104,7 @@ export interface NewSchedule {
   readonly userId: string;
   readonly agentId: string;
   readonly prompt: string;
+  readonly mentions: readonly string[];
   readonly recurrence: ScheduleRecurrence;
   readonly tz: string;
   readonly active: boolean;
@@ -118,6 +120,7 @@ export async function insertSchedule(tx: KobeTx, input: NewSchedule): Promise<Ro
       userId: input.userId,
       agentId: input.agentId,
       prompt: input.prompt,
+      mentions: [...input.mentions],
       recurrence: input.recurrence,
       cron: recurrenceToCron(input.recurrence),
       tz: input.tz,
@@ -138,6 +141,7 @@ export async function insertSchedule(tx: KobeTx, input: NewSchedule): Promise<Ro
 export interface SchedulePatch {
   readonly agentId?: string;
   readonly prompt?: string;
+  readonly mentions?: readonly string[];
   readonly recurrence?: ScheduleRecurrence;
   readonly tz?: string;
   readonly active?: boolean;
@@ -161,6 +165,7 @@ export async function updateSchedule(
     .set({
       ...(patch.agentId !== undefined ? { agentId: patch.agentId } : {}),
       ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+      ...(patch.mentions !== undefined ? { mentions: [...patch.mentions] } : {}),
       ...(patch.recurrence !== undefined
         ? { recurrence: patch.recurrence, cron: recurrenceToCron(patch.recurrence) }
         : {}),

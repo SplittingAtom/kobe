@@ -19,6 +19,7 @@ import type {
   RunnableAgent,
   RunSnapshot,
   SubmitResult,
+  ThreadActivityList,
   ThreadCard,
   ThreadDetail,
   ThreadPage,
@@ -82,7 +83,11 @@ export interface ToolOutput {
 
 export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
-  searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
+  searchThreads(
+    q: string,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
   /** The caller's pinned threads, newest pin first (CE19, KOBE-220). */
   listPinned(): Promise<ApiResult<ThreadPage>>;
@@ -128,6 +133,8 @@ export interface ChatApi {
   threadSummary(threadId: string): Promise<ApiResult<ThreadSummary>>;
   /** The rail's hover card (CE18, KOBE-219): first message, agent, last activity, count. */
   threadCard(threadId: string): Promise<ApiResult<ThreadCard>>;
+  /** The caller's own threads with a run going or an approval waiting (KOBE-301, the rail). */
+  threadActivity(): Promise<ApiResult<ThreadActivityList>>;
   listEntries(threadId: string, after: number): Promise<ApiResult<EntryPage>>;
   renameThread(threadId: string, title: string | null): Promise<ApiResult<ThreadSummary>>;
   trashThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
@@ -148,6 +155,8 @@ export interface ChatApi {
       readonly content: string;
       readonly parentEntryId?: string | undefined;
       readonly fileIds?: readonly string[] | undefined;
+      /** Workspace paths picked with `@` (KOBE-223): only their markers are rewritten. */
+      readonly mentions?: readonly string[] | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -160,7 +169,11 @@ export interface ChatApi {
   reorderQueue(threadId: string, runIds: readonly string[]): Promise<ApiResult<ThreadRuns>>;
   getRun(runId: string): Promise<ApiResult<RunSnapshot>>;
   editQueued(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
-  steer(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
+  steer(
+    runId: string,
+    content: string,
+    mentions?: readonly string[],
+  ): Promise<ApiResult<RunSnapshot>>;
   cancel(runId: string): Promise<ApiResult<RunSnapshot>>;
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
   /** Tokens and spend of one run (KOBE-43), as the model gateway measured them. */
@@ -225,7 +238,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
 
   return {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
-    searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
+    searchThreads: (q, cursor, signal) =>
+      apiRequest(`/v1/threads${query({ q, cursor })}`, { teamId, fetchFn, signal }),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
     listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
     listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),
@@ -270,6 +284,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),
     threadSummary: (id) => get(`/v1/threads/${enc(id)}${query({ limit: 1 })}`),
     threadCard: (id) => get(`/v1/threads/${enc(id)}/card`),
+    threadActivity: () => get("/v1/threads/activity"),
     listEntries: (id, after) =>
       get(`/v1/threads/${enc(id)}/entries${query({ after, limit: 500 })}`),
     renameThread: (id, title) => send("PATCH", `/v1/threads/${enc(id)}`, { title }),
@@ -289,6 +304,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.fileIds === undefined || body.fileIds.length === 0
             ? {}
             : { file_ids: body.fileIds }),
+          ...(body.mentions === undefined || body.mentions.length === 0
+            ? {}
+            : { mentions: body.mentions }),
         },
         teamId,
         idempotencyKey,
@@ -302,7 +320,12 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
       send("POST", `/v1/threads/${enc(id)}/queue/order`, { run_ids: runIds }),
     getRun: (runId) => get(`/v1/runs/${enc(runId)}`),
     editQueued: (runId, content) => send("PATCH", `/v1/runs/${enc(runId)}`, { content }),
-    steer: (runId, content) => send("POST", `/v1/runs/${enc(runId)}/steer`, { content }),
+    steer: (runId, content, mentions) =>
+      send(
+        "POST",
+        `/v1/runs/${enc(runId)}/steer`,
+        mentions === undefined || mentions.length === 0 ? { content } : { content, mentions },
+      ),
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),

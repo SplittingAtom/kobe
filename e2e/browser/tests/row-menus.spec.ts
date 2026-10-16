@@ -9,7 +9,7 @@ import { expectThemed, paintOf, type Theme } from "./support/colours.js";
  * in place and the rail follows. Copy puts the conversation on the clipboard as Markdown.
  */
 const THEME_COOKIE = "kobe-theme";
-// KOBE-220 added Pin, Move to project and Archive.
+// KOBE-220 added Pin, Move to project and Archive; KOBE-221 added Share.
 const THREAD_ITEMS = [
   "Copy",
   "Regenerate",
@@ -17,6 +17,7 @@ const THREAD_ITEMS = [
   "Pin",
   "Move to project",
   "Archive",
+  "Share",
   "Delete",
 ];
 const FILE_ITEMS = ["Open", "Download", "Copy path", "Delete"];

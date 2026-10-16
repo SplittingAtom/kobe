@@ -750,6 +750,13 @@
       "when": 1792154370678,
       "tag": "0106_thread_share_team_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792179315485,
+      "tag": "0107_schedule_mentions",
+      "breakpoints": true
     }
   ]
 }

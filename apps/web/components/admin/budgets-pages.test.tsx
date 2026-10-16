@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +7,7 @@ import { must } from "../../lib/testing/must";
 import type { BudgetStatusLine } from "../../lib/admin/api/budgets";
 import { budgetBannerText } from "../chat/run-notices";
 import { SiteBudget } from "./site/site-budget";
-import { TeamBudgetsPage, spentOf, tokensOf } from "./team/budgets-page";
+import { TeamBudgetsPage, budgetLevel, percentOf, spentOf, tokensOf } from "./team/budgets-page";
 import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
 
 const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
@@ -15,6 +16,8 @@ const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
   month_tokens: monthTokens,
   day_tokens: dayTokens,
 });
+// A variable path: Vite rewrites `new URL("literal", import.meta.url)` into a served asset URL.
+const ADMIN_CSS = "./admin.module.css";
 const none = { monthly_usd: null, daily_usd: null, monthly_tokens: null, daily_tokens: null };
 const BUDGETS = {
   period: { month: "2026-10-01", day: "2026-10-04" },
@@ -65,6 +68,55 @@ const body = (calls: ReturnType<typeof stubApi>, method: string, url?: string) =
     String(must(calls.find((c) => c.method === method && (!url || c.url === url))).body),
   ) as unknown;
 
+describe("budget usage colours (KOBE-301)", () => {
+  it("turn amber at 80 % and red at 100 %, with an icon and words, never colour alone", async () => {
+    stubApi({
+      "GET /v1/team/budgets": [
+        200,
+        {
+          ...BUDGETS,
+          team: { ...BUDGETS.team, spent: spend(85, 2, 1_000_000, 10_000) },
+        },
+      ],
+      "GET /v1/team/members": [200, MEMBERS],
+    });
+    renderTeam(<TeamBudgetsPage />);
+    const warn = (await screen.findByText(/\$85\.00 of \$100\.00 \(85 %\)/)).closest(
+      "[data-budget-level]",
+    );
+    expect(warn?.getAttribute("data-budget-level")).toBe("warn");
+    expect(warn?.className).toMatch(/budgetWarn/);
+    expect(warn?.querySelector("svg[aria-hidden]")).not.toBeNull();
+    const full = must(screen.getAllByText(/1M of 1M tokens \(100 %\)/)[0]).closest(
+      "[data-budget-level]",
+    );
+    expect(full?.getAttribute("data-budget-level")).toBe("full");
+    expect(full?.className).toMatch(/budgetFull/);
+    expect(full?.textContent).toContain("used up");
+    // Below 80 %: plain.
+    expect(
+      screen
+        .getByText(/\$2\.00 \(no budget\)/)
+        .closest("[data-budget-level]")
+        ?.getAttribute("data-budget-level"),
+    ).toBe("ok");
+  });
+
+  it("reads the status colours", () => {
+    expect(budgetLevel(null)).toBe("ok");
+    expect(budgetLevel(79)).toBe("ok");
+    expect(budgetLevel(80)).toBe("warn");
+    expect(budgetLevel(100)).toBe("full");
+    // Decided on the exact share, not the rounded text ("80 %", "100 %").
+    expect(budgetLevel(percentOf(79.6, 100))).toBe("ok");
+    expect(budgetLevel(percentOf(99.6, 100))).toBe("warn");
+    expect(budgetLevel(percentOf(1, 0))).toBe("full");
+    const css = readFileSync(new URL(ADMIN_CSS, import.meta.url), "utf8");
+    expect(css).toMatch(/\.budgetWarn \{\s*color: var\(--kobe-status-attention\);/);
+    expect(css).toMatch(/\.budgetFull \{\s*color: var\(--kobe-status-failed\);/);
+  });
+});
+
 describe("team budgets page (KOBE-42)", () => {
   it("shows dollar and token spend and saves the team's budgets and rate", async () => {
     const calls = stubApi({
@@ -76,7 +128,7 @@ describe("team budgets page (KOBE-42)", () => {
     expect(await screen.findByText(/\$42\.00 of \$100\.00 \(42 %\)/)).toBeTruthy();
     expect(screen.getAllByText(/250k of 1M tokens \(25 %\)/).length).toBeGreaterThan(0);
     // The site budget in percent only.
-    expect(screen.getByText(/Dollars: 12 % used/)).toBeTruthy();
+    expect(screen.getByText("12 % used").parentElement?.textContent).toMatch(/Dollars: 12 % used/);
     await userEvent.type(screen.getByLabelText("Team Daily ($)"), "5.5");
     await userEvent.type(screen.getByLabelText("Team Daily (tokens)"), "200,000");
     await userEvent.type(screen.getByLabelText("Requests per minute (max 60)"), "20");

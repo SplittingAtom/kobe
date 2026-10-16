@@ -304,7 +304,8 @@
   min-height: 0;
 }
 
-.artifact:empty {
+.artifact:empty,
+.artifact[data-hidden] {
   display: none;
 }
 
@@ -397,7 +398,7 @@
    column ≥ 360 px, the conversation ≥ 400 px. A dragged width holds while it fits and comes back
    when the window widens again. */
 @media (width >= 820px) {
-  .grid:has(> .artifact:not(:empty)) {
+  .grid:has(> .artifact:not(:empty):not([data-hidden])) {
     grid-template-columns:
       var(--kobe-rail-width)
       minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px))

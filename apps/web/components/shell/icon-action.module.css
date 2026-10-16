@@ -34,7 +34,7 @@
   opacity: 0.85;
 }
 
-/* A visible count in place of the dot (the notification bell). */
+/* A visible count in place of the dot (the notification bell): an accent pill (KOBE-301). */
 .count {
   position: absolute;
   top: -0.25rem;
@@ -44,7 +44,9 @@
   font-size: 0.6875rem;
   line-height: 1.125rem;
   text-align: center;
-  color: #fff;
-  background: var(--admin-danger, #c62828);
+  font-weight: 600;
+  color: var(--kobe-status-accent-fg);
+  background: var(--kobe-status-accent);
   border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--admin-bg, #fff);
 }

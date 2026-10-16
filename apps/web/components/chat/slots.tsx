@@ -22,11 +22,12 @@ import { FileCard } from "./file-card";
 import { ConnectedEgressNotice } from "./egress-notice";
 import { MemoryNotice } from "./memory-notice";
 import { OmissionNotice } from "./omission-notice";
-import { ChatSessionContext } from "./kobe-runtime";
+import { ChatSessionContext, useKobeExtras } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
 export function ApprovalSlot({ tool }: { readonly tool: ToolActivity }) {
   const session = useContext(ChatSessionContext);
+  const readOnly = useKobeExtras()?.state.summary?.readOnly === true;
   const requested = tool.approvalRequested;
   if (!requested) return null;
   return (
@@ -35,6 +36,7 @@ export function ApprovalSlot({ tool }: { readonly tool: ToolActivity }) {
       requested={requested}
       resolved={tool.approvalResolved}
       api={session?.api}
+      readOnly={readOnly}
     />
   );
 }

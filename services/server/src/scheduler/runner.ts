@@ -135,6 +135,7 @@ export class SchedulerRunner {
               userId: r.userId,
               agentId: r.agentId,
               prompt: r.prompt,
+              mentions: r.mentions,
               dueAt: r.nextDueAt,
             },
           ]
@@ -149,7 +150,13 @@ export class SchedulerRunner {
     try {
       const result = await this.#opts.runs.submitMessage(
         ownerActor(due),
-        { thread_id: threadId, content: due.prompt, trigger: "schedule", approval_mode: "auto" },
+        {
+          thread_id: threadId,
+          content: due.prompt,
+          mentions: [...due.mentions],
+          trigger: "schedule",
+          approval_mode: "auto",
+        },
         { scheduled },
       );
       this.#log.info(

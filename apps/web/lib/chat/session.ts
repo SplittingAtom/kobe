@@ -6,13 +6,15 @@
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
-import { createFilesApi } from "../files/api";
+import { createFilesApi, type FilesApi } from "../files/api";
 import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
+import { MentionStore } from "./mentions";
 import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
+import { activityOfState, ThreadActivityStore } from "./thread-activity";
 import { organizeRequest, type OrganizeChange } from "./organize";
 import type { ThreadListSync } from "./thread-list-sync";
 import type { RunnableAgent, ThreadSummary, ThreadVisibility } from "./types";
@@ -69,6 +71,10 @@ export class ChatSession {
   readonly api: ChatApi;
   /** Files attached to the composer drafts of this tab (KOBE-145). */
   readonly attachments: AttachmentStore;
+  /** The caller's workspace files: the composer's `@` picker (KOBE-223) and sent chips. */
+  readonly files: FilesApi;
+  /** Files picked with `@` per composer draft (KOBE-223). */
+  readonly mentions = new MentionStore();
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
   readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
@@ -79,8 +85,12 @@ export class ChatSession {
   get canChooseAgent(): boolean {
     return this.#options.testAgentId === undefined;
   }
+  /** What the threads held open here are doing, live (KOBE-301: the rail's dots, the tab title). */
+  readonly activity = new ThreadActivityStore();
   readonly #options: ChatSessionOptions;
   readonly #held = new Map<string, Held>();
+  /** Stops following a held controller's activity. */
+  readonly #untrack = new Map<string, () => void>();
   /** Title for the thread `initialize` creates next (taken from the message being sent). */
   #nextTitle: string | undefined;
   readonly #composerDrafts = new Map<string, string>();
@@ -120,7 +130,8 @@ export class ChatSession {
       teamId: options.teamId,
       transport: options.uploadTransport ?? xhrUploadTransport,
     });
-    this.sentFiles = new SentFileCache(createFilesApi(options.teamId, options.fetchFn));
+    this.files = createFilesApi(options.teamId, options.fetchFn);
+    this.sentFiles = new SentFileCache(this.files);
     this.#options = options;
     options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
   }
@@ -137,6 +148,20 @@ export class ChatSession {
     });
   }
 
+  /** Follows a held thread's activity until it is let go. */
+  #track(threadId: string, controller: ThreadController): ThreadController {
+    const update = () => this.activity.set(threadId, activityOfState(controller.getState()));
+    update();
+    this.#untrack.set(threadId, controller.subscribe(update));
+    return controller;
+  }
+
+  #untrackThread(threadId: string): void {
+    this.#untrack.get(threadId)?.();
+    this.#untrack.delete(threadId);
+    this.activity.release(threadId);
+  }
+
   /** The controller for a thread (a fresh draft for `null`); call `release` when done. */
   acquire(threadId: string | null): ThreadController {
     if (threadId === null) return this.#create(null);
@@ -147,6 +172,7 @@ export class ChatSession {
     }
     const controller = this.#create(threadId);
     this.#held.set(threadId, { controller, count: 1 });
+    this.#track(threadId, controller);
     void controller.load();
     return controller;
   }
@@ -161,6 +187,7 @@ export class ChatSession {
     held.count -= 1;
     if (held.count > 0) return;
     this.#held.delete(threadId);
+    this.#untrackThread(threadId);
     controller.dispose();
   }
 
@@ -171,7 +198,7 @@ export class ChatSession {
     const controller = this.#create(summary.threadId);
     controller.seed(summary);
     this.#held.set(summary.threadId, { controller, count: 0 });
-    return controller;
+    return this.#track(summary.threadId, controller);
   }
 
   peek(threadId: string): ThreadController | undefined {
@@ -385,6 +412,9 @@ export class ChatSession {
     this.#options.listSync?.close();
     this.attachments.dispose();
     this.sentFiles.dispose();
+    for (const untrack of this.#untrack.values()) untrack();
+    this.#untrack.clear();
+    this.activity.clear();
     for (const held of this.#held.values()) held.controller.dispose();
     this.#held.clear();
   }

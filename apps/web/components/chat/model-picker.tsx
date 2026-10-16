@@ -1,16 +1,48 @@
 "use client";
 
 import { useId, useState, useSyncExternalStore } from "react";
-import { modelName } from "../../lib/admin/api/team/models";
-import { aliasName, modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
+import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
+import {
+  aliasName,
+  modelChoices,
+  teamDefaultLabel,
+  type ModelChoices,
+} from "../../lib/chat/model-choices";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
+import type { MenuBinding } from "../../lib/shell/menu";
+import { useBindCommands } from "../shell/command-bindings";
 import { useChatSession } from "./kobe-runtime";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
 /** The `<select>` value of "use the team's default" (an alias is never empty). */
 const DEFAULT = "";
+
+/**
+ * `/model` (KOBE-224): the picker's own choices and `choose`, or why it can't change now.
+ */
+function modelBinding(
+  models: TeamModels,
+  choices: ModelChoices,
+  blocker: string | null,
+  choose: (value: string) => void,
+): MenuBinding {
+  const { enabled, chosen, pinned } = choices;
+  if (pinned !== null) {
+    return { choices: [], blocker: `This agent always uses ${aliasName(models, pinned)}.` };
+  }
+  if (enabled.length === 0 && chosen === null) {
+    return { choices: [], blocker: "No models are enabled for your team yet." };
+  }
+  return {
+    blocker,
+    choices: [
+      { key: DEFAULT, label: teamDefaultLabel(choices), current: chosen === null },
+      ...enabled.map((m) => ({ key: m.alias, label: modelName(m), current: m.alias === chosen })),
+    ].map((c) => ({ ...c, onSelect: () => choose(c.key) })),
+  };
+}
 
 /**
  * The conversation's model (D30; KOBE-41's open question): one of the team's enabled models, or
@@ -38,18 +70,6 @@ export function ModelPicker({
     () => null,
   );
   const [draft, setDraft] = useState<string | null>(() => session.draftModel);
-
-  if (loaded.status !== "ready") return null;
-  // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
-  // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
-  const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
-  const choices = modelChoices(
-    loaded.data,
-    isNew ? draft : (state.summary?.model ?? null),
-    agentModel,
-  );
-  const { enabled, chosen, unavailable, pinned } = choices;
-  const chosenName = chosen === null ? null : aliasName(loaded.data, chosen);
   const disabled =
     state.summary?.deletedAt != null || isBusy(state, "model") || (!isNew && !controller);
 
@@ -62,6 +82,30 @@ export function ModelPicker({
     }
     void controller?.setModel(model);
   };
+  // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
+  // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
+  const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
+  const all =
+    loaded.status === "ready"
+      ? modelChoices(loaded.data, isNew ? draft : (state.summary?.model ?? null), agentModel)
+      : undefined;
+  useBindCommands(
+    loaded.status === "ready" && all
+      ? {
+          "choose-model": modelBinding(
+            loaded.data,
+            all,
+            disabled ? "The model can't be changed right now." : null,
+            choose,
+          ),
+        }
+      : {},
+  );
+
+  if (loaded.status !== "ready" || all === undefined) return null;
+  const choices = all;
+  const { enabled, chosen, unavailable, pinned } = choices;
+  const chosenName = chosen === null ? null : aliasName(loaded.data, chosen);
 
   if (pinned !== null) {
     const name = aliasName(loaded.data, pinned);

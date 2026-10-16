@@ -12,6 +12,7 @@ export * from "./projects.js";
 export * from "./web-search.js";
 export * from "./uploads.js";
 export * from "./files.js";
+export * from "./mentions.js";
 export * from "./schedules.js";
 export * from "./notifications.js";
 export * from "./sse.js";

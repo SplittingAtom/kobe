@@ -574,6 +574,77 @@
         }
       }
     },
+    "/v1/threads/activity": {
+      "get": {
+        "operationId": "listThreadActivity",
+        "summary": "The caller's own threads with a run going or an approval waiting (KOBE-301)",
+        "description": "Polled by the rail's dots and the tab title: live, non-test threads the caller owns whose run is active; `approval` when an approval only they can decide waits there. Threads not listed are idle. At most 200.",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's active threads.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadActivityList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/shared": {
       "get": {
         "operationId": "listSharedThreads",
@@ -2210,7 +2281,7 @@
       "post": {
         "operationId": "submitMessage",
         "summary": "Send a message: starts a run, or queues it behind the thread's active run (D17)",
-        "description": "Owner only. The run is created queued and starts at once when nothing is active and the thread is not interrupted; otherwise `queued` is true and it starts in order (Retry runs first). Follow it with `GET /v1/runs/{id}/events`. `parent_entry_id` branches from an entry (edit-and-regenerate); absent = the thread's leaf when the run starts.",
+        "description": "Owner only. The run is created queued and starts at once when nothing is active and the thread is not interrupted; otherwise `queued` is true and it starts in order (Retry runs first). Follow it with `GET /v1/runs/{id}/events`. `parent_entry_id` branches from an entry (edit-and-regenerate); absent = the thread's leaf when the run starts. `mentions` (KOBE-223) lists the workspace paths the member picked with `@`: each must be a live file of the owner's synced workspace with no invisible, format or shell characters, and only its `@file(<path>)` marker in `content` is replaced by the absolute `/workspace/...` path before the run is stored; any other `@file(...)` text stays as written. Steering and editing a queued message take `mentions` the same way.",
         "parameters": [
           {
             "name": "id",
@@ -2325,7 +2396,7 @@
             }
           },
           "422": {
-            "description": "`attachments_unavailable` (this site has no workspace storage) or `invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message).",
+            "description": "`attachments_unavailable` (this site has no workspace storage) or `invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message), or `invalid_mention` (a `mentions` path is outside `/workspace`, holds invisible, format or shell characters, or is not a file in the workspace).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4137,6 +4208,10 @@
           "owner_name": {
             "type": ["string", "null"]
           },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -4396,6 +4471,10 @@
                 "owner_name": {
                   "type": ["string", "null"]
                 },
+                "pending_approval": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "is_test": {
                   "type": "boolean"
                 },
@@ -4565,6 +4644,38 @@
         "required": ["threads", "next_cursor"],
         "additionalProperties": false
       },
+      "ThreadActivityList": {
+        "type": "object",
+        "properties": {
+          "threads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "thread_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "activity": {
+                  "type": "string",
+                  "enum": ["running", "approval"]
+                }
+              },
+              "required": ["thread_id", "activity"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["threads"],
+        "additionalProperties": false
+      },
       "ThreadSearchPage": {
         "type": "object",
         "properties": {
@@ -4662,6 +4773,10 @@
                 },
                 "owner_name": {
                   "type": ["string", "null"]
+                },
+                "pending_approval": {
+                  "type": "boolean",
+                  "const": true
                 },
                 "is_test": {
                   "type": "boolean"
@@ -4966,6 +5081,10 @@
           },
           "owner_name": {
             "type": ["string", "null"]
+          },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
           },
           "is_test": {
             "type": "boolean"
@@ -5676,6 +5795,10 @@
           "owner_name": {
             "type": ["string", "null"]
           },
+          "pending_approval": {
+            "type": "boolean",
+            "const": true
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -6171,6 +6294,15 @@
                 }
               ]
             }
+          },
+          "mentions": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
           }
         },
         "required": ["content"],
@@ -6204,6 +6336,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200000
+          },
+          "mentions": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
           }
         },
         "required": ["content"],
@@ -6216,6 +6357,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200000
+          },
+          "mentions": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
           }
         },
         "required": ["content"],

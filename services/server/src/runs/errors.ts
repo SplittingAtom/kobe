@@ -19,7 +19,8 @@ export type OrchestratorErrorCode =
   | "message_too_large" // 413: the files' total is over the per-message limit
   | "quota_exceeded" // 403: the team has no storage left for the files
   | "storage_unavailable" // 503: object storage did not take the files
-  | "sandbox_unavailable"; // 503: the workspace did not answer a steer
+  | "sandbox_unavailable" // 503: the workspace did not answer a steer
+  | "invalid_mention"; // 422: an @file mention is malformed, outside /workspace or unknown (KOBE-223)
 
 export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   run_not_found: 404,
@@ -42,6 +43,7 @@ export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   budget_exhausted: 429,
   isolation_unavailable: 503,
   sandbox_unavailable: 503,
+  invalid_mention: 422,
 };
 
 const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
@@ -66,6 +68,7 @@ const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
   budget_exhausted: "The budget is used up, so no new runs can start.",
   isolation_unavailable: "Agents are disabled: the sandbox isolation runtime is not available.",
   sandbox_unavailable: "Your workspace did not answer. Try again.",
+  invalid_mention: "A mentioned file is not in your workspace.",
 };
 
 export class RunError extends Error {

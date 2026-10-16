@@ -19,7 +19,7 @@ import { IconAction } from "../shell/icon-action";
  * the toggle in bar row two opens or closes them all at once and is stored per user (A6). A card
  * opened or closed by hand keeps that until the toggle changes again.
  */
-interface DetailApi {
+export interface DetailApi {
   readonly expanded: boolean;
   /** Bumped on every toggle: cards drop what was opened or closed by hand before it. */
   readonly generation: number;
@@ -56,6 +56,11 @@ export function DetailProvider({
   }, [commit, current]);
   const api = useMemo(() => ({ expanded: value, generation, toggle }), [value, generation, toggle]);
   return <DetailContext.Provider value={api}>{children}</DetailContext.Provider>;
+}
+
+/** The Detail state and its toggle (the bar's button, its shortcut and the palette, KOBE-225). */
+export function useDetail(): DetailApi {
+  return useContext(DetailContext);
 }
 
 /** The toggle in bar row two. */

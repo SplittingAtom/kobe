@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { GROUP_ORDER, groupThreads, placementOf } from "./thread-groups";
+import {
+  adjacentThread,
+  GROUP_ORDER,
+  groupThreads,
+  placementOf,
+  threadOrder,
+} from "./thread-groups";
 
 const listed = (id: string, custom: unknown) => ({ id, custom });
 
@@ -101,5 +107,50 @@ describe("thread groups (CE5)", () => {
       ["project", ["own@0", "ps@1"]],
       ["shared", ["ps@1", "ts@2", "tl@3"]],
     ]);
+  });
+});
+
+/** KOBE-225 (CE23): Mod+[ and Mod+] step through the rail's conversations. */
+describe("threadOrder and adjacentThread", () => {
+  const listed = [
+    { id: "a", custom: {} },
+    { id: "p", custom: { pinned: true } },
+    { id: "z", custom: { archived: true } },
+    { id: "s", custom: { shared: true, visibility: "project", projectId: "x" } },
+  ];
+
+  it("follows the rail's groups, each thread once, without Archived or Trash", () => {
+    const groups = groupThreads(listed, ["t"], () => undefined);
+    expect(threadOrder(groups)).toEqual(["p", "s", "a"]);
+  });
+
+  it("orders project groups by name, as the rail, whatever the threads' recency", () => {
+    const projects = [
+      { id: "z1", custom: { projectId: "Z" } },
+      { id: "a1", custom: { projectId: "A" } },
+      { id: "z2", custom: { projectId: "Z" } },
+      { id: "u", custom: {} },
+    ];
+    const names = new Map([
+      ["Z", "Zeta"],
+      ["A", "Alpha"],
+    ]);
+    expect(threadOrder(groupThreads(projects, [], (id) => names.get(id)))).toEqual([
+      "a1",
+      "z1",
+      "z2",
+      "u",
+    ]);
+  });
+
+  it("steps without wrapping; from a draft both go to the first", () => {
+    const order = ["p", "s", "a"];
+    expect(adjacentThread(order, "s", -1)).toBe("p");
+    expect(adjacentThread(order, "s", 1)).toBe("a");
+    expect(adjacentThread(order, "p", -1)).toBeNull();
+    expect(adjacentThread(order, "a", 1)).toBeNull();
+    expect(adjacentThread(order, "draft", 1)).toBe("p");
+    expect(adjacentThread(order, "draft", -1)).toBe("p");
+    expect(adjacentThread([], "draft", 1)).toBeNull();
   });
 });

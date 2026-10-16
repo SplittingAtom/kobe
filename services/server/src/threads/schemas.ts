@@ -160,6 +160,11 @@ export const threadSummarySchema = z.object({
    * team. Always null for the caller's own threads; never an email address.
    */
   owner_name: z.string().nullable().optional(),
+  /**
+   * Computed for the caller (KOBE-301): true while the thread holds an approval only they can
+   * decide (pending, not expired, on their run). Absent otherwise.
+   */
+  pending_approval: z.literal(true).optional(),
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
@@ -189,6 +194,20 @@ export const threadSummarySchema = z.object({
   ...threadOrganizationSchema.pick({ pinned_at: true, archived_at: true }).shape,
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
+
+/**
+ * `GET /v1/threads/activity` (KOBE-301): the caller's own live threads with a run going;
+ * `approval` when an approval waits for them there. Threads not listed are idle.
+ */
+export const threadActivityListSchema = z.strictObject({
+  threads: z.array(
+    z.strictObject({
+      thread_id: wireUuidSchema,
+      activity: z.enum(["running", "approval"]),
+    }),
+  ),
+});
+export type ThreadActivityList = z.infer<typeof threadActivityListSchema>;
 
 /** Longest first message the hover card shows (KOBE-219); the rest is cut. */
 export const THREAD_CARD_MESSAGE_CHARS = 280;

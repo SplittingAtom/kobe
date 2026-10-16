@@ -26,6 +26,7 @@ import {
   canRegenerateWith,
   currentRunId,
   initialThreadState,
+  isThreadRunning,
   mergeCommittedEntries,
   mergeServerEntries,
   promptSaved,
@@ -407,6 +408,7 @@ export class ThreadController {
   #onEvents(runId: string, events: readonly KobeEvent[]): void {
     for (const event of events) {
       if (event.type === "thread.updated") this.#retitled(event.payload);
+      if (event.type === "thread.suggestions") this.#suggested(runId, event.payload);
     }
     const live = this.#state.live;
     if (!live || live.runId !== runId) return;
@@ -428,6 +430,7 @@ export class ThreadController {
     }
     if (applied.run.started && !wasStarted) {
       // A queued run started: it leaves the queue and its prompt shows in the conversation.
+      this.#set((s) => (s.followups ? { ...s, followups: undefined } : s));
       this.#announce("The agent is working on your message.");
       void this.refresh();
     } else if (this.#mayBeUnsavedPrompt(applied.entries)) {
@@ -461,6 +464,26 @@ export class ThreadController {
         : s,
     );
     this.#onRetitled?.(payload.thread_id, payload.title);
+  }
+
+  /**
+   * The server's follow-ups after `runId` (KOBE-222): shown only while that run is still the
+   * thread's latest and nothing was sent since (a late epilogue never brings old chips back).
+   */
+  #suggested(
+    runId: string,
+    payload: { readonly thread_id: string; readonly suggestions: readonly string[] },
+  ): void {
+    const s = this.#state;
+    const current =
+      payload.thread_id === s.threadId &&
+      s.live?.runId === runId &&
+      s.sending === undefined &&
+      !isThreadRunning(s);
+    if (!current) return;
+    this.#set((st) => ({ ...st, followups: { runId, suggestions: payload.suggestions } }));
+    // Chips appear after the answer: screen readers hear about them (review N4).
+    if (s.summary?.readOnly !== true) this.#announce("Follow-up suggestions are available.");
   }
 
   #onTerminal(terminal: NonNullable<ThreadState["live"]>["terminal"]): void {
@@ -563,9 +586,10 @@ export class ThreadController {
     text: string,
     parentEntryId?: string,
     attach?: MessageFiles,
+    mentions?: readonly string[],
   ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId, attach);
+      return await this.#send(text, parentEntryId, attach, mentions);
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -574,25 +598,33 @@ export class ThreadController {
     }
   };
 
-  async #send(text: string, parentEntryId?: string, attach?: MessageFiles): Promise<boolean> {
+  async #send(
+    text: string,
+    parentEntryId?: string,
+    attach?: MessageFiles,
+    mentions?: readonly string[],
+  ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
     if (threadId === null || this.#state.sending !== undefined) return false;
     const key = this.#newKey();
     const queues = currentRunId(this.#state) !== undefined;
     const branchFrom = parentEntryId ?? this.#state.summary?.leafEntryId ?? null;
+    const followups = this.#state.followups;
     this.#set((s) => ({
       ...s,
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
+      followups: undefined, // shown until the next send (KOBE-222)
       queuePaused: false, // sending releases a queue held by Stop
     }));
-    const body = { content: text, parentEntryId, fileIds: attach?.fileIds };
+    const body = { content: text, parentEntryId, fileIds: attach?.fileIds, mentions };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;
     if (!res.ok) {
-      this.#set((s) => ({ ...s, sending: undefined }));
+      // Nothing was sent: the follow-ups come back with the draft (review N2).
+      this.#set((s) => ({ ...s, sending: undefined, followups: s.followups ?? followups }));
       this.#fail(res.error, text);
       return false;
     }
@@ -624,10 +656,10 @@ export class ThreadController {
   }
 
   /** Steer now (D17): inject into the current run at Pi's next safe point. */
-  readonly steer = async (text: string): Promise<boolean> => {
+  readonly steer = async (text: string, mentions?: readonly string[]): Promise<boolean> => {
     const runId = currentRunId(this.#state);
-    if (runId === undefined) return this.send(text);
-    const res = await this.#busy("steer", () => this.#api.steer(runId, text));
+    if (runId === undefined) return this.send(text, undefined, undefined, mentions);
+    const res = await this.#busy("steer", () => this.#api.steer(runId, text, mentions));
     if (!res.ok) {
       this.#fail(res.error, text);
       return false;
@@ -869,7 +901,12 @@ export class ThreadController {
     if (threadId === null || !summary || summary.leafEntryId === entryId) return;
     const previous = summary.leafEntryId;
     this.#leafVersion += 1;
-    this.#set((s) => (s.summary ? { ...s, summary: { ...s.summary, leafEntryId: entryId } } : s));
+    // Another branch: the follow-ups were for the answer that is no longer shown (review N1).
+    this.#set((s) =>
+      s.summary
+        ? { ...s, followups: undefined, summary: { ...s.summary, leafEntryId: entryId } }
+        : s,
+    );
     const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, entryId));
     if (!res.ok) {
       this.#set((s) =>

@@ -177,6 +177,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       return false;
     }
     const attach = session.attachments.ready(draft);
+    const mentions = session.mentions.forText(draft, text);
     const created = threadId === undefined;
     if (threadId === undefined) {
       try {
@@ -188,13 +189,20 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     }
     const target = session.peek(threadId) ?? controller;
     // The controller reports its own failures; a throw must never leave the composer stuck.
-    const sent = await (target?.send(text, parentEntryId, attach) ?? Promise.resolve(false)).catch(
-      () => false,
-    );
-    if (sent) session.attachments.sent(draft);
+    const sent = await (
+      target?.send(text, parentEntryId, attach, mentions) ?? Promise.resolve(false)
+    ).catch(() => false);
+    if (sent) {
+      session.attachments.sent(draft);
+      session.mentions.clear(draft);
+    }
     // The thread exists but the message did not go: the composer is on that thread now, so the
-    // files follow it instead of staying under the abandoned "new" draft (KOBE-194).
-    else if (created) session.attachments.move(draft, threadId);
+    // files (and picked mentions) follow it instead of staying under the abandoned "new" draft
+    // (KOBE-194).
+    else if (created) {
+      session.attachments.move(draft, threadId);
+      session.mentions.move(draft, threadId);
+    }
     if (created) session.threadCreated();
     return sent;
   };

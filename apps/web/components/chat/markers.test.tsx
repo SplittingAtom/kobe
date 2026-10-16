@@ -184,6 +184,64 @@ describe("inline markers on a recorded thread (ac-1, ac-3)", () => {
   });
 });
 
+/**
+ * KOBE-302: on gate1 the e2e click "did not open" the compaction. The trace showed the marker
+ * already open (the member's stored Detail toggle was on), so the click closed it; it never
+ * remounted. These pin both halves: the open state survives every refresh, and it follows Detail.
+ */
+describe("a compaction's open state (KOBE-302)", () => {
+  const toggle = () =>
+    within(marker("compaction")).getByRole("button", { name: /Context compacted/ });
+  const body = () => must(document.getElementById(must(toggle().getAttribute("aria-controls"))));
+  const markerReads = (thread: string) =>
+    fake.requests.filter((r) => r.method === "GET" && r.path === `/v1/threads/${thread}/markers`);
+
+  it("stays open across a new turn, the markers read after it and a new title", async () => {
+    const { thread } = recordedThread();
+    openApp(fake, thread);
+    await screen.findByText("Final version.");
+    await waitFor(() => expect(markerReads(thread).length).toBeGreaterThan(0));
+    const user = userEvent.setup();
+    await user.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    const opened = toggle();
+    const reads = markerReads(thread).length;
+
+    await user.type(await composer(), "One more thing{Enter}");
+    await waitFor(() => expect(fake.activeRun(thread)).toBeDefined());
+    const runId = must(fake.activeRun(thread)).run_id;
+    await streaming(fake, runId);
+    fake.agent.commitPrompt(runId);
+    fake.agent.delta(runId, "m9", "Noted.");
+    fake.agent.commit(runId, say("Noted."), "m9");
+    fake.agent.complete(runId, { epilogue: ["title"] });
+    fake.agent.retitle(runId, "Launch plan, final");
+    await waitFor(() =>
+      expect(document.getElementById("kobe-thread-title")?.textContent).toBe("Launch plan, final"),
+    );
+    await waitFor(() => expect(markerReads(thread).length).toBeGreaterThan(reads));
+
+    expect(toggle()).toBe(opened);
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(body().hidden).toBe(false);
+  });
+
+  it("opens with the stored Detail toggle; a click then closes it", async () => {
+    fake.preferences = { detail_expanded: true };
+    const { thread } = recordedThread();
+    openApp(fake, thread);
+    await screen.findByText("Final version.");
+    await waitFor(() => expect(toggle().getAttribute("aria-expanded")).toBe("true"));
+    expect(body().hidden).toBe(false);
+    const user = userEvent.setup();
+    await user.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(body().hidden).toBe(true);
+    await user.click(toggle());
+    expect(body().hidden).toBe(false);
+  });
+});
+
 describe("fork markers (ac-2)", () => {
   it("shows the branch count with a picker that switches the leaf", async () => {
     const { thread, a5 } = recordedThread();

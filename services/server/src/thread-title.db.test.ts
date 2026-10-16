@@ -194,6 +194,15 @@ const completedPayload = async (team: string, runId: string) =>
 
 const settled = () => f.fx.replica(0).deps.background.idle();
 
+/**
+ * Waits until the gateway has seen `n` calls, then for background work to settle: a title call
+ * starts after `run.completed`, so `settled()` alone can run before it is even queued (CI load).
+ */
+async function gatewaySaw(n: number): Promise<void> {
+  await until(async () => gateway.seen.length >= n, `gateway saw ${n} calls`);
+  await settled();
+}
+
 describe("auto-titles (KOBE-219)", () => {
   it("titles a new thread once after its first completed run, through the gateway with the server-call token alone", async () => {
     gateway.mode = "ok";
@@ -299,7 +308,8 @@ describe("auto-titles (KOBE-219)", () => {
     const runs: string[] = [];
     for (const prompt of ["One", "Two", "Three", "Four"]) {
       runs.push(await answered(w, ws, threadId, prompt));
-      await settled();
+      // Three attempts, one per run; the fourth run makes no call.
+      await gatewaySaw(Math.min(runs.length, 3));
     }
     // After the third failed attempt the first prompt's first line, unlocked, with its event.
     expect(await threadRow(w.team, threadId)).toEqual({ title: "One", title_locked: false });
@@ -404,13 +414,13 @@ describe("auto-titles (KOBE-219)", () => {
         const ws = await f.connect(w, 0);
         const threadId = await untitledThread(w.owner);
         await answered(w, ws, threadId, "Ventes trimestrielles par région ?");
-        await settled();
+        await gatewaySaw(1);
         expect(gateway.seen).toHaveLength(1);
         expect((await threadRow(w.team, threadId))?.title).toBeNull();
         await answered(w, ws, threadId, "Et en Europe ?");
-        await settled();
+        await gatewaySaw(2);
         await answered(w, ws, threadId, "Merci");
-        await settled();
+        await gatewaySaw(3);
         expect(gateway.seen).toHaveLength(3);
         expect((await threadRow(w.team, threadId))?.title).toBe(
           "Ventes trimestrielles par région ?",

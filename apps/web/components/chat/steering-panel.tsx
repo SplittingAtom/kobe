@@ -1,6 +1,6 @@
 "use client";
 
-import { SquareIcon } from "lucide-react";
+import { ClockIcon, SquareIcon } from "lucide-react";
 import { useState } from "react";
 import {
   formatElapsed,
@@ -12,11 +12,14 @@ import {
   type RunPhase,
   type SteeringMode,
 } from "../../lib/chat/steering";
+import { stopBinding } from "../../lib/chat/thread-commands";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { currentRunId, isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import { useBudgetFinishing, useElapsed, useThrottledText } from "../../lib/chat/use-steering";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
+import { toneClass } from "../ui/status";
+import { scrollToPendingApproval } from "./approval-card";
 import { Button } from "../ui/button";
 import { useDraftAgentName } from "./agent-picker";
 import { useSteer } from "./composer-steer";
@@ -83,15 +86,50 @@ function StatusRow({
       <span aria-hidden>·</span>
       <Elapsed since={runStartedAt(state)} runId={currentRunId(state) ?? ""} />
       <span aria-hidden>·</span>
-      <span
-        data-phase={phase.kind}
-        className={cn("text-foreground", phase.kind === "approval" && "text-primary font-medium")}
-      >
-        {phaseText(phase)}
-      </span>
+      {phase.kind === "approval" ? (
+        <ApprovalPhase reader={state.summary?.readOnly === true} />
+      ) : (
+        <span data-phase={phase.kind} className="text-foreground">
+          {phaseText(phase)}
+        </span>
+      )}
     </p>
   );
 }
+
+/**
+ * "Waiting for your approval" above the composer until the approval is decided (KOBE-301): amber
+ * with a clock, and Show to bring the card back into view when the member scrolled away.
+ */
+function ApprovalPhase({ reader }: { readonly reader: boolean }) {
+  return (
+    <>
+      <span
+        data-phase="approval"
+        data-kobe-approval-note
+        className={cn("inline-flex items-center gap-1 font-medium", toneClass("attention"))}
+      >
+        <ClockIcon aria-hidden className="size-3.5 shrink-0" />
+        {phaseText({ kind: "approval" })}
+      </span>
+      {!reader && (
+        <Button
+          type="button"
+          variant="link"
+          size="xs"
+          className="h-auto px-1 py-0 text-xs"
+          onClick={() => scrollToPendingApproval()}
+        >
+          Show
+        </Button>
+      )}
+    </>
+  );
+}
+
+/** The Stop button's red tint, from the status colours (app/theme.css, Tailwind names). */
+export const STOP_TINT =
+  "border-status-failed bg-status-failed-bg text-status-failed hover:bg-status-failed-bg hover:text-status-failed dark:bg-status-failed-bg dark:hover:bg-status-failed-bg dark:border-status-failed";
 
 /** Row 3: Steer now and Stop while a run holds the thread; Retry and Continue when interrupted. */
 function ControlsRow({
@@ -165,13 +203,16 @@ function ControlsRow({
             disabled={unavailable !== undefined}
             onClick={() => void steer()}
           />
+          {/* Red-tinted while the run streams (KOBE-301): the failed/denied status colour. */}
           <IconAction
             command="stop"
             size="sm"
             side="top"
-            variant="destructive"
+            variant="outline"
+            data-kobe-stop
+            className={STOP_TINT}
             disabled={isBusy(state, "stop")}
-            onClick={() => void controller.stop()}
+            onClick={stopBinding(controller, state).onSelect}
           >
             <SquareIcon aria-hidden className="size-3 fill-current" />
           </IconAction>

@@ -110,6 +110,38 @@ export const workspaceListResponseSchema = z.strictObject({
 });
 export type WorkspaceListResponse = z.infer<typeof workspaceListResponseSchema>;
 
+/** Most files one `GET /v1/workspace/files/search` answers (KOBE-223). */
+export const WORKSPACE_SEARCH_MAX_RESULTS = 50;
+export const WORKSPACE_SEARCH_QUERY_MAX = 100;
+
+/**
+ * `GET /v1/workspace/files/search?q=&limit=` (KOBE-223, the composer's `@` picker): the caller's
+ * own synced files whose path contains `q` (case-insensitive; absent = every file), files only,
+ * those whose name starts with `q` first, then newest first. Files whose path cannot be mentioned
+ * (`mentionPathIssue`: invisible or format characters) are left out. The scan is bounded (a
+ * workspace past the bound may miss files) and rate-limited per member (429 `rate_limited`). `limit` defaults to and is capped at
+ * {@link WORKSPACE_SEARCH_MAX_RESULTS}. Answers {@link workspaceSearchResponseSchema}.
+ */
+export const workspaceSearchQuerySchema = z.strictObject({
+  q: z
+    .string()
+    .max(WORKSPACE_SEARCH_QUERY_MAX)
+    // eslint-disable-next-line no-control-regex
+    .refine((s) => !/[\u0000-\u001f\u007f]/u.test(s), "control character")
+    .optional(),
+  limit: z
+    .string()
+    .regex(/^[1-9][0-9]{0,2}$/u)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(WORKSPACE_SEARCH_MAX_RESULTS))
+    .optional(),
+});
+
+export const workspaceSearchResponseSchema = z.strictObject({
+  entries: z.array(workspaceFileEntrySchema).max(WORKSPACE_SEARCH_MAX_RESULTS),
+});
+export type WorkspaceSearchResponse = z.infer<typeof workspaceSearchResponseSchema>;
+
 /**
  * `GET .../workspace/file?path=`: the bytes, `Content-Disposition: attachment`,
  * `X-Content-Type-Options: nosniff`, never inline.

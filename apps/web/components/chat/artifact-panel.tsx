@@ -258,7 +258,9 @@ export function ArtifactPanel({
   const { sheet, modal } = useSheetLayer(ref);
   const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
-  if (!panel || active === null) return null; // no tabs: no column (CE6)
+  // No tabs: no column (CE6). Hidden by the member (CE23), it stays mounted (the grid hides it),
+  // so every preview keeps its state.
+  if (!panel || active === null) return null;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
     event.stopPropagation();

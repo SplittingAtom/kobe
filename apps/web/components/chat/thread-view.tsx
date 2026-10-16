@@ -6,6 +6,7 @@ import { newSince, shownCount } from "../../lib/chat/scroll-follow";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { Skeleton } from "../ui/skeleton";
+import { StatusBadge, type StatusTone } from "../ui/status";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
 import { FilesButton } from "../shell/rail-state";
@@ -20,14 +21,26 @@ import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
+import { ThreadCommands } from "./thread-commands";
+import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chips";
 import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
 
-function statusLabel(state: ThreadState): string | undefined {
-  if (state.summary?.deletedAt != null) return "In Trash";
-  if (isThreadRunning(state)) return "Running";
+interface ThreadStatusCue {
+  readonly label: string;
+  readonly tone: StatusTone;
+  readonly pulse: boolean;
+}
+
+/**
+ * The header's state badge (KOBE-301): Running is green with a softly pulsing dot, Interrupted
+ * amber (it needs the member: Retry or Continue), In Trash grey. The label always shows.
+ */
+export function statusLabel(state: ThreadState): ThreadStatusCue | undefined {
+  if (state.summary?.deletedAt != null) return { label: "In Trash", tone: "idle", pulse: false };
+  if (isThreadRunning(state)) return { label: "Running", tone: "running", pulse: true };
   if (state.interruptedRun !== null || state.summary?.status === "interrupted")
-    return "Interrupted";
+    return { label: "Interrupted", tone: "attention", pulse: false };
   return undefined;
 }
 
@@ -135,6 +148,7 @@ function MessagesAndComposer({
   readonly modelPicker: boolean;
 }) {
   const { state } = extras;
+  const starters = useAgentStarters(extras);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const hasMessages = useAuiState((s) => s.thread.messages.length > 0);
   const follow = useFollowLatest(
@@ -193,6 +207,7 @@ function MessagesAndComposer({
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
             <RunNotices extras={extras} />
           </div>
+          <FollowupChips extras={extras} />
           <ComposerDictationProvider>
             {/* The overlay sheet at 768–820 px ends above this box (KOBE-269, chat-global.css). */}
             <div className="flex flex-col" data-kobe-composer-box>
@@ -201,7 +216,9 @@ function MessagesAndComposer({
             </div>
           </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
-            {state.phase === "ready" && <ThreadSuggestions />}
+            {state.phase === "ready" &&
+              state.summary?.readOnly !== true &&
+              (starters.length > 0 ? <AgentStarters starters={starters} /> : <ThreadSuggestions />)}
           </AuiIf>
         </div>
       </div>
@@ -239,7 +256,9 @@ export function ThreadView({
         <ThreadTitle state={state} controller={extras.controller} editable={contextInBar} />
         {!contextInBar && <AgentChips />}
         {label && (
-          <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
+          <StatusBadge tone={label.tone} pulse={label.pulse}>
+            {label.label}
+          </StatusBadge>
         )}
         {!contextInBar && (
           <span className="ms-auto">
@@ -264,6 +283,7 @@ export function ThreadView({
         </div>
       )}
       <OpenThreadContext.Provider value={onOpenThread}>
+        <ThreadCommands extras={extras} />
         <ThreadPrimitive.ViewportProvider>
           <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
         </ThreadPrimitive.ViewportProvider>

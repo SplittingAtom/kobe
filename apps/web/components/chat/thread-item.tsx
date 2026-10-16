@@ -1,11 +1,13 @@
 "use client";
 
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { useId } from "react";
 import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
 import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
 import styles from "./chat.module.css";
+import { ThreadActivityDot, useRowActivity } from "./thread-activity";
 import { ThreadRowMenu } from "./thread-row-menu";
 
 /**
@@ -22,6 +24,9 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const shared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
   const movable = !archived && !shared && remoteId !== undefined;
+  // A run going or an approval waiting, live, also while another thread is open (KOBE-301).
+  const activity = useRowActivity();
+  const activityId = useId();
 
   return (
     <li
@@ -36,11 +41,16 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
           : undefined
       }
     >
-      <ThreadListItemPrimitive.Root className={`group/row ${styles.threadItem}`}>
+      <ThreadListItemPrimitive.Root
+        className={`group/row ${styles.threadItem}`}
+        data-kobe-activity={activity}
+      >
+        <ThreadActivityDot activity={activity} id={activityId} />
         <RailThreadCard>
           <ThreadListItemPrimitive.Trigger
             className={styles.threadTrigger}
             title={typeof forkHint === "string" ? forkHint : undefined}
+            aria-describedby={activity === "idle" ? undefined : activityId}
           >
             <ThreadListItemPrimitive.Title fallback="Untitled conversation" />
           </ThreadListItemPrimitive.Trigger>

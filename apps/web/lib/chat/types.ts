@@ -30,6 +30,14 @@ export interface ThreadCard {
   readonly messageCountCapped?: boolean;
 }
 
+/** `GET /v1/threads/activity` (KOBE-301), camelized: threads not listed are idle. */
+export interface ThreadActivityList {
+  readonly threads: readonly {
+    readonly threadId: string;
+    readonly activity: "running" | "approval";
+  }[];
+}
+
 /** Who reads a thread (D23, CE20): its owner only, its project's members, or the whole team. */
 export type ThreadVisibility = "private" | "project" | "team";
 
@@ -54,6 +62,11 @@ export interface ThreadSummary {
   readonly readOnly?: boolean;
   /** For a reader: who shared it ("Shared by …"); null once they left the team (KOBE-221). */
   readonly ownerName?: string | null;
+  /**
+   * An approval waits for the caller on this thread (KOBE-301; pending, unexpired, on their run):
+   * the rail's amber dot. Absent otherwise, and on older servers.
+   */
+  readonly pendingApproval?: boolean;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
@@ -95,6 +108,8 @@ export interface RunnableAgent {
   readonly description?: string;
   /** The model the agent's current version pins (alias or id); null = not pinned. */
   readonly model: string | null;
+  /** The current version's conversation starters (D19): the welcome screen's chips (KOBE-222). */
+  readonly starters?: readonly string[];
 }
 
 export interface ThreadPage {

@@ -48,9 +48,21 @@ describe("IconAction", () => {
     expect(tip.querySelector("kbd")?.textContent).toMatch(/^(Ctrl\+N|⌘N)$/);
   });
 
-  it("shows no shortcut the keyboard doesn't bind yet (C7 turns them on)", () => {
-    render(<IconAction command="files" />);
-    expect(screen.getByRole("button", { name: "Files" }).hasAttribute("aria-keyshortcuts")).toBe(
+  it("shows the bound CE23 shortcut (KOBE-225), and none where the call site says so", () => {
+    render(
+      <>
+        <IconAction command="files" />
+        <IconAction command="detail" shortcut={null} />
+        <IconAction command="edit" />
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Files" }).getAttribute("aria-keyshortcuts")).toBe(
+      "Control+Shift+F Meta+Shift+F",
+    );
+    const detail = screen.getByRole("button", { name: "Show all details" });
+    expect(detail.hasAttribute("aria-keyshortcuts")).toBe(false);
+    // Edit has no key of its own: the last message's Edit shows edit-last-message's.
+    expect(screen.getByRole("button", { name: "Edit" }).hasAttribute("aria-keyshortcuts")).toBe(
       false,
     );
   });
@@ -149,13 +161,20 @@ describe("command registry", () => {
       COMMANDS.filter((c) => c.shortcut).map((c) => [c.id, c.shortcut]),
     );
     expect(shortcuts).toEqual({
-      files: "Mod+Shift+F",
-      detail: "Mod+Shift+D",
+      "command-palette": "Mod+K",
       "new-thread": "Mod+N",
       "toggle-rail": "Mod+B",
-      edit: "Mod+Shift+E",
+      files: "Mod+Shift+F",
+      "toggle-artifacts": "Mod+Shift+A",
+      detail: "Mod+Shift+D",
       stop: "Mod+.",
       steer: "Mod+Shift+Enter",
+      "edit-last-message": "Mod+Shift+E",
+      "previous-thread": "Mod+[",
+      "next-thread": "Mod+]",
+      "focus-composer": "Mod+/",
+      // The sheet's own key; not one of the twelve.
+      "keyboard-shortcuts": "?",
     });
   });
 

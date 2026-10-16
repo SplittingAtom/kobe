@@ -34,6 +34,8 @@ export interface RequestOptions {
   readonly idempotencyKey?: string | undefined;
   /** Lets the request outlive the page (a save on `pagehide`); small bodies only (64 KiB). */
   readonly keepalive?: boolean | undefined;
+  /** Cancels the request (a search superseded by the next keystroke). */
+  readonly signal?: AbortSignal | undefined;
   readonly fetchFn?: typeof fetch | undefined;
 }
 
@@ -130,6 +132,7 @@ export async function apiRequest<T>(
     ifMatch,
     idempotencyKey,
     keepalive,
+    signal,
     fetchFn = fetch,
   } = options;
   const headers = new Headers({ accept: "application/json" });
@@ -155,6 +158,7 @@ export async function apiRequest<T>(
       body,
       credentials: "same-origin",
       ...(keepalive ? { keepalive: true } : {}),
+      ...(signal ? { signal } : {}),
     });
   } catch {
     return { ok: false, error: fallback(0) };

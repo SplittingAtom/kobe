@@ -10,6 +10,7 @@ import {
   type RunTrigger,
 } from "./common.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE } from "./uploads.js";
+import { mentionsFieldSchema } from "./mentions.js";
 import { runStatusSchema, type RunStatus, type RunTransitionCause } from "./runs.js";
 
 /**
@@ -45,6 +46,11 @@ export const submitMessageBodySchema = z.strictObject({
     .max(UPLOAD_MAX_FILES_PER_MESSAGE)
     .refine((ids) => new Set(ids).size === ids.length, "duplicate file_ids")
     .optional(),
+  /**
+   * `@file` mentions (KOBE-223, mentions.ts): the workspace paths the member picked. Only the
+   * `@file(...)` markers of these paths in `content` are rewritten to `/workspace/...`.
+   */
+  mentions: mentionsFieldSchema.optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
@@ -62,6 +68,8 @@ export const steerBodySchema = z.strictObject({
     .min(1)
     .max(200_000)
     .refine((s) => !s.includes("\u0000"), "U+0000"),
+  /** `@file` mentions, as in {@link submitMessageBodySchema} (KOBE-223). */
+  mentions: mentionsFieldSchema.optional(),
 });
 export type SteerBody = z.infer<typeof steerBodySchema>;
 

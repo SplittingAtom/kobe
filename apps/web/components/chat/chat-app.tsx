@@ -16,6 +16,12 @@ import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
+import { AppCommands } from "../shell/app-commands";
+import { CommandBindingsProvider } from "../shell/command-bindings";
+import { CommandPalette } from "../shell/command-palette";
+import { ShortcutKeys } from "../shell/shortcut-keys";
+import { ShortcutSheet } from "../shell/shortcut-sheet";
+import { ThreadGroupsProvider } from "../shell/thread-groups";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider } from "../shell/rail-state";
@@ -34,6 +40,7 @@ import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
+import { ThreadActivityWatch } from "./thread-activity";
 import { ThreadView } from "./thread-view";
 import { useViewportHeight } from "./use-viewport-height";
 import styles from "./chat.module.css";
@@ -120,7 +127,10 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
 
 /** The shell grid with the artifact column's dragged width (CE6) and sheet (CE7). */
 function WorkspaceGrid(
-  props: Omit<Parameters<typeof ShellGrid>[0], "artifactWidth" | "artifactSheet">,
+  props: Omit<
+    Parameters<typeof ShellGrid>[0],
+    "artifactWidth" | "artifactSheet" | "artifactHidden"
+  >,
 ) {
   const panel = useArtifactPanel();
   return (
@@ -128,6 +138,7 @@ function WorkspaceGrid(
       {...props}
       artifactWidth={panel?.width ?? null}
       artifactSheet={panel?.sheetOpen ?? false}
+      artifactHidden={panel?.hidden ?? false}
     />
   );
 }
@@ -155,8 +166,10 @@ function ChatWorkspace({
   session,
   teamName,
   fetchFn,
+  activityPollMs,
 }: {
   readonly session: ChatSession;
+  readonly activityPollMs: number | undefined;
   /** The rail's header (CE2): the workspace is the member's view of this team. */
   readonly teamName: string;
   readonly fetchFn: typeof fetch | undefined;
@@ -197,50 +210,61 @@ function ChatWorkspace({
   const layout = useLayoutPreferences(fetchFn);
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
-      <RetentionNotice />
-      <RailProvider preferences={layout.preferences} onSave={layout.save}>
-        <DetailProvider preferences={layout.preferences} onSave={layout.save}>
-          <ThreadUsageProvider>
-            <TeamModelsProvider>
-              <ThreadMarkersProvider>
-                <ArtifactPanelProvider
-                  teamId={session.teamId}
-                  threadId={threadId}
-                  preferences={layout.preferences}
-                  onSavePreferences={layout.save}
-                >
-                  <FileGoneNotice />
-                  <ShellSlot name="search">
-                    <ThreadSearch onOpenThread={setThreadId} />
-                  </ShellSlot>
-                  <ShellSlot name="context">
-                    <ContextRow />
-                  </ShellSlot>
-                  <ShellSlot name="nav">
-                    <RailDrawerButton />
-                  </ShellSlot>
-                  <WorkspaceGrid
-                    rail={
-                      <WorkspaceRail
-                        teamName={teamName || "Workspace"}
-                        listError={listError}
-                        filesApi={filesApi}
-                        fetchFn={fetchFn}
+      {/* What each action does now: the `/` menu (KOBE-224), the palette and keys (KOBE-225). */}
+      <CommandBindingsProvider>
+        <RetentionNotice />
+        <ThreadGroupsProvider fetchFn={fetchFn}>
+          <RailProvider preferences={layout.preferences} onSave={layout.save}>
+            <DetailProvider preferences={layout.preferences} onSave={layout.save}>
+              <ThreadUsageProvider>
+                <TeamModelsProvider>
+                  <ThreadMarkersProvider>
+                    <ArtifactPanelProvider
+                      teamId={session.teamId}
+                      threadId={threadId}
+                      preferences={layout.preferences}
+                      onSavePreferences={layout.save}
+                    >
+                      <FileGoneNotice />
+                      {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
+                      <ThreadActivityWatch pollMs={activityPollMs} />
+                      <AppCommands />
+                      {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
+                      <ShortcutKeys />
+                      <CommandPalette onOpenThread={setThreadId} />
+                      <ShortcutSheet />
+                      <ShellSlot name="search">
+                        <ThreadSearch onOpenThread={setThreadId} />
+                      </ShellSlot>
+                      <ShellSlot name="context">
+                        <ContextRow />
+                      </ShellSlot>
+                      <ShellSlot name="nav">
+                        <RailDrawerButton />
+                      </ShellSlot>
+                      <WorkspaceGrid
+                        rail={
+                          <WorkspaceRail
+                            teamName={teamName || "Workspace"}
+                            listError={listError}
+                            filesApi={filesApi}
+                          />
+                        }
+                        artifact={<ArtifactPanel filesApi={filesApi} />}
+                        conversation={
+                          <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                            <ThreadView onOpenThread={setThreadId} contextInBar />
+                          </main>
+                        }
                       />
-                    }
-                    artifact={<ArtifactPanel filesApi={filesApi} />}
-                    conversation={
-                      <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                        <ThreadView onOpenThread={setThreadId} contextInBar />
-                      </main>
-                    }
-                  />
-                </ArtifactPanelProvider>
-              </ThreadMarkersProvider>
-            </TeamModelsProvider>
-          </ThreadUsageProvider>
-        </DetailProvider>
-      </RailProvider>
+                    </ArtifactPanelProvider>
+                  </ThreadMarkersProvider>
+                </TeamModelsProvider>
+              </ThreadUsageProvider>
+            </DetailProvider>
+          </RailProvider>
+        </ThreadGroupsProvider>
+      </CommandBindingsProvider>
     </AssistantRuntimeProvider>
   );
 }
@@ -254,6 +278,8 @@ export interface ChatAppProps {
   readonly uploadTransport?: UploadTransport | undefined;
   /** This browser's other tabs (CE19); default: a `BroadcastChannel` per team. */
   readonly threadListSync?: ((teamId: string) => ThreadListSync | undefined) | undefined;
+  /** How often the rail rereads an active thread's state (KOBE-301); tests shorten it. */
+  readonly activityPollMs?: number | undefined;
 }
 
 /**
@@ -268,6 +294,7 @@ export function ChatApp({
   reopenDelayMs,
   uploadTransport,
   threadListSync = browserThreadListSync,
+  activityPollMs,
 }: ChatAppProps) {
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
@@ -320,6 +347,7 @@ export function ChatApp({
           session={session}
           teamName={team.status === "ready" ? team.teamName : ""}
           fetchFn={fetchFn}
+          activityPollMs={activityPollMs}
         />
       </ChatSessionContext.Provider>
     );

@@ -56,6 +56,8 @@ export interface RunnableAgent {
   readonly icon?: string;
   /** Model the current version pins (alias or id); null → the user's model choice applies. */
   readonly model: string | null;
+  /** The current version's conversation starters (D19; KOBE-222: the welcome screen's chips). */
+  readonly starters: readonly string[];
   readonly currentVersion: number;
 }
 
@@ -127,11 +129,9 @@ export async function listRunnableAgents(
       );
     const page = records.slice(0, limit);
     const last = page.at(-1);
-    const models = await pinnedModels(tx, page);
+    const details = await versionDetails(tx, page);
     return {
-      agents: page.map((p) =>
-        toRunnable(p, models.get(p.agent.id) ?? null, galleryKeys.get(p.agent.id)),
-      ),
+      agents: page.map((p) => toRunnable(p, details.get(p.agent.id), galleryKeys.get(p.agent.id))),
       nextCursor: records.length > limit && last ? `${last.agent.slug}:${last.agent.id}` : null,
     };
   });
@@ -139,9 +139,17 @@ export async function listRunnableAgents(
 
 type Tx = Parameters<Parameters<typeof withTeam>[2]>[0];
 
-/** The `model` of each agent's current version (one query per table). */
-async function pinnedModels(tx: Tx, page: readonly Published[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+interface VersionDetails {
+  readonly model: string | null;
+  readonly starters: readonly string[];
+}
+
+/** The `model` and `starters` of each agent's current version (one query per table). */
+async function versionDetails(
+  tx: Tx,
+  page: readonly Published[],
+): Promise<Map<string, VersionDetails>> {
+  const out = new Map<string, VersionDetails>();
   for (const [t, inTable] of [
     [teamAgentVersions, page.filter((p) => p.agent.scope === "team")],
     [siteAgentVersions, page.filter((p) => p.agent.scope !== "team")],
@@ -160,8 +168,13 @@ async function pinnedModels(tx: Tx, page: readonly Published[]): Promise<Map<str
         ),
       );
     for (const r of rows) {
-      const model = (r.frontmatter as { model?: unknown }).model;
-      if (typeof model === "string") out.set(r.agentId, model);
+      const { model, starters } = r.frontmatter as { model?: unknown; starters?: unknown };
+      out.set(r.agentId, {
+        model: typeof model === "string" ? model : null,
+        starters: Array.isArray(starters)
+          ? starters.filter((s): s is string => typeof s === "string")
+          : [],
+      });
     }
   }
   return out;
@@ -169,7 +182,7 @@ async function pinnedModels(tx: Tx, page: readonly Published[]): Promise<Map<str
 
 const toRunnable = (
   { agent: a, version }: Published,
-  model: string | null,
+  details: VersionDetails | undefined,
   galleryKey: string | undefined,
 ): RunnableAgent => ({
   id: a.id,
@@ -179,6 +192,7 @@ const toRunnable = (
   name: a.frontmatter.name,
   ...(a.frontmatter.description !== undefined ? { description: a.frontmatter.description } : {}),
   ...(a.frontmatter.icon !== undefined ? { icon: a.frontmatter.icon } : {}),
-  model,
+  model: details?.model ?? null,
+  starters: details?.starters ?? [],
   currentVersion: version,
 });

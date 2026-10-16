@@ -7,6 +7,7 @@ import { formatDuration, inputSummary } from "../../lib/chat/history";
 import type { ToolActivity } from "../../lib/chat/live";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { cn } from "../../lib/utils";
+import { toneClass, type StatusTone } from "../ui/status";
 import { ARTIFACT_TOOL_NAMES, artifactIdFromToolResult } from "../../lib/chat/artifacts";
 import { OpenArtifactButton } from "./artifact-panel";
 import { Disclosure, useDisclosure } from "./detail";
@@ -31,7 +32,7 @@ function resultText(result: unknown): string {
   return typeof result === "string" ? result : JSON.stringify(result, null, 2);
 }
 
-type Outcome = "denied" | "error" | "done" | "waiting" | "running";
+export type Outcome = "denied" | "error" | "done" | "waiting" | "running";
 
 function outcomeOf(activity: ToolActivity, props: ToolCallMessagePartProps): Outcome {
   if (activity.denied) return "denied";
@@ -56,6 +57,19 @@ const OUTCOME_ICON: Record<Outcome, ComponentType<{ className?: string }>> = {
   done: CheckIcon,
   waiting: ClockIcon,
   running: LoaderIcon,
+};
+
+/**
+ * The step's status colour (KOBE-301, app/theme.css): running green with a spinning icon,
+ * waiting for approval amber, failed and denied red, done a muted green check. The label and
+ * icon always show too.
+ */
+export const OUTCOME_TONE: Record<Outcome, StatusTone> = {
+  denied: "failed",
+  error: "failed",
+  done: "done",
+  waiting: "attention",
+  running: "running",
 };
 
 /** A finished artifact call in an old thread: no live event, so the id comes from the result. */
@@ -94,15 +108,16 @@ function ToolCardHeader({
   readonly took: string | undefined;
 }) {
   const Icon = OUTCOME_ICON[outcome];
-  const failed = outcome === "denied" || outcome === "error";
+  const tone = toneClass(OUTCOME_TONE[outcome]);
   return (
     <>
       <Icon
         aria-hidden
+        data-kobe-outcome={outcome}
         className={cn(
           "size-4 shrink-0",
           outcome === "running" && "animate-spin motion-reduce:animate-none",
-          failed && "text-destructive",
+          tone,
         )}
       />
       {skill === undefined ? (
@@ -116,7 +131,7 @@ function ToolCardHeader({
           <span className="text-foreground min-w-0 truncate font-mono text-xs">{skill}</span>
         </>
       )}
-      <span className={cn("ms-auto shrink-0", failed && "text-destructive")}>
+      <span className={cn("ms-auto shrink-0", tone)} data-kobe-outcome-label={outcome}>
         {OUTCOME_LABEL[outcome]}
       </span>
       {took !== undefined && <span className="shrink-0 tabular-nums">{took}</span>}
