@@ -76,8 +76,15 @@ export const serverCallClaimsSchema = z
     aud: z.literal(SERVER_CALL_AUDIENCE),
     purpose: serverCallPurposeSchema,
     team_id: uuidSchema,
-    /** Whose budget line and virtual key: the member whose run triggered the call. */
+    /**
+     * Whose budget line and virtual key: the member whose run triggered the call. Also the trace's
+     * `user.id` (opaque uuid; KOBE-274 sets the attribute on the gateway's span).
+     */
     user_id: uuidSchema,
+    /**
+     * The thread: usage attribution, and the trace's `session.id` (Langfuse sessions group a
+     * thread's model calls; KOBE-274 sets it on run calls and, from this claim, on server calls).
+     */
     thread_id: uuidSchema,
     /** The completed run that triggered the call (usage attribution and tracing). */
     run_id: uuidSchema,
