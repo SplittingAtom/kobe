@@ -4,6 +4,7 @@ import {
   SERVER_CALL_MAX_BODY_BYTES,
   SERVER_CALL_PATH,
   SERVER_CALL_TOKEN_HEADER,
+  serverCallOutputCap,
   serverCallRequestSchema,
   type ServerCallClaims,
 } from "@kobe/protocol";
@@ -134,12 +135,16 @@ export function serverCallBodyLimit(maxBodyBytes: number): number {
 
 /**
  * The body against the contract and the token: shape (no tools, no streaming), the token's model,
- * an output limit within the token's. Returns the output limit (the budget reservation's
+ * an output limit within the token's and within the purpose's cap for this model: the reasoning
+ * headroom and a `reasoning_effort` only when the site catalog marks the model as reasoning
+ * (KOBE-219), whatever the token says. Returns the output limit (the budget reservation's
  * allowance).
  */
 export function checkServerCallBody(
   body: Buffer,
   claims: ServerCallClaims,
+  /** The catalog marks `claims.model` as reasoning (`GatewayPrincipal.reasoningModels`). */
+  reasoning: boolean,
 ): { readonly ok: true; readonly maxOutputTokens: number } | ServerCallRefusal {
   const bad = (message: string) => refuse(400, "server_call_body_refused", message);
   let json: unknown;
@@ -155,5 +160,11 @@ export function checkServerCallBody(
   if (parsed.data.model !== claims.model) return bad("The model is not the token's.");
   const limit = parsed.data.max_tokens ?? parsed.data.max_completion_tokens ?? Infinity;
   if (limit > claims.max_output_tokens) return bad("The output limit is above the token's.");
+  if (limit > serverCallOutputCap(claims.purpose, reasoning)) {
+    return bad("The output limit is above this model's cap for the purpose.");
+  }
+  if (parsed.data.reasoning_effort !== undefined && !reasoning) {
+    return bad("A reasoning effort is only for a model the catalog marks as reasoning.");
+  }
   return { ok: true, maxOutputTokens: limit };
 }

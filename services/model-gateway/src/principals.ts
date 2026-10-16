@@ -22,6 +22,8 @@ export type Resolution =
       readonly virtualKey: string;
       /** `<gateway provider>/<model>` ids the team enabled. */
       readonly enabledModels: ReadonlySet<string>;
+      /** Those the catalog marks as reasoning (server calls' headroom, KOBE-219). */
+      readonly reasoningModels: ReadonlySet<string>;
     }
   | {
       readonly ok: false;
@@ -95,6 +97,7 @@ export class PrincipalCache {
         ok: true,
         virtualKey: this.box.open(p.virtualKey.valueEnc, virtualKeyContext(teamId, userId)),
         enabledModels: new Set(p.enabledModels),
+        reasoningModels: new Set(p.reasoningModels ?? []),
       };
     } catch {
       return { ok: false, reason: "key_unreadable" };

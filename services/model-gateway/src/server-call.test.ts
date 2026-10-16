@@ -5,6 +5,7 @@ import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipa
 import {
   RUN_TOKEN_HEADER,
   SERVER_CALL_AUDIENCE,
+  SERVER_CALL_LIMITS,
   SERVER_CALL_TOKEN_HEADER,
   type ServerCallClaims,
 } from "@kobe/protocol";
@@ -372,6 +373,31 @@ describe("server calls: refused (KOBE-234 ac-2)", () => {
     const disabled = await post("/v1/chat/completions", asServer());
     expect([disabled.status, disabled.code]).toEqual([403, "model_not_enabled"]);
     expect(hits).toEqual([]);
+  });
+
+  it("gives the reasoning headroom and an effort only to a catalog reasoning model (KOBE-219 H1)", async () => {
+    const big = SERVER_CALL_LIMITS.title.reasoning_max_output_tokens;
+    const reasoningBody = { ...BODY, max_tokens: big, reasoning_effort: "low" };
+    const token = () => serverToken({ max_output_tokens: big });
+    // Not marked as reasoning: neither the larger cap nor the field, whatever the token says.
+    const plainBig = await post("/v1/chat/completions", asServer(token()), {
+      ...BODY,
+      max_tokens: big,
+    });
+    expect([plainBig.status, plainBig.code]).toEqual([400, "server_call_body_refused"]);
+    const plainEffort = await post("/v1/chat/completions", asServer(), {
+      ...BODY,
+      reasoning_effort: "low",
+    });
+    expect([plainEffort.status, plainEffort.code]).toEqual([400, "server_call_body_refused"]);
+    expect(hits).toEqual([]);
+    // Marked: both pass, the allowance is the larger cap, and nothing above it.
+    principal = { ...principal, reasoningModels: [MODEL] };
+    const ok = await post("/v1/chat/completions", asServer(token()), reasoningBody);
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(hits[0]?.body ?? "{}")).toEqual(reasoningBody);
+    expect(admitted.at(-1)).toMatchObject({ outputAllowance: big });
+    expect(() => serverToken({ max_output_tokens: big + 1 })).toThrow();
   });
 
   it("refuses a token whose run is not a completed run of its thread and member (review L1)", async () => {

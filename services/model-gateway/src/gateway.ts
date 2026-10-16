@@ -419,7 +419,11 @@ export function createModelGateway(options: GatewayOptions): Server {
       let outputAllowance = chargedOutput(undefined, 1, countOnly);
       if (serverCall) {
         // The contract's shape, the token's model and cap (no tools, no streaming).
-        const checked = checkServerCallBody(body, serverCall);
+        const checked = checkServerCallBody(
+          body,
+          serverCall,
+          resolution.reasoningModels.has(serverCall.model),
+        );
         if (!checked.ok) {
           status = checked.status;
           sendError(res, kind, checked.status, checked.code, checked.message);
