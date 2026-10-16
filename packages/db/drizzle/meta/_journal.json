@@ -736,6 +736,20 @@
       "when": 1792152672953,
       "tag": "0104_thread_project_moves_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792154364877,
+      "tag": "0105_thread_share_team",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792154370678,
+      "tag": "0106_thread_share_team_checks",
+      "breakpoints": true
     }
   ]
 }

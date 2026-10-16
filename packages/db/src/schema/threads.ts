@@ -89,6 +89,13 @@ export const threads = pgTable(
     leafEntryId: text(),
     status: threadStatus().notNull().default("idle"),
     sharedToProject: boolean().notNull().default(false),
+    /**
+     * Shared read-only with every member of the team (CE20, KOBE-221). At most one share scope:
+     * `threads_share_scope` (SQL-only, `0106_thread_share_team_checks.sql`) refuses it together
+     * with `shared_to_project`, and on a test thread. `threads/share.ts` in the server maps the two
+     * columns to the wire `visibility` (private | project | team).
+     */
+    sharedToTeam: boolean().notNull().default(false),
     deletedAt: timestamp({ withTimezone: true }),
     lastActivityAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -194,6 +201,9 @@ export const threads = pgTable(
     // owner_user_id, archived_at DESC NULLS LAST, id DESC NULLS LAST) WHERE archived_at IS NOT
     // NULL AND deleted_at IS NULL. SQL-only (`0104_thread_project_moves_checks.sql`), IF NOT
     // EXISTS so large sites can build it CONCURRENTLY first (docs/install.md, "Upgrading").
+    // Shared with me (CE20, KOBE-221): `threads_team_shared_idx` on (team_id, last_activity_at
+    // DESC, id DESC) WHERE shared_to_team AND deleted_at IS NULL, and `threads_share_scope`. Both
+    // SQL-only (`0106_thread_share_team_checks.sql`), like KOBE-220's.
     // A source's forks: the fork key's ON DELETE SET NULL looks them up on every purge.
     index("threads_forked_from_idx")
       .on(t.teamId, t.forkedFromThreadId)

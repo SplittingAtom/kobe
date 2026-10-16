@@ -624,12 +624,17 @@ export const AUDIT_EVENTS = {
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
-  /** `visibility` is the share scope after the change (private | project; `team` joins with KOBE-221). */
+  /**
+   * The owner changed the share scope (D23, CE20): `visibility` after the change, `from` before it
+   * (KOBE-221; absent on older rows). `projectId` is the thread's project, null for a thread outside
+   * any project (only the team scope needs none). Revoking is a change to `private`.
+   */
   "thread.sharing_changed": event("team", {
     threadId: id,
-    projectId: id,
+    projectId: id.nullable(),
     shared: z.boolean(),
-    visibility: z.enum(["private", "project"]),
+    visibility: z.enum(["private", "project", "team"]),
+    from: z.enum(["private", "project", "team"]).optional(),
   }),
   /**
    * The owner moved the thread to another project, or out of one (null: no project; CE19,

@@ -752,6 +752,23 @@ EXISTS` an invalid leftover.
   As above, check `pg_index.indisvalid` for `threads_owner_archived_idx` and
   `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
 
+- **Shared with me index (KOBE-221, migrations `*_thread_share_team` and
+  `*_thread_share_team_checks`).** The first adds `threads.shared_to_team` (catalog-only), but its
+  ACCESS EXCLUSIVE lock on `threads` is held until the upgrade commits, so while the second builds
+  `threads_team_shared_idx` with a plain `CREATE INDEX`, **reads and writes of `threads`** wait
+  (its CHECK is `NOT VALID`: no scan). The index can't be built beforehand (its column is new in
+  this release); the build is one sequential read of `threads` and the index starts empty. On a
+  large site, upgrade in a quiet window. A later re-run (or a failed build) can use:
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_team_shared_idx
+    ON threads (team_id, last_activity_at DESC, id DESC)
+    WHERE shared_to_team AND deleted_at IS NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `threads_team_shared_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,

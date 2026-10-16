@@ -55,6 +55,8 @@ export interface ThreadSearchHit {
   readonly agentVersion: number | null;
   readonly status: ThreadStatus;
   readonly sharedToProject: boolean;
+  /** Shared read-only with the whole team (CE20, KOBE-221). */
+  readonly sharedToTeam: boolean;
   /** The thread's chosen model alias (KOBE-44); null = the team's default. */
   readonly modelAlias: string | null;
   readonly lastActivityAt: Date;
@@ -93,6 +95,7 @@ interface HitRow extends Record<string, unknown> {
   agent_version: number | null;
   status: ThreadStatus;
   shared_to_project: boolean;
+  shared_to_team: boolean;
   model_alias: string | null;
   activity_micros: string;
   created_micros: string;
@@ -108,9 +111,9 @@ interface HitRow extends Record<string, unknown> {
 
 /**
  * Searches the active team's threads that `viewerUserId` may read (spec D9, D23, D24, §6.1): their
- * own threads and threads shared to `projectIds`, never Trash, never another team (RLS, so call it
- * inside `withTeam`). Matches user/assistant message text and titles by full text, and titles by
- * trigram similarity. Read-only; never wakes a sandbox.
+ * own threads, threads shared to `projectIds` and threads shared with the team (KOBE-221), never
+ * Trash, never another team (RLS, so call it inside `withTeam`). Matches user/assistant message text
+ * and titles by full text, and titles by trigram similarity. Read-only; never wakes a sandbox.
  *
  * The caller vouches for the inputs that RLS cannot check: `viewerUserId` must be the signed-in user
  * (KOBE-34) and `projectIds` the projects that user belongs to (KOBE-57); the data layer only adds
@@ -210,6 +213,7 @@ function toHit(row: HitRow): ThreadSearchHit {
     agentVersion: row.agent_version,
     status: row.status,
     sharedToProject: row.shared_to_project,
+    sharedToTeam: row.shared_to_team,
     modelAlias: row.model_alias,
     // Raw execute returns timestamps as text; µs → ms (a Date's precision), as drizzle does.
     lastActivityAt: fromMicros(row.activity_micros),
@@ -254,7 +258,8 @@ function searchQuery(
     ),
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
-             t.agent_version, t.status, t.shared_to_project, t.model_alias, t.last_activity_at,
+             t.agent_version, t.status, t.shared_to_project, t.shared_to_team, t.model_alias,
+             t.last_activity_at,
              t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id,
              t.pinned_at, t.archived_at
       FROM threads t
@@ -262,6 +267,7 @@ function searchQuery(
         AND t.deleted_at IS NULL
         AND NOT t.is_test
         AND (t.owner_user_id = ${p.viewerUserId}
+             OR t.shared_to_team
              OR (t.shared_to_project AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
         ${projectFilter}
         ${activityFilter}
@@ -307,7 +313,7 @@ function searchQuery(
     )
     -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
     SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
-           r.agent_version, r.status, r.shared_to_project, r.model_alias,
+           r.agent_version, r.status, r.shared_to_project, r.shared_to_team, r.model_alias,
            r.activity_micros::text AS activity_micros, r.leaf_entry_id,
            r.forked_from_thread_id, r.forked_at_entry_id,
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,

@@ -53,6 +53,7 @@ interface ThreadSpec {
   readonly title?: string | null;
   readonly projectId?: string;
   readonly sharedToProject?: boolean;
+  readonly sharedToTeam?: boolean;
   readonly deleted?: boolean;
   readonly lastActivityAt?: Date;
   /** Pi entries: `type` and payload (a Pi session v3 entry body). */
@@ -92,6 +93,7 @@ async function newThread(teamId: string, spec: ThreadSpec): Promise<string> {
         title: spec.title ?? null,
         projectId: spec.projectId ?? null,
         sharedToProject: spec.sharedToProject ?? false,
+        sharedToTeam: spec.sharedToTeam ?? false,
         deletedAt: spec.deleted ? new Date() : null,
         lastActivityAt: spec.lastActivityAt ?? new Date(),
       })
@@ -354,6 +356,29 @@ describe("visibility (ac-2)", () => {
         projectId: notMine,
       }),
     ).toEqual([]);
+  });
+
+  it("returns team-shared threads to every member of that team only (KOBE-221)", async () => {
+    const me = await newUser(teamA);
+    const colleague = await newUser(teamA, teamB);
+    const shared = await newThread(teamA, {
+      ownerUserId: colleague,
+      sharedToTeam: true,
+      entries: [userMsg("team wombat notes")],
+    });
+    await newThread(teamA, {
+      ownerUserId: colleague,
+      sharedToTeam: true,
+      deleted: true,
+      entries: [userMsg("trashed wombat notes")],
+    });
+    const hits = (await search(teamA, { viewerUserId: me, query: "wombat" })).hits;
+    expect(hits.map((h) => h.threadId)).toEqual([shared]);
+    expect(hits[0]?.sharedToTeam).toBe(true);
+    // Another team never sees it, not even through a member of both teams.
+    const stranger = await newUser(teamB);
+    expect(await ids(teamB, { viewerUserId: stranger, query: "wombat" })).toEqual([]);
+    expect(await ids(teamB, { viewerUserId: colleague, query: "wombat" })).toEqual([]);
   });
 
   it("excludes threads in Trash", async () => {
