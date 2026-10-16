@@ -1093,6 +1093,7 @@ export class FakeKobe {
       agent_name: thread.agent_name ?? null,
       last_activity_at: thread.last_activity_at,
       message_count: messages.filter((e) => role(e) === "user" || role(e) === "assistant").length,
+      message_count_capped: false,
     };
   }
 

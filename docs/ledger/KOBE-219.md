@@ -59,12 +59,35 @@
 - **Member** = the run's lease user (what the gateway's `serverCallRunMatches` checks).
 - No model-specific knobs (`reasoning_effort` left out: providers differ on it).
 
+## Review (Opus, changes requested) and fixes
+
+- **H1** reasoning models: reuse the catalog's `reasoning` flag (KOBE-259, already editable in
+  Site > Models; no migration). `SERVER_CALL_LIMITS` gains `reasoning_max_output_tokens` (title
+  512, follow-ups 768) and `SERVER_CALL_REASONING_EFFORT = "low"`; the server sends both only for
+  a flagged model (`title-source.ts`); the gateway reads the flagged models with the principal
+  (`GatewayPrincipal.reasoningModels`) and refuses the larger cap or a `reasoning_effort` for any
+  other model (`checkServerCallBody`). Design doc updated.
+- **M1** an empty reply is `empty_content`; unusable replies and nothing-to-call cases are logged
+  `server call skipped` (the gateway's skip line) with code and model.
+- **M2** `finish_reason: length` → `truncated`, never saved.
+- **M3** fallback title = first line of the first prompt (same guard): at run end when no call
+  will come (titles not configured, past three attempts), after the epilogue when the last attempt
+  failed or skipped, at once for `no_model` / `no_lease`; announced with `thread.updated` there.
+  So a 402 on all three attempts now ends with the first line as the title (ac-9 test adjusted).
+- **L1** controls, format characters and separators stripped; `generatedTitleSchema` refuses them.
+- **L2** a reply holding a link (`://`, `www.`, `[..](`) is `schema_reject`.
+- **L3** the Markdown export escapes Markdown punctuation in the heading.
+- **L4** the card's count reads at most 1,000 message entries (`message_count_capped`, "1000+").
+
+## Deploy step (coordinator)
+
+After G3 is on gate1: Site > Models > `glm-5.3-flash` → tick "Reasons before answering"
+(`model_catalog.reasoning = true`). Without it gate1's titles come back empty and the threads get
+the fallback title after three runs.
+
 ## Open questions
 
-- A reasoning model may spend all 64 output tokens thinking and return no text: the title is then
-  skipped (`bad_reply`) up to three times. If gate1's models do this, KOBE-234 could allow a
-  `reasoning_effort` per model (contract change, own PR).
-- Untitled after failure: a fourth-run or manual "Generate title" is out of scope (CE18: once).
+- Follow-ups (KOBE-222) inherit the reasoning headroom (768) and effort; untested until 222.
 
 ## Evidence
 

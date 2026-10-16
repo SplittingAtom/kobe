@@ -26,6 +26,8 @@ export interface ThreadCard {
   readonly lastActivityAt: string;
   /** The member's messages and the agent's answers (tool-only turns not counted). */
   readonly messageCount: number;
+  /** The server stopped counting: the thread holds more ("1000+"); absent on older servers. */
+  readonly messageCountCapped?: boolean;
 }
 
 export interface ThreadSummary {

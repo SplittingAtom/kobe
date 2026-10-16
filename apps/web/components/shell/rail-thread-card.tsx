@@ -61,7 +61,10 @@ function CardBody({ state }: { readonly state: CardState }) {
           </time>
         </dd>
         <dt>Messages</dt>
-        <dd>{card.messageCount}</dd>
+        <dd>
+          {card.messageCount}
+          {card.messageCountCapped ? "+" : ""}
+        </dd>
       </dl>
     </>
   );
