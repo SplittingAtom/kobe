@@ -73,7 +73,15 @@ export interface SlashContext {
 
 const UNBOUND: MenuBinding = {};
 
-function blockerOf(command: RegisteredCommand, binding: MenuBinding, ctx: SlashContext) {
+/**
+ * Why `command` can't run now, or null: one rule for the `/` menu, the palette and the shortcuts
+ * (KOBE-225). A reader may run only the read-only-safe; an unbound command is not here now.
+ */
+export function commandBlocker(
+  command: RegisteredCommand,
+  binding: MenuBinding,
+  ctx: SlashContext,
+): string | null {
   if (ctx.readOnly && command.readOnlySafe !== true) return READ_ONLY_HERE;
   if (!isAvailable(command, { consoles: ctx.consoles ?? [] })) return NOT_YOURS;
   if (binding.onSelect === undefined && binding.choices === undefined) return NOT_HERE;
@@ -92,7 +100,7 @@ export function slashEntries(bindings: MenuBindings, ctx: SlashContext): readonl
     if (slash === undefined) return [];
     const binding = bindings[command.id] ?? UNBOUND;
     const label = binding.label ?? command.name;
-    return [{ command, slash, label, binding, blocker: blockerOf(command, binding, ctx) }];
+    return [{ command, slash, label, binding, blocker: commandBlocker(command, binding, ctx) }];
   });
   return [...all.filter((e) => e.command.href === undefined), ...all.filter((e) => e.command.href)];
 }

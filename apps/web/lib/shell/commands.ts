@@ -12,8 +12,11 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
   CircleUserIcon,
   CircleXIcon,
+  CommandIcon,
   ClipboardCopyIcon,
   CopyIcon,
   CpuIcon,
@@ -28,10 +31,12 @@ import {
   FolderKanbanIcon,
   GitForkIcon,
   GripVerticalIcon,
+  KeyboardIcon,
   MessagesSquareIcon,
   MicIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PanelRightIcon,
   PanelRightOpenIcon,
   PaperclipIcon,
   PauseIcon,
@@ -46,6 +51,7 @@ import {
   SquareIcon,
   SquarePenIcon,
   SunIcon,
+  TextCursorInputIcon,
   Trash2Icon,
   UsersIcon,
   XIcon,
@@ -73,7 +79,16 @@ import type { ConsoleKind } from "../admin/nav/types";
  * registry order; a row binds the ones it offers (`lib/shell/menu.ts`).
  */
 export type CommandScope =
-  "bar" | "rail" | "thread" | "message" | "composer" | "artifact" | "thread-menu" | "file-menu";
+  | "bar"
+  | "rail"
+  | "thread"
+  | "message"
+  | "composer"
+  | "artifact"
+  | "thread-menu"
+  | "file-menu"
+  /** Keyboard and palette only (CE23, KOBE-225): no icon of its own on screen. */
+  | "app";
 
 /** What availability depends on; grows with the palette (thread state, selection). */
 export interface CommandContext {
@@ -101,13 +116,18 @@ export interface Command {
   readonly arg?: string;
   /** Offered to a reader of a shared thread (KOBE-221): it changes nothing of the owner's. */
   readonly readOnlySafe?: boolean;
+  /**
+   * Listed in the palette (CE23, KOBE-225) although it has no `/` word, shortcut or href: an
+   * action of the whole app rather than of one row or message (the theme).
+   */
+  readonly palette?: boolean;
 }
 
 /**
- * The CE23 shortcuts are recorded here but not bound yet: C7 (KOBE-225) adds the key handlers and
- * turns this on, so tooltips don't promise keys that do nothing until then.
+ * The CE23 shortcuts are bound (KOBE-225, `components/shell/shortcut-keys.tsx`), so tooltips show
+ * them. Kept as a switch so a surface without the key handlers could turn them off again.
  */
-export const SHORTCUTS_BOUND = false;
+export const SHORTCUTS_BOUND = true;
 
 const LIST = [
   // Bar, row one: the member's areas, the consoles, notifications, profile.
@@ -163,7 +183,14 @@ const LIST = [
   { id: "profile", name: "Profile", icon: CircleUserIcon, scope: "bar" },
   // KOBE-282: flips light/dark; a toggle (aria-pressed while dark). The call site shows the
   // current theme's icon, sun or moon.
-  { id: "theme", name: "Dark theme", icon: SunIcon, scope: "bar" },
+  {
+    id: "theme",
+    name: "Dark theme",
+    icon: SunIcon,
+    scope: "bar",
+    palette: true,
+    readOnlySafe: true,
+  },
   // Bar, row two: the open thread's context. Files shows the rail's Files section.
   {
     id: "files",
@@ -181,6 +208,7 @@ const LIST = [
     icon: ChevronsUpDownIcon,
     scope: "bar",
     shortcut: "Mod+Shift+D",
+    readOnlySafe: true,
   },
   // Compact now (CE15, B9 KOBE-213): beside the context gauge at red, and in the thread's actions
   // menu; opens the dialog (optional focus). Enabled only while the thread is idle. It acts on the
@@ -219,6 +247,7 @@ const LIST = [
     icon: PanelLeftCloseIcon,
     scope: "rail",
     shortcut: "Mod+B",
+    readOnlySafe: true,
   },
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
@@ -310,7 +339,8 @@ const LIST = [
   { id: "thread-menu", name: "Menu", icon: EllipsisVerticalIcon, scope: "thread" },
   // Message actions.
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
-  { id: "edit", name: "Edit", icon: PencilIcon, scope: "message", shortcut: "Mod+Shift+E" },
+  // The last user message's Edit shows the shortcut of `edit-last-message` (KOBE-225).
+  { id: "edit", name: "Edit", icon: PencilIcon, scope: "message" },
   { id: "regenerate", name: "Regenerate", icon: RefreshCwIcon, scope: "message" },
   // Regenerate's split half (CE17, KOBE-217): the team's models to regenerate with.
   { id: "regenerate-with", name: "Regenerate with…", icon: ChevronDownIcon, scope: "message" },
@@ -349,6 +379,14 @@ const LIST = [
   },
   { id: "pause-queue", name: "Pause the queue", icon: PauseIcon, scope: "composer" },
   { id: "resume-queue", name: "Resume queue", icon: PlayIcon, scope: "composer" },
+  // Mod+Shift+E, and Up arrow in an empty composer (CE23, KOBE-225): the last sent message.
+  {
+    id: "edit-last-message",
+    name: "Edit your last message",
+    icon: PencilIcon,
+    scope: "composer",
+    shortcut: "Mod+Shift+E",
+  },
   { id: "move-queued", name: "Move queued message", icon: GripVerticalIcon, scope: "composer" },
   { id: "delete-queued", name: "Delete queued message", icon: XIcon, scope: "composer" },
   // Artifact column.
@@ -363,6 +401,55 @@ const LIST = [
   { id: "artifact-close", name: "Close artifact", icon: XIcon, scope: "artifact" },
   // The artifact sheet (under 820 px) goes back to the conversation; its tabs stay open.
   { id: "artifact-back", name: "Back to the conversation", icon: ArrowLeftIcon, scope: "artifact" },
+  // Hides the column (its tabs stay) or shows it again; opens the newest artifact when none is.
+  {
+    id: "toggle-artifacts",
+    name: "Show or hide the artifact column",
+    icon: PanelRightIcon,
+    scope: "artifact",
+    shortcut: "Mod+Shift+A",
+    readOnlySafe: true,
+  },
+  // Keyboard and palette only (CE23, KOBE-225).
+  {
+    id: "command-palette",
+    name: "Search actions, threads and files",
+    icon: CommandIcon,
+    scope: "app",
+    shortcut: "Mod+K",
+    readOnlySafe: true,
+  },
+  {
+    id: "keyboard-shortcuts",
+    name: "Keyboard shortcuts",
+    icon: KeyboardIcon,
+    scope: "app",
+    shortcut: "?",
+    readOnlySafe: true,
+  },
+  {
+    id: "previous-thread",
+    name: "Previous conversation",
+    icon: ChevronsLeftIcon,
+    scope: "app",
+    shortcut: "Mod+[",
+    readOnlySafe: true,
+  },
+  {
+    id: "next-thread",
+    name: "Next conversation",
+    icon: ChevronsRightIcon,
+    scope: "app",
+    shortcut: "Mod+]",
+    readOnlySafe: true,
+  },
+  {
+    id: "focus-composer",
+    name: "Go to the message box",
+    icon: TextCursorInputIcon,
+    scope: "app",
+    shortcut: "Mod+/",
+  },
 ] as const satisfies readonly Command[];
 
 export type CommandId = (typeof LIST)[number]["id"];

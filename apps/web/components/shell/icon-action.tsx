@@ -9,6 +9,7 @@ import {
   SHORTCUTS_BOUND,
   type CommandId,
 } from "../../lib/shell/commands";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -60,10 +61,6 @@ interface OwnProps {
 
 export type IconActionProps = OwnProps &
   Omit<ComponentProps<"button">, keyof OwnProps | "aria-label">;
-
-function onMac(): boolean {
-  return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-}
 
 function isInert(disabled: boolean | undefined, ariaDisabled: unknown): boolean {
   return disabled === true || ariaDisabled === true || ariaDisabled === "true";
@@ -177,7 +174,7 @@ export function IconAction({
         </TooltipTrigger>
         <TooltipContent side={side}>
           {name}
-          {keys && <kbd className={styles.keys}>{formatShortcut(keys, onMac())}</kbd>}
+          {keys && <kbd className={styles.keys}>{formatShortcut(keys, isMacPlatform())}</kbd>}
           {description && <span className={styles.description}>{description}</span>}
         </TooltipContent>
       </Tooltip>

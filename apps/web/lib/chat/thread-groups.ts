@@ -142,3 +142,26 @@ export function groupThreads(
     (a, b) => rank(a.kind) - rank(b.kind) || a.label.localeCompare(b.label),
   );
 }
+
+/** Groups that previous/next conversation (CE23, KOBE-225) step through: not Archived or Trash. */
+const STEPPED: ReadonlySet<GroupKind> = new Set(["archived", "trash"]);
+
+/** The rail's conversations in order, each once (a project-shared thread is listed twice). */
+export function threadOrder(groups: readonly ThreadGroup[]): readonly string[] {
+  const ids = groups.filter((g) => !STEPPED.has(g.kind)).flatMap((g) => g.threads.map((t) => t.id));
+  return [...new Set(ids)];
+}
+
+/**
+ * The conversation `step` (-1 previous, +1 next) from `current` in `order`, without wrapping;
+ * from a thread not in the order (a new draft) both go to the first. Null at either end.
+ */
+export function adjacentThread(
+  order: readonly string[],
+  current: string,
+  step: -1 | 1,
+): string | null {
+  const at = order.indexOf(current);
+  if (at < 0) return order[0] ?? null;
+  return order[at + step] ?? null;
+}
