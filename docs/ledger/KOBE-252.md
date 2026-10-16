@@ -19,15 +19,34 @@
   search), and `->>` / `lower()` are not. The plan had `Index Cond: team_id` only and
   `Filter: lower(...)`; on 1M rows the planner preferred a parallel seq scan (205 ms, below).
   uuid equality is leakproof, so a nullable `schedule_id uuid` column (ADD COLUMN without default:
-  catalog only) and `events_schedule_latest_idx (team_id, schedule_id, created_at DESC) WHERE kind
-IN ('schedule.fire','schedule.skip')` serve it. The three writers in `fire.ts` set the column;
+  catalog only) and `events_schedule_latest_idx` on (team_id, schedule_id, created_at DESC) for
+  the two kinds serve it. The three writers in `fire.ts` set the column;
   `ref.schedule_id` stays for readers. No backfill (it would rewrite every fire/skip row in the
   migration's transaction); a schedule mid-streak at upgrade records one more skip, nothing else.
-- **Migration 0098 is hand-written** (`-- kobe:hand-written`): both statements need IF NOT EXISTS
-  so a large site can add the column and build the index CONCURRENTLY before upgrading
-  (`docs/install.md`, Upgrading). db:rebase keeps it and renumbers it; note `migration-plan.mjs`
-  refuses a branch that mixes hand-written and generated migrations, so a later G1 ticket with a
-  generated migration has to land separately.
+- **Migration 0098 is hand-written** (`-- kobe:hand-written`): it needs IF NOT EXISTS (so a large
+  site can add the column and build the indexes CONCURRENTLY first, `docs/install.md`) and NOT
+  VALID. db:rebase keeps it and only renumbers it, and refuses when the branch also has a generated
+  migration or when main changed the schema after the fork (review M2). So group-1-fixes merges
+  before any other schema PR; the manual rebase is in `docs/parallel-work.md` ("Hand-written
+  migrations"). Teaching db:rebase to re-apply a hand-written snapshot delta is not small; not done.
+- **Review follow-ups (Opus DB review, 0 C/H):**
+  - M1: the owner sweep read every run of a team on every tick and replica. 0098 adds
+    `runs_schedule_live_idx` on runs (team_id, thread_id) WHERE trigger = 'schedule' AND status IN
+    (live), SQL-only and IF NOT EXISTS like the events index. The sweep now reads in small steps
+    (schedules; live scheduled runs through the index; their threads' owners by primary key; which
+    owners are inactive): as one join the planner hashed the team's 20k threads (15 ms with the
+    index), and scalar or LATERAL variants were slower still. `cancelScheduledRuns` states the
+    same predicate. Sweeping only teams with recent offboarding was not needed after that.
+  - L1: install.md and 0098 now say reads AND writes of `events` wait (ACCESS EXCLUSIVE from the
+    ALTERs, held to commit), with the pre-create SQL for both indexes first.
+  - L2 (rolling update): pods of the previous release write fires/skips without `schedule_id`
+    until replaced. Effect, bounded to the upgrade window: at most one extra skip row (an old
+    pod's skip is missed) or one missing skip row (an old pod's fire is missed, so an older skip
+    looks latest) per schedule. Fire dedupe stays on `events_schedule_fire_uniq` (keyed on `ref`),
+    so no duplicate fires.
+  - L3: added `events_schedule_id_ref` CHECK (schedule_id IS NULL OR schedule_id::text =
+    lower(ref->>'schedule_id')) NOT VALID: no scan, checks new rows only, every old row is NULL;
+    old pods writing NULL pass. SQL-only like 0034's NOT VALID checks.
 - **Query shape:** the kind list is the index's literal `IN (...)` (`sql.raw`), not drizzle's
   `inArray` (bound parameters), so the partial predicate is provable in generic plans too. The
   `due_at` tie-break stays; it is an Incremental Sort over the rows of one `created_at`.
@@ -81,6 +100,18 @@ IN ('schedule.fire','schedule.skip')` serve it. The three writers in `fire.ts` s
   | spec: `lower(ref->>...)` + expression index | Parallel Seq Scan (index unusable under RLS) | 205.4 ms |
   | after: `schedule_id = $2` + new index       | Index Scan, Index Cond team_id + schedule_id | 0.079 ms |
 
+- **M1** `packages/db/src/schedule-sweep-index.db.test.ts`: index definition; the sweep's runs
+  read as the app role (RLS on), with values and generic, scans only `runs_schedule_live_idx`.
+  EXPLAIN ANALYZE, app role, 1,002,000 runs in one team, 40 live scheduled (min of 5):
+
+  | sweep step                      | plan                                     | time     |
+  | ------------------------------- | ---------------------------------------- | -------- |
+  | live scheduled runs, no index   | Parallel Seq Scan, 1M rows filtered      | 49.2 ms  |
+  | live scheduled runs, with index | Index Only Scan `runs_schedule_live_idx` | 0.084 ms |
+  | their owners (40 ids)           | Index Scan `threads_team_id_id_pk`       | 0.32 ms  |
+
+- **L3** `schedule-latest-index.db.test.ts`: a disagreeing `schedule_id` is refused; the check is
+  NOT VALID.
 - **ac-2** `schedule-governance.db.test.ts` "a failed deactivation step is finished by the
   scheduler's sweep": a removal whose cancel throws leaves the run `running`; the next tick
   cancels it (audit `member_removed`, system), a further tick does nothing. A deactivation without

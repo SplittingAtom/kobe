@@ -1,4 +1,4 @@
-import { sql, withTeam, type KobeDb } from "@kobe/db";
+import { and, eq, inArray, or, schedules, sql, threads, withTeam, type KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { ScheduledCancelReason } from "../runs/cancel-scheduled.js";
 import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
@@ -33,21 +33,45 @@ const STEPS: Record<"deactivated" | "removed", [ScheduleStopCause, ScheduledCanc
   removed: ["member_removed", "member_removed"],
 };
 
-/** Owners in `teamId` with something left to stop and who are no longer active there. */
+/**
+ * Owners in `teamId` with something left to stop and who are no longer active there. Small
+ * indexed reads, in this order, because this runs every tick: the team's live or admin-paused
+ * schedules, its in-flight scheduled runs (`runs_schedule_live_idx`: the predicate below is the
+ * index's, literally), their threads' owners by primary key, then which of those owners are
+ * deactivated or gone from the team. A single join let the planner hash the team's threads.
+ */
 async function inactiveOwners(db: KobeDb, teamId: string): Promise<InactiveOwner[]> {
   return withTeam(db, teamId, async (tx) => {
+    const scheduleOwners = await tx
+      .selectDistinct({ userId: schedules.userId })
+      .from(schedules)
+      .where(
+        and(
+          eq(schedules.teamId, teamId),
+          or(eq(schedules.active, true), eq(schedules.pausedBy, "team_admin")),
+        ),
+      );
+    const live = await tx.execute<{ thread_id: string }>(sql`
+      SELECT DISTINCT thread_id FROM runs
+       WHERE team_id = ${teamId} AND trigger = 'schedule'
+         AND status IN ('queued', 'running', 'waiting_approval')`);
+    const threadIds = live.rows.map((r) => r.thread_id);
+    const runOwners =
+      threadIds.length === 0
+        ? []
+        : await tx
+            .selectDistinct({ userId: threads.ownerUserId })
+            .from(threads)
+            .where(and(eq(threads.teamId, teamId), inArray(threads.id, threadIds)));
+    const candidates = [
+      ...new Set([...scheduleOwners, ...runOwners].flatMap((o) => (o.userId ? [o.userId] : []))),
+    ];
+    if (candidates.length === 0) return [];
     const res = await tx.execute<{ user_id: string; deactivated: boolean }>(sql`
-      SELECT o.user_id, u.deactivated_at IS NOT NULL AS deactivated
-        FROM (SELECT s.user_id FROM schedules s
-               WHERE s.team_id = ${teamId} AND (s.active OR s.paused_by = 'team_admin')
-              UNION
-              SELECT t.owner_user_id FROM runs r
-                JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-               WHERE r.team_id = ${teamId} AND t.team_id = ${teamId} AND r.trigger = 'schedule'
-                 AND r.status IN ('queued', 'running', 'waiting_approval')
-                 AND t.owner_user_id IS NOT NULL) AS o (user_id)
-        LEFT JOIN users u ON u.id = o.user_id
-        LEFT JOIN team_members m ON m.team_id = ${teamId} AND m.user_id = o.user_id
+      SELECT c.id AS user_id, u.deactivated_at IS NOT NULL AS deactivated
+        FROM unnest(${`{${candidates.join(",")}}`}::uuid[]) AS c (id)
+        LEFT JOIN users u ON u.id = c.id
+        LEFT JOIN team_members m ON m.team_id = ${teamId} AND m.user_id = c.id
        WHERE u.deactivated_at IS NOT NULL OR m.user_id IS NULL`);
     return res.rows.map((r) => ({ userId: r.user_id, deactivated: r.deactivated }));
   });
