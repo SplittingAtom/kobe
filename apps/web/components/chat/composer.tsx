@@ -19,6 +19,7 @@ import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { ModelPicker } from "./model-picker";
+import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
 
 /**
@@ -92,7 +93,7 @@ export function Composer({
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
-    // An open trigger popover (the @ picker) takes Enter to pick, not to queue.
+    // An open trigger popover (the @ picker, the / menu) takes Enter to pick, not to queue.
     if (e.currentTarget.getAttribute("aria-expanded") === "true") return;
     if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -122,7 +123,7 @@ export function Composer({
     );
   }
 
-  // Trigger popovers (KOBE-223 `@` files; the `/` menu joins this root) share the input's keys.
+  // Trigger popovers (KOBE-223 `@` files, KOBE-224 `/` actions) share the input's keys.
   return (
     <ComposerPrimitive.TriggerPopoverRoot>
       <ComposerPrimitive.Root
@@ -141,6 +142,7 @@ export function Composer({
           className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
         >
           <MentionPicker draft={draft} input={input} />
+          <SlashMenu input={input} readOnly={state.summary?.readOnly === true} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <label htmlFor="kobe-composer" className="sr-only">
