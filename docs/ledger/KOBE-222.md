@@ -52,6 +52,24 @@
 - **Builder test threads** get no follow-ups (as no titles).
 - The 402 `budget_soft_limit` backstop is logged (`server call failed`, code only), never shown.
 
+## Review (coordinator, approve with should-fix) and fixes
+
+- **S1** the decision's reads run in a savepoint (`tx.transaction`) with try/catch: any error is
+  "no follow-ups", logged `follow-up decision failed; skipped` with its code; the run still
+  completes (db test with a check that runs `SELECT 1 / 0`).
+- **S2** parser drops lead-ins ending in `:`/`：`, code fences (with a language tag), inner
+  emphasis/code marks; tests with real-looking replies.
+- **S3** `PUT /v1/team/settings` writes onto `{}` when `teams.settings` is not an object; reads of
+  `[]`, `"x"`, `null`, `{"followups_enabled":"true"}` are off (db test).
+- **S4** no starters (nor generic suggestions) for a reader of a shared thread.
+- **S5** db tests: builder-test and Trash threads, team / default member / site lines at 80 %, the
+  402 logged as `server call skipped` (N3); web: chips cleared when another thread opens.
+- Nits done: N1 (branch switch clears chips), N2 (a failed send brings them back), N3, N4b
+  (announced), N5 (no chips before the summary), N6 (bare addresses / e-mails dropped), N10 (no
+  audit row for a no-op). Skipped: N4a (focus after a chip click), N4c (starter flash while the
+  agents load), N8, N11, N12, N13; N9: server calls also take the member's per-minute request
+  rate (a low `user_requests_per_minute` can delay the next prompt right after a run).
+
 ## Open questions
 
 - Gate1 deploy: the switch is off by default; the browser spec needs `KOBE_USER` to be a team
