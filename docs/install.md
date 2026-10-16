@@ -721,6 +721,54 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   As above, check `pg_index.indisvalid` for both indexes and `DROP INDEX CONCURRENTLY IF EXISTS`
   an invalid leftover before upgrading.
 
+- **Skill usage index (KOBE-297, migrations `*_skills_reach` and `*_runs_skill_uses_idx`).** The
+  first adds three columns (catalog-only), but its ACCESS EXCLUSIVE lock on `runs` is held until
+  the upgrade commits, so while the second builds `runs_skill_uses_idx` with a plain
+  `CREATE INDEX`, **reads and writes of `runs`** wait. The index can't be built beforehand (its
+  column is new in this release); the build is one sequential read of `runs` and the index starts
+  empty. On a large site, upgrade in a quiet window. A later re-run (or a failed build) can use:
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS runs_skill_uses_idx
+    ON runs (team_id, created_at) WHERE jsonb_array_length(skills_used) > 0;
+  ```
+
+  As above, check `pg_index.indisvalid` for `runs_skill_uses_idx` and `DROP INDEX CONCURRENTLY IF
+EXISTS` an invalid leftover.
+
+- **Archived threads index (KOBE-220, migrations `*_thread_project_moves` and
+  `*_thread_project_moves_checks`).** The first adds `threads.project_moves` (catalog-only), but
+  its ACCESS EXCLUSIVE lock on `threads` is held until the upgrade commits, so while the second
+  builds `threads_owner_archived_idx` with a plain `CREATE INDEX`, **reads and writes of
+  `threads`** wait (its CHECK is `NOT VALID`: no scan). The index's columns already exist, so on a
+  large site build it first, then upgrade (the migration skips an existing index):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_owner_archived_idx
+    ON threads (team_id, owner_user_id, archived_at DESC NULLS LAST, id DESC NULLS LAST)
+    WHERE archived_at IS NOT NULL AND deleted_at IS NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `threads_owner_archived_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
+
+- **Shared with me index (KOBE-221, migrations `*_thread_share_team` and
+  `*_thread_share_team_checks`).** The first adds `threads.shared_to_team` (catalog-only), but its
+  ACCESS EXCLUSIVE lock on `threads` is held until the upgrade commits, so while the second builds
+  `threads_team_shared_idx` with a plain `CREATE INDEX`, **reads and writes of `threads`** wait
+  (its CHECK is `NOT VALID`: no scan). The index can't be built beforehand (its column is new in
+  this release); the build is one sequential read of `threads` and the index starts empty. On a
+  large site, upgrade in a quiet window. A later re-run (or a failed build) can use:
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_team_shared_idx
+    ON threads (team_id, last_activity_at DESC, id DESC)
+    WHERE shared_to_team AND deleted_at IS NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `threads_team_shared_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,

@@ -41,6 +41,8 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
       archivedAt: now,
       titleLocked: true,
     });
+    // Shared with the whole team (KOBE-221): still confined to it.
+    await insertThread(tx, teamId, { sharedToTeam: true });
   },
   thread_entries: async (tx, teamId) => {
     const threadId = await insertThread(tx, teamId);

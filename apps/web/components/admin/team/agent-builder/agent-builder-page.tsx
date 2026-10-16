@@ -18,6 +18,7 @@ import {
   type FieldErrors,
   type FormState,
 } from "../../../../lib/admin/agent-builder/form-model";
+import { isSkillSlug } from "../../../../lib/admin/skills/reach";
 import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
 import { ResourceView, confirmed } from "../../parts";
@@ -48,9 +49,12 @@ const HOME: Readonly<Record<BuilderScope, { base: string; back: string; title: s
 export function AgentBuilderPage({
   agentId,
   scope = "team",
+  addSkill,
 }: {
   readonly agentId?: string;
   readonly scope?: BuilderScope;
+  /** A skill page's "Add to agent…" (KOBE-297): the draft opens with this skill added. */
+  readonly addSkill?: string | undefined;
 }) {
   const teamId = useTeamAccess().team.id;
   const home = HOME[scope];
@@ -60,7 +64,7 @@ export function AgentBuilderPage({
         <Link href={home.base}>{home.back}</Link>
       </p>
       {agentId ? (
-        <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} />
+        <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} addSkill={addSkill} />
       ) : (
         <Builder teamId={teamId} initial={null} scope={scope} />
       )}
@@ -72,17 +76,27 @@ function ExistingAgent({
   teamId,
   agentId,
   scope,
+  addSkill,
 }: {
   readonly teamId: string;
   readonly agentId: string;
   readonly scope: BuilderScope;
+  readonly addSkill?: string | undefined;
 }) {
   const { state } = useResource(() => getTeamAgent(teamId, agentId));
   return (
     <ResourceView state={state} label="agent">
-      {(data) => <Builder teamId={teamId} initial={data.agent} scope={scope} />}
+      {(data) => <Builder teamId={teamId} initial={data.agent} scope={scope} addSkill={addSkill} />}
     </ResourceView>
   );
+}
+
+/** The form with `slug` appended to its skills (unless listed already or not a skill name). */
+function withSkill(form: FormState, slug: string | undefined): FormState {
+  if (slug === undefined || !isSkillSlug(slug)) return form;
+  const listed = form.skills.split("\n").map((l) => l.trim());
+  if (listed.includes(slug)) return form;
+  return { ...form, skills: [...listed.filter((l) => l !== ""), slug].join("\n") };
 }
 
 interface Baseline {
@@ -99,15 +113,20 @@ function Builder({
   teamId,
   initial,
   scope,
+  addSkill,
 }: {
   readonly teamId: string;
   readonly initial: AgentDetail | null;
   readonly scope: BuilderScope;
+  readonly addSkill?: string | undefined;
 }) {
   const home = HOME[scope];
   const [agent, setAgent] = useState(initial);
   const [baseline, setBaseline] = useState(() => baselineOf(initial));
-  const [form, setForm] = useState(baseline.form);
+  const [form, setForm] = useState(() =>
+    initial?.canEdit && !initial.archivedAt ? withSkill(baseline.form, addSkill) : baseline.form,
+  );
+  const added = form.skills !== baseline.form.skills ? addSkill : undefined;
   const [prompt, setPrompt] = useState(baseline.prompt);
   const [slug, setSlug] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -221,6 +240,11 @@ function Builder({
             Fix {problemCount} {problemCount === 1 ? "problem" : "problems"} before saving.
           </p>
         </div>
+      )}
+      {added !== undefined && dirty && (
+        <p role="status" className={adminStyles.hint}>
+          Added {added} to this agent&apos;s skills. Save the draft and publish it to use the skill.
+        </p>
       )}
       <MutationStatus error={mutation.error} notice={published ?? mutation.notice} />
       <form

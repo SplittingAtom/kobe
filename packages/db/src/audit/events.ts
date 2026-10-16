@@ -624,13 +624,23 @@ export const AUDIT_EVENTS = {
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
-  /** `visibility` is the share scope after the change (private | project; `team` joins with KOBE-221). */
+  /**
+   * The owner changed the share scope (D23, CE20): `visibility` after the change, `from` before it
+   * (KOBE-221; absent on older rows). `projectId` is the thread's project, null for a thread outside
+   * any project (only the team scope needs none). Revoking is a change to `private`.
+   */
   "thread.sharing_changed": event("team", {
     threadId: id,
-    projectId: id,
+    projectId: id.nullable(),
     shared: z.boolean(),
-    visibility: z.enum(["private", "project"]),
+    visibility: z.enum(["private", "project", "team"]),
+    from: z.enum(["private", "project", "team"]).optional(),
   }),
+  /**
+   * The owner moved the thread to another project, or out of one (null: no project; CE19,
+   * KOBE-220). A thread shared to its old project is unshared too (`thread.sharing_changed`).
+   */
+  "thread.moved": event("team", { threadId: id, from: id.nullable(), to: id.nullable() }),
   /** A new private thread copied from `sourceThreadId`; `threadId` is the fork. */
   "thread.forked": event("team", {
     threadId: id,
@@ -1217,6 +1227,8 @@ export const AUDIT_EVENTS = {
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
+  /** A team admin turned a team skill's "Offer to all agents" on or off (KOBE-297). */
+  "skill.offer.changed": event("team", { skillId: id, slug, offerToAll: z.boolean() }),
   /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */

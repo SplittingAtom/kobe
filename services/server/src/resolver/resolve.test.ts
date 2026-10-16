@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveEffective, type ResolveInput } from "./resolve.js";
+import { RUN_SKILLS_MAX, resolveEffective, type ResolveInput } from "./resolve.js";
 
 const base: ResolveInput = {
   agent: {
@@ -218,6 +218,103 @@ describe("skills", () => {
     expect(r.ok && r.value.omissions).toEqual([
       { kind: "skill", name: "a", reason: "shadowed_by_agent" },
     ]);
+  });
+});
+
+describe("team skills offered to all agents (KOBE-297)", () => {
+  const names = (input: ResolveInput) => {
+    const r = resolveEffective(input);
+    return r.ok ? r.value.skills.map((s) => s.name) : [];
+  };
+
+  it("a non-exclusive agent gets every offered skill, after its own and the user's", () => {
+    const input = with_({
+      agent: { skills: [sk("named")] },
+      user: { skills: [sk("mine")] },
+      team: { offeredSkills: [sk("offered"), sk("also")] },
+    });
+    expect(names(input)).toEqual(["named", "mine", "offered", "also"]);
+    const r = resolveEffective(input);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("an exclusive agent gets none of them, without a notice", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: [sk("named")], exclusiveSkills: true },
+        team: { offeredSkills: [sk("offered")] },
+      }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["named"]);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("is deduplicated with the agent's named skills, built-ins and the user's skills", () => {
+    expect(
+      names(
+        with_({
+          agent: { skills: [sk("dup")], builtinSkills: ["pdf"] },
+          user: { skills: [sk("mine", "h-personal")] },
+          team: { offeredSkills: [sk("dup"), sk("pdf"), sk("mine"), sk("fresh"), sk("fresh")] },
+        }),
+      ),
+    ).toEqual(["dup", "mine", "fresh"]);
+  });
+
+  it("an offered skill fills in for a personal one the team switch hides", () => {
+    expect(
+      names(
+        with_({
+          user: { skills: [sk("same", "h-personal")] },
+          team: { personalSkillsDisabled: true, offeredSkills: [sk("same")] },
+        }),
+      ),
+    ).toEqual(["same"]);
+  });
+
+  it("caps the run at the run.start limit: named, then personal, then offered; the rest are skill_limit", () => {
+    const many = (prefix: string, n: number) =>
+      Array.from({ length: n }, (_, i) => sk(`${prefix}-${String(i).padStart(2, "0")}`));
+    const r = resolveEffective(
+      with_({
+        agent: { skills: many("named", 32) },
+        user: { skills: many("mine", 3) },
+        team: { offeredSkills: many("offered", 32) },
+      }),
+    );
+    expect(RUN_SKILLS_MAX).toBe(64);
+    const names = r.ok ? r.value.skills.map((s) => s.name) : [];
+    expect(names).toHaveLength(64);
+    expect(names.slice(0, 35)).toEqual([
+      ...many("named", 32).map((s) => s.name),
+      ...many("mine", 3).map((s) => s.name),
+    ]);
+    expect(names.at(-1)).toBe("offered-28");
+    expect(r.ok && r.value.omissions).toEqual(
+      ["offered-29", "offered-30", "offered-31"].map((name) => ({
+        kind: "skill",
+        name,
+        reason: "skill_limit",
+      })),
+    );
+  });
+
+  it("exactly at the limit, nothing is omitted", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: Array.from({ length: 32 }, (_, i) => sk(`n${i}`)) },
+        team: { offeredSkills: Array.from({ length: 32 }, (_, i) => sk(`o${i}`)) },
+      }),
+    );
+    expect(r.ok && r.value.skills).toHaveLength(64);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("a blocklisted offered skill is left out", () => {
+    const r = resolveEffective(
+      with_({ team: { offeredSkills: [sk("bad", "bad"), sk("ok")] }, blockedHashes: ["bad"] }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["ok"]);
   });
 });
 

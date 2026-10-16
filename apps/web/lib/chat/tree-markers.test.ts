@@ -10,7 +10,12 @@ import {
   toolResult,
   user,
 } from "./testing/entries";
-import { placeRunMarkers, type RunMarker } from "./markers";
+import {
+  placeProjectMarkers,
+  placeRunMarkers,
+  type ProjectMarker,
+  type RunMarker,
+} from "./markers";
 import { messageMeta, projectThread, type Projection } from "./tree";
 import { must } from "../testing/must";
 
@@ -223,5 +228,35 @@ describe("placeRunMarkers", () => {
       ["a1", ["r1", "r3"]],
       ["u2", ["r2"]],
     ]);
+  });
+});
+
+describe("placeProjectMarkers (CE19, KOBE-220)", () => {
+  const moved = (over: Partial<ProjectMarker>): ProjectMarker => ({
+    runId: "r1",
+    userEntryId: null,
+    parentEntryId: null,
+    fromProjectId: null,
+    fromProjectName: null,
+    toProjectId: "p1",
+    toProjectName: "Q4",
+    ...over,
+  });
+
+  it("puts a move above the prompt of the run that first used the new project", () => {
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("a")),
+      user("u2", "a1", "after the move"),
+      assistant("a2", "u2", text("b")),
+    ];
+    const p = projectThread(entries, "a2");
+    const node = must(p.nodeOfEntry.get("u2"));
+    const placed = placeProjectMarkers(
+      [moved({ runId: "r2", userEntryId: "u2" }), moved({ runId: "r3", userEntryId: "gone" })],
+      p,
+    );
+    expect([...placed.keys()]).toEqual([node]);
+    expect(placed.get(node)?.map((m) => m.runId)).toEqual(["r2"]);
   });
 });

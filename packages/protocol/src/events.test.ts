@@ -20,7 +20,7 @@ import {
 import { EVENT_PAYLOAD_EXAMPLES, EXAMPLE_IDS, createInMemoryEventLog } from "./testing/index.js";
 
 describe("Kobe Event Stream types", () => {
-  it("lists every event type from the spec (§6.2)", () => {
+  it("lists every event type from the spec (§6.2) and the epilogue (KOBE-234)", () => {
     expect(KOBE_EVENT_TYPES).toEqual([
       "run.queued",
       "run.started",
@@ -44,6 +44,8 @@ describe("Kobe Event Stream types", () => {
       "run.failed",
       "run.interrupted",
       "run.budget_stopped",
+      "thread.updated",
+      "thread.suggestions",
     ]);
   });
 

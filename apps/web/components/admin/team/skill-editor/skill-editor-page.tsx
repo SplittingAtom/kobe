@@ -32,6 +32,8 @@ import agentStyles from "../agent-builder/agent-builder.module.css";
 import { Field } from "../agent-builder/field";
 import { skillPaths, type SkillArea } from "./area";
 import { FilesEditor } from "./files-editor";
+import { SkillReachPanel } from "./skill-reach";
+import { TEAM_SKILL_RULE } from "../../../../lib/admin/skills/reach";
 import styles from "./skill-editor.module.css";
 
 const EMPTY: SkillDraft = { name: "", description: "", other: "", body: "", files: [] };
@@ -159,7 +161,7 @@ function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly are
           {!skill && area === "team" && (
             <Field
               label="Scope"
-              hint="Team skills are shared with the team; personal ones are only yours."
+              hint={`Team skills are shared with the team; personal ones are only yours. ${TEAM_SKILL_RULE}`}
             >
               {(control) => (
                 <select
@@ -249,6 +251,8 @@ function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly are
           )}
         </div>
       </form>
+      {/* Keyed by the version: a saved version may change the review state the panel shows. */}
+      {skill && <SkillReachPanel key={skill.latestVersion} skill={skill} />}
     </>
   );
 }

@@ -1,4 +1,12 @@
-import { exhaustedLine, type BudgetLine, type MemberBudgetState, type ModelPrice } from "@kobe/db";
+import {
+  exhaustedLine,
+  scaledDecimal,
+  thresholdReached,
+  type BudgetLine,
+  type MemberBudgetState,
+  type ModelPrice,
+} from "@kobe/db";
+import { SERVER_CALL_LIMITS, type ServerCallPurpose } from "@kobe/protocol";
 import { randomUUID } from "node:crypto";
 import { TtlCache } from "./cache.js";
 import { MemoryReservations } from "./reservations-memory.js";
@@ -31,6 +39,9 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   refused at once, alone or not, with a final 402 `budget_below_call`. A budget below one call's
  *   output allowance is fine: the rules above apply unchanged (a lone call is admitted and may
  *   overshoot, overlapping calls wait).
+ * - **Server calls** (KOBE-234): the same lines and reservations, plus the purpose's soft limit
+ *   (`SERVER_CALL_LIMITS[purpose].skip_at_percent`): follow-ups are refused with a final 402
+ *   `budget_soft_limit` once any line is at 80 %, so a server bug cannot spend past CE21's rule.
  * - More requests than the member's per-minute rate (the site's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the site-wide backstop.
@@ -56,6 +67,53 @@ function budgetName(line: BudgetLine): string {
 
 export function budgetMessage(line: BudgetLine): string {
   return `${budgetName(line)} is used up.`;
+}
+
+/** KOBE-234: a server call skipped at its purpose's soft limit (follow-ups at 80 %). */
+export function budgetSoftLimitMessage(line: BudgetLine, purpose: ServerCallPurpose): string {
+  const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
+  return `${budgetName(line)} is at ${pct} % or more: ${purpose === "title" ? "titles" : "follow-ups"} are skipped.`;
+}
+
+/** The purpose's soft limit in percent, when it is below the 100 % stop. */
+function softPercent(purpose: ServerCallPurpose | undefined): number | undefined {
+  if (purpose === undefined) return undefined;
+  const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
+  return pct < 100 ? pct : undefined;
+}
+
+const SCALE = 10n ** 12n;
+
+/** A count of 1e-12 units as plain decimal text (the inverse of `scaledDecimal`). */
+function decimalText(units: bigint): string {
+  const sign = units < 0n ? "-" : "";
+  const abs = units < 0n ? -units : units;
+  return `${sign}${abs / SCALE}.${(abs % SCALE).toString().padStart(12, "0")}`;
+}
+
+/**
+ * The line with its limit at `pct` %: what the reservation judges a soft-limited server call by,
+ * so the 80 % rule uses the database's own spend read and the other calls' reservations
+ * (KOBE-286), not this replica's cached spend (review L2).
+ */
+function atPercent(line: BudgetLine, pct: number): BudgetLine {
+  const { limitExact, ...rest } = line;
+  return {
+    ...rest,
+    limit: (line.limit * pct) / 100,
+    ...(limitExact === undefined
+      ? {}
+      : { limitExact: decimalText((scaledDecimal(limitExact) * BigInt(pct)) / 100n) }),
+  };
+}
+
+/** The first line at or past a server call's soft limit (none below 100 %: the stop applies). */
+function softLimitLine(
+  lines: readonly BudgetLine[],
+  purpose: ServerCallPurpose | undefined,
+): BudgetLine | undefined {
+  const pct = softPercent(purpose);
+  return pct === undefined ? undefined : lines.find((l) => thresholdReached(l, pct));
 }
 
 /** KOBE-259: the request's input alone exceeds the budget's limit; waiting cannot help. */
@@ -133,6 +191,15 @@ export class BudgetGate implements CallGate {
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
     }
+    const soft = softLimitLine(state.lines, call.purpose);
+    if (soft && call.purpose) {
+      return {
+        ok: false,
+        status: 402,
+        code: "budget_soft_limit",
+        message: budgetSoftLimitMessage(soft, call.purpose),
+      };
+    }
     const input = this.inputCostOf(call, prices);
     const below = state.lines.find((l) => input[l.unit] > l.limit);
     if (below) {
@@ -155,6 +222,10 @@ export class BudgetGate implements CallGate {
     }
     if (state.lines.length === 0) return { ok: true };
     const callId = call.callId ?? randomUUID();
+    // A soft-limited server call is judged against its percentage of every line, in the database
+    // (the cached check above only refuses early).
+    const pct = softPercent(call.purpose);
+    const judged = pct === undefined ? state.lines : state.lines.map((l) => atPercent(l, pct));
     let verdict;
     try {
       // One atomic check-and-hold against the reservations of every replica.
@@ -163,7 +234,7 @@ export class BudgetGate implements CallGate {
         userId: call.userId,
         callId,
         cost: this.costOf(call, prices),
-        lines: state.lines,
+        lines: judged,
       });
     } catch (err) {
       // Fail closed: without the reservations an overspend cannot be ruled out.
@@ -189,6 +260,14 @@ export class BudgetGate implements CallGate {
         };
       }
       const l = state.lines[verdict.line] ?? state.lines[0];
+      if (pct !== undefined && call.purpose && l) {
+        return {
+          ok: false,
+          status: 402,
+          code: "budget_soft_limit",
+          message: budgetSoftLimitMessage(l, call.purpose),
+        };
+      }
       return {
         ok: false,
         status: 402,

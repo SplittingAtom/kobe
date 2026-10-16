@@ -60,7 +60,8 @@ jobs:
   db:
     # Migrations from scratch + RLS catalog check + cross-team probe suite, on every push (spec D5).
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    # The server's test:db alone takes ~13 min on hosted runners (main 2026-10-16); KOBE-300 speeds it up.
+    timeout-minutes: 25
     services:
       postgres:
         # Through Google's Docker Hub mirror: anonymous Docker Hub pulls from shared runner IPs get

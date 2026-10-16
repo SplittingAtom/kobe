@@ -104,7 +104,8 @@ export function LimitsFields({
           onChange={(e) => choice.setReasoning(e.target.checked)}
         />{" "}
         Reasons before answering (a thinking model). Its reasoning counts against the output limit,
-        so it gets the higher default.
+        so it gets the higher default, and Kobe&apos;s short calls after a run (conversation titles)
+        ask it for low reasoning effort with more room.
       </label>
       <label>
         Output limit (tokens, optional)

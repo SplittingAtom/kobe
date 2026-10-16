@@ -1,5 +1,7 @@
 import {
+  EPILOGUE_EVENT_TYPES,
   EVENT_PAYLOAD_MAX_BYTES,
+  SERVER_CALL_EPILOGUE_MAX_MS,
   EventPayloadTooLargeError,
   isKobeEventType,
   isTerminalEventType,
@@ -38,7 +40,8 @@ export type AppendErrorCode =
   | "payload_too_large" // one payload over MAX_EVENT_PAYLOAD_BYTES
   | "terminal_not_last" // a terminal run.* event followed by more events in the batch
   | "run_not_found" // no such run in the transaction's team
-  | "run_finished"; // the run already has its terminal event
+  | "run_finished" // the run already has its terminal event
+  | "epilogue_refused"; // an epilogue event the run's run.completed did not leave room for
 
 export class AppendError extends Error {
   constructor(
@@ -129,13 +132,7 @@ async function appendValid(
        FOR NO KEY UPDATE OF r`);
   if (!locked.rows[0])
     throw new AppendError("run_not_found", `run ${runId} not found in the active team`);
-  const last = await tx.execute<{ type: string }>(sql`
-    SELECT e.type FROM runs r
-      JOIN run_events e ON e.team_id = r.team_id AND e.run_id = r.id AND e.seq = r.last_seq
-     WHERE r.team_id = ${teamId} AND r.id = ${runId}`);
-  const lastType = last.rows[0]?.type;
-  if (lastType !== undefined && isKobeEventType(lastType) && isTerminalEventType(lastType))
-    throw new AppendError("run_finished", `run ${runId} already ended with ${lastType}`);
+  await checkRunOpen(tx, teamId, runId, valid);
 
   // Rows get seq in VALUES order (row trigger); RETURNING order is not guaranteed, so sort.
   const rows = await tx
@@ -163,6 +160,65 @@ async function appendValid(
         payload: r.payload,
       }) as KobeEvent,
   );
+}
+
+/** Epilogue event types (KOBE-234) by the server call that writes them. */
+const EPILOGUE_TYPES: ReadonlyMap<KobeEventType, string> = new Map(
+  Object.entries(EPILOGUE_EVENT_TYPES).map(([purpose, type]) => [type as KobeEventType, purpose]),
+);
+/**
+ * At most one event per epilogue purpose follows a terminal event, so a run's terminal event, if
+ * any, is among its last `1 + purposes` events.
+ */
+const TAIL = 1 + EPILOGUE_TYPES.size;
+
+/**
+ * The run must still take these events (call with the run row locked). Before its terminal event
+ * anything but an epilogue event goes. After it, only the epilogue (KOBE-234,
+ * `@kobe/protocol` server-call.ts): the event types `run.completed.epilogue` announced, each at
+ * most once per run, within `SERVER_CALL_EPILOGUE_MAX_MS` of `run.completed` (database clock);
+ * everything else is `run_finished`, so an epilogue event at the end never reopens the run.
+ */
+async function checkRunOpen(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  valid: readonly ValidEvent[],
+): Promise<void> {
+  const tail = await tx.execute<{ type: string; payload: unknown; age_ms: number }>(sql`
+    SELECT e.type, e.payload,
+           (extract(epoch FROM clock_timestamp() - e.created_at) * 1000)::float8 AS age_ms
+      FROM runs r
+      JOIN run_events e ON e.team_id = r.team_id AND e.run_id = r.id AND e.seq > r.last_seq - ${TAIL}
+     WHERE r.team_id = ${teamId} AND r.id = ${runId}
+     ORDER BY e.seq`);
+  const at = tail.rows.findIndex((r) => isKobeEventType(r.type) && isTerminalEventType(r.type));
+  const terminal = at < 0 ? undefined : tail.rows[at];
+  const epilogue = valid.filter((e) => EPILOGUE_TYPES.has(e.type));
+  if (!terminal) {
+    if (epilogue.length > 0) {
+      throw new AppendError("epilogue_refused", `run ${runId} has not completed`);
+    }
+    return;
+  }
+  if (epilogue.length < valid.length) {
+    throw new AppendError("run_finished", `run ${runId} already ended with ${terminal.type}`);
+  }
+  const announced =
+    terminal.type === "run.completed"
+      ? ((terminal.payload as { epilogue?: readonly string[] }).epilogue ?? [])
+      : [];
+  const seen = new Set(tail.rows.slice(at + 1).map((r) => r.type));
+  for (const e of epilogue) {
+    const purpose = EPILOGUE_TYPES.get(e.type) ?? "";
+    if (!announced.includes(purpose) || seen.has(e.type)) {
+      throw new AppendError("epilogue_refused", `run ${runId}: ${e.type} is not expected`);
+    }
+    seen.add(e.type);
+  }
+  if (Number(terminal.age_ms) >= SERVER_CALL_EPILOGUE_MAX_MS) {
+    throw new AppendError("epilogue_refused", `run ${runId}: the epilogue window has closed`);
+  }
 }
 
 /** Appends in a transaction of its own (with a lock timeout); commits before returning. */

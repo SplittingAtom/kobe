@@ -58,14 +58,51 @@ export interface ApprovalMarker {
   readonly cause: ApprovalResolutionCause | null;
 }
 
+/** A skill the server saw a run use (KOBE-297): its SKILL.md was read by this tool call. */
+export interface SkillMarker {
+  readonly runId: string;
+  /** The run's prompt: tool call ids are only unique within a run. */
+  readonly userEntryId: string | null;
+  readonly toolCallId: string;
+  readonly name: string;
+  readonly source: "team" | "personal" | "builtin";
+}
+
+/**
+ * The thread moved to another project (CE19, KOBE-220), shown above the prompt of the first run
+ * that started after the move: from there the agent works with the new project's instructions.
+ * Id and name are null for no project; `*Hidden` marks a project the viewer can't open (its id
+ * is not sent): "another project". Absent `*Hidden` (an older answer) reads as false.
+ */
+export interface ProjectMarker {
+  readonly runId: string;
+  readonly userEntryId: string | null;
+  readonly parentEntryId: string | null;
+  readonly fromProjectId: string | null;
+  readonly fromProjectName: string | null;
+  readonly fromProjectHidden?: boolean | undefined;
+  readonly toProjectId: string | null;
+  readonly toProjectName: string | null;
+  readonly toProjectHidden?: boolean | undefined;
+}
+
 export interface ThreadMarkers {
   readonly runs: readonly RunMarker[];
+  /** Absent from servers before KOBE-220. */
+  readonly projects?: readonly ProjectMarker[] | undefined;
   readonly approvals: readonly ApprovalMarker[];
+  /** Absent from servers before KOBE-297. */
+  readonly skills?: readonly SkillMarker[] | undefined;
   /** Older markers were left out (the server returns the newest 500 of each). */
   readonly truncated?: boolean | undefined;
 }
 
-/** The key an approval's marker is found by: its run's prompt and the tool call. */
+/** The key a skill marker of the live run is found by before its prompt is in the tree. */
+export function runToolKey(runId: string, toolCallId: string): string {
+  return `${runId}\u0000${toolCallId}`;
+}
+
+/** The key an approval's (or a skill's) marker is found by: its run's prompt and the tool call. */
 export function approvalKey(promptEntryId: string | undefined | null, toolCallId: string): string {
   return `${promptEntryId ?? ""}\u0000${toolCallId}`;
 }
@@ -178,6 +215,23 @@ export function placeRunMarkers(
           : undefined;
     if (at === undefined) continue;
     placed.set(at, [...(placed.get(at) ?? []), run]);
+  }
+  return placed;
+}
+
+/**
+ * Where each project move shows, by message id: above the prompt of the run it marks. A run whose
+ * prompt is not in the loaded tree (never mirrored, another page) is left out.
+ */
+export function placeProjectMarkers(
+  moves: readonly ProjectMarker[],
+  projection: Projection,
+): ReadonlyMap<string, readonly ProjectMarker[]> {
+  const placed = new Map<string, ProjectMarker[]>();
+  for (const move of moves) {
+    const at = move.userEntryId === null ? undefined : projection.nodeOfEntry.get(move.userEntryId);
+    if (at === undefined) continue;
+    placed.set(at, [...(placed.get(at) ?? []), move]);
   }
   return placed;
 }

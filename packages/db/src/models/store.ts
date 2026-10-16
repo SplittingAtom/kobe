@@ -93,6 +93,11 @@ export interface GatewayPrincipal {
    * refuses anything else itself, so a disable holds even if a push to Bifrost failed.
    */
   readonly enabledModels: readonly string[];
+  /**
+   * Those of them the site catalog marks as reasoning (`model_catalog.reasoning`, KOBE-259): a
+   * server call to one may use the purpose's reasoning headroom (KOBE-219). Absent: none.
+   */
+  readonly reasoningModels?: readonly string[];
 }
 
 /** Everything the model-gateway shim checks for a verified token, in one team transaction. */
@@ -100,7 +105,8 @@ export async function loadGatewayPrincipal(
   db: KobeDb,
   teamId: string,
   userId: string,
-  sandboxId: string,
+  /** Undefined for a server call (KOBE-234): no sandbox and no eval; `sandbox` is `unrecorded`. */
+  sandboxId: string | undefined,
 ): Promise<GatewayPrincipal> {
   return withTeam(db, teamId, async (tx) => {
     const member = await tx
@@ -128,15 +134,27 @@ export async function loadGatewayPrincipal(
         providerId: modelProviders.id,
         kind: modelProviders.kind,
         model: modelCatalog.model,
+        reasoning: modelCatalog.reasoning,
       })
       .from(teamModels)
       .innerJoin(modelCatalog, eq(modelCatalog.alias, teamModels.alias))
       .innerJoin(modelProviders, eq(modelProviders.id, modelCatalog.providerId))
       .where(eq(teamModels.teamId, teamId));
-    const enabledModels = [
-      ...new Set(enabled.map((e) => `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`)),
-    ].sort();
+    const named = (e: (typeof enabled)[number]) =>
+      `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`;
+    const enabledModels = [...new Set(enabled.map(named))].sort();
     // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
+    if (sandboxId === undefined) {
+      // Several aliases may name one model: it reasons if any of them says so.
+      const reasoningModels = [...new Set(enabled.filter((e) => e.reasoning).map(named))].sort();
+      return {
+        member: member.length > 0,
+        sandbox: "unrecorded",
+        virtualKey: vk,
+        enabledModels,
+        reasoningModels,
+      };
+    }
     const [evalRun] = await tx
       .select({ status: orbitEvals.status, model: orbitEvals.model })
       .from(orbitEvals)
@@ -186,6 +204,47 @@ export async function isActiveRunLeasedTo(
           eq(sandboxRunLeases.runId, runId),
           eq(sandboxRunLeases.sandboxId, sandboxId),
           inArray(runs.status, [...ACTIVE_RUN_STATUSES]),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  });
+}
+
+/** What a server-call token claims about the run that triggered it (KOBE-234). */
+export interface ServerCallRunClaim {
+  readonly teamId: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly userId: string;
+}
+
+/**
+ * Whether a server call's claims match the record (KOBE-234 review L1): the run is a completed run
+ * of that thread, leased to that member (`sandbox_run_leases`, kept after the run ends), so a
+ * server bug cannot charge another member's budget for a thread's title or follow-ups. One read
+ * by primary keys, in the team's RLS context.
+ */
+export async function serverCallRunMatches(
+  db: KobeDb,
+  claim: ServerCallRunClaim,
+): Promise<boolean> {
+  return withTeam(db, claim.teamId, async (tx) => {
+    const rows = await tx
+      .select({ runId: runs.id })
+      .from(runs)
+      .innerJoin(
+        sandboxRunLeases,
+        and(eq(sandboxRunLeases.teamId, runs.teamId), eq(sandboxRunLeases.runId, runs.id)),
+      )
+      .where(
+        and(
+          eq(runs.teamId, claim.teamId),
+          eq(runs.id, claim.runId),
+          eq(runs.threadId, claim.threadId),
+          eq(runs.status, "completed"),
+          eq(sandboxRunLeases.userId, claim.userId),
+          eq(sandboxRunLeases.threadId, claim.threadId),
         ),
       )
       .limit(1);

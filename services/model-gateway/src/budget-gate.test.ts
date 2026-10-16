@@ -47,6 +47,86 @@ function gate(state: () => MemberBudgetState, now = { t: 0 }) {
   return { g, loads: () => loads };
 }
 
+describe("BudgetGate: server calls (KOBE-234)", () => {
+  const at = (spent: number): MemberBudgetState => ({
+    lines: [line({ limit: 1_000, spent })],
+    requestsPerMinute: 1_000,
+  });
+  const server = (user: string, purpose: "title" | "followups"): CallContext => ({
+    ...call(user),
+    sandboxId: undefined,
+    runId: randomUUID(),
+    purpose,
+  });
+
+  it("refuses follow-ups at 80 % of any budget line, never titles or sandbox calls", async () => {
+    let state = at(800);
+    const { g: inner } = gate(() => state);
+    // Each admitted call ends at once, so no reservation carries over to the next assertion.
+    const g = {
+      admit: async (c: CallContext) => {
+        const d = await inner.admit(c);
+        if (d.ok) d.release?.(false);
+        return d;
+      },
+      invalidateTeam: (t: string) => inner.invalidateTeam(t),
+    };
+    const user = randomUUID();
+    expect(await g.admit(server(user, "followups"))).toEqual({
+      ok: false,
+      status: 402,
+      code: "budget_soft_limit",
+      message: "Your team's monthly model budget is at 80 % or more: follow-ups are skipped.",
+    });
+    expect(await g.admit(server(user, "title"))).toMatchObject({ ok: true });
+    expect(await g.admit(call(user))).toMatchObject({ ok: true });
+    state = at(799);
+    g.invalidateTeam(teamId);
+    expect(await g.admit(server(user, "followups"))).toMatchObject({ ok: true });
+  });
+
+  it("judges follow-ups in the reservation at 80 % of each line, not on the cached spend (review L2)", async () => {
+    const seen: BudgetLine[][] = [];
+    const store: ReservationStore = {
+      reserve: async (r) => {
+        seen.push([...r.lines]);
+        // The database's own read: spend + reservations reach the (scaled) limit.
+        return { ok: false, verdict: "full", line: 0 };
+      },
+      extend: async () => undefined,
+      end: async () => undefined,
+    };
+    const g = new BudgetGate(
+      {
+        // Stale cache: 10 % spent.
+        load: async () => ({
+          lines: [line({ limit: 1_000, spent: 100, limitExact: "1000.5", spentExact: "100" })],
+          requestsPerMinute: 1_000,
+        }),
+        prices: async () => new Map([["openai/m", { input: 1_000_000, output: 1_000_000 }]]),
+      },
+      { ttlMs: 1_000, now: () => 0, reservations: store },
+    );
+    expect(await g.admit(server(randomUUID(), "followups"))).toMatchObject({
+      ok: false,
+      status: 402,
+      code: "budget_soft_limit",
+    });
+    expect(seen[0]?.[0]).toMatchObject({ limit: 800, limitExact: "800.400000000000" });
+    // Titles and sandbox calls are judged on the full limit.
+    await g.admit(server(randomUUID(), "title"));
+    expect(seen[1]?.[0]).toMatchObject({ limit: 1_000, limitExact: "1000.5" });
+  });
+
+  it("stops titles at 100 % like any call", async () => {
+    const { g } = gate(() => at(1_000));
+    expect(await g.admit(server(randomUUID(), "title"))).toMatchObject({
+      ok: false,
+      code: "budget_exhausted",
+    });
+  });
+});
+
 describe("BudgetGate (KOBE-42)", () => {
   it("admits calls under budget and refuses once any level is used up (402), widest first", async () => {
     // $1,000: above the call's $100 input (KOBE-259: a request larger than the budget is refused).

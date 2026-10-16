@@ -106,6 +106,13 @@ export const listThreadsQuerySchema = z.strictObject({
 });
 export type ListThreadsQuery = z.infer<typeof listThreadsQuerySchema>;
 
+/**
+ * `POST /v1/threads/{id}/move` (CE19, KOBE-220): the project to move the thread to, where the
+ * caller may start a thread; null = out of its project ("Your threads").
+ */
+export const moveThreadBodySchema = z.strictObject({ project_id: uuidSchema.nullable() });
+
+/** Trash, and the Pinned and Archived lists (CE19): newest first, keyset pages. */
 export const trashQuerySchema = z.strictObject({
   cursor: z.string().max(256).optional(),
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
@@ -141,8 +148,18 @@ export const threadSummarySchema = z.object({
   agent_id: wireUuidSchema.nullable(),
   agent_version: z.number().int().nullable(),
   shared_to_project: z.boolean(),
-  /** The share scope (D23): `private` or `project` (a `team` scope may follow, KOBE-221). */
+  /** The share scope (D23, CE20): `private`, `project` or `team` (KOBE-221). */
   visibility: threadVisibilitySchema,
+  /**
+   * Computed for the caller (KOBE-221): true for a thread someone else shared with them, which
+   * they may read and fork, nothing more. Absent where no viewer applies (a just-created thread).
+   */
+  read_only: z.boolean().optional(),
+  /**
+   * For a reader: the name of the member who shared it ("Shared by …"), null once they left the
+   * team. Always null for the caller's own threads; never an email address.
+   */
+  owner_name: z.string().nullable().optional(),
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
@@ -165,8 +182,35 @@ export const threadSummarySchema = z.object({
   ...threadOrganizationSchema.pick({ forked_from_thread_id: true, forked_at_entry_id: true }).shape,
   /** The source's title when the viewer may open it (null: untitled, not a fork, or no access). */
   forked_from_title: z.string().nullable(),
+  /**
+   * The owner's organization (CE19, KOBE-220): pinned (the Pinned group, by this time) or
+   * archived (out of the normal groups, still searchable, retention unchanged); never both.
+   */
+  ...threadOrganizationSchema.pick({ pinned_at: true, archived_at: true }).shape,
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
+
+/** Longest first message the hover card shows (KOBE-219); the rest is cut. */
+export const THREAD_CARD_MESSAGE_CHARS = 280;
+
+/** `GET /v1/threads/{id}/card` (CE18, KOBE-219): the rail's hover card. */
+export const threadCardSchema = z.object({
+  thread_id: wireUuidSchema,
+  /** The thread's first user message, whitespace collapsed, cut to 280 characters; null: none. */
+  first_message: z.string().max(THREAD_CARD_MESSAGE_CHARS).nullable(),
+  /** True when `first_message` was cut. */
+  first_message_truncated: z.boolean(),
+  /** The pinned agent; null for the site default agent. */
+  agent_id: wireUuidSchema.nullable(),
+  /** The pinned agent's name; null for the default agent or one no longer available. */
+  agent_name: z.string().nullable(),
+  last_activity_at: timestamp,
+  /** The member's messages and the agent's answers (tool-only turns not counted), all branches. */
+  message_count: z.number().int().min(0),
+  /** The count read only the first 1,000 message entries: the thread holds more ("1,000+"). */
+  message_count_capped: z.boolean(),
+});
+export type ThreadCard = z.infer<typeof threadCardSchema>;
 
 export const threadEntrySchema = z.object({
   entry_id: idSchema,
@@ -226,7 +270,7 @@ export const threadDetailSchema = threadSummarySchema.extend({
    */
   /** The pinned agent's name and effective status in this team (KOBE-122); null without one. */
   agent_name: z.string().nullable(),
-  /** True for a reader of a thread shared to their project: no messages, runs or changes (D23). */
+  /** True for a reader of a shared thread (project or team): no messages, runs or changes (D23). */
   read_only: z.boolean(),
   agent_status: z.enum(["active", "suspended", "archived"]).nullable(),
   agent_current_version: z.number().int().nullable(),

@@ -25,6 +25,22 @@ import { teams } from "./teams.js";
 // foreign-key checks and cascades (which bypass RLS) can never reach another team's rows. Other
 // areas reference a thread as (team_id, thread_id) → threads (team_id, id) for the same reason.
 
+/** One move of a thread between projects (CE19); null = no project. */
+export interface ThreadProjectMove {
+  readonly at: string;
+  readonly from: string | null;
+  readonly to: string | null;
+  /**
+   * How many of the thread's message runs had started when it moved: the marker goes on the next
+   * one. A count, not a time: a run's `started_at` is its transaction's start, which can precede
+   * a move it waited for on the thread lock.
+   */
+  readonly runs: number;
+}
+
+/** The moves a thread keeps (the newest); older ones lose their marker. */
+export const THREAD_PROJECT_MOVES_MAX = 20;
+
 export const threadStatus = pgEnum("thread_status", ["idle", "running", "interrupted"]);
 export type ThreadStatus = (typeof threadStatus.enumValues)[number];
 
@@ -73,6 +89,13 @@ export const threads = pgTable(
     leafEntryId: text(),
     status: threadStatus().notNull().default("idle"),
     sharedToProject: boolean().notNull().default(false),
+    /**
+     * Shared read-only with every member of the team (CE20, KOBE-221). At most one share scope:
+     * `threads_share_scope` (SQL-only, `0106_thread_share_team_checks.sql`) refuses it together
+     * with `shared_to_project`, and on a test thread. `threads/share.ts` in the server maps the two
+     * columns to the wire `visibility` (private | project | team).
+     */
+    sharedToTeam: boolean().notNull().default(false),
     deletedAt: timestamp({ withTimezone: true }),
     lastActivityAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -123,6 +146,13 @@ export const threads = pgTable(
      * (null source + entry = "forked from a thread that no longer exists").
      */
     forkedAtEntryId: text(),
+    /**
+     * The owner's moves of the thread between projects (CE19, KOBE-220), oldest first, at most
+     * {@link THREAD_PROJECT_MOVES_MAX}: `{ at, from, to }` (ISO time, project ids or null for no
+     * project). The chat marks each on the next run after it (`GET /v1/threads/{id}/markers`).
+     * Ids only, no foreign key: a deleted project leaves a move to "a project you can't open".
+     */
+    projectMoves: jsonb().$type<readonly ThreadProjectMove[]>().notNull().default([]),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -167,6 +197,13 @@ export const threads = pgTable(
     index("threads_owner_pinned_idx")
       .on(t.teamId, t.ownerUserId, t.pinnedAt.desc(), t.id.desc())
       .where(sql`${t.pinnedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    // The Archived group (CE19, KOBE-220): `threads_owner_archived_idx` on (team_id,
+    // owner_user_id, archived_at DESC NULLS LAST, id DESC NULLS LAST) WHERE archived_at IS NOT
+    // NULL AND deleted_at IS NULL. SQL-only (`0104_thread_project_moves_checks.sql`), IF NOT
+    // EXISTS so large sites can build it CONCURRENTLY first (docs/install.md, "Upgrading").
+    // Shared with me (CE20, KOBE-221): `threads_team_shared_idx` on (team_id, last_activity_at
+    // DESC, id DESC) WHERE shared_to_team AND deleted_at IS NULL, and `threads_share_scope`. Both
+    // SQL-only (`0106_thread_share_team_checks.sql`), like KOBE-220's.
     // A source's forks: the fork key's ON DELETE SET NULL looks them up on every purge.
     index("threads_forked_from_idx")
       .on(t.teamId, t.forkedFromThreadId)
@@ -191,6 +228,8 @@ export const threads = pgTable(
       sql`NOT ${t.isTest} OR (${t.projectId} IS NULL AND NOT ${t.sharedToProject})`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
+    // KOBE-220's `threads_project_moves_shape` (an array of at most THREAD_PROJECT_MOVES_MAX):
+    // SQL-only and NOT VALID (`0104_thread_project_moves_checks.sql`), like KOBE-234's checks.
     check("threads_fork_not_self", sql`${t.forkedFromThreadId} IS DISTINCT FROM ${t.id}`),
     check(
       "threads_forked_at_entry_id_length",

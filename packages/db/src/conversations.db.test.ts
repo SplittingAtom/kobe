@@ -399,6 +399,19 @@ describe("runs (ac-5)", () => {
   });
 });
 
+describe("threads: share scope (KOBE-221)", () => {
+  const share = (thread: string, set: Partial<typeof threads.$inferInsert>) =>
+    withTeam(app.db, teamA, (tx) => tx.update(threads).set(set).where(eq(threads.id, thread)));
+
+  it("allows one share scope at a time and never shares a test thread", async () => {
+    const thread = await newThread(teamA);
+    expect(await sqlState(share(thread, { sharedToTeam: true }))).toBeUndefined();
+    expect(await sqlState(share(thread, { sharedToProject: true }))).toBe("23514");
+    expect(await sqlState(share(thread, { sharedToTeam: false, isTest: true }))).toBeUndefined();
+    expect(await sqlState(share(thread, { sharedToTeam: true }))).toBe("23514");
+  });
+});
+
 describe("runs: queue and compaction", () => {
   function queued(threadId: string, queuePos: number): Promise<unknown> {
     return withTeam(app.db, teamA, (tx) =>

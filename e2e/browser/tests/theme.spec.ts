@@ -1,24 +1,9 @@
 import type { Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 import { type Chat, expect, test } from "./support/chat.js";
-import { type Paint, paintOf } from "./support/colours.js";
-
-type Theme = "light" | "dark";
+import { expectThemed, MIN_CONTRAST, type Paint, paintOf, type Theme } from "./support/colours.js";
 
 const THEME_COOKIE = "kobe-theme";
-/** Background luminance on either side of this reads as light or dark. */
-const LIGHT_ABOVE = 0.5;
-/** Text and background must stay this far apart in luminance to read. */
-const MIN_CONTRAST = 0.3;
-
-function expectThemed(name: string, paint: Paint, theme: Theme): void {
-  const where = `${name} in ${theme}: ${paint.background} / ${paint.text}`;
-  if (theme === "light") expect(paint.backgroundLuminance, where).toBeGreaterThan(LIGHT_ABOVE);
-  else expect(paint.backgroundLuminance, where).toBeLessThan(LIGHT_ABOVE);
-  expect(Math.abs(paint.backgroundLuminance - paint.textLuminance), where).toBeGreaterThan(
-    MIN_CONTRAST,
-  );
-}
 
 const themeToggle = (page: Page) =>
   page.getByRole("button", { name: "Dark theme", exact: true }).first();

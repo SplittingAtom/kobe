@@ -68,3 +68,17 @@ describe("export Markdown", () => {
     ).toContain("# Untitled conversation");
   });
 });
+
+describe("threadHeader title (KOBE-219 review L3)", () => {
+  it("escapes Markdown in the heading, so a title cannot become a link or markup", () => {
+    const header = threadHeader({
+      threadId: "t1",
+      title: "[click](javascript:alert(1)) *bold* <b>x</b>",
+      createdAt: "2026-10-16T00:00:00Z",
+      lastActivityAt: "2026-10-16T00:00:00Z",
+      inTrash: false,
+    });
+    const heading = header.split("\n")[0] ?? "";
+    expect(heading).toBe("# \\[click\\]\\(javascript:alert\\(1\\)\\) \\*bold\\* \\<b\\>x\\</b\\>");
+  });
+});

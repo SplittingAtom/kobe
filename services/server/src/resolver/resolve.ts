@@ -1,4 +1,4 @@
-import type { ApprovalMode } from "@kobe/protocol";
+import { SKILL_BUNDLES_MAX, type ApprovalMode } from "@kobe/protocol";
 import { agentModelNotEnabled } from "../runs/failure-codes.js";
 import { strictestApprovalMode } from "../policy/approval-floor.js";
 
@@ -15,6 +15,8 @@ export interface SkillRef {
   readonly name: string;
   /** Content hash of the skill bundle (the blocklist keys on it). */
   readonly hash: string;
+  /** Where it comes from (KOBE-297: recorded with the run); absent = not said. */
+  readonly source?: "team" | "personal";
 }
 
 export interface ResolveInput {
@@ -42,6 +44,13 @@ export interface ResolveInput {
     readonly connectors: readonly string[];
     /** Team-level switch (KOBE-80): when true, no user-enabled personal skill is used. */
     readonly personalSkillsDisabled: boolean;
+    /**
+     * Team skills set to "Offer to all agents" (KOBE-297), each at its newest approved version:
+     * added to every non-exclusive agent's run after its own and the user's skills, unless a skill
+     * of that name is already there. Exclusive agents and blocklisted hashes leave them out
+     * without a notice (the agent never named them).
+     */
+    readonly offeredSkills?: readonly SkillRef[];
   };
   readonly user: {
     /** The user's enabled personal skills. */
@@ -65,7 +74,8 @@ export type OmissionReason =
   | "not_team_enabled"
   | "not_user_connected"
   | "no_team_default"
-  | "not_approved";
+  | "not_approved"
+  | "skill_limit";
 
 export interface Omission {
   readonly kind: "skill" | "connector" | "model";
@@ -87,6 +97,13 @@ export interface ResolvedConfig {
 export type ResolveResult =
   | { readonly ok: true; readonly value: ResolvedConfig }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
+
+/**
+ * Most skills one run may carry (KOBE-297): `run.start` refuses more (`SKILL_BUNDLES_MAX`), which
+ * would fail the start. Named skills come first, then personal ones, then offered ones (sorted by
+ * name by the caller); the rest are omitted as `skill_limit`.
+ */
+export const RUN_SKILLS_MAX = SKILL_BUNDLES_MAX;
 
 function resolveSkills(input: ResolveInput): {
   skills: SkillRef[];
@@ -126,7 +143,16 @@ function resolveSkills(input: ResolveInput): {
         : "not_approved";
     omissions.push({ kind: "skill", name, reason });
   }
-  return { skills, omissions };
+  if (!input.agent.exclusiveSkills) {
+    const taken = new Set([...agentNames, ...skills.map((s) => s.name)]);
+    for (const s of input.team.offeredSkills ?? []) {
+      if (blocked.has(s.hash) || taken.has(s.name)) continue;
+      taken.add(s.name);
+      skills.push(s);
+    }
+  }
+  for (const s of skills.slice(RUN_SKILLS_MAX)) omit(s, "skill_limit");
+  return { skills: skills.slice(0, RUN_SKILLS_MAX), omissions };
 }
 
 /**

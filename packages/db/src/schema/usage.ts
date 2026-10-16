@@ -35,6 +35,16 @@ export type UsageRoute = (typeof USAGE_ROUTES)[number];
 export const USAGE_SOURCES = ["reported", "estimated"] as const;
 export type UsageSource = (typeof USAGE_SOURCES)[number];
 
+/**
+ * What made the call (KOBE-234, CE18/CE21): `run` for a sandbox's call during a run (every row
+ * before migration 0099), `title` / `followups` for the server's own post-run calls through the
+ * gateway (`@kobe/protocol` server-call.ts). Server calls have no sandbox; they carry the run whose
+ * completion triggered them (so thread and agent resolve as for run calls). Budgets count every
+ * kind; per-run views and the context gauge read `run` rows only.
+ */
+export const USAGE_KINDS = ["run", "title", "followups"] as const;
+export type UsageKind = (typeof USAGE_KINDS)[number];
+
 /** Longest gateway model id kept (`<gateway provider>/<model>`). */
 export const USAGE_MODEL_MAX_CHARS = 240;
 
@@ -53,8 +63,9 @@ export const runUsage = pgTable(
     userId: uuid()
       .notNull()
       .references(() => users.id),
-    /** The calling sandbox (session token `sub`). */
-    sandboxId: uuid().notNull(),
+    /** The calling sandbox (session token `sub`); null for a server call (`kind` not `run`). */
+    sandboxId: uuid(),
+    kind: text().$type<UsageKind>().notNull().default("run"),
     /** Attribution hints (see above): null when the call named no run. */
     runId: uuid(),
     threadId: uuid(),
@@ -109,6 +120,10 @@ export const runUsage = pgTable(
       "run_usage_timing",
       sql`${t.durationMs} >= 0 AND (${t.ttfbMs} IS NULL OR ${t.ttfbMs} >= 0)`,
     ),
+    // KOBE-234's `run_usage_kind` (kind IN USAGE_KINDS) and `run_usage_kind_shape` (a run call
+    // names its sandbox; a server call names none and always its triggering run) are added NOT
+    // VALID by the custom migration 0100, not declared here: drizzle cannot express NOT VALID, and
+    // a generated migration's hand edits would be lost when db:rebase regenerates it.
     check("run_usage_thread_needs_run", sql`${t.threadId} IS NULL OR ${t.runId} IS NOT NULL`),
   ],
 );

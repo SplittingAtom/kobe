@@ -502,6 +502,30 @@ describe("the nightly pass (D18)", () => {
     });
   });
 
+  it("purges archived and pinned threads by their activity like any other (CE19, KOBE-220)", async () => {
+    await setPeriod(team, "90d");
+    const archivedOld = await thread({ owner: ids.bob, activity: ago(100) });
+    const pinnedOld = await thread({ owner: ids.bob, activity: ago(100) });
+    const archivedRecent = await thread({ owner: ids.carol, activity: ago(10) });
+    // Archiving or pinning never counts as activity: the period runs from the last message.
+    await h.admin.query(
+      `UPDATE threads SET archived_at = now() WHERE team_id = $1 AND id = ANY($2::uuid[])`,
+      [team, [archivedOld, archivedRecent]],
+    );
+    await h.admin.query(`UPDATE threads SET pinned_at = now() WHERE team_id = $1 AND id = $2`, [
+      team,
+      pinnedOld,
+    ]);
+
+    const result = await pass();
+
+    expect(await threadIds()).toEqual([archivedRecent]);
+    expect(result.teams.find((t) => t.teamId === team)).toMatchObject({
+      retention: { threads: 2 },
+      failed: false,
+    });
+  });
+
   it("deletes only keys in the purged thread's own tree, never anything a crafted reference names", async () => {
     await setPeriod(team, "30d");
     const victim = await thread({ owner: ids.carol, blobKeys: [key("victim")] });

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  boolean,
   check,
   foreignKey,
   integer,
@@ -108,6 +109,12 @@ export const teamSkills = pgTable(
       .notNull()
       .references(() => users.id),
     ...skillColumns(),
+    /**
+     * "Offer to all agents" (KOBE-297): the resolver adds the newest approved version to every
+     * non-exclusive agent's runs in this team (blocklist respected, deduplicated with named and
+     * personal skills). Changed by team admins only.
+     */
+    offerToAll: boolean().notNull().default(false),
   },
   (t): PgTableExtraConfigValue[] => [
     // (team_id, id): other team tables reference a skill with team_id included (KOBE-29 rule).

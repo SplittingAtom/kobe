@@ -9,7 +9,7 @@ import { workspaceFrameUrl } from "../../lib/files/preview";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
 import { ChatApp } from "../chat/chat-app";
-import { browserSpaced, composer, crushedIconButtons } from "../chat/testing";
+import { browserSpaced, composer, crushedIconButtons, openRowMenu } from "../chat/testing";
 
 /** KOBE-268: workspace files open as tabs of the artifact column. */
 let fake: FakeKobe;
@@ -157,14 +157,11 @@ describe("opening files (ac-1)", () => {
     await user.click(within(section).getByRole("button", { name: "Open folder notes" }));
     await view(user, section, "todo.md");
     expect(tabNames()).toEqual(["todo.md*", "report.csv"]);
-    // KOBE-269: the rows' Download and Delete icons (and the tab's) keep their size: the
-    // standard 32 px target, Delete set apart from Download.
+    // KOBE-269: the rows' icons (since KOBE-292 one ⋯ menu button) and the tab's keep their
+    // size: the standard 32 px target.
     expect(crushedIconButtons()).toEqual([]);
-    const download = within(section).getByRole("button", { name: "Download todo.md" });
-    const del = within(section).getByRole("button", { name: "Delete todo.md" });
-    expect(download.className).toMatch(/\bsize-8\b/);
-    expect(del.className).toMatch(/\bsize-8\b/);
-    expect(del.className).toMatch(/\bms-2\b/);
+    const actions = within(section).getByRole("button", { name: "Actions for todo.md" });
+    expect(actions.className).toMatch(/\bsize-8\b/);
     // KOBE-269: the Files list sits flush, without the browser's list indent and margins.
     expect(browserSpaced(section)).toEqual([]);
 
@@ -172,7 +169,8 @@ describe("opening files (ac-1)", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     await user.click(within(panel).getByRole("button", { name: "Download todo.md" }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
-    await user.click(within(section).getByRole("button", { name: "Download todo.md" }));
+    const menu = await openRowMenu("Actions for todo.md");
+    await user.click(within(menu).getByRole("menuitem", { name: "Download" }));
     await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
   });
 });

@@ -1,8 +1,9 @@
 /**
  * assistant-ui `RemoteThreadListAdapter` over the Thread API (D16, KOBE-34). Trash is the list's
  * "archived" state: archive = move to Trash (`DELETE`, restorable for 30 days), unarchive =
- * restore; delete = "Delete forever" from Trash (KOBE-18, the owner only). Titles are the first line
- * of the first message, set when the thread is created; there is no model-generated title.
+ * restore; delete = "Delete forever" from Trash (KOBE-18, the owner only). A new thread is created
+ * untitled: the server titles it after its first answer (CE18, KOBE-219, `thread.updated`), and
+ * until then the rail shows the first line of its first message (kept in the session only).
  */
 import type { RemoteThreadListAdapter } from "@assistant-ui/react";
 import type { ApiError, ApiResult } from "../api/client";
@@ -24,11 +25,11 @@ export class ChatApiError extends Error {
 
 type RemoteThreadMetadata = Awaited<ReturnType<RemoteThreadListAdapter["fetch"]>>;
 
-export function metadataOf(thread: ThreadSummary): RemoteThreadMetadata {
+export function metadataOf(thread: ThreadSummary, provisional?: string): RemoteThreadMetadata {
   return {
     status: thread.deletedAt === null ? "regular" : "archived",
     remoteId: thread.threadId,
-    title: thread.title ?? undefined,
+    title: thread.title ?? provisional ?? undefined,
     lastMessageAt: new Date(thread.lastActivityAt),
     // The rail's groups read this (CE5): project, Scheduled, Shared with me; and the item's fork
     // provenance (CE16), as the server resolved it for the viewer.
@@ -55,16 +56,34 @@ export function createThreadListAdapter(
     throw new ChatApiError(res.error);
   };
 
+  const meta = (thread: ThreadSummary) =>
+    metadataOf(thread, session.provisionalTitle(thread.threadId));
+
   return {
     async list(params) {
       const cursor = params?.after;
       if (cursor !== undefined) {
         const page = await unwrap(api.listThreads(cursor));
-        return { threads: page.threads.map(metadataOf), nextCursor: page.nextCursor ?? undefined };
+        return { threads: page.threads.map(meta), nextCursor: page.nextCursor ?? undefined };
       }
-      const [page, trash] = await Promise.all([unwrap(api.listThreads()), unwrap(api.listTrash())]);
+      // CE19: the activity list leaves pinned and archived threads out; their own lists (first
+      // page, newest first) frame it, so no thread is listed twice when more pages load. The
+      // activity list is the member's own: others' shared threads come from their list (CE20).
+      const [pinned, page, shared, archived, trash] = await Promise.all([
+        unwrap(api.listPinned()),
+        unwrap(api.listThreads()),
+        unwrap(api.listShared()),
+        unwrap(api.listArchived()),
+        unwrap(api.listTrash()),
+      ]);
       return {
-        threads: [...page.threads, ...trash.threads].map(metadataOf),
+        threads: [
+          ...pinned.threads,
+          ...page.threads,
+          ...shared.threads,
+          ...archived.threads,
+          ...trash.threads,
+        ].map(meta),
         nextCursor: page.nextCursor ?? undefined,
       };
     },
@@ -91,9 +110,11 @@ export function createThreadListAdapter(
       const model = session.takeNextModel();
       const agent = session.takeNextAgent();
       const projectId = session.takeNextProject();
+      const provisional = session.takeNextTitle();
       const created = await unwrap(
         api.createThread(
-          session.takeNextTitle(),
+          // Untitled on purpose: the server titles it after the first answer (KOBE-219).
+          undefined,
           // A pinned agent's model wins (2026-10-04): the draft's choice is not sent.
           agent?.model != null ? null : model,
           test !== undefined
@@ -104,6 +125,7 @@ export function createThreadListAdapter(
           projectId,
         ),
       );
+      session.setProvisionalTitle(created.threadId, provisional);
       session.seed(created);
       return { remoteId: created.threadId, externalId: undefined };
     },
@@ -116,7 +138,7 @@ export function createThreadListAdapter(
       })) as unknown as GenerateTitle,
 
     async fetch(threadId) {
-      return metadataOf(await unwrap(api.threadSummary(threadId)));
+      return meta(await unwrap(api.threadSummary(threadId)));
     },
   };
 }

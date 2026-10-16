@@ -10,7 +10,8 @@ import { TtlCache } from "./cache.js";
  * once for concurrent callers, and dropped on `keys:<team>` hints.
  */
 export interface PrincipalStore {
-  load(teamId: string, userId: string, sandboxId: string): Promise<GatewayPrincipal>;
+  /** `sandboxId` undefined: a server call (KOBE-234), no sandbox to check. */
+  load(teamId: string, userId: string, sandboxId: string | undefined): Promise<GatewayPrincipal>;
   /** Asks the gateway sync for this member's virtual key (NOTIFY `ensure:<team>:<user>`). */
   requestKey(teamId: string, userId: string): Promise<void>;
 }
@@ -21,6 +22,8 @@ export type Resolution =
       readonly virtualKey: string;
       /** `<gateway provider>/<model>` ids the team enabled. */
       readonly enabledModels: ReadonlySet<string>;
+      /** Those the catalog marks as reasoning (server calls' headroom, KOBE-219). */
+      readonly reasoningModels: ReadonlySet<string>;
     }
   | {
       readonly ok: false;
@@ -59,9 +62,15 @@ export class PrincipalCache {
     });
   }
 
-  resolve(teamId: string, userId: string, sandboxId: string, fresh = false): Promise<Resolution> {
+  /** `sandboxId` undefined: a server call (KOBE-234); membership and key only, no sandbox. */
+  resolve(
+    teamId: string,
+    userId: string,
+    sandboxId: string | undefined,
+    fresh = false,
+  ): Promise<Resolution> {
     return this.cache.get(
-      `${teamId}:${userId}:${sandboxId}`,
+      `${teamId}:${userId}:${sandboxId ?? "server-call"}`,
       async () => {
         const first = await this.load(teamId, userId, sandboxId);
         return !first.ok && first.reason === "no_key"
@@ -72,23 +81,34 @@ export class PrincipalCache {
     );
   }
 
-  private async load(teamId: string, userId: string, sandboxId: string): Promise<Resolution> {
+  private async load(
+    teamId: string,
+    userId: string,
+    sandboxId: string | undefined,
+  ): Promise<Resolution> {
     const p = await this.store.load(teamId, userId, sandboxId);
     if (!p.member) return { ok: false, reason: "not_member" };
-    if (p.sandbox === "revoked") return { ok: false, reason: "sandbox_revoked" };
+    if (sandboxId !== undefined && p.sandbox === "revoked") {
+      return { ok: false, reason: "sandbox_revoked" };
+    }
     if (!p.virtualKey) return { ok: false, reason: "no_key" };
     try {
       return {
         ok: true,
         virtualKey: this.box.open(p.virtualKey.valueEnc, virtualKeyContext(teamId, userId)),
         enabledModels: new Set(p.enabledModels),
+        reasoningModels: new Set(p.reasoningModels ?? []),
       };
     } catch {
       return { ok: false, reason: "key_unreadable" };
     }
   }
 
-  private async waitForKey(teamId: string, userId: string, sandboxId: string): Promise<Resolution> {
+  private async waitForKey(
+    teamId: string,
+    userId: string,
+    sandboxId: string | undefined,
+  ): Promise<Resolution> {
     const member = `${teamId}:${userId}`;
     const requestedAt = this.requested.get(member);
     if (

@@ -9,6 +9,7 @@ import {
   type ReviewFilter,
   type SkillReview,
 } from "../../../lib/admin/api/team/skill-review";
+import { TEAM_SKILL_RULE } from "../../../lib/admin/skills/reach";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
@@ -30,7 +31,8 @@ export function SkillReviewPage() {
         Every new version of a team skill is scanned when it is uploaded and stays unusable until a
         team admin approves it. The scan is a heuristic that flags network calls, pipes into a
         shell, package installs, obfuscation and secret-shaped strings: read the findings, and the
-        skill, before approving. Rejecting an approved version takes it out of use again.
+        skill, before approving. Rejecting an approved version takes it out of use again.{" "}
+        {TEAM_SKILL_RULE}
       </p>
       <PersonalSkillsSwitch />
       <ReviewQueue />

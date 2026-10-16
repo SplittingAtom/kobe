@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { logger as rootLogger } from "../logger.js";
-import { decodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
+import { decodeAccessHint, decodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
 
 /** What a stream hears from the hub. Every call means "re-read Postgres"; none carries content. */
 export interface HubSubscriber {
@@ -9,6 +9,8 @@ export interface HubSubscriber {
   hint(seq: number): void;
   /** Notifications may have been missed (listener (re)connected or down): re-read now. */
   resync(): void;
+  /** Who may watch this run changed (KOBE-221): recheck the viewer now. */
+  revalidate?(): void;
   /** The hub is shutting down: end the stream so the client reconnects to another replica. */
   close(): void;
 }
@@ -89,7 +91,13 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     for (const runId of byRun.keys()) {
       const fire = () => {
         const current = byRun.get(runId);
-        if (current) for (const s of [...current]) s.resync();
+        if (current) {
+          for (const s of [...current]) {
+            s.resync();
+            // Access hints may have been missed too (KOBE-221): recheck the viewers.
+            s.revalidate?.();
+          }
+        }
       };
       if (windowMs <= 0) fire();
       else setTimeout(fire, Math.random() * windowMs).unref();
@@ -101,6 +109,12 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   const dispatch = (payload: string | undefined) => {
     if (payload?.startsWith(PROBE_PREFIX)) {
       if (probe && payload === PROBE_PREFIX + probe.nonce) probe.resolve();
+      return;
+    }
+    const access = decodeAccessHint(payload);
+    if (access !== undefined) {
+      const watchers = byRun.get(access);
+      if (watchers) for (const s of [...watchers]) s.revalidate?.();
       return;
     }
     const hint = decodeHint(payload);

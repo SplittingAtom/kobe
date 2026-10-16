@@ -1,4 +1,4 @@
-import type { PiEventFrame, PiGetEntriesData } from "@kobe/protocol";
+import type { PiEventFrame, PiGetEntriesData, ServerCallPurpose } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import {
   appendRunEventsInTx,
@@ -11,6 +11,7 @@ import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
+import { recordSkillUsesInTx } from "../skills/usage.js";
 import type { RunTranslator } from "./translate.js";
 
 /** What the ingest needs from its connection. */
@@ -48,6 +49,8 @@ export interface RunIngestOptions {
   readonly createTranslator: () => RunTranslator;
   readonly host: IngestHost;
   readonly tuning: WireTuning;
+  /** Server calls `run.completed` may announce (KOBE-234/219); default none. */
+  readonly serverCalls?: readonly ServerCallPurpose[];
 }
 
 const SETTLE_SYNC_ATTEMPTS = 3;
@@ -346,6 +349,8 @@ export class RunIngest {
         for (let i = 0; i < all.length; i += MAX_APPEND_BATCH) {
           await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
         }
+        // KOBE-297: a successful read of one of the run's SKILL.md files is a skill use.
+        await recordSkillUsesInTx(tx, teamId, runId, events);
         if (settled) {
           // The last model call failed (KOBE-41) or was cut off (KOBE-258), or the run's entries
           // were not saved: the run fails with the server's own message.
@@ -353,7 +358,8 @@ export class RunIngest {
             end === undefined
               ? ({ status: "completed" } as const)
               : ({ status: "failed", error: failureInfo(end, "model_error") } as const);
-          return (await endRunInTx(tx, teamId, runId, outcome)).ended;
+          const calls = this.#o.serverCalls ?? [];
+          return (await endRunInTx(tx, teamId, runId, outcome, undefined, undefined, calls)).ended;
         }
         return false;
       });

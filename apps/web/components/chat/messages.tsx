@@ -28,6 +28,7 @@ import { ForkAction } from "./fork-dialog";
 import { RegenerateWith } from "./regenerate-with";
 import { Disclosure, useDisclosure } from "./detail";
 import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
+import { UsedSkills } from "./skill-badge";
 import { Reasoning } from "./reasoning";
 import { FullOutputStatus, Output, useFullOutput } from "./tool-output";
 import { ToolCallCard } from "./tool-call";
@@ -211,6 +212,7 @@ export function AssistantMessage() {
       <MessageMarkers place="before" className="mb-2" />
       <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+        <UsedSkills />
         {running && (
           <span className="text-muted-foreground animate-pulse text-sm motion-reduce:animate-none">
             Working…

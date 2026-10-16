@@ -46,6 +46,7 @@ import {
 import type { RunAgentResolver } from "./runs/seams.js";
 import { createOffboarding, type Offboarding } from "./offboarding/index.js";
 import { stopUserSchedules } from "./schedules/offboard.js";
+import { endUserShares } from "./threads/share-scope.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -64,6 +65,8 @@ import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
+import { createServerCallClient } from "./models/gateway-client.js";
+import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import type { UploadSettings } from "./uploads/settings.js";
 
 export interface ServerDepsOptions {
@@ -135,6 +138,16 @@ export interface ServerDepsOptions {
   readonly uploads?: UploadSettings;
   /** Limits of models without their own (KOBE-259, chart values); unset: `MODEL_TOKEN_DEFAULTS`. */
   readonly modelTokenDefaults?: ModelTokenDefaults;
+  /**
+   * The server's own model calls (KOBE-234/219: auto-titles) through the model gateway: its
+   * in-cluster URL (`KOBE_MODEL_GATEWAY_URL`) and the server-call token key (from the gateway
+   * session key). Unset: no run announces an epilogue and nothing is called.
+   */
+  readonly serverCalls?: {
+    readonly gatewayUrl: string;
+    readonly key: Uint8Array;
+    readonly fetch?: typeof fetch;
+  };
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -301,12 +314,28 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   };
   const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
+  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
+  // Titles after a completed run (KOBE-219), off the run's path; never a run failure.
+  const serverCalls = options.serverCalls
+    ? createServerCalls({
+        db: database.db,
+        client: createServerCallClient({
+          url: options.serverCalls.gatewayUrl,
+          key: options.serverCalls.key,
+          ...(options.serverCalls.fetch ? { fetch: options.serverCalls.fetch } : {}),
+        }),
+        agents: runAgents,
+        background,
+        log: logger.child({ component: "server-calls" }),
+      })
+    : NO_SERVER_CALLS;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
   const projectMounts = createProjectMounts(database.db, logger);
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,
     ...options.sandboxWire,
+    serverCalls: serverCalls.purposes,
     approvals: options.sandboxWire?.approvals ?? approvals.broker,
     approvalVerifier: options.sandboxWire?.approvalVerifier ?? approvals.verifier,
     background,
@@ -319,6 +348,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       createWebSearchService({ db: database.db, envelope: options.envelope }),
     hooks: {
       async onRunEnded(event) {
+        if (event.status === "completed") serverCalls.afterRunCompleted(event);
         try {
           await extraHooks?.onRunEnded?.(event);
         } finally {
@@ -329,7 +359,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
-  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
   const modelTokenDefaults = options.modelTokenDefaults ?? MODEL_TOKEN_DEFAULTS;
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
@@ -375,6 +404,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   lifecycle.on("deactivated", {
     name: "schedules",
     run: (userId) => stopUserSchedules(database.db, runs, userId),
+  });
+  // Their shared threads go private in every team (KOBE-221); reactivation does not share again.
+  lifecycle.on("deactivated", {
+    name: "thread-shares",
+    run: (userId) => endUserShares(database.db, userId),
   });
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {

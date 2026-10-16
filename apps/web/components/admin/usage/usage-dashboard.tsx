@@ -2,7 +2,12 @@
 
 import { useState, type ReactNode } from "react";
 import type { ApiResult } from "../../../lib/api/client";
-import type { SeriesPoint, UsageReport, UsageTotals } from "../../../lib/admin/api/usage";
+import type {
+  KindUsage,
+  SeriesPoint,
+  UsageReport,
+  UsageTotals,
+} from "../../../lib/admin/api/usage";
 import {
   USAGE_RANGES,
   fillSeries,
@@ -111,6 +116,13 @@ export function Breakdown<T extends UsageTotals>({
     </div>
   );
 }
+
+/** `run_usage.kind` (KOBE-234): who made the calls. */
+const KIND_LABELS: Readonly<Record<KindUsage["kind"], string>> = {
+  run: "Runs",
+  title: "Titles",
+  followups: "Follow-ups",
+};
 
 function agentName(a: UsageReport["byAgent"][number]): string {
   if (!a.agentId) return "Default agent / no agent";
@@ -223,6 +235,14 @@ function Report({
               rowKey={(r) => `${r.scope ?? ""}:${r.agentId ?? ""}`}
               name={{ label: "Agent", render: agentName }}
             />
+            {report.byKind && report.byKind.length > 0 && (
+              <Breakdown
+                caption="By kind"
+                rows={report.byKind}
+                rowKey={(r) => r.kind}
+                name={{ label: "Kind", render: (r) => KIND_LABELS[r.kind] ?? r.kind }}
+              />
+            )}
           </>
         );
       }}

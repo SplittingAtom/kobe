@@ -34,10 +34,15 @@ interface FakeThread {
   agent_status?: "active" | "suspended" | "archived" | null;
   /** The thread's project and sharing (KOBE-163); `read_only` = shared to you by someone else. */
   project_id?: string | null;
-  visibility?: "private" | "project";
+  visibility?: "private" | "project" | "team";
   read_only?: boolean;
+  /** For a reader: who shared it (KOBE-221); null once they left the team. */
+  owner_name?: string | null;
   /** Set on a thread a schedule started (KOBE-173); absent = a normal thread. */
   schedule_id?: string | null;
+  /** The owner's organization (CE19, KOBE-220); absent = neither. */
+  pinned_at?: string | null;
+  archived_at?: string | null;
   /** Fork provenance (KOBE-216): the source only when the viewer may open it. */
   forked_from_thread_id?: string | null;
   forked_from_title?: string | null;
@@ -60,6 +65,8 @@ export interface FakeRunnableAgent {
   readonly id: string;
   readonly scope: "team" | "personal" | "gallery";
   readonly galleryKey?: string;
+  /** Default: derived from the name. */
+  readonly slug?: string;
   readonly name: string;
   readonly description?: string;
   readonly model: string | null;
@@ -101,6 +108,13 @@ export interface RecordedRequest {
 }
 
 const NOW = "2026-10-02T10:00:00.000Z";
+const ORGANIZE: ReadonlySet<string | undefined> = new Set([
+  "pin",
+  "unpin",
+  "archive",
+  "unarchive",
+  "move",
+]);
 const ACTIVE = new Set(["running", "waiting_approval"]);
 const ENDED = new Set(["completed", "failed", "interrupted", "cancelled", "budget_stopped"]);
 
@@ -325,7 +339,10 @@ export class FakeKobe {
   }
 
   /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
-  readonly threadMarkers = new Map<string, { runs: Json[]; approvals: Json[] }>();
+  readonly threadMarkers = new Map<
+    string,
+    { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[] }
+  >();
 
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
@@ -484,13 +501,23 @@ export class FakeKobe {
       ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
-    complete: (runId: string) => {
+    /** `epilogue`: the server will title the thread after the run (KOBE-219). */
+    complete: (runId: string, options: { readonly epilogue?: readonly "title"[] } = {}) => {
       const run = this.run(runId);
       // Like the server: the leaf moves in the same transaction as the terminal event.
       this.#thread(run.thread_id).leaf_entry_id =
         run.tip ?? this.#thread(run.thread_id).leaf_entry_id;
-      this.#end(run, "completed", "run.completed", { leaf_entry_id: run.tip });
+      this.#end(run, "completed", "run.completed", {
+        leaf_entry_id: run.tip,
+        ...(options.epilogue ? { epilogue: [...options.epilogue] } : {}),
+      });
       this.#advance(run.thread_id);
+    },
+    /** The server's title call answered (KOBE-219): saved first, then `thread.updated`. */
+    retitle: (runId: string, title: string) => {
+      const run = this.run(runId);
+      this.#thread(run.thread_id).title = title;
+      this.emit(runId, "thread.updated", { thread_id: run.thread_id, title });
     },
     fail: (runId: string, code: string, message: string) => {
       this.#end(this.run(runId), "failed", "run.failed", { error: { code, message } });
@@ -575,6 +602,72 @@ export class FakeKobe {
     };
   }
 
+  /** `GET /v1/projects` (the caller's live projects): a move may target these only (CE19). */
+  readonly projects: Json[] = [];
+
+  addProject(name: string): string {
+    const id = uuid(10, this.projects.length + 1);
+    this.projects.push({
+      id,
+      team_id: this.teamId,
+      slug: name.toLowerCase(),
+      name,
+      description: "",
+      instructions: "",
+      default_agent_id: null,
+      members_mode: "team",
+      my_role: "member",
+      file_count: 0,
+      created_by: uuid(3, 1),
+      created_at: NOW,
+      updated_at: NOW,
+      archived_at: null,
+    });
+    return id;
+  }
+  /** Answers the next organize call with this refusal instead (once). */
+  refuseOrganize: {
+    readonly status: number;
+    readonly code: string;
+    readonly message: string;
+  } | null = null;
+  #organizeN = 0;
+
+  /** Pin, unpin, archive, unarchive and move (CE19, KOBE-220), as the server rules them. */
+  #organize(thread: FakeThread, action: string, body: Json | undefined): Response {
+    const refusal = this.refuseOrganize;
+    if (refusal) {
+      this.refuseOrganize = null;
+      return error(refusal.status, refusal.code, refusal.message);
+    }
+    if (thread.read_only)
+      return error(403, "read_only", "This thread is shared with you read-only.");
+    if (thread.deleted_at !== null) return error(409, "thread_in_trash", "Restore it first.");
+    this.#organizeN += 1;
+    const at = `2026-10-03T10:${String(this.#organizeN).padStart(2, "0")}:00.000Z`;
+    if (action === "pin") {
+      if (thread.archived_at) return error(409, "thread_archived", "Unarchive it first.");
+      thread.pinned_at ??= at;
+    } else if (action === "unpin") thread.pinned_at = null;
+    else if (action === "archive") Object.assign(thread, { archived_at: at, pinned_at: null });
+    else if (action === "unarchive") thread.archived_at = null;
+    else {
+      const target = (body?.project_id as string | null | undefined) ?? null;
+      if (target !== null && !this.projects.some((p) => p.id === target)) {
+        return error(404, "project_not_found", "No project with that id is available to you.");
+      }
+      if (this.activeRun(thread.thread_id) || this.#queued(thread.thread_id).length > 0) {
+        return error(409, "thread_busy", "The thread is busy.");
+      }
+      // A project share ends with the move; a team share stays (KOBE-221).
+      Object.assign(thread, {
+        project_id: target,
+        visibility: thread.visibility === "team" ? "team" : "private",
+      });
+    }
+    return json(200, this.#summary(thread));
+  }
+
   #summary(thread: FakeThread): Json {
     const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
     return {
@@ -582,8 +675,11 @@ export class FakeKobe {
       owner_user_id: uuid(3, 1),
       project_id: thread.project_id ?? null,
       schedule_id: thread.schedule_id ?? null,
+      pinned_at: thread.pinned_at ?? null,
+      archived_at: thread.archived_at ?? null,
       visibility: thread.visibility ?? "private",
       ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
+      owner_name: thread.read_only === true ? (thread.owner_name ?? null) : null,
       agent_id: thread.agent_id ?? null,
       agent_version: null,
       is_test: thread.is_test ?? false,
@@ -720,6 +816,7 @@ export class FakeKobe {
       url.pathname.startsWith("/v1/runs") ||
       url.pathname.startsWith("/v1/approvals") ||
       url.pathname === "/v1/team/retention" ||
+      url.pathname === "/v1/projects" ||
       url.pathname.startsWith("/v1/egress/requests");
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
@@ -830,6 +927,9 @@ export class FakeKobe {
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
     const [, area, id, action, sub] = parts;
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
+    if (area === "projects" && id === undefined && method === "GET") {
+      return json(200, { projects: this.projects });
+    }
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
     if (area === "egress" && id === "requests") return this.#egressRoute(method, url, body);
@@ -921,6 +1021,10 @@ export class FakeKobe {
       const q = url.searchParams.get("q");
       const list = [...this.threads.values()]
         .filter((t) => t.deleted_at === null && t.is_test !== true)
+        // The activity list leaves out pinned and archived threads; search finds them (CE19).
+        .filter((t) => q !== null || (!t.pinned_at && !t.archived_at))
+        // ... and others' shared threads, which have their own list (CE20, KOBE-221).
+        .filter((t) => q !== null || t.read_only !== true)
         .filter((t) => q === null || (t.title ?? "").toLowerCase().includes(q.toLowerCase()))
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       const threads = list.map((t) =>
@@ -934,6 +1038,19 @@ export class FakeKobe {
             },
       );
       return json(200, { threads, next_cursor: null });
+    }
+    if ((id === "pinned" || id === "archived") && method === "GET") {
+      const key = id === "pinned" ? "pinned_at" : "archived_at";
+      const list = [...this.threads.values()]
+        .filter((t) => t.deleted_at === null && t.is_test !== true && t[key])
+        .sort((a, b) => String(b[key]).localeCompare(String(a[key])));
+      return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
+    }
+    if (id === "shared" && method === "GET") {
+      const list = [...this.threads.values()]
+        .filter((t) => t.deleted_at === null && t.read_only === true)
+        .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
+      return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
     }
     if (id === "trash" && method === "GET") {
       const trash = [...this.threads.values()].filter((t) => t.deleted_at !== null);
@@ -988,12 +1105,16 @@ export class FakeKobe {
     if (action === "share" && method === "POST") {
       if (thread.read_only)
         return error(403, "read_only", "This thread is shared with you read-only.");
-      if (!thread.project_id)
+      const visibility = body?.visibility;
+      if (visibility !== "private" && visibility !== "project" && visibility !== "team")
+        return error(400, "invalid_request", "Give visibility: private, project or team.");
+      if (visibility === "project" && !thread.project_id)
         return error(409, "not_in_project", "Only threads in a project can be shared.");
-      thread.visibility = body?.visibility === "project" ? "project" : "private";
+      thread.visibility = visibility;
       return json(200, this.#summary(thread));
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);
+    if (ORGANIZE.has(action) && method === "POST") return this.#organize(thread, action, body);
     if (action === "fork" && method === "POST") {
       // Root to the entry (default: the leaf), with the source as provenance (KOBE-216).
       const at = typeof body?.entry_id === "string" ? body.entry_id : thread.leaf_entry_id;
@@ -1028,6 +1149,7 @@ export class FakeKobe {
       this.threads.delete(thread.thread_id);
       return new Response(null, { status: 204 });
     }
+    if (action === "card" && method === "GET") return json(200, this.#card(thread));
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));
     if (action === "pending-messages") return json(200, this.#pending(thread.thread_id));
@@ -1055,6 +1177,33 @@ export class FakeKobe {
       return json(200, this.#threadRuns(thread.thread_id));
     }
     return error(404, "not_found");
+  }
+
+  /** `GET /v1/threads/{id}/card` (KOBE-219), like the server: first message, agent, count. */
+  #card(thread: FakeThread): Json {
+    const messages = thread.entries.filter((e) => e.type === "message");
+    const role = (e: (typeof messages)[number]) =>
+      (e.payload as { message?: { role?: string } }).message?.role;
+    const first = messages.find((e) => role(e) === "user");
+    const content = (first?.payload as { message?: { content?: unknown } } | undefined)?.message
+      ?.content;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((p: { text?: string }) => p.text ?? "").join("")
+          : "";
+    const flat = text.replace(/\s+/g, " ").trim();
+    return {
+      thread_id: thread.thread_id,
+      first_message: flat === "" ? null : flat.slice(0, 280),
+      first_message_truncated: flat.length > 280,
+      agent_id: thread.agent_id ?? null,
+      agent_name: thread.agent_name ?? null,
+      last_activity_at: thread.last_activity_at,
+      message_count: messages.filter((e) => role(e) === "user" || role(e) === "assistant").length,
+      message_count_capped: false,
+    };
   }
 
   /** Like the server (KOBE-213): idle threads only; Pi's `compaction` entry becomes the leaf. */
@@ -1422,10 +1571,12 @@ export class FakeEventSource implements EventSourceLike {
         lastEventId: String(event.seq),
       });
       for (const listener of this.#listeners.get(event.type) ?? []) listener(message);
+      const epilogue = event.type === "run.completed" && (event.payload.epilogue?.length ?? 0) > 0;
       if (
         event.type.startsWith("run.") &&
         event.type !== "run.queued" &&
-        event.type !== "run.started"
+        event.type !== "run.started" &&
+        !epilogue // KOBE-234: the response stays open for the announced results
       ) {
         this.drop(); // the server ends the response after a terminal event
         return;

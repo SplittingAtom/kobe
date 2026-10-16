@@ -216,6 +216,13 @@
   color: var(--admin-fg);
 }
 
+/* A thread row dragged over a project header (CE19): dropping moves it there. */
+.groupToggle[data-drop-target="true"] {
+  color: var(--admin-fg);
+  outline: 2px dashed var(--admin-accent);
+  outline-offset: -2px;
+}
+
 .chevron {
   width: 0.875rem;
   height: 0.875rem;
@@ -285,4 +292,49 @@
   flex-direction: column;
   gap: 0.25rem;
   padding: 0 0.5rem;
+}
+
+/* A thread row's hover card (CE18, KOBE-219): first message, agent, last activity, count.
+   Above the drawer (z-index 40), so it shows from the narrow-screen rail too. */
+.card {
+  z-index: 50;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 0.75rem;
+  color: var(--admin-fg);
+  background: var(--admin-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  font-size: 0.85rem;
+}
+
+.cardMessage {
+  display: -webkit-box;
+  margin: 0 0 0.5rem;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.cardMuted {
+  margin: 0;
+  color: var(--admin-muted);
+}
+
+.cardFacts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.125rem 0.75rem;
+  margin: 0;
+}
+
+.cardFacts dt {
+  color: var(--admin-muted);
+}
+
+.cardFacts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }

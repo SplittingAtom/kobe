@@ -1,93 +1,75 @@
 "use client";
 
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { useState, type FormEvent } from "react";
+import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
+import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
+import { RailThreadCard } from "../shell/rail-thread-card";
 import styles from "./chat.module.css";
+import { ThreadRowMenu } from "./thread-row-menu";
 
-/** One thread in the rail (D16): open, rename, move to Trash; in Trash restore or delete forever. */
+/**
+ * One thread in the rail (D16): open it; its ⋯ menu copies, regenerates, pins, moves, archives or
+ * moves it to Trash (KOBE-292, KOBE-220; rename is the conversation header's pencil). In Trash:
+ * restore or delete forever. Hovering or focusing the row shows its card (CE18, KOBE-219). The
+ * member's own rows can be dragged onto a project header to move there (CE19).
+ */
 function ThreadItem({ archived }: { readonly archived: boolean }) {
   const aui = useAui();
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
   // "Forked from …" on hover (CE16), from the list answer (`metadataOf`).
   const forkHint = useAuiState((s) => s.threadListItem.custom?.["forkHint"]);
-  const [draft, setDraft] = useState<string | null>(null);
-
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    const next = draft?.trim() ?? "";
-    setDraft(null);
-    if (next !== "" && next !== title) aui.threadListItem.rename(next);
-  };
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const shared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
+  const movable = !archived && !shared && remoteId !== undefined;
 
   return (
-    <li>
-      <ThreadListItemPrimitive.Root className={styles.threadItem}>
-        {draft === null ? (
+    <li
+      data-kobe-thread={remoteId}
+      draggable={movable || undefined}
+      onDragStart={
+        movable
+          ? (e) => {
+              e.dataTransfer.setData(THREAD_DRAG_TYPE, remoteId);
+              e.dataTransfer.effectAllowed = "move";
+            }
+          : undefined
+      }
+    >
+      <ThreadListItemPrimitive.Root className={`group/row ${styles.threadItem}`}>
+        <RailThreadCard>
           <ThreadListItemPrimitive.Trigger
             className={styles.threadTrigger}
             title={typeof forkHint === "string" ? forkHint : undefined}
           >
             <ThreadListItemPrimitive.Title fallback="Untitled conversation" />
           </ThreadListItemPrimitive.Trigger>
-        ) : (
-          <form onSubmit={save} className={styles.search}>
-            <label className={styles.visuallyHidden} htmlFor="kobe-rename">
-              New title for {title}
-            </label>
-            <input
-              id="kobe-rename"
-              value={draft}
-              maxLength={200}
-              autoFocus
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Escape") return;
-                // Handled here: the rail's drawer (KOBE-201) must not close on the same key.
-                e.preventDefault();
-                setDraft(null);
-              }}
-            />
-            <button type="submit">Save</button>
-          </form>
-        )}
-        {draft === null && (
-          <span className={styles.itemActions}>
-            {!archived && (
+        </RailThreadCard>
+        <span className={styles.itemActions}>
+          {archived ? (
+            <>
+              <ThreadListItemPrimitive.Unarchive asChild>
+                <IconAction command="restore-thread" label={`Restore ${title}`} size="sm" />
+              </ThreadListItemPrimitive.Unarchive>
               <IconAction
-                command="rename-thread"
-                label={`Rename ${title}`}
+                command="delete-thread"
+                label={`Delete ${title} forever`}
                 size="sm"
-                onClick={() => setDraft(title)}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Delete “${title}” forever? Its messages, files and history can't be recovered.`,
+                    )
+                  ) {
+                    void aui.threadListItem.delete();
+                  }
+                }}
               />
-            )}
-            {archived ? (
-              <>
-                <ThreadListItemPrimitive.Unarchive asChild>
-                  <IconAction command="restore-thread" label={`Restore ${title}`} size="sm" />
-                </ThreadListItemPrimitive.Unarchive>
-                <IconAction
-                  command="delete-thread"
-                  label={`Delete ${title} forever`}
-                  size="sm"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Delete “${title}” forever? Its messages, files and history can't be recovered.`,
-                      )
-                    ) {
-                      void aui.threadListItem.delete();
-                    }
-                  }}
-                />
-              </>
-            ) : (
-              <ThreadListItemPrimitive.Archive asChild>
-                <IconAction command="trash-thread" label={`Move ${title} to Trash`} size="sm" />
-              </ThreadListItemPrimitive.Archive>
-            )}
-          </span>
-        )}
+            </>
+          ) : (
+            <ThreadRowMenu />
+          )}
+        </span>
       </ThreadListItemPrimitive.Root>
     </li>
   );

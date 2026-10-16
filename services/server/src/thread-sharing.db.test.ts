@@ -94,8 +94,20 @@ describe("share and unshare", () => {
     expect((await as(x.reader).get(url)).status).toBe(404);
     expect((await as(x.reader).get(stream)).status).toBe(404);
     expect(await audit(x.w.team, "thread.sharing_changed")).toEqual([
-      { threadId: x.threadId, projectId: x.projectId, shared: true, visibility: "project" },
-      { threadId: x.threadId, projectId: x.projectId, shared: false, visibility: "private" },
+      {
+        threadId: x.threadId,
+        projectId: x.projectId,
+        shared: true,
+        visibility: "project",
+        from: "private",
+      },
+      {
+        threadId: x.threadId,
+        projectId: x.projectId,
+        shared: false,
+        visibility: "private",
+        from: "project",
+      },
     ]);
   });
 
@@ -106,7 +118,7 @@ describe("share and unshare", () => {
     const refused = await as(x.reader).post(url, { visibility: "private" });
     expect([refused.status, refused.json.code]).toEqual([403, "read_only"]);
     expect((await as(x.outsider).post(url, { visibility: "private" })).status).toBe(404);
-    expect((await as(x.author).post(url, { visibility: "team" })).status).toBe(400);
+    expect((await as(x.author).post(url, { visibility: "public" })).status).toBe(400);
     const loose = await f.thread(x.author);
     const noProject = await as(x.author).post(`/v1/threads/${loose}/share`, {
       visibility: "project",

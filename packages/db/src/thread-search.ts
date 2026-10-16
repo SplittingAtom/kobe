@@ -55,6 +55,8 @@ export interface ThreadSearchHit {
   readonly agentVersion: number | null;
   readonly status: ThreadStatus;
   readonly sharedToProject: boolean;
+  /** Shared read-only with the whole team (CE20, KOBE-221). */
+  readonly sharedToTeam: boolean;
   /** The thread's chosen model alias (KOBE-44); null = the team's default. */
   readonly modelAlias: string | null;
   readonly lastActivityAt: Date;
@@ -67,6 +69,9 @@ export interface ThreadSearchHit {
    */
   readonly forkedFromThreadId: string | null;
   readonly forkedAtEntryId: string | null;
+  /** Pinned or archived by the owner (CE19, KOBE-220): search shows archived threads, marked. */
+  readonly pinnedAt: Date | null;
+  readonly archivedAt: Date | null;
   /** Relevance; hits are ordered by score, then most recent activity. */
   readonly score: number;
   /** Best-matching entry (may be on an inactive branch); null for a title-only match. */
@@ -90,12 +95,15 @@ interface HitRow extends Record<string, unknown> {
   agent_version: number | null;
   status: ThreadStatus;
   shared_to_project: boolean;
+  shared_to_team: boolean;
   model_alias: string | null;
   activity_micros: string;
   created_micros: string;
   leaf_entry_id: string | null;
   forked_from_thread_id: string | null;
   forked_at_entry_id: string | null;
+  pinned_micros: string | null;
+  archived_micros: string | null;
   score: number;
   matched_entry_id: string | null;
   headline: string | null;
@@ -103,9 +111,9 @@ interface HitRow extends Record<string, unknown> {
 
 /**
  * Searches the active team's threads that `viewerUserId` may read (spec D9, D23, D24, §6.1): their
- * own threads and threads shared to `projectIds`, never Trash, never another team (RLS, so call it
- * inside `withTeam`). Matches user/assistant message text and titles by full text, and titles by
- * trigram similarity. Read-only; never wakes a sandbox.
+ * own threads, threads shared to `projectIds` and threads shared with the team (KOBE-221), never
+ * Trash, never another team (RLS, so call it inside `withTeam`). Matches user/assistant message text
+ * and titles by full text, and titles by trigram similarity. Read-only; never wakes a sandbox.
  *
  * The caller vouches for the inputs that RLS cannot check: `viewerUserId` must be the signed-in user
  * (KOBE-34) and `projectIds` the projects that user belongs to (KOBE-57); the data layer only adds
@@ -205,6 +213,7 @@ function toHit(row: HitRow): ThreadSearchHit {
     agentVersion: row.agent_version,
     status: row.status,
     sharedToProject: row.shared_to_project,
+    sharedToTeam: row.shared_to_team,
     modelAlias: row.model_alias,
     // Raw execute returns timestamps as text; µs → ms (a Date's precision), as drizzle does.
     lastActivityAt: fromMicros(row.activity_micros),
@@ -212,6 +221,8 @@ function toHit(row: HitRow): ThreadSearchHit {
     leafEntryId: row.leaf_entry_id,
     forkedFromThreadId: row.forked_from_thread_id,
     forkedAtEntryId: row.forked_at_entry_id,
+    pinnedAt: row.pinned_micros === null ? null : fromMicros(row.pinned_micros),
+    archivedAt: row.archived_micros === null ? null : fromMicros(row.archived_micros),
     score: row.score,
     matchedEntryId: row.matched_entry_id,
     snippet: row.headline === null ? null : parseSnippet(row.headline),
@@ -247,14 +258,22 @@ function searchQuery(
     ),
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
-             t.agent_version, t.status, t.shared_to_project, t.model_alias, t.last_activity_at,
-             t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id
+             t.agent_version, t.status, t.shared_to_project, t.shared_to_team, t.model_alias,
+             t.last_activity_at,
+             t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id,
+             t.pinned_at, t.archived_at
       FROM threads t
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
         AND NOT t.is_test
         AND (t.owner_user_id = ${p.viewerUserId}
-             OR (t.shared_to_project AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
+             OR (NOT ${p.ownOnly}::boolean AND (t.shared_to_team
+                  OR (t.shared_to_project
+                      AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
+                 -- A share counts only while its owner is an active member (KOBE-221).
+                 AND EXISTS (SELECT 1 FROM team_members om JOIN users ou ON ou.id = om.user_id
+                             WHERE om.team_id = ${teamId} AND om.user_id = t.owner_user_id
+                               AND ou.deactivated_at IS NULL)))
         ${projectFilter}
         ${activityFilter}
         AND EXISTS (SELECT 1 FROM team_members m
@@ -299,10 +318,12 @@ function searchQuery(
     )
     -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
     SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
-           r.agent_version, r.status, r.shared_to_project, r.model_alias,
+           r.agent_version, r.status, r.shared_to_project, r.shared_to_team, r.model_alias,
            r.activity_micros::text AS activity_micros, r.leaf_entry_id,
            r.forked_from_thread_id, r.forked_at_entry_id,
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
+           (extract(epoch FROM r.pinned_at) * 1000000)::bigint::text AS pinned_micros,
+           (extract(epoch FROM r.archived_at) * 1000000)::bigint::text AS archived_micros,
            r.score, r.matched_entry_id,
            CASE WHEN r.rn <= ${p.limit} AND r.matched_entry_id IS NOT NULL THEN
              (SELECT ts_headline(${TS_CONFIG}::regconfig,

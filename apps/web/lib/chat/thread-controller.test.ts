@@ -11,10 +11,13 @@ let controllers: ThreadController[];
 beforeEach(() => {
   fake = new FakeKobe();
   controllers = [];
+  retitles.length = 0;
 });
 afterEach(() => {
   for (const c of controllers) c.dispose();
 });
+
+const retitles: [string, string][] = [];
 
 function open(threadId: string, reopenDelayMs = 0, fetchFn: typeof fetch = fake.fetch) {
   let n = 0;
@@ -23,6 +26,7 @@ function open(threadId: string, reopenDelayMs = 0, fetchFn: typeof fetch = fake.
     eventSource: fake.eventSource,
     newKey: () => `k${++n}`,
     reopenDelayMs: () => reopenDelayMs,
+    onRetitled: (id, title) => retitles.push([id, title]),
   });
   controllers.push(controller);
   return controller;
@@ -56,6 +60,43 @@ function visibleTexts(state: ThreadState): string[] {
   }
   return path;
 }
+
+describe("auto-title after the first run (KOBE-219 ac-2, ac-6)", () => {
+  it("keeps listening after run.completed and applies thread.updated to the bar and the list", async () => {
+    const t = fake.addThread(null);
+    const c = open(t);
+    await c.load();
+    expect(await c.send("What drives revenue?")).toBe(true);
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open");
+    fake.agent.commitPrompt(runId);
+    fake.agent.complete(runId, { epilogue: ["title"] });
+    await until(c, (s) => s.live?.terminal !== undefined);
+    expect(c.getState().summary?.title ?? null).toBeNull();
+    fake.agent.retitle(runId, "Revenue drivers");
+    await until(c, (s) => s.summary?.title === "Revenue drivers");
+    expect(retitles).toEqual([[t, "Revenue drivers"]]);
+    // A later refresh keeps it (the server saved it before the event).
+    await c.refresh();
+    expect(c.getState().summary?.title).toBe("Revenue drivers");
+  });
+
+  it("ignores a thread.updated for another thread", async () => {
+    const t = fake.addThread(null);
+    const other = fake.addThread(null);
+    const c = open(t);
+    await c.load();
+    await c.send("q");
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open");
+    fake.agent.complete(runId, { epilogue: ["title"] });
+    await until(c, (s) => s.live?.terminal !== undefined);
+    fake.emit(runId, "thread.updated", { thread_id: other, title: "Elsewhere" });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(c.getState().summary?.title ?? null).toBeNull();
+    expect(retitles).toEqual([]);
+  });
+});
 
 describe("ThreadController", () => {
   it("loads, sends, streams and settles on the committed entries", async () => {

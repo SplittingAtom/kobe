@@ -18,6 +18,9 @@ import {
   modelCatalog,
   modelGatewayKeys,
   modelProviders,
+  recordModelUsage,
+  runUsage,
+  serverCallRunMatches,
   sandboxes,
   teamModels,
   teamMembers,
@@ -27,15 +30,22 @@ import {
   withTeam,
   type KobeDatabase,
 } from "@kobe/db";
-import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
-import { RUN_TOKEN_HEADER } from "@kobe/protocol";
+import {
+  deriveRunTokenKey,
+  deriveServerCallTokenKey,
+  signRunToken,
+  signServerCallToken,
+} from "@kobe/protocol/node";
+import { RUN_TOKEN_HEADER, SERVER_CALL_AUDIENCE, SERVER_CALL_TOKEN_HEADER } from "@kobe/protocol";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
 import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { PrincipalCache } from "./principals.js";
-import { OPEN_GATE } from "./seams.js";
+import { OPEN_GATE, type CallRecord } from "./seams.js";
+import { ServerCallReplay } from "./server-call.js";
+import { usageRecordOf } from "./usage/sink.js";
 
 /**
  * KOBE-40 ac-2 at integration level: the shim with its real Postgres principal store. A live
@@ -57,6 +67,8 @@ let base = "";
 const seenVks: string[] = [];
 const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode(KEY));
 let requireRunToken = false;
+const SC_KEY = deriveServerCallTokenKey(new TextEncoder().encode(KEY));
+const recorded: CallRecord[] = [];
 
 const token = (teamId = team) => {
   const now = Math.floor(Date.now() / 1000);
@@ -138,12 +150,19 @@ beforeAll(async () => {
       { ttlMs: 0, keyWaitMs: 100, keyPollMs: 20 },
     ),
     isRunLeased: (t, r, s) => isActiveRunLeasedTo(db, t, r, s),
+    serverCalls: {
+      key: SC_KEY,
+      replay: new ServerCallReplay(),
+      runMatches: (c) => serverCallRunMatches(db, c),
+      limiter: new CallLimiter({ perSandbox: 2, total: 4 }),
+      rate: new RequestRate({ burst: 10, perSecond: 10 }),
+    },
     bifrostUrl: `http://127.0.0.1:${(bifrost.address() as AddressInfo).port}`,
     limiter: new CallLimiter({ perSandbox: 4, total: 16 }),
     bytes: new ByteBudget({ perSandbox: 65_536, total: 65_536 }),
     rate: new RequestRate({ burst: 100, perSecond: 100 }),
     gate: OPEN_GATE,
-    sink: { record: () => undefined },
+    sink: { record: (r) => recorded.push(r) },
     onBifrostForgotKey: () => undefined,
     logger: pino({ level: "silent" }),
     settings: { maxBodyBytes: 65_536, idleTimeoutMs: 5_000 },
@@ -276,5 +295,104 @@ describe("run tokens against the real record (KOBE-118)", () => {
     } finally {
       requireRunToken = false;
     }
+  });
+});
+
+describe("server calls against the real store and ledger (KOBE-234)", () => {
+  it("a title call reaches Bifrost without a live sandbox and lands as a kind=title row", async () => {
+    const { runId, threadId } = await withTeam(app.db, team, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: team, ownerUserId: user })
+        .returning({ id: threads.id });
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: team,
+          threadId: thread?.id ?? "",
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      await tx.insert(sandboxRunLeases).values({
+        teamId: team,
+        runId: run?.id ?? "",
+        userId: user,
+        threadId: thread?.id ?? "",
+        sandboxId,
+      });
+      // The member's sandbox hibernated after the run: a server call does not need it.
+      await tx
+        .update(sandboxes)
+        .set({ state: "hibernated" })
+        .where(and(eq(sandboxes.teamId, team), eq(sandboxes.userId, user)));
+      return { runId: run?.id ?? "", threadId: thread?.id ?? "" };
+    });
+    const iat = Math.floor(Date.now() / 1000);
+    const scToken = signServerCallToken(SC_KEY, {
+      iss: "kobe-server",
+      aud: SERVER_CALL_AUDIENCE,
+      purpose: "title",
+      team_id: team,
+      user_id: user,
+      thread_id: threadId,
+      run_id: runId,
+      model: "openai/gpt-x",
+      max_output_tokens: 32,
+      iat,
+      exp: iat + 30,
+      jti: randomUUID(),
+    });
+    // Review L1: a token naming another member (or thread) for that run is refused.
+    const mate = randomUUID();
+    await app.db.insert(users).values({ id: mate, name: "O", email: `${mate}@g.test` });
+    await withTeam(app.db, team, (tx) =>
+      tx.insert(teamMembers).values({ teamId: team, userId: mate, role: "member" }),
+    );
+    expect(
+      await serverCallRunMatches(app.db, { teamId: team, runId, threadId, userId: mate }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, {
+        teamId: team,
+        runId,
+        threadId: randomUUID(),
+        userId: user,
+      }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, { teamId: other, runId, threadId, userId: user }),
+    ).toBe(false);
+    expect(
+      await serverCallRunMatches(app.db, { teamId: team, runId, threadId, userId: user }),
+    ).toBe(true);
+    const before = seenVks.length;
+    recorded.length = 0;
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { [SERVER_CALL_TOKEN_HEADER]: scToken, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "openai/gpt-x",
+        messages: [{ role: "user", content: "Title: revenue by region" }],
+        max_tokens: 32,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(seenVks.slice(before)).toEqual([VK]);
+    // The sandbox path still refuses that hibernated sandbox's token.
+    expect(await chat(token())).toBe(401);
+    await expect.poll(() => recorded.length).toBe(1);
+    const row = usageRecordOf(recorded[0] as CallRecord);
+    expect(row).toBeDefined();
+    await recordModelUsage(app.db, row ? [row] : []);
+    const [stored] = await withTeam(app.db, team, (tx) =>
+      tx
+        .select()
+        .from(runUsage)
+        .where(eq(runUsage.id, row?.id ?? "")),
+    );
+    expect(stored).toMatchObject({ kind: "title", sandboxId: null, runId, threadId, userId: user });
   });
 });

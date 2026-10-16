@@ -8,7 +8,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
-import type { SessionTokenClaims } from "@kobe/protocol";
+import type { ServerCallClaims, SessionTokenClaims } from "@kobe/protocol";
 import { SessionTokenError } from "@kobe/session-token";
 import {
   annotate,
@@ -24,7 +24,14 @@ import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { resolveRunAttribution } from "./run-attribution.js";
-import { classify, forwardedQuery, type RouteKind } from "./routes.js";
+import {
+  authenticateServerCall,
+  checkServerCallBody,
+  isServerCall,
+  serverCallBodyLimit,
+  type ServerCallOptions,
+} from "./server-call.js";
+import { classify, forwardedQuery, type Route, type RouteKind } from "./routes.js";
 import type { RunTokenSubject } from "@kobe/db";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
 import { chargedOutput } from "./usage/charge.js";
@@ -45,6 +52,10 @@ import { UsageMeter, type UsageReading } from "./usage/meter.js";
  * 6. forwarded to Bifrost with only allowlisted headers plus `x-bf-vk: <member's virtual key>`,
  *    so Bifrost applies that member's team model allowlist (and, with KOBE-42, budgets);
  * 7. the response streamed back unbuffered; a client that goes away cancels the upstream call.
+ *
+ * Server calls (KOBE-234, server-call.ts) take the same path with their own identity: the
+ * `x-kobe-server-call` token instead of 1., the member without a sandbox in 3., the token's run
+ * in 4., the contract's body and the token's model and cap, and the purpose's budget soft limit.
  */
 export interface GatewayOptions {
   readonly verify: (token: string) => SessionTokenClaims;
@@ -60,6 +71,8 @@ export interface GatewayOptions {
     /** Enforcement: a call without a run token is refused (off for rollout). */
     readonly require: boolean;
   };
+  /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
+  readonly serverCalls?: ServerCallOptions;
   readonly bifrostUrl: string;
   readonly limiter: CallLimiter;
   /** Request bytes held in memory, per sandbox and in total. */
@@ -204,6 +217,64 @@ export function createModelGateway(options: GatewayOptions): Server {
     ? new HttpsAgent({ keepAlive: true, maxSockets: 256 })
     : new HttpAgent({ keepAlive: true, maxSockets: 256 });
 
+  type Caller =
+    | {
+        readonly ok: true;
+        readonly identity: {
+          readonly teamId: string;
+          readonly userId: string;
+          readonly sandboxId: string | undefined;
+        };
+        readonly serverCall: ServerCallClaims | undefined;
+      }
+    | {
+        readonly ok: false;
+        readonly status: number;
+        readonly code: string;
+        readonly message: string;
+      };
+
+  const NO_SESSION = {
+    ok: false,
+    status: 401,
+    code: "invalid_session_token",
+    message: "A valid sandbox session token is required.",
+  } as const;
+
+  /** Who calls: a server call (its header decides, KOBE-234) or a sandbox (its session token). */
+  function authenticate(req: IncomingMessage, url: URL, route: Route | undefined): Caller {
+    if (isServerCall(req.headers)) {
+      const auth = authenticateServerCall(
+        options.serverCalls,
+        req.headers,
+        url.searchParams,
+        route,
+        req.method,
+      );
+      if (!auth.ok) return auth;
+      const { team_id: teamId, user_id: userId } = auth.claims;
+      return {
+        ok: true,
+        identity: { teamId, userId, sandboxId: undefined },
+        serverCall: auth.claims,
+      };
+    }
+    const credential = extractCredential(req.headers, url.searchParams);
+    if (!credential.ok) return NO_SESSION;
+    let claims: SessionTokenClaims;
+    try {
+      claims = options.verify(credential.token);
+    } catch (err) {
+      if (!(err instanceof SessionTokenError)) throw err;
+      return NO_SESSION;
+    }
+    return {
+      ok: true,
+      identity: { teamId: claims.team_id, userId: claims.user_id, sandboxId: claims.sub },
+      serverCall: undefined,
+    };
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://gateway.invalid");
     if (url.pathname === "/healthz" && req.method === "GET") {
@@ -215,30 +286,11 @@ export function createModelGateway(options: GatewayOptions): Server {
     const route = classify(req.method ?? "", url.pathname);
     const kind = route?.kind ?? "openai";
 
-    // 1. The session token (any SDK's API-key header). No route detail before authentication.
-    const credential = extractCredential(req.headers, url.searchParams);
-    if (!credential.ok) {
-      sendError(
-        res,
-        kind,
-        401,
-        "invalid_session_token",
-        "A valid sandbox session token is required.",
-      );
-      return;
-    }
-    let claims: SessionTokenClaims;
-    try {
-      claims = options.verify(credential.token);
-    } catch (err) {
-      if (!(err instanceof SessionTokenError)) throw err;
-      sendError(
-        res,
-        kind,
-        401,
-        "invalid_session_token",
-        "A valid sandbox session token is required.",
-      );
+    // 1. The caller: a server call's token (KOBE-234), else the sandbox's session token (any SDK's
+    // API-key header). No route detail before authentication.
+    const caller = authenticate(req, url, route);
+    if (!caller.ok) {
+      sendError(res, kind, caller.status, caller.code, caller.message);
       return;
     }
     // 2. Inference paths only.
@@ -246,15 +298,33 @@ export function createModelGateway(options: GatewayOptions): Server {
       sendError(res, kind, 404, "not_found", "Not a model inference endpoint.");
       return;
     }
-    const identity = { teamId: claims.team_id, userId: claims.user_id, sandboxId: claims.sub };
+    const { identity, serverCall } = caller;
+    // Limits are per sandbox; server calls have their own, per team (review L4).
+    const limitKey = identity.sandboxId ?? `server-call:${identity.teamId}`;
+    const limits = serverCall && options.serverCalls ? options.serverCalls : options;
+    const skipped = (reason: string) => {
+      if (serverCall) {
+        logger.warn(
+          {
+            teamId: identity.teamId,
+            runId: serverCall.run_id,
+            purpose: serverCall.purpose,
+            reason,
+          },
+          "server call skipped",
+        );
+      }
+    };
 
     // 3. Per-sandbox request rate and concurrent calls, before anything touches the database.
-    if (!options.rate.allow(identity.sandboxId)) {
+    if (!limits.rate.allow(limitKey)) {
+      skipped("rate_limited");
       sendError(res, kind, 429, "rate_limited", "Too many model requests; slow down.", 1);
       return;
     }
-    const release = options.limiter.acquire(identity.sandboxId);
+    const release = limits.limiter.acquire(limitKey);
     if (!release) {
+      skipped("too_many_concurrent_calls");
       sendError(res, kind, 429, "too_many_concurrent_calls", "Too many concurrent model calls.", 1);
       return;
     }
@@ -292,7 +362,28 @@ export function createModelGateway(options: GatewayOptions): Server {
 
       // 5. Run attribution: the run token when sent (it must verify, no fallback), else the legacy
       // advisory header, unless enforcement makes the token mandatory (KOBE-118).
-      const attribution = await resolveRunAttribution(options, req.headers, identity);
+      // A server call's run is its token's: the completed run that triggered it, of the token's
+      // thread and member in the record (review L1).
+      const attribution = serverCall
+        ? (await options.serverCalls?.runMatches({
+            teamId: serverCall.team_id,
+            runId: serverCall.run_id,
+            threadId: serverCall.thread_id,
+            userId: serverCall.user_id,
+          }))
+          ? ({ ok: true, runId: serverCall.run_id } as const)
+          : ({
+              ok: false,
+              status: 403,
+              code: "server_call_run_mismatch",
+              message: "That run is not a completed run of this thread and member.",
+            } as const)
+        : identity.sandboxId === undefined
+          ? NO_SESSION
+          : await resolveRunAttribution(options, req.headers, {
+              teamId: identity.teamId,
+              sandboxId: identity.sandboxId,
+            });
       if (!attribution.ok) {
         status = attribution.status;
         sendError(res, kind, attribution.status, attribution.code, attribution.message);
@@ -303,8 +394,8 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(
         req,
-        settings.maxBodyBytes,
-        (n) => options.bytes.tryTake(identity.sandboxId, n),
+        serverCall ? serverCallBodyLimit(settings.maxBodyBytes) : settings.maxBodyBytes,
+        (n) => options.bytes.tryTake(limitKey, n),
         (n) => {
           bytesHeld += n;
         },
@@ -326,7 +417,21 @@ export function createModelGateway(options: GatewayOptions): Server {
       // Count-only endpoints generate nothing (KOBE-43 review): no output allowance.
       const countOnly = route.path.endsWith("/count_tokens") || route.path.endsWith(":countTokens");
       let outputAllowance = chargedOutput(undefined, 1, countOnly);
-      if (req.method === "POST") {
+      if (serverCall) {
+        // The contract's shape, the token's model and cap (no tools, no streaming).
+        const checked = checkServerCallBody(
+          body,
+          serverCall,
+          resolution.reasoningModels.has(serverCall.model),
+        );
+        if (!checked.ok) {
+          status = checked.status;
+          sendError(res, kind, checked.status, checked.code, checked.message);
+          return;
+        }
+        model = serverCall.model;
+        outputAllowance = chargedOutput(checked.maxOutputTokens, 1, false);
+      } else if (req.method === "POST") {
         const scanned = topLevelModel(body);
         if (!scanned.ok) {
           status = 400;
@@ -363,6 +468,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         ...identity,
         callId: randomUUID(),
         runId,
+        ...(serverCall ? { purpose: serverCall.purpose } : {}),
         route: route.kind,
         path: route.path,
         model,
@@ -385,6 +491,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       const decision = await options.gate.admit(call);
       if (decision.ok && decision.release) releaseGate = decision.release;
       if (!decision.ok) {
+        skipped(decision.code);
         status = decision.status;
         sendError(
           res,
@@ -448,9 +555,11 @@ export function createModelGateway(options: GatewayOptions): Server {
             userId: call.userId,
             sandboxId: call.sandboxId,
             runId: call.runId,
+            ...(serverCall ? { threadId: serverCall.thread_id } : {}),
           },
           {
             "kobe.call_id": call.callId,
+            "kobe.usage_kind": call.purpose ?? "run",
             "kobe.route": call.route,
             ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
             ...(usage === undefined
@@ -472,7 +581,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
       // that named a model), so the gate never sees spend that is neither reserved nor recorded.
       releaseGate?.(usage !== undefined && call?.model !== undefined);
-      options.bytes.give(identity.sandboxId, bytesHeld);
+      options.bytes.give(limitKey, bytesHeld);
       if (call) {
         options.sink.record({
           ...call,

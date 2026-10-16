@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { composer, openApp } from "./testing";
+import { announcement, composer, openApp, streaming } from "./testing";
 
 /**
  * Compact now (CE15, KOBE-213): the dialog behind the gauge's red action and the thread's actions
@@ -65,6 +65,9 @@ const menuItem = async () => {
   details.open = true;
   return within(details).getByRole("button", { name: /Compact now/ });
 };
+
+const usageReads = (t: string) => (r: { method: string; path: string }) =>
+  r.method === "GET" && r.path === `/v1/threads/${t}/usage`;
 
 const compactRequests = (t: string) =>
   fake.requests.filter((r) => r.method === "POST" && r.path === `/v1/threads/${t}/compact`);
@@ -301,4 +304,76 @@ describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Conversation actions");
   });
+});
+
+describe("the gauge after Compact now, once a run streamed in this tab (KOBE-293)", () => {
+  // ~30k tokens, as the KOBE-285 compact-now spec sends: stored, but streamed without its body.
+  const LONG = `Reply only with OK. ${Array.from({ length: 2400 }, (_, i) => `Entry ${i}: the harbour log notes the tide near the beacon.`).join(" ")}`;
+
+  /** Sends `text` (pasted: typing 100 KB key by key is slow) and streams its run to the end. */
+  async function runTurn(t: string, text: string, tokens: number) {
+    const user = userEvent.setup();
+    await user.click(await composer());
+    await user.paste(text);
+    await user.keyboard("{Enter}");
+    const run = await waitFor(() => must(fake.activeRun(t)), WAIT);
+    await streaming(fake, run.run_id);
+    fake.agent.commitPrompt(run.run_id);
+    fake.agent.commit(
+      run.run_id,
+      {
+        role: "assistant",
+        content: [{ type: "text", text: `Answer ${tokens}` }],
+        usage: { input: tokens, cacheRead: 0, cacheWrite: 0 },
+      },
+      "m1",
+    );
+    fake.threadLatestCall.set(t, {
+      run_id: run.run_id,
+      at: "2026-10-14T10:05:00.000Z",
+      model: "ollama/kimi",
+      input_tokens: tokens,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    });
+    fake.agent.complete(run.run_id);
+    await screen.findByText(`Answer ${tokens}`, {}, WAIT);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy(), WAIT);
+  }
+
+  const gaugeNow = () =>
+    Number(screen.getByRole("meter", { name: "Context used" }).getAttribute("aria-valuenow"));
+
+  it.each([
+    ["a prompt over 64 KiB (stored, streamed without its body)", LONG],
+    ["a short prompt", "Reply only with OK."],
+  ])(
+    "after %s: unknown until the next model call",
+    async (_name, prompt) => {
+      const t = conversation();
+      openApp(fake, t);
+      await screen.findByText("They add up to 42.", {}, WAIT);
+      await runTurn(t, prompt, 40_800);
+      await waitFor(() => expect(gaugeNow()).toBe(40_800), WAIT);
+
+      const user = userEvent.setup();
+      await user.click(await menuItem());
+      const dialog = await screen.findByRole("dialog", { name: "Compact this thread" }, WAIT);
+      await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), WAIT);
+      await waitFor(() => must(document.querySelector('[data-kobe-marker="compaction"]')), WAIT);
+      await waitFor(() => expect(announcement()).toBe("The conversation was compacted."), WAIT);
+      await waitFor(
+        () => expect(fake.requests.filter(usageReads(t)).length).toBeGreaterThan(0),
+        WAIT,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(screen.queryByRole("meter")).toBeNull();
+
+      // The next call is the size after the compaction.
+      await runTurn(t, "And now?", 3_000);
+      await waitFor(() => expect(gaugeNow()).toBe(3_000), WAIT);
+    },
+    30_000,
+  );
 });

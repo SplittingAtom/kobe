@@ -34,6 +34,7 @@ import {
   threadModelNotEnabled,
 } from "./failure-codes.js";
 import type { Omission } from "../resolver/resolve.js";
+import { recordRunSkillRefsInTx } from "../skills/usage.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
 import { modelAcceptsImages, resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
@@ -208,6 +209,7 @@ export async function promoteInTx(
       approvalMode,
     });
     transitions.push(applied.transition);
+    await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
     // KOBE-77: what the resolver left out, right after `run.started` (never on a recovery restart).
     const items = omittedItems(resolved.omissions ?? []);
     if (items !== undefined) {
@@ -337,6 +339,8 @@ export async function restartPlanInTx(
 ): Promise<StartPlan | undefined> {
   const resolved = await resolveForStart(tx, agents, thread, run);
   if (!resolved.ok) return undefined;
+  // The re-sent start lists the skills resolved now: only those count as used (KOBE-297).
+  await recordRunSkillRefsInTx(tx, run.teamId, run.id, resolved.skillRefs ?? [], true);
   // The model the run started with (`run.started.model`), so a re-sent start does not switch
   // models; the resolver's alias only when the run had none.
   const started = await startedModelAlias(tx, run.teamId, run.id);

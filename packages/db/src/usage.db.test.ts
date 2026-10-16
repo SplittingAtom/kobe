@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { recordModelUsage, type ModelUsageRecord } from "./models/index.js";
 import {
   modelCatalog,
   modelProviders,
+  modelSpendDaily,
   runUsage,
   runs,
   teamMembers,
@@ -184,5 +185,84 @@ describe("recordModelUsage", () => {
       tx.select().from(runUsage).where(eq(runUsage.sandboxId, sb)),
     );
     expect(row).toMatchObject({ inputTokens: 2_000_000_000, outputTokens: 0, durationMs: 0 });
+  });
+
+  it("records a server call (KOBE-234): its kind, no sandbox, the triggering run's thread; budgets count it", async () => {
+    const { runId, threadId } = await withTeam(app.db, teamA, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: userId })
+        .returning({ id: threads.id });
+      if (!thread) throw new Error("no thread");
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: teamA,
+          threadId: thread.id,
+          trigger: "user",
+          status: "completed",
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      if (!run) throw new Error("no run");
+      return { runId: run.id, threadId: thread.id };
+    });
+    const spent = async () => {
+      const [r] = await withTeam(app.db, teamA, (tx) =>
+        tx
+          .select({ tokens: sql<string>`COALESCE(sum(${modelSpendDaily.tokens}), 0)` })
+          .from(modelSpendDaily)
+          .where(and(eq(modelSpendDaily.teamId, teamA), eq(modelSpendDaily.userId, userId))),
+      );
+      return Number(r?.tokens ?? 0);
+    };
+    const before = await spent();
+    const id = randomUUID();
+    await recordModelUsage(app.db, [record({ id, sandboxId: undefined, runId, kind: "title" })]);
+    // The spend counters (what budgets read, KOBE-286) count it like any call.
+    expect((await spent()) - before).toBe(13_000);
+    const [row] = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(runUsage).where(eq(runUsage.id, id)),
+    );
+    expect(row).toMatchObject({ kind: "title", sandboxId: null, runId, threadId });
+    expect(row?.costUsd).toBeGreaterThan(0);
+  });
+
+  it("defaults to kind run; refuses a run row without a sandbox and a server row with one or without a run", async () => {
+    const sb = randomUUID();
+    await recordModelUsage(app.db, [record({ sandboxId: sb })]);
+    const [row] = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(runUsage).where(eq(runUsage.sandboxId, sb)),
+    );
+    expect(row?.kind).toBe("run");
+    const shape = async (over: Partial<ModelUsageRecord>) =>
+      (
+        (await recordModelUsage(app.db, [record(over)]).catch((e: unknown) => e)) as {
+          cause?: { code?: string; constraint?: string };
+        }
+      ).cause;
+    expect(await shape({ sandboxId: undefined })).toMatchObject({
+      code: "23514",
+      constraint: "run_usage_kind_shape",
+    });
+    expect(await shape({ kind: "followups", runId: randomUUID() })).toMatchObject({
+      code: "23514",
+      constraint: "run_usage_kind_shape",
+    });
+    expect(await shape({ kind: "followups", sandboxId: undefined })).toMatchObject({
+      code: "23514",
+      constraint: "run_usage_kind_shape",
+    });
+  });
+
+  it("adds the kind CHECKs NOT VALID: no scan of the ledger under the migration's lock (0099)", async () => {
+    const res = await app.db.execute<{ conname: string; convalidated: boolean }>(sql`
+      SELECT conname, convalidated FROM pg_constraint
+       WHERE conrelid = 'public.run_usage'::regclass AND conname LIKE 'run_usage_kind%'
+       ORDER BY conname`);
+    expect(res.rows).toEqual([
+      { conname: "run_usage_kind", convalidated: false },
+      { conname: "run_usage_kind_shape", convalidated: false },
+    ]);
   });
 });

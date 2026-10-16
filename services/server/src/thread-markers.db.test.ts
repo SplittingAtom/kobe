@@ -59,6 +59,8 @@ describe("GET /v1/threads/{id}/markers", () => {
     expect((await as(w.owner).get(`/v1/threads/${threadId}/markers`)).json).toEqual({
       runs: [],
       approvals: [],
+      skills: [],
+      projects: [],
       truncated: false,
     });
 

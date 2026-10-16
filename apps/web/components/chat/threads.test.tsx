@@ -9,6 +9,7 @@ import {
   composer,
   crushedIconButtons,
   openApp,
+  openRowMenu,
   streamed,
   streaming,
 } from "./testing";
@@ -31,6 +32,12 @@ afterEach(() => {
 
 const list = () => screen.findByRole("list", { name: "Your threads" });
 
+/** Delete in a thread row's ⋯ menu (KOBE-292): moves it to Trash. */
+async function trashFromMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
+  const menu = await openRowMenu(`Actions for ${title}`);
+  await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+}
+
 describe("thread list (RemoteThreadListAdapter)", () => {
   it("lists the caller's threads newest first and opens one", async () => {
     fake.addThread("Older");
@@ -48,7 +55,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     expect(window.location.search).toBe(`?thread=${newer}`);
   });
 
-  it("creates a thread on the first message, titled with its first line", async () => {
+  it("creates a thread on the first message, shown by its first line until the server titles it", async () => {
     openApp(fake);
     const user = userEvent.setup();
     await screen.findByText("No threads yet.");
@@ -58,7 +65,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     );
     await waitFor(() => expect(fake.threads.size).toBe(1));
     const [thread] = [...fake.threads.values()];
-    expect(thread?.title).toBe("Plot revenue by month");
+    expect(thread?.title).toBeNull(); // KOBE-219: the server titles it after the first answer
     const run = await waitFor(() => {
       const r = fake.activeRun(must(thread).thread_id);
       expect(r).toBeDefined();
@@ -73,27 +80,70 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     ).toBeTruthy();
   });
 
-  it("renames, moves to Trash and restores (D18)", async () => {
-    const t = fake.addThread("Budget");
+  it("shows the server's title in the rail and the bar as soon as it arrives (KOBE-219 ac-2)", async () => {
     openApp(fake);
     const user = userEvent.setup();
-    const items = within(await list());
-    await user.click(await items.findByRole("button", { name: "Rename Budget" }));
-    const input = screen.getByLabelText("New title for Budget");
-    await user.clear(input);
-    await user.type(input, "Budget 2027{Enter}");
-    await waitFor(() => expect(fake.threads.get(t)?.title).toBe("Budget 2027"));
-    expect(chatRequests(fake, "PATCH").at(-1)).toMatchObject({
-      body: { title: "Budget 2027" },
+    await screen.findByText("No threads yet.");
+    await user.type(await composer(), "What drives revenue?{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(1));
+    const [thread] = [...fake.threads.values()];
+    const run = await waitFor(() => must(fake.activeRun(must(thread).thread_id)));
+    await streaming(fake, run.run_id);
+    expect(
+      await within(await list()).findByRole("button", { name: "What drives revenue?" }),
+    ).toBeTruthy();
+    fake.agent.commitPrompt(run.run_id);
+    fake.agent.complete(run.run_id, { epilogue: ["title"] });
+    fake.agent.retitle(run.run_id, "Revenue drivers");
+    expect(
+      await within(await list()).findByRole("button", { name: "Revenue drivers" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.getElementById("kobe-thread-title")?.textContent).toBe("Revenue drivers"),
+    );
+    // No rename was sent: the title stays unlocked on the server.
+    expect(chatRequests(fake, "PATCH")).toEqual([]);
+  });
+
+  it("shows a thread's card on hover: first message, agent, last activity, message count (KOBE-219 ac-3)", async () => {
+    const t = fake.addThread("Budget review");
+    const u = fake.addEntry(t, null, { role: "user", content: "Where did the Q3 budget go?" });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "Mostly travel." }] });
+    openApp(fake);
+    const user = userEvent.setup();
+    const row = await within(await list()).findByRole("button", { name: "Budget review" });
+    await user.hover(row);
+    const card = await screen.findByTestId("thread-card", {}, { timeout: 3_000 });
+    await waitFor(() => expect(card.textContent).toContain("Where did the Q3 budget go?"));
+    expect(card.textContent).toContain("No agent");
+    expect(card.textContent).toMatch(/Messages\s*2/);
+    expect(card.querySelector("time")?.getAttribute("datetime")).toBe(
+      fake.threads.get(t)?.last_activity_at,
+    );
+    expect(chatRequests(fake, "GET").some((r) => r.path === `/v1/threads/${t}/card`)).toBe(true);
+  });
+
+  it("moves to Trash from the row's menu and restores (D18)", async () => {
+    const t = fake.addThread("Budget");
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    openApp(fake);
+    const user = userEvent.setup();
+    await list();
+    await trashFromMenu(user, "Budget");
+    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    expect(chatRequests(fake, "DELETE").at(-1)).toMatchObject({
+      path: `/v1/threads/${t}`,
       team: fake.teamId,
     });
-
-    await user.click(await items.findByRole("button", { name: "Move Budget 2027 to Trash" }));
-    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
     await user.click(screen.getByRole("button", { name: "Trash" }));
     expect(screen.getByText("Threads in Trash are deleted for good after 30 days.")).toBeTruthy();
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
-    await user.click(await trash.findByRole("button", { name: "Restore Budget 2027" }));
+    // Trash rows keep their own two actions, no menu.
+    expect(trash.queryByRole("button", { name: "Actions for Budget" })).toBeNull();
+    await user.click(await trash.findByRole("button", { name: "Restore Budget" }));
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).toBeNull());
     expect(chatRequests(fake, "POST").at(-1)?.path).toBe(`/v1/threads/${t}/restore`);
   });
@@ -104,10 +154,10 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     vi.stubGlobal("confirm", confirm);
     openApp(fake);
     const user = userEvent.setup();
-    await user.click(
-      await within(await list()).findByRole("button", { name: "Move Old plan to Trash" }),
-    );
+    await list();
+    await trashFromMenu(user, "Old plan");
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    expect(confirm).not.toHaveBeenCalled(); // Trash is undoable: only Delete forever asks
     await user.click(screen.getByRole("button", { name: "Trash" }));
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
     // Cancelled: nothing is sent.
@@ -167,9 +217,11 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     const user = userEvent.setup();
     await user.type(await composer(), "work{Enter}");
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
-    await user.click(
-      await within(await list()).findByRole("button", { name: "Move Busy to Trash" }),
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
     );
+    await trashFromMenu(user, "Busy");
     expect((await screen.findAllByText("Stop the run and clear the queue first."))[0]).toBeTruthy();
     expect(fake.threads.get(t)?.deleted_at).toBeNull();
   });

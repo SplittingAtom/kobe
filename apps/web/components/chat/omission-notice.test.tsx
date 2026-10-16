@@ -43,6 +43,7 @@ describe("OmissionNotice (KOBE-77)", () => {
       "not_user_connected",
       "no_team_default",
       "not_approved",
+      "skill_limit",
     ] as const;
     for (const kind of ["skill", "connector", "model"] as const) {
       for (const reason of reasons) {
@@ -56,6 +57,12 @@ describe("OmissionNotice (KOBE-77)", () => {
       typeof omissionText
     >[0];
     expect(omissionText(item)).toBe("Skill x: it was left out of this run");
+  });
+
+  it("explains skill_limit (KOBE-297)", () => {
+    expect(omissionText({ kind: "skill", name: "extra", reason: "skill_limit" })).toBe(
+      "Skill extra: this run already has the most skills one run can load",
+    );
   });
 
   it("explains not_approved", () => {

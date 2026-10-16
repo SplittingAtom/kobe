@@ -7,12 +7,15 @@ import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import { createFilesApi } from "../files/api";
+import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
 import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
-import type { RunnableAgent, ThreadSummary } from "./types";
+import { organizeRequest, type OrganizeChange } from "./organize";
+import type { ThreadListSync } from "./thread-list-sync";
+import type { RunnableAgent, ThreadSummary, ThreadVisibility } from "./types";
 
 export interface ChatSessionOptions {
   readonly teamId: string;
@@ -26,6 +29,8 @@ export interface ChatSessionOptions {
   readonly fetchFn?: typeof fetch | undefined;
   /** Tests replace the XHR upload transport (KOBE-145). */
   readonly uploadTransport?: UploadTransport | undefined;
+  /** This browser's other tabs (CE19 pin, archive, move); the session closes it on dispose. */
+  readonly listSync?: ThreadListSync | undefined;
 }
 
 interface Held {
@@ -39,7 +44,10 @@ export const MODELS_TTL_MS = 30_000;
 /** A fresh read this recent answers another fresh request. */
 const MODELS_FRESH_SHARE_MS = 1_000;
 
-/** A thread's first title: the first line of its first message, shortened. */
+/**
+ * A new thread's name in the rail until the server titles it (KOBE-219): the first line of its
+ * first message, shortened. Never sent: a thread created with a title would not be auto-titled.
+ */
 export function titleFrom(text: string): string | undefined {
   const line =
     text
@@ -77,6 +85,10 @@ export class ChatSession {
   #nextTitle: string | undefined;
   readonly #composerDrafts = new Map<string, string>();
   readonly #createdListeners = new Set<() => void>();
+  readonly #retitledListeners = new Set<(threadId: string, title: string) => void>();
+  readonly #listChangedListeners = new Set<() => void>();
+  /** First lines of threads created here, shown until their title arrives (KOBE-219). */
+  readonly #provisional = new Map<string, string>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
   /** Project for the thread `initialize` creates next (`/?project=<id>`, KOBE-164). */
@@ -91,6 +103,8 @@ export class ChatSession {
   #agents:
     | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
     | undefined;
+  #projects:
+    { readonly at: number; readonly result: Promise<ApiResult<readonly Project[]>> } | undefined;
   #models:
     | {
         readonly at: number;
@@ -108,6 +122,7 @@ export class ChatSession {
     });
     this.sentFiles = new SentFileCache(createFilesApi(options.teamId, options.fetchFn));
     this.#options = options;
+    options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
   }
 
   #create(threadId: string | null): ThreadController {
@@ -116,6 +131,9 @@ export class ChatSession {
       eventSource: this.#options.eventSource,
       ...(this.#options.newKey ? { newKey: this.#options.newKey } : {}),
       ...(this.#options.reopenDelayMs ? { reopenDelayMs: this.#options.reopenDelayMs } : {}),
+      onRetitled: (id, title) => {
+        for (const listener of this.#retitledListeners) listener(id, title);
+      },
     });
   }
 
@@ -176,6 +194,16 @@ export class ChatSession {
 
   setNextTitle(text: string): void {
     this.#nextTitle = titleFrom(text);
+  }
+
+  /** The rail's name for a thread created here before its title arrives (KOBE-219). */
+  provisionalTitle(threadId: string): string | undefined {
+    return this.#provisional.get(threadId);
+  }
+
+  setProvisionalTitle(threadId: string, title: string | undefined): void {
+    if (title === undefined) this.#provisional.delete(threadId);
+    else this.#provisional.set(threadId, title);
   }
 
   takeNextTitle(): string | undefined {
@@ -282,6 +310,23 @@ export class ChatSession {
     return result;
   }
 
+  /**
+   * The projects the member may start threads in, so may move a thread to (CE19: the live ones
+   * they can open), read at most every `MODELS_TTL_MS`. The server decides each move again.
+   */
+  projects(): Promise<ApiResult<readonly Project[]>> {
+    const now = Date.now();
+    const cached = this.#projects;
+    if (cached && now - cached.at < MODELS_TTL_MS) return cached.result;
+    const result = createProjectsApi(this.teamId, this.#options.fetchFn).list(false);
+    this.#projects = { at: now, result };
+    // A failed read is not kept: the next menu asks again.
+    void result.then((res) => {
+      if (!res.ok && this.#projects?.result === result) this.#projects = undefined;
+    });
+    return result;
+  }
+
   /** Called when a new thread got its first message (the thread list reads its title again). */
   onThreadCreated(listener: () => void): () => void {
     this.#createdListeners.add(listener);
@@ -292,7 +337,52 @@ export class ChatSession {
     for (const listener of this.#createdListeners) listener();
   }
 
+  /** The server titled a thread (KOBE-219 `thread.updated`); the rail reads its list again. */
+  onThreadRetitled(listener: (threadId: string, title: string) => void): () => void {
+    this.#retitledListeners.add(listener);
+    return () => this.#retitledListeners.delete(listener);
+  }
+
+  /** A thread was pinned, archived or moved, here or in another tab: the rail reads its list. */
+  onThreadListChanged(listener: () => void): () => void {
+    this.#listChangedListeners.add(listener);
+    return () => this.#listChangedListeners.delete(listener);
+  }
+
+  #listChanged(threadId: string): void {
+    for (const listener of this.#listChangedListeners) listener();
+    // The open conversation follows too (its project bar, its archived note).
+    void this.peek(threadId)?.refresh();
+  }
+
+  /**
+   * Pins, archives or moves one of the member's threads (CE19, KOBE-220). Once the server saved
+   * it, this tab's rail and the thread read again, and the other tabs are told.
+   */
+  async organize(threadId: string, change: OrganizeChange): Promise<ApiResult<ThreadSummary>> {
+    const res = await organizeRequest(this.api, threadId, change);
+    if (res.ok) {
+      this.#listChanged(threadId);
+      this.#options.listSync?.post(threadId);
+    }
+    return res;
+  }
+
+  /**
+   * Sets who reads one of the member's threads (CE20, KOBE-221): only them, the project's members
+   * or the whole team; `private` revokes. Once saved, the rail and the thread read again.
+   */
+  async share(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>> {
+    const res = await this.api.shareThread(threadId, visibility);
+    if (res.ok) {
+      this.#listChanged(threadId);
+      this.#options.listSync?.post(threadId);
+    }
+    return res;
+  }
+
   dispose(): void {
+    this.#options.listSync?.close();
     this.attachments.dispose();
     this.sentFiles.dispose();
     for (const held of this.#held.values()) held.controller.dispose();

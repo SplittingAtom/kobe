@@ -1,5 +1,5 @@
 import { addCosts, costForDisplay, costToUnits } from "./usage-cost.js";
-import { scanTeams, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { scanTeams, sql, withTeam, type KobeDb, type KobeTx, type UsageKind } from "@kobe/db";
 
 /**
  * Usage dashboards and run details (KOBE-43, spec D30): aggregates of the `run_usage` ledger
@@ -53,6 +53,14 @@ export interface AgentUsage extends UsageTotals {
   readonly scope: "team" | "personal" | "gallery" | null;
 }
 
+/**
+ * Who made the calls (KOBE-234, `run_usage.kind`): `run` = a sandbox during a run; `title` and
+ * `followups` = the server after a run (KOBE-219/222).
+ */
+export interface KindUsage extends UsageTotals {
+  readonly kind: UsageKind;
+}
+
 export interface TeamUsageReport {
   readonly range: { readonly from: string; readonly to: string; readonly bucket: Bucket };
   readonly totals: UsageTotals;
@@ -60,6 +68,7 @@ export interface TeamUsageReport {
   readonly by_user: readonly UserUsage[];
   readonly by_model: readonly ModelUsage[];
   readonly by_agent: readonly AgentUsage[];
+  readonly by_kind: readonly KindUsage[];
 }
 
 export interface TeamUsageSummary extends UsageTotals {
@@ -180,6 +189,8 @@ async function teamReport(
       LEFT JOIN team_agents ta ON ta.team_id = u.team_id AND ta.id = u.agent_id
       LEFT JOIN site_agents ia ON ia.id = u.agent_id
      WHERE ${where} GROUP BY u.agent_id ${ORDER} ${LIMIT}`);
+  const kinds = await tx.execute<Row>(sql`
+    SELECT u.kind, ${TOTALS} FROM run_usage u WHERE ${where} GROUP BY u.kind ${ORDER}`);
   return {
     totals: totalsOf(totals.rows[0]),
     series: series.rows.map((r) => ({ t: iso(r.t), ...totalsOf(r) })),
@@ -196,6 +207,7 @@ async function teamReport(
       scope: (r.scope as AgentUsage["scope"]) ?? null,
       ...totalsOf(r),
     })),
+    by_kind: kinds.rows.map((r) => ({ kind: String(r.kind) as UsageKind, ...totalsOf(r) })),
   };
 }
 
@@ -265,6 +277,10 @@ export async function siteUsage(db: KobeDb, range: UsageRange): Promise<SiteUsag
       teams.map((t) => t.report.by_agent),
       (a) => `${a.scope ?? ""}:${a.agent_id ?? ""}`,
     ),
+    by_kind: mergeBy(
+      teams.map((t) => t.report.by_kind),
+      (k) => k.kind,
+    ),
     by_team: teams
       .map((t) => ({
         team_id: t.team.id,
@@ -294,7 +310,7 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
            array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
       FROM run_usage u
       LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
-     WHERE u.team_id = ${teamId}::uuid AND ${filter}
+     WHERE u.team_id = ${teamId}::uuid AND ${filter} AND u.kind = 'run'
      GROUP BY u.run_id, r.user_entry_id ORDER BY min(u.at)`);
   return res.rows.map((r) => ({
     run_id: String(r.run_id),
@@ -304,7 +320,11 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
   }));
 }
 
-/** Per-run usage of one run, or of every run of a thread (runs without calls are omitted). */
+/**
+ * Per-run usage of one run, or of every run of a thread (runs without calls are omitted): the
+ * run's own calls (`kind = 'run'`); the server's title and follow-up calls after it are in the
+ * dashboards and budgets, not under the answer (KOBE-219).
+ */
 export async function runsUsage(db: KobeDb, teamId: string, of: UsageOf): Promise<RunUsage[]> {
   return withTeam(db, teamId, (tx) => runsUsageIn(tx, teamId, of));
 }
@@ -331,7 +351,9 @@ export interface LatestCall {
  * The thread's newest `run_usage` row of a message run that read any input (a call refused before
  * the provider read the prompt says nothing about the context's size); null before its first model
  * call. A compaction's summary calls (KOBE-213, `runs.kind`) read the old context, not the one the
- * next turn sends, so they are left out here (their spend still counts in the totals and budgets).
+ * next turn sends, so they are left out here (their spend still counts in the totals and budgets),
+ * and so are the server's own calls after a run (KOBE-219: `kind` other than `run`), which send
+ * only a short excerpt.
  */
 async function latestCallIn(
   tx: KobeTx,
@@ -341,7 +363,7 @@ async function latestCallIn(
   const res = await tx.execute<Row>(sql`
     SELECT u.run_id, u.at, u.model, u.input_tokens, u.cache_read_tokens, u.cache_write_tokens
       FROM run_usage u
-     WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid
+     WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid AND u.kind = 'run'
        AND u.input_tokens + u.cache_read_tokens + u.cache_write_tokens > 0
        AND NOT EXISTS (SELECT 1 FROM runs r
                         WHERE r.team_id = u.team_id AND r.id = u.run_id AND r.kind = 'compaction')

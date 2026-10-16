@@ -43,6 +43,7 @@ export function usageRecordOf(call: CallRecord): ModelUsageRecord | undefined {
     userId: call.userId,
     sandboxId: call.sandboxId,
     runId: call.runId,
+    ...(call.purpose ? { kind: call.purpose } : {}),
     at: call.startedAt,
     route: call.route,
     model: call.model,

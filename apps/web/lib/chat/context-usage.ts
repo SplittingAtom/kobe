@@ -94,20 +94,24 @@ export interface ContextSize {
  * While a run streams, its newest message wins. After it ended, `run_usage` wins only once a read
  * made after the end holds a call of that run (a stale read keeps the streamed value; the usage
  * provider reads again, bounded). With no run streamed, `run_usage` as loaded.
+ *
+ * `compacted` (the entries hold a compaction after every call) wins over both: the streamed
+ * messages are entries too, so the run on screen streamed nothing since. Compact now after a run
+ * ended in this tab leaves that run's size on `live` (KOBE-293).
  */
 export function newestContextSize(
   live: LiveContext | undefined,
   read: UsageRead | null,
   compacted: boolean,
 ): ContextSize | null {
+  if (compacted) return null;
   const call = read?.latestCall;
-  const stored: ContextSize | null =
-    call && !compacted
-      ? {
-          tokens: call.inputTokens + call.cacheReadTokens + (call.cacheWriteTokens ?? 0),
-          counter: { gatewayModel: call.model },
-        }
-      : null;
+  const stored: ContextSize | null = call
+    ? {
+        tokens: call.inputTokens + call.cacheReadTokens + (call.cacheWriteTokens ?? 0),
+        counter: { gatewayModel: call.model },
+      }
+    : null;
   const streamed = live?.contextTokens;
   if (live === undefined || streamed === undefined) return stored;
   if (streamed === null) return null;

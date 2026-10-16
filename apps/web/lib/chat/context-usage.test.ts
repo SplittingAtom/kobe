@@ -122,6 +122,9 @@ describe("newestContextSize", () => {
     expect(newestContextSize(undefined, read(null, "r1"), true)).toBeNull();
     expect(newestContextSize(live(null), read("r2", "r2"), true)).toBeNull();
     expect(newestContextSize(live(null), read(null, "r1"), false)).toBeNull();
+    // Compact now after a run streamed in this tab: its streamed size predates the compaction.
+    expect(newestContextSize(live(120_000), read("r2", "r2"), true)).toBeNull();
+    expect(newestContextSize(live(120_000), read(null, "r1"), true)).toBeNull();
   });
 });
 

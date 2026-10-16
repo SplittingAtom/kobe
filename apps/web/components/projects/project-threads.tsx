@@ -28,9 +28,11 @@ export function ProjectThreads({ project }: { readonly project: Project }) {
                   <Link href={`/?thread=${t.threadId}`}>{t.title ?? "Untitled conversation"}</Link>{" "}
                   <span className={styles.hint}>
                     {t.ownerUserId === me
-                      ? t.sharedToProject
-                        ? "yours, shared with the project"
-                        : "yours, private"
+                      ? t.visibility === "team"
+                        ? "yours, shared with the team"
+                        : t.sharedToProject
+                          ? "yours, shared with the project"
+                          : "yours, private"
                       : `shared by ${roster.nameOf(t.ownerUserId)}, read-only`}
                     {" · "}
                     <DateTime value={t.lastActivityAt} />

@@ -282,7 +282,7 @@ describe("the CE7 table, per band (ac-1)", () => {
 });
 
 describe("review round 1", () => {
-  it("Escape that cancels a rename in the drawer leaves the drawer open", async () => {
+  it("Escape that closes a row's menu in the drawer leaves the drawer open (KOBE-292)", async () => {
     resizeWindow(960);
     fake.addThread("Budget");
     openApp(fake);
@@ -290,12 +290,18 @@ describe("review round 1", () => {
     const user = userEvent.setup();
     await user.click(await within(aside()).findByRole("button", { name: "Show threads" }));
     const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
-    await user.click(await drawer.findByRole("button", { name: "Rename Budget" }));
-    expect(drawer.getByLabelText("New title for Budget")).toBe(document.activeElement);
+    const button = await drawer.findByRole("button", { name: "Actions for Budget" });
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("menu", { name: "Actions for Budget" })).toBeTruthy();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(drawer.queryByLabelText("New title for Budget")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
-    await user.keyboard("{Escape}"); // the next one is the drawer's
+    expect(document.activeElement).toBe(button);
+    // The button's tooltip (shown on focus) takes the next Escape; then the drawer's.
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+    await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
   });
 

@@ -247,6 +247,19 @@ describe("gateway principal", () => {
     });
   });
 
+  it("a server call's principal names the catalog's reasoning models (KOBE-219)", async () => {
+    const plain = await loadGatewayPrincipal(app.db, teamA, userId, undefined);
+    expect(plain).toMatchObject({ sandbox: "unrecorded", reasoningModels: [] });
+    await app.db.execute(sql`UPDATE model_catalog SET reasoning = true WHERE alias = ${alias}`);
+    try {
+      const reasoning = await loadGatewayPrincipal(app.db, teamA, userId, undefined);
+      expect(reasoning.reasoningModels).toEqual([`kobe-${providerId}/qwen/qwen3-8b`]);
+      expect(reasoning.enabledModels).toEqual(plain.enabledModels);
+    } finally {
+      await app.db.execute(sql`UPDATE model_catalog SET reasoning = false WHERE alias = ${alias}`);
+    }
+  });
+
   it("another sandbox id, a hibernated or destroyed sandbox is revoked", async () => {
     expect((await loadGatewayPrincipal(app.db, teamA, userId, randomUUID())).sandbox).toBe(
       "revoked",

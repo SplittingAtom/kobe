@@ -239,7 +239,12 @@ export const projectFileNameSchema = uploadFileNameSchema;
 
 // ----------------------------------------------------------------------------- REST: share and fork
 
-export const THREAD_VISIBILITIES = ["private", "project"] as const;
+/**
+ * A thread's share scope (D23, CE20): `private` (its owner only), `project` (members of its project,
+ * read-only) or `team` (every member of the team, read-only; KOBE-221). Team admins have no wider
+ * view: they read a member's thread only when it is shared to them like to anyone else.
+ */
+export const THREAD_VISIBILITIES = ["private", "project", "team"] as const;
 export const threadVisibilitySchema = z.enum(THREAD_VISIBILITIES);
 export type ThreadVisibility = z.infer<typeof threadVisibilitySchema>;
 
@@ -254,7 +259,11 @@ export const threadProjectFieldsSchema = z.strictObject({
 });
 export type ThreadProjectFields = z.infer<typeof threadProjectFieldsSchema>;
 
-/** `POST /v1/threads/:id/share` (author only; the thread must already be in a project) -> 200 {@link threadProjectFieldsSchema}. */
+/**
+ * `POST /v1/threads/:id/share` (author only) -> 200 {@link threadProjectFieldsSchema}. `project`
+ * needs the thread to be in a project; `team` does not; `private` revokes either share at once,
+ * including open event streams of readers.
+ */
 export const shareThreadRequestSchema = z.strictObject({ visibility: threadVisibilitySchema });
 export type ShareThreadRequest = z.infer<typeof shareThreadRequestSchema>;
 

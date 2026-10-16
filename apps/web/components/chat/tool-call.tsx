@@ -12,6 +12,7 @@ import { OpenArtifactButton } from "./artifact-panel";
 import { Disclosure, useDisclosure } from "./detail";
 import { useKobeExtras } from "./kobe-runtime";
 import { FullOutputStatus, Output, PRE, useFullOutput, type FullOutput } from "./tool-output";
+import { useSkillOfToolCall } from "./skill-badge";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
 import styles from "./chat.module.css";
 
@@ -81,11 +82,14 @@ function useFullOutputEntry(toolCallId: string): string | undefined {
 function ToolCardHeader({
   toolName,
   summary,
+  skill,
   outcome,
   took,
 }: {
   readonly toolName: string;
   readonly summary: string;
+  /** The skill this call loaded (KOBE-297): "Read skill <name>" instead of tool and path. */
+  readonly skill?: string | undefined;
   readonly outcome: Outcome;
   readonly took: string | undefined;
 }) {
@@ -101,8 +105,17 @@ function ToolCardHeader({
           failed && "text-destructive",
         )}
       />
-      <span className="text-foreground shrink-0 font-mono font-medium">{toolName}</span>
-      {summary !== "" && <span className="min-w-0 truncate font-mono text-xs">{summary}</span>}
+      {skill === undefined ? (
+        <>
+          <span className="text-foreground shrink-0 font-mono font-medium">{toolName}</span>
+          {summary !== "" && <span className="min-w-0 truncate font-mono text-xs">{summary}</span>}
+        </>
+      ) : (
+        <>
+          <span className="text-foreground shrink-0 font-medium">Read skill</span>
+          <span className="text-foreground min-w-0 truncate font-mono text-xs">{skill}</span>
+        </>
+      )}
       <span className={cn("ms-auto shrink-0", failed && "text-destructive")}>
         {OUTCOME_LABEL[outcome]}
       </span>
@@ -196,6 +209,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
   const activity = extras?.state.live?.tools[props.toolCallId] ?? NO_ACTIVITY;
   const { open, setOpen } = useDisclosure();
   const fullEntry = useFullOutputEntry(props.toolCallId);
+  const skill = useSkillOfToolCall(props.toolCallId)?.name;
   const { output: full, retry } = useFullOutput(fullEntry, open);
   const outcome = outcomeOf(activity, props);
   const timing = props.timing;
@@ -206,7 +220,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
   return (
     <section
       className="border-border bg-card text-card-foreground my-1 w-full rounded-lg border text-sm whitespace-normal"
-      aria-label={`Tool call ${props.toolName}`}
+      aria-label={`Tool call ${props.toolName}${skill === undefined ? "" : `: skill ${skill}`}`}
     >
       <Disclosure
         open={open}
@@ -217,6 +231,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
           <ToolCardHeader
             toolName={props.toolName}
             summary={inputSummary((props.args ?? {}) as Readonly<Record<string, unknown>>)}
+            skill={skill}
             outcome={outcome}
             took={took}
           />

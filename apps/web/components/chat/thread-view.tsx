@@ -20,6 +20,7 @@ import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
+import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
 
 function statusLabel(state: ThreadState): string | undefined {
@@ -223,7 +224,6 @@ export function ThreadView({
   readonly contextInBar?: boolean;
 } = {}) {
   const extras = useKobeExtras();
-  const title = useAuiState((s) => s.threadListItem.title);
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
   if (!extras) return null;
   const { state } = extras;
@@ -236,11 +236,7 @@ export function ThreadView({
       style={COMPOSER_VARS}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">
-        <h2 id="kobe-thread-title" className="text-sm font-medium">
-          {state.threadId === null
-            ? "New conversation"
-            : (state.summary?.title ?? title ?? "Untitled conversation")}
-        </h2>
+        <ThreadTitle state={state} controller={extras.controller} editable={contextInBar} />
         {!contextInBar && <AgentChips />}
         {label && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>

@@ -2,7 +2,11 @@
 
 Playwright specs for the chat surfaces of v1.1 Phase A/B, run in a real browser against a running
 Kobe: scroll follow, the steering panel, the context gauge, Compact now, root edit, Regenerate
-with another model, Fork to a new thread, and the theme toggle with its popups. It is **not** part
+with another model, Fork to a new thread, the theme toggle with its popups, the rail's
+row menus with the header rename (KOBE-292), auto-titles with the rail's hover card
+(KOBE-219), pin, archive and move to project (KOBE-220; it creates a project, so the member
+must be allowed to, and archives it afterwards), and sharing with the team between two members
+(KOBE-221; needs `KOBE_USER2`, skipped without it). It is **not** part
 of CI and not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
 (`@playwright/test` 1.55.0, Apache-2.0).
 
@@ -25,6 +29,8 @@ KOBE_BASE_URL=https://kobe.example.org KOBE_USER=member@example.org KOBE_PW='…
 | `KOBE_BASE_URL` | The deployment's URL (required).                                                                                          |
 | `KOBE_USER`     | A member who can sign in with a password, can run conversations and (for the theme spec) can open the team admin console. |
 | `KOBE_PW`       | That member's password. Pass it from a secret store; never write it to a file or a log.                                   |
+| `KOBE_USER2`    | A second member of the same team (password sign-in, only that team), for the sharing spec; optional.                      |
+| `KOBE_PW2`      | That member's password; same rules as `KOBE_PW`.                                                                          |
 | `KOBE_WORKERS`  | Specs in parallel (default 1: each one starts a sandbox and spends tokens).                                               |
 
 One spec: `npx playwright test theme` (by file name) or `-g "Compact now"` (by title). The

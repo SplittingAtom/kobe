@@ -32,6 +32,14 @@ describe("usageRecordOf", () => {
     expect(usageRecordOf(call({ usage: undefined }))).toBeUndefined();
     expect(usageRecordOf(call({ model: undefined }))).toBeUndefined();
     expect(usageRecordOf(call())).toMatchObject({ inputTokens: 1, outputTokens: 2 });
+    expect(usageRecordOf(call())?.kind).toBeUndefined();
+  });
+
+  it("records a server call's kind, its triggering run and no sandbox (KOBE-234)", () => {
+    const runId = randomUUID();
+    expect(
+      usageRecordOf(call({ sandboxId: undefined, runId, purpose: "followups" })),
+    ).toMatchObject({ kind: "followups", runId, sandboxId: undefined });
   });
 });
 

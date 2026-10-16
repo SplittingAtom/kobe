@@ -19,11 +19,13 @@ import type {
   RunnableAgent,
   RunSnapshot,
   SubmitResult,
+  ThreadCard,
   ThreadDetail,
   ThreadPage,
   ThreadRuns,
   ThreadSearchPage,
   ThreadSummary,
+  ThreadVisibility,
 } from "./types";
 
 const enc = encodeURIComponent;
@@ -52,6 +54,12 @@ export interface TeamRetentionNotice {
   readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
 }
 
+/**
+ * The rail reads this many pinned and archived threads (CE19): one page each, the most recent.
+ * Older archived threads are found by search.
+ */
+export const ORGANIZED_PAGE = 100;
+
 const RUNNABLE_PAGE_SIZE = 200;
 /** A guard, not a limit anyone reaches: 10 pages of 200. */
 const RUNNABLE_MAX_PAGES = 10;
@@ -76,6 +84,19 @@ export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
+  /** The caller's pinned threads, newest pin first (CE19, KOBE-220). */
+  listPinned(): Promise<ApiResult<ThreadPage>>;
+  /** The caller's archived threads, most recently archived first (CE19). */
+  listArchived(): Promise<ApiResult<ThreadPage>>;
+  /** Others' threads shared with the caller, newest activity first (CE20, KOBE-221). */
+  listShared(): Promise<ApiResult<ThreadPage>>;
+  /** Pin, unpin, archive or unarchive one of the caller's threads (CE19); idempotent. */
+  organizeThread(
+    threadId: string,
+    action: "pin" | "unpin" | "archive" | "unarchive",
+  ): Promise<ApiResult<ThreadSummary>>;
+  /** Moves the thread to a project the caller may start threads in, or out (null; CE19). */
+  moveThread(threadId: string, projectId: string | null): Promise<ApiResult<ThreadSummary>>;
   /** A new thread; `model` is an enabled alias, or null/absent for the team default (KOBE-44). */
   createThread(
     title?: string,
@@ -83,11 +104,8 @@ export interface ChatApi {
     agent?: { readonly agentId: string; readonly test: boolean },
     projectId?: string | null,
   ): Promise<ApiResult<ThreadSummary>>;
-  /** Shares the thread to its project, or makes it private again (owner only, KOBE-163). */
-  shareThread(
-    threadId: string,
-    visibility: "private" | "project",
-  ): Promise<ApiResult<ThreadSummary>>;
+  /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
+  shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
   /**
    * Copies the thread into a new private thread of yours (`POST /v1/threads/:id/fork`): its
    * entries up to `entryId` (default: the leaf), titled `title` (default: the source's).
@@ -108,6 +126,8 @@ export interface ChatApi {
   getThread(threadId: string, after?: number): Promise<ApiResult<ThreadDetail>>;
   /** The thread without its entries (the thread list's `fetch`). */
   threadSummary(threadId: string): Promise<ApiResult<ThreadSummary>>;
+  /** The rail's hover card (CE18, KOBE-219): first message, agent, last activity, count. */
+  threadCard(threadId: string): Promise<ApiResult<ThreadCard>>;
   listEntries(threadId: string, after: number): Promise<ApiResult<EntryPage>>;
   renameThread(threadId: string, title: string | null): Promise<ApiResult<ThreadSummary>>;
   trashThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
@@ -207,6 +227,12 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
+    listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
+    listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),
+    listShared: () => get(`/v1/threads/shared${query({ limit: ORGANIZED_PAGE })}`),
+    organizeThread: (id, action) => send("POST", `/v1/threads/${enc(id)}/${action}`),
+    moveThread: (id, projectId) =>
+      send("POST", `/v1/threads/${enc(id)}/move`, { project_id: projectId }),
     shareThread: (id, visibility) => send("POST", `/v1/threads/${enc(id)}/share`, { visibility }),
     forkThread: (id, options = {}) =>
       send("POST", `/v1/threads/${enc(id)}/fork`, {
@@ -243,6 +269,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     getThread: (id, after = 0) =>
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),
     threadSummary: (id) => get(`/v1/threads/${enc(id)}${query({ limit: 1 })}`),
+    threadCard: (id) => get(`/v1/threads/${enc(id)}/card`),
     listEntries: (id, after) =>
       get(`/v1/threads/${enc(id)}/entries${query({ after, limit: 500 })}`),
     renameThread: (id, title) => send("PATCH", `/v1/threads/${enc(id)}`, { title }),

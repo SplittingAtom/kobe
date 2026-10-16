@@ -8,8 +8,10 @@ import {
   entryPageSchema,
   errorSchema,
   listThreadsQuerySchema,
+  moveThreadBodySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
+  threadCardSchema,
   threadDetailSchema,
   threadPageSchema,
   threadSearchPageSchema,
@@ -93,7 +95,9 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         operationId: "listThreads",
         summary: "List the viewer's threads (or a project's readable threads), newest first",
         description:
-          "Keyset pagination on (last_activity_at, id). Never Trash. With `q`, full-text search " +
+          "Keyset pagination on (last_activity_at, id). Never Trash. Without `project_id`, " +
+          "pinned and archived threads are left out (`/v1/threads/pinned`, `/archived`, CE19). " +
+          "With `q`, full-text search " +
           '(KOBE-33): web-search syntax (`"phrase"`, `-exclude`, `or`) over user/assistant ' +
           "messages (all terms in one message) and titles (plus fuzzy title matching), ranked by " +
           "relevance with snippets; `cursor` is then a search cursor and `limit` is capped at 50. " +
@@ -172,6 +176,34 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         responses: { "200": json("ThreadPage", "A page of trashed threads."), ...ERROR_RESPONSES },
       },
     },
+    "/v1/threads/pinned": {
+      get: {
+        operationId: "listPinnedThreads",
+        summary: "The viewer's pinned threads, most recently pinned first (CE19)",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of pinned threads."), ...ERROR_RESPONSES },
+      },
+    },
+    "/v1/threads/archived": {
+      get: {
+        operationId: "listArchivedThreads",
+        summary: "The viewer's archived threads, most recently archived first (CE19)",
+        description: "Archived threads stay searchable and follow the same retention.",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of archived threads."), ...ERROR_RESPONSES },
+      },
+    },
+    "/v1/threads/shared": {
+      get: {
+        operationId: "listSharedThreads",
+        summary: "Threads others shared with the viewer, most recent activity first (CE20)",
+        description:
+          "Shared with the team, or to a project the viewer belongs to; read-only (`read_only`, " +
+          "`owner_name`). Never Trash or test threads. Team admins see only what is shared with them.",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of shared threads."), ...ERROR_RESPONSES },
+      },
+    },
     "/v1/threads/{id}": {
       get: {
         operationId: "getThread",
@@ -202,6 +234,23 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         parameters: change([idParameter]),
         responses: {
           "200": json("Thread", "The trashed thread."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
+    "/v1/threads/{id}/card": {
+      get: {
+        operationId: "getThreadCard",
+        summary: "The rail's hover card: first message, agent, last activity, message count",
+        description:
+          "CE18 (KOBE-219): read when the card opens. The first user message is cut to 280 " +
+          "characters; the count holds the member's messages and the agent's answers on every " +
+          "branch (turns that only called tools are not counted). Readable by whoever may read " +
+          "the thread. Never wakes a sandbox.",
+        parameters: [idParameter, teamHeader],
+        responses: {
+          "200": json("ThreadCard", "The thread's card."),
           "404": notFound,
           ...ERROR_RESPONSES,
         },
@@ -290,14 +339,20 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
     "/v1/threads/{id}/share": {
       post: {
         operationId: "shareThread",
-        summary: "Set who can read the thread: `private` or `project` (author only)",
+        summary: "Set who can read the thread: `private`, `project` or `team` (author only)",
+        description:
+          "Readers read and fork, nothing more. `private` revokes at once, open event streams " +
+          "included. Both sharing and revoking are audited (`thread.sharing_changed`).",
         parameters: change([idParameter]),
         requestBody: body("ShareThreadBody"),
         responses: {
           "200": json("Thread", "The updated thread."),
           "404": notFound,
           ...ERROR_RESPONSES,
-          "409": json("Error", "`not_in_project`, `thread_busy` or `thread_in_trash`."),
+          "409": json(
+            "Error",
+            "`not_in_project`, `test_thread`, `thread_busy` or `thread_in_trash`.",
+          ),
         },
       },
     },
@@ -321,6 +376,23 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    ...organizeOperations(),
+    "/v1/threads/{id}/move": {
+      post: {
+        operationId: "moveThread",
+        summary: "Move the thread to a project, or out of one (owner only, CE19)",
+        description:
+          "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`).",
+        parameters: change([idParameter]),
+        requestBody: body("MoveThreadBody"),
+        responses: {
+          "200": json("Thread", "The moved thread."),
+          "404": json("Error", "`thread_not_found`, or `project_not_found` (also: not allowed)."),
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`thread_busy`, `thread_in_trash` or `test_thread`."),
+        },
+      },
+    },
     "/v1/threads/{id}/restore": {
       post: {
         operationId: "restoreThread",
@@ -336,6 +408,35 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
   };
 }
 
+const ORGANIZE = {
+  pin: ["pinThread", "Pin the thread (the Pinned group, by pin time; owner only, CE19)"],
+  unpin: ["unpinThread", "Unpin the thread (owner only, CE19)"],
+  archive: ["archiveThread", "Archive the thread: out of the normal groups, unpinned (CE19)"],
+  unarchive: ["unarchiveThread", "Unarchive the thread (owner only, CE19)"],
+} as const;
+
+/** Pin, unpin, archive, unarchive: idempotent, no body. */
+function organizeOperations() {
+  return Object.fromEntries(
+    Object.entries(ORGANIZE).map(([action, [operationId, summary]]) => [
+      `/v1/threads/{id}/${action}`,
+      {
+        post: {
+          operationId,
+          summary,
+          parameters: change([idParameter]),
+          responses: {
+            "200": json("Thread", "The thread."),
+            "404": notFound,
+            ...ERROR_RESPONSES,
+            "409": json("Error", "`thread_in_trash`, `thread_archived` (pin) or `test_thread`."),
+          },
+        },
+      },
+    ]),
+  );
+}
+
 export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
   return {
     Error: withoutDialect(output(errorSchema)),
@@ -343,6 +444,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadPage: withoutDialect(output(threadPageSchema)),
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
+    ThreadCard: withoutDialect(output(threadCardSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     ToolOutput: withoutDialect(output(toolOutputSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
@@ -350,6 +452,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ShareThreadBody: withoutDialect(input(shareThreadRequestSchema)),
     ForkThreadBody: withoutDialect(input(forkThreadRequestSchema)),
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
+    MoveThreadBody: withoutDialect(input(moveThreadBodySchema)),
     SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),
   };

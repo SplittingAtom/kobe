@@ -49,6 +49,7 @@ import { runEventsRoutes } from "./routes/run-events.js";
 import { runRoutes, threadRunRoutes } from "./routes/runs.js";
 import { setupRoutes } from "./routes/setup.js";
 import { skillRoutes } from "./routes/skills.js";
+import { skillReachRoutes } from "./routes/skill-reach.js";
 import { teamAuditRoutes } from "./routes/team-audit.js";
 import { teamEgressRoutes } from "./routes/team-egress.js";
 import { teamBreakGlassRoutes } from "./routes/team-break-glass.js";
@@ -184,6 +185,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   api.route("/skills", skillRoutes(deps));
+  api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
   api.route("/site/settings", siteSettingsRoutes(deps));

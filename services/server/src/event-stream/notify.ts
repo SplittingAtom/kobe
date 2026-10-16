@@ -32,3 +32,24 @@ export function decodeHint(payload: string | undefined): RunEventsHint | undefin
   const seq = Number(raw);
   return Number.isSafeInteger(seq) ? { runId: runId.toLowerCase(), seq } : undefined;
 }
+
+/**
+ * Access hint (KOBE-221), on the same channel: "who may watch run X changed" (a share was revoked
+ * or narrowed, the thread went to Trash or moved). Ids only, like {@link encodeHint}; the hub has
+ * every open stream of that run recheck its viewer at once instead of at the next periodic
+ * revalidation. A forged one costs one recheck.
+ */
+const ACCESS_PREFIX = "access:";
+
+export function encodeAccessHint(runId: string): string {
+  return `${ACCESS_PREFIX}${runId}`;
+}
+
+/** The run id of an access hint; undefined for anything else (never throws). */
+export function decodeAccessHint(payload: string | undefined): string | undefined {
+  if (payload === undefined || payload.length > 64 || !payload.startsWith(ACCESS_PREFIX)) {
+    return undefined;
+  }
+  const runId = payload.slice(ACCESS_PREFIX.length);
+  return uuid.safeParse(runId).success ? runId.toLowerCase() : undefined;
+}

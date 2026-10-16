@@ -294,6 +294,11 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     case "run.interrupted":
     case "run.budget_stopped":
       return { ...next, terminal: event, waking: undefined };
+    // Epilogue (KOBE-234): sent after run.completed, so never reaches here yet (dropped after a
+    // terminal below); KOBE-219 (title) and KOBE-222 (follow-ups) render them.
+    case "thread.updated":
+    case "thread.suggestions":
+      return next;
   }
 }
 

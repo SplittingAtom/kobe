@@ -1,5 +1,10 @@
 import pg from "pg";
-import type { KobeEvent } from "@kobe/protocol";
+import {
+  serverCallPurposeSchema,
+  type KobeEvent,
+  type KobeEventType,
+  type ServerCallPurpose,
+} from "@kobe/protocol";
 import type { TeamRole } from "@kobe/db";
 
 /** Most events one read returns: what a stream holds in memory at a time. */
@@ -22,6 +27,8 @@ export interface WatchableRun extends RunState {
   readonly projectId: string | null;
   /** Shared to its project and not in Trash (D23). */
   readonly sharedToProject: boolean;
+  /** Shared with the team and not in Trash (CE20, KOBE-221). */
+  readonly sharedToTeam: boolean;
 }
 
 export interface Page {
@@ -29,6 +36,16 @@ export interface Page {
   readonly run: RunState | null;
   /** Events with seq > after, ascending and contiguous. Shared between streams: never mutate. */
   readonly events: readonly KobeEvent[];
+}
+
+export interface EpilogueRecord {
+  /** Seq of the announcing `run.completed`. */
+  readonly terminalSeq: number;
+  readonly purposes: readonly ServerCallPurpose[];
+  /** Event types written after it. */
+  readonly written: ReadonlySet<KobeEventType>;
+  /** When it was written (database clock), ms since the epoch. */
+  readonly completedAtMs: number;
 }
 
 export interface Access {
@@ -39,6 +56,7 @@ export interface Access {
   readonly ownerUserId: string | null;
   readonly projectId: string | null;
   readonly sharedToProject: boolean;
+  readonly sharedToTeam: boolean;
 }
 
 /** Database reads behind the event stream, on their own small pool. */
@@ -50,6 +68,12 @@ export interface StreamReader {
    * watchers of a run cost one read per wake-up, not one per stream.
    */
   readPage(teamId: string, runId: string, after: number): Promise<Page>;
+  /**
+   * An ended run's epilogue (KOBE-234): what its `run.completed` announced, the epilogue events
+   * written after it and its seq; null when the run did not end with an announcing
+   * `run.completed`. Reads the run's last few events only (at most two follow the terminal).
+   */
+  epilogue(teamId: string, runId: string): Promise<EpilogueRecord | null>;
   /** Session, membership and thread owner in one statement (periodic revalidation). */
   access(input: {
     teamId: string;
@@ -80,13 +104,30 @@ const PAGE_SQL = `
    WHERE r.team_id = $1 AND r.id = $2
    ORDER BY p.seq`;
 
+/**
+ * A share counts only while the thread's owner is an active member of its team (KOBE-221), as in
+ * the thread API's `sharedWith`; `t` is the thread.
+ */
+const OWNER_ACTIVE = `EXISTS (SELECT 1 FROM team_members om JOIN users ou ON ou.id = om.user_id
+           WHERE om.team_id = t.team_id AND om.user_id = t.owner_user_id
+             AND ou.deactivated_at IS NULL)`;
+
 const RUN_SQL = `
   SELECT r.thread_id, t.owner_user_id, t.project_id,
-         (t.shared_to_project AND t.deleted_at IS NULL) AS shared, r.ended_at IS NOT NULL AS ended,
+         (t.shared_to_project AND t.deleted_at IS NULL AND ${OWNER_ACTIVE}) AS shared,
+         (t.shared_to_team AND t.deleted_at IS NULL AND ${OWNER_ACTIVE}) AS team_shared,
+         r.ended_at IS NOT NULL AS ended,
          r.events_compacted_at IS NOT NULL AS compacted, r.last_seq
     FROM runs r
     JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
    WHERE r.team_id = $1 AND r.id = $2`;
+
+const EPILOGUE_SQL = `
+  SELECT e.seq, e.type, e.payload -> 'epilogue' AS epilogue, e.created_at
+    FROM runs r
+    JOIN run_events e ON e.team_id = r.team_id AND e.run_id = r.id AND e.seq > r.last_seq - 3
+   WHERE r.team_id = $1 AND r.id = $2
+   ORDER BY e.seq`;
 
 const ACCESS_SQL = `
   SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id = $1 AND s.expires_at > now()) AS session_live,
@@ -97,9 +138,12 @@ const ACCESS_SQL = `
          (SELECT t.project_id FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
            WHERE r.team_id = $2 AND r.id = $4) AS project_id,
-         COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL FROM runs r
+         COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL AND ${OWNER_ACTIVE} FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-           WHERE r.team_id = $2 AND r.id = $4), false) AS shared`;
+           WHERE r.team_id = $2 AND r.id = $4), false) AS shared,
+         COALESCE((SELECT t.shared_to_team AND t.deleted_at IS NULL AND ${OWNER_ACTIVE} FROM runs r
+            JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+           WHERE r.team_id = $2 AND r.id = $4), false) AS team_shared`;
 
 interface PageRow {
   ended: boolean;
@@ -183,6 +227,7 @@ export function createStreamReader(options: {
         owner_user_id: string;
         project_id: string | null;
         shared: boolean;
+        team_shared: boolean;
         ended: boolean;
         compacted: boolean;
         last_seq: number;
@@ -194,6 +239,7 @@ export function createStreamReader(options: {
         ownerUserId: row.owner_user_id,
         projectId: row.project_id,
         sharedToProject: row.shared,
+        sharedToTeam: row.team_shared,
         ended: row.ended,
         compacted: row.compacted,
         lastSeq: row.last_seq,
@@ -208,6 +254,28 @@ export function createStreamReader(options: {
       }
       return pending;
     },
+    async epilogue(teamId, runId) {
+      const rows = await inTeam<{
+        seq: number;
+        type: string;
+        epilogue: unknown;
+        created_at: Date;
+      }>(teamId, EPILOGUE_SQL, [teamId, runId]);
+      const at = rows.findIndex((r) => r.type === "run.completed");
+      const terminal = rows[at];
+      if (!terminal || !Array.isArray(terminal.epilogue)) return null;
+      const purposes = terminal.epilogue.flatMap((p) => {
+        const parsed = serverCallPurposeSchema.safeParse(p);
+        return parsed.success ? [parsed.data] : [];
+      });
+      if (purposes.length === 0) return null;
+      return {
+        terminalSeq: Number(terminal.seq),
+        purposes,
+        written: new Set(rows.slice(at + 1).map((r) => r.type as KobeEventType)),
+        completedAtMs: new Date(terminal.created_at).getTime(),
+      };
+    },
     async access({ teamId, runId, userId, sessionId }) {
       const [row] = await inTeam<{
         session_live: boolean;
@@ -215,6 +283,7 @@ export function createStreamReader(options: {
         owner_user_id: string | null;
         project_id: string | null;
         shared: boolean;
+        team_shared: boolean;
       }>(teamId, ACCESS_SQL, [sessionId, teamId, userId, runId]);
       return {
         sessionLive: row?.session_live ?? false,
@@ -222,6 +291,7 @@ export function createStreamReader(options: {
         ownerUserId: row?.owner_user_id ?? null,
         projectId: row?.project_id ?? null,
         sharedToProject: row?.shared ?? false,
+        sharedToTeam: row?.team_shared ?? false,
       };
     },
     close: () => pool.end(),
