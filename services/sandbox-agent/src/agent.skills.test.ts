@@ -170,10 +170,10 @@ describe("skills at run start", () => {
 
   it("advertises skill support in hello only when it has a skills store (older agents send none)", async () => {
     h = await startHarness({ skills: store() });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles", "trace_spans"]);
     await h.close();
     h = await startHarness();
-    expect(h.server.frames("hello").at(-1)).not.toHaveProperty("capabilities");
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["trace_spans"]);
   });
 
   it("ignores config fields it does not know instead of failing the run", async () => {
@@ -256,9 +256,13 @@ describe("built-in skills", () => {
     expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
       "skill_bundles",
       "builtin_skills",
+      "trace_spans",
     ]);
     await h.close();
     h = await startHarness({ env: builtinEnv });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["builtin_skills"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
+      "builtin_skills",
+      "trace_spans",
+    ]);
   });
 });

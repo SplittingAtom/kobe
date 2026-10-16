@@ -666,7 +666,20 @@ export class Thread {
   ): Promise<void> {
     // Memory only (KOBE-118): handed to this Pi on request, never written anywhere.
     this.#runToken = runToken === undefined ? undefined : { runId, token: runToken };
-    await this.#modelFile?.update({ runId, model });
+    await this.#modelFile?.update({ runId, model, traceparent: null });
+  }
+
+  /**
+   * The run's current span for Pi's model calls (KOBE-274): written to the model file while `runId`
+   * is this thread's run. Never fails the run.
+   */
+  setTraceparent(runId: string, traceparent: string | null): void {
+    if (this.#run?.runId !== runId) return;
+    this.#modelFile
+      ?.update({ traceparent })
+      .catch((error: unknown) =>
+        this.#warn(`model file not updated with the trace context: ${(error as Error).message}`),
+      );
   }
 
   /**
@@ -759,7 +772,7 @@ export class Thread {
     this.#runToken = undefined;
     this.lastUsed = Date.now();
     this.#modelFile
-      ?.update({ runId: null })
+      ?.update({ runId: null, traceparent: null })
       .catch((error: unknown) =>
         this.#warn(`model file not updated at run end: ${(error as Error).message}`),
       );

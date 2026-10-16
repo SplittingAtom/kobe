@@ -243,6 +243,11 @@ export class ThreadManager {
   }
 
   /** Abort a run the server no longer leases to us, or one the outbox gave up on. */
+  /** The run's current span for its model calls (KOBE-274). */
+  setTraceparent(runId: string, traceparent: string | null): void {
+    for (const thread of this.#threads.values()) thread.setTraceparent(runId, traceparent);
+  }
+
   abortRun(runId: string): void {
     for (const thread of this.#threads.values()) {
       if (thread.runId === runId) void this.#abort(thread);

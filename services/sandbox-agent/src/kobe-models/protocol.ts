@@ -72,7 +72,15 @@ export interface ModelFileState {
   readonly token: string;
   /** The active run on this Pi (sent as `x-kobe-run-id`), or null between runs. */
   readonly run_id: string | null;
+  /**
+   * The run's current span as a W3C `traceparent` (KOBE-274), sent with the run's model calls;
+   * null when the run is not traced. Absent in files from older agents (read as null).
+   */
+  readonly traceparent?: string | null;
 }
+
+/** W3C `traceparent`, version 00 (mirrors `traceparentSchema` in packages/protocol). */
+const TRACEPARENT = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** `GATEWAY_MODEL_PATTERN`: the wire's own gateway-model limit (KOBE-280). */
@@ -133,6 +141,10 @@ export function parseModelFile(text: string): ModelFileState {
   if (runId !== null && (typeof runId !== "string" || !UUID.test(runId))) {
     throw new Error("model file run_id is invalid");
   }
+  const traceparent = raw.traceparent ?? null;
+  if (traceparent !== null && (typeof traceparent !== "string" || !TRACEPARENT.test(traceparent))) {
+    throw new Error("model file traceparent is invalid");
+  }
   return {
     v: MODEL_FILE_VERSION,
     gateway_url: gateway,
@@ -146,6 +158,7 @@ export function parseModelFile(text: string): ModelFileState {
           },
     token,
     run_id: runId === null ? null : runId.toLowerCase(),
+    ...(traceparent === null ? {} : { traceparent }),
   };
 }
 

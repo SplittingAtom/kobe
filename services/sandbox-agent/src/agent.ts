@@ -9,6 +9,7 @@ import {
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_COMPACT,
+  CAPABILITY_TRACE_SPANS,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -35,6 +36,7 @@ import { compactFailure, type CompactReply } from "./threads/compact.js";
 import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js";
 import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
+import { TraceRecorder } from "./trace/recorder.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { McpWiring } from "./mcp/pi-mcp-config.js";
@@ -129,6 +131,8 @@ export class Agent {
   readonly #proposals: ProjectFileBroker;
   readonly #searches: WebSearchBroker;
   readonly #memory: MemoryBroker;
+  /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
+  readonly #traces: TraceRecorder;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -138,6 +142,10 @@ export class Agent {
     this.#deps = deps;
     const { config, logger } = deps;
     this.#outbox = new Outbox(config.outboxMaxBytes);
+    this.#traces = new TraceRecorder({
+      sendText: (text) => this.#wire.sendText(text),
+      onModelParent: (runId, traceparent) => this.#threads.setTraceparent(runId, traceparent),
+    });
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
     this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
@@ -187,13 +195,16 @@ export class Agent {
       ...(deps.workspace === undefined
         ? {}
         : {
-            beforeRun: (frame: RunStartFrame) =>
-              deps.workspace?.beforeRun(frame) ?? Promise.resolve(),
+            beforeRun: (frame: RunStartFrame) => this.#pullWorkspace(frame),
           }),
       hooks: {
         runStarted: (runId, threadId) => this.#outbox.open(runId, threadId),
-        piEvent: (runId, threadId, event) => this.#emitPiEvent(runId, threadId, event),
+        piEvent: (runId, threadId, event) => {
+          this.#traces.onPiEvent(runId, event);
+          this.#emitPiEvent(runId, threadId, event);
+        },
         runEnded: (runId) => {
+          this.#traces.runEnded(runId);
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
@@ -212,7 +223,10 @@ export class Agent {
             request,
           });
         },
-        piExited: (threadId, runId, exit) => this.#reportExit(threadId, runId, exit),
+        piExited: (threadId, runId, exit) => {
+          if (runId !== undefined) this.#traces.piExited(runId);
+          this.#reportExit(threadId, runId, exit);
+        },
         policyCheck: (threadId, runId, check, reply) =>
           this.#broker.check(threadId, runId, check, reply),
         policyCancel: (threadId, requestId) => {
@@ -292,6 +306,8 @@ export class Agent {
     await this.#threads.shutdown(deadlineMs);
     // Pi is gone, so the workspace is settled: push what changed since the last sync.
     await this.#deps.workspace?.flush(WORKSPACE_FLUSH_MS);
+    this.#traces.flush();
+    this.#traces.close();
     await this.#wire.stop(1000, "agent stopping");
     this.#deps.onExit(code);
   }
@@ -343,6 +359,8 @@ export class Agent {
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
       // Compaction (KOBE-213) summarizes through the gateway with the run's token: same condition.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
+      // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.
+      CAPABILITY_TRACE_SPANS,
     ];
     return {
       v: 1,
@@ -360,6 +378,8 @@ export class Agent {
     this.#seenCommands = new Set();
     this.#outbox.resetConnectionState();
     const listed = new Map(ack.runs.map((run) => [run.run_id, run]));
+    // Spans of runs the server no longer lists would name runs this connection never held.
+    this.#traces.keepOnly(new Set(listed.keys()));
     for (const runId of this.#outbox.runIds()) {
       const run = listed.get(runId);
       if (run === undefined) {
@@ -410,6 +430,7 @@ export class Agent {
         this.#broker.onPending(frame);
         return;
       case "policy.result":
+        this.#traces.noteDecision(frame.run_id, frame.tool_call_id, frame.decision);
         this.#broker.onResult(frame);
         return;
       case "artifact.result":
@@ -459,6 +480,9 @@ export class Agent {
     // Command ids are per connection (connection.ts leasing): a result for a command that arrived
     // on an earlier connection must not be sent on a later one; the server re-issues instead.
     const epoch = this.#wire.epoch;
+    if (frame.type === "run.start")
+      this.#traces.startRun(frame.run_id, frame.thread_id, frame.trace);
+    if (frame.type === "run.stop") this.#traces.stopRequested(frame.run_id);
     let outcome: CommandOutcome;
     try {
       outcome = await this.#execute(frame);
@@ -467,6 +491,7 @@ export class Agent {
       outcome = fail("internal", "command failed in the sandbox agent");
     }
     if (!outcome.ok) logRefusal(this.#deps.logger, frame, outcome);
+    if (frame.type === "run.start" && !outcome.ok) this.#traces.runEnded(frame.run_id);
     if (this.#wire.epoch !== epoch || !this.#wire.ready) {
       this.#deps.logger.debug({ command_id: commandId }, "result dropped: connection changed");
       return;
@@ -500,6 +525,7 @@ export class Agent {
     if (this.#seenCommands.has(commandId)) return;
     this.#remember(commandId);
     const epoch = this.#wire.epoch;
+    this.#traces.startRun(frame.run_id, frame.thread_id, frame.trace, true);
     let reply: CompactReply;
     try {
       reply = await this.#threads.compact(frame);
@@ -513,6 +539,7 @@ export class Agent {
         "compaction refused",
       );
     }
+    this.#traces.runEnded(frame.run_id);
     if (this.#wire.epoch !== epoch || !this.#wire.ready) return;
     const base = { v: 1, type: "thread.compact_result", command_id: commandId } as const;
     if (this.#wire.send({ ...base, thread_id: frame.thread_id, ...reply })) return;
@@ -554,6 +581,20 @@ export class Agent {
     if (this.#seenCommands.size > MAX_REMEMBERED_COMMANDS) {
       const oldest = this.#seenCommands.values().next().value;
       if (oldest !== undefined) this.#seenCommands.delete(oldest);
+    }
+  }
+
+  /** Workspace restore before a run (KOBE-27), timed as the run's sync span (KOBE-274). */
+  async #pullWorkspace(frame: RunStartFrame): Promise<void> {
+    const startMs = Date.now();
+    let ok = false;
+    try {
+      await this.#deps.workspace?.beforeRun(frame);
+      ok = true;
+    } finally {
+      if (this.#deps.workspace !== undefined) {
+        this.#traces.workspaceSync(frame.run_id, { direction: "pull", startMs, ok });
+      }
     }
   }
 

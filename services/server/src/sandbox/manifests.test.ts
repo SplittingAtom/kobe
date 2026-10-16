@@ -278,6 +278,23 @@ describe("template, warm pool and claim", () => {
     });
   });
 
+  it("carries no collector URL or credential, even when the server has them (KOBE-274 ac-3)", async () => {
+    const saved = { ...process.env };
+    process.env.KOBE_OTEL_ENDPOINT = "http://collector.example:4318";
+    process.env.KOBE_OTEL_HEADERS = "Authorization=Basic c2VjcmV0";
+    process.env.KOBE_OTEL_CAPTURE_CONTENT = "true";
+    try {
+      const t = sandboxTemplateManifest("ns", await verified(), SETTINGS, ADDRESSES);
+      const text = JSON.stringify(t);
+      expect(text).not.toMatch(/OTEL|otlp|collector|langfuse|4318|c2VjcmV0|traceparent/i);
+      const pod = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as Pod;
+      const names = must(pod.containers[0]).env.map((e) => e.name);
+      expect(names.filter((n) => /OTEL|TRACE|COLLECTOR|LANGFUSE/i.test(n))).toEqual([]);
+    } finally {
+      process.env = saved;
+    }
+  });
+
   it("sizes the per-namespace warm pool from settings", () => {
     expect(warmPoolManifest("ns", SETTINGS).spec).toEqual({
       replicas: 1,
