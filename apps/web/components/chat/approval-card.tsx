@@ -108,6 +108,11 @@ function scrollBehavior(): ScrollBehavior {
   return reduce ? "auto" : "smooth";
 }
 
+/** The message list follows the latest message (KOBE-288's `data-kobe-follow`, use-follow.ts). */
+function followsLatest(el: Element): boolean {
+  return el.closest("[data-kobe-follow]")?.getAttribute("data-kobe-follow") === "pinned";
+}
+
 /** Brings the first approval still waiting into view (the steering panel's Show button). */
 export function scrollToPendingApproval(root: ParentNode = document): void {
   root
@@ -136,11 +141,14 @@ export function ApprovalCard({
   resolved,
   api,
   now = () => Date.now(),
+  readOnly = false,
 }: {
   readonly requested: Requested;
   readonly resolved: Resolved | undefined;
   readonly api: Pick<ChatApi, "decideApproval" | "getApproval"> | undefined;
   readonly now?: () => number;
+  /** The viewer reads a thread shared with them: the run's user decides, not them. */
+  readonly readOnly?: boolean;
 }) {
   const ids = useId();
   const [busy, setBusy] = useState(false);
@@ -158,12 +166,17 @@ export function ApprovalCard({
   );
   const [attempt, setAttempt] = useState(0);
   const card = useRef<HTMLElement>(null);
-  const pending = resolved === undefined;
-  // A request that arrives is brought into view once (KOBE-301): it needs the member.
+  const expired = Date.parse(requested.expires_at) <= now();
+  const askable = resolved === undefined && !expired && !readOnly;
+  // A request that arrives is brought into view once (KOBE-301), only while the list follows the
+  // latest message: a member reading further up keeps their place (KOBE-288), and the steering
+  // panel's Show brings it when they choose. Never for a reader, who cannot decide it.
   useEffect(() => {
-    // Once per request: later renders (the input read back) don't scroll again.
-    if (pending) card.current?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
-  }, [approvalId, pending]);
+    const el = card.current;
+    if (askable && el !== null && followsLatest(el)) {
+      el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+    }
+  }, [approvalId, askable]);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
@@ -192,7 +205,6 @@ export function ApprovalCard({
       </p>
     );
   }
-  const expired = Date.parse(requested.expires_at) <= now();
   // Every unicode-escaped character of the name, so lookalikes can't pass for another tool.
   const toolShown = visible(requested.tool).replace(
     /[^\x20-\x7e]/gu,

@@ -8,6 +8,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { stubApi } from "../admin/testing";
 import { IconActionProvider } from "../shell/icon-action";
+import { ApprovalCard } from "./approval-card";
 import { NotificationBell } from "./notification-bell";
 import { STOP_TINT } from "./steering-panel";
 import { OUTCOME_TONE } from "./tool-call";
@@ -109,7 +110,6 @@ describe("approval card (ac-3)", () => {
     expect(card.getAttribute("data-kobe-approval")).toBe("pending");
     const icon = must(card.querySelector("svg[aria-hidden]"));
     expect(icon.getAttribute("class")).toMatch(/attention/);
-    expect(scrolled).toContain(card);
 
     const footer = must(document.querySelector<HTMLElement>("[data-kobe-composer]"));
     const note = await within(footer).findByText("Waiting for your approval");
@@ -125,6 +125,39 @@ describe("approval card (ac-3)", () => {
 
     await userEvent.setup().click(within(card).getByRole("button", { name: "Allow" }));
     await waitFor(() => expect(within(footer).queryByText("Waiting for your approval")).toBeNull());
+  });
+
+  const cardIn = (
+    follow: "pinned" | "unpinned" | "pending",
+    props: { readOnly?: boolean; expiresAt?: string } = {},
+  ) =>
+    render(
+      <div data-kobe-follow={follow}>
+        <ApprovalCard
+          requested={{ ...asked(), ...(props.expiresAt ? { expires_at: props.expiresAt } : {}) }}
+          resolved={undefined}
+          api={undefined}
+          readOnly={props.readOnly ?? false}
+        />
+      </div>,
+    );
+
+  it("scrolls into view on arrival only while the list follows the latest message (M1)", () => {
+    cardIn("pinned");
+    expect(scrolled).toHaveLength(1);
+    expect(scrolled[0]?.getAttribute("data-kobe-approval")).toBe("pending");
+  });
+
+  it("never moves a member who scrolled up, or while the position is being restored (KOBE-288)", () => {
+    cardIn("unpinned");
+    cardIn("pending");
+    expect(scrolled).toEqual([]);
+  });
+
+  it("never scrolls for a reader of a shared thread or for an expired request", () => {
+    cardIn("pinned", { readOnly: true });
+    cardIn("pinned", { expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    expect(scrolled).toEqual([]);
   });
 
   it("the accent border is the amber status colour", () => {
