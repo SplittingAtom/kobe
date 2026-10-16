@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { ShieldAlertIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
 import { visible } from "../../lib/security/visible";
+import { cn } from "../../lib/utils";
+import { toneClass } from "../ui/status";
 import styles from "./chat.module.css";
 
 type Requested = KobeEventPayload<"approval.requested">;
@@ -97,6 +100,21 @@ function ApprovedInput({ tool, input }: { readonly tool: string; readonly input:
   );
 }
 
+/** Smooth unless the member asked for less motion. */
+function scrollBehavior(): ScrollBehavior {
+  const reduce =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return reduce ? "auto" : "smooth";
+}
+
+/** Brings the first approval still waiting into view (the steering panel's Show button). */
+export function scrollToPendingApproval(root: ParentNode = document): void {
+  root
+    .querySelector<HTMLElement>('[data-kobe-approval="pending"]')
+    ?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+}
+
 /** Anything outside printable ASCII in a tool name (lookalike letters, hidden characters). */
 const NON_ASCII = /[^\x20-\x7e]/;
 
@@ -139,6 +157,13 @@ export function ApprovalCard({
     inputMissing ? "loading" : "ready",
   );
   const [attempt, setAttempt] = useState(0);
+  const card = useRef<HTMLElement>(null);
+  const pending = resolved === undefined;
+  // A request that arrives is brought into view once (KOBE-301): it needs the member.
+  useEffect(() => {
+    // Once per request: later renders (the input read back) don't scroll again.
+    if (pending) card.current?.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+  }, [approvalId, pending]);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
@@ -193,12 +218,15 @@ export function ApprovalCard({
 
   return (
     <section
+      ref={card}
       className={styles.approval}
       role="group"
       aria-labelledby={`${ids}-title`}
       aria-describedby={`${ids}-why`}
+      data-kobe-approval={expired || sent ? "answered" : "pending"}
     >
       <p id={`${ids}-title`} className={styles.approvalTitle}>
+        <ShieldAlertIcon aria-hidden className={cn(styles.approvalIcon, toneClass("attention"))} />
         <strong>Approval needed</strong> to run <span className={styles.toolName}>{toolShown}</span>{" "}
         <span className={styles.badge}>{RISK_LABEL[requested.risk]}</span>
       </p>

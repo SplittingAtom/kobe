@@ -248,33 +248,27 @@
   white-space: nowrap;
 }
 
-/* Approval card (KOBE-37). */
+/* Approval card (KOBE-37): an amber accent border and icon (KOBE-301, the status colours). */
 .approval {
   margin: 0.25rem 0;
   padding: 0.5rem 0.75rem;
   background: var(--admin-warn-bg);
   border: 1px solid var(--admin-border);
+  border-inline-start: 4px solid var(--kobe-status-attention);
   border-radius: 0.375rem;
+  scroll-margin-block: 1rem;
 }
 
 .approvalTitle {
   margin: 0;
 }
 
-.approvalReasons {
-  margin: 0.25rem 0;
-  padding-left: 1.25rem;
-}
-
-.approvalRemember {
-  margin: 0.25rem 0;
-}
-
-.approvalActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+.approvalIcon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin-inline-end: 0.375rem;
+  vertical-align: -0.125rem;
 }
 
 /* --- small shared pieces ------------------------------------------------------------------- */

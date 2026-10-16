@@ -6,6 +6,7 @@ import { newSince, shownCount } from "../../lib/chat/scroll-follow";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { Skeleton } from "../ui/skeleton";
+import { StatusBadge, type StatusTone } from "../ui/status";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
 import { FilesButton } from "../shell/rail-state";
@@ -25,11 +26,21 @@ import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chi
 import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
 
-function statusLabel(state: ThreadState): string | undefined {
-  if (state.summary?.deletedAt != null) return "In Trash";
-  if (isThreadRunning(state)) return "Running";
+interface ThreadStatusCue {
+  readonly label: string;
+  readonly tone: StatusTone;
+  readonly pulse: boolean;
+}
+
+/**
+ * The header's state badge (KOBE-301): Running is green with a softly pulsing dot, Interrupted
+ * amber (it needs the member: Retry or Continue), In Trash grey. The label always shows.
+ */
+export function statusLabel(state: ThreadState): ThreadStatusCue | undefined {
+  if (state.summary?.deletedAt != null) return { label: "In Trash", tone: "idle", pulse: false };
+  if (isThreadRunning(state)) return { label: "Running", tone: "running", pulse: true };
   if (state.interruptedRun !== null || state.summary?.status === "interrupted")
-    return "Interrupted";
+    return { label: "Interrupted", tone: "attention", pulse: false };
   return undefined;
 }
 
@@ -245,7 +256,9 @@ export function ThreadView({
         <ThreadTitle state={state} controller={extras.controller} editable={contextInBar} />
         {!contextInBar && <AgentChips />}
         {label && (
-          <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
+          <StatusBadge tone={label.tone} pulse={label.pulse}>
+            {label.label}
+          </StatusBadge>
         )}
         {!contextInBar && (
           <span className="ms-auto">
