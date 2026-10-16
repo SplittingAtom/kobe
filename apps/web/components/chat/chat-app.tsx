@@ -205,7 +205,6 @@ function ChatWorkspace({
     () => session.onThreadListChanged(() => void runtime.threads.reload()),
     [session, runtime],
   );
-  const reloadList = useCallback(() => void runtime.threads.reload(), [runtime]);
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   // The member's layout, from any device (CE8): loaded once, changes saved debounced.
   const layout = useLayoutPreferences(fetchFn);
@@ -228,7 +227,7 @@ function ChatWorkspace({
                     >
                       <FileGoneNotice />
                       {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
-                      <ThreadActivityWatch reload={reloadList} pollMs={activityPollMs} />
+                      <ThreadActivityWatch pollMs={activityPollMs} />
                       <AppCommands />
                       {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
                       <ShortcutKeys />

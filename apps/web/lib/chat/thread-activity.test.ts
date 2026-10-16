@@ -39,6 +39,10 @@ describe("thread activity (KOBE-301)", () => {
     expect(stripTitlePrefix("Kobe")).toBe("Kobe");
   });
 
+  it("a teammate's run on a thread shared with the member is not theirs to watch (S1)", () => {
+    expect(activityOfSummary(summary({ status: "running", readOnly: true }))).toBe("idle");
+  });
+
   it("the store keeps immutable snapshots and reports a thread let go after a run as stale", () => {
     const store = new ThreadActivityStore();
     const changed = vi.fn();
@@ -48,15 +52,27 @@ describe("thread activity (KOBE-301)", () => {
     const first = store.snapshot();
     store.set("a", "idle");
     expect(store.snapshot()).not.toBe(first);
-    expect(first.size).toBe(0);
+    expect(first.live.size).toBe(0);
     store.set("a", "idle"); // no change, no notification
     expect(changed).toHaveBeenCalledTimes(1);
     store.release("a");
-    expect(stale).not.toHaveBeenCalled(); // never ran while held: the list is current
+    expect(stale).not.toHaveBeenCalled(); // never ran while held
     store.set("b", "running");
     store.set("b", "idle");
     store.release("b");
     expect(stale).toHaveBeenCalledWith("b");
-    expect(store.get("b")).toBeUndefined();
+    expect(store.get("b")).toBeUndefined(); // nothing polled yet: the list decides
+  });
+
+  it("held threads win over the server's answer; unlisted threads are idle once it answered", () => {
+    const store = new ThreadActivityStore();
+    store.setPolled(new Map([["a", "approval"]]));
+    expect(store.get("a")).toBe("approval");
+    expect(store.get("z")).toBe("idle");
+    store.set("a", "running");
+    expect(store.get("a")).toBe("running");
+    const before = store.snapshot();
+    store.setPolled(new Map([["a", "approval"]])); // same answer: no new snapshot
+    expect(store.snapshot()).toBe(before);
   });
 });

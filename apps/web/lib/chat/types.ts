@@ -30,6 +30,14 @@ export interface ThreadCard {
   readonly messageCountCapped?: boolean;
 }
 
+/** `GET /v1/threads/activity` (KOBE-301), camelized: threads not listed are idle. */
+export interface ThreadActivityList {
+  readonly threads: readonly {
+    readonly threadId: string;
+    readonly activity: "running" | "approval";
+  }[];
+}
+
 /** Who reads a thread (D23, CE20): its owner only, its project's members, or the whole team. */
 export type ThreadVisibility = "private" | "project" | "team";
 

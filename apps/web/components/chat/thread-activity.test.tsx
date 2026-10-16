@@ -39,7 +39,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function open(threadId: string) {
+function open(threadId: string, pollMs = 30) {
   window.history.replaceState(null, "", `/?thread=${threadId}`);
   let n = 0;
   return render(
@@ -48,7 +48,7 @@ function open(threadId: string) {
       eventSource={fake.eventSource}
       newKey={() => `key-${++n}`}
       reopenDelayMs={() => 0}
-      activityPollMs={30}
+      activityPollMs={pollMs}
     />,
   );
 }
@@ -148,15 +148,55 @@ describe("rail activity dots (ac-2)", () => {
     await waitFor(async () => expect(await activityOf("Ops")).toBe("approval"));
   });
 
-  it("stops reading the list once nothing outside the open thread is active", async () => {
-    const t = fake.addThread("Quiet");
+  it("a run this tab never started (a schedule, another device) shows from the activity read", async () => {
+    const t = fake.addThread("Here");
+    const elsewhere = fake.addThread("Nightly");
     open(t);
-    await rail();
-    const lists = () => fake.requests.filter((r) => r.method === "GET" && r.path === "/v1/threads");
-    await waitFor(() => expect(lists().length).toBeGreaterThan(0));
-    const before = lists().length;
+    expect(await activityOf("Nightly")).toBe("idle");
+    must(fake.threads.get(elsewhere)).status = "running";
+    await waitFor(async () => expect(await activityOf("Nightly")).toBe("running"));
+    must(fake.threads.get(elsewhere)).status = "idle";
+    await waitFor(async () => expect(await activityOf("Nightly")).toBe("idle"));
+  });
+
+  it("a teammate's run on a thread shared with the member shows no dot and no tab prefix (S1)", async () => {
+    const t = fake.addThread("Mine");
+    const shared = fake.addThread("Theirs");
+    Object.assign(must(fake.threads.get(shared)), {
+      read_only: true,
+      visibility: "team",
+      status: "running",
+    });
+    // Only the thread list decides here: the activity read fails and is not asked again soon.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    fake.failNext.set("GET /v1/threads/activity", new Response(null, { status: 500 }));
+    open(t, 60_000);
+    const theirs = await waitFor(() =>
+      must(document.querySelector(`li[data-kobe-thread="${shared}"]`)),
+    );
+    setVisibility("hidden");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(theirs.querySelector("[data-status-dot]")).toBeNull();
+    expect(document.title).toBe("Kobe");
+  });
+
+  it("reads only the activity, never the thread lists, and not while the tab is hidden", async () => {
+    const t = fake.addThread("Quiet");
+    must(fake.threads.get(fake.addThread("Busy"))).status = "running";
+    open(t);
+    await waitFor(async () => expect(await activityOf("Busy")).toBe("running"));
+    const reads = (path: string) =>
+      fake.requests.filter((r) => r.method === "GET" && r.path === path).length;
+    const lists = reads("/v1/threads");
+    await waitFor(() => expect(reads("/v1/threads/activity")).toBeGreaterThan(2));
+    expect(reads("/v1/threads")).toBe(lists); // no list reload while a thread runs elsewhere
+
+    setVisibility("hidden");
+    const hidden = reads("/v1/threads/activity");
     await new Promise((r) => setTimeout(r, 150));
-    expect(lists().length).toBe(before);
+    expect(reads("/v1/threads/activity")).toBe(hidden);
+    setVisibility("visible"); // shown again: read at once
+    expect(reads("/v1/threads/activity")).toBe(hidden + 1);
   });
 });
 

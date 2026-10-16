@@ -686,6 +686,13 @@ export class FakeKobe {
     return json(200, this.#summary(thread));
   }
 
+  /** A pending approval on the thread (the fake has one member: the run's user). */
+  #awaitsApproval(threadId: string): boolean {
+    return [...this.approvals.values()].some(
+      (a) => a.status === "pending" && this.runs.get(a.runId)?.thread_id === threadId,
+    );
+  }
+
   #summary(thread: FakeThread): Json {
     const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
     return {
@@ -704,9 +711,7 @@ export class FakeKobe {
       shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
       // KOBE-301: an approval waits for the caller (the fake has one member: the run's user).
-      ...([...this.approvals.values()].some(
-        (a) => a.status === "pending" && this.runs.get(a.runId)?.thread_id === thread.thread_id,
-      )
+      ...(thread.read_only !== true && this.#awaitsApproval(thread.thread_id)
         ? { pending_approval: true }
         : {}),
     };
@@ -1105,6 +1110,22 @@ export class FakeKobe {
         .filter((t) => t.deleted_at === null && t.read_only === true)
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
+    }
+    if (id === "activity" && method === "GET") {
+      // KOBE-301: the caller's own live threads with a run going; `approval` when one waits.
+      const active = [...this.threads.values()].filter(
+        (t) =>
+          t.deleted_at === null &&
+          t.read_only !== true &&
+          t.is_test !== true &&
+          t.status === "running",
+      );
+      return json(200, {
+        threads: active.map((t) => ({
+          thread_id: t.thread_id,
+          activity: this.#awaitsApproval(t.thread_id) ? "approval" : "running",
+        })),
+      });
     }
     if (id === "trash" && method === "GET") {
       const trash = [...this.threads.values()].filter((t) => t.deleted_at !== null);
