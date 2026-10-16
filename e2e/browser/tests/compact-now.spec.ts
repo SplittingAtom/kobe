@@ -55,13 +55,21 @@ test("Compact now folds the older turns into a summary marker", async ({ chat, p
   await expect(marker).toContainText("Context compacted");
   // The gauge is unknown again until the next model call.
   await expect(page.getByRole("meter", { name: "Context used" })).toHaveCount(0);
-  // The marker opens to the summary.
-  await marker.getByText("Context compacted").click();
+  // The marker opens to the summary. It follows the Detail toggle, which is stored per member
+  // (KOBE-208): already open when Detail is on, where a click would close it (KOBE-302).
+  const header = marker.getByRole("button", { name: /Context compacted/ });
+  if ((await header.getAttribute("aria-expanded")) !== "true") await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "true");
   await expect(
     marker
       .locator("[data-kobe-summary]")
       .or(marker.getByText("The summary is too large to show here.")),
   ).toBeVisible();
+  // A click closes it and the next opens it again.
+  await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "false");
+  await header.click();
+  await expect(header).toHaveAttribute("aria-expanded", "true");
 
   // Straight away again: nothing new to fold, and the dialog says so.
   await openDialog();
