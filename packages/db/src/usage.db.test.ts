@@ -254,4 +254,15 @@ describe("recordModelUsage", () => {
       constraint: "run_usage_kind_shape",
     });
   });
+
+  it("adds the kind CHECKs NOT VALID: no scan of the ledger under the migration's lock (0099)", async () => {
+    const res = await app.db.execute<{ conname: string; convalidated: boolean }>(sql`
+      SELECT conname, convalidated FROM pg_constraint
+       WHERE conrelid = 'public.run_usage'::regclass AND conname LIKE 'run_usage_kind%'
+       ORDER BY conname`);
+    expect(res.rows).toEqual([
+      { conname: "run_usage_kind", convalidated: false },
+      { conname: "run_usage_kind_shape", convalidated: false },
+    ]);
+  });
 });
