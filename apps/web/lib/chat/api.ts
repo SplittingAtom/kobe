@@ -25,6 +25,7 @@ import type {
   ThreadRuns,
   ThreadSearchPage,
   ThreadSummary,
+  ThreadVisibility,
 } from "./types";
 
 const enc = encodeURIComponent;
@@ -87,6 +88,8 @@ export interface ChatApi {
   listPinned(): Promise<ApiResult<ThreadPage>>;
   /** The caller's archived threads, most recently archived first (CE19). */
   listArchived(): Promise<ApiResult<ThreadPage>>;
+  /** Others' threads shared with the caller, newest activity first (CE20, KOBE-221). */
+  listShared(): Promise<ApiResult<ThreadPage>>;
   /** Pin, unpin, archive or unarchive one of the caller's threads (CE19); idempotent. */
   organizeThread(
     threadId: string,
@@ -101,11 +104,8 @@ export interface ChatApi {
     agent?: { readonly agentId: string; readonly test: boolean },
     projectId?: string | null,
   ): Promise<ApiResult<ThreadSummary>>;
-  /** Shares the thread to its project, or makes it private again (owner only, KOBE-163). */
-  shareThread(
-    threadId: string,
-    visibility: "private" | "project",
-  ): Promise<ApiResult<ThreadSummary>>;
+  /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
+  shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
   /**
    * Copies the thread into a new private thread of yours (`POST /v1/threads/:id/fork`): its
    * entries up to `entryId` (default: the leaf), titled `title` (default: the source's).
@@ -229,6 +229,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
     listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
     listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),
+    listShared: () => get(`/v1/threads/shared${query({ limit: ORGANIZED_PAGE })}`),
     organizeThread: (id, action) => send("POST", `/v1/threads/${enc(id)}/${action}`),
     moveThread: (id, projectId) =>
       send("POST", `/v1/threads/${enc(id)}/move`, { project_id: projectId }),

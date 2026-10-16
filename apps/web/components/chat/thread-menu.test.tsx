@@ -68,6 +68,7 @@ describe("thread row menu (KOBE-292)", () => {
       "Pin",
       "Move to project",
       "Archive",
+      "Share",
       "Delete",
     ]);
   });

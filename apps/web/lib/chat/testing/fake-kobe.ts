@@ -34,8 +34,10 @@ interface FakeThread {
   agent_status?: "active" | "suspended" | "archived" | null;
   /** The thread's project and sharing (KOBE-163); `read_only` = shared to you by someone else. */
   project_id?: string | null;
-  visibility?: "private" | "project";
+  visibility?: "private" | "project" | "team";
   read_only?: boolean;
+  /** For a reader: who shared it (KOBE-221); null once they left the team. */
+  owner_name?: string | null;
   /** Set on a thread a schedule started (KOBE-173); absent = a normal thread. */
   schedule_id?: string | null;
   /** The owner's organization (CE19, KOBE-220); absent = neither. */
@@ -657,7 +659,11 @@ export class FakeKobe {
       if (this.activeRun(thread.thread_id) || this.#queued(thread.thread_id).length > 0) {
         return error(409, "thread_busy", "The thread is busy.");
       }
-      Object.assign(thread, { project_id: target, visibility: "private" });
+      // A project share ends with the move; a team share stays (KOBE-221).
+      Object.assign(thread, {
+        project_id: target,
+        visibility: thread.visibility === "team" ? "team" : "private",
+      });
     }
     return json(200, this.#summary(thread));
   }
@@ -673,6 +679,7 @@ export class FakeKobe {
       archived_at: thread.archived_at ?? null,
       visibility: thread.visibility ?? "private",
       ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
+      owner_name: thread.read_only === true ? (thread.owner_name ?? null) : null,
       agent_id: thread.agent_id ?? null,
       agent_version: null,
       is_test: thread.is_test ?? false,
@@ -1016,6 +1023,8 @@ export class FakeKobe {
         .filter((t) => t.deleted_at === null && t.is_test !== true)
         // The activity list leaves out pinned and archived threads; search finds them (CE19).
         .filter((t) => q !== null || (!t.pinned_at && !t.archived_at))
+        // ... and others' shared threads, which have their own list (CE20, KOBE-221).
+        .filter((t) => q !== null || t.read_only !== true)
         .filter((t) => q === null || (t.title ?? "").toLowerCase().includes(q.toLowerCase()))
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       const threads = list.map((t) =>
@@ -1035,6 +1044,12 @@ export class FakeKobe {
       const list = [...this.threads.values()]
         .filter((t) => t.deleted_at === null && t.is_test !== true && t[key])
         .sort((a, b) => String(b[key]).localeCompare(String(a[key])));
+      return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
+    }
+    if (id === "shared" && method === "GET") {
+      const list = [...this.threads.values()]
+        .filter((t) => t.deleted_at === null && t.read_only === true)
+        .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
     }
     if (id === "trash" && method === "GET") {
@@ -1090,9 +1105,12 @@ export class FakeKobe {
     if (action === "share" && method === "POST") {
       if (thread.read_only)
         return error(403, "read_only", "This thread is shared with you read-only.");
-      if (!thread.project_id)
+      const visibility = body?.visibility;
+      if (visibility !== "private" && visibility !== "project" && visibility !== "team")
+        return error(400, "invalid_request", "Give visibility: private, project or team.");
+      if (visibility === "project" && !thread.project_id)
         return error(409, "not_in_project", "Only threads in a project can be shared.");
-      thread.visibility = body?.visibility === "project" ? "project" : "private";
+      thread.visibility = visibility;
       return json(200, this.#summary(thread));
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);

@@ -7,8 +7,10 @@ import {
   inArray,
   runs,
   sql,
+  teamMembers,
   threadEntries,
   threads,
+  users,
   type KobeTx,
   type RunStatus,
 } from "@kobe/db";
@@ -26,8 +28,10 @@ import {
   type DraftPin,
   type PinError,
 } from "../agents/versions.js";
-import { canCreateInProject } from "./references.js";
 import { visibilityOf } from "./share.js";
+import { applyShareScope, recordShareScope, shareScopeRefusal } from "./share-scope.js";
+import { notifyThreadAccess } from "../event-stream/access.js";
+import type { ThreadVisibility } from "@kobe/protocol";
 import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { trimLargeOutput } from "./entry-output.js";
@@ -35,10 +39,10 @@ import { trimLargeOutput } from "./entry-output.js";
 /**
  * Thread data access (spec D9, D15, D18, D23, §6.1). Every function runs inside the caller's
  * `withTeam` transaction, so RLS confines it to the active team; the visibility rules below add
- * the per-user layer: a viewer reads their own threads (including their Trash) and threads shared
- * to a project they belong to (read-only, never from Trash). Nobody else reads a thread — not a
- * team admin (D18), not a site admin (D8; break-glass is its own audited path, KOBE-16).
- * Only the owner changes a thread.
+ * the per-user layer: a viewer reads their own threads (including their Trash), threads shared
+ * to a project they belong to and threads shared with the team (CE20, KOBE-221), read-only and
+ * never from Trash. Nobody else reads a thread — not a team admin (D18), not a site admin (D8;
+ * break-glass is its own audited path, KOBE-16). Only the owner changes a thread.
  */
 
 type SQL = ReturnType<typeof sql>;
@@ -103,6 +107,7 @@ export const summaryColumns = {
   agentId: threads.agentId,
   agentVersion: threads.agentVersion,
   sharedToProject: threads.sharedToProject,
+  sharedToTeam: threads.sharedToTeam,
   modelAlias: threads.modelAlias,
   leafEntryId: threads.leafEntryId,
   lastActivityAt: threads.lastActivityAt,
@@ -126,6 +131,7 @@ export type SummaryRow = {
   agentId: string | null;
   agentVersion: number | null;
   sharedToProject: boolean;
+  sharedToTeam: boolean;
   modelAlias: string | null;
   leafEntryId: string | null;
   lastActivityAt: Date;
@@ -174,17 +180,21 @@ export function toSummary(row: SummaryRow): ThreadSummary {
 
 /**
  * Rows the viewer may read: own (Trash included while restorable; older Trash is awaiting purge
- * and treated as gone) or shared to one of their projects (never from Trash).
+ * and treated as gone), or shared with the team or to one of their projects (never from Trash).
  */
 function readableBy(viewer: Viewer): SQL {
   const own = sql`${eq(threads.ownerUserId, viewer.userId)} AND (${threads.deletedAt} IS NULL OR ${threads.deletedAt} > now() - ${TRASH_INTERVAL})`;
-  if (viewer.projectIds.length === 0) return sql`${eq(threads.teamId, viewer.teamId)} AND ${own}`;
-  const shared = and(
+  return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR (${sharedWith(viewer)} AND ${threads.deletedAt} IS NULL))`;
+}
+
+/** Shared to the viewer by its scope: with the team, or to one of their projects (D23, CE20). */
+function sharedWith(viewer: Viewer): SQL {
+  if (viewer.projectIds.length === 0) return sql`${threads.sharedToTeam}`;
+  const project = and(
     eq(threads.sharedToProject, true),
     inArray(threads.projectId, [...viewer.projectIds]),
-    sql`${threads.deletedAt} IS NULL`,
   );
-  return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR ${shared})`;
+  return sql`(${threads.sharedToTeam} OR ${project})`;
 }
 
 /**
@@ -201,14 +211,42 @@ export async function summarize(
   const ids = new Set(rows.flatMap((r) => (r.forkedFromThreadId ? [r.forkedFromThreadId] : [])));
   const sources =
     ids.size === 0 ? new Map<string, SummaryRow>() : await findThreads(tx, viewer, [...ids]);
+  const owners = await sharerNames(tx, viewer, rows);
   return rows.map((row) => {
     const source = row.forkedFromThreadId ? sources.get(row.forkedFromThreadId) : undefined;
-    // Pin and archive are the owner's own organization (CE19): a project reader never sees them.
-    const summary = ownOrganization(toSummary(row), viewer);
+    // Pin and archive are the owner's own organization (CE19): a reader never sees them.
+    const own = row.ownerUserId === viewer.userId;
+    const summary = {
+      ...ownOrganization(toSummary(row), viewer),
+      read_only: !own,
+      owner_name: own ? null : (owners.get(row.ownerUserId) ?? null),
+    };
     return source
       ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
       : summary;
   });
+}
+
+/**
+ * The names of the people who shared `rows` with the viewer ("Shared by …", CE20), only those
+ * still in the active team: someone who left shows as null. Never the email address.
+ */
+export async function sharerNames(
+  tx: KobeTx,
+  viewer: Viewer,
+  rows: readonly { readonly ownerUserId: string }[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(rows.map((r) => r.ownerUserId).filter((id) => id !== viewer.userId))];
+  if (ids.length === 0) return new Map();
+  const found = await tx
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .innerJoin(
+      teamMembers,
+      and(eq(teamMembers.teamId, viewer.teamId), eq(teamMembers.userId, users.id)),
+    )
+    .where(inArray(users.id, ids));
+  return new Map(found.map((u) => [u.id, u.name]));
 }
 
 /** The summary with `pinned_at` / `archived_at` only for its owner (CE19, KOBE-220). */
@@ -313,6 +351,33 @@ export async function listOwnOrganized(
     )
     // NULLS LAST as the indexes are built, so the scan is already in order (no sort).
     .orderBy(sql`${column} DESC NULLS LAST`, sql`${threads.id} DESC NULLS LAST`)
+    .limit(options.limit + 1);
+  return toPage(tx, viewer, rows, options.limit);
+}
+
+/**
+ * Shared with me (CE20, KOBE-221): other members' live threads shared with the viewer, with the
+ * team or to one of their projects, most recent activity first (indexes `threads_team_shared_idx`
+ * and `threads_project_activity_idx`). Read-only for the viewer; never test threads or Trash.
+ */
+export async function listSharedWithMe(
+  tx: KobeTx,
+  viewer: Viewer,
+  options: { cursor: ActivityCursor | null; limit: number },
+): Promise<Page<ThreadSummary>> {
+  const rows = await tx
+    .select({ ...summaryColumns, position: micros(threads.lastActivityAt) })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.teamId, viewer.teamId),
+        sql`${threads.ownerUserId} <> ${viewer.userId}`,
+        sharedWith(viewer),
+        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
+        options.cursor ? after(threads.lastActivityAt, options.cursor) : undefined,
+      ),
+    )
+    .orderBy(desc(threads.lastActivityAt), desc(threads.id))
     .limit(options.limit + 1);
   return toPage(tx, viewer, rows, options.limit);
 }
@@ -456,65 +521,75 @@ export async function hasRunIn(
   return row !== undefined;
 }
 
+/**
+ * The owner's changes to a thread: title, model and share scope. `visibility` (`POST /share`) sets
+ * the scope; the older `shared_to_project` (PATCH) shares to the project (true) or ends a project
+ * share (false; a team share stays).
+ */
 export async function updateThread(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
-  body: UpdateThreadBody,
+  body: UpdateThreadBody & { readonly visibility?: ThreadVisibility },
 ): Promise<ThreadResult> {
   const locked = await lockForChange(tx, viewer, id);
   if (!locked.ok) return locked;
-  if (locked.thread.deletedAt) return { ok: false, error: "thread_in_trash" };
-  if (body.shared_to_project !== undefined && locked.thread.projectId === null) {
+  const before = locked.thread;
+  if (before.deletedAt) return { ok: false, error: "thread_in_trash" };
+  // PATCH shared_to_project (KOBE-34) is about the project: refused outside one, as before.
+  if (body.shared_to_project !== undefined && before.projectId === null) {
     return { ok: false, error: "not_in_project" };
   }
-  // Sharing needs the owner to still be a member who can use the (unarchived) project: a removed
-  // member's old thread can't be put back in front of the project. Unsharing is always allowed.
-  if (
-    body.shared_to_project === true &&
-    !locked.thread.sharedToProject &&
-    locked.thread.projectId !== null &&
-    !(await canCreateInProject(tx, viewer, locked.thread.projectId))
-  ) {
-    return { ok: false, error: "project_not_found" };
+  const target = targetScope(before, body);
+  if (target !== undefined) {
+    const refusal = await shareScopeRefusal(tx, viewer, before, target);
+    if (refusal) return { ok: false, error: refusal };
   }
   // A newly chosen model must be one the team enabled; keeping the current one is always fine.
-  const modelChanged = body.model !== undefined && body.model !== locked.thread.modelAlias;
+  const modelChanged = body.model !== undefined && body.model !== before.modelAlias;
   if (modelChanged && body.model && !(await isModelEnabled(tx, viewer.teamId, body.model))) {
     return { ok: false, error: "model_not_enabled" };
   }
+  const set = {
+    // The owner's own name locks the title against auto-titling (CE18, KOBE-292), and
+    // clearing it hands the name back to auto-titling.
+    ...(body.title !== undefined ? { title: body.title, titleLocked: body.title !== null } : {}),
+    ...applyShareScope(before, target),
+    ...(modelChanged ? { modelAlias: body.model ?? null } : {}),
+  };
+  // Nothing changes (the scope it already has, the same model): idempotent, nothing recorded.
+  if (Object.keys(set).length === 0) {
+    return { ok: true, thread: await summarizeOne(tx, viewer, before) };
+  }
   const [row] = await tx
     .update(threads)
-    .set({
-      // The owner's own name locks the title against auto-titling (CE18, KOBE-292), and
-      // clearing it hands the name back to auto-titling.
-      ...(body.title !== undefined ? { title: body.title, titleLocked: body.title !== null } : {}),
-      ...(body.shared_to_project !== undefined ? { sharedToProject: body.shared_to_project } : {}),
-      ...(modelChanged ? { modelAlias: body.model ?? null } : {}),
-    })
+    .set(set)
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
-  if (row.projectId !== null && row.sharedToProject !== locked.thread.sharedToProject) {
-    await recordAudit(tx, {
-      action: "thread.sharing_changed",
-      teamId: viewer.teamId,
-      target: {
-        threadId: id,
-        projectId: row.projectId,
-        shared: row.sharedToProject,
-        visibility: visibilityOf(row),
-      },
-    });
-  }
+  await recordShareScope(tx, viewer, before, row);
   if (modelChanged) {
     await recordAudit(tx, {
       action: "thread.model_changed",
       teamId: viewer.teamId,
-      target: { threadId: id, from: locked.thread.modelAlias, to: row.modelAlias },
+      target: { threadId: id, from: before.modelAlias, to: row.modelAlias },
     });
   }
   return { ok: true, thread: await summarizeOne(tx, viewer, row) };
+}
+
+/** The scope a change asks for, or undefined when it leaves the scope alone. */
+function targetScope(
+  thread: SummaryRow,
+  body: {
+    readonly visibility?: ThreadVisibility | undefined;
+    readonly shared_to_project?: boolean | undefined;
+  },
+): ThreadVisibility | undefined {
+  if (body.visibility !== undefined) return body.visibility;
+  if (body.shared_to_project === undefined) return undefined;
+  if (body.shared_to_project) return "project";
+  return visibilityOf(thread) === "project" ? "private" : undefined;
 }
 
 /**
@@ -630,6 +705,8 @@ export async function trashThread(tx: KobeTx, viewer: Viewer, id: string): Promi
     teamId: viewer.teamId,
     target: { threadId: id },
   });
+  // Readers lose a shared thread while it is in Trash: their open streams recheck now.
+  if (visibilityOf(row) !== "private") await notifyThreadAccess(tx, viewer.teamId, id);
   return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 

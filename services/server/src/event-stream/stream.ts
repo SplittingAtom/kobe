@@ -198,6 +198,10 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
       dirty = true;
       signal();
     },
+    revalidate() {
+      revalidateDue = true;
+      signal();
+    },
     close: () => finish("shutdown"),
   };
 

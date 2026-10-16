@@ -79,9 +79,27 @@ describe("thread groups (CE5)", () => {
         projectId: null,
         scheduled: false,
         shared: false,
+        visibility: "private",
         pinned: false,
         archived: false,
       });
     }
+  });
+
+  it("lists a project-shared thread under Shared with me and in its project group (CE20)", () => {
+    const groups = groupThreads(
+      [
+        listed("own", { projectId: "p1" }),
+        listed("ps", { projectId: "p1", shared: true, visibility: "project" }),
+        listed("ts", { projectId: "p1", shared: true, visibility: "team" }),
+        listed("tl", { projectId: null, shared: true, visibility: "team" }),
+      ],
+      [],
+      (id) => ({ p1: "Budget" })[id],
+    );
+    expect(groups.map((g) => [g.kind, g.threads.map((t) => `${t.id}@${t.index}`)])).toEqual([
+      ["project", ["own@0", "ps@1"]],
+      ["shared", ["ps@1", "ts@2", "tl@3"]],
+    ]);
   });
 });

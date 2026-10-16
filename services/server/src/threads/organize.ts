@@ -1,5 +1,6 @@
 import { and, eq, sql, threads, type KobeTx, type ThreadProjectMove } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { notifyThreadAccess } from "../event-stream/access.js";
 import { canCreateInProject } from "./references.js";
 import { movesOf, withMove } from "./project-moves.js";
 import {
@@ -23,7 +24,8 @@ import {
  *   unpins; pinning an archived thread is refused), and neither is audited, like a rename.
  * - Move sets `project_id` where the owner may start a thread (`canCreateInProject`, as
  *   `POST /v1/threads`), only while no run is queued or running (that run's context is the old
- *   project's), unshares a thread shared to its old project (its audience changes), and records
+ *   project's), unshares a thread shared to its old project (its audience changes; a team share
+ *   stays, KOBE-221), and records
  *   the move for the next run's marker (`project-moves.ts`) and the audit log.
  */
 
@@ -134,12 +136,20 @@ export async function moveThread(
     teamId: viewer.teamId,
     target: { threadId: id, from: thread.projectId, to: projectId },
   });
+  // A project share ends with the move (its readers were the old project's); a team share stays.
   if (thread.sharedToProject && thread.projectId !== null) {
     await recordAudit(tx, {
       action: "thread.sharing_changed",
       teamId: viewer.teamId,
-      target: { threadId: id, projectId: thread.projectId, shared: false, visibility: "private" },
+      target: {
+        threadId: id,
+        projectId: thread.projectId,
+        shared: false,
+        visibility: "private",
+        from: "project",
+      },
     });
+    await notifyThreadAccess(tx, viewer.teamId, id);
   }
   return result;
 }

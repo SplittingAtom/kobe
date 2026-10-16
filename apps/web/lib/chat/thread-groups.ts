@@ -2,9 +2,12 @@
  * The rail's thread groups (CE5, KOBE-198) in their fixed order: Pinned → projects → ungrouped →
  * Scheduled → Shared with me → Archived → Trash. A group shows only when it has threads. Pinned and
  * Archived are the owner's organization (CE19, KOBE-220: `pinned_at`, `archived_at`); "archived"
- * in the thread list adapter's own status is Trash (D18), not CE19's Archive.
+ * in the thread list adapter's own status is Trash (D18), not CE19's Archive. Shared with me holds
+ * others' threads shared with the member (CE20, KOBE-221); one shared to a project is also listed
+ * in that project's group.
  */
-import type { ThreadSummary } from "./types";
+import { visibilityOf } from "./share";
+import type { ThreadSummary, ThreadVisibility } from "./types";
 
 export type GroupKind =
   "pinned" | "project" | "ungrouped" | "scheduled" | "shared" | "archived" | "trash";
@@ -34,6 +37,8 @@ export interface ThreadPlacement {
   readonly scheduled: boolean;
   /** Shared to the caller by someone else (KOBE-163): read-only. */
   readonly shared: boolean;
+  /** The share scope (CE20): a project-scoped shared thread is also in its project's group. */
+  readonly visibility: ThreadVisibility;
   /** CE19: in the Pinned group (by pin time, the list's order), or in Archived. */
   readonly pinned: boolean;
   readonly archived: boolean;
@@ -44,6 +49,7 @@ export function placementCustom(thread: ThreadSummary): Record<string, unknown> 
     projectId: thread.projectId,
     scheduled: thread.scheduleId != null,
     shared: thread.readOnly === true,
+    visibility: visibilityOf(thread),
     pinned: thread.pinnedAt != null,
     archived: thread.archivedAt != null,
   };
@@ -57,6 +63,7 @@ export function placementOf(custom: unknown): ThreadPlacement {
     projectId: typeof c.projectId === "string" ? c.projectId : null,
     scheduled: c.scheduled === true,
     shared: c.shared === true,
+    visibility: c.visibility === "project" || c.visibility === "team" ? c.visibility : "private",
     pinned: c.pinned === true,
     archived: c.archived === true,
   };
@@ -102,17 +109,29 @@ export function groupThreads(
   projectName: (id: string) => string | undefined,
 ): readonly ThreadGroup[] {
   const buckets = new Map<string, ThreadGroup>();
+  const add = (kind: GroupKind, projectId: string | null, thread: GroupedThread) => {
+    const key = kind === "project" ? `project:${projectId}` : kind;
+    const label =
+      kind === "project"
+        ? (projectName(projectId ?? "") ?? "Project")
+        : LABELS[kind as Exclude<GroupKind, "project">];
+    const group = buckets.get(key) ?? {
+      key,
+      kind,
+      label,
+      projectId: kind === "project" ? (projectId ?? undefined) : undefined,
+      threads: [],
+    };
+    buckets.set(key, { ...group, threads: [...group.threads, thread] });
+  };
   regular.forEach(({ id, custom }, index) => {
     const placement = placementOf(custom);
     const kind = kindOf(placement);
-    const key = kind === "project" ? `project:${placement.projectId}` : kind;
-    const label =
-      kind === "project"
-        ? (projectName(placement.projectId ?? "") ?? "Project")
-        : LABELS[kind as Exclude<GroupKind, "project">];
-    const projectId = kind === "project" ? (placement.projectId ?? undefined) : undefined;
-    const group = buckets.get(key) ?? { key, kind, label, projectId, threads: [] };
-    buckets.set(key, { ...group, threads: [...group.threads, { id, index }] });
+    add(kind, placement.projectId, { id, index });
+    // CE20: shared to a project, it is also one of that project's threads.
+    if (kind === "shared" && placement.visibility === "project" && placement.projectId !== null) {
+      add("project", placement.projectId, { id, index });
+    }
   });
   if (trashIds.length > 0) {
     const threads = trashIds.map((id, index) => ({ id, index }));

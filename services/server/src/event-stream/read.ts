@@ -27,6 +27,8 @@ export interface WatchableRun extends RunState {
   readonly projectId: string | null;
   /** Shared to its project and not in Trash (D23). */
   readonly sharedToProject: boolean;
+  /** Shared with the team and not in Trash (CE20, KOBE-221). */
+  readonly sharedToTeam: boolean;
 }
 
 export interface Page {
@@ -54,6 +56,7 @@ export interface Access {
   readonly ownerUserId: string | null;
   readonly projectId: string | null;
   readonly sharedToProject: boolean;
+  readonly sharedToTeam: boolean;
 }
 
 /** Database reads behind the event stream, on their own small pool. */
@@ -103,7 +106,8 @@ const PAGE_SQL = `
 
 const RUN_SQL = `
   SELECT r.thread_id, t.owner_user_id, t.project_id,
-         (t.shared_to_project AND t.deleted_at IS NULL) AS shared, r.ended_at IS NOT NULL AS ended,
+         (t.shared_to_project AND t.deleted_at IS NULL) AS shared,
+         (t.shared_to_team AND t.deleted_at IS NULL) AS team_shared, r.ended_at IS NOT NULL AS ended,
          r.events_compacted_at IS NOT NULL AS compacted, r.last_seq
     FROM runs r
     JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
@@ -127,7 +131,10 @@ const ACCESS_SQL = `
            WHERE r.team_id = $2 AND r.id = $4) AS project_id,
          COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-           WHERE r.team_id = $2 AND r.id = $4), false) AS shared`;
+           WHERE r.team_id = $2 AND r.id = $4), false) AS shared,
+         COALESCE((SELECT t.shared_to_team AND t.deleted_at IS NULL FROM runs r
+            JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+           WHERE r.team_id = $2 AND r.id = $4), false) AS team_shared`;
 
 interface PageRow {
   ended: boolean;
@@ -211,6 +218,7 @@ export function createStreamReader(options: {
         owner_user_id: string;
         project_id: string | null;
         shared: boolean;
+        team_shared: boolean;
         ended: boolean;
         compacted: boolean;
         last_seq: number;
@@ -222,6 +230,7 @@ export function createStreamReader(options: {
         ownerUserId: row.owner_user_id,
         projectId: row.project_id,
         sharedToProject: row.shared,
+        sharedToTeam: row.team_shared,
         ended: row.ended,
         compacted: row.compacted,
         lastSeq: row.last_seq,
@@ -265,6 +274,7 @@ export function createStreamReader(options: {
         owner_user_id: string | null;
         project_id: string | null;
         shared: boolean;
+        team_shared: boolean;
       }>(teamId, ACCESS_SQL, [sessionId, teamId, userId, runId]);
       return {
         sessionLive: row?.session_live ?? false,
@@ -272,6 +282,7 @@ export function createStreamReader(options: {
         ownerUserId: row?.owner_user_id ?? null,
         projectId: row?.project_id ?? null,
         sharedToProject: row?.shared ?? false,
+        sharedToTeam: row?.team_shared ?? false,
       };
     },
     close: () => pool.end(),

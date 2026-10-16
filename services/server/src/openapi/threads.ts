@@ -193,6 +193,17 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         responses: { "200": json("ThreadPage", "A page of archived threads."), ...ERROR_RESPONSES },
       },
     },
+    "/v1/threads/shared": {
+      get: {
+        operationId: "listSharedThreads",
+        summary: "Threads others shared with the viewer, most recent activity first (CE20)",
+        description:
+          "Shared with the team, or to a project the viewer belongs to; read-only (`read_only`, " +
+          "`owner_name`). Never Trash or test threads. Team admins see only what is shared with them.",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of shared threads."), ...ERROR_RESPONSES },
+      },
+    },
     "/v1/threads/{id}": {
       get: {
         operationId: "getThread",
@@ -328,14 +339,20 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
     "/v1/threads/{id}/share": {
       post: {
         operationId: "shareThread",
-        summary: "Set who can read the thread: `private` or `project` (author only)",
+        summary: "Set who can read the thread: `private`, `project` or `team` (author only)",
+        description:
+          "Readers read and fork, nothing more. `private` revokes at once, open event streams " +
+          "included. Both sharing and revoking are audited (`thread.sharing_changed`).",
         parameters: change([idParameter]),
         requestBody: body("ShareThreadBody"),
         responses: {
           "200": json("Thread", "The updated thread."),
           "404": notFound,
           ...ERROR_RESPONSES,
-          "409": json("Error", "`not_in_project`, `thread_busy` or `thread_in_trash`."),
+          "409": json(
+            "Error",
+            "`not_in_project`, `test_thread`, `thread_busy` or `thread_in_trash`.",
+          ),
         },
       },
     },

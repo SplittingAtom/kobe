@@ -4,6 +4,7 @@ import { IconAction } from "../shell/icon-action";
 import { useEffect, useState } from "react";
 import { createProjectsApi } from "../../lib/projects/api";
 import { isBusy } from "../../lib/chat/thread-state";
+import { SHARED_HINT, sharedBy, visibilityOf } from "../../lib/chat/share";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -13,8 +14,10 @@ export function isReadOnlyThread(extras: KobeThreadExtras | null | undefined): b
 }
 
 /**
- * The project side of a thread: for its owner a share-with-the-project switch, for a reader the
- * read-only banner with Fork. Plain text only. The server decides every call; a refusal shows.
+ * The sharing side of a thread (D23, CE20): for a reader the read-only banner naming who shared it,
+ * with Fork; for its owner a share-with-the-project switch on a project thread, or, while it is
+ * shared with the team, a note with Make private (the row menu's Share sets every scope). Plain
+ * text only. The server decides every call; a refusal shows.
  */
 export function ProjectBar({
   extras,
@@ -44,8 +47,8 @@ export function ProjectBar({
     return (
       <div className={styles.banner} role="note" aria-label="Shared thread">
         <p>
-          This conversation is shared with you read-only. You can read it and fork it into your own
-          private copy; only its author can continue it.
+          {sharedBy(summary.ownerName)} This conversation is shared with you read-only. You can read
+          it and fork it into your own private copy; only its author can continue it.
         </p>
         <button type="button" disabled={isBusy(state, "fork")} onClick={() => void fork()}>
           Fork into my conversations
@@ -55,8 +58,23 @@ export function ProjectBar({
     );
   }
 
+  const visibility = visibilityOf(summary);
+  if (visibility === "team") {
+    return (
+      <div className={styles.banner} role="group" aria-label="Sharing">
+        <span className={styles.hint}>{SHARED_HINT.team}</span>{" "}
+        <button
+          type="button"
+          disabled={isBusy(state, "share")}
+          onClick={() => void controller.setVisibility("private")}
+        >
+          Make private
+        </button>
+      </div>
+    );
+  }
   if (summary.projectId === null) return null;
-  const shared = summary.visibility === "project" || summary.sharedToProject;
+  const shared = visibility === "project";
   return (
     <div className={styles.banner} role="group" aria-label="Sharing">
       <label>
@@ -69,9 +87,7 @@ export function ProjectBar({
         Share with the project
       </label>
       <span className={styles.hint}>
-        {shared
-          ? " Members of the project can read and fork this conversation."
-          : " Only you can see this conversation."}
+        {shared ? ` ${SHARED_HINT.project}` : " Only you can see this conversation."}
       </span>
       <IconAction command="open-project" href={`/me/projects/${summary.projectId}`} size="sm" />
     </div>

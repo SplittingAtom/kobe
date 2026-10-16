@@ -21,7 +21,6 @@ import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protoco
 import { FORK_RATE, forkThread } from "../threads/fork.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
-import { sharedToProjectFor } from "../threads/share.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
@@ -31,6 +30,7 @@ import {
   isLockTimeout,
   listEntries,
   listOwnOrganized,
+  listSharedWithMe,
   listThreads,
   listTrash,
   restoreThread,
@@ -197,6 +197,18 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (cursor === undefined) return fail(c, "invalid_cursor");
     const page = await asViewer(c, (tx, viewer) =>
       listTrash(tx, viewer, { cursor, limit: query.limit }),
+    );
+    return c.json(pageBody(page));
+  });
+
+  // Shared with me (CE20, KOBE-221): others' threads shared with the caller, newest activity first.
+  app.get("/shared", async (c) => {
+    const query = parseQuery(c, trashQuerySchema);
+    if (!query) return invalidRequest(c);
+    const cursor = cursorParam(query.cursor);
+    if (cursor === undefined) return fail(c, "invalid_cursor");
+    const page = await asViewer(c, (tx, viewer) =>
+      listSharedWithMe(tx, viewer, { cursor, limit: query.limit }),
     );
     return c.json(pageBody(page));
   });
@@ -369,10 +381,8 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   app.post("/:id/share", async (c) => {
     const id = threadIdParam(c);
     const body = await parseBody(c, shareThreadRequestSchema);
-    if (!id || !body) return invalidRequest(c, "Give visibility: private or project.");
-    return change(c, (tx, viewer) =>
-      updateThread(tx, viewer, id, { shared_to_project: sharedToProjectFor(body.visibility) }),
-    );
+    if (!id || !body) return invalidRequest(c, "Give visibility: private, project or team.");
+    return change(c, (tx, viewer) => updateThread(tx, viewer, id, { visibility: body.visibility }));
   });
 
   app.post("/:id/fork", async (c) => {

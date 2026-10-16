@@ -103,6 +103,9 @@ class FakeHub implements RunEventHub {
   hint(seq: number) {
     for (const s of this.subs) s.hint(seq);
   }
+  accessChanged() {
+    for (const s of this.subs) s.revalidate?.();
+  }
   async close() {
     for (const s of this.subs) s.close();
   }
@@ -306,6 +309,23 @@ describe("run event stream", () => {
     const { reader, ends } = open(log, new FakeHub());
     log.allowed = false;
     expect(await reader.rest()).toEqual([]);
+    expect(ends).toEqual(["revoked"]);
+  });
+
+  it("rechecks access at once when the hub says the thread's access changed (KOBE-221)", async () => {
+    const log = new FakeLog();
+    const hub = new FakeHub();
+    log.append(1);
+    // Periodic revalidation far away: only the push can end the stream in time.
+    const { reader, ends } = open(log, hub, 0, { ...FAST, revalidateMs: 60_000 });
+    expect((await reader.nextEvent())?.seq).toBe(1);
+    log.allowed = false;
+    hub.accessChanged();
+    const ended = await Promise.race([
+      reader.rest().then(() => true),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 1_000)),
+    ]);
+    expect(ended).toBe(true);
     expect(ends).toEqual(["revoked"]);
   });
 

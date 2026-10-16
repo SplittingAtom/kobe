@@ -30,6 +30,9 @@ export interface ThreadCard {
   readonly messageCountCapped?: boolean;
 }
 
+/** Who reads a thread (D23, CE20): its owner only, its project's members, or the whole team. */
+export type ThreadVisibility = "private" | "project" | "team";
+
 export interface ThreadSummary {
   readonly threadId: string;
   readonly title: string | null;
@@ -42,10 +45,15 @@ export interface ThreadSummary {
   readonly agentName?: string | null;
   readonly agentStatus?: "active" | "suspended" | "archived" | null;
   readonly sharedToProject: boolean;
-  /** `private` or `project` (KOBE-163); absent on older answers = see `sharedToProject`. */
-  readonly visibility?: "private" | "project";
+  /**
+   * `private`, `project` (KOBE-163) or `team` (KOBE-221); absent on older answers = see
+   * `sharedToProject`.
+   */
+  readonly visibility?: ThreadVisibility;
   /** True for a thread shared to you by someone else: you read and fork it, nothing else. */
   readonly readOnly?: boolean;
+  /** For a reader: who shared it ("Shared by …"); null once they left the team (KOBE-221). */
+  readonly ownerName?: string | null;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */

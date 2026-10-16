@@ -15,7 +15,7 @@ import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
 import { organizeRequest, type OrganizeChange } from "./organize";
 import type { ThreadListSync } from "./thread-list-sync";
-import type { RunnableAgent, ThreadSummary } from "./types";
+import type { RunnableAgent, ThreadSummary, ThreadVisibility } from "./types";
 
 export interface ChatSessionOptions {
   readonly teamId: string;
@@ -361,6 +361,19 @@ export class ChatSession {
    */
   async organize(threadId: string, change: OrganizeChange): Promise<ApiResult<ThreadSummary>> {
     const res = await organizeRequest(this.api, threadId, change);
+    if (res.ok) {
+      this.#listChanged(threadId);
+      this.#options.listSync?.post(threadId);
+    }
+    return res;
+  }
+
+  /**
+   * Sets who reads one of the member's threads (CE20, KOBE-221): only them, the project's members
+   * or the whole team; `private` revokes. Once saved, the rail and the thread read again.
+   */
+  async share(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>> {
+    const res = await this.api.shareThread(threadId, visibility);
     if (res.ok) {
       this.#listChanged(threadId);
       this.#options.listSync?.post(threadId);

@@ -16,6 +16,7 @@ import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
 import { useChatSession } from "./kobe-runtime";
 import { useThreadTeamModels, type TeamModelsLoad } from "./use-team-models";
 import { useOrganizeMenu } from "./use-organize-menu";
+import { useShareMenu } from "./use-share-menu";
 
 const NO_ANSWER = "There is no answer to regenerate yet.";
 const OPENING = "Opening the conversation…";
@@ -96,8 +97,8 @@ interface Notice {
 /**
  * A listed thread's ⋯ menu in the rail (KOBE-292): Copy (the branch on screen as Markdown),
  * Regenerate and Regenerate with (its last answer, as the answer's own buttons do, after opening
- * the thread), Pin, Move to project and Archive (CE19, KOBE-220, `useOrganizeMenu`) and Delete
- * (to Trash, no confirm: it can be undone).
+ * the thread), Pin, Move to project and Archive (CE19, KOBE-220, `useOrganizeMenu`), Share (CE20,
+ * KOBE-221, `useShareMenu`) and Delete (to Trash, no confirm: it can be undone).
  */
 export function ThreadRowMenu() {
   const aui = useAui();
@@ -117,6 +118,14 @@ export function ThreadRowMenu() {
     title,
     custom,
     open,
+    readOnly,
+    state,
+    notify: setNotice,
+  });
+  const share = useShareMenu({
+    threadId: threadId ?? "",
+    title,
+    custom,
     readOnly,
     state,
     notify: setNotice,
@@ -203,6 +212,7 @@ export function ThreadRowMenu() {
         }
       : {}),
     ...organize,
+    ...share,
     "trash-thread": { onSelect: trash, destructive: true, blocker: readOnly ? NOT_YOURS : null },
   };
 

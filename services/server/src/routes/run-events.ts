@@ -130,6 +130,7 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
               ownerUserId: access.ownerUserId,
               projectId: access.projectId,
               sharedToProject: access.sharedToProject,
+              sharedToTeam: access.sharedToTeam,
             },
             user.id,
             access.ownerUserId === user.id ? [] : await memberOf(),

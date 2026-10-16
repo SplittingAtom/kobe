@@ -67,17 +67,23 @@ export function createThreadListAdapter(
         return { threads: page.threads.map(meta), nextCursor: page.nextCursor ?? undefined };
       }
       // CE19: the activity list leaves pinned and archived threads out; their own lists (first
-      // page, newest first) frame it, so no thread is listed twice when more pages load.
-      const [pinned, page, archived, trash] = await Promise.all([
+      // page, newest first) frame it, so no thread is listed twice when more pages load. The
+      // activity list is the member's own: others' shared threads come from their list (CE20).
+      const [pinned, page, shared, archived, trash] = await Promise.all([
         unwrap(api.listPinned()),
         unwrap(api.listThreads()),
+        unwrap(api.listShared()),
         unwrap(api.listArchived()),
         unwrap(api.listTrash()),
       ]);
       return {
-        threads: [...pinned.threads, ...page.threads, ...archived.threads, ...trash.threads].map(
-          meta,
-        ),
+        threads: [
+          ...pinned.threads,
+          ...page.threads,
+          ...shared.threads,
+          ...archived.threads,
+          ...trash.threads,
+        ].map(meta),
         nextCursor: page.nextCursor ?? undefined,
       };
     },

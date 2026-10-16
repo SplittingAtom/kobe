@@ -6,7 +6,7 @@ import {
   type ThreadSearchHit as SearchHit,
 } from "@kobe/db";
 import { visibilityOf } from "./share.js";
-import { findThreads, ownOrganization, type Viewer } from "./repository.js";
+import { findThreads, ownOrganization, sharerNames, type Viewer } from "./repository.js";
 import type { ThreadSearchHit } from "./schemas.js";
 
 /**
@@ -57,7 +57,16 @@ export async function searchThreadList(
     // open it (`findThreads`, KOBE-216).
     const sourceIds = [...new Set(page.hits.flatMap((h) => h.forkedFromThreadId ?? []))];
     const sources = await findThreads(tx, viewer, sourceIds);
-    const threads = page.hits.map((hit) => ownOrganization(toWire(hit, sources), viewer));
+    const owners = await sharerNames(tx, viewer, page.hits);
+    const threads = page.hits.map((hit) => {
+      // Someone else's thread is shared with the viewer (CE20): read-only, by its sharer.
+      const own = hit.ownerUserId === viewer.userId;
+      return {
+        ...ownOrganization(toWire(hit, sources), viewer),
+        read_only: !own,
+        owner_name: own ? null : (owners.get(hit.ownerUserId) ?? null),
+      };
+    });
     return { ok: true, body: { threads, next_cursor: page.nextCursor } };
   } catch (err) {
     // `failed`/`no_team` are server faults: rethrown to the 500 handler (messages carry no SQL).

@@ -35,7 +35,8 @@ import {
   type ThreadState,
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
-import type { ThreadEntry, ThreadRuns, ThreadSummary } from "./types";
+import { SHARED_ANNOUNCEMENT } from "./share";
+import type { ThreadEntry, ThreadRuns, ThreadSummary, ThreadVisibility } from "./types";
 
 const NO_THREAD: ApiError = {
   status: 0,
@@ -817,8 +818,11 @@ export class ThreadController {
     this.#set((s) => ({ ...s, actionError: failure }));
   }
 
-  /** Shares the thread to its project or makes it private again (owner only; the server decides). */
-  readonly setVisibility = async (visibility: "private" | "project"): Promise<boolean> => {
+  /**
+   * Shares the thread with its project or the team, or makes it private again (owner only; the
+   * server decides).
+   */
+  readonly setVisibility = async (visibility: ThreadVisibility): Promise<boolean> => {
     const threadId = this.#state.threadId;
     if (threadId === null) return false;
     const res = await this.#busy("share", () => this.#api.shareThread(threadId, visibility));
@@ -827,11 +831,7 @@ export class ThreadController {
       return false;
     }
     this.#set((s) => ({ ...s, summary: { ...res.data, readOnly: false } }));
-    this.#announce(
-      visibility === "project"
-        ? "Shared with the project. Its members can read and fork this conversation."
-        : "Private again. Only you can see this conversation.",
-    );
+    this.#announce(SHARED_ANNOUNCEMENT[visibility]);
     return true;
   };
 

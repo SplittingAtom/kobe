@@ -118,6 +118,7 @@ describe("project API", () => {
 describe("share and fork", () => {
   it("share, fork, thread fields (old thread shapes need none)", () => {
     expect(shareThreadRequestSchema.safeParse({ visibility: "project" }).success).toBe(true);
+    expect(shareThreadRequestSchema.safeParse({ visibility: "team" }).success).toBe(true);
     expect(shareThreadRequestSchema.safeParse({ visibility: "public" }).success).toBe(false);
     for (const title of ["a\u0000b", "a\nb", "a\tb", "x".repeat(201), "   "]) {
       expect(forkThreadRequestSchema.safeParse({ title }).success, JSON.stringify(title)).toBe(

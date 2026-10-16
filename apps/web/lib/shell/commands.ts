@@ -41,6 +41,7 @@ import {
   RefreshCcwDotIcon,
   RefreshCwIcon,
   ServerCogIcon,
+  Share2Icon,
   SquareIcon,
   SquarePenIcon,
   SunIcon,
@@ -208,6 +209,8 @@ const LIST = [
   { id: "move-thread", name: "Move to project", icon: FolderInputIcon, scope: "thread-menu" },
   { id: "archive-thread", name: "Archive", icon: ArchiveIcon, scope: "thread-menu" },
   { id: "unarchive-thread", name: "Unarchive", icon: ArchiveRestoreIcon, scope: "thread-menu" },
+  // Share (CE20, KOBE-221): a submenu of scopes (only you, the project's members, the team).
+  { id: "share-thread", name: "Share", icon: Share2Icon, scope: "thread-menu" },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.

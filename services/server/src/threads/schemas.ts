@@ -148,8 +148,18 @@ export const threadSummarySchema = z.object({
   agent_id: wireUuidSchema.nullable(),
   agent_version: z.number().int().nullable(),
   shared_to_project: z.boolean(),
-  /** The share scope (D23): `private` or `project` (a `team` scope may follow, KOBE-221). */
+  /** The share scope (D23, CE20): `private`, `project` or `team` (KOBE-221). */
   visibility: threadVisibilitySchema,
+  /**
+   * Computed for the caller (KOBE-221): true for a thread someone else shared with them, which
+   * they may read and fork, nothing more. Absent where no viewer applies (a just-created thread).
+   */
+  read_only: z.boolean().optional(),
+  /**
+   * For a reader: the name of the member who shared it ("Shared by …"), null once they left the
+   * team. Always null for the caller's own threads; never an email address.
+   */
+  owner_name: z.string().nullable().optional(),
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
@@ -260,7 +270,7 @@ export const threadDetailSchema = threadSummarySchema.extend({
    */
   /** The pinned agent's name and effective status in this team (KOBE-122); null without one. */
   agent_name: z.string().nullable(),
-  /** True for a reader of a thread shared to their project: no messages, runs or changes (D23). */
+  /** True for a reader of a shared thread (project or team): no messages, runs or changes (D23). */
   read_only: z.boolean(),
   agent_status: z.enum(["active", "suspended", "archived"]).nullable(),
   agent_current_version: z.number().int().nullable(),

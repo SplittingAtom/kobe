@@ -34,6 +34,7 @@ describe("thread list adapter", () => {
       projectId: null,
       scheduled: false,
       shared: false,
+      visibility: "private",
       pinned: false,
       archived: false,
       forkHint: null,

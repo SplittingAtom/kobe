@@ -574,6 +574,95 @@
         }
       }
     },
+    "/v1/threads/shared": {
+      "get": {
+        "operationId": "listSharedThreads",
+        "summary": "Threads others shared with the viewer, most recent activity first (CE20)",
+        "description": "Shared with the team, or to a project the viewer belongs to; read-only (`read_only`, `owner_name`). Never Trash or test threads. Team admins see only what is shared with them.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,3}$"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of shared threads.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/{id}": {
       "get": {
         "operationId": "getThread",
@@ -1375,7 +1464,8 @@
     "/v1/threads/{id}/share": {
       "post": {
         "operationId": "shareThread",
-        "summary": "Set who can read the thread: `private` or `project` (author only)",
+        "summary": "Set who can read the thread: `private`, `project` or `team` (author only)",
+        "description": "Readers read and fork, nothing more. `private` revokes at once, open event streams included. Both sharing and revoking are audited (`thread.sharing_changed`).",
         "parameters": [
           {
             "name": "id",
@@ -1459,7 +1549,7 @@
             }
           },
           "409": {
-            "description": "`not_in_project`, `thread_busy` or `thread_in_trash`.",
+            "description": "`not_in_project`, `test_thread`, `thread_busy` or `thread_in_trash`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4039,7 +4129,13 @@
           },
           "visibility": {
             "type": "string",
-            "enum": ["private", "project"]
+            "enum": ["private", "project", "team"]
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "owner_name": {
+            "type": ["string", "null"]
           },
           "is_test": {
             "type": "boolean"
@@ -4292,7 +4388,13 @@
                 },
                 "visibility": {
                   "type": "string",
-                  "enum": ["private", "project"]
+                  "enum": ["private", "project", "team"]
+                },
+                "read_only": {
+                  "type": "boolean"
+                },
+                "owner_name": {
+                  "type": ["string", "null"]
                 },
                 "is_test": {
                   "type": "boolean"
@@ -4553,7 +4655,13 @@
                 },
                 "visibility": {
                   "type": "string",
-                  "enum": ["private", "project"]
+                  "enum": ["private", "project", "team"]
+                },
+                "read_only": {
+                  "type": "boolean"
+                },
+                "owner_name": {
+                  "type": ["string", "null"]
                 },
                 "is_test": {
                   "type": "boolean"
@@ -4851,7 +4959,13 @@
           },
           "visibility": {
             "type": "string",
-            "enum": ["private", "project"]
+            "enum": ["private", "project", "team"]
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "owner_name": {
+            "type": ["string", "null"]
           },
           "is_test": {
             "type": "boolean"
@@ -4990,9 +5104,6 @@
           "agent_name": {
             "type": ["string", "null"]
           },
-          "read_only": {
-            "type": "boolean"
-          },
           "agent_status": {
             "anyOf": [
               {
@@ -5106,6 +5217,7 @@
           "agent_version",
           "shared_to_project",
           "visibility",
+          "read_only",
           "is_test",
           "model",
           "leaf_entry_id",
@@ -5120,7 +5232,6 @@
           "pinned_at",
           "archived_at",
           "agent_name",
-          "read_only",
           "agent_status",
           "agent_current_version",
           "agent_model",
@@ -5405,7 +5516,7 @@
         "properties": {
           "visibility": {
             "type": "string",
-            "enum": ["private", "project"]
+            "enum": ["private", "project", "team"]
           }
         },
         "required": ["visibility"],
@@ -5557,7 +5668,13 @@
           },
           "visibility": {
             "type": "string",
-            "enum": ["private", "project"]
+            "enum": ["private", "project", "team"]
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "owner_name": {
+            "type": ["string", "null"]
           },
           "is_test": {
             "type": "boolean"
