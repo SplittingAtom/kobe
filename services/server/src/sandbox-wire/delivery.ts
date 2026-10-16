@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  CAPABILITY_TRACE_SPANS,
+  parseTraceparent,
+  runTraceId,
+  type WireTraceContext,
   CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
@@ -53,7 +57,15 @@ export interface DeliveryHost {
   /** The agent advertised this optional feature in `hello.capabilities` (KOBE-82). */
   hasCapability(name: string): boolean;
   /** `compaction`: a compaction run's lease (KOBE-213; no tool frames may name it). */
-  leaseRun(runId: string, threadId: string, cursor: number, compaction?: boolean): void;
+  leaseRun(
+    runId: string,
+    threadId: string,
+    cursor: number,
+    compaction?: boolean,
+    startedAt?: Date | null,
+  ): void;
+  /** The run's start went out with a trace context naming `commandSpanId` (KOBE-274). */
+  traceStarted(runId: string, commandSpanId: string): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
   /** The sandbox has a newer connection: stop and close. */
@@ -489,10 +501,10 @@ export class CommandDelivery {
                 ttlSeconds: ctx.tuning.runTokenTtlSeconds,
               })
             : undefined;
-        return { cursor: run.sandboxSeq, runToken };
+        return { cursor: run.sandboxSeq, runToken, startedAt: run.startedAt };
       }
       return (await markDelivered(tx, teamId, row.id, this.#host.id))
-        ? { cursor: 0, runToken: undefined }
+        ? { cursor: 0, runToken: undefined, startedAt: null }
         : ("gone" as const);
     });
     if (claimed === "gone") return; // expired or taken meanwhile
@@ -505,8 +517,15 @@ export class CommandDelivery {
       return;
     }
     if (starts && row.runId !== null) {
-      this.#host.leaseRun(row.runId, row.threadId, claimed.cursor, row.kind === "thread.compact");
+      this.#host.leaseRun(
+        row.runId,
+        row.threadId,
+        claimed.cursor,
+        row.kind === "thread.compact",
+        claimed.startedAt,
+      );
     }
+    const traced = starts ? this.#traceContext(row, frame) : undefined;
     this.#host.leaseThread(row.threadId);
     this.#issued.set(commandId, {
       kind: "row",
@@ -520,11 +539,21 @@ export class CommandDelivery {
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
     if (row.kind === "thread.compact") {
       if (claimed.runToken === undefined) throw new Error("compaction delivered without a token");
-      this.#host.send({ ...(frame as ThreadCompactFrame), run_token: claimed.runToken });
+      this.#host.send({
+        ...withoutTrace(frame as ThreadCompactFrame),
+        ...(traced ? { trace: traced } : {}),
+        run_token: claimed.runToken,
+      });
       return;
     }
+    const base = starts
+      ? ({
+          ...withoutTrace(frame as RunStartFrame),
+          ...(traced ? { trace: traced } : {}),
+        } as RunStartFrame)
+      : frame;
     let out = (
-      claimed.runToken ? { ...frame, run_token: claimed.runToken } : frame
+      claimed.runToken ? { ...base, run_token: claimed.runToken } : base
     ) as ServerToSandboxFrame;
     // Project files: the user's workspace is brought in line with their memberships before the
     // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
@@ -549,6 +578,26 @@ export class CommandDelivery {
       out = rest as ServerToSandboxFrame;
     }
     this.#host.send(out);
+  }
+
+  /**
+   * The trace context a start command keeps (KOBE-274): only for agents with `trace_spans`, only
+   * when this replica relays spans; the command span it names becomes a kept parent.
+   */
+  #traceContext(row: CommandRow, frame: object): WireTraceContext | undefined {
+    const trace = "trace" in frame ? (frame.trace as WireTraceContext | undefined) : undefined;
+    if (
+      trace === undefined ||
+      row.runId === null ||
+      !this.#ctx.traceRelay ||
+      !this.#host.hasCapability(CAPABILITY_TRACE_SPANS)
+    ) {
+      return undefined;
+    }
+    const parsed = parseTraceparent(trace.traceparent);
+    if (parsed === undefined || parsed.traceId !== runTraceId(row.runId)) return undefined;
+    this.#host.traceStarted(row.runId, parsed.parentSpanId);
+    return trace;
   }
 
   /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */
@@ -706,4 +755,10 @@ export class CommandDelivery {
       (outcome.data as { disposition?: unknown } | undefined)?.disposition === "handled";
     if (!outcome.ok || handled) await this.#endRun(issued.runId, issued.threadId, outcome);
   }
+}
+
+/** A start frame without its trace context (added back only when the agent may take it). */
+function withoutTrace<F extends RunStartFrame | ThreadCompactFrame>(frame: F): Omit<F, "trace"> {
+  const { trace: _trace, ...rest } = frame;
+  return rest;
 }

@@ -27,6 +27,8 @@ export interface RunRow {
   readonly trigger: "user" | "schedule";
   readonly sandboxSeq: number;
   readonly ownerUserId: string;
+  /** When the run started (KOBE-274: the lower bound of its relayed span times). */
+  readonly startedAt: Date | null;
 }
 
 /** The run with its thread's owner (under the team's RLS); undefined when not in this team. */
@@ -41,8 +43,9 @@ export async function loadRun(
     trigger: "user" | "schedule";
     sandbox_seq: number;
     owner_user_id: string;
+    started_at: Date | string | null;
   }>(sql`
-    SELECT r.status, r.thread_id, r.trigger, r.sandbox_seq, t.owner_user_id
+    SELECT r.status, r.thread_id, r.trigger, r.sandbox_seq, t.owner_user_id, r.started_at
       FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
      WHERE r.team_id = ${teamId} AND r.id = ${runId}`);
   const row = res.rows[0];
@@ -53,6 +56,7 @@ export async function loadRun(
         trigger: row.trigger,
         sandboxSeq: row.sandbox_seq,
         ownerUserId: row.owner_user_id,
+        startedAt: row.started_at === null ? null : new Date(row.started_at),
       }
     : undefined;
 }
@@ -279,6 +283,7 @@ export interface LeasedRun {
   readonly sandboxSeq: number;
   /** A compaction (KOBE-213) is never resumed on a new connection: its command died with the old. */
   readonly kind: RunKind;
+  readonly startedAt: Date | null;
 }
 
 /** Runs leased to the (team, user) sandbox that are still active. */
@@ -293,8 +298,9 @@ export async function activeLeasedRuns(
     status: RunStatus;
     sandbox_seq: number;
     kind: RunKind;
+    started_at: Date | string | null;
   }>(sql`
-    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq, r.kind
+    SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq, r.kind, r.started_at
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
      WHERE l.team_id = ${teamId} AND l.user_id = ${userId}
@@ -305,5 +311,6 @@ export async function activeLeasedRuns(
     status: r.status,
     sandboxSeq: r.sandbox_seq,
     kind: r.kind,
+    startedAt: r.started_at === null ? null : new Date(r.started_at),
   }));
 }

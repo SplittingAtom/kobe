@@ -6,6 +6,7 @@ import {
   trace,
   type Attributes,
   type Context,
+  type Link,
   type Span,
 } from "@opentelemetry/api";
 import { MAX_CAPTURED_CHARS } from "./content.js";
@@ -60,6 +61,8 @@ export interface SpanOptions {
   readonly kind?: SpanKind;
   /** Parent context (e.g. extracted from request headers); default: the active context. */
   readonly parent?: Context;
+  /** Spans this one relates to without being their child (e.g. the request that caused it). */
+  readonly links?: readonly Link[];
 }
 
 /**
@@ -78,6 +81,7 @@ export async function withSpan<T>(
     {
       kind: options.kind ?? SpanKind.INTERNAL,
       ...(options.attributes ? { attributes: options.attributes } : {}),
+      ...(options.links ? { links: [...options.links] } : {}),
     },
     parent,
   );

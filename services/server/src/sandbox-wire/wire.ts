@@ -8,6 +8,7 @@ import {
   type ToolRegistry,
 } from "@kobe/protocol";
 import { z } from "zod";
+import { telemetryState } from "@kobe/telemetry";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
@@ -28,6 +29,7 @@ import { attachSandboxGateway } from "./gateway.js";
 import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
 import { CommandRouter } from "./router.js";
+import { RelayBudget } from "./trace-budget.js";
 import { sweepOnce, type SweepResult } from "./sweeper.js";
 import type {
   ApprovalBroker,
@@ -66,6 +68,8 @@ export interface SandboxWireOptions {
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
+  /** `k_trace` (KOBE-274); unset: sandboxes get no trace context and send no spans. */
+  readonly traceSpanKey?: Uint8Array;
   /** Server calls a completed run may announce (KOBE-234/219); unset: none. */
   readonly serverCalls?: readonly ServerCallPurpose[];
   /** Connections one replica accepts. */
@@ -195,6 +199,15 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   });
   // Hints and resyncs only arrive after bus.start() below, when both exist.
   const registry = new ConnectionRegistry(db, bus, replicaId);
+  const telemetry = telemetryState();
+  const traceRelay =
+    telemetry.enabled && options.traceSpanKey
+      ? {
+          key: options.traceSpanKey,
+          budget: new RelayBudget(),
+          captureContent: telemetry.captureContent,
+        }
+      : undefined;
   const router = new CommandRouter({
     db,
     bus,
@@ -203,6 +216,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     registry,
     waker: options.waker ?? NO_WAKE,
     log,
+    // Any replica may request a start (the scheduler too); the delivering one strips the context
+    // when it does not relay spans or the agent cannot take it.
+    traceRuns: telemetry.enabled,
   });
   bus.start();
 
@@ -246,6 +262,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     tuning,
     replicaId,
     ...(options.runTokenKey ? { runTokenKey: options.runTokenKey } : {}),
+    ...(traceRelay ? { traceRelay } : {}),
     serverCalls: options.serverCalls ?? [],
     tools,
     policy: {

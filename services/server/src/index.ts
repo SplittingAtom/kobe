@@ -40,7 +40,7 @@ import { schedulerAuthStandIn } from "./scheduler/process-deps.js";
 import { onScheduledRunEnded } from "./scheduler/run-hook.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
-import { runTokenKeyFromEnv } from "./sandbox-wire/run-token.js";
+import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-token.js";
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
@@ -91,6 +91,8 @@ const bifrostAdmin = modelsConfig
   : undefined;
 // Run-bound model-gateway tokens (KOBE-118): keyed from the gateway session key; unset: off.
 const runTokenKey = runTokenKeyFromEnv(process.env);
+// Relayed sandbox spans (KOBE-274): `k_trace` from the same session key; unset: no span relay.
+const traceSpanKey = traceSpanKeyFromEnv(process.env);
 // The server's own model calls (KOBE-219 auto-titles): the gateway's address and a token key from
 // the same session key. Either unset: no titles (logged once below).
 const serverCallKey = serverCallKeyFromEnv(process.env);
@@ -118,7 +120,11 @@ if (config.process === "scheduler") {
     ...auth,
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
-    sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
+    sandboxWire: {
+      waker,
+      ...(runTokenKey ? { runTokenKey } : {}),
+      ...(traceSpanKey ? { traceSpanKey } : {}),
+    },
     ...(config.modelGatewayUrl && serverCallKey
       ? { serverCalls: { gatewayUrl: config.modelGatewayUrl, key: serverCallKey } }
       : {}),

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { recordRunToken, type KobeTx } from "@kobe/db";
 import type { RunTokenGrant } from "@kobe/protocol";
-import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
+import { deriveRunTokenKey, deriveTraceSpanKey, signRunToken } from "@kobe/protocol/node";
 
 /** Minimum length of the master secret (the gateway's session key) the run token key derives from. */
 const MASTER_ENV = "KOBE_SESSION_KEY_MODEL_GATEWAY";
@@ -18,6 +18,22 @@ export function runTokenKeyFromEnv(
   if (!master) return undefined;
   try {
     return deriveRunTokenKey(new TextEncoder().encode(master));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `k_trace` (KOBE-274): remaps relayed sandbox span ids, derived from the same master secret as the
+ * run token key, so the model gateway derives the same one. Undefined when the secret is unset.
+ */
+export function traceSpanKeyFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): Uint8Array | undefined {
+  const master = env[MASTER_ENV];
+  if (!master) return undefined;
+  try {
+    return deriveTraceSpanKey(new TextEncoder().encode(master));
   } catch {
     return undefined;
   }
