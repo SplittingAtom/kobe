@@ -62,7 +62,9 @@ export function siteAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
 
   /** Forwarding health (syslog, OTLP): cursor, lag, failures and the next retry (KOBE-19). */
   app.get("/forwarding", async (c) =>
-    c.json(await readForwardingHealth(db, deps.auditForwardingDestinations)),
+    c.json(
+      await readForwardingHealth(db, deps.auditForwardingDestinations, deps.auditForwardingSecrets),
+    ),
   );
 
   /** Recomputes the whole chain; `head` is the value to anchor outside the database. */

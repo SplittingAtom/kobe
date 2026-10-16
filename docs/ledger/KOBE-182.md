@@ -41,6 +41,22 @@ RFC 5424 SD-ID enterprise number configurable (chart → env → zod), default 3
   `^[1-9][0-9]{0,9}$`, validated even while syslog is off. Schema accepts an integer or a digit
   string. `SYSLOG_SD_ID` became `syslogSdId(pen)`.
 
+## Review follow-ups (code review of 4dd67814)
+
+- MEDIUM: `readForwardingHealth` takes the configured secrets (`deps.auditForwardingSecrets`, from
+  `forwardingSecrets(config)` in index.ts) and applies the full write-path redaction on read.
+  `audit-forwarding-health.db.test.ts` writes a legacy raw row (userinfo with an `@` in the
+  password, a path token, an X-Api-Key value equal to a configured secret); verified to fail with
+  the read pass removed.
+- LOW: every URL keeps only scheme://host[:port], path and query become `/[redacted]`, userinfo up
+  to the last `@` before the host (server and web).
+- LOW: member and team admin get 403 on the route (same test file).
+- LOW: bearer/basic redaction needs a plausible credential (6+ characters with a digit or token
+  symbol, or a capital after the first letter): "Basic constraints", "Bearer token" stay.
+- LOW: enterprise number: the "(32-bit)" comment was wrong; chose to keep "at most 10 digits"
+  consistently (zod, schema maximum 9999999999, docs) rather than cap at 2^32-1, since IANA PENs
+  are far below either bound.
+
 ## Evidence
 
 - ac-1 (UI): `apps/web/components/admin/audit-forwarding-page.test.tsx` (off, ok + failing,

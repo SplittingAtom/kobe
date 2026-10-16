@@ -439,9 +439,11 @@ Secret). Both carry the same fields as the site export, including the chain hash
   kept. `GET /v1/site/audit/forwarding` (site admins) reports per destination `status`
   (`ok`, `retrying`, `failing` from 5 failures in a row, `pending`), `behind` (events not yet
   delivered), `lastSuccessAt`, `lastError`, `nextAttemptAt`.
-- **Errors never carry credentials (KOBE-182).** Before an error is stored, logged or shown, URL
-  userinfo, query strings, `Bearer`/`Basic` tokens and every configured secret (OTLP header values,
-  URL user and password) are replaced by `[redacted]`; the health view redacts again on read.
+- **Errors never carry credentials (KOBE-182).** Before an error is stored or logged, every
+  configured secret (OTLP header values, URL user and password) becomes `[redacted]`, every URL
+  keeps only `scheme://host[:port]` (userinfo, path and query become `[redacted]`), and
+  `Bearer`/`Basic` credentials go. The health view applies the same full pass on read, so errors
+  stored by an older release are covered too.
 - **Admin console (KOBE-182).** Site console → System → _Audit forwarding_ shows the same per
   destination: status, events behind, events delivered, last delivery, next attempt and the last
   error.

@@ -34,14 +34,31 @@ export function getAuditForwarding(): Promise<ApiResult<ForwardingHealth>> {
 }
 
 const REDACTED = "[redacted]";
+/** Same rules as the server's `redactForwardingError` (services/server/src/audit/forward/redact.ts). */
+const URL_PATTERN =
+  /\b([a-z][a-z0-9+.-]*:\/\/)(?:([^\s/?#]*)@)?([^\s/?#@)\]'",]+)([/?#][^\s)\]'",]*)?/gi;
+const AUTH_CREDENTIAL = /\b(Bearer|bearer|Basic|basic)\s+([A-Za-z0-9._~+/-]+=*)/g;
+
+function looksLikeCredential(token: string): boolean {
+  if (token.length < 6) return false;
+  return /[0-9+/=._~-]/.test(token) || (/[a-z]/.test(token) && /[A-Z]/.test(token.slice(1)));
+}
 
 /**
- * The server stores errors redacted; this second pass keeps credentials off the screen even for an
- * older server or an error it did not foresee: URL userinfo, query strings, bearer/basic tokens.
+ * The server stores errors redacted and redacts again on read; this third pass keeps credentials
+ * off the screen even for an older server: every URL keeps only scheme://host[:port] (userinfo up
+ * to the last "@", path and query go) and bearer/basic credentials go.
  */
 export function redactForwardingError(message: string): string {
   return message
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi, `$1${REDACTED}@`)
-    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, `$1?${REDACTED}`)
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${REDACTED}`);
+    .replace(
+      URL_PATTERN,
+      (_m, scheme: string, userinfo: string | undefined, host: string, rest = "") =>
+        `${scheme}${userinfo === undefined ? "" : `${REDACTED}@`}${host}${
+          rest === "" || rest === "/" ? rest : `/${REDACTED}`
+        }`,
+    )
+    .replace(AUTH_CREDENTIAL, (match, scheme: string, token: string) =>
+      looksLikeCredential(token) ? `${scheme} ${REDACTED}` : match,
+    );
 }

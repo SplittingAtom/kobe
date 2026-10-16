@@ -117,6 +117,7 @@ if (config.process === "scheduler") {
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
     connectors: loadConnectorUrlPolicy(process.env),
     auditForwardingDestinations: destinationsOf(config.auditForwarding),
+    auditForwardingSecrets: forwardingSecrets(config.auditForwarding),
     ...(config.mcpProxyUrl && config.mcpProxyInternalKey
       ? {
           connectorProbe: createProxyProbe({

@@ -32,7 +32,7 @@ const envSchema = z.object({
       )
       .optional(),
   ),
-  // IANA private enterprise number for the SD-ID: digits, no leading zero, at most 10 (32-bit).
+  // IANA private enterprise number for the SD-ID: digits, no leading zero, at most 10 digits.
   KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER: z.preprocess(
     emptyToUndefined,
     z

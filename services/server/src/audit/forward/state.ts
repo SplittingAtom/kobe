@@ -90,6 +90,8 @@ export interface ForwardingHealth {
 export async function readForwardingHealth(
   db: KobeDb,
   configured: readonly ForwardDestination[],
+  /** Configured credentials (`forwardingSecrets`), redacted like on the write path. */
+  secrets: readonly string[] = [],
 ): Promise<ForwardingHealth> {
   const head = await auditHeadSeq(db);
   const destinations: DestinationHealth[] = [];
@@ -101,8 +103,10 @@ export async function readForwardingHealth(
     }
     const status: ForwardStatus =
       state.failures === 0 ? "ok" : state.failures >= FAILING_AFTER ? "failing" : "retrying";
-    // Stored errors are redacted when written; this second pass covers rows written before that.
-    const lastError = state.lastError === null ? null : redactForwardingError(state.lastError);
+    // Stored errors are redacted when written; this full second pass covers rows written before
+    // that (KOBE-19 kept fetch's message, credentialed URL included) and anything it missed.
+    const lastError =
+      state.lastError === null ? null : redactForwardingError(state.lastError, secrets);
     destinations.push({
       destination,
       status,

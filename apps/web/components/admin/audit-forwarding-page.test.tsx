@@ -117,7 +117,7 @@ describe("Audit forwarding (KOBE-182)", () => {
               ...failing,
               lastError:
                 "Request cannot be constructed from a URL that includes credentials: " +
-                "https://siem-user:pa55word@collector.example.test/v1/logs?token=t0ken (Bearer abc.def)",
+                "https://siem-user:pa55@word@collector.example.test/in/t0ken (Bearer abc.def-123)",
             },
           ],
         },
@@ -125,10 +125,10 @@ describe("Audit forwarding (KOBE-182)", () => {
     });
     renderSite(<AuditForwardingPage />);
     const alert = await screen.findByRole("alert", { name: /OTLP: last error/ });
-    for (const secret of ["siem-user", "pa55word", "t0ken", "abc.def"]) {
+    for (const secret of ["siem-user", "pa55", "word", "t0ken", "abc.def-123"]) {
       expect(alert.textContent).not.toContain(secret);
     }
-    expect(alert.textContent).toContain("https://[redacted]@collector.example.test/v1/logs");
+    expect(alert.textContent).toContain("https://[redacted]@collector.example.test/[redacted]");
   });
 
   it("refreshes on request and shows API errors", async () => {
