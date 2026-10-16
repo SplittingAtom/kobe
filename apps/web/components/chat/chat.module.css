@@ -101,6 +101,11 @@
   cursor: pointer;
 }
 
+/* The row's activity dot (KOBE-301), before its title. */
+.railDot {
+  margin-inline-start: 0.375rem;
+}
+
 .itemActions {
   display: flex;
   gap: 0.125rem;

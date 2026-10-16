@@ -566,6 +566,11 @@ export class FakeKobe {
     const wasActive = ACTIVE.has(run.status);
     run.status = status;
     if (wasActive) thread.status = status === "interrupted" ? "interrupted" : "idle";
+    // Like the server: a run's undecided approvals expire with it.
+    for (const approval of this.approvals.values()) {
+      if (approval.runId === run.run_id && approval.status === "pending")
+        approval.status = "expired";
+    }
     this.emit(run.run_id, type, payload);
   }
 
@@ -698,6 +703,12 @@ export class FakeKobe {
       is_test: thread.is_test ?? false,
       shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
+      // KOBE-301: an approval waits for the caller (the fake has one member: the run's user).
+      ...([...this.approvals.values()].some(
+        (a) => a.status === "pending" && this.runs.get(a.runId)?.thread_id === thread.thread_id,
+      )
+        ? { pending_approval: true }
+        : {}),
     };
   }
 

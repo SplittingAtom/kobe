@@ -54,6 +54,11 @@ export interface ThreadSummary {
   readonly readOnly?: boolean;
   /** For a reader: who shared it ("Shared by …"); null once they left the team (KOBE-221). */
   readonly ownerName?: string | null;
+  /**
+   * An approval waits for the caller on this thread (KOBE-301; pending, unexpired, on their run):
+   * the rail's amber dot. Absent otherwise, and on older servers.
+   */
+  readonly pendingApproval?: boolean;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */

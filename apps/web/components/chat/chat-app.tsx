@@ -40,6 +40,7 @@ import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
+import { ThreadActivityWatch } from "./thread-activity";
 import { ThreadView } from "./thread-view";
 import { useViewportHeight } from "./use-viewport-height";
 import styles from "./chat.module.css";
@@ -165,8 +166,10 @@ function ChatWorkspace({
   session,
   teamName,
   fetchFn,
+  activityPollMs,
 }: {
   readonly session: ChatSession;
+  readonly activityPollMs: number | undefined;
   /** The rail's header (CE2): the workspace is the member's view of this team. */
   readonly teamName: string;
   readonly fetchFn: typeof fetch | undefined;
@@ -202,6 +205,7 @@ function ChatWorkspace({
     () => session.onThreadListChanged(() => void runtime.threads.reload()),
     [session, runtime],
   );
+  const reloadList = useCallback(() => void runtime.threads.reload(), [runtime]);
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   // The member's layout, from any device (CE8): loaded once, changes saved debounced.
   const layout = useLayoutPreferences(fetchFn);
@@ -223,6 +227,8 @@ function ChatWorkspace({
                       onSavePreferences={layout.save}
                     >
                       <FileGoneNotice />
+                      {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
+                      <ThreadActivityWatch reload={reloadList} pollMs={activityPollMs} />
                       <AppCommands />
                       {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
                       <ShortcutKeys />
@@ -273,6 +279,8 @@ export interface ChatAppProps {
   readonly uploadTransport?: UploadTransport | undefined;
   /** This browser's other tabs (CE19); default: a `BroadcastChannel` per team. */
   readonly threadListSync?: ((teamId: string) => ThreadListSync | undefined) | undefined;
+  /** How often the rail rereads an active thread's state (KOBE-301); tests shorten it. */
+  readonly activityPollMs?: number | undefined;
 }
 
 /**
@@ -287,6 +295,7 @@ export function ChatApp({
   reopenDelayMs,
   uploadTransport,
   threadListSync = browserThreadListSync,
+  activityPollMs,
 }: ChatAppProps) {
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
@@ -339,6 +348,7 @@ export function ChatApp({
           session={session}
           teamName={team.status === "ready" ? team.teamName : ""}
           fetchFn={fetchFn}
+          activityPollMs={activityPollMs}
         />
       </ChatSessionContext.Provider>
     );

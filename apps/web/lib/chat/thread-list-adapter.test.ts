@@ -38,6 +38,8 @@ describe("thread list adapter", () => {
       pinned: false,
       archived: false,
       forkHint: null,
+      // The rail's dot (KOBE-301).
+      activity: "idle",
     });
   });
 
