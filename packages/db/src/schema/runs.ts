@@ -220,6 +220,10 @@ export const runs = pgTable(
     // ('queued', 'running', 'waiting_approval'). SQL-only (hand-written migration
     // `*_events_schedule_latest.sql`, IF NOT EXISTS so large sites can build it CONCURRENTLY
     // first, docs/install.md); not declared here.
+    // Runs that used a skill (KOBE-297, per-skill usage): `runs_skill_uses_idx` on (team_id,
+    // created_at) WHERE jsonb_array_length(skills_used) > 0. SQL-only (custom migration
+    // `*_runs_skill_uses_idx.sql`, IF NOT EXISTS so large sites can build it CONCURRENTLY first,
+    // docs/install.md); not declared here.
     // Pending stops the sweep re-sends (few rows at any time).
     index("runs_stop_pending_idx")
       .on(t.teamId, t.stopRequestedAt)

@@ -721,6 +721,21 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   As above, check `pg_index.indisvalid` for both indexes and `DROP INDEX CONCURRENTLY IF EXISTS`
   an invalid leftover before upgrading.
 
+- **Skill usage index (KOBE-297, migrations `*_skills_reach` and `*_runs_skill_uses_idx`).** The
+  first adds three columns (catalog-only), but its ACCESS EXCLUSIVE lock on `runs` is held until
+  the upgrade commits, so while the second builds `runs_skill_uses_idx` with a plain
+  `CREATE INDEX`, **reads and writes of `runs`** wait. The index can't be built beforehand (its
+  column is new in this release); the build is one sequential read of `runs` and the index starts
+  empty. On a large site, upgrade in a quiet window. A later re-run (or a failed build) can use:
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS runs_skill_uses_idx
+    ON runs (team_id, created_at) WHERE jsonb_array_length(skills_used) > 0;
+  ```
+
+  As above, check `pg_index.indisvalid` for `runs_skill_uses_idx` and `DROP INDEX CONCURRENTLY IF
+EXISTS` an invalid leftover.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
