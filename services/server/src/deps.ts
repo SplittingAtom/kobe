@@ -315,7 +315,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
   const runAgents = options.runs?.agents ?? PINNED_AGENTS;
-  // Titles after a completed run (KOBE-219), off the run's path; never a run failure.
+  // Titles (KOBE-219) and follow-ups (KOBE-222) after a completed run, off its path.
   const serverCalls = options.serverCalls
     ? createServerCalls({
         db: database.db,

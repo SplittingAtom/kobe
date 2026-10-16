@@ -532,6 +532,8 @@ export const AUDIT_EVENTS = {
     enabled: z.boolean(),
     isDefault: z.boolean(),
   }),
+  /** A team admin turned post-run follow-up suggestions on or off for the team (KOBE-222, CE21). */
+  "models.followups.changed": event("team", { enabled: z.boolean() }),
   /**
    * A budget or rate limit was set, changed or removed (KOBE-42, D30): the site's (install
    * admins; no team), the team's or one member's (team admins). Amounts in dollars; null = none.

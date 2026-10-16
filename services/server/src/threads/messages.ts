@@ -94,3 +94,37 @@ export async function messageCount(
     capped: Number(row?.scanned ?? 0) >= MESSAGE_COUNT_SCAN,
   };
 }
+
+/** The latest exchange: the thread's last user message and the last answer text after it. */
+export interface LastExchange {
+  readonly prompt: string;
+  readonly answer: string | undefined;
+}
+
+/**
+ * The thread's latest user message (by append order) and the last assistant text after it: what
+ * the follow-up call (KOBE-222) quotes. Undefined when there is no user message with text.
+ */
+export async function lastExchange(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<LastExchange | undefined> {
+  const res = await tx.execute<MessageRow>(sql`
+    SELECT seq, payload -> 'message' -> 'content' AS content
+      FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
+       AND payload -> 'message' ->> 'role' = 'user'
+     ORDER BY seq DESC LIMIT 1`);
+  const row = res.rows[0];
+  const prompt = row ? messageText(row.content).trim() : "";
+  if (!row || prompt === "") return undefined;
+  const answers = await tx.execute<MessageRow>(sql`
+    SELECT seq, payload -> 'message' -> 'content' AS content
+      FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
+       AND seq > ${Number(row.seq)} AND payload -> 'message' ->> 'role' = 'assistant'
+     ORDER BY seq DESC LIMIT 8`);
+  const answer = answers.rows.map((r) => messageText(r.content).trim()).find((t) => t !== "");
+  return { prompt, answer };
+}

@@ -42,16 +42,16 @@ export function titleMessages(
   ];
 }
 
-const QUOTES = /^["'“”‘’«»`]+|["'“”‘’«»`]+$/gu;
+export const QUOTES = /^["'“”‘’«»`]+|["'“”‘’«»`]+$/gu;
 const MARKUP = /^[#>*_\s-]+|[*_\s]+$/gu;
 const LABEL = /^title\s*:\s*/iu;
 const TRAILING = /[.!?:;,…\s]+$/u;
 /** Line breaks, including the Unicode separators and NEL that `\n` splitting misses. */
-const LINES = /\r\n|[\n\r\u0085\u2028\u2029]/u;
+export const LINES = /\r\n|[\n\r\u0085\u2028\u2029]/u;
 /** Controls, format characters (bidi, zero-width) and separators (review L1). */
-const UNSAFE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+export const UNSAFE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 /** A link or address in a title is model output steering the reader (review L2): refused. */
-const LINKISH = /:\/\/|\bwww\.|\[[^\]]*\]\(/iu;
+export const LINKISH = /:\/\/|\bwww\.|\[[^\]]*\]\(/iu;
 
 /** Cuts at the last word boundary within the limit (or hard, for one long word). */
 function fit(title: string, max: number): string {

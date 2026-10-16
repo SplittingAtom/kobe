@@ -76,6 +76,7 @@ const UNUSABLE = new Set([
   "bad_reply",
   "schema_reject",
   "titled",
+  "no_thread",
   "no_lease",
   "no_model",
   "no_message",

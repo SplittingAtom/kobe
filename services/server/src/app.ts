@@ -9,6 +9,7 @@ import type { IsolationGate } from "./isolation/gate.js";
 import type { EvalRunner } from "./agents/eval/service.js";
 import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
+import { teamSettingsRoutes } from "./routes/team-settings.js";
 import { siteBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { scheduleRoutes } from "./routes/schedules.js";
@@ -159,6 +160,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
   api.route("/team/retention", teamRetentionRoutes(deps));
   api.route("/team/eval-settings", teamEvalSettingsRoutes(deps));
+  api.route("/team/settings", teamSettingsRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team", teamRoutes(deps));
