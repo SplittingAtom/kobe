@@ -2,16 +2,19 @@ import { hostname as osHostname } from "node:os";
 import net from "node:net";
 import tls from "node:tls";
 import type { AuditEntry } from "@kobe/db";
-import type { AuditForwardingConfig } from "./config.js";
+import { DEFAULT_ENTERPRISE_NUMBER, type AuditForwardingConfig } from "./config.js";
 import type { AuditSink } from "./types.js";
 
 /** Facility 13 (log audit) and severity 6 (informational): PRI = 13 * 8 + 6. */
 export const SYSLOG_PRI = 110;
 /**
- * Structured-data ID. `kobe@32473` uses the enterprise number RFC 5612 reserves for documentation;
- * SIEM rules should match the APP-NAME `kobe-audit` and the MSGID (the action).
+ * Structured-data ID `kobe@<enterprise number>`. The default, 32473, is the number RFC 5612 reserves
+ * for documentation; an operator with a registered IANA PEN configures theirs (KOBE-182). SIEM rules
+ * should match the APP-NAME `kobe-audit` and the MSGID (the action), not the SD-ID.
  */
-export const SYSLOG_SD_ID = "kobe@32473";
+export function syslogSdId(enterpriseNumber: string = DEFAULT_ENTERPRISE_NUMBER): string {
+  return `kobe@${enterpriseNumber}`;
+}
 const SEND_TIMEOUT_MS = 10_000;
 
 /** PRINTUSASCII without space, at most `max` characters, "-" when nothing is left (RFC 5424 §6). */
@@ -28,6 +31,8 @@ function sdValue(value: string): string {
 export interface SyslogFormatOptions {
   readonly hostname?: string;
   readonly procId?: string | number;
+  /** Validated digits (config); default 32473. */
+  readonly enterpriseNumber?: string;
 }
 
 /** One event as an RFC 5424 message: structured data carries the ids, the body the full event. */
@@ -40,7 +45,7 @@ export function formatSyslogMessage(entry: AuditEntry, options: SyslogFormatOpti
     ["actor", entry.actor.id],
     ["hash", entry.hash],
   ];
-  const sd = `[${SYSLOG_SD_ID}${params
+  const sd = `[${syslogSdId(options.enterpriseNumber)}${params
     .filter(([, v]) => v !== null)
     .map(([k, v]) => ` ${k}="${sdValue(v ?? "")}"`)
     .join("")}]`;
@@ -92,7 +97,9 @@ export function syslogSink(
   return {
     name: "syslog",
     send(events) {
-      const data = Buffer.concat(events.map((e) => frame(formatSyslogMessage(e, options))));
+      const pen = config.enterpriseNumber;
+      const format = { ...(pen ? { enterpriseNumber: pen } : {}), ...options };
+      const data = Buffer.concat(events.map((e) => frame(formatSyslogMessage(e, format))));
       return new Promise<void>((resolve, reject) => {
         const socket = config.tls
           ? tls.connect({

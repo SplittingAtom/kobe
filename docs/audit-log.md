@@ -424,8 +424,7 @@ number of rows sent.
 
 **Forwarding (KOBE-19).** Off by default; Helm values `auditForwarding.syslog` (RFC 5424 over TCP
 or TLS, octet-counted frames, APP-NAME `kobe-audit`, MSGID the action, structured data
-`[kobe@32473 seq id team actorKind actor hash]`, body the event as JSON; `32473` is the enterprise
-number RFC 5612 reserves for documentation) and `auditForwarding.otlp` (OTLP/HTTP logs, JSON
+`[kobe@<PEN> seq id team actorKind actor hash]`, body the event as JSON) and `auditForwarding.otlp` (OTLP/HTTP logs, JSON
 encoding; the action is the log body, fields are `kobe.audit.*` attributes; auth headers from a
 Secret). Both carry the same fields as the site export, including the chain hashes.
 
@@ -440,8 +439,38 @@ Secret). Both carry the same fields as the site export, including the chain hash
   kept. `GET /v1/site/audit/forwarding` (site admins) reports per destination `status`
   (`ok`, `retrying`, `failing` from 5 failures in a row, `pending`), `behind` (events not yet
   delivered), `lastSuccessAt`, `lastError`, `nextAttemptAt`.
-- **TLS.** The collector's certificate is verified against the server image's trust store
-  (`NODE_EXTRA_CA_CERTS` for a private CA).
+- **Errors never carry credentials (KOBE-182).** Before an error is stored, logged or shown, URL
+  userinfo, query strings, `Bearer`/`Basic` tokens and every configured secret (OTLP header values,
+  URL user and password) are replaced by `[redacted]`; the health view redacts again on read.
+- **Admin console (KOBE-182).** Site console → System → _Audit forwarding_ shows the same per
+  destination: status, events behind, events delivered, last delivery, next attempt and the last
+  error.
+- **Enterprise number (KOBE-182).** The SD-ID is `kobe@<PEN>`, the PEN from
+  `auditForwarding.syslog.enterpriseNumber` (env `KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER`; digits, no
+  leading zero, at most 10; anything else fails at install and at startup). The default, `32473`, is
+  the number RFC 5612 reserves for documentation: an organisation with its own registered IANA
+  Private Enterprise Number should set it. Match SIEM rules on the APP-NAME `kobe-audit` and the
+  MSGID, not on the SD-ID, so changing the number does not break them.
+- **TLS and a private CA (KOBE-182).** The collector's certificate is verified against the server's
+  trust store: the public CAs, plus a private CA from `server.extraCaBundle`. Name one Secret
+  (`secretName`) or one ConfigMap (`configMapName`, e.g. one filled by trust-manager) and the `key`
+  holding the PEM certificates (default `ca.crt`); the chart mounts that key read-only at
+  `/etc/kobe/extra-ca/ca-bundle.pem` on the server and sets `NODE_EXTRA_CA_CERTS` to it, so the
+  private CA is trusted in addition to the public ones (OTLP, OIDC and S3 over TLS benefit too).
+  Node reads the bundle only at start: restart the server (`kubectl rollout restart`) after
+  rotating it.
+
+  ```yaml
+  server:
+    extraCaBundle:
+      secretName: siem-ca # kubectl create secret generic siem-ca --from-file=ca.crt=./ca.pem
+  auditForwarding:
+    syslog:
+      enabled: true
+      host: siem.example.test
+      port: 6514
+      tls: true
+  ```
 
 ## Reading the log
 

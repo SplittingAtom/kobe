@@ -553,6 +553,16 @@ scratch.
 
 Every value is validated by `charts/kobe/values.schema.json`; unknown keys are rejected.
 
+### Private certificate authorities
+
+When a service the server calls over TLS (a syslog or OTLP collector for audit forwarding, an OIDC
+issuer, S3) has a certificate from your own CA, give the server that CA: `server.extraCaBundle`
+names one Secret (`secretName`) or one ConfigMap (`configMapName`) and the `key` holding PEM
+certificates (default `ca.crt`). The chart mounts it read-only and sets `NODE_EXTRA_CA_CERTS`, so
+the CA is trusted in addition to the public ones; certificates are still verified. Restart the
+server after rotating the bundle (Node reads it at start). See
+[audit forwarding](audit-log.md#export-and-forwarding).
+
 ### Migrations
 
 Install and upgrade with `--wait`. Schema migrations run as the database owner in a Job — the

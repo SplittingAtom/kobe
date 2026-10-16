@@ -2,9 +2,21 @@ import { z } from "zod";
 
 /** Audit forwarding as configured by Helm values (`auditForwarding.*`, KOBE-19). */
 export interface AuditForwardingConfig {
-  readonly syslog?: { readonly host: string; readonly port: number; readonly tls: boolean };
+  readonly syslog?: {
+    readonly host: string;
+    readonly port: number;
+    readonly tls: boolean;
+    /** IANA private enterprise number in the RFC 5424 SD-ID (`kobe@<n>`); default 32473. */
+    readonly enterpriseNumber?: string;
+  };
   readonly otlp?: { readonly url: string; readonly headers: Readonly<Record<string, string>> };
 }
+
+/**
+ * RFC 5612 reserves 32473 for documentation. Operators with a registered IANA PEN set their own
+ * (`auditForwarding.syslog.enterpriseNumber`, KOBE-182).
+ */
+export const DEFAULT_ENTERPRISE_NUMBER = "32473";
 
 const emptyToUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
 
@@ -20,6 +32,17 @@ const envSchema = z.object({
       )
       .optional(),
   ),
+  // IANA private enterprise number for the SD-ID: digits, no leading zero, at most 10 (32-bit).
+  KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .regex(
+        /^[1-9][0-9]{0,9}$/,
+        "KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER must be an IANA private enterprise number (digits)",
+      )
+      .optional(),
+  ),
   // The collector's OTLP/HTTP logs endpoint, e.g. https://collector:4318/v1/logs
   KOBE_AUDIT_OTLP_URL: z.preprocess(
     emptyToUndefined,
@@ -29,7 +52,10 @@ const envSchema = z.object({
   KOBE_AUDIT_OTLP_HEADERS: z.string().optional(),
 });
 
-function parseSyslog(raw: string): NonNullable<AuditForwardingConfig["syslog"]> {
+function parseSyslog(
+  raw: string,
+  enterpriseNumber: string,
+): NonNullable<AuditForwardingConfig["syslog"]> {
   const url = new URL(raw);
   if (url.protocol !== "tcp:" && url.protocol !== "tls:") {
     throw new Error(
@@ -40,7 +66,12 @@ function parseSyslog(raw: string): NonNullable<AuditForwardingConfig["syslog"]> 
   if (!url.hostname || !Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Invalid configuration: KOBE_AUDIT_SYSLOG_URL needs a host and a port");
   }
-  return { host: url.hostname.replace(/^\[|\]$/g, ""), port, tls: url.protocol === "tls:" };
+  return {
+    host: url.hostname.replace(/^\[|\]$/g, ""),
+    port,
+    tls: url.protocol === "tls:",
+    enterpriseNumber,
+  };
 }
 
 export function parseOtlpHeaders(raw: string | undefined): Record<string, string> {
@@ -64,7 +95,14 @@ export function loadAuditForwardingConfig(
   }
   const { KOBE_AUDIT_SYSLOG_URL: syslog, KOBE_AUDIT_OTLP_URL: otlp } = parsed.data;
   return {
-    ...(syslog ? { syslog: parseSyslog(syslog) } : {}),
+    ...(syslog
+      ? {
+          syslog: parseSyslog(
+            syslog,
+            parsed.data.KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER ?? DEFAULT_ENTERPRISE_NUMBER,
+          ),
+        }
+      : {}),
     ...(otlp
       ? { otlp: { url: otlp, headers: parseOtlpHeaders(parsed.data.KOBE_AUDIT_OTLP_HEADERS) } }
       : {}),

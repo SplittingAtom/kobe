@@ -1,5 +1,6 @@
 import { listAuditEvents, type KobeDb } from "@kobe/db";
 import type { ReconcileLock } from "../../sandbox/reconcile-lock.js";
+import { redactForwardingError } from "./redact.js";
 import { auditHeadSeq, initialState, readState, writeState, type ForwardState } from "./state.js";
 import type { AuditSink } from "./types.js";
 
@@ -29,12 +30,15 @@ export interface AuditForwarderOptions {
   readonly log: Log;
   readonly now?: () => Date;
   readonly batchSize?: number;
+  /** Configured credentials no stored or logged error may contain (`forwardingSecrets`). */
+  readonly secrets?: readonly string[];
 }
 
-function describe(err: unknown): string {
+/** The error as the health view shows it: credentials redacted (KOBE-182), one line, bounded. */
+function describe(err: unknown, secrets: readonly string[]): string {
   const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
   const message = (err instanceof Error ? err.message : String(err)) + cause;
-  return message.replace(/\s+/g, " ").slice(0, ERROR_MAX);
+  return redactForwardingError(message, secrets).replace(/\s+/g, " ").slice(0, ERROR_MAX);
 }
 
 /**
@@ -109,7 +113,7 @@ export class AuditForwarder {
       failures,
       nextAttemptAt: new Date(now.getTime() + backoffMs(failures)).toISOString(),
       lastErrorAt: now.toISOString(),
-      lastError: describe(err),
+      lastError: describe(err, this.o.secrets ?? []),
     };
     this.o.log.warn(
       { destination: sink.name, failures, error: next.lastError, retryAt: next.nextAttemptAt },

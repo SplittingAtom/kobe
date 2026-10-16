@@ -356,6 +356,9 @@ spec:
 {{- if $syslog.enabled }}
 - name: KOBE_AUDIT_SYSLOG_URL
   value: {{ printf "%s://%s:%d" (ternary "tls" "tcp" ($syslog.tls | default false)) (required "auditForwarding.syslog.host is required when syslog forwarding is enabled" $syslog.host) ($syslog.port | default 6514 | int) | quote }}
+{{- $pen := $syslog.enterpriseNumber | default 32473 }}
+- name: KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER
+  value: {{ ternary $pen ($pen | int64 | toString) (kindIs "string" $pen) | quote }}
 {{- end }}
 {{- if $otlp.enabled }}
 - name: KOBE_AUDIT_OTLP_URL
@@ -368,6 +371,43 @@ spec:
       key: headers
 {{- end }}
 {{- end }}
+{{- end -}}
+
+{{/* Extra CA bundle for the server's outgoing TLS (KOBE-182): a Secret or ConfigMap key mounted
+  read-only at one fixed path, named by NODE_EXTRA_CA_CERTS. Empty when not configured. */}}
+{{- define "kobe.extraCaPath" -}}/etc/kobe/extra-ca{{- end -}}
+
+{{- define "kobe.extraCaEnv" -}}
+{{- $b := .Values.server.extraCaBundle | default dict -}}
+{{- if or $b.secretName $b.configMapName -}}
+- name: NODE_EXTRA_CA_CERTS
+  value: {{ printf "%s/ca-bundle.pem" (include "kobe.extraCaPath" .) | quote }}
+{{- end -}}
+{{- end -}}
+
+{{- define "kobe.extraCaMounts" -}}
+{{- $b := .Values.server.extraCaBundle | default dict -}}
+{{- if or $b.secretName $b.configMapName -}}
+- name: extra-ca
+  mountPath: {{ include "kobe.extraCaPath" . }}
+  readOnly: true
+{{- end -}}
+{{- end -}}
+
+{{- define "kobe.extraCaVolumes" -}}
+{{- $b := .Values.server.extraCaBundle | default dict -}}
+{{- $items := list (dict "key" ($b.key | default "ca.crt") "path" "ca-bundle.pem") -}}
+{{- if $b.secretName -}}
+- name: extra-ca
+  secret:
+    secretName: {{ $b.secretName }}
+    items: {{ toJson $items }}
+{{- else if $b.configMapName -}}
+- name: extra-ca
+  configMap:
+    name: {{ $b.configMapName }}
+    items: {{ toJson $items }}
+{{- end -}}
 {{- end -}}
 
 {{/* Upload limits and the team storage quota (KOBE-143/185) as server env. */}}
