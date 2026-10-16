@@ -11,6 +11,7 @@ import {
   workspaceDownloadQuerySchema,
   workspaceListQuerySchema,
   workspacePathSchema,
+  workspaceSearchQuerySchema,
   workspaceUploadFieldsSchema,
   type WorkspaceFileError,
 } from "@kobe/protocol";
@@ -35,6 +36,7 @@ import {
   joinPath,
 } from "../workspace-files/paths.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
+import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { currentEntry } from "../workspace-sync/store.js";
@@ -111,6 +113,19 @@ export function workspaceFileRoutes(
       entries: listing.entries,
       ...(listing.nextCursor === undefined ? {} : { next_cursor: listing.nextCursor }),
     });
+  });
+
+  /** The `@` picker (KOBE-223): the caller's own files whose path contains `q`. */
+  app.get("/files/search", async (c) => {
+    const query = workspaceSearchQuerySchema.safeParse(queryOf(c));
+    if (!query.success) {
+      return c.json({ code: "invalid_request", message: "That is not a valid search." }, 400);
+    }
+    const owner = ownerOf(c);
+    const entries = await withTeam(db, owner.teamId, (tx) =>
+      searchFiles(tx, owner, query.data.q ?? "", query.data.limit),
+    );
+    return c.json({ entries });
   });
 
   app.get("/file", async (c) => {

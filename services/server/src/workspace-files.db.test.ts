@@ -4,6 +4,7 @@ import {
   workspaceFileEntrySchema,
   workspaceFileErrorSchema,
   workspaceListResponseSchema,
+  workspaceSearchResponseSchema,
   type WorkspaceChange,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
@@ -790,6 +791,48 @@ describe("rail drop into uploads/ (KOBE-199)", () => {
       [other.team],
     );
     expect(rows).toEqual([]);
+  });
+});
+
+describe("GET /v1/workspace/files/search (KOBE-223)", () => {
+  const search = async (b: TestBrowser, query: string) => {
+    const res = await b.get(`/v1/workspace/files/search${query}`);
+    expect(res.status, res.text).toBe(200);
+    return workspaceSearchResponseSchema.parse(res.json).entries.map((e) => e.path);
+  };
+
+  it("lists the caller's own live files whose path contains the query, names first", async () => {
+    const w = await world();
+    await seed(w, w.alice, "sales/summary.txt", "s");
+    await seed(w, w.alice, "reports/Sales Q3.csv", "q");
+    await seed(w, w.alice, "notes.md", "n");
+    await seed(w, w.alice, "uploads/t/sales-upload.txt", "u", "uploads");
+    await seed(w, w.alice, "old-sales.txt", "o");
+    await withTeam(fx.db, w.team, (tx) =>
+      sync.deleteServerFile(tx, { teamId: w.team, userId: w.alice.id }, "old-sales.txt"),
+    );
+    await seed(w, w.bob, "bob-sales.csv", "b");
+    const found = await search(w.a, "?q=SALES");
+    expect(new Set(found)).toEqual(
+      new Set(["sales/summary.txt", "reports/Sales Q3.csv", "uploads/t/sales-upload.txt"]),
+    );
+    // Names starting with the query come before paths that only contain it.
+    expect(found.indexOf("sales/summary.txt")).toBe(2);
+    expect(await search(w.a, "")).toHaveLength(4);
+    expect(await search(w.a, "?limit=1")).toHaveLength(1);
+    expect(await search(w.b, "?q=sales")).toEqual(["bob-sales.csv"]);
+  });
+
+  it("answers file entries with their area, and refuses bad queries", async () => {
+    const w = await world();
+    await seed(w, w.alice, "projects/p/brief.md", "p", "projects");
+    const res = await w.a.get("/v1/workspace/files/search?q=brief");
+    expect(workspaceSearchResponseSchema.parse(res.json).entries).toMatchObject([
+      { path: "projects/p/brief.md", type: "file", area: "projects", owner: "server" },
+    ]);
+    for (const q of ["?q=%00", "?limit=51", "?limit=x", "?path=a"]) {
+      expect((await w.a.get(`/v1/workspace/files/search${q}`)).status, q).toBe(400);
+    }
   });
 });
 

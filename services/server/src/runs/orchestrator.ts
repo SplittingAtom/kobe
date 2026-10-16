@@ -37,6 +37,7 @@ import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
+import { rewriteMentions } from "./mentions.js";
 import { compactThread } from "./compaction.js";
 import {
   budgetStoppedEvent,
@@ -204,6 +205,12 @@ const WIRE_END_CAUSES = {
 
 const userActor = (actor: ActorContext): AuditActor => ({ kind: "user", id: actor.user_id });
 
+/** The workspace a thread's runs use: its owner's, in its team (D11). */
+const ownerOf = (teamId: string, thread: { readonly ownerUserId: string }) => ({
+  teamId,
+  userId: thread.ownerUserId,
+});
+
 /**
  * The run orchestrator (KOBE-30; contract `RunOrchestrator`, `@kobe/protocol`). Postgres is the
  * only shared state, so every replica can serve every call: the thread row lock is the per-thread
@@ -332,6 +339,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         const seen = await runByClientKey(tx, teamId, thread.id, clientKey);
         if (seen) return { result: { run_id: seen.id, queued: seen.status === "queued" } };
       }
+      // @file mentions (KOBE-223) resolve against the owner's own workspace, never the client's
+      // word; scheduled prompts are sent as written.
+      const input =
+        command.trigger === "user"
+          ? await rewriteMentions(tx, ownerOf(teamId, thread), command.content)
+          : command.content;
       // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
       const budgetBlocked = await this.#budgetBlocksSchedule(tx, actor, scheduled !== undefined);
       const parent = command.parent_entry_id ?? null;
@@ -353,7 +366,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         threadId: thread.id,
         trigger: command.trigger,
         approvalMode,
-        input: command.content,
+        input,
         parentEntryId: parent,
         retryOfRunId: null,
         clientKey,
@@ -415,10 +428,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
-    const run = await this.#threadTx(actor, async (tx, viewer) => {
+    const { run, message } = await this.#threadTx(actor, async (tx, viewer) => {
       const found = await ownedRun(tx, viewer, runId, false);
       await this.#assertMayRun(tx, actor, false);
-      return found.run;
+      return {
+        run: found.run,
+        message: await rewriteMentions(tx, ownerOf(actor.team_id, found.thread), body.content),
+      };
     });
     // A compaction (KOBE-213) has no turn to steer.
     if (!isActiveRunStatus(run.status) || !isMessageRun(run)) {
@@ -427,7 +443,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const outcome = await this.#router.steerRun(this.#target(actor.team_id, actor.user_id), {
       runId,
       threadId: run.threadId,
-      message: body.content,
+      message,
     });
     if (!outcome.ok) {
       this.#log.info({ run_id: runId, code: outcome.error.code }, "steer not delivered");
@@ -443,7 +459,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       await appendRunEvents(this.#db, actor.team_id, runId, [
         {
           type: "steer.applied",
-          payload: { content: body.content.slice(0, STEER_EVENT_MAX_CHARS) },
+          payload: { content: message.slice(0, STEER_EVENT_MAX_CHARS) },
         },
       ]);
     } catch (err) {
@@ -508,12 +524,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     body: UpdateQueuedBody,
   ): Promise<RunSnapshot> {
     await this.#threadTx(actor, async (tx, viewer) => {
-      const { run } = await ownedRun(tx, viewer, runId, true);
+      const { thread, run } = await ownedRun(tx, viewer, runId, true);
       if (run.status !== "queued") {
         throw new RunError("invalid_transition", "Only queued messages can be edited.");
       }
+      const input = await rewriteMentions(tx, ownerOf(actor.team_id, thread), body.content);
       await tx.execute(sql`
-        UPDATE runs SET input = ${body.content} WHERE team_id = ${actor.team_id} AND id = ${runId}`);
+        UPDATE runs SET input = ${input} WHERE team_id = ${actor.team_id} AND id = ${runId}`);
       await touchThread(tx, actor.team_id, run.threadId);
     });
     return this.getRun(actor, runId);

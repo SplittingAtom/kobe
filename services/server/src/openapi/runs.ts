@@ -86,7 +86,10 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "Owner only. The run is created queued and starts at once when nothing is active and the " +
           "thread is not interrupted; otherwise `queued` is true and it starts in order (Retry " +
           "runs first). Follow it with `GET /v1/runs/{id}/events`. `parent_entry_id` branches " +
-          "from an entry (edit-and-regenerate); absent = the thread's leaf when the run starts.",
+          "from an entry (edit-and-regenerate); absent = the thread's leaf when the run starts. " +
+          "`@file(<path>)` markers in `content` (KOBE-223) are resolved against the owner's " +
+          "synced workspace and replaced by the file's absolute `/workspace/...` path before " +
+          "the run is stored; the same applies to steering and to editing a queued message.",
         parameters: [
           ...change,
           {
@@ -118,7 +121,9 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "422": json(
             "Error",
             "`attachments_unavailable` (this site has no workspace storage) or " +
-              "`invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message).",
+              "`invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message), or " +
+              "`invalid_mention` (an `@file` mention is malformed, outside `/workspace`, or not a " +
+              "file in the workspace).",
           ),
           "429": json("Error", "`budget_exhausted`: no new runs at 100 % of a budget (D30)."),
           "503": json(
