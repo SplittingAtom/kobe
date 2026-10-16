@@ -6,8 +6,8 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { recordModelUsage } from "@kobe/db";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { recordModelUsage, sql } from "@kobe/db";
 import {
   SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
@@ -17,6 +17,10 @@ import {
 } from "@kobe/protocol";
 import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
 import { SseReader } from "./testing/sse.js";
+import { withAppendTx } from "./event-stream/append.js";
+import { logger } from "./logger.js";
+import { endRunInTx } from "./sandbox-wire/run-state.js";
+import { followupsDecisionInTx } from "./threads/followups.js";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
 
 /**
@@ -51,6 +55,29 @@ const gateway = {
 };
 
 const f = new RunFixture();
+
+/** What the server-call service logs at warn (codes only), captured through its child loggers. */
+const warnings: { readonly msg: string; readonly fields: Record<string, unknown> }[] = [];
+function captureServerCallWarnings(): void {
+  type Child = typeof logger;
+  const wrap = (log: Child): Child => {
+    const child = log.child.bind(log);
+    const warn = log.warn.bind(log);
+    return Object.assign(Object.create(log) as Child, {
+      child: ((...a: Parameters<Child["child"]>) =>
+        wrap(child(...a) as unknown as Child)) as unknown as Child["child"],
+      warn: ((fields: Record<string, unknown>, msg: string) => {
+        warnings.push({ msg, fields });
+        warn(fields, msg);
+      }) as Child["warn"],
+    });
+  };
+  const original = logger.child.bind(logger);
+  vi.spyOn(logger, "child").mockImplementation(((...a: Parameters<Child["child"]>) => {
+    const made = original(...a) as unknown as Child;
+    return (a[0] as { component?: string }).component === "server-calls" ? wrap(made) : made;
+  }) as unknown as Child["child"]);
+}
 let server: Server;
 
 function answer(res: ServerResponse, status: number, body: unknown): void {
@@ -113,10 +140,12 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const gatewayUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  captureServerCallWarnings();
   await f.setup({ serverCalls: { gatewayUrl, key: KEY } });
 }, 120_000);
 
 afterAll(async () => {
+  vi.restoreAllMocks();
   for (const release of gateway.held) release();
   await f.teardown();
   server.closeAllConnections();
@@ -217,6 +246,14 @@ describe("follow-ups (KOBE-222)", () => {
       [w.team],
     );
     expect(rows.map((r) => r.target)).toEqual([{ enabled: true }]);
+    // Saving the same value again changes nothing and audits nothing (review N10).
+    const again = await f.on(0, w.owner).put("/v1/team/settings", { followups_enabled: true });
+    expect(again.json).toEqual({ followups_enabled: true });
+    const after = await f.fx.admin.query(
+      `SELECT 1 FROM audit_log WHERE team_id = $1 AND action = 'models.followups.changed'`,
+      [w.team],
+    );
+    expect(after.rows).toHaveLength(1);
     // Other teams are untouched (the switch lives on this team's row).
     const other = await f.world();
     expect((await f.on(0, other.owner).get("/v1/team/settings")).json).toEqual({
@@ -383,6 +420,141 @@ describe("follow-ups (KOBE-222)", () => {
     expect(await types(w.team, runId)).not.toContain("thread.suggestions");
     expect(await types(w.team, runId)).not.toContain("run.failed");
     expect(await f.status(w.team, runId)).toBe("completed");
+    // Logged as the designed skip, with its code only (review N3).
+    expect(warnings).toContainEqual({
+      msg: "server call skipped",
+      fields: expect.objectContaining({ purpose: "followups", code: "budget_soft_limit" }),
+    });
     gateway.mode = "ok";
+  });
+
+  it.each([
+    ["a builder test thread", `UPDATE threads SET is_test = true WHERE id = $1`],
+    ["a thread in Trash", `UPDATE threads SET deleted_at = now() WHERE id = $1`],
+  ])("are skipped on %s", async (_what, update) => {
+    gateway.mode = "ok";
+    gateway.seen.length = 0;
+    const { w, ws } = await setUp(true);
+    const threadId = await f.thread(w.owner);
+    const runId = await answered(w, ws, threadId, "Hello", async () => {
+      await f.fx.admin.query(update, [threadId]);
+    });
+    await settled();
+    expect(await epilogueOf(w.team, runId)).toBeUndefined();
+    expect(gateway.seen).toHaveLength(0);
+  });
+
+  /** One run asks (spend 120 tokens), then `line` is put at exactly 80 % and the next is skipped. */
+  async function skippedAtLine(line: (team: string, owner: string) => Promise<void>) {
+    gateway.mode = "ok";
+    const { w, ws } = await setUp(true);
+    const threadId = await f.thread(w.owner);
+    const first = await answered(w, ws, threadId, "Before the line");
+    expect(await epilogueOf(w.team, first)).toEqual(["followups"]);
+    await settled();
+    await line(w.team, w.owner.id);
+    gateway.seen.length = 0;
+    const at = await answered(w, ws, threadId, "At the line");
+    await settled();
+    expect(await epilogueOf(w.team, at)).toBeUndefined();
+    expect(gateway.seen).toHaveLength(0);
+    expect(await f.status(w.team, at)).toBe("completed");
+  }
+
+  it("are skipped at 80 % of the team's budget (ac-4)", async () => {
+    await skippedAtLine(async (team, owner) => {
+      await f.fx.admin.query(
+        `INSERT INTO team_budgets (team_id, monthly_tokens, updated_by) VALUES ($1, 150, $2)`,
+        [team, owner],
+      );
+    });
+  });
+
+  it("are skipped at 80 % of the team's default member budget (ac-4)", async () => {
+    await skippedAtLine(async (team, owner) => {
+      await f.fx.admin.query(
+        `INSERT INTO team_budgets (team_id, member_monthly_tokens, updated_by) VALUES ($1, 150, $2)`,
+        [team, owner],
+      );
+    });
+  });
+
+  it("are skipped at 80 % of the site budget (ac-4)", async () => {
+    let admin: string | undefined;
+    try {
+      await skippedAtLine(async (_team, owner) => {
+        // Only a site admin may change site limits (trigger): the world's owner becomes one.
+        admin = owner;
+        await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [
+          owner,
+        ]);
+        // The site's spend is every team's: the limit is set so that it stands at 80 % or more.
+        const { rows } = await f.fx.admin.query<{ t: string }>(
+          `SELECT coalesce(sum(tokens), 0) AS t FROM site_model_spend_daily
+            WHERE day >= date_trunc('month', current_date)`,
+        );
+        const spent = Number(rows[0]?.t);
+        expect(spent).toBeGreaterThan(0);
+        await f.fx.admin.query(
+          `INSERT INTO site_model_limits (id, monthly_tokens, updated_by) VALUES (1, $1, $2)
+           ON CONFLICT (id) DO UPDATE SET monthly_tokens = EXCLUDED.monthly_tokens,
+                                          updated_by = EXCLUDED.updated_by`,
+          [Math.floor((spent * 100) / 80), owner],
+        );
+      });
+    } finally {
+      if (admin !== undefined) {
+        await f.fx.admin.query(
+          `UPDATE site_model_limits SET monthly_tokens = NULL, updated_by = $1 WHERE id = 1`,
+          [admin],
+        );
+      }
+    }
+  });
+
+  it("a failing decision skips follow-ups and never rolls back the run's completion (review S1)", async () => {
+    const w = await f.world();
+    const runId = await f.fx.run(w.team, w.owner);
+    const { thread_id: threadId } = await f.run(w.team, runId);
+    const decided = await withAppendTx(f.fx.db, w.team, async (tx) => {
+      const ended = await endRunInTx(tx, w.team, runId, { status: "completed" });
+      expect(ended.ended).toBe(true);
+      const ids = { teamId: w.team, runId, threadId };
+      const failing = await followupsDecisionInTx(tx, ids, true, async (sp) => {
+        await sp.execute(sql`SELECT 1 / 0`);
+        return true;
+      });
+      // The transaction is still usable after the failed savepoint.
+      await tx.execute(sql`SELECT 1`);
+      return failing;
+    });
+    expect(decided).toBe(false);
+    expect(await f.status(w.team, runId)).toBe("completed");
+  });
+
+  it("a malformed teams.settings reads as off and the switch still turns on and off (review S3)", async () => {
+    const w = await f.world();
+    const get = async () => (await f.on(0, w.owner).get("/v1/team/settings")).json;
+    for (const bad of ["[]", '"x"', "null", '{"followups_enabled": "true"}']) {
+      await f.fx.admin.query(`UPDATE teams SET settings = $2::jsonb WHERE id = $1`, [w.team, bad]);
+      expect(await get()).toEqual({ followups_enabled: false });
+      const on = await f.on(0, w.owner).put("/v1/team/settings", { followups_enabled: true });
+      expect(on.status, JSON.stringify(on.json)).toBe(200);
+      expect(await get()).toEqual({ followups_enabled: true });
+      const off = await f.on(0, w.owner).put("/v1/team/settings", { followups_enabled: false });
+      expect(off.status).toBe(200);
+      expect(await get()).toEqual({ followups_enabled: false });
+    }
+    // An object keeps its other keys.
+    await f.fx.admin.query(`UPDATE teams SET settings = $2::jsonb WHERE id = $1`, [
+      w.team,
+      '{"sandbox_idle_minutes": 20}',
+    ]);
+    await f.on(0, w.owner).put("/v1/team/settings", { followups_enabled: true });
+    const { rows } = await f.fx.admin.query<{ settings: unknown }>(
+      `SELECT settings FROM teams WHERE id = $1`,
+      [w.team],
+    );
+    expect(rows[0]?.settings).toEqual({ sandbox_idle_minutes: 20, followups_enabled: true });
   });
 });

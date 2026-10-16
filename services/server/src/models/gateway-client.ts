@@ -77,6 +77,8 @@ const UNUSABLE = new Set([
   "schema_reject",
   "titled",
   "no_thread",
+  // The gateway's 80 % backstop for follow-ups (KOBE-222 review N3): a designed skip.
+  "budget_soft_limit",
   "no_lease",
   "no_model",
   "no_message",

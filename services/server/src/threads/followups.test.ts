@@ -43,6 +43,34 @@ describe("parseFollowups (KOBE-222 ac-5: threadSuggestionsSchema)", () => {
     expect(parseFollowups(reply)).toEqual(["Chart it", "Show Q4", "Compare"]);
   });
 
+  it.each([
+    [
+      "Here are three follow-up questions:\n1. What changed in Q3?\n2. Which region grew most?\n3. How does Q4 look?",
+      ["What changed in Q3?", "Which region grew most?", "How does Q4 look?"],
+    ],
+    [
+      "Sure! Some ideas you could ask next:\n\n- **Chart** revenue by region\n- Break it down by _product_\n- Compare with `2023`",
+      ["Chart revenue by region", "Break it down by product", "Compare with 2023"],
+    ],
+    [
+      "```text\nShow the top customers\nForecast next quarter\nExplain the dip in May\n```",
+      ["Show the top customers", "Forecast next quarter", "Explain the dip in May"],
+    ],
+    [
+      "Follow-up questions：\n1) Why did churn rise?\n2) Plot churn by month\n3) Which accounts left?\n4) A fourth",
+      ["Why did churn rise?", "Plot churn by month", "Which accounts left?"],
+    ],
+    [
+      "Open evil.example/x for details\nMail me at a@b.co\nSum the column\nKeep file_name as is",
+      ["Sum the column", "Keep file_name as is"],
+    ],
+  ])(
+    "real-looking reply %#: lead-ins, fences and inner Markdown never become chips",
+    (reply, expected) => {
+      expect(parseFollowups(reply)).toEqual(expected);
+    },
+  );
+
   it("removes controls and bidi overrides", () => {
     const [first] = parseFollowups("Chart\u202e it\u0007") ?? [];
     expect(first).toBe("Chart it");
