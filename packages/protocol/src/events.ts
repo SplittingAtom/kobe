@@ -357,8 +357,10 @@ export const TERMINAL_EVENT_TYPES = [
 ] as const satisfies KobeEventType[];
 
 /**
- * Events that may follow `run.completed` (KOBE-234): written by the server's post-run calls, one
- * per announced epilogue entry, at most once each.
+ * Events that may follow `run.completed` (KOBE-234): written by the server's post-run calls. After
+ * a terminal event a run takes only these, only those its `run.completed.epilogue` announced, each
+ * at most once per run, within `SERVER_CALL_EPILOGUE_MAX_MS`; anything else is refused (the
+ * server's append guard). Never before the terminal event.
  */
 export const EPILOGUE_EVENT_TYPES = {
   title: "thread.updated",

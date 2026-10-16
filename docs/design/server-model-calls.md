@@ -12,7 +12,7 @@ KOBE-219 (titles) and KOBE-222 (follow-ups) build on. The wire shapes live in
 
 | Topic         | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity      | A per-call **server-call token** (`ksc1.`, HMAC-SHA256, own HKDF key `kobe/server-call-token/v1` from the gateway's session key, `aud: kobe.model-gateway.server-call`) in `x-kobe-server-call`, alone on the request. TTL ≤ 60 s, single use per gateway replica.                                                                                                                                                                                                                                         |
+| Identity      | A per-call **server-call token** (`ksc1.`, HMAC-SHA256, own HKDF key `kobe/server-call-token/v1` from the gateway's session key, `aud: kobe.model-gateway.server-call`) in `x-kobe-server-call`, alone on the request. TTL ≤ 30 s, single use per gateway replica.                                                                                                                                                                                                                                         |
 | What it binds | `purpose` (`title` / `followups`), team, user, thread, triggering run, the one `model`, `max_output_tokens` (≤ the purpose's hard cap), `jti`.                                                                                                                                                                                                                                                                                                                                                             |
 | Refusals      | Only `POST /v1/chat/completions`; body must match `serverCallRequestSchema` (no tools, functions, tool messages, images, streaming, `n > 1`, unknown fields); `body.model` must equal the token's and be enabled for the team; output limit ≤ the token's.                                                                                                                                                                                                                                                 |
 | Attribution   | The triggering run's member and team, through the same `BudgetGate` and `kobe_reserve_budget` path as sandbox calls (site, team and user-in-team lines, dollars and tokens). The call counts toward 80 % warnings and 100 % stops like any call.                                                                                                                                                                                                                                                           |
@@ -35,7 +35,7 @@ Why not reuse an existing credential:
 - The **run token** is bound to an active run on a sandbox; the run has ended.
 - A **static server credential** (a shared secret header) would be long-lived and unbound: one leak
   lets anyone call any model for any team. A per-call token binds team, member, model, output cap
-  and purpose, and expires within a minute.
+  and purpose, and expires within 30 s.
 
 Separation from sandbox credentials (ac-2):
 
@@ -51,13 +51,33 @@ Separation from sandbox credentials (ac-2):
    only to the gateway; it is never stored, logged or sent to a client.
 4. A server bug cannot widen a call: the gateway enforces the purpose's hard output cap, the
    request shape, the token's model, the team's enabled models, the member's liveness, the budget
-   reservation and the 80 % rule for follow-ups, whatever the token says.
+   reservation and the 80 % rule for follow-ups, whatever the token says. It also checks the
+   token's run in the record (`serverCallRunMatches`, one read by primary keys): a **completed**
+   run of the token's thread, leased to the token's member (`sandbox_run_leases` keeps the row
+   after the run ends), else 403 `server_call_run_mismatch`. So a bug cannot charge another member
+   of the team; another team is impossible anyway (RLS).
 
-Replay: the gateway refuses a `jti` it has already seen (in memory, per replica, kept until the
-token expires). Across replicas a captured token could be replayed until it expires (≤ 60 s), each
-replay still capped, budget-reserved and recorded. Cross-replica single use would need shared state
-(a table), which the CE spec rules out ("no new team tables"); the bound is judged sufficient for a
-token that only ever travels server → gateway inside the cluster.
+### Replay threat model (accepted)
+
+The gateway refuses a `jti` it has already seen (in memory, per replica, until the token expires;
+the table is filled only after a MAC check and fails closed at 100 000 entries). Cross-replica
+single use would need shared state (a nonce table), which the CE spec rules out ("no new team
+tables"); reservations cannot serve as one (none is made without budget lines, and they end at
+settle). Accepted because:
+
+- **Who can see a token:** it travels only server → gateway inside the cluster, in plain HTTP. A
+  sandbox cannot sniff other pods (gVisor/Kata, NetworkPolicy, no host network). Whoever can read
+  that traffic or the server process (node root, the CNI, the host network, the server pod) can
+  already read the `sandbox-session-keys` Secret and mint tokens, so a replay adds nothing to what
+  they can do.
+- **What a replay carries:** only the model, purpose, member, thread and output cap are bound, not
+  the body: a replay can send an **attacker-chosen prompt** (≤ 64 KiB, ≤ 4 text messages, no
+  tools, no streaming) and read the answer.
+- **Bound:** at most one extra call per gateway replica that has not seen the `jti` (2 replicas: at
+  most 1 extra), within the token's ≤ 30 s, capped at the purpose's output limit, through the
+  same budget reservation and recorded as `kind = title | followups`, **charged to the right
+  member** (the run check above).
+- Revisit if the gateway ever gets ingress from outside the cluster.
 
 Network: the gateway's NetworkPolicy admits only team namespaces today. KOBE-219 adds an ingress
 rule from the server pods (port 8080) and, where server egress is restricted, the matching egress.
@@ -97,21 +117,43 @@ event lose nothing durable: the title is on the thread row, and follow-ups are a
 next send. Epilogue events are ordinary `run_events` rows (seq after the terminal), so a client
 that reconnects with `Last-Event-ID` gets them by replay.
 
+Append rule (`services/server` `event-stream/append.ts`, enforced since KOBE-234): once a run has
+its terminal event, the only events it takes are the epilogue types its `run.completed.epilogue`
+announced (`title` → `thread.updated`, `followups` → `thread.suggestions`), **each at most once
+per run**, within `SERVER_CALL_EPILOGUE_MAX_MS` of `run.completed` (database clock); anything else
+is `run_finished`, and an epilogue event that does not fit is `epilogue_refused`. The guard looks
+for the terminal among the run's last three events (at most two epilogue events follow it), so an
+epilogue event at the end never reopens the run. Epilogue events are refused before the terminal.
+The per-run event cap (`runMaxEvents`, enforced by producers) does not apply to them: they are at
+most two. D18 compaction treats them like any event: deleted with the run's stream after 7 days
+(the title stays on the thread row; old follow-ups have no use).
+
 ## Gateway contract stub
 
 `services/model-gateway/src/server-call.ts`:
 
-| Step        | Check                                                                      | Refusal                                                                 |
-| ----------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Credentials | `x-kobe-server-call` alone (no API-key header, `?key=`, run token, run id) | 400 `ambiguous_credentials`                                             |
-| Token       | prefix, MAC, claims, time                                                  | 401 `invalid_server_call_token`                                         |
-| Replay      | `jti` unseen on this replica                                               | 401 `server_call_token_replayed`                                        |
-| Route       | `POST /v1/chat/completions`                                                | 403 `server_call_route_refused`                                         |
-| Member      | active member with a virtual key (no sandbox check)                        | as sandbox calls (401 `session_revoked`, 503 pending)                   |
-| Body        | `serverCallRequestSchema`, model = token's, limit ≤ token's, ≤ 64 KiB      | 400 `server_call_body_refused`, 413                                     |
-| Model       | enabled for the team                                                       | 403 `model_not_enabled`                                                 |
-| Budget      | `BudgetGate` (reservation), plus `skip_at_percent` for the purpose         | 402 `budget_exhausted` / `budget_below_call` / `budget_soft_limit`, 429 |
-| Usage       | `run_usage` row with `kind`, no sandbox, `run_id` from the token           | —                                                                       |
+| Step        | Check                                                                         | Refusal                                                                 |
+| ----------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Credentials | `x-kobe-server-call` alone (no API-key header, `?key=`, run token, run id)    | 400 `ambiguous_credentials`                                             |
+| Token       | prefix, MAC, claims, time                                                     | 401 `invalid_server_call_token`                                         |
+| Replay      | `jti` unseen on this replica                                                  | 401 `server_call_token_replayed`                                        |
+| Route       | `POST /v1/chat/completions`                                                   | 403 `server_call_route_refused`                                         |
+| Member      | active member with a virtual key (no sandbox check)                           | as sandbox calls (401 `session_revoked`, 503 pending)                   |
+| Run         | completed run of the token's thread, leased to the token's member             | 403 `server_call_run_mismatch`                                          |
+| Body        | `serverCallRequestSchema`, model = token's, limit ≤ token's, ≤ 64 KiB         | 400 `server_call_body_refused`, 413                                     |
+| Model       | enabled for the team                                                          | 403 `model_not_enabled`                                                 |
+| Budget      | `BudgetGate` (reservation), at `skip_at_percent` of each line for the purpose | 402 `budget_exhausted` / `budget_below_call` / `budget_soft_limit`, 429 |
+| Usage       | `run_usage` row with `kind`, no sandbox, `run_id` from the token              | —                                                                       |
 
-Rate and concurrency limits are keyed per team for server calls (`server-call:<team>`) instead of
-per sandbox; the member's per-minute request rate applies as for sandbox calls.
+Server calls have their **own** request rate and concurrency limiter, per team
+(`SERVER_CALL_LIMIT_DEFAULTS`: 8 concurrent per team, 64 in all, burst 20, 5 per second), apart
+from the sandboxes' per-sandbox limits, so a team whose sandboxes are busy still gets its titles
+and server calls cannot crowd out sandboxes. Every server call the gateway refuses at the rate,
+concurrency or budget step is logged at warn (`server call skipped`, with purpose, run and reason;
+no content). The member's per-minute request rate (the budget gate) applies as for sandbox calls.
+
+The 80 % rule is decided in the database: the gate passes each line to `kobe_reserve_budget` with
+its limit at the purpose's percentage, so the reservation's own spend read and the other calls'
+in-flight reservations (KOBE-286) judge it, not this replica's cached spend. The cached state only
+refuses early. Because in-flight reservations count, a follow-up is skipped slightly before the
+ledger alone reaches 80 % when many calls are in flight (conservative by design).

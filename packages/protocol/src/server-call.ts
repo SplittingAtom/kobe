@@ -19,13 +19,15 @@ import { gatewayModelSchema } from "./sandbox-wire/frames.js";
  *
  * The gateway (every request): size cap, prefix, constant-time MAC, strict claims, `now < exp`,
  * `iat <= now + skew`, the `jti` not seen before on this replica (single use per replica; across
- * replicas the token is bounded by its TTL, purpose, model and output cap), the member still
- * active with a virtual key, `model` enabled for the team, and then the body:
+ * replicas the token is bounded by its TTL, purpose, model and output cap; threat model in the
+ * design doc), the member still active with a virtual key, the token's run a completed run of its
+ * thread leased to its member, `model` enabled for the team, and then the body:
  * {@link serverCallRequestSchema} (Chat Completions, no tools, no streaming), `body.model ===
  * claims.model`, its output limit at most `claims.max_output_tokens`. Budgets are the same
  * reservation path as sandbox calls (`kobe_reserve_budget`, KOBE-120/286) for (team, user), plus
  * {@link SERVER_CALL_LIMITS}`[purpose].skip_at_percent`, which the gateway enforces too (402
- * `budget_soft_limit`), so a server bug cannot spend past the rule. Usage is one `run_usage` row
+ * `budget_soft_limit`; judged by the reservation at that percentage of each line), so a server
+ * bug cannot spend past the rule. Usage is one `run_usage` row
  * with `kind = purpose`, no sandbox, `run_id = claims.run_id` (migration 0099).
  */
 export const SERVER_CALL_PURPOSES = ["title", "followups"] as const;
@@ -42,7 +44,7 @@ export const SERVER_CALL_TOKEN_MAX_CHARS = 1024;
 /** Tolerated clock skew for `iat`, seconds. */
 export const SERVER_CALL_TOKEN_SKEW_SECONDS = 30;
 /** Upper bound on `exp - iat`: a token is minted right before its one call. */
-export const MAX_SERVER_CALL_TOKEN_TTL_SECONDS = 60;
+export const MAX_SERVER_CALL_TOKEN_TTL_SECONDS = 30;
 /** The only gateway route a server call may use (Bifrost translates it for every provider). */
 export const SERVER_CALL_PATH = "/v1/chat/completions";
 /** Largest request body the gateway accepts on a server call. */
