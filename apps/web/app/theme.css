@@ -46,9 +46,28 @@
   --kobe-console-panel: #f4f4f6;
   --kobe-console-border: #d9d9df;
 
-  /* The context gauge (components/shell/context-gauge.module.css). */
-  --kobe-gauge-ok: #2e7d32;
-  --kobe-gauge-warn: #b45309;
+  /* Status colours (KOBE-301), one set for every activity cue: running = green, needs you
+     (approval, interrupted) = amber, failed or denied = red, done = muted green, idle or Trash =
+     grey, plus the accent pill of a count. Each colour is a text/icon colour that keeps WCAG AA
+     (4.5:1) on the page, the rail panel, cards and its own `-bg` tint in both themes
+     (app/status-tokens.test.ts); colour never carries meaning alone (a label or icon stays). CSS
+     modules read them as var(--kobe-status-*), Tailwind as text-status-* / bg-status-*-bg
+     (app/chat-global.css). */
+  --kobe-status-running: #166534;
+  --kobe-status-running-bg: #dcfce7;
+  --kobe-status-attention: #a14b05;
+  --kobe-status-attention-bg: #fef3c7;
+  --kobe-status-failed: #b91c1c;
+  --kobe-status-failed-bg: #fee2e2;
+  --kobe-status-done: #3f7a55;
+  --kobe-status-idle: #5c5c5c;
+  --kobe-status-accent: #2449c7;
+  --kobe-status-accent-fg: #ffffff;
+
+  /* The context gauge (components/shell/context-gauge.module.css), from the status colours. */
+  --kobe-gauge-ok: var(--kobe-status-done);
+  --kobe-gauge-warn: var(--kobe-status-attention);
+  --kobe-gauge-full: var(--kobe-status-failed);
 
   /* `display` for content shown in one theme only (the toggle's icon). */
   --kobe-when-light: block;
@@ -88,8 +107,16 @@
   --kobe-console-bg: #16161a;
   --kobe-console-panel: #202027;
   --kobe-console-border: #3a3a45;
-  --kobe-gauge-ok: #66bb6a;
-  --kobe-gauge-warn: #ffa726;
+  --kobe-status-running: #4ade80;
+  --kobe-status-running-bg: #052e16;
+  --kobe-status-attention: #fbbf24;
+  --kobe-status-attention-bg: #422006;
+  --kobe-status-failed: #f87171;
+  --kobe-status-failed-bg: #450a0a;
+  --kobe-status-done: #8fbf9f;
+  --kobe-status-idle: #a3a3a3;
+  --kobe-status-accent: #8fa8ff;
+  --kobe-status-accent-fg: #0a0a0a;
   --kobe-when-light: none;
   --kobe-when-dark: block;
 }
@@ -124,8 +151,16 @@
     --kobe-console-bg: #16161a;
     --kobe-console-panel: #202027;
     --kobe-console-border: #3a3a45;
-    --kobe-gauge-ok: #66bb6a;
-    --kobe-gauge-warn: #ffa726;
+    --kobe-status-running: #4ade80;
+    --kobe-status-running-bg: #052e16;
+    --kobe-status-attention: #fbbf24;
+    --kobe-status-attention-bg: #422006;
+    --kobe-status-failed: #f87171;
+    --kobe-status-failed-bg: #450a0a;
+    --kobe-status-done: #8fbf9f;
+    --kobe-status-idle: #a3a3a3;
+    --kobe-status-accent: #8fa8ff;
+    --kobe-status-accent-fg: #0a0a0a;
     --kobe-when-light: none;
     --kobe-when-dark: block;
   }

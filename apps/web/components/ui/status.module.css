@@ -1,0 +1,93 @@
+/* Status cues (KOBE-301): dots and the thread header's badge, from the status colours in
+   app/theme.css. Colour never carries meaning alone: every dot comes with a label or icon. */
+
+.dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.running {
+  color: var(--kobe-status-running);
+}
+
+.attention {
+  color: var(--kobe-status-attention);
+}
+
+.failed {
+  color: var(--kobe-status-failed);
+}
+
+.done {
+  color: var(--kobe-status-done);
+}
+
+.idle {
+  color: var(--kobe-status-idle);
+}
+
+/* A soft pulse while work is happening. */
+.pulse {
+  animation: kobe-status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes kobe-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+/* The header badge: the label in the tone's colour on its tint, with a dot. */
+.badge {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: center;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+
+.badge.running {
+  background: var(--kobe-status-running-bg);
+}
+
+.badge.attention {
+  background: var(--kobe-status-attention-bg);
+}
+
+.badge.failed {
+  background: var(--kobe-status-failed-bg);
+}
+
+.badge.idle {
+  border-color: var(--border);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* All status motion stops for people who asked for less. */
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}

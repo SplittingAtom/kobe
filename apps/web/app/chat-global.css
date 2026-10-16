@@ -39,6 +39,17 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* Status colours (KOBE-301, app/theme.css): text-status-running, bg-status-running-bg, … */
+  --color-status-running: var(--kobe-status-running);
+  --color-status-running-bg: var(--kobe-status-running-bg);
+  --color-status-attention: var(--kobe-status-attention);
+  --color-status-attention-bg: var(--kobe-status-attention-bg);
+  --color-status-failed: var(--kobe-status-failed);
+  --color-status-failed-bg: var(--kobe-status-failed-bg);
+  --color-status-done: var(--kobe-status-done);
+  --color-status-idle: var(--kobe-status-idle);
+  --color-status-accent: var(--kobe-status-accent);
+  --color-status-accent-fg: var(--kobe-status-accent-fg);
 }
 
 /* Only for pages that render the chat (KOBE-32): the app paints edge to edge. */

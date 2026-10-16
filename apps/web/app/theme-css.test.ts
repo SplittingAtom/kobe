@@ -118,3 +118,76 @@ describe("theme tokens (KOBE-282)", () => {
     expect(media).toContain('&:where(:root:not([data-theme="light"]) *)');
   });
 });
+
+/** A colour from theme.css as relative luminance: `#rrggbb`, or an achromatic `oklch(L 0 0)`. */
+function luminance(value: string): number {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value);
+  if (hex) {
+    const n = Number.parseInt(hex[1] as string, 16);
+    const lin = (c: number) => {
+      const v = c / 255;
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  }
+  // OKLab with no chroma: l = m = s = L³, so linear R = G = B = L³.
+  const ok = /^oklch\(([\d.]+) 0 0\)$/.exec(value);
+  if (ok) return Number(ok[1]) ** 3;
+  throw new Error(`no luminance for ${value}`);
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+describe("status tokens (KOBE-301)", () => {
+  const light = new Map(declarations(block(THEME, ":root")));
+  const dark = new Map([...light, ...declarations(block(THEME, ':root[data-theme="dark"]'))]);
+  /** A token's colour in a theme, following var() references. */
+  const resolve = (theme: Map<string, string>, name: string): string => {
+    const value = theme.get(name);
+    if (value === undefined) throw new Error(`no ${name}`);
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    return ref ? resolve(theme, ref[1] as string) : value;
+  };
+
+  const TEXT = ["running", "attention", "failed", "done", "idle"] as const;
+  // The page, the rail (`--admin-panel` = --muted) and cards (tool steps).
+  const SURFACES = ["--background", "--muted", "--card"] as const;
+
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`every status colour keeps AA (4.5:1) on every surface and on its tint (${name})`, () => {
+      for (const status of TEXT) {
+        const fg = resolve(theme, `--kobe-status-${status}`);
+        for (const surface of SURFACES) {
+          expect(contrast(fg, resolve(theme, surface)), `${status} on ${surface}`).toBeGreaterThan(
+            4.5,
+          );
+        }
+        if (theme.has(`--kobe-status-${status}-bg`)) {
+          const tint = resolve(theme, `--kobe-status-${status}-bg`);
+          expect(contrast(fg, tint), `${status} on its tint`).toBeGreaterThan(4.5);
+        }
+      }
+      // The approval card's amber border and icon sit on the warning background.
+      expect(
+        contrast(resolve(theme, "--kobe-status-attention"), resolve(theme, "--admin-warn-bg")),
+      ).toBeGreaterThan(4.5);
+      // The count pill (notification bell): its text on the accent.
+      expect(
+        contrast(resolve(theme, "--kobe-status-accent-fg"), resolve(theme, "--kobe-status-accent")),
+      ).toBeGreaterThan(4.5);
+    });
+  }
+
+  it("the gauges read the status colours, and both dark blocks set the same ones", () => {
+    expect(light.get("--kobe-gauge-warn")).toBe("var(--kobe-status-attention)");
+    expect(light.get("--kobe-gauge-full")).toBe("var(--kobe-status-failed)");
+    const css = read("components/shell/context-gauge.module.css");
+    expect(css).toContain("var(--kobe-gauge-full)");
+  });
+});
