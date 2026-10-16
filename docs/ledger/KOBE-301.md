@@ -11,7 +11,7 @@
    and read by CSS modules as `var(--kobe-status-*)`, so G7's Tailwind consoles can use them.
 2. A `StatusDot` / `StatusBadge` pair (`components/ui/status.tsx` + `status.module.css`) holds
    the dot, the soft pulse and its `prefers-reduced-motion` off switch.
-3. The rail's activity: live for threads this tab holds open, from the list summary otherwise.
+3. The rail's activity: live for threads this tab holds open, else `GET /v1/threads/activity`.
 
 ## Decisions
 
@@ -22,11 +22,24 @@
   stated. No migration. `openapi.json` regenerated. Tests: `thread-activity.db.test.ts` (own
   pending vs expired/denied/decided, the thread read agrees, a team-share reader never sees it,
   other teams). Search hits don't carry it (the rail doesn't use search).
-- **Live source for the rail:** the web has no cross-thread stream, so: a thread held open
-  (`ChatSession.acquire`) follows its controller (`ThreadActivityStore`, immutable snapshots);
-  any other thread follows `status` + `pending_approval` in the list. The list is read again
-  when a held thread that saw a run is let go (its summary predates the run's end) and every
-  15 s only while a thread not held here is active; no polling while all is idle.
+- **Activity endpoint (review S2/S3):** `GET /v1/threads/activity` lists the caller's own live,
+  non-test threads whose status is `running`, `approval` when an approval only they can decide
+  waits there (EXISTS on approvals). One query on `threads_owner_activity_idx` under `withTeam`,
+  `team_id` stated, no project read; capped at 200. OpenAPI regenerated; db tests cover own
+  running/approval, expired, Trash, a team-share reader and another team. (The test caught a
+  drizzle trap: a bare `${threads.id}` inside the raw subquery rendered unqualified and bound to
+  `approvals.id`; the subquery names `threads.*` in full.)
+- **Live source for the rail:** a thread held open (`ChatSession.acquire`) follows its controller
+  (`ThreadActivityStore`, immutable snapshots). Other threads follow the activity read, polled
+  every 15 s **only while the tab is visible**, plus on focus, when the tab shows again and when
+  a held thread that ran is let go. Its answer is merged into the store (unlisted = idle); the
+  thread lists are never reloaded for activity, so loaded pages stay. It also sees runs this tab
+  never started (schedules, another device). Before its first answer the list summary
+  (`status`, `pending_approval`) decides. Known limit: a hidden tab's title follows the open
+  thread live but other threads only as of the last read (no polling while hidden, by design).
+- **Only the member's own runs (review S1):** a thread shared with them (`readOnly`) is idle for
+  the rail dot and the tab title, from the summary and from the live controller; the endpoint
+  never lists it.
 - Rail row: the dot is decoration; the state ("Running" / "Waiting for your approval") is the
   row button's `aria-describedby`, so its accessible name stays the title (specs find rows by
   title).
@@ -34,7 +47,11 @@
   approval phase (CE10), now amber with a clock and a **Show** button that scrolls the card
   into view; a second note would have said the same thing twice.
 - The approval card scrolls into view (`block: nearest`, smooth unless reduced motion) once per
-  request while pending.
+  request, **only while the message list follows the latest message** (`data-kobe-follow =
+pinned`, KOBE-288): never when the member scrolled up or while the position is restored
+  (`pending`), never for a reader or an expired request (review M1). Otherwise the steering
+  panel's amber note and Show (a deliberate scroll) and the rail/tab cues say it.
+- Budget levels use the exact share (79.6 % stays plain although the text rounds to 80 %).
 - The tab title follows the rail: `(!) ` if any thread waits for an approval, else `● ` if any
   runs; only while `document.visibilityState === "hidden"`; restored on visibilitychange, focus,
   when the state ends, and on unmount. Only prefixes it added are stripped.
@@ -63,14 +80,28 @@
 Attention on the approval card (`--admin-warn-bg`): 5.4 light, 7.6 dark. Count pill text on
 accent: 7.4 light (white on `#2449c7`), 8.7 dark (`#0a0a0a` on `#8fa8ff`).
 
-## Screenshots (ac-7)
+## Screenshots (ac-7): pending gate1
 
+Not attached yet: the coordinator captures gate1 screenshots after deploy.
 `e2e/browser/tests/status-cues.spec.ts` attaches light and dark PNGs of the header badge, the
-rail row and Stop to the Playwright report (`header-badge-*.png`, `rail-row-*.png`,
-`stop-*.png`). Described: Running = green text on a pale green (dark: deep green) pill with a
-pulsing dot; Interrupted = amber on amber tint; In Trash = grey outline; rail = a 8 px dot before
-the title; approval card = 4 px amber left border and amber shield icon. Gate1 captures:
-coordinator, after deploy.
+rail row and Stop to the Playwright report, and switches threads **in the app** (rail clicks, no
+page load), so its "other thread" step proves the live path.
+
+What the component tests prove (happy-dom has no cascade or layout, so they pin tone classes,
+data attributes, labels and the CSS contract, not painted colours):
+
+- Header badge: tone (`running` / `attention` / `idle`), the label text, the pulsing dot.
+- Rail: the dot's tone and pulse, the "Running" / "Waiting for your approval" description, live
+  for the open thread, from the activity read for others (incl. a run started elsewhere), no dot
+  for a shared thread, no list reloads, no reads while hidden.
+- Approval: amber class on icon and note, Show scrolls to the card, the note goes once allowed;
+  scroll on arrival only when pinned, never unpinned/pending, reader or expired.
+- Tool steps: tone per outcome on icon and label, spinner with `motion-reduce:animate-none`.
+- Stop, bell, gauge, budgets: Stop's tint classes, the count pill's CSS, the gauge aliases, budget
+  levels and their icon and words.
+- Tokens: values and AA ratios parsed from theme.css (`app/theme-css.test.ts`); reduced motion
+  from status.module.css. Painted colour (green badge and dot, red Stop, no pulse under reduced
+  motion): only the e2e spec on gate1.
 
 ## Evidence (acceptance criteria → test or command output)
 

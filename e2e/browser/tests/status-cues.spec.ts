@@ -36,9 +36,15 @@ test("status cues: a green Running badge and the rail's dot, also from another t
   chat,
   page,
 }) => {
+  // A finished thread to switch to later, inside the app (no page load).
+  await chat.open();
+  await chat.ask("No tools. Reply with the single word OK.");
+  const otherId = await chat.threadId();
   await chat.open();
   await chat.send(STORY);
   const threadId = await chat.threadId();
+  const rowButton = (id: string) =>
+    page.locator(`li[data-kobe-thread="${id}"]`).getByRole("button").first();
 
   // The header's badge: green, labelled, with a pulsing dot.
   const badge = page.locator('header [data-status-badge="running"]');
@@ -66,14 +72,17 @@ test("status cues: a green Running badge and the rail's dot, also from another t
   await shoot(page, "rail-row", row);
   await shoot(page, "stop", stop);
 
-  // Another conversation on screen: the rail still shows the run (read from the server).
-  await chat.open();
-  await expect(
-    page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot="running"]`),
-  ).toBeVisible();
+  // Another conversation opened from the rail, in the app: the dot stays, from the live
+  // activity read (the run's own stream is closed once its thread is off screen).
+  await rowButton(otherId).click();
+  await expect(page).toHaveURL(new RegExp(`thread=${otherId}`));
+  const away = page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot="running"]`);
+  await expect(away).toBeVisible();
+  await expect(rowButton(threadId)).toHaveAccessibleDescription("Running");
 
-  // Back to stop it; the dot goes once the run has ended.
-  await page.goto(`/?thread=${threadId}`);
+  // Back to it (again in the app) to stop it; the dot goes once the run has ended.
+  await rowButton(threadId).click();
+  await expect(page).toHaveURL(new RegExp(`thread=${threadId}`));
   await chat.steering.locator("[data-kobe-stop]").click();
   await chat.waitForIdle();
   await expect(page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot]`)).toHaveCount(0);
