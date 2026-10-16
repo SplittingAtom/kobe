@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type {
-  SANDBOX_TURN_STOP_REASONS} from "@kobe/protocol";
+import type { SANDBOX_TURN_STOP_REASONS } from "@kobe/protocol";
 import {
   SANDBOX_SPAN_CONTENT_MAX_CHARS,
   TRACE_SPANS_AGENT_BUFFER_MAX,
