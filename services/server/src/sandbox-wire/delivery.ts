@@ -31,6 +31,11 @@ import {
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
 import { mintRunToken } from "./run-token.js";
+import {
+  RUNTIME_TAMPERED,
+  auditRuntimeTamperInTx,
+  type RuntimeTamperReport,
+} from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
 /** What delivery needs from its connection. */
@@ -67,6 +72,10 @@ export type IssuedCommand =
 
 const ANSWERED_MAX = 4_096;
 const DRAIN_BATCH = 20;
+
+/** The sandbox stopped Pi for a tampered runtime: a security event (KOBE-271). */
+const tampered = (outcome: CommandOutcome): boolean =>
+  !outcome.ok && outcome.error.code === RUNTIME_TAMPERED;
 
 const failure = (code: string, message: string): CommandOutcome => ({
   ok: false,
@@ -579,6 +588,8 @@ export class CommandDelivery {
           maxBytes: this.#ctx.tuning.runMaxBytes,
         });
       }
+      if (tampered(outcome))
+        await auditRuntimeTamperInTx(tx, this.#tamper(runId, threadId, "message"));
       return result;
     });
     this.#host.endLease(runId);
@@ -598,8 +609,8 @@ export class CommandDelivery {
         code: outcome.error.code,
         error: outcome.error.message.slice(0, 300),
       };
-      // A tampered runtime is a security event, logged like a run's (stored as its failure code).
-      if (outcome.error.code === "runtime_tampered") {
+      // A tampered runtime is a security event: logged here, audited with the run end (KOBE-271).
+      if (tampered(outcome)) {
         this.#host.log.warn(
           { ...detail, sandbox_id: this.#host.sandboxId, security: true },
           "compaction stopped: Pi's runtime was tampered with",
@@ -626,10 +637,25 @@ export class CommandDelivery {
           this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
         }
       }
-      return endRunInTx(tx, teamId, runId, end);
+      const result = await endRunInTx(tx, teamId, runId, end);
+      if (tampered(outcome)) {
+        await auditRuntimeTamperInTx(tx, this.#tamper(runId, threadId, "compaction"));
+      }
+      return result;
     });
     this.#host.endLease(runId);
     if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
+  }
+
+  /** The ids of a tampered-runtime report from this connection (KOBE-271). */
+  #tamper(
+    runId: string,
+    threadId: string,
+    runKind: RuntimeTamperReport["runKind"],
+  ): RuntimeTamperReport {
+    const { teamId, userId } = this.#host.target;
+    const { sandboxId } = this.#host;
+    return { teamId, userId, sandboxId, replicaId: this.#ctx.replicaId, threadId, runId, runKind };
   }
 
   async #record(issued: Extract<IssuedCommand, { kind: "row" }>, outcome: CommandOutcome) {

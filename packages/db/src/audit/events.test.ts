@@ -86,6 +86,22 @@ describe("audit event taxonomy", () => {
     expect(auditCategoryNames("identity")).toEqual(["identity"]);
   });
 
+  it("sandbox.runtime_tampered records ids and the run kind only (KOBE-271)", () => {
+    const { scope, target } = AUDIT_EVENTS["sandbox.runtime_tampered"];
+    expect(scope).toBe("team");
+    const ids = {
+      sandboxId: "0b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b",
+      userId: "1b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b",
+      threadId: "2b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b",
+      runId: "3b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b",
+      replicaId: "4b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b",
+    };
+    expect(target.safeParse({ ...ids, runKind: "message" }).success).toBe(true);
+    expect(target.safeParse({ ...ids, runKind: "compaction" }).success).toBe(true);
+    expect(target.safeParse({ ...ids, runKind: "other" }).success).toBe(false);
+    expect(target.safeParse({ ...ids, runKind: "message", reason: "x" }).success).toBe(false);
+  });
+
   it("is documented: docs/audit-log.md lists every action", () => {
     const doc = readFileSync(new URL("../../../../docs/audit-log.md", import.meta.url), "utf8");
     expect(AUDIT_ACTIONS.filter((a) => !doc.includes(`\`${a}\``))).toEqual([]);
