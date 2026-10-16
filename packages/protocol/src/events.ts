@@ -12,6 +12,12 @@ import {
 } from "./common.js";
 import { skippedActionsSchema } from "./notifications.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
+import {
+  SERVER_CALL_PURPOSES,
+  generatedTitleSchema,
+  serverCallPurposeSchema,
+  threadSuggestionsSchema,
+} from "./server-call.js";
 
 /** Kobe Event Stream event types (spec §6.2). Every event is persisted to `run_events` with a monotonic `seq` before fan-out. */
 export const KOBE_EVENT_TYPES = [
@@ -37,6 +43,9 @@ export const KOBE_EVENT_TYPES = [
   "run.failed",
   "run.interrupted",
   "run.budget_stopped",
+  // Epilogue (KOBE-234): results of the server's post-run model calls, after `run.completed`.
+  "thread.updated",
+  "thread.suggestions",
 ] as const;
 
 export type KobeEventType = (typeof KOBE_EVENT_TYPES)[number];
@@ -254,6 +263,17 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     usage: usageSchema.optional(),
     /** Scheduled runs (D32): tool calls denied instead of asked. Names only, never inputs (KOBE-176). */
     skipped_actions: skippedActionsSchema.optional(),
+    /**
+     * Server calls the server will make for this run (KOBE-234, server-call.ts): their results
+     * follow as `thread.updated` / `thread.suggestions`, and the stream stays open for them (sse.ts).
+     * Absent: none; the stream ends here.
+     */
+    epilogue: z
+      .array(serverCallPurposeSchema)
+      .min(1)
+      .max(SERVER_CALL_PURPOSES.length)
+      .refine((a) => new Set(a).size === a.length, { message: "duplicate epilogue entry" })
+      .optional(),
   }),
   "run.failed": z.strictObject({
     error: errorInfoSchema,
@@ -273,6 +293,16 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     /** `install`: recorded before KOBE-256 renamed the scope; read it as `site`. Never sent now. */
     scope: z.enum(["site", "team", "user", "install"]),
     message: z.string().max(1000),
+  }),
+  /** CE18: the server titled the thread after its first run (never when `title_locked`). */
+  "thread.updated": z.strictObject({
+    thread_id: uuidSchema,
+    title: generatedTitleSchema,
+  }),
+  /** CE21: follow-ups for the composer, shown until the next send. */
+  "thread.suggestions": z.strictObject({
+    thread_id: uuidSchema,
+    suggestions: threadSuggestionsSchema,
   }),
 } as const satisfies Record<KobeEventType, z.ZodType>;
 
@@ -314,13 +344,26 @@ export const kobeEventSchema = z.discriminatedUnion(
   ],
 ) as unknown as z.ZodType<KobeEvent>;
 
-/** Terminal events: the server closes the SSE stream after sending one. */
+/**
+ * Terminal events: the server closes the SSE stream after sending one, unless `run.completed`
+ * announces an `epilogue` ({@link EPILOGUE_EVENT_TYPES}, sse.ts). A terminal event still ends the
+ * run: nothing after it changes the run's state.
+ */
 export const TERMINAL_EVENT_TYPES = [
   "run.completed",
   "run.failed",
   "run.interrupted",
   "run.budget_stopped",
 ] as const satisfies KobeEventType[];
+
+/**
+ * Events that may follow `run.completed` (KOBE-234): written by the server's post-run calls, one
+ * per announced epilogue entry, at most once each.
+ */
+export const EPILOGUE_EVENT_TYPES = {
+  title: "thread.updated",
+  followups: "thread.suggestions",
+} as const satisfies Record<(typeof SERVER_CALL_PURPOSES)[number], KobeEventType>;
 
 export function isTerminalEventType(type: KobeEventType): boolean {
   return (TERMINAL_EVENT_TYPES as readonly KobeEventType[]).includes(type);

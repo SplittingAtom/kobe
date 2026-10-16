@@ -1,4 +1,5 @@
-import type { KobeEvent } from "./events.js";
+import { EPILOGUE_EVENT_TYPES, type KobeEvent, type KobeEventType } from "./events.js";
+import { SERVER_CALL_EPILOGUE_MAX_MS, type ServerCallPurpose } from "./server-call.js";
 
 /**
  * SSE framing and resume semantics for `GET /v1/runs/{id}/events` (spec §6.2, D16).
@@ -22,9 +23,13 @@ import type { KobeEvent } from "./events.js";
  * - The server replays every `run_events` row with `seq > cursor` from Postgres, then streams live
  *   events (LISTEN/NOTIFY is only a hint to re-read; Postgres is the record). Replay and live are
  *   merged so no seq is sent twice and none is skipped (seq is gapless, KOBE-29).
- * - After a terminal event (`TERMINAL_EVENT_TYPES`) the server ends the response. EventSource then
- *   reconnects with `Last-Event-ID` = the terminal seq; for a run that has ended and has no events
- *   after the cursor the server answers **204 No Content**, which tells EventSource to stop.
+ * - After a terminal event (`TERMINAL_EVENT_TYPES`) the server ends the response, unless the run's
+ *   epilogue is open ({@link epilogueOpen}, KOBE-234): a `run.completed` that announces an
+ *   `epilogue` keeps the response open until each announced result (`thread.updated`,
+ *   `thread.suggestions`) was sent or `SERVER_CALL_EPILOGUE_MAX_MS` after `run.completed`, then
+ *   ends it. EventSource then reconnects with `Last-Event-ID` = the last seq; for a run that has
+ *   ended, has no events after the cursor and no open epilogue the server answers **204 No
+ *   Content**, which tells EventSource to stop (an open epilogue streams again, as above).
  * - Compacted runs (`runs.events_compacted_at` set, D18: events folded into entries after 7 days):
  *   the server answers **410 Gone** with `{"error":{"code":"events_compacted"}}` whatever the
  *   cursor; EventSource stops (non-200), and the client renders the thread from
@@ -83,8 +88,30 @@ export function decideStreamOpen(run: {
   readonly events_compacted: boolean;
   readonly last_seq: number;
   readonly cursor: number;
+  /** {@link epilogueOpen} for this run (KOBE-234); absent: closed. */
+  readonly epilogue_open?: boolean;
 }): StreamOpenDecision {
   if (run.events_compacted) return { kind: "gone" };
-  if (run.ended && run.cursor >= run.last_seq) return { kind: "no_content" };
+  if (run.ended && run.cursor >= run.last_seq && run.epilogue_open !== true) {
+    return { kind: "no_content" };
+  }
   return { kind: "stream" };
+}
+
+/**
+ * Whether an ended run still waits for epilogue events (KOBE-234): its `run.completed` announced
+ * an `epilogue`, not every announced result has been written, and less than
+ * `SERVER_CALL_EPILOGUE_MAX_MS` passed since `run.completed`. While open, the stream stays open
+ * after the terminal event; once closed, it ends (and a reconnect without new events is a 204).
+ */
+export function epilogueOpen(input: {
+  readonly epilogue: readonly ServerCallPurpose[] | undefined;
+  /** Event types already written for the run. */
+  readonly written: ReadonlySet<KobeEventType>;
+  readonly completedAtMs: number;
+  readonly nowMs: number;
+}): boolean {
+  if (!input.epilogue || input.epilogue.length === 0) return false;
+  if (input.nowMs >= input.completedAtMs + SERVER_CALL_EPILOGUE_MAX_MS) return false;
+  return input.epilogue.some((p) => !input.written.has(EPILOGUE_EVENT_TYPES[p]));
 }
