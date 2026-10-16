@@ -23,6 +23,7 @@ const storedMoveSchema = z.object({
   at: z.iso.datetime({ offset: true }),
   from: wireUuidSchema.nullable(),
   to: wireUuidSchema.nullable(),
+  runs: z.number().int().min(0).max(2_147_483_647),
 });
 
 /** The stored moves, oldest first; anything malformed is dropped (never trusted blindly). */
@@ -42,17 +43,31 @@ export function withMove(
   return [...moves, move].slice(-THREAD_PROJECT_MOVES_MAX);
 }
 
-/** Reads the locked thread's moves and the transaction's time (the move's `at`). */
+/**
+ * Reads the locked thread's moves, the time now (`clock_timestamp()`, taken under the row lock)
+ * and how many of its message runs have started (where the next move's marker goes). Called
+ * under the thread lock with no run queued or running, so the count can't change meanwhile.
+ */
 export async function movesOf(
   tx: KobeTx,
   teamId: string,
   threadId: string,
-): Promise<{ moves: ThreadProjectMove[]; now: string }> {
+): Promise<{ moves: ThreadProjectMove[]; now: string; started: number }> {
   const [row] = await tx
-    .select({ moves: threads.projectMoves, now: sql<string>`now()` })
+    .select({
+      moves: threads.projectMoves,
+      now: sql<string>`clock_timestamp()`,
+      started: sql<number>`(SELECT count(*)::int FROM runs r
+        WHERE r.team_id = ${teamId}::uuid AND r.thread_id = ${threadId}::uuid
+          AND r.kind = 'message' AND r.started_at IS NOT NULL)`,
+    })
     .from(threads)
     .where(and(eq(threads.teamId, teamId), eq(threads.id, threadId)));
-  return { moves: parseMoves(row?.moves), now: new Date(row?.now ?? Date.now()).toISOString() };
+  return {
+    moves: parseMoves(row?.moves),
+    now: new Date(row?.now ?? Date.now()).toISOString(),
+    started: Number(row?.started ?? 0),
+  };
 }
 
 export const projectMarkerSchema = z.strictObject({
@@ -60,12 +75,17 @@ export const projectMarkerSchema = z.strictObject({
   run_id: wireUuidSchema,
   user_entry_id: idSchema.nullable(),
   parent_entry_id: idSchema.nullable(),
-  /** Where the thread was at the run before; null = no project. */
+  /**
+   * Where the thread was at the run before, and where it went: id and name while the viewer may
+   * open the project; both null for no project, or with `*_hidden` for a project the viewer can't
+   * open ("another project": its id is not sent).
+   */
   from_project_id: wireUuidSchema.nullable(),
-  /** The project's name while the viewer may open it; null otherwise (or no project). */
   from_project_name: z.string().nullable(),
+  from_project_hidden: z.boolean(),
   to_project_id: wireUuidSchema.nullable(),
   to_project_name: z.string().nullable(),
+  to_project_hidden: z.boolean(),
 });
 export type ProjectMarker = z.infer<typeof projectMarkerSchema>;
 
@@ -103,19 +123,24 @@ export function groupMoves(rows: readonly MoveRun[]): MoveGroup[] {
 type Row = Record<string, unknown>;
 const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
-/** The project's name when the viewer may open it (member, or team admin), else null. */
-async function nameFor(
+type Side = { readonly id: string | null; readonly name: string | null; readonly hidden: boolean };
+
+/** The project as the viewer may see it: id and name if they may open it (member or team admin). */
+async function sideFor(
   tx: KobeTx,
   viewer: { teamId: string; userId: string },
   projectId: string | null,
   cache: Map<string, string | null>,
-): Promise<string | null> {
-  if (projectId === null) return null;
+): Promise<Side> {
+  if (projectId === null) return { id: null, name: null, hidden: false };
   if (!cache.has(projectId)) {
     const access = await loadAccess(tx, viewer, projectId);
     cache.set(projectId, access?.can.view ? access.project.name : null);
   }
-  return cache.get(projectId) ?? null;
+  const name = cache.get(projectId) ?? null;
+  return name === null
+    ? { id: null, name: null, hidden: true }
+    : { id: projectId, name, hidden: false };
 }
 
 /** The thread's project markers, oldest first (at most one per run). */
@@ -132,10 +157,10 @@ export async function projectMarkers(
         SELECT r.id, r.user_entry_id, r.parent_entry_id FROM runs r
          WHERE r.team_id = t.team_id AND r.thread_id = t.id AND r.kind = 'message'
            AND r.started_at IS NOT NULL
-           AND r.started_at > (m.move ->> 'at')::timestamptz
-         ORDER BY r.started_at, r.id LIMIT 1) r ON true
+         ORDER BY r.started_at, r.id
+         OFFSET (m.move ->> 'runs')::int LIMIT 1) r ON true
      WHERE t.team_id = ${viewer.teamId}::uuid AND t.id = ${threadId}::uuid
-       AND jsonb_typeof(m.move -> 'at') = 'string'
+       AND jsonb_typeof(m.move -> 'runs') = 'number'
      ORDER BY m.ord`);
   const rows = res.rows.flatMap((r) => {
     const [move] = parseMoves([r.move]);
@@ -153,14 +178,18 @@ export async function projectMarkers(
   const names = new Map<string, string | null>();
   const markers: ProjectMarker[] = [];
   for (const g of groupMoves(rows)) {
+    const from = await sideFor(tx, viewer, g.from, names);
+    const to = await sideFor(tx, viewer, g.to, names);
     markers.push({
       run_id: g.runId,
       user_entry_id: g.userEntryId,
       parent_entry_id: g.parentEntryId,
-      from_project_id: g.from,
-      from_project_name: await nameFor(tx, viewer, g.from, names),
-      to_project_id: g.to,
-      to_project_name: await nameFor(tx, viewer, g.to, names),
+      from_project_id: from.id,
+      from_project_name: from.name,
+      from_project_hidden: from.hidden,
+      to_project_id: to.id,
+      to_project_name: to.name,
+      to_project_hidden: to.hidden,
     });
   }
   return markers;

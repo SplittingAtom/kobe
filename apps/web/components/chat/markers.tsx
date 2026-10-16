@@ -289,26 +289,32 @@ export function MarkerPart({ data }: DataMessagePartProps) {
   ) : null;
 }
 
-const projectLabel = (id: string | null, name: string | null) =>
-  name ?? (id === null ? null : "a project you can't open");
-
-/** "Moved to project Q4": the project's instructions apply from this message on (CE19). */
+/**
+ * "Moved to project Q4": the project's instructions apply from this message on (CE19). A project
+ * the viewer can't open is "another project" (the server sends no id or name for it).
+ */
 function ProjectMoveRow({ move }: { readonly move: ProjectMarker }) {
-  const to = projectLabel(move.toProjectId, move.toProjectName);
-  const from = projectLabel(move.fromProjectId, move.fromProjectName);
+  const into = move.toProjectId !== null || move.toProjectHidden === true;
+  if (!into) {
+    return (
+      <MarkerRow kind="project" icon={FolderInputIcon}>
+        Moved out of {move.fromProjectName === null ? "its project" : "project"}
+        {move.fromProjectName !== null && (
+          <span className="text-foreground font-medium">{move.fromProjectName}</span>
+        )}
+      </MarkerRow>
+    );
+  }
   return (
     <MarkerRow kind="project" icon={FolderInputIcon}>
-      {to === null ? (
-        <>
-          Moved out of {from === null ? "its project" : "project"}
-          {from !== null && <span className="text-foreground font-medium">{from}</span>}
-        </>
+      {move.toProjectName === null ? (
+        "Moved to another project"
       ) : (
         <>
-          Moved to project <span className="text-foreground font-medium">{to}</span>
-          <span>· its instructions apply from here</span>
+          Moved to project <span className="text-foreground font-medium">{move.toProjectName}</span>
         </>
       )}
+      <span>· its instructions apply from here</span>
     </MarkerRow>
   );
 }

@@ -118,11 +118,16 @@ export async function moveThread(
   if (await hasRunIn(tx, viewer, id, PENDING_RUN_STATUSES)) {
     return { ok: false, error: "thread_busy" };
   }
-  const { moves, now } = await movesOf(tx, viewer.teamId, id);
+  const { moves, now, started } = await movesOf(tx, viewer.teamId, id);
   const result = await save(tx, viewer, id, {
     projectId,
     sharedToProject: false,
-    projectMoves: withMove(moves, { at: now, from: thread.projectId, to: projectId }),
+    projectMoves: withMove(moves, {
+      at: now,
+      from: thread.projectId,
+      to: projectId,
+      runs: started,
+    }),
   });
   await recordAudit(tx, {
     action: "thread.moved",

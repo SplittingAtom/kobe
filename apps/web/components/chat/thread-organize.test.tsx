@@ -233,15 +233,30 @@ describe("move to project (ac-2)", () => {
           to_project_id: "00000000-0000-4000-8000-000000000098",
           to_project_name: "Q4",
         },
+        {
+          run_id: "00000000-0000-4000-8000-000000000097",
+          user_entry_id: u1,
+          parent_entry_id: null,
+          from_project_id: null,
+          from_project_name: null,
+          from_project_hidden: false,
+          to_project_id: null,
+          to_project_name: null,
+          to_project_hidden: true,
+        },
       ],
     });
     openApp(fake, t);
-    const marker = await waitFor(() =>
-      must(document.querySelector<HTMLElement>('[data-kobe-marker="project"]')),
-    );
-    expect(marker.getAttribute("role")).toBe("note");
-    expect(marker.textContent).toContain("Moved to project Q4");
-    expect(marker.textContent).toContain("its instructions apply from here");
+    const markers = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>('[data-kobe-marker="project"]')];
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(markers.map((m) => m.getAttribute("role"))).toEqual(["note", "note"]);
+    // A project the member can't open is named neutrally (no id, no name).
+    expect(markers[0]?.textContent).toContain("Moved to another project");
+    expect(markers[1]?.textContent).toContain("Moved to project Q4");
+    expect(markers[1]?.textContent).toContain("its instructions apply from here");
   });
 });
 

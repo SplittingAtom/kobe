@@ -736,6 +736,22 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   As above, check `pg_index.indisvalid` for `runs_skill_uses_idx` and `DROP INDEX CONCURRENTLY IF
 EXISTS` an invalid leftover.
 
+- **Archived threads index (KOBE-220, migrations `*_thread_project_moves` and
+  `*_thread_project_moves_checks`).** The first adds `threads.project_moves` (catalog-only), but
+  its ACCESS EXCLUSIVE lock on `threads` is held until the upgrade commits, so while the second
+  builds `threads_owner_archived_idx` with a plain `CREATE INDEX`, **reads and writes of
+  `threads`** wait (its CHECK is `NOT VALID`: no scan). The index's columns already exist, so on a
+  large site build it first, then upgrade (the migration skips an existing index):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_owner_archived_idx
+    ON threads (team_id, owner_user_id, archived_at DESC NULLS LAST, id DESC NULLS LAST)
+    WHERE archived_at IS NOT NULL AND deleted_at IS NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `threads_owner_archived_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,

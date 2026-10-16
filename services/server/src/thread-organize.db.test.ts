@@ -228,6 +228,21 @@ describe("move to project", () => {
     expect(await audit(w.team, "thread.moved")).toEqual([]);
   });
 
+  it("is refused for another team's project, and another team's member can't move the thread", async () => {
+    const w = await f.world();
+    const other = await f.world();
+    const a = await f.thread(w.owner);
+    const theirs = await project(other.owner, "Theirs");
+    const res = await as(w.owner).post(`/v1/threads/${a}/move`, { project_id: theirs });
+    expect(res.status).toBe(404);
+    expect(res.json.code).toBe("project_not_found");
+    const outsider = await as(other.owner).post(`/v1/threads/${a}/move`, { project_id: theirs });
+    expect(outsider.status).toBe(404);
+    expect(outsider.json.code).toBe("thread_not_found");
+    expect((await as(w.owner).get(`/v1/threads/${a}`)).json.project_id).toBeNull();
+    expect(await audit(w.team, "thread.moved")).toEqual([]);
+  });
+
   it("unshares a thread shared to its old project: the new project's members don't inherit it", async () => {
     const w = await f.world();
     const from = await project(w.owner, "From");
@@ -307,8 +322,10 @@ describe("move to project", () => {
         user_entry_id: entries.user,
         from_project_id: q3,
         from_project_name: "Q3",
+        from_project_hidden: false,
         to_project_id: q4,
         to_project_name: "Q4",
+        to_project_hidden: false,
       }),
     ]);
 
@@ -324,7 +341,22 @@ describe("move to project", () => {
     expect(after.projects.map((m) => m.run_id)).toEqual([second]);
   });
 
-  it("names only projects the viewer may open in the marker", async () => {
+  it("bounds project_moves in the database too: an array of at most 20 (review L3)", async () => {
+    const w = await f.world();
+    const a = await f.thread(w.owner);
+    const set = (value: unknown) =>
+      f.fx.admin.query(
+        `UPDATE threads SET project_moves = $3::jsonb WHERE team_id = $1 AND id = $2`,
+        [w.team, a, JSON.stringify(value)],
+      );
+    await expect(set(Array.from({ length: 20 }, () => ({})))).resolves.toBeDefined();
+    await expect(set(Array.from({ length: 21 }, () => ({})))).rejects.toMatchObject({
+      code: "23514",
+    });
+    await expect(set({ at: "x" })).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("names only projects the viewer may open in the marker, and never their ids", async () => {
     const w = await f.world();
     const member = await f.member(w.team);
     const ws = await f.connect(
@@ -348,8 +380,11 @@ describe("move to project", () => {
       expect.objectContaining({
         run_id: run,
         from_project_id: null,
-        to_project_id: open,
+        from_project_hidden: false,
+        // A project the viewer can't open: "another project", its id not sent (review L2).
+        to_project_id: null,
         to_project_name: null,
+        to_project_hidden: true,
       }),
     ]);
   });

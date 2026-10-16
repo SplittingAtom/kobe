@@ -1,5 +1,5 @@
 {
-  "id": "7c4df607-11d1-4e7a-b4a7-299a24a0cc84",
+  "id": "b7cf5077-2f52-493b-b644-8154ae2348c5",
   "prevId": "186d5616-0ac4-4b43-ad74-b0d7f8def346",
   "version": "7",
   "dialect": "postgresql",
@@ -1481,40 +1481,6 @@
           "method": "btree",
           "with": {}
         },
-        "threads_owner_archived_idx": {
-          "name": "threads_owner_archived_idx",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "archived_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"threads\".\"archived_at\" IS NOT NULL AND \"threads\".\"deleted_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "threads_forked_from_idx": {
           "name": "threads_forked_from_idx",
           "columns": [
@@ -1737,10 +1703,6 @@
         "threads_last_entry_seq": {
           "name": "threads_last_entry_seq",
           "value": "\"threads\".\"last_entry_seq\" >= 0"
-        },
-        "threads_project_moves_array": {
-          "name": "threads_project_moves_array",
-          "value": "jsonb_typeof(\"threads\".\"project_moves\") = 'array'"
         },
         "threads_fork_not_self": {
           "name": "threads_fork_not_self",

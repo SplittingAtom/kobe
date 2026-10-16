@@ -71,7 +71,8 @@ export interface SkillMarker {
 /**
  * The thread moved to another project (CE19, KOBE-220), shown above the prompt of the first run
  * that started after the move: from there the agent works with the new project's instructions.
- * A name is null when the viewer can't open the project (or for no project, id null).
+ * Id and name are null for no project; `*Hidden` marks a project the viewer can't open (its id
+ * is not sent): "another project". Absent `*Hidden` (an older answer) reads as false.
  */
 export interface ProjectMarker {
   readonly runId: string;
@@ -79,8 +80,10 @@ export interface ProjectMarker {
   readonly parentEntryId: string | null;
   readonly fromProjectId: string | null;
   readonly fromProjectName: string | null;
+  readonly fromProjectHidden?: boolean | undefined;
   readonly toProjectId: string | null;
   readonly toProjectName: string | null;
+  readonly toProjectHidden?: boolean | undefined;
 }
 
 export interface ThreadMarkers {

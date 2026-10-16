@@ -30,6 +30,12 @@ export interface ThreadProjectMove {
   readonly at: string;
   readonly from: string | null;
   readonly to: string | null;
+  /**
+   * How many of the thread's message runs had started when it moved: the marker goes on the next
+   * one. A count, not a time: a run's `started_at` is its transaction's start, which can precede
+   * a move it waited for on the thread lock.
+   */
+  readonly runs: number;
 }
 
 /** The moves a thread keeps (the newest); older ones lose their marker. */
@@ -184,10 +190,10 @@ export const threads = pgTable(
     index("threads_owner_pinned_idx")
       .on(t.teamId, t.ownerUserId, t.pinnedAt.desc(), t.id.desc())
       .where(sql`${t.pinnedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
-    // The Archived group (CE19, KOBE-220): the owner's archived live threads, newest first.
-    index("threads_owner_archived_idx")
-      .on(t.teamId, t.ownerUserId, t.archivedAt.desc(), t.id.desc())
-      .where(sql`${t.archivedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    // The Archived group (CE19, KOBE-220): `threads_owner_archived_idx` on (team_id,
+    // owner_user_id, archived_at DESC NULLS LAST, id DESC NULLS LAST) WHERE archived_at IS NOT
+    // NULL AND deleted_at IS NULL. SQL-only (`0104_thread_project_moves_checks.sql`), IF NOT
+    // EXISTS so large sites can build it CONCURRENTLY first (docs/install.md, "Upgrading").
     // A source's forks: the fork key's ON DELETE SET NULL looks them up on every purge.
     index("threads_forked_from_idx")
       .on(t.teamId, t.forkedFromThreadId)
@@ -212,7 +218,8 @@ export const threads = pgTable(
       sql`NOT ${t.isTest} OR (${t.projectId} IS NULL AND NOT ${t.sharedToProject})`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
-    check("threads_project_moves_array", sql`jsonb_typeof(${t.projectMoves}) = 'array'`),
+    // KOBE-220's `threads_project_moves_shape` (an array of at most THREAD_PROJECT_MOVES_MAX):
+    // SQL-only and NOT VALID (`0104_thread_project_moves_checks.sql`), like KOBE-234's checks.
     check("threads_fork_not_self", sql`${t.forkedFromThreadId} IS DISTINCT FROM ${t.id}`),
     check(
       "threads_forked_at_entry_id_length",
