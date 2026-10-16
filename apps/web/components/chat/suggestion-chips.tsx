@@ -41,6 +41,8 @@ export function useAgentStarters(extras: KobeThreadExtras): readonly string[] {
   );
   const agents = useRunnableAgents();
   const { state } = extras;
+  // A reader of a shared thread cannot send here (review S4).
+  if (state.summary?.readOnly === true) return [];
   if (state.threadId === null) return draft?.starters ?? [];
   const agentId = state.summary?.agentId;
   if (agentId == null) return [];
@@ -76,8 +78,9 @@ export function FollowupChips({ extras }: { readonly extras: KobeThreadExtras })
   const followups = state.followups;
   if (
     !followups ||
-    state.summary?.readOnly === true ||
-    state.summary?.deletedAt != null ||
+    state.summary === undefined ||
+    state.summary.readOnly === true ||
+    state.summary.deletedAt != null ||
     state.sending !== undefined ||
     isThreadRunning(state)
   ) {

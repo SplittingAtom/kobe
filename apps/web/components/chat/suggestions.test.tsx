@@ -7,7 +7,7 @@ import { initialThreadState } from "../../lib/chat/thread-state";
 import { must } from "../../lib/testing/must";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { FollowupChips } from "./suggestion-chips";
-import { composer, openApp, streaming } from "./testing";
+import { announcement, composer, openApp, streaming } from "./testing";
 
 /**
  * KOBE-222 (CE21): the agent's starters on the welcome screen send at once; the server's follow-ups
@@ -35,8 +35,10 @@ const sentMessages = () =>
     .map((r) => (r.body as { content?: string } | undefined)?.content);
 
 /** Opens a thread, sends `text`, and completes its run announcing follow-ups. */
-async function completedRun(text: string): Promise<{ threadId: string; runId: string }> {
-  const threadId = fake.addThread("Sales");
+async function completedRun(
+  text: string,
+  threadId = fake.addThread("Sales"),
+): Promise<{ threadId: string; runId: string }> {
   openApp(fake, threadId);
   const user = userEvent.setup();
   await user.type(await composer(), `${text}{Enter}`);
@@ -129,6 +131,90 @@ describe("FollowupChips for a reader of a shared thread (KOBE-221)", () => {
         ...base,
         phase: "ready",
         summary: { readOnly: true },
+        followups: { runId: "r1", suggestions: ["Chart it"] },
+      },
+    } as unknown as KobeThreadExtras;
+    const { container } = render(<FollowupChips extras={extras} />);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("review fixes (S4, S5, N1, N2, N5)", () => {
+  it("shows no starters on an empty thread shared read-only, whose agent has some (S4)", async () => {
+    const agent = "00000000-0000-4000-8000-0000000000bb";
+    fake.runnableAgents.push({
+      id: agent,
+      scope: "team",
+      name: "Ledger",
+      model: null,
+      starters: ["Close the books"],
+    });
+    const t = fake.addThread("Shared");
+    Object.assign(must(fake.threads.get(t)), {
+      read_only: true,
+      visibility: "team",
+      owner_name: "Alice Author",
+      agent_id: agent,
+    });
+    openApp(fake, t);
+    expect(await screen.findByText(/shared with you read-only/)).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Conversation starters" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close the books" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Analyse a spreadsheet/ })).toBeNull();
+  });
+
+  it("shows the pinned agent's starters on an empty thread the member owns", async () => {
+    const agent = "00000000-0000-4000-8000-0000000000cc";
+    fake.runnableAgents.push({
+      id: agent,
+      scope: "team",
+      name: "Ledger",
+      model: null,
+      starters: ["Close the books"],
+    });
+    const t = fake.addThread("Mine");
+    Object.assign(must(fake.threads.get(t)), { agent_id: agent });
+    openApp(fake, t);
+    const group = await screen.findByRole("group", { name: "Conversation starters" });
+    await userEvent.setup().click(within(group).getByRole("button", { name: "Close the books" }));
+    await waitFor(() => expect(sentMessages()).toEqual(["Close the books"]));
+  });
+
+  it("clears the chips when another thread opens (S5)", async () => {
+    const other = fake.addThread("Other");
+    fake.addEntry(other, null, { role: "user", content: "from the other thread" });
+    const { runId } = await completedRun("What drives revenue?");
+    fake.agent.suggest(runId, ["Chart it by region"]);
+    await screen.findByRole("group", { name: "Suggested follow-ups" });
+    const rail = await screen.findByRole("list", { name: "Your threads" });
+    await userEvent.setup().click(within(rail).getByRole("button", { name: "Other" }));
+    expect(await screen.findByText("from the other thread")).toBeTruthy();
+    expect(followups()).toBeNull();
+  });
+
+  it("announces the chips, and brings them back when a send fails (N2, N4)", async () => {
+    const { threadId, runId } = await completedRun("What drives revenue?");
+    fake.agent.suggest(runId, ["Chart it by region"]);
+    await screen.findByRole("group", { name: "Suggested follow-ups" });
+    expect(announcement()).toBe("Follow-up suggestions are available.");
+    fake.failNext.set(
+      `POST /v1/threads/${threadId}/messages`,
+      new Response(JSON.stringify({ code: "thread_busy", message: "Try again." }), {
+        status: 409,
+      }),
+    );
+    await userEvent.setup().type(await composer(), "Something else{Enter}");
+    expect(await screen.findByText("Try again.")).toBeTruthy();
+    expect(await screen.findByRole("group", { name: "Suggested follow-ups" })).toBeTruthy();
+  });
+
+  it("renders nothing before the thread's summary is read (N5)", () => {
+    const extras = {
+      controller: null,
+      projection: { items: [], headId: null, lastEntryOfNode: new Map() },
+      state: {
+        ...initialThreadState("t1"),
+        phase: "ready",
         followups: { runId: "r1", suggestions: ["Chart it"] },
       },
     } as unknown as KobeThreadExtras;

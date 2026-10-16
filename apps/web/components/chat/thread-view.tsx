@@ -205,6 +205,7 @@ function MessagesAndComposer({
           </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
             {state.phase === "ready" &&
+              state.summary?.readOnly !== true &&
               (starters.length > 0 ? <AgentStarters starters={starters} /> : <ThreadSuggestions />)}
           </AuiIf>
         </div>

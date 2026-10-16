@@ -474,14 +474,16 @@ export class ThreadController {
     runId: string,
     payload: { readonly thread_id: string; readonly suggestions: readonly string[] },
   ): void {
-    this.#set((s) =>
+    const s = this.#state;
+    const current =
       payload.thread_id === s.threadId &&
       s.live?.runId === runId &&
       s.sending === undefined &&
-      !isThreadRunning(s)
-        ? { ...s, followups: { runId, suggestions: payload.suggestions } }
-        : s,
-    );
+      !isThreadRunning(s);
+    if (!current) return;
+    this.#set((st) => ({ ...st, followups: { runId, suggestions: payload.suggestions } }));
+    // Chips appear after the answer: screen readers hear about them (review N4).
+    if (s.summary?.readOnly !== true) this.#announce("Follow-up suggestions are available.");
   }
 
   #onTerminal(terminal: NonNullable<ThreadState["live"]>["terminal"]): void {
@@ -602,6 +604,7 @@ export class ThreadController {
     const key = this.#newKey();
     const queues = currentRunId(this.#state) !== undefined;
     const branchFrom = parentEntryId ?? this.#state.summary?.leafEntryId ?? null;
+    const followups = this.#state.followups;
     this.#set((s) => ({
       ...s,
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
@@ -614,7 +617,8 @@ export class ThreadController {
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;
     if (!res.ok) {
-      this.#set((s) => ({ ...s, sending: undefined }));
+      // Nothing was sent: the follow-ups come back with the draft (review N2).
+      this.#set((s) => ({ ...s, sending: undefined, followups: s.followups ?? followups }));
       this.#fail(res.error, text);
       return false;
     }
@@ -891,7 +895,12 @@ export class ThreadController {
     if (threadId === null || !summary || summary.leafEntryId === entryId) return;
     const previous = summary.leafEntryId;
     this.#leafVersion += 1;
-    this.#set((s) => (s.summary ? { ...s, summary: { ...s.summary, leafEntryId: entryId } } : s));
+    // Another branch: the follow-ups were for the answer that is no longer shown (review N1).
+    this.#set((s) =>
+      s.summary
+        ? { ...s, followups: undefined, summary: { ...s.summary, leafEntryId: entryId } }
+        : s,
+    );
     const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, entryId));
     if (!res.ok) {
       this.#set((s) =>
