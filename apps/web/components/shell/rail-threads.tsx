@@ -15,7 +15,6 @@ import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
 import {
   groupThreads,
-  placementCustom,
   placementOf,
   type GroupKind,
   type ThreadGroup,
@@ -27,6 +26,7 @@ import { useChatSession } from "../chat/kobe-runtime";
 import { THREAD_ITEM, TRASH_ITEM } from "../chat/thread-item";
 import { RailAnnounce } from "../chat/use-organize-menu";
 import { IconAction } from "./icon-action";
+import { useListedThreads } from "./use-listed-threads";
 import { InlineLink } from "./text-links";
 import chat from "../chat/chat.module.css";
 import styles from "./rail.module.css";
@@ -180,20 +180,11 @@ export function RailThreads({
   readonly fetchFn: typeof fetch | undefined;
 }) {
   const session = useChatSession();
-  const threadIds = useAuiState((s) => s.threads.threadIds);
   const trashIds = useAuiState((s) => s.threads.archivedThreadIds);
   const items = useAuiState((s) => s.threads.threadItems);
   const hasMore = useAuiState((s) => s.threads.hasMore);
   const loading = useAuiState((s) => s.threads.isLoading);
-  const listed = useMemo(() => {
-    // A thread created since the last list read has no `custom` yet: its seeded summary has it.
-    const seeded = (remoteId: string | undefined) => {
-      const summary = remoteId === undefined ? null : session.peek(remoteId)?.getState().summary;
-      return summary ? placementCustom(summary) : undefined;
-    };
-    const custom = new Map(items.map((i) => [i.id, i.custom ?? seeded(i.remoteId)]));
-    return threadIds.map((id) => ({ id, custom: custom.get(id) }));
-  }, [threadIds, items, session]);
+  const listed = useListedThreads();
   const projectIds = [
     ...new Set(listed.map((t) => placementOf(t.custom).projectId).filter((p) => p !== null)),
   ]

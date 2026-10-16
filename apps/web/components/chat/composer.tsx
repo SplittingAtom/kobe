@@ -18,9 +18,54 @@ import { useComposerDictation, useSteer } from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
+import { ariaKeyShortcuts } from "../../lib/shell/commands";
+import { READ_ONLY } from "../../lib/chat/thread-commands";
+import type { MenuBindings } from "../../lib/shell/menu";
+import { shortcutOf } from "../../lib/shell/shortcuts";
+import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
 import { ModelPicker } from "./model-picker";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
+
+const NOTHING_TO_STEER = "Nothing is running to steer.";
+const IN_TRASH = "Restore the conversation first.";
+
+/**
+ * The composer's own actions for the palette and the shortcuts (CE23, KOBE-225): Go to the message
+ * box (Mod+/) and Steer now (Mod+Shift+Enter, which the input itself also handles while a run is
+ * on), each with why it can't run.
+ */
+function composerBindings(
+  focus: () => void,
+  steer: { readonly run: () => void; readonly unavailable: string | undefined },
+  state: { readonly running: boolean; readonly readOnly: boolean; readonly inTrash: boolean },
+): MenuBindings {
+  const closed = state.readOnly ? READ_ONLY : state.inTrash ? IN_TRASH : null;
+  return {
+    "focus-composer": { onSelect: focus, blocker: closed },
+    steer: {
+      onSelect: steer.run,
+      blocker: closed ?? (state.running ? (steer.unavailable ?? null) : NOTHING_TO_STEER),
+    },
+  };
+}
+
+/** Up arrow edits the last sent message only from an empty input, the caret at its start. */
+function wantsEditLast(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  const el = e.currentTarget;
+  return (
+    e.key === "ArrowUp" &&
+    !e.shiftKey &&
+    !e.altKey &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.nativeEvent.isComposing &&
+    el.value === "" &&
+    el.selectionStart === 0 &&
+    // An open trigger popover (the @ picker, the / menu) owns the arrows.
+    el.getAttribute("aria-expanded") !== "true"
+  );
+}
 
 /**
  * The composer (D17). Idle: Enter sends. While a run holds the thread the primary button reads
@@ -47,7 +92,7 @@ export function Composer({
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
   const dictation = useComposerDictation();
-  const { steer } = useSteer(extras);
+  const { steer, unavailable } = useSteer(extras);
   const draft = remoteId ?? NEW_DRAFT;
   const blocker = session.attachments.blocker(draft);
   const picker = useRef<HTMLInputElement>(null);
@@ -91,7 +136,23 @@ export function Composer({
       aui.composer.setText("");
     }
   };
+  const readOnly = extras.state.summary?.readOnly === true;
+  useBindCommands(
+    composerBindings(
+      () => input.current?.focus(),
+      { run: () => void steer(), unavailable },
+      { running, readOnly, inTrash },
+    ),
+  );
+  const editLast = useBoundCommands()["edit-last-message"];
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (wantsEditLast(e)) {
+      if (editLast?.onSelect && !editLast.blocker) {
+        e.preventDefault();
+        editLast.onSelect();
+      }
+      return;
+    }
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
     // An open trigger popover (the @ picker, the / menu) takes Enter to pick, not to queue.
     if (e.currentTarget.getAttribute("aria-expanded") === "true") return;
@@ -104,7 +165,7 @@ export function Composer({
     }
   };
 
-  if (extras.state.summary?.readOnly === true && !inTrash) {
+  if (readOnly && !inTrash) {
     return (
       <p className={styles.banner} role="note">
         You are reading a shared conversation. Fork it to ask the agent something of your own.
@@ -155,6 +216,7 @@ export function Composer({
               running ? "Type to queue a message, or steer the agent" : "Message the agent"
             }
             aria-describedby="kobe-composer-hint"
+            aria-keyshortcuts={ariaKeyShortcuts(shortcutOf("focus-composer"))}
             onKeyDown={onKeyDown}
             submitMode="enter"
             rows={1}

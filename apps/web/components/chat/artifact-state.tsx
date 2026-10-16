@@ -77,6 +77,13 @@ export interface ArtifactPanelApi {
   /** Closes the active tab. */
   close(): void;
   setWidth(width: number): void;
+  /**
+   * The member hid the column with its key or the palette (CE23, KOBE-225): its tabs stay and it
+   * takes no space until shown again or an artifact is opened.
+   */
+  readonly hidden: boolean;
+  /** Hides or shows the column (the sheet, under 820 px); false when there is nothing to show. */
+  toggleColumn(): boolean;
 }
 
 const ArtifactPanelContext = createContext<ArtifactPanelApi | null>(null);
@@ -231,7 +238,13 @@ function useSheet(threadId: string | undefined, hasTabs: boolean, asSheet: boole
   );
   const hide = useCallback(() => setState({ open: false, threadId, asSheet }), [threadId, asSheet]);
   const open = state.open && state.threadId === threadId && state.asSheet === asSheet && hasTabs;
-  return useMemo(() => ({ open, show, hide }), [open, show, hide]);
+  return useMemo(() => ({ open, show, hide, asSheet }), [open, show, hide, asSheet]);
+}
+
+/** The thread's most recently updated artifact, to show when the column has no tab open. */
+function newestArtifact(artifacts: readonly ArtifactSummaryView[] | null): string | undefined {
+  const sorted = [...(artifacts ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return sorted[0]?.id;
 }
 
 export function ArtifactPanelProvider({
@@ -261,13 +274,35 @@ export function ArtifactPanelProvider({
   const artifacts = useThreadArtifacts(threadId, t.prune);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
   const { openArtifact: openTab, drop } = t;
+  const [hiddenIn, setHiddenIn] = useState<string | undefined | null>(null);
+  // Hidden for the thread it was hidden on (`null`: shown); another thread shows its own tabs.
+  const hidden = hiddenIn !== null && hiddenIn === threadId && !sheet.asSheet;
   const openArtifact = useCallback(
     (id: string, version?: number) => {
+      setHiddenIn(null);
       sheet.show();
       openTab(id, version);
     },
     [sheet, openTab],
   );
+  const hasTabs = t.tabs.active !== null;
+  const newest = newestArtifact(artifacts);
+  const toggleColumn = useCallback((): boolean => {
+    if (sheet.asSheet) {
+      if (sheet.open) sheet.hide();
+      else if (hasTabs) sheet.show();
+      else if (newest) openArtifact(newest);
+      else return false;
+      return true;
+    }
+    if (hasTabs) {
+      setHiddenIn(hidden ? null : threadId);
+      return true;
+    }
+    if (!newest) return false;
+    openArtifact(newest);
+    return true;
+  }, [sheet, hasTabs, newest, openArtifact, hidden, threadId]);
   const openFile = useCallback((path: string) => openArtifact(fileTabId(path)), [openArtifact]);
   const [gone, setGone] = useState<{ readonly path: string; readonly threadId?: string } | null>(
     null,
@@ -301,8 +336,12 @@ export function ArtifactPanelProvider({
       closeTab: t.closeTab,
       close: t.close,
       setWidth,
+      hidden,
+      toggleColumn,
     }),
     [
+      hidden,
+      toggleColumn,
       openFile,
       dropFile,
       goneFile,

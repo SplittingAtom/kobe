@@ -258,7 +258,8 @@ export function ArtifactPanel({
   const { sheet, modal } = useSheetLayer(ref);
   const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
-  if (!panel || active === null) return null; // no tabs: no column (CE6)
+  // No tabs, or hidden by the member (CE23): no column (CE6).
+  if (!panel || active === null || panel.hidden) return null;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
     event.stopPropagation();

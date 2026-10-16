@@ -17,6 +17,7 @@ import {
   type KobeMessageMeta,
   type SkippedReport,
 } from "../../lib/chat/tree";
+import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
@@ -142,6 +143,10 @@ export function UserMessage() {
   const readOnly = isReadOnlyThread(extras);
   const canEdit =
     !readOnly && extras !== undefined && branchPointOfMeta(extras.projection, meta) !== undefined;
+  // The last message sent is the one Mod+Shift+E edits (CE23): its Edit tooltip names the key.
+  const lastSent = useAuiState(
+    (s) => s.thread.messages.findLast((m) => m.role === "user")?.id === s.message.id,
+  );
   return (
     <MessagePrimitive.Root
       data-role="user"
@@ -166,7 +171,11 @@ export function UserMessage() {
             <ActionBarPrimitive.Root hideWhenRunning className="flex items-center">
               {canEdit && (
                 <ActionBarPrimitive.Edit asChild>
-                  <IconAction command="edit" size="sm" />
+                  <IconAction
+                    command="edit"
+                    size="sm"
+                    shortcut={lastSent ? shortcutOf("edit-last-message") : undefined}
+                  />
                 </ActionBarPrimitive.Edit>
               )}
               <ForkAction meta={meta} />
