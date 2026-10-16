@@ -20,6 +20,7 @@ import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
+import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chips";
 import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
 
@@ -135,6 +136,7 @@ function MessagesAndComposer({
   readonly modelPicker: boolean;
 }) {
   const { state } = extras;
+  const starters = useAgentStarters(extras);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const hasMessages = useAuiState((s) => s.thread.messages.length > 0);
   const follow = useFollowLatest(
@@ -193,6 +195,7 @@ function MessagesAndComposer({
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
             <RunNotices extras={extras} />
           </div>
+          <FollowupChips extras={extras} />
           <ComposerDictationProvider>
             {/* The overlay sheet at 768–820 px ends above this box (KOBE-269, chat-global.css). */}
             <div className="flex flex-col" data-kobe-composer-box>
@@ -201,7 +204,8 @@ function MessagesAndComposer({
             </div>
           </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
-            {state.phase === "ready" && <ThreadSuggestions />}
+            {state.phase === "ready" &&
+              (starters.length > 0 ? <AgentStarters starters={starters} /> : <ThreadSuggestions />)}
           </AuiIf>
         </div>
       </div>

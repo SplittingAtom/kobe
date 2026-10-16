@@ -70,6 +70,8 @@ export interface FakeRunnableAgent {
   readonly name: string;
   readonly description?: string;
   readonly model: string | null;
+  /** The current version's starters (KOBE-222); default none. */
+  readonly starters?: readonly string[];
 }
 
 interface FakeEntry {
@@ -501,8 +503,11 @@ export class FakeKobe {
       ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
-    /** `epilogue`: the server will title the thread after the run (KOBE-219). */
-    complete: (runId: string, options: { readonly epilogue?: readonly "title"[] } = {}) => {
+    /** `epilogue`: the server will title the thread / suggest follow-ups after the run. */
+    complete: (
+      runId: string,
+      options: { readonly epilogue?: readonly ("title" | "followups")[] } = {},
+    ) => {
       const run = this.run(runId);
       // Like the server: the leaf moves in the same transaction as the terminal event.
       this.#thread(run.thread_id).leaf_entry_id =
@@ -518,6 +523,14 @@ export class FakeKobe {
       const run = this.run(runId);
       this.#thread(run.thread_id).title = title;
       this.emit(runId, "thread.updated", { thread_id: run.thread_id, title });
+    },
+    /** The server's follow-up call answered (KOBE-222): `thread.suggestions` on the run. */
+    suggest: (runId: string, suggestions: readonly string[]) => {
+      const run = this.run(runId);
+      this.emit(runId, "thread.suggestions", {
+        thread_id: run.thread_id,
+        suggestions: [...suggestions],
+      });
     },
     fail: (runId: string, code: string, message: string) => {
       this.#end(this.run(runId), "failed", "run.failed", { error: { code, message } });
@@ -765,6 +778,7 @@ export class FakeKobe {
         agents: page.map((a) => ({
           slug: a.name.toLowerCase().replace(/\W+/g, "-"),
           current_version: 1,
+          starters: [],
           ...a,
         })),
         next_cursor: next < this.runnableAgents.length ? String(next) : null,

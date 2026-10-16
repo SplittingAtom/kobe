@@ -95,6 +95,8 @@ export interface RunnableAgent {
   readonly description?: string;
   /** The model the agent's current version pins (alias or id); null = not pinned. */
   readonly model: string | null;
+  /** The current version's conversation starters (D19): the welcome screen's chips (KOBE-222). */
+  readonly starters?: readonly string[];
 }
 
 export interface ThreadPage {

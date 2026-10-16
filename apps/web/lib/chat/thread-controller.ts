@@ -26,6 +26,7 @@ import {
   canRegenerateWith,
   currentRunId,
   initialThreadState,
+  isThreadRunning,
   mergeCommittedEntries,
   mergeServerEntries,
   promptSaved,
@@ -407,6 +408,7 @@ export class ThreadController {
   #onEvents(runId: string, events: readonly KobeEvent[]): void {
     for (const event of events) {
       if (event.type === "thread.updated") this.#retitled(event.payload);
+      if (event.type === "thread.suggestions") this.#suggested(runId, event.payload);
     }
     const live = this.#state.live;
     if (!live || live.runId !== runId) return;
@@ -428,6 +430,7 @@ export class ThreadController {
     }
     if (applied.run.started && !wasStarted) {
       // A queued run started: it leaves the queue and its prompt shows in the conversation.
+      this.#set((s) => (s.followups ? { ...s, followups: undefined } : s));
       this.#announce("The agent is working on your message.");
       void this.refresh();
     } else if (this.#mayBeUnsavedPrompt(applied.entries)) {
@@ -461,6 +464,24 @@ export class ThreadController {
         : s,
     );
     this.#onRetitled?.(payload.thread_id, payload.title);
+  }
+
+  /**
+   * The server's follow-ups after `runId` (KOBE-222): shown only while that run is still the
+   * thread's latest and nothing was sent since (a late epilogue never brings old chips back).
+   */
+  #suggested(
+    runId: string,
+    payload: { readonly thread_id: string; readonly suggestions: readonly string[] },
+  ): void {
+    this.#set((s) =>
+      payload.thread_id === s.threadId &&
+      s.live?.runId === runId &&
+      s.sending === undefined &&
+      !isThreadRunning(s)
+        ? { ...s, followups: { runId, suggestions: payload.suggestions } }
+        : s,
+    );
   }
 
   #onTerminal(terminal: NonNullable<ThreadState["live"]>["terminal"]): void {
@@ -585,6 +606,7 @@ export class ThreadController {
       ...s,
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
+      followups: undefined, // shown until the next send (KOBE-222)
       queuePaused: false, // sending releases a queue held by Stop
     }));
     const body = { content: text, parentEntryId, fileIds: attach?.fileIds };

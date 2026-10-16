@@ -61,6 +61,12 @@ export interface ThreadState {
   readonly busy: readonly string[];
   /** The run the server accepted Stop for; it may stream on until its end arrives (KOBE-269). */
   readonly stopRequested?: string | undefined;
+  /**
+   * Follow-ups the server suggested after the last completed run (KOBE-222 `thread.suggestions`):
+   * chips above the composer until the next send.
+   */
+  readonly followups?:
+    { readonly runId: string; readonly suggestions: readonly string[] } | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
   /** Bumped per announcement, so the same text twice is announced twice. */
