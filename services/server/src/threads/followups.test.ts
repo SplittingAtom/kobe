@@ -23,7 +23,7 @@ describe("parseFollowups (KOBE-222 ac-5: threadSuggestionsSchema)", () => {
     ],
     ["- Chart it\n* Show Q4\n• Compare", ["Chart it", "Show Q4", "Compare"]],
     ['"Chart it"\n“Show Q4”\n**Compare**', ["Chart it", "Show Q4", "Compare"]],
-    ["\n\n  Chart   it \r\n\r\nShow Q4 Compare", ["Chart it", "Show Q4", "Compare"]],
+    ["\n\n  Chart   it \r\n\r\nShow Q4\u2028Compare", ["Chart it", "Show Q4", "Compare"]],
   ])("cleans %j", (reply, expected) => {
     expect(parseFollowups(reply)).toEqual(expected);
   });
@@ -44,7 +44,7 @@ describe("parseFollowups (KOBE-222 ac-5: threadSuggestionsSchema)", () => {
   });
 
   it("removes controls and bidi overrides", () => {
-    const [first] = parseFollowups("Chart‮ it\u0007") ?? [];
+    const [first] = parseFollowups("Chart\u202e it\u0007") ?? [];
     expect(first).toBe("Chart it");
   });
 
