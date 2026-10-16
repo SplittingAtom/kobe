@@ -14,7 +14,7 @@ import {
   type ServerToSandboxFrame,
   type ThreadCompactFrame,
 } from "@kobe/protocol";
-import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
+import { sql, withTeam, type KobeTx, type SandboxCommandKind } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
 import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
 import { failureInfo } from "../runs/failure-codes.js";
@@ -34,6 +34,7 @@ import { mintRunToken } from "./run-token.js";
 import {
   RUNTIME_TAMPERED,
   auditRuntimeTamperInTx,
+  withTamperAudit,
   type RuntimeTamperReport,
 } from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
@@ -578,7 +579,7 @@ export class CommandDelivery {
     const read = outcome.ok ? undefined : await this.fetchNewEntries(threadId);
     const prompt: PromptSource | undefined =
       read === undefined ? undefined : { kind: "pi", entries: read, otherwise: "unsent" };
-    const { ended } = await withAppendTx(this.#ctx.db, teamId, async (tx) => {
+    const { ended } = await this.#endTx(outcome, runId, threadId, "message", async (tx) => {
       const result = await endRunInTx(tx, teamId, runId, end, undefined, prompt);
       // Ended before (Stop while the sandbox prepared the run): the prompt is kept all the same.
       if (!result.ended && prompt !== undefined) {
@@ -588,8 +589,6 @@ export class CommandDelivery {
           maxBytes: this.#ctx.tuning.runMaxBytes,
         });
       }
-      if (tampered(outcome))
-        await auditRuntimeTamperInTx(tx, this.#tamper(runId, threadId, "message"));
       return result;
     });
     this.#host.endLease(runId);
@@ -623,7 +622,7 @@ export class CommandDelivery {
     const end = outcome.ok
       ? ({ status: "completed" } as const)
       : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
-    const { ended } = await withAppendTx(this.#ctx.db, teamId, async (tx) => {
+    const { ended } = await this.#endTx(outcome, runId, threadId, "compaction", async (tx) => {
       if (entries !== undefined) {
         const mirrored = await mirrorEntriesInTx(
           tx,
@@ -637,14 +636,34 @@ export class CommandDelivery {
           this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
         }
       }
-      const result = await endRunInTx(tx, teamId, runId, end);
-      if (tampered(outcome)) {
-        await auditRuntimeTamperInTx(tx, this.#tamper(runId, threadId, "compaction"));
-      }
-      return result;
+      return endRunInTx(tx, teamId, runId, end);
     });
     this.#host.endLease(runId);
     if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
+  }
+
+  /**
+   * The transaction ending a run (`withAppendTx`). For a tampered runtime it also writes
+   * `sandbox.runtime_tampered` as its last write, and the row alone if it cannot commit (KOBE-271).
+   */
+  #endTx<T>(
+    outcome: CommandOutcome,
+    runId: string,
+    threadId: string,
+    runKind: RuntimeTamperReport["runKind"],
+    work: (tx: KobeTx) => Promise<T>,
+  ): Promise<T> {
+    const { db } = this.#ctx;
+    const { teamId } = this.#host.target;
+    if (!tampered(outcome)) return withAppendTx(db, teamId, work);
+    const report = this.#tamper(runId, threadId, runKind);
+    return withTamperAudit(db, report, this.#host.log, () =>
+      withAppendTx(db, teamId, async (tx) => {
+        const result = await work(tx);
+        await auditRuntimeTamperInTx(tx, report);
+        return result;
+      }),
+    );
   }
 
   /** The ids of a tampered-runtime report from this connection (KOBE-271). */

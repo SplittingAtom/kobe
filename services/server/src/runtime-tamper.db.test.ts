@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPACT } from "@kobe/protocol";
 import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { auditQuerySchema, listAuditEvents, listTeamAuditEvents, withTeam } from "@kobe/db";
 import { must } from "./testing/event-stream-fixture.js";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
-import { auditRuntimeTamperInTx } from "./sandbox-wire/runtime-tamper.js";
+import { TAMPER_AUDIT_ATTEMPTS, auditRuntimeTamperInTx } from "./sandbox-wire/runtime-tamper.js";
 
 /**
  * A tampered Pi runtime (KOBE-271) is a security event: the run's failure is recorded with an
@@ -102,6 +103,44 @@ function expectIdsOnly(target: Record<string, unknown>): void {
     ["replicaId", "runId", "runKind", "sandboxId", "threadId", "userId"].sort(),
   );
   expect(JSON.stringify(target)).not.toContain("models.json");
+}
+
+/**
+ * Makes `sandbox.runtime_tampered` inserts of `team` fail: the first `failures` of them, or every
+ * one (null). `tries()` counts the inserts attempted; `drop()` removes the fault.
+ */
+async function failTamperInserts(team: string, failures: number | null) {
+  const admin = f.fx.admin;
+  await admin.query(
+    `DROP SEQUENCE IF EXISTS kobe_test_tamper_tries; CREATE SEQUENCE kobe_test_tamper_tries`,
+  );
+  await admin.query(`
+    CREATE OR REPLACE FUNCTION kobe_test_tamper_fault() RETURNS trigger
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+    BEGIN
+      IF NEW.action = '${ACTION}' AND NEW.team_id = '${team}' THEN
+        IF nextval('kobe_test_tamper_tries') <= ${failures ?? 1_000_000} THEN
+          RAISE EXCEPTION 'test: audit insert refused';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END $$`);
+  await admin.query(`
+    CREATE TRIGGER kobe_test_tamper_fault BEFORE INSERT ON audit_log
+      FOR EACH ROW EXECUTE FUNCTION kobe_test_tamper_fault()`);
+  return {
+    tries: async () => {
+      const { rows } = await admin.query<{ n: string }>(
+        `SELECT CASE WHEN is_called THEN last_value ELSE 0 END AS n FROM kobe_test_tamper_tries`,
+      );
+      return Number(must(rows[0], "sequence").n);
+    },
+    drop: async () => {
+      await admin.query(`DROP TRIGGER kobe_test_tamper_fault ON audit_log`);
+      await admin.query(`DROP FUNCTION kobe_test_tamper_fault()`);
+      await admin.query(`DROP SEQUENCE kobe_test_tamper_tries`);
+    },
+  };
 }
 
 describe("sandbox.runtime_tampered (KOBE-271)", () => {
@@ -208,6 +247,78 @@ describe("sandbox.runtime_tampered (KOBE-271)", () => {
     const results = await Promise.all([once(), once(), once()]);
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(await once()).toBe(false);
+    expect(await tamperRows(w.team)).toHaveLength(1);
+  });
+
+  it("the run's failure and its row commit together: a refused audit write leaves neither", async () => {
+    const w = await f.world();
+    await teamModel(w);
+    const ws = await f.connect(w, 0, CAPABLE);
+    tamperStarts(ws);
+    const faults = await failTamperInserts(w.team, null);
+    try {
+      const threadId = await f.thread(w.owner);
+      const runId = await f.message(w.owner, threadId, "x");
+      // The run end with its row, then the row alone on every retry: all refused.
+      await expect
+        .poll(() => faults.tries(), { timeout: 15_000, interval: 50 })
+        .toBe(1 + TAMPER_AUDIT_ATTEMPTS);
+      expect(await f.status(w.team, runId)).toBe("running");
+      expect(await f.types(w.team, runId)).not.toContain("run.failed");
+      expect(await tamperRows(w.team)).toEqual([]);
+    } finally {
+      await faults.drop();
+    }
+  });
+
+  it("a run end that could not commit still leaves the row (written on its own)", async () => {
+    const w = await f.world();
+    await teamModel(w);
+    const ws = await f.connect(w, 0, CAPABLE);
+    tamperStarts(ws);
+    // The first insert (with the run's failure) is refused; the retry writes the row alone.
+    const faults = await failTamperInserts(w.team, 1);
+    try {
+      const threadId = await f.thread(w.owner);
+      const runId = await f.message(w.owner, threadId, "x");
+      await expect
+        .poll(async () => (await tamperRows(w.team)).length, { timeout: 15_000, interval: 50 })
+        .toBe(1);
+      expect(must((await tamperRows(w.team))[0], "row").target).toMatchObject({
+        runId,
+        threadId,
+        runKind: "message",
+      });
+      // The run's end rolled back; the lost-run sweep ends it later (unchanged).
+      expect(await f.status(w.team, runId)).toBe("running");
+      expect(await faults.tries()).toBe(2);
+    } finally {
+      await faults.drop();
+    }
+  });
+
+  it("once per run even when the run row is gone (racing reports of a deleted run)", async () => {
+    const w = await f.world();
+    const report = {
+      teamId: w.team,
+      userId: w.owner.id,
+      sandboxId: randomUUID(),
+      replicaId: f.fx.replica(0).deps.sandboxWire.replicaId,
+      threadId: randomUUID(),
+      runId: randomUUID(),
+      runKind: "message" as const,
+    };
+    const once = () => withTeam(db(), w.team, (tx) => auditRuntimeTamperInTx(tx, report));
+    // The first report holds its transaction open after writing; the second starts meanwhile.
+    let second: Promise<boolean> | undefined;
+    const first = withTeam(db(), w.team, async (tx) => {
+      const wrote = await auditRuntimeTamperInTx(tx, report);
+      second = once();
+      await new Promise((r) => setTimeout(r, 300));
+      return wrote;
+    });
+    expect(await first).toBe(true);
+    expect(await must(second, "second report")).toBe(false);
     expect(await tamperRows(w.team)).toHaveLength(1);
   });
 
