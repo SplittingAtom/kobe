@@ -18,6 +18,9 @@ import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { AppCommands } from "../shell/app-commands";
 import { CommandBindingsProvider } from "../shell/command-bindings";
+import { CommandPalette } from "../shell/command-palette";
+import { ShortcutKeys } from "../shell/shortcut-keys";
+import { ShortcutSheet } from "../shell/shortcut-sheet";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider } from "../shell/rail-state";
@@ -199,7 +202,7 @@ function ChatWorkspace({
   const layout = useLayoutPreferences(fetchFn);
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
-      {/* What each action does now, for the `/` menu (KOBE-224) and the palette (KOBE-225). */}
+      {/* What each action does now: the `/` menu (KOBE-224), the palette and keys (KOBE-225). */}
       <CommandBindingsProvider>
         <RetentionNotice />
         <RailProvider preferences={layout.preferences} onSave={layout.save}>
@@ -215,6 +218,10 @@ function ChatWorkspace({
                   >
                     <FileGoneNotice />
                     <AppCommands />
+                    {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
+                    <ShortcutKeys />
+                    <CommandPalette onOpenThread={setThreadId} />
+                    <ShortcutSheet />
                     <ShellSlot name="search">
                       <ThreadSearch onOpenThread={setThreadId} />
                     </ShellSlot>

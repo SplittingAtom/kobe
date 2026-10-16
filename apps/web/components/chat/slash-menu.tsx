@@ -8,8 +8,7 @@ import {
   type TriggerAdapter,
   type TriggerItem,
 } from "@assistant-ui/react";
-import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
-import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   SLASH_ARGUMENT,
   SLASH_COMMAND,
@@ -24,6 +23,7 @@ import {
   type SlashQuery,
 } from "../../lib/shell/slash";
 import { useBoundCommands, useWantCommands } from "../shell/command-bindings";
+import { useNavigate } from "../shell/use-navigate";
 
 /** The `/` being typed (null when none), read from the composer text and the input's caret. */
 function useSlashQuery(input: RefObject<HTMLTextAreaElement | null>): SlashQuery | null {
@@ -33,15 +33,6 @@ function useSlashQuery(input: RefObject<HTMLTextAreaElement | null>): SlashQuery
     setQuery(slashQueryAt(text, input.current?.selectionStart ?? text.length));
   }, [text, input]);
   return query;
-}
-
-/**
- * Navigation leaves the thread the way the bar's links do: client-side (the draft, its
- * attachments and a live run's stream stay in memory). Outside Next's app router (tests), a load.
- */
-function useNavigate(): (href: string) => void {
-  const router = useContext(AppRouterContext);
-  return (href) => (router ? router.push(href) : window.location.assign(href));
 }
 
 /**
