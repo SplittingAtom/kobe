@@ -221,6 +221,65 @@ describe("skills", () => {
   });
 });
 
+describe("team skills offered to all agents (KOBE-297)", () => {
+  const names = (input: ResolveInput) => {
+    const r = resolveEffective(input);
+    return r.ok ? r.value.skills.map((s) => s.name) : [];
+  };
+
+  it("a non-exclusive agent gets every offered skill, after its own and the user's", () => {
+    const input = with_({
+      agent: { skills: [sk("named")] },
+      user: { skills: [sk("mine")] },
+      team: { offeredSkills: [sk("offered"), sk("also")] },
+    });
+    expect(names(input)).toEqual(["named", "mine", "offered", "also"]);
+    const r = resolveEffective(input);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("an exclusive agent gets none of them, without a notice", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: [sk("named")], exclusiveSkills: true },
+        team: { offeredSkills: [sk("offered")] },
+      }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["named"]);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("is deduplicated with the agent's named skills, built-ins and the user's skills", () => {
+    expect(
+      names(
+        with_({
+          agent: { skills: [sk("dup")], builtinSkills: ["pdf"] },
+          user: { skills: [sk("mine", "h-personal")] },
+          team: { offeredSkills: [sk("dup"), sk("pdf"), sk("mine"), sk("fresh"), sk("fresh")] },
+        }),
+      ),
+    ).toEqual(["dup", "mine", "fresh"]);
+  });
+
+  it("an offered skill fills in for a personal one the team switch hides", () => {
+    expect(
+      names(
+        with_({
+          user: { skills: [sk("same", "h-personal")] },
+          team: { personalSkillsDisabled: true, offeredSkills: [sk("same")] },
+        }),
+      ),
+    ).toEqual(["same"]);
+  });
+
+  it("a blocklisted offered skill is left out", () => {
+    const r = resolveEffective(
+      with_({ team: { offeredSkills: [sk("bad", "bad"), sk("ok")] }, blockedHashes: ["bad"] }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["ok"]);
+  });
+});
+
 describe("connectors", () => {
   const omit = (name: string, reason: string) => ({ kind: "connector", name, reason });
   it.each([

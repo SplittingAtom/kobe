@@ -5,7 +5,7 @@ import type {
   RunMcpContext,
   RunTrigger,
 } from "@kobe/protocol";
-import type { AgentScope, KobeTx } from "@kobe/db";
+import type { AgentScope, KobeTx, RunSkillRef } from "@kobe/db";
 import type { Omission } from "../resolver/resolve.js";
 
 /**
@@ -52,6 +52,8 @@ export type AgentResolution =
       readonly omissions?: readonly Omission[];
       /** The run's effective MCP connectors and tools (KOBE-111); empty = none. */
       readonly mcp?: RunMcpContext;
+      /** The skills `run.start` lists, with their source, recorded with the run (KOBE-297). */
+      readonly skillRefs?: readonly RunSkillRef[];
     }
   | { readonly ok: false; readonly error: ErrorInfo };
 

@@ -4,6 +4,7 @@ import { resolveEffective } from "../resolver/resolve.js";
 import { isBuiltinSkillName } from "@kobe/protocol";
 import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsFor } from "../skills/materialize.js";
+import { runSkillRefs } from "../skills/detect.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
 import {
@@ -103,6 +104,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
       { teamId: input.teamId, userId: input.ownerUserId },
       value.skills,
     );
+    const builtinSkills = value.builtinSkills.filter(isBuiltinSkillName);
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""
         ? {}
@@ -113,10 +115,10 @@ export const PINNED_AGENTS: RunAgentResolver = {
         ? { skills: skillBundles.map((s) => s.name), skill_bundles: skillBundles }
         : {}),
       // Built-ins (KOBE-88) come from the sandbox image: no bundle, nothing to fetch or block.
-      ...(value.builtinSkills.length > 0
-        ? { builtin_skills: value.builtinSkills.filter(isBuiltinSkillName) }
-        : {}),
+      ...(value.builtinSkills.length > 0 ? { builtin_skills: builtinSkills } : {}),
     };
+    // KOBE-297: what this run.start lists, kept with the run so a SKILL.md read can be matched.
+    const skillRefs = runSkillRefs(skillBundles, value.skills, builtinSkills);
     return {
       ok: true,
       agent: {
@@ -129,6 +131,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
       omissions: value.omissions,
       mcp,
+      ...(skillRefs.length > 0 ? { skillRefs } : {}),
       ...(Object.keys(config).length > 0 ? { config } : {}),
     };
   },

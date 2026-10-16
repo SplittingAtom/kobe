@@ -15,6 +15,8 @@ export interface SkillRef {
   readonly name: string;
   /** Content hash of the skill bundle (the blocklist keys on it). */
   readonly hash: string;
+  /** Where it comes from (KOBE-297: recorded with the run); absent = not said. */
+  readonly source?: "team" | "personal";
 }
 
 export interface ResolveInput {
@@ -42,6 +44,13 @@ export interface ResolveInput {
     readonly connectors: readonly string[];
     /** Team-level switch (KOBE-80): when true, no user-enabled personal skill is used. */
     readonly personalSkillsDisabled: boolean;
+    /**
+     * Team skills set to "Offer to all agents" (KOBE-297), each at its newest approved version:
+     * added to every non-exclusive agent's run after its own and the user's skills, unless a skill
+     * of that name is already there. Exclusive agents and blocklisted hashes leave them out
+     * without a notice (the agent never named them).
+     */
+    readonly offeredSkills?: readonly SkillRef[];
   };
   readonly user: {
     /** The user's enabled personal skills. */
@@ -125,6 +134,14 @@ function resolveSkills(input: ResolveInput): {
         ? "team_disabled"
         : "not_approved";
     omissions.push({ kind: "skill", name, reason });
+  }
+  if (!input.agent.exclusiveSkills) {
+    const taken = new Set([...agentNames, ...skills.map((s) => s.name)]);
+    for (const s of input.team.offeredSkills ?? []) {
+      if (blocked.has(s.hash) || taken.has(s.name)) continue;
+      taken.add(s.name);
+      skills.push(s);
+    }
   }
   return { skills, omissions };
 }

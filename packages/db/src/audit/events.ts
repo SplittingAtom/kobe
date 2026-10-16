@@ -1217,6 +1217,8 @@ export const AUDIT_EVENTS = {
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
+  /** A team admin turned a team skill's "Offer to all agents" on or off (KOBE-297). */
+  "skill.offer.changed": event("team", { skillId: id, slug, offerToAll: z.boolean() }),
   /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */

@@ -1,6 +1,6 @@
 import { agentConnectors, agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
 import { isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
-import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
+import { and, connectors, eq, teamConnectors, teamModels, teamSkills, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
 import { approvedTeamSkills, personalSkillUsage } from "../skills/review.js";
@@ -32,8 +32,19 @@ export interface SkillFacts {
   readonly agentUnapproved: readonly string[];
   /** Personal skills blocked for lack of this team's approval (KOBE-99). */
   readonly userUnapproved: readonly string[];
-  /** Hashes among the two lists that the site blocklist holds (read at this run start, KOBE-81). */
+  /** The team's skills offered to all agents (KOBE-297), at their newest approved versions. */
+  readonly offered: readonly SkillRef[];
+  /** Hashes among the three lists that the site blocklist holds (read at this run start, KOBE-81). */
   readonly blockedHashes: readonly string[];
+}
+
+/** Slugs of the team skills set to "Offer to all agents" (KOBE-297; RLS: inside `withTeam`). */
+export async function offeredSkillNames(tx: KobeTx, teamId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ slug: teamSkills.slug })
+    .from(teamSkills)
+    .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.offerToAll, true)));
+  return rows.map((r) => r.slug);
 }
 
 /** The team's enabled models and connectors (RLS: inside `withTeam`). */
@@ -73,29 +84,36 @@ export async function loadSkillFacts(
   // name, so they are neither looked up nor reported as unapproved.
   const agentBuiltin = [...new Set(args.agentSkillNames.filter(isBuiltinSkillName))];
   const teamNames = args.agentSkillNames.filter((n) => !isBuiltinSkillName(n));
-  const [agent, user] = await Promise.all([
-    approvedTeamSkills(tx, args.teamId, teamNames),
-    personalSkillUsage(tx, {
-      teamId: args.teamId,
-      userId: args.userId,
-      ensureRows: !args.personalSkillsDisabled,
-    }),
-  ]);
+  // One transaction, one connection: these reads run one after the other.
+  const agent = (await approvedTeamSkills(tx, args.teamId, teamNames)).map(fromTeam);
+  const user = await personalSkillUsage(tx, {
+    teamId: args.teamId,
+    userId: args.userId,
+    ensureRows: !args.personalSkillsDisabled,
+  });
+  const usable = user.usable.map((s) => ({ ...s, source: "personal" as const }));
+  // Only approved versions, like named team skills: an offer never widens what review allows.
+  const offered = (
+    await approvedTeamSkills(tx, args.teamId, await offeredSkillNames(tx, args.teamId))
+  ).map(fromTeam);
   const approved = new Set(agent.map((s) => s.name));
   // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
   const blockedHashes = await blockedAmong(
     tx,
-    [...agent, ...user.usable].map((s) => s.hash),
+    [...agent, ...usable, ...offered].map((s) => s.hash),
   );
   return {
     agent,
     agentBuiltin,
-    user: user.usable,
+    user: usable,
+    offered,
     blockedHashes,
     agentUnapproved: [...new Set(teamNames)].filter((n) => !approved.has(n)),
     userUnapproved: user.blocked,
   };
 }
+
+const fromTeam = (s: { name: string; hash: string }): SkillRef => ({ ...s, source: "team" });
 
 export function buildResolveInput(args: {
   readonly frontmatter: AgentFrontmatter;
@@ -124,6 +142,7 @@ export function buildResolveInput(args: {
       models: team.models,
       connectors: team.connectors.map((c) => c.name),
       personalSkillsDisabled: team.personalSkillsDisabled,
+      offeredSkills: args.skills.offered,
     },
     user: {
       skills: args.skills.user,

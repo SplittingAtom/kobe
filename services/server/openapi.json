@@ -2506,7 +2506,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Run outcomes and decided approvals, oldest first.",
+            "description": "Run outcomes, decided approvals and skill uses, oldest first.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5360,11 +5360,55 @@
               "additionalProperties": false
             }
           },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "user_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tool_call_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": ["team", "personal", "builtin"]
+                }
+              },
+              "required": ["run_id", "user_entry_id", "tool_call_id", "name", "source"],
+              "additionalProperties": false
+            }
+          },
           "truncated": {
             "type": "boolean"
           }
         },
-        "required": ["runs", "approvals", "truncated"],
+        "required": ["runs", "approvals", "skills", "truncated"],
         "additionalProperties": false
       },
       "CompactThreadRequest": {

@@ -51,7 +51,10 @@ export function markersOpenApiPaths(): Record<string, Record<string, unknown>> {
           },
         ],
         responses: {
-          "200": json("ThreadMarkers", "Run outcomes and decided approvals, oldest first."),
+          "200": json(
+            "ThreadMarkers",
+            "Run outcomes, decided approvals and skill uses, oldest first.",
+          ),
           "400": json("Error", "`invalid_request`: the id is not a uuid."),
           "401": json("Error", "`unauthenticated`: no session."),
           "403": json("Error", "`not_a_team_member` or `forbidden`."),

@@ -11,6 +11,7 @@ import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
+import { recordSkillUsesInTx } from "../skills/usage.js";
 import type { RunTranslator } from "./translate.js";
 
 /** What the ingest needs from its connection. */
@@ -346,6 +347,8 @@ export class RunIngest {
         for (let i = 0; i < all.length; i += MAX_APPEND_BATCH) {
           await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
         }
+        // KOBE-297: a successful read of one of the run's SKILL.md files is a skill use.
+        await recordSkillUsesInTx(tx, teamId, runId, events);
         if (settled) {
           // The last model call failed (KOBE-41) or was cut off (KOBE-258), or the run's entries
           // were not saved: the run fails with the server's own message.
