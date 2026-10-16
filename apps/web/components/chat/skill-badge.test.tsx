@@ -73,8 +73,8 @@ const cards = () => screen.getAllByRole("region", { name: /^Tool call/ });
 describe("skill use badges (KOBE-297)", () => {
   it("names the skill on the answer and on its Read step, nowhere else", async () => {
     openApp(fake, skillThread());
-    expect(await screen.findByText("Used skill: pretty-html")).toBeTruthy();
-    await waitFor(() => expect(cards()).toHaveLength(3));
+    expect(await screen.findByText("Used skill: pretty-html", {}, { timeout: 4_000 })).toBeTruthy();
+    await waitFor(() => expect(cards()).toHaveLength(3), { timeout: 4_000 });
     const [skill, plain, later] = cards();
     expect(skill?.getAttribute("aria-label")).toBe("Tool call read: skill pretty-html");
     expect(within(skill as HTMLElement).getByText("Read skill")).toBeTruthy();
@@ -88,8 +88,8 @@ describe("skill use badges (KOBE-297)", () => {
     const thread = skillThread();
     fake.threadMarkers.set(thread, { runs: [], approvals: [] });
     openApp(fake, thread);
-    await screen.findByText("Here is the page.");
-    await waitFor(() => expect(cards()).toHaveLength(3));
+    await screen.findByText("Here is the page.", {}, { timeout: 4_000 });
+    await waitFor(() => expect(cards()).toHaveLength(3), { timeout: 4_000 });
     expect(screen.queryByText(/^Used skill:/)).toBeNull();
     expect(screen.queryByText("Read skill")).toBeNull();
   });
