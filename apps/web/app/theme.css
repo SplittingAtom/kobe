@@ -50,7 +50,7 @@
      (approval, interrupted) = amber, failed or denied = red, done = muted green, idle or Trash =
      grey, plus the accent pill of a count. Each colour is a text/icon colour that keeps WCAG AA
      (4.5:1) on the page, the rail panel, cards and its own `-bg` tint in both themes
-     (app/status-tokens.test.ts); colour never carries meaning alone (a label or icon stays). CSS
+     (app/theme-css.test.ts); colour never carries meaning alone (a label or icon stays). CSS
      modules read them as var(--kobe-status-*), Tailwind as text-status-* / bg-status-*-bg
      (app/chat-global.css). */
   --kobe-status-running: #166534;

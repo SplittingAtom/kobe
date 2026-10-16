@@ -59,9 +59,12 @@ export function budgetLevel(percent: number | null): BudgetLevel {
   return percent >= BUDGET_WARN_PERCENT ? "warn" : "ok";
 }
 
-/** The share of a budget used, or null without a budget. */
+/**
+ * The share of a budget used, unrounded (the colour decides on the exact share, so 79.6 % stays
+ * plain while the text says 80 %), or null without a budget.
+ */
 export const percentOf = (spent: number, limit: number | null): number | null =>
-  limit === null ? null : pct(spent, limit);
+  limit === null ? null : limit > 0 ? (spent / limit) * 100 : 100;
 
 const LEVEL_CLASS: Record<BudgetLevel, string | undefined> = {
   ok: undefined,

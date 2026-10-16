@@ -7,7 +7,7 @@ import { must } from "../../lib/testing/must";
 import type { BudgetStatusLine } from "../../lib/admin/api/budgets";
 import { budgetBannerText } from "../chat/run-notices";
 import { SiteBudget } from "./site/site-budget";
-import { TeamBudgetsPage, budgetLevel, spentOf, tokensOf } from "./team/budgets-page";
+import { TeamBudgetsPage, budgetLevel, percentOf, spentOf, tokensOf } from "./team/budgets-page";
 import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
 
 const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
@@ -107,6 +107,10 @@ describe("budget usage colours (KOBE-301)", () => {
     expect(budgetLevel(79)).toBe("ok");
     expect(budgetLevel(80)).toBe("warn");
     expect(budgetLevel(100)).toBe("full");
+    // Decided on the exact share, not the rounded text ("80 %", "100 %").
+    expect(budgetLevel(percentOf(79.6, 100))).toBe("ok");
+    expect(budgetLevel(percentOf(99.6, 100))).toBe("warn");
+    expect(budgetLevel(percentOf(1, 0))).toBe("full");
     const css = readFileSync(new URL(ADMIN_CSS, import.meta.url), "utf8");
     expect(css).toMatch(/\.budgetWarn \{\s*color: var\(--kobe-status-attention\);/);
     expect(css).toMatch(/\.budgetFull \{\s*color: var\(--kobe-status-failed\);/);
