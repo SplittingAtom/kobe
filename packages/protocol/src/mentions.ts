@@ -79,12 +79,12 @@ export function sandboxPathOf(path: string): string {
  * own prompt: invisible or format characters (`\p{C}`: controls, zero-width and bidi characters,
  * the tag block U+E0000–E007F, private use, unassigned, surrogates), variation selectors and other
  * invisible marks or fillers, line and paragraph separators, spaces other than U+0020, and the
- * shell's `` ` ``, `$` and `;`.
+ * shell's `` ` ``, `$` and `;`. Default-ignorable code points (e.g. U+17B4/U+17B5) too.
  */
 // The class lists single code points on purpose (combining marks among them), never sequences.
 /* eslint-disable no-misleading-character-class */
 const MENTION_FORBIDDEN =
-  /[\p{C}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u034f\u115f\u1160\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0\u{e0100}-\u{e01ef}`$;]/u;
+  /[\p{C}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u034f\u115f\u1160\u180b-\u180f\u2800\u3164\ufe00-\ufe0f\uffa0\u{e0100}-\u{e01ef}`$;]/u;
 /* eslint-enable no-misleading-character-class */
 
 /**

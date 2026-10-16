@@ -10,6 +10,7 @@ import {
 import { withTeam } from "@kobe/db";
 import { createApp } from "./app.js";
 import { SEARCH_RATE_LIMIT } from "./routes/workspace-files.js";
+import { searchFiles } from "./workspace-files/search.js";
 import {
   EventStreamFixture,
   PUBLIC_URL,
@@ -842,6 +843,21 @@ describe("GET /v1/workspace/files/search (KOBE-223)", () => {
     await fx.activate(w.alice, w.team);
     w.a.team = w.team;
     expect(await search(w.a, "?q=rep")).toEqual(["rep/ok.csv"]);
+  });
+
+  it("reads at most the scan bound of rows, tombstones included", async () => {
+    const w = await world();
+    const owner = { teamId: w.team, userId: w.alice.id };
+    for (const p of ["a1.txt", "a2.txt", "a3.txt"]) {
+      await seed(w, w.alice, p, p);
+      await withTeam(fx.db, w.team, (tx) => sync.deleteServerFile(tx, owner, p));
+    }
+    await seed(w, w.alice, "b-live.txt", "b");
+    const found = (scanMax: number) =>
+      withTeam(fx.db, w.team, (tx) => searchFiles(tx, owner, "", 50, scanMax));
+    // The three tombstones fill a bound of 3: the live file after them is not reached.
+    expect(await found(3)).toEqual([]);
+    expect((await found(4)).map((e) => e.path)).toEqual(["b-live.txt"]);
   });
 
   it("is rate-limited per member (429 rate_limited)", async () => {

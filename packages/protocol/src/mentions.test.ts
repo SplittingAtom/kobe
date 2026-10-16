@@ -97,6 +97,8 @@ describe("mention path rules (KOBE-223 B1)", () => {
     ["Mongolian vowel separator", "a\u180eb.csv"],
     ["combining grapheme joiner", "a\u034fb.csv"],
     ["Hangul filler", "a\u3164b.csv"],
+    ["Khmer inherent vowel AQ", "a\u17b4b.csv"],
+    ["Khmer inherent vowel AA", "a\u17b5b.csv"],
     ["private use", "a\ue000b.csv"],
     ["supplementary private use", "a\u{f0000}b.csv"],
     ["unassigned", "a\u{e0080}b.csv"],

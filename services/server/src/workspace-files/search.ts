@@ -13,9 +13,9 @@ type SearchRow = { path: string; size: string; mtime_ms: string; sha256: string 
 const INTERNAL = WORKSPACE_EXCLUDED_PREFIXES.map((p) => underPattern(p.slice(0, -1)));
 
 /**
- * Rows one search reads at most, in path order through the primary key (team, user, path): the
- * work per call is bounded however many files a workspace holds; files past the bound are not
- * found (KOBE-223 S1).
+ * Rows one search reads at most, tombstones included, in path order through the primary key
+ * (team, user, path): the work per call is bounded however many rows a workspace holds; files
+ * past the bound are not found (KOBE-223 S1).
  */
 export const SEARCH_SCAN_MAX = 20_000;
 /** Matches taken from the scan, before ranking. */
@@ -35,16 +35,17 @@ export async function searchFiles(
   owner: WorkspaceOwner,
   query: string,
   limit: number = WORKSPACE_SEARCH_MAX_RESULTS,
+  scanMax: number = SEARCH_SCAN_MAX,
 ): Promise<WorkspaceFileEntry[]> {
   const q = query.toLowerCase();
   const internal = INTERNAL.map((pattern) => sql`AND path NOT LIKE ${pattern}`);
   const res = await tx.execute<SearchRow>(sql`
     SELECT path, size, mtime_ms, sha256 FROM (
-      SELECT path, size, mtime_ms, sha256 FROM workspace_files
-       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND NOT deleted
-       ORDER BY path LIMIT ${SEARCH_SCAN_MAX}
+      SELECT path, size, mtime_ms, sha256, deleted FROM workspace_files
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+       ORDER BY path LIMIT ${scanMax}
     ) AS scanned
-     WHERE strpos(lower(path), ${q}) > 0 ${sql.join(internal, sql` `)}
+     WHERE NOT deleted AND strpos(lower(path), ${q}) > 0 ${sql.join(internal, sql` `)}
      LIMIT ${SEARCH_MATCH_MAX}`);
   const cap = Math.min(Math.max(limit, 1), WORKSPACE_SEARCH_MAX_RESULTS);
   const startsWith = (r: SearchRow) => baseName(r.path).toLowerCase().startsWith(q);
