@@ -24,7 +24,12 @@ object-store round trip.
   code carries only server-written keys from those rows (never a path or key from the sandbox) and
   the bytes go only into this caller's reply. Versions are immutable, so the object read is exactly
   the listed version. A change in the gap (doc deleted, member removed) is equivalent to the read
-  having finished just before it; a purged object reads as missing and is skipped, as before.
+  having finished just before it (also stated in `memory/search.ts`).
+- **Vanished object (review of 597bbbd3):** a listed object missing at read time (new version and
+  old object purged, or Undo) is re-resolved once: a short `withTeam` re-runs the caller's checks
+  (`targetsFor`) and `currentObject` (same owner/project scoping, live docs only), then the new key
+  is read; skipped only if still missing. Re-resolves run one at a time (one connection at most).
+- Search code moved to `services/server/src/memory/search.ts` (agent.ts was near 700 lines).
 - **Results unchanged:** path order (then scope), first 200 docs, at most 20 files and 256 KiB,
   `truncated` as before. Blobs are fetched 8 at a time but matched strictly in path order, so the
   answer is identical; at most 7 extra objects are read past the stopping point.
@@ -34,11 +39,12 @@ object-store round trip.
 
 ## Evidence
 
-- ac-1: `services/server/src/memory-search.db.test.ts`: 210 docs; a probe in the object store's `get`
-  asserts no backend is `idle in transaction` on a memory query while any blob is read (failed
-  before the change, passes after); ranking/limits (20 of 29 matches, `truncated`), a doc past the
+- ac-1: `services/server/src/memory-search.db.test.ts`: 210 docs, the search on its own pool; a
+  probe in the object store's `get` asserts the pool has no checked-out client while any blob is
+  read (fails on the pre-change code), at most 8 gets in flight (and more than 1); ranking/limits (20 of 29 matches, `truncated`), a doc past the
   200 window is not searched but a path read finds it, a missing object is skipped, an ended run
-  reads nothing. `memory-agent.db.test.ts` and `memory.db.test.ts` unchanged and green.
+  reads nothing, a doc replaced and purged after the listing is re-resolved and read at v2, an
+  object-store error answers `storage_failed`. `memory-agent.db.test.ts` and `memory.db.test.ts` unchanged and green.
 - Latency (dev Postgres, 220 personal docs, no-match query = 200 blob reads, 40 runs each; simulated
   object-store latency per get; hold = pool acquire to release):
 

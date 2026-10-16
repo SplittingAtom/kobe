@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import pino from "pino";
+import { createDb, type KobeDatabase } from "@kobe/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readMemory, type ReadRequest } from "./memory/agent.js";
 import { memoryBlobKey } from "./memory/keys.js";
@@ -16,24 +18,42 @@ import type { GetOptions } from "./workspace-sync/object-store.js";
 const PREFIX = "kobe/";
 const DOCS = 210;
 
-/** Calls `probe` before every get, so a test can look at the database while a blob is read. */
+/**
+ * Calls `probe` before every get (so a test can look at the database while a blob is read), holds
+ * each get a few milliseconds so parallel reads overlap, and records the most gets in flight.
+ */
 class ProbedObjects extends MemoryObjects {
   probe: ((key: string) => Promise<void>) | undefined;
+  failGets = false;
+  inFlight = 0;
+  maxInFlight = 0;
   override async get(key: string, options?: GetOptions) {
-    await this.probe?.(key);
-    return super.get(key, options);
+    this.inFlight++;
+    this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    try {
+      await this.probe?.(key);
+      await sleep(2);
+      if (this.failGets) throw new Error("object store down");
+      return await super.get(key, options);
+    } finally {
+      this.inFlight--;
+    }
   }
 }
 
 const fx = new EventStreamFixture();
 const objects = new ProbedObjects();
 const log = pino({ level: "silent" });
+/** The search's own pool: nothing else checks clients out of it. */
+let search: KobeDatabase;
 
 beforeAll(async () => {
   await fx.setup([{}], () => ({ blobs: { objects, prefix: PREFIX } }));
+  search = createDb(fx.database.appUrl, { max: 4 });
 });
 
 afterAll(async () => {
+  await search.close();
   await fx.teardown();
 });
 
@@ -75,24 +95,29 @@ async function world(): Promise<World> {
   };
 }
 
-/** Backends sitting in a transaction whose last statement touched memory tables. */
-async function memoryTxOpen(): Promise<number> {
-  const { rows } = await fx.admin.query<{ n: string }>(
-    `SELECT count(*) AS n FROM pg_stat_activity
-      WHERE datname = current_database() AND state LIKE 'idle in transaction%'
-        AND query ILIKE '%memory_doc%'`,
+/** Clients of the search's pool checked out (a transaction or query in progress) right now. */
+const checkedOut = (): number => search.pool.totalCount - search.pool.idleCount;
+
+const deps = () => ({ db: search.db, blobs: { objects, prefix: PREFIX }, log });
+
+/** The current blob key of the world's doc at `path`. */
+async function keyOf(team: string, docPath: string): Promise<{ id: string; key: string }> {
+  const { rows } = await fx.admin.query<{ id: string; blob_ref: string }>(
+    `SELECT d.id, v.blob_ref FROM memory_docs d JOIN memory_doc_versions v
+        ON v.team_id = d.team_id AND v.doc_id = d.id AND v.version = d.current_version
+      WHERE d.team_id = $1 AND d.path = $2`,
+    [team, docPath],
   );
-  return Number(rows[0]?.n ?? 0);
+  return { id: rows[0]?.id ?? "", key: rows[0]?.blob_ref ?? "" };
 }
 
-const deps = () => ({ db: fx.db, blobs: { objects, prefix: PREFIX }, log });
-
 describe("recall search over 200+ docs (KOBE-240)", () => {
-  it("reads no blob while a memory transaction is open, with unchanged ranking and limits", async () => {
+  it("reads no blob while a pooled connection is checked out, with unchanged ranking and limits", async () => {
     const w = await world();
+    objects.maxInFlight = 0;
     const open: number[] = [];
     objects.probe = async () => {
-      open.push(await memoryTxOpen());
+      open.push(checkedOut());
     };
     try {
       const found = await readMemory(deps(), { ...w.req, input: { query: "needle" } });
@@ -106,6 +131,9 @@ describe("recall search over 200+ docs (KOBE-240)", () => {
       expect(found).toEqual({ ok: true, op: "read", files: want, truncated: true });
       expect(open.length).toBeGreaterThan(0);
       expect(open.every((n) => n === 0)).toBe(true);
+      // Reads overlap, at most 8 at once.
+      expect(objects.maxInFlight).toBeGreaterThan(1);
+      expect(objects.maxInFlight).toBeLessThanOrEqual(8);
     } finally {
       objects.probe = undefined;
     }
@@ -115,7 +143,7 @@ describe("recall search over 200+ docs (KOBE-240)", () => {
     const w = await world();
     const open: number[] = [];
     objects.probe = async () => {
-      open.push(await memoryTxOpen());
+      open.push(checkedOut());
     };
     try {
       expect(await readMemory(deps(), { ...w.req, input: { query: "lonely" } })).toEqual({
@@ -138,12 +166,7 @@ describe("recall search over 200+ docs (KOBE-240)", () => {
 
   it("a missing object is skipped and an ended run reads nothing", async () => {
     const w = await world();
-    const { rows } = await fx.admin.query<{ blob_ref: string }>(
-      `SELECT v.blob_ref FROM memory_doc_versions v JOIN memory_docs d
-          ON d.team_id = v.team_id AND d.id = v.doc_id WHERE d.team_id = $1 AND d.path = $2`,
-      [w.req.teamId, path(0)],
-    );
-    objects.lost.add(rows[0]?.blob_ref ?? "");
+    objects.lost.add((await keyOf(w.req.teamId, path(0))).key);
     const found = await readMemory(deps(), { ...w.req, input: { query: "needle" } });
     expect(found.ok && found.op === "read" ? found.files.map((f) => f.path)[0] : null).toBe(
       path(7),
@@ -151,5 +174,58 @@ describe("recall search over 200+ docs (KOBE-240)", () => {
     await fx.complete(w.req.teamId, w.req.runId);
     const ended = await readMemory(deps(), { ...w.req, input: { query: "needle" } });
     expect(ended.ok).toBe(false);
+  });
+
+  it("a doc replaced (old object purged) after the listing is re-resolved once and read", async () => {
+    const w = await world();
+    const team = w.req.teamId;
+    const { id, key: v1 } = await keyOf(team, path(0));
+    const v2 = memoryBlobKey(PREFIX, team, id, 2);
+    const open: number[] = [];
+    let replaced = false;
+    objects.probe = async (key) => {
+      open.push(checkedOut());
+      if (key !== v1 || replaced) return;
+      replaced = true;
+      // A new version lands and the old object is purged between the commit and this read.
+      const bytes = Buffer.from("replaced NEEDLE", "utf8");
+      objects.objects.set(v2, bytes);
+      await fx.admin.query(
+        `INSERT INTO memory_doc_versions (team_id, doc_id, version, blob_ref, size_bytes, sha256, actor_kind)
+         VALUES ($1, $2, 2, $3, $4, $5, 'agent')`,
+        [team, id, v2, bytes.length, "0".repeat(64)],
+      );
+      await fx.admin.query(
+        `UPDATE memory_docs SET current_version = 2 WHERE team_id = $1 AND id = $2`,
+        [team, id],
+      );
+      objects.objects.delete(v1);
+    };
+    try {
+      const found = await readMemory(deps(), { ...w.req, input: { query: "needle" } });
+      expect(found.ok && found.op === "read" ? found.files[0] : null).toEqual({
+        scope: "user",
+        path: path(0),
+        content: "replaced NEEDLE",
+        version: 2,
+      });
+      expect(replaced).toBe(true);
+      expect(open.every((n) => n === 0)).toBe(true);
+    } finally {
+      objects.probe = undefined;
+    }
+  });
+
+  it("an object-store error answers storage_failed", async () => {
+    const w = await world();
+    objects.failGets = true;
+    try {
+      expect(await readMemory(deps(), { ...w.req, input: { query: "needle" } })).toEqual({
+        ok: false,
+        error: { code: "storage_failed", message: "Memory storage is not available. Try again." },
+      });
+    } finally {
+      objects.failGets = false;
+    }
   });
 });
