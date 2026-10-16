@@ -59,7 +59,9 @@ export const events = pgTable(
     // `events_schedule_latest_idx` on (team_id, schedule_id, created_at DESC) WHERE kind IN
     // ('schedule.fire', 'schedule.skip'). SQL-only (hand-written migration
     // `*_events_schedule_latest.sql`, IF NOT EXISTS so large sites can build it CONCURRENTLY
-    // first, docs/install.md); not declared here.
+    // first, docs/install.md); not declared here. The same migration adds the SQL-only check
+    // `events_schedule_id_ref` (schedule_id IS NULL OR schedule_id::text =
+    // lower(ref->>'schedule_id'), NOT VALID).
     check(
       "events_schedule_fire_keys",
       sql`${t.kind} <> 'schedule.fire' OR (${t.ref}->>'schedule_id' IS NOT NULL AND ${t.dueAt} IS NOT NULL)`,

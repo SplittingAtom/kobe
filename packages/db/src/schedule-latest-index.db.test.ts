@@ -131,4 +131,20 @@ describe("events_schedule_latest_idx (KOBE-252)", () => {
     expect(await latest(schedule)).toEqual([{ kind: "schedule.fire", reason: "missed" }]);
     expect(await latest(randomUUID())).toEqual([]);
   });
+
+  it("refuses a schedule_id that disagrees with ref.schedule_id (events_schedule_id_ref)", async () => {
+    const insert = (sid: string, refSid: string) =>
+      admin.query(
+        `INSERT INTO events (team_id, kind, status, ref, schedule_id, due_at)
+         VALUES ($1, 'schedule.skip', 'processed', jsonb_build_object('schedule_id', $3::text), $2, now())`,
+        [team, sid, refSid],
+      );
+    const sid = randomUUID();
+    await expect(insert(sid, randomUUID())).rejects.toThrow(/events_schedule_id_ref/);
+    await expect(insert(sid, sid.toUpperCase())).resolves.toBeDefined();
+    const { rows } = await admin.query<{ convalidated: boolean }>(
+      `SELECT convalidated FROM pg_constraint WHERE conname = 'events_schedule_id_ref'`,
+    );
+    expect(rows).toEqual([{ convalidated: false }]);
+  });
 });
