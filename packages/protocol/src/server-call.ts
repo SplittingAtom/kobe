@@ -54,22 +54,53 @@ export const SERVER_CALL_MAX_MESSAGES = 4;
 export const SERVER_CALL_MESSAGE_MAX_CHARS = 16_000;
 
 /**
- * Per purpose: the hard output cap (the gateway refuses more whatever the token says), the
- * server's whole-call timeout (no retries; a failure is logged, never a run failure), and the
- * budget use at which the call is skipped: titles below 100 % (the ordinary budget stop),
- * follow-ups below 80 % (CE21). Percent of every budget line that applies to the call (site,
- * team, user-in-team; dollars or tokens; month or day).
+ * Per purpose: the hard output cap (the gateway refuses more whatever the token says), the cap
+ * for a model the site catalog marks as reasoning (`model_catalog.reasoning`, KOBE-259): its
+ * hidden reasoning spends the same allowance, so 64 tokens can leave no visible text (KOBE-219
+ * review H1); the gateway allows it only for such a model. Then the server's whole-call timeout
+ * (no retries; a failure is logged, never a run failure), and the budget use at which the call is
+ * skipped: titles below 100 % (the ordinary budget stop), follow-ups below 80 % (CE21). Percent
+ * of every budget line that applies to the call (site, team, user-in-team; dollars or tokens;
+ * month or day). The visible text is bounded by its own schema whatever the cap.
  */
 export const SERVER_CALL_LIMITS = {
-  title: { max_output_tokens: 64, timeout_ms: 15_000, skip_at_percent: 100 },
-  followups: { max_output_tokens: 256, timeout_ms: 20_000, skip_at_percent: 80 },
+  title: {
+    max_output_tokens: 64,
+    reasoning_max_output_tokens: 512,
+    timeout_ms: 15_000,
+    skip_at_percent: 100,
+  },
+  followups: {
+    max_output_tokens: 256,
+    reasoning_max_output_tokens: 768,
+    timeout_ms: 20_000,
+    skip_at_percent: 80,
+  },
 } as const satisfies Record<
   ServerCallPurpose,
-  { max_output_tokens: number; timeout_ms: number; skip_at_percent: number }
+  {
+    max_output_tokens: number;
+    reasoning_max_output_tokens: number;
+    timeout_ms: number;
+    skip_at_percent: number;
+  }
 >;
 
+/**
+ * What a server call to a reasoning model asks for (KOBE-219 review H1): `low` keeps the
+ * reasoning short and the answer in `content`. `none` moved the reasoning into the content on
+ * gate1's model and `minimal` still ran out of tokens; non-reasoning models get no field at all.
+ */
+export const SERVER_CALL_REASONING_EFFORT = "low" as const;
+
+/** The output cap of one call: the reasoning headroom only for a catalog reasoning model. */
+export function serverCallOutputCap(purpose: ServerCallPurpose, reasoning: boolean): number {
+  const l = SERVER_CALL_LIMITS[purpose];
+  return reasoning ? l.reasoning_max_output_tokens : l.max_output_tokens;
+}
+
 const MAX_OUTPUT_CAP = Math.max(
-  ...SERVER_CALL_PURPOSES.map((p) => SERVER_CALL_LIMITS[p].max_output_tokens),
+  ...SERVER_CALL_PURPOSES.map((p) => SERVER_CALL_LIMITS[p].reasoning_max_output_tokens),
 );
 
 export const serverCallClaimsSchema = z
@@ -103,7 +134,7 @@ export const serverCallClaimsSchema = z
     message: "exp must be after iat and within MAX_SERVER_CALL_TOKEN_TTL_SECONDS",
     path: ["exp"],
   })
-  .refine((c) => c.max_output_tokens <= SERVER_CALL_LIMITS[c.purpose].max_output_tokens, {
+  .refine((c) => c.max_output_tokens <= serverCallOutputCap(c.purpose, true), {
     message: "max_output_tokens is above the purpose's cap",
     path: ["max_output_tokens"],
   });
@@ -149,13 +180,20 @@ export type ServerCallRequest = z.infer<typeof serverCallRequestSchema>;
 
 /** Longest generated title (well under {@link THREAD_TITLE_MAX}; the rail shows one line). */
 export const GENERATED_TITLE_MAX_CHARS = 80;
+/**
+ * Control, format (bidi overrides, zero-width marks) and line/paragraph separator characters:
+ * never in a generated title, which quotes model output (KOBE-219 review L1).
+ */
+export const TITLE_UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
 /** A title the server writes after normalising the model's reply (one line, no quotes). */
 export const generatedTitleSchema = z
   .string()
   .trim()
   .min(1)
   .max(Math.min(GENERATED_TITLE_MAX_CHARS, THREAD_TITLE_MAX))
-  .regex(NO_CONTROL_CHARS);
+  .regex(NO_CONTROL_CHARS)
+  .refine((t) => !TITLE_UNSAFE_CHARS.test(t), { message: "no format or separator characters" });
 
 export const THREAD_SUGGESTIONS_MAX = 3;
 export const THREAD_SUGGESTION_MAX_CHARS = 120;

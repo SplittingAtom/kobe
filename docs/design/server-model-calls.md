@@ -19,7 +19,7 @@ KOBE-219 (titles) and KOBE-222 (follow-ups) build on. The wire shapes live in
 | 80 % rule     | Follow-ups are skipped when any applicable budget line is at **≥ 80 %**; titles only at 100 % (the ordinary stop). The server checks before calling; the gateway enforces it again (402 `budget_soft_limit`).                                                                                                                                                                                                                                                                                              |
 | Usage record  | One `run_usage` row: `kind` = purpose, `sandbox_id` NULL, `run_id` = triggering run (so `thread_id` and `agent_id` resolve as for run calls). Migration 0099 (expand-only; no new table, no RLS change).                                                                                                                                                                                                                                                                                                   |
 | Model         | The thread's resolved model at call time: `resolveRunModel` with the thread's pinned-agent alias (a pin wins; else the team default), the same function `run.start` uses. A model no longer enabled: skip.                                                                                                                                                                                                                                                                                                 |
-| Caps          | Title: ≤ 64 output tokens, 15 s. Follow-ups: ≤ 256 output tokens, 20 s. Non-streaming, no retries. Failures are logged (codes only) and never surface as run failures.                                                                                                                                                                                                                                                                                                                                     |
+| Caps          | Title: ≤ 64 output tokens, 15 s. Follow-ups: ≤ 256 output tokens, 20 s. A model the site catalog marks as reasoning (`model_catalog.reasoning`, the KOBE-259 flag in Site > Models) gets `reasoning_effort: "low"` and up to 512 (title) / 768 (follow-ups) output tokens (KOBE-219 review H1); the gateway allows the larger cap and the field only for such a model. Non-streaming, no retries. Failures are logged (codes only) and never surface as run failures.                                      |
 | Secrets       | The server holds only the session key it already has (it mints run tokens from it). Provider keys stay in Bifrost; the gateway forwards with the member's virtual key exactly as for sandbox calls. The token never reaches a sandbox or a browser.                                                                                                                                                                                                                                                        |
 | Events        | `run.completed.epilogue` announces the calls; results follow on the same run's event stream: `thread.updated {thread_id, title}` and `thread.suggestions {thread_id, suggestions[1..3]}`. The stream stays open for them up to 30 s (`epilogueOpen`).                                                                                                                                                                                                                                                      |
 | Tracing       | The server wraps each call in a span `server_call.<purpose>` and injects `traceparent`, so the gateway's `model_gateway.request` span is its child; the gateway adds `kobe.usage_kind`. Langfuse sessions: the token's `thread_id` and `user_id` claims are the span's `session.id` and `user.id` (opaque uuids), as KOBE-274 ac-6 sets for run calls, so titles and follow-ups join their thread's session; the attributes themselves are KOBE-274's. Content only under `captureContent` (off on gate1). |
@@ -106,7 +106,24 @@ AND title IS NULL AND NOT title_locked`; append `thread.updated` only when a row
      (a rename in the meantime wins);
    - follow-ups: parse up to three lines (`threadSuggestionsSchema`); append `thread.suggestions`.
 4. Failure (gateway refusal, timeout, empty or invalid reply): log `{purpose, run_id, code}` at
-   warn, write nothing. The epilogue window closes by its deadline.
+   warn, write nothing. The epilogue window closes by its deadline. A reply that came back but
+   cannot be used is a skip, logged as `server call skipped` (the gateway's own skip line) with
+   its code and the model: `empty_content` (no text: a reasoning model spent its allowance),
+   `truncated` (`finish_reason: length`; never saved, the text may stop mid-word), `bad_reply`,
+   `schema_reject` (no usable title: empty after normalising, or it holds a link); and so is a
+   call with nothing to send (`no_model`, `no_lease`, `no_message`, `titled`).
+5. Title fallback (KOBE-219 review M3): when no title will come, the first line of the first
+   prompt (unsafe characters removed, ≤ 80 characters, cut with "…") is written with the same
+   guard (`title IS NULL AND NOT title_locked`): at run end when the server makes no title calls
+   (not configured, or the thread is past its three attempts), and after the epilogue when the
+   last attempt failed or skipped, or at once when no model or lease will ever allow one. A
+   fallback inside the epilogue is announced with `thread.updated` like a generated title.
+
+Reasoning models: `low` was measured on gate1's `glm-5.3-flash` (a clean title in ~12 output
+tokens, no reasoning); without it the 64 tokens went to reasoning and `content` was empty;
+`minimal` still ran out, and `none` moved the reasoning into `content`, so neither is used.
+Titles strip controls, format characters (bidi overrides, zero-width marks) and line separators
+(`generatedTitleSchema` refuses them too).
 
 Prompts carry the first user message and the start of the answer, truncated to
 `SERVER_CALL_MESSAGE_MAX_CHARS`; the request body is at most 64 KiB.
@@ -136,18 +153,18 @@ most two. D18 compaction treats them like any event: deleted with the run's stre
 
 `services/model-gateway/src/server-call.ts`:
 
-| Step        | Check                                                                         | Refusal                                                                 |
-| ----------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Credentials | `x-kobe-server-call` alone (no API-key header, `?key=`, run token, run id)    | 400 `ambiguous_credentials`                                             |
-| Token       | prefix, MAC, claims, time                                                     | 401 `invalid_server_call_token`                                         |
-| Replay      | `jti` unseen on this replica                                                  | 401 `server_call_token_replayed`                                        |
-| Route       | `POST /v1/chat/completions`                                                   | 403 `server_call_route_refused`                                         |
-| Member      | active member with a virtual key (no sandbox check)                           | as sandbox calls (401 `session_revoked`, 503 pending)                   |
-| Run         | completed run of the token's thread, leased to the token's member             | 403 `server_call_run_mismatch`                                          |
-| Body        | `serverCallRequestSchema`, model = token's, limit ≤ token's, ≤ 64 KiB         | 400 `server_call_body_refused`, 413                                     |
-| Model       | enabled for the team                                                          | 403 `model_not_enabled`                                                 |
-| Budget      | `BudgetGate` (reservation), at `skip_at_percent` of each line for the purpose | 402 `budget_exhausted` / `budget_below_call` / `budget_soft_limit`, 429 |
-| Usage       | `run_usage` row with `kind`, no sandbox, `run_id` from the token              | —                                                                       |
+| Step        | Check                                                                                                                                                                                      | Refusal                                                                 |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Credentials | `x-kobe-server-call` alone (no API-key header, `?key=`, run token, run id)                                                                                                                 | 400 `ambiguous_credentials`                                             |
+| Token       | prefix, MAC, claims, time                                                                                                                                                                  | 401 `invalid_server_call_token`                                         |
+| Replay      | `jti` unseen on this replica                                                                                                                                                               | 401 `server_call_token_replayed`                                        |
+| Route       | `POST /v1/chat/completions`                                                                                                                                                                | 403 `server_call_route_refused`                                         |
+| Member      | active member with a virtual key (no sandbox check)                                                                                                                                        | as sandbox calls (401 `session_revoked`, 503 pending)                   |
+| Run         | completed run of the token's thread, leased to the token's member                                                                                                                          | 403 `server_call_run_mismatch`                                          |
+| Body        | `serverCallRequestSchema`, model = token's, limit ≤ token's and ≤ the purpose's cap for the model (reasoning headroom and `reasoning_effort` only for a catalog reasoning model), ≤ 64 KiB | 400 `server_call_body_refused`, 413                                     |
+| Model       | enabled for the team                                                                                                                                                                       | 403 `model_not_enabled`                                                 |
+| Budget      | `BudgetGate` (reservation), at `skip_at_percent` of each line for the purpose                                                                                                              | 402 `budget_exhausted` / `budget_below_call` / `budget_soft_limit`, 429 |
+| Usage       | `run_usage` row with `kind`, no sandbox, `run_id` from the token                                                                                                                           | —                                                                       |
 
 Server calls have their **own** request rate and concurrency limiter, per team
 (`SERVER_CALL_LIMIT_DEFAULTS`: 8 concurrent per team, 64 in all, burst 20, 5 per second), apart

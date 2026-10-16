@@ -6,10 +6,12 @@ import {
   SERVER_CALL_EPILOGUE_MARGIN_MS,
   SERVER_CALL_EPILOGUE_MAX_MS,
   SERVER_CALL_LIMITS,
+  SERVER_CALL_REASONING_EFFORT,
   SERVER_CALL_TOKEN_HEADER,
   SERVER_CALL_TOKEN_SKEW_SECONDS,
   decideStreamOpen,
   epilogueOpen,
+  generatedTitleSchema,
   parseEventPayload,
   serverCallClaimsSchema,
   serverCallRequestSchema,
@@ -130,9 +132,19 @@ describe("server-call token", () => {
     expect(parse({})).toBe(true);
     expect(parse({ exp: NOW + MAX_SERVER_CALL_TOKEN_TTL_SECONDS + 1 })).toBe(false);
     expect(parse({ exp: NOW })).toBe(false);
-    expect(parse({ max_output_tokens: SERVER_CALL_LIMITS.title.max_output_tokens + 1 })).toBe(
-      false,
+    // A reasoning model's call may carry the larger cap (KOBE-219 review H1), never more.
+    expect(parse({ max_output_tokens: SERVER_CALL_LIMITS.title.reasoning_max_output_tokens })).toBe(
+      true,
     );
+    expect(
+      parse({ max_output_tokens: SERVER_CALL_LIMITS.title.reasoning_max_output_tokens + 1 }),
+    ).toBe(false);
+    expect(
+      parse({
+        purpose: "followups",
+        max_output_tokens: SERVER_CALL_LIMITS.followups.reasoning_max_output_tokens + 1,
+      }),
+    ).toBe(false);
     expect(
       parse({
         purpose: "followups",
@@ -151,6 +163,23 @@ describe("server-call token", () => {
       );
     }
     expect(SERVER_CALL_EPILOGUE_MAX_MS).toBe(30_000);
+  });
+
+  it("gives reasoning models a bounded headroom and a low effort (KOBE-219 review H1)", () => {
+    for (const p of ["title", "followups"] as const) {
+      const l = SERVER_CALL_LIMITS[p];
+      expect(l.reasoning_max_output_tokens).toBeGreaterThan(l.max_output_tokens);
+      expect(l.reasoning_max_output_tokens).toBeLessThanOrEqual(1024);
+    }
+    expect(SERVER_CALL_LIMITS.title.reasoning_max_output_tokens).toBe(512);
+    expect(SERVER_CALL_REASONING_EFFORT).toBe("low");
+  });
+
+  it("refuses format characters in a generated title (bidi, zero-width, line separators)", () => {
+    for (const bad of ["Rev\u202Eenue", "Rev\u200Benue", "a\u2028b", "a\u0085b", "\u2066x"]) {
+      expect(generatedTitleSchema.safeParse(bad).success).toBe(false);
+    }
+    expect(generatedTitleSchema.safeParse("Analyse des ventes · Q3 ✓").success).toBe(true);
   });
 
   it("skips follow-ups at 80 % and titles only at 100 % (CE21)", () => {
