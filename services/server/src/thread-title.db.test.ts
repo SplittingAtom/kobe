@@ -19,6 +19,8 @@ import {
 import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
 import { SseReader } from "./testing/sse.js";
 import { threadCardSchema } from "./threads/schemas.js";
+import { withAppendTx } from "./event-stream/append.js";
+import { endRunInTx } from "./sandbox-wire/run-state.js";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
@@ -33,7 +35,7 @@ const MASTER = "s".repeat(48);
 const KEY = deriveServerCallTokenKey(new TextEncoder().encode(MASTER));
 const WAIT_MS = 20_000;
 
-type Mode = "ok" | "budget" | "hold";
+type Mode = "ok" | "budget" | "hold" | "empty" | "length";
 
 interface Seen {
   readonly headers: IncomingHttpHeaders;
@@ -94,7 +96,12 @@ async function handle(headers: IncomingHttpHeaders, url: string, raw: string, re
       aborted: false,
     },
   ]);
-  answer(res, 200, { choices: [{ message: { role: "assistant", content: gateway.reply } }] });
+  // A reasoning model that spent its allowance thinking, or one cut off mid-title (review H1, M2).
+  const content = gateway.mode === "empty" ? "" : gateway.reply;
+  const finish = gateway.mode === "length" ? "length" : "stop";
+  answer(res, 200, {
+    choices: [{ message: { role: "assistant", content }, finish_reason: finish }],
+  });
 }
 
 beforeAll(async () => {
@@ -282,7 +289,7 @@ describe("auto-titles (KOBE-219)", () => {
     expect(await f.status(w.team, runId)).toBe("completed");
   });
 
-  it("at 100 % budget (gateway 402) leaves no title and no failed run; at most three attempts", async () => {
+  it("at 100 % budget (gateway 402) leaves no generated title and no failed run; three attempts, then the first line (review M3)", async () => {
     gateway.mode = "budget";
     gateway.seen.length = 0;
     const w = await f.world();
@@ -294,12 +301,15 @@ describe("auto-titles (KOBE-219)", () => {
       runs.push(await answered(w, ws, threadId, prompt));
       await settled();
     }
-    expect(await threadRow(w.team, threadId)).toEqual({ title: null, title_locked: false });
+    // After the third failed attempt the first prompt's first line, unlocked, with its event.
+    expect(await threadRow(w.team, threadId)).toEqual({ title: "One", title_locked: false });
     for (const runId of runs) {
       expect(await f.status(w.team, runId)).toBe("completed");
-      expect(await types(w.team, runId)).not.toContain("thread.updated");
       expect(await types(w.team, runId)).not.toContain("run.failed");
     }
+    const updated: boolean[] = [];
+    for (const r of runs) updated.push((await types(w.team, r)).includes("thread.updated"));
+    expect(updated).toEqual([false, false, true, false]);
     // The first three completed runs announce a title and try once each; the fourth does not.
     const announced: unknown[] = [];
     for (const r of runs) announced.push((await completedPayload(w.team, r))?.epilogue);
@@ -358,5 +368,91 @@ describe("auto-titles (KOBE-219)", () => {
     expect((await f.on(0, other).get(`/v1/threads/${threadId}/card`)).status).toBe(404);
     expect((await f.on(0, w.owner).get(`/v1/threads/${randomUUID()}/card`)).status).toBe(404);
     expect((await f.on(0, w.owner).get(`/v1/threads/nope/card`)).status).toBe(400);
+  });
+
+  it("asks a catalog reasoning model for a low effort within the reasoning headroom (review H1)", async () => {
+    gateway.mode = "ok";
+    gateway.seen.length = 0;
+    const w = await f.world();
+    await enableModel(w.team, w.owner.id);
+    await f.fx.admin.query(`UPDATE model_catalog SET reasoning = true WHERE alias = 'fast'`);
+    try {
+      const ws = await f.connect(w, 0);
+      const threadId = await untitledThread(w.owner);
+      await answered(w, ws, threadId, "What drives our Q3 revenue?");
+      await until(async () => (await threadRow(w.team, threadId))?.title, "title");
+      const body = serverCallRequestSchema.parse(gateway.seen[0]?.body);
+      expect(body.reasoning_effort).toBe("low");
+      expect(body.max_tokens).toBe(SERVER_CALL_LIMITS.title.reasoning_max_output_tokens);
+      expect(gateway.seen[0]?.claims?.max_output_tokens).toBe(
+        SERVER_CALL_LIMITS.title.reasoning_max_output_tokens,
+      );
+    } finally {
+      await f.fx.admin.query(`UPDATE model_catalog SET reasoning = false WHERE alias = 'fast'`);
+    }
+  });
+
+  it.each(["empty", "length"] as const)(
+    "never saves a %s reply; after the last attempt the first line instead (review M1, M2)",
+    async (mode) => {
+      gateway.mode = mode;
+      gateway.reply = "Analyse des ventes trimest";
+      gateway.seen.length = 0;
+      try {
+        const w = await f.world();
+        await enableModel(w.team, w.owner.id);
+        const ws = await f.connect(w, 0);
+        const threadId = await untitledThread(w.owner);
+        await answered(w, ws, threadId, "Ventes trimestrielles par région ?");
+        await settled();
+        expect(gateway.seen).toHaveLength(1);
+        expect((await threadRow(w.team, threadId))?.title).toBeNull();
+        await answered(w, ws, threadId, "Et en Europe ?");
+        await settled();
+        await answered(w, ws, threadId, "Merci");
+        await settled();
+        expect(gateway.seen).toHaveLength(3);
+        expect((await threadRow(w.team, threadId))?.title).toBe(
+          "Ventes trimestrielles par région ?",
+        );
+      } finally {
+        gateway.reply = '"Q3 revenue drivers."';
+      }
+    },
+  );
+
+  it("a team with no model to title with gets the first line after its first run (review M3)", async () => {
+    gateway.mode = "ok";
+    gateway.seen.length = 0;
+    const w = await f.world(); // no team model enabled
+    const ws = await f.connect(w, 0);
+    const threadId = await untitledThread(w.owner);
+    await answered(w, ws, threadId, "Plot revenue\nby month");
+    await until(async () => (await threadRow(w.team, threadId))?.title, "fallback title");
+    expect(await threadRow(w.team, threadId)).toEqual({
+      title: "Plot revenue",
+      title_locked: false,
+    });
+    expect(gateway.seen).toHaveLength(0);
+  });
+
+  it("a server without titles configured gives the first line at the run's end (review M3)", async () => {
+    const w = await f.world();
+    const runId = await f.fx.run(w.team, w.owner);
+    const { thread_id: threadId } = await f.run(w.team, runId);
+    await f.fx.admin.query(`UPDATE runs SET input = $2 WHERE id = $1`, [
+      runId,
+      "Summarise the report\nplease",
+    ]);
+    // No server calls on this server: nothing is announced, the fallback is written in the end.
+    const ended = await withAppendTx(f.fx.db, w.team, (tx) =>
+      endRunInTx(tx, w.team, runId, { status: "completed" }),
+    );
+    expect(ended.ended).toBe(true);
+    expect((await completedPayload(w.team, runId))?.epilogue).toBeUndefined();
+    expect(await threadRow(w.team, threadId)).toEqual({
+      title: "Summarise the report",
+      title_locked: false,
+    });
   });
 });

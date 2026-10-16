@@ -14,7 +14,7 @@ import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
-import { wantsTitleInTx } from "../threads/title.js";
+import { saveFallbackTitleInTx, titleDecisionInTx } from "../threads/title.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -227,7 +227,9 @@ export async function endRunInTx(
 /**
  * What `run.completed` announces (KOBE-234 Flow 1): only calls this server can make and the run
  * qualifies for. Decided here, in the transaction that completes the run, so a stream that sees
- * the terminal event knows whether to wait.
+ * the terminal event knows whether to wait. An untitled thread no title call will ever come for
+ * (titles not configured, or past its attempts) gets the first line of its first prompt now
+ * (KOBE-219 review M3).
  */
 async function epilogueOf(
   tx: KobeTx,
@@ -236,8 +238,10 @@ async function epilogueOf(
   threadId: string,
   serverCalls: readonly ServerCallPurpose[],
 ): Promise<ServerCallPurpose[]> {
-  if (!serverCalls.includes("title")) return [];
-  return (await wantsTitleInTx(tx, teamId, runId, threadId)) ? ["title"] : [];
+  const ids = { teamId, runId, threadId };
+  const decision = await titleDecisionInTx(tx, ids, serverCalls.includes("title"));
+  if (decision === "fallback") await saveFallbackTitleInTx(tx, ids);
+  return decision === "announce" ? ["title"] : [];
 }
 
 function expiryCauseOfEnd(to: RunStatus) {

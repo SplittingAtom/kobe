@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   MAX_SERVER_CALL_TOKEN_TTL_SECONDS,
   SERVER_CALL_AUDIENCE,
-  SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
+  SERVER_CALL_REASONING_EFFORT,
   SERVER_CALL_TOKEN_HEADER,
+  serverCallOutputCap,
   serverCallRequestSchema,
   type ServerCallPurpose,
   type ServerCallRequest,
@@ -42,17 +43,43 @@ export function serverCallKeyFromEnv(
   }
 }
 
-/** A failed server call: `code` is safe to log (no content, no credentials). */
+/**
+ * A failed server call: `code` is safe to log (no content, no credentials). A reply the call
+ * cannot use is one too: `empty_content` (no text, e.g. a reasoning model spent its allowance
+ * thinking), `truncated` (`finish_reason: length`: never saved, the text may stop mid-word),
+ * `bad_reply` (not a chat completion); the epilogue adds `schema_reject` for text that does not
+ * make a title. `model` is the call's model, for the log.
+ */
 export class ServerCallError extends Error {
+  readonly model: string | undefined;
+
   constructor(
     readonly code: string,
     readonly status?: number,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { readonly model?: string },
   ) {
     super(`server call failed: ${code}`, options);
     this.name = "ServerCallError";
+    this.model = options?.model;
+  }
+
+  /** The reply came back but cannot be used (logged as `server call skipped`, not a failure). */
+  get unusable(): boolean {
+    return UNUSABLE.has(this.code);
   }
 }
+
+/** Skips, not failures: an unusable reply, or nothing to call with (`threads/title-source.ts`). */
+const UNUSABLE = new Set([
+  "empty_content",
+  "truncated",
+  "bad_reply",
+  "schema_reject",
+  "titled",
+  "no_lease",
+  "no_model",
+  "no_message",
+]);
 
 export interface ServerCallInput {
   readonly purpose: ServerCallPurpose;
@@ -64,6 +91,11 @@ export interface ServerCallInput {
   readonly runId: string;
   /** `<gateway provider>/<model>`: the thread's resolved model. */
   readonly model: string;
+  /**
+   * The site catalog marks the model as reasoning (`model_catalog.reasoning`): the call asks for
+   * `reasoning_effort: low` and may use the purpose's reasoning headroom (KOBE-219 review H1).
+   */
+  readonly reasoning: boolean;
   readonly messages: ServerCallRequest["messages"];
   /** Bounds the whole call (the purpose's `timeout_ms`, from the epilogue). */
   readonly signal: AbortSignal;
@@ -94,7 +126,7 @@ function mintToken(key: Uint8Array, input: ServerCallInput, now: Date): string {
     thread_id: input.threadId,
     run_id: input.runId,
     model: input.model,
-    max_output_tokens: SERVER_CALL_LIMITS[input.purpose].max_output_tokens,
+    max_output_tokens: serverCallOutputCap(input.purpose, input.reasoning),
     iat,
     exp: iat + MAX_SERVER_CALL_TOKEN_TTL_SECONDS,
     jti: randomUUID(),
@@ -105,9 +137,10 @@ function bodyOf(input: ServerCallInput): ServerCallRequest {
   return serverCallRequestSchema.parse({
     model: input.model,
     messages: input.messages,
-    max_tokens: SERVER_CALL_LIMITS[input.purpose].max_output_tokens,
+    max_tokens: serverCallOutputCap(input.purpose, input.reasoning),
     temperature: 0.2,
     stream: false,
+    ...(input.reasoning ? { reasoning_effort: SERVER_CALL_REASONING_EFFORT } : {}),
   });
 }
 
@@ -146,20 +179,29 @@ function refusalCode(json: unknown, status: number): string {
   return typeof code === "string" && CODE.test(code) ? code : `http_${status}`;
 }
 
-function replyText(json: unknown): string | undefined {
+type Reply = { readonly kind: "text"; readonly text: string } | { readonly kind: UnusableCode };
+type UnusableCode = "empty_content" | "truncated" | "bad_reply";
+
+/** The first choice's text, or why it cannot be used (never its content). */
+function replyOf(json: unknown): Reply {
   const choices = (json as { choices?: unknown } | undefined)?.choices;
-  const message = Array.isArray(choices)
-    ? (choices[0] as { message?: { content?: unknown } } | undefined)?.message
+  const choice = Array.isArray(choices)
+    ? (choices[0] as { message?: { content?: unknown }; finish_reason?: unknown } | undefined)
     : undefined;
-  const content = message?.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((p: { type?: unknown; text?: unknown }) =>
-      p?.type === "text" && typeof p.text === "string" ? p.text : "",
-    )
-    .join("");
-  return text === "" ? undefined : text;
+  if (!choice?.message) return { kind: "bad_reply" };
+  if (choice.finish_reason === "length") return { kind: "truncated" };
+  const content = choice.message.content;
+  if (content === null || content === undefined) return { kind: "empty_content" };
+  if (typeof content !== "string" && !Array.isArray(content)) return { kind: "bad_reply" };
+  const text =
+    typeof content === "string"
+      ? content
+      : content
+          .map((p: { type?: unknown; text?: unknown }) =>
+            p?.type === "text" && typeof p.text === "string" ? p.text : "",
+          )
+          .join("");
+  return text.trim() === "" ? { kind: "empty_content" } : { kind: "text", text };
 }
 
 async function post(
@@ -208,13 +250,16 @@ export function createServerCallClient(options: ServerCallClientOptions): Server
           try {
             text = await readCapped(res);
           } catch {
-            throw new ServerCallError(input.signal.aborted ? "timeout" : "unreadable", res.status);
+            throw new ServerCallError(input.signal.aborted ? "timeout" : "unreadable", res.status, {
+              model: input.model,
+            });
           }
           const json = parseJson(text);
-          if (!res.ok) throw new ServerCallError(refusalCode(json, res.status), res.status);
-          const reply = replyText(json);
-          if (reply === undefined) throw new ServerCallError("bad_reply", res.status);
-          return reply;
+          const model = { model: input.model };
+          if (!res.ok) throw new ServerCallError(refusalCode(json, res.status), res.status, model);
+          const reply = replyOf(json);
+          if (reply.kind !== "text") throw new ServerCallError(reply.kind, res.status, model);
+          return reply.text;
         },
       );
     },

@@ -5,7 +5,7 @@ import {
   SERVER_CALL_MESSAGE_MAX_CHARS,
   serverCallRequestSchema,
 } from "@kobe/protocol";
-import { normaliseTitle, titleMessages } from "./title.js";
+import { fallbackTitle, normaliseTitle, titleMessages } from "./title.js";
 
 describe("normaliseTitle (KOBE-219 ac-5: generatedTitleSchema)", () => {
   it.each([
@@ -39,6 +39,32 @@ describe("normaliseTitle (KOBE-219 ac-5: generatedTitleSchema)", () => {
 
   it("drops control characters", () => {
     expect(normaliseTitle("Rev\u0007enue")).toBe("Revenue");
+  });
+
+  it("drops bidi controls, zero-width marks and C1 controls; splits on Unicode separators (review L1)", () => {
+    expect(normaliseTitle("Rev\u202Eenue\u200B drivers")).toBe("Revenue drivers");
+    expect(normaliseTitle("\u2066Q3\u2069 plan\u0085second line")).toBe("Q3 plan");
+    expect(normaliseTitle("First\u2028Second")).toBe("First");
+    expect(normaliseTitle("\u200B\u200F")).toBeUndefined();
+  });
+
+  it.each(["Verify at https://evil.example", "See www.evil.example now", "[Login](x)"])(
+    "refuses a title that carries a link: %j (review L2)",
+    (reply) => {
+      expect(normaliseTitle(reply)).toBeUndefined();
+    },
+  );
+});
+
+describe("fallbackTitle (review M3)", () => {
+  it("is the first line of the prompt, cleaned, cut with an ellipsis", () => {
+    expect(fallbackTitle("  Plot revenue\nby month  ")).toBe("Plot revenue");
+    expect(fallbackTitle("Rev\u202Eenue   by\tregion")).toBe("Revenue by region");
+    const long = fallbackTitle("word ".repeat(40));
+    expect(long?.endsWith("…")).toBe(true);
+    expect(long?.length).toBeLessThanOrEqual(GENERATED_TITLE_MAX_CHARS);
+    expect(fallbackTitle("x".repeat(200))?.length).toBe(GENERATED_TITLE_MAX_CHARS);
+    expect(fallbackTitle("  \n ")).toBeUndefined();
   });
 });
 

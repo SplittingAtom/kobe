@@ -62,10 +62,14 @@ afterEach(() => {
   seen.length = 0;
 });
 
-const ok = (content: unknown) => (res: ServerResponse) => {
-  res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
-};
+const ok =
+  (content: unknown, finish_reason = "stop") =>
+  (res: ServerResponse) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content }, finish_reason }] }),
+    );
+  };
 
 const input = (over: Partial<ServerCallInput> = {}): ServerCallInput => ({
   purpose: "title",
@@ -74,6 +78,7 @@ const input = (over: Partial<ServerCallInput> = {}): ServerCallInput => ({
   threadId: "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
   runId: "4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80",
   model: "openai/gpt-x",
+  reasoning: false,
   messages: [{ role: "user", content: "What drives revenue?" }],
   signal: AbortSignal.timeout(5_000),
   ...over,
@@ -156,6 +161,42 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     expect(String(req?.headers[SERVER_CALL_TOKEN_HEADER])).toMatch(/^ksc1\./);
   });
 
+  it("asks a reasoning model for a low effort within the reasoning headroom (review H1)", async () => {
+    reply = ok("Revenue drivers");
+    const client = createServerCallClient({ url: base, key: KEY });
+    await client.complete(input({ reasoning: true }));
+    const body = serverCallRequestSchema.parse(JSON.parse(seen[0]?.body ?? ""));
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.max_tokens).toBe(SERVER_CALL_LIMITS.title.reasoning_max_output_tokens);
+    const verified = verifyServerCallToken(
+      KEY,
+      seen[0]?.headers[SERVER_CALL_TOKEN_HEADER],
+      Math.floor(Date.now() / 1000),
+    );
+    expect(verified.ok && verified.claims.max_output_tokens).toBe(
+      SERVER_CALL_LIMITS.title.reasoning_max_output_tokens,
+    );
+    // A model the catalog does not mark gets no effort field at all.
+    seen.length = 0;
+    await client.complete(input());
+    expect(JSON.parse(seen[0]?.body ?? "{}")).not.toHaveProperty("reasoning_effort");
+  });
+
+  it.each([
+    ["", "stop", "empty_content"],
+    ["   \n ", "stop", "empty_content"],
+    [null, "stop", "empty_content"],
+    ["Analyse des ventes trimest", "length", "truncated"],
+  ])("does not use a reply %j (finish %s): %s, with the model", async (content, finish, code) => {
+    reply = ok(content, finish);
+    const client = createServerCallClient({ url: base, key: KEY });
+    const err = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
+    expect(err).toBeInstanceOf(ServerCallError);
+    expect(err.code).toBe(code);
+    expect(err.unusable).toBe(true);
+    expect(err.model).toBe("openai/gpt-x");
+  });
+
   it("reports a refusal by the gateway's code, never its text", async () => {
     reply = (res) => {
       res.writeHead(402, { "content-type": "application/json" });
@@ -183,7 +224,13 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     reply = ok([{ type: "image" }]);
     const client = createServerCallClient({ url: base, key: KEY });
     const bad = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
-    expect(bad.code).toBe("bad_reply");
+    expect(bad.code).toBe("empty_content");
+    reply = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [] }));
+    };
+    const shapeless = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
+    expect(shapeless.code).toBe("bad_reply");
 
     reply = () => undefined; // never answers
     const slow = (await client

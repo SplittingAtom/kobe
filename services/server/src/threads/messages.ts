@@ -66,16 +66,31 @@ export async function firstAnswerAfter(
   return undefined;
 }
 
+/** Most message entries the card's count reads (each read opens the entry's payload). */
+export const MESSAGE_COUNT_SCAN = 1_000;
+
 /**
  * Messages as the member sees them: their prompts and the agent's answers (an assistant turn
- * that only called tools is not one), on every branch.
+ * that only called tools is not one), on every branch. Reads at most {@link MESSAGE_COUNT_SCAN}
+ * message entries (review L4): `capped` says the thread has more.
  */
-export async function messageCount(tx: KobeTx, teamId: string, threadId: string): Promise<number> {
-  const res = await tx.execute<{ n: number | string }>(sql`
-    SELECT count(*) AS n FROM thread_entries
-     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
-       AND (payload -> 'message' ->> 'role' = 'user'
-            OR (payload -> 'message' ->> 'role' = 'assistant'
-                AND COALESCE(payload -> 'message' ->> 'stopReason', '') <> 'toolUse'))`);
-  return Number(res.rows[0]?.n ?? 0);
+export async function messageCount(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<{ readonly count: number; readonly capped: boolean }> {
+  const res = await tx.execute<{ n: number | string; scanned: number | string }>(sql`
+    SELECT count(*) FILTER (WHERE e.role = 'user'
+                              OR (e.role = 'assistant' AND e.stop IS DISTINCT FROM 'toolUse')) AS n,
+           count(*) AS scanned
+      FROM (SELECT payload -> 'message' ->> 'role' AS role,
+                   payload -> 'message' ->> 'stopReason' AS stop
+              FROM thread_entries
+             WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
+             ORDER BY seq LIMIT ${MESSAGE_COUNT_SCAN}) e`);
+  const row = res.rows[0];
+  return {
+    count: Number(row?.n ?? 0),
+    capped: Number(row?.scanned ?? 0) >= MESSAGE_COUNT_SCAN,
+  };
 }

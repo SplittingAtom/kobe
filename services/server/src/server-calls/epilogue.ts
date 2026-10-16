@@ -43,15 +43,32 @@ const errorCode = (err: unknown): string =>
       ? err.name
       : "unknown";
 
+/**
+ * Logs a call that produced nothing: `server call skipped` (the line the gateway logs for its own
+ * refusals, so one count covers both) for a reply or source it could not use, else `server call
+ * failed`. Codes and the model only, never content.
+ */
+function logCallError(d: EpilogueDeps, purpose: ServerCallPurpose, err: unknown) {
+  const model = err instanceof ServerCallError && err.model ? { model: err.model } : {};
+  const skipped = err instanceof ServerCallError && err.unusable;
+  d.log.warn(
+    { purpose, code: errorCode(err), ...model },
+    skipped ? "server call skipped" : "server call failed",
+  );
+  return skipped ? ("skipped" as const) : ("failed" as const);
+}
+
 async function titleStep(d: EpilogueDeps, call: NonNullable<EpilogueDeps["title"]>) {
   let title: string | undefined;
   try {
     title = await call(signalFor("title"));
   } catch (err) {
-    d.log.warn({ purpose: "title", code: errorCode(err) }, "server call failed");
-    return "failed" as const;
+    return logCallError(d, "title", err);
   }
-  if (!title) return "skipped" as const;
+  if (!title) {
+    d.log.warn({ purpose: "title", code: "no_title" }, "server call skipped");
+    return "skipped" as const;
+  }
   try {
     if (!(await d.saveTitle(title))) return "locked" as const;
   } catch (err) {
@@ -73,10 +90,12 @@ async function followupsStep(d: EpilogueDeps, call: NonNullable<EpilogueDeps["fo
   try {
     suggestions = await call(signalFor("followups"));
   } catch (err) {
-    d.log.warn({ purpose: "followups", code: errorCode(err) }, "server call failed");
-    return "failed" as const;
+    return logCallError(d, "followups", err);
   }
-  if (!suggestions || suggestions.length === 0) return "skipped" as const;
+  if (!suggestions || suggestions.length === 0) {
+    d.log.warn({ purpose: "followups", code: "no_suggestions" }, "server call skipped");
+    return "skipped" as const;
+  }
   try {
     await d.append({
       type: "thread.suggestions",

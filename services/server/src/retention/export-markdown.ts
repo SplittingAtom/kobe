@@ -112,10 +112,18 @@ export interface ThreadHeading {
   readonly inTrash: boolean;
 }
 
+/**
+ * Markdown punctuation escaped, so a title (which may quote model output, KOBE-219 review L3)
+ * renders as the text it is: never a link, an image, markup or HTML in a Markdown viewer.
+ */
+function escapeMarkdown(text: string): string {
+  return text.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
+}
+
 export function threadHeader(thread: ThreadHeading): string {
   const title = inline(thread.title ?? "") || "Untitled conversation";
   const lines = [
-    `# ${title.replace(/^#+\s*/, "")}`,
+    `# ${escapeMarkdown(title.replace(/^#+\s*/, ""))}`,
     "",
     `- Thread: \`${thread.threadId}\``,
     `- Started: ${thread.createdAt}`,

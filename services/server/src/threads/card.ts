@@ -9,6 +9,11 @@ import { THREAD_CARD_MESSAGE_CHARS, type ThreadCard } from "./schemas.js";
  * user message (cut short), its agent, its last activity and how many messages it holds. Read
  * when the card opens, for whoever may read the thread; Postgres only (never a sandbox).
  */
+async function counted(tx: KobeTx, teamId: string, threadId: string) {
+  const { count, capped } = await messageCount(tx, teamId, threadId);
+  return { message_count: count, message_count_capped: capped };
+}
+
 export async function threadCard(
   tx: KobeTx,
   viewer: Viewer,
@@ -33,6 +38,6 @@ export async function threadCard(
     agent_id: thread.agentId,
     agent_name: agent?.frontmatter.name ?? null,
     last_activity_at: thread.lastActivityAt.toISOString(),
-    message_count: await messageCount(tx, viewer.teamId, threadId),
+    ...(await counted(tx, viewer.teamId, threadId)),
   };
 }

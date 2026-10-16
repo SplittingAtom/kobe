@@ -185,6 +185,8 @@ export const threadCardSchema = z.object({
   last_activity_at: timestamp,
   /** The member's messages and the agent's answers (tool-only turns not counted), all branches. */
   message_count: z.number().int().min(0),
+  /** The count read only the first 1,000 message entries: the thread holds more ("1,000+"). */
+  message_count_capped: z.boolean(),
 });
 export type ThreadCard = z.infer<typeof threadCardSchema>;
 

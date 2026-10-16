@@ -580,7 +580,15 @@ export class CommandDelivery {
     const prompt: PromptSource | undefined =
       read === undefined ? undefined : { kind: "pi", entries: read, otherwise: "unsent" };
     const { ended } = await this.#endTx(outcome, runId, threadId, "message", async (tx) => {
-      const result = await endRunInTx(tx, teamId, runId, end, undefined, prompt);
+      const result = await endRunInTx(
+        tx,
+        teamId,
+        runId,
+        end,
+        undefined,
+        prompt,
+        this.#ctx.serverCalls,
+      );
       // Ended before (Stop while the sandbox prepared the run): the prompt is kept all the same.
       if (!result.ended && prompt !== undefined) {
         await keepRunPromptInTx(tx, teamId, runId, prompt, {
