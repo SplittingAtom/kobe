@@ -1,20 +1,28 @@
 import { sql } from "drizzle-orm";
 import type { KobeDb } from "../client.js";
-import { USAGE_MODEL_MAX_CHARS, type UsageRoute, type UsageSource } from "../schema/usage.js";
+import {
+  USAGE_MODEL_MAX_CHARS,
+  type UsageKind,
+  type UsageRoute,
+  type UsageSource,
+} from "../schema/usage.js";
 import { withTeam } from "../with-team.js";
 
 /**
- * One forwarded model call as the model-gateway shim measured it (KOBE-43). `runId` is the
- * advisory `x-kobe-run-id` the shim verified as an active run leased to the sandbox; the thread
- * and agent are looked up from it when the row is written.
+ * One forwarded model call as the model-gateway shim measured it (KOBE-43). `runId` is the run the
+ * shim attributed the call to (a sandbox call's verified run; a server call's triggering run,
+ * KOBE-234); the thread and agent are looked up from it when the row is written.
  */
 export interface ModelUsageRecord {
   /** Generated once when the call is recorded; a retried write of the same record is a no-op. */
   readonly id: string;
   readonly teamId: string;
   readonly userId: string;
-  readonly sandboxId: string;
+  /** The calling sandbox; undefined for a server call (`kind` other than `run`). */
+  readonly sandboxId: string | undefined;
   readonly runId: string | undefined;
+  /** What made the call (KOBE-234); absent means `run`. */
+  readonly kind?: UsageKind;
   readonly at: Date;
   readonly route: UsageRoute;
   readonly model: string;
@@ -57,7 +65,8 @@ export async function recordModelUsage(
     const payload = rows.map((r) => ({
       id: r.id,
       user_id: r.userId,
-      sandbox_id: r.sandboxId,
+      sandbox_id: r.sandboxId ?? null,
+      kind: r.kind ?? "run",
       run_id: r.runId ?? null,
       at: r.at.toISOString(),
       route: r.route,
@@ -74,10 +83,11 @@ export async function recordModelUsage(
     }));
     written += await withTeam(db, teamId, async (tx) => {
       const res = await tx.execute(sql`
-        INSERT INTO run_usage (team_id, id, at, user_id, sandbox_id, run_id, thread_id, agent_id, route,
-          model, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+        INSERT INTO run_usage (team_id, id, at, user_id, sandbox_id, kind, run_id, thread_id, agent_id,
+          route, model, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
           usage_source, cost_usd, duration_ms, ttfb_ms, aborted)
-        SELECT ${teamId}::uuid, v.id, v.at, v.user_id, v.sandbox_id, v.run_id, r.thread_id, t.agent_id,
+        SELECT ${teamId}::uuid, v.id, v.at, v.user_id, v.sandbox_id, v.kind, v.run_id, r.thread_id,
+               t.agent_id,
                v.route, v.model, v.status, v.input_tokens, v.output_tokens, v.cache_read_tokens,
                v.cache_write_tokens, v.usage_source,
                CASE WHEN price.input IS NULL OR price.output IS NULL THEN NULL ELSE
@@ -87,7 +97,7 @@ export async function recordModelUsage(
                END,
                v.duration_ms, v.ttfb_ms, v.aborted
           FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS v(
-                 id uuid, user_id uuid, sandbox_id uuid, run_id uuid, at timestamptz, route text,
+                 id uuid, user_id uuid, sandbox_id uuid, kind text, run_id uuid, at timestamptz, route text,
                  model text, status smallint, input_tokens integer, output_tokens integer,
                  cache_read_tokens integer, cache_write_tokens integer, usage_source text,
                  duration_ms integer, ttfb_ms integer, aborted boolean)
