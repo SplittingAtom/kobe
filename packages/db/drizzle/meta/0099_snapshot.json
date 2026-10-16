@@ -1,5 +1,5 @@
 {
-  "id": "6e570b2d-3305-4b3f-94bf-e2da8a9b4ddb",
+  "id": "51554278-61c5-4e8b-9b61-8622c0e3e77c",
   "prevId": "768cedd6-7d8c-4a6e-bb8c-b782daa56faf",
   "version": "7",
   "dialect": "postgresql",
@@ -7730,14 +7730,6 @@
         "run_usage_timing": {
           "name": "run_usage_timing",
           "value": "\"run_usage\".\"duration_ms\" >= 0 AND (\"run_usage\".\"ttfb_ms\" IS NULL OR \"run_usage\".\"ttfb_ms\" >= 0)"
-        },
-        "run_usage_kind": {
-          "name": "run_usage_kind",
-          "value": "\"run_usage\".\"kind\" IN ('run', 'title', 'followups')"
-        },
-        "run_usage_kind_shape": {
-          "name": "run_usage_kind_shape",
-          "value": "(\"run_usage\".\"kind\" = 'run' AND \"run_usage\".\"sandbox_id\" IS NOT NULL) OR (\"run_usage\".\"kind\" <> 'run' AND \"run_usage\".\"sandbox_id\" IS NULL AND \"run_usage\".\"run_id\" IS NOT NULL)"
         },
         "run_usage_thread_needs_run": {
           "name": "run_usage_thread_needs_run",

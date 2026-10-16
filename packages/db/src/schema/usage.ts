@@ -120,12 +120,10 @@ export const runUsage = pgTable(
       "run_usage_timing",
       sql`${t.durationMs} >= 0 AND (${t.ttfbMs} IS NULL OR ${t.ttfbMs} >= 0)`,
     ),
-    check("run_usage_kind", sql`${t.kind} IN (${list(USAGE_KINDS)})`),
-    // A run call names its sandbox; a server call names none but always its triggering run.
-    check(
-      "run_usage_kind_shape",
-      sql`(${t.kind} = 'run' AND ${t.sandboxId} IS NOT NULL) OR (${t.kind} <> 'run' AND ${t.sandboxId} IS NULL AND ${t.runId} IS NOT NULL)`,
-    ),
+    // KOBE-234's `run_usage_kind` (kind IN USAGE_KINDS) and `run_usage_kind_shape` (a run call
+    // names its sandbox; a server call names none and always its triggering run) are added NOT
+    // VALID by the custom migration 0100, not declared here: drizzle cannot express NOT VALID, and
+    // a generated migration's hand edits would be lost when db:rebase regenerates it.
     check("run_usage_thread_needs_run", sql`${t.threadId} IS NULL OR ${t.runId} IS NOT NULL`),
   ],
 );
