@@ -349,6 +349,8 @@ export async function deleteMemory(
 }
 
 export interface ListedDoc extends DocRow {
+  /** Object key of the current version (server-written; never sent to a client). */
+  readonly blobRef: string;
   readonly sizeBytes: number;
   readonly updatedBy: string | null;
   readonly actorKind: "user" | "agent";
@@ -367,6 +369,7 @@ export async function listMemory(
   const rows = await tx
     .select({
       ...DOC_COLUMNS,
+      blobRef: memoryDocVersions.blobRef,
       sizeBytes: memoryDocVersions.sizeBytes,
       updatedBy: memoryDocVersions.actorUserId,
       actorKind: memoryDocVersions.actorKind,
