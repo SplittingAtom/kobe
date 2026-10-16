@@ -3,9 +3,15 @@ import { createServer, request, type IncomingHttpHeaders, type Server } from "no
 import type { AddressInfo } from "node:net";
 import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
 import { RUN_TOKEN_HEADER, type RunTokenClaims, type SessionTokenAudience } from "@kobe/protocol";
-import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
+import {
+  deriveRunTokenKey,
+  deriveTraceSpanKey,
+  mapSandboxSpanId,
+  signRunToken,
+} from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
+import { runRootSpanId, runTraceId } from "@kobe/protocol";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -120,6 +126,8 @@ let vkValue = "";
 let keyRequests = 0;
 let leased = new Set<string>();
 const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode("r".repeat(40)));
+const SPAN_KEY = deriveTraceSpanKey(new TextEncoder().encode("r".repeat(40)));
+const SESSION_THREAD = "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60";
 /** jti of the run tokens the (fake) record still holds as active. */
 let activeTokens = new Set<string>();
 let records: CallRecord[] = [];
@@ -182,6 +190,10 @@ async function start(over: ShimOptions = {}): Promise<void> {
       key: RUN_KEY,
       isActive: async (s) => activeTokens.has(s.jti),
       require: over.requireRunToken ?? false,
+    },
+    tracing: {
+      spanKey: SPAN_KEY,
+      runSession: async () => ({ threadId: SESSION_THREAD, userId: user }),
     },
     bifrostUrl,
     limiter: new CallLimiter({ perSandbox: over.perSandboxCalls ?? 1, total: 10 }),
@@ -870,19 +882,53 @@ describe("tracing (KOBE-10)", () => {
     expect(dump).not.toContain("gen_ai.prompt");
   });
 
-  it("joins the caller's trace and passes it on to Bifrost", async () => {
+  const RUN = "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6071";
+  const OTHER_RUN = "9e8d7c6b-5a49-4382-b170-6f5e4d3c2b1a";
+  const tp = (runId: string, span = "b7ad6b7169203331") => `00-${runTraceId(runId)}-${span}-01`;
+  const gatewaySpan = (exporter: InMemorySpanExporter) =>
+    exporter.getFinishedSpans().find((s) => s.name === "model_gateway.request");
+
+  it("never joins the caller's trace without an attributed run (KOBE-274)", async () => {
     const exporter = trace(false);
-    await call("/v1/chat/completions", {
-      headers: {
-        ...bearer(),
-        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-      },
-    });
-    const span = exporter.getFinishedSpans()[0];
-    expect(span?.spanContext().traceId).toBe("0af7651916cd43dd8448eb211c80319c");
+    await call("/v1/chat/completions", { headers: { ...bearer(), traceparent: tp(RUN) } });
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).not.toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext).toBeUndefined();
     const upstream = String(hits[0]?.headers.traceparent);
-    expect(upstream).toContain("0af7651916cd43dd8448eb211c80319c");
+    expect(upstream).toContain(span?.spanContext().traceId);
     expect(upstream).toContain(span?.spanContext().spanId);
+  });
+
+  it("places the call in its run's trace under the caller's remapped span, with the session", async () => {
+    const exporter = trace(false);
+    leased.add(RUN);
+    await call("/v1/chat/completions", {
+      headers: { ...bearer(), "x-kobe-run-id": RUN, traceparent: tp(RUN) },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext?.spanId).toBe(
+      mapSandboxSpanId(SPAN_KEY, RUN, "b7ad6b7169203331"),
+    );
+    expect(span?.attributes).toMatchObject({
+      "session.id": SESSION_THREAD,
+      "user.id": user,
+      "kobe.thread_id": SESSION_THREAD,
+      "kobe.run_id": RUN,
+    });
+    expect(String(hits[0]?.headers.traceparent)).toContain(runTraceId(RUN));
+  });
+
+  it("puts a call naming another run's trace in its own run's trace, under the root", async () => {
+    const exporter = trace(false);
+    leased.add(RUN);
+    await call("/v1/chat/completions", {
+      headers: { ...bearer(), "x-kobe-run-id": RUN, traceparent: tp(OTHER_RUN) },
+    });
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext?.spanId).toBe(runRootSpanId(RUN));
   });
 
   it("adds the prompt only with content capture on", async () => {

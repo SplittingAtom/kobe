@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from "hono";
-import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { contentAttributes, withSpan } from "./spans.js";
 import { extractContext } from "./propagation.js";
 import { telemetryState } from "./state.js";
@@ -9,12 +9,23 @@ const asNumber = (v: string | null | undefined): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 
+export interface HonoTracingOptions {
+  /**
+   * Join the caller's trace from `traceparent` (default true). False for every listener a sandbox
+   * can reach (KOBE-274): run trace ids are predictable, so a sandbox could write into any run's
+   * trace; those listeners always start a fresh trace.
+   */
+  readonly joinCallerTrace?: boolean;
+}
+
 /**
  * One server span per request: method, route template (never the raw path), status, sizes. Joins
- * the caller's trace from `traceparent`. The query string is content (it can carry tokens) and is
- * recorded only with capture on. Streaming responses end the span when headers are sent.
+ * the caller's trace from `traceparent` unless told not to. The query string is content (it can
+ * carry tokens) and is recorded only with capture on. Streaming responses end the span when
+ * headers are sent.
  */
-export function honoTracing(): MiddlewareHandler {
+export function honoTracing(options: HonoTracingOptions = {}): MiddlewareHandler {
+  const join = options.joinCallerTrace ?? true;
   return async (c, next) => {
     if (!telemetryState().enabled) return next();
     const method = c.req.method;
@@ -23,7 +34,7 @@ export function honoTracing(): MiddlewareHandler {
       method,
       {
         kind: SpanKind.SERVER,
-        parent: extractContext(c.req.header()),
+        parent: join ? extractContext(c.req.header()) : ROOT_CONTEXT,
         attributes: {
           "http.request.method": method,
           ...(asNumber(c.req.header("content-length")) === undefined

@@ -11,11 +11,13 @@ import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import type { ServerCallClaims, SessionTokenClaims } from "@kobe/protocol";
 import { SessionTokenError } from "@kobe/session-token";
 import {
-  annotate,
   contentAttributes,
+  idAttributes,
   injectTraceHeaders,
   telemetryState,
   traceNodeRequest,
+  type Context,
+  type RequestSpan,
 } from "@kobe/telemetry";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
@@ -24,6 +26,7 @@ import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { resolveRunAttribution } from "./run-attribution.js";
+import { placeRequestSpan, type GatewayTracing } from "./trace-placement.js";
 import {
   authenticateServerCall,
   checkServerCallBody,
@@ -71,6 +74,8 @@ export interface GatewayOptions {
     /** Enforcement: a call without a run token is refused (off for rollout). */
     readonly require: boolean;
   };
+  /** Run traces (KOBE-274); absent: spans of sandbox calls hang under the run's root. */
+  readonly tracing?: GatewayTracing;
   /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
   readonly serverCalls?: ServerCallOptions;
   readonly bifrostUrl: string;
@@ -275,7 +280,11 @@ export function createModelGateway(options: GatewayOptions): Server {
     };
   }
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+    span: RequestSpan,
+  ): Promise<void> {
     const url = new URL(req.url ?? "/", "http://gateway.invalid");
     if (url.pathname === "/healthz" && req.method === "GET") {
       const ready = options.ready();
@@ -340,6 +349,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     let errorType: string | undefined;
     let aborted = false;
     let call: CallContext | undefined;
+    let traceContext: Context | undefined;
     try {
       // 4. Liveness, the member's virtual key and the team's enabled models.
       let resolution = await options.principals.resolve(
@@ -390,6 +400,14 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       const runId = attribution.runId;
+      // The span opens only now, in the attributed run's trace (KOBE-274 listener rule).
+      const placement = await placeRequestSpan(options.tracing, req.headers, {
+        teamId: identity.teamId,
+        runId,
+        serverCall,
+      });
+      span.setAttributes(placement.attributes);
+      traceContext = span.open(placement.parent);
 
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(
@@ -515,6 +533,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           resolution.virtualKey,
           attempt === 0,
           { kind: route.kind, started, outputAllowance },
+          traceContext,
         );
         status = outcome.status;
         errorType = outcome.errorType;
@@ -549,34 +568,31 @@ export function createModelGateway(options: GatewayOptions): Server {
       release();
       if (call) {
         // Metadata only; the prompt joins only when content capture is on.
-        annotate(
-          {
+        span.setAttributes({
+          ...idAttributes({
             teamId: call.teamId,
             userId: call.userId,
             sandboxId: call.sandboxId,
             runId: call.runId,
-            ...(serverCall ? { threadId: serverCall.thread_id } : {}),
-          },
-          {
-            "kobe.call_id": call.callId,
-            "kobe.usage_kind": call.purpose ?? "run",
-            "kobe.route": call.route,
-            ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
-            ...(usage === undefined
-              ? {}
-              : {
-                  "gen_ai.usage.input_tokens": usage.counts.input,
-                  "gen_ai.usage.output_tokens": usage.counts.output,
-                }),
-            "http.response.status_code": status,
-            "http.request.body.size": bytesIn,
-            "http.response.body.size": bytesOut,
-            "kobe.aborted": aborted,
-            ...(promptBody
-              ? contentAttributes({ "gen_ai.prompt": promptBody.toString("utf8") })
-              : {}),
-          },
-        );
+          }),
+          "kobe.call_id": call.callId,
+          "kobe.usage_kind": call.purpose ?? "run",
+          "kobe.route": call.route,
+          ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
+          ...(usage === undefined
+            ? {}
+            : {
+                "gen_ai.usage.input_tokens": usage.counts.input,
+                "gen_ai.usage.output_tokens": usage.counts.output,
+              }),
+          "http.response.status_code": status,
+          "http.request.body.size": bytesIn,
+          "http.response.body.size": bytesOut,
+          "kobe.aborted": aborted,
+          ...(promptBody
+            ? contentAttributes({ "gen_ai.prompt": promptBody.toString("utf8") })
+            : {}),
+        });
       }
       // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
       // that named a model), so the gate never sees spend that is neither reserved nor recorded.
@@ -636,6 +652,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       readonly started: number;
       readonly outputAllowance: number;
     },
+    traceContext: Context | undefined,
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let bytesOut = 0;
@@ -673,7 +690,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           agent,
           headers: {
             ...forwardRequestHeaders(req.headers, virtualKey, body.length),
-            ...injectTraceHeaders({}),
+            ...(traceContext === undefined ? {} : injectTraceHeaders({}, traceContext)),
           },
         },
         (up) => {
@@ -771,7 +788,7 @@ export function createModelGateway(options: GatewayOptions): Server {
   }
 
   const server = createServer((req, res) => {
-    traceNodeRequest("model_gateway.request", req, res, () => handle(req, res)).catch(
+    traceNodeRequest("model_gateway.request", req, res, (span) => handle(req, res, span)).catch(
       (err: unknown) => {
         logger.error({ err }, "model gateway request failed");
         if (!res.headersSent) sendError(res, "openai", 500, "internal_error", "Internal error.");

@@ -16,9 +16,11 @@ export {
   loadGatewayPrincipal,
   notifyModels,
   providerKeyContext,
+  runSessionOf,
   serverCallRunMatches,
   virtualKeyContext,
   type GatewayPrincipal,
+  type RunSession,
   type SandboxLiveness,
   type ServerCallRunClaim,
 } from "./store.js";

@@ -52,7 +52,7 @@ function peerAddress(c: Context): string {
  */
 export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
   const app = new Hono();
-  app.use("*", honoTracing());
+  app.use("*", honoTracing({ joinCallerTrace: false }));
   app.get("/healthz", (c) => c.json({ status: "ok", service: "server-sandbox" }));
   // Sandbox endpoints are cluster-internal: anything that came through the ingress is refused.
   app.use("/v1/sandbox/*", async (c, next) => {

@@ -11,6 +11,7 @@ import {
   sandboxes,
   teamMembers,
   teamModels,
+  threads,
   users,
   type ModelProviderKind,
 } from "../schema/index.js";
@@ -208,6 +209,32 @@ export async function isActiveRunLeasedTo(
       )
       .limit(1);
     return rows.length > 0;
+  });
+}
+
+/** A run's Langfuse session (KOBE-274): its thread and that thread's owner. */
+export interface RunSession {
+  readonly threadId: string;
+  readonly userId: string;
+}
+
+/**
+ * The session of a run the gateway already attributed (KOBE-274 ac-6): `session.id` = thread,
+ * `user.id` = `threads.owner_user_id`, read from the server's record, never from the caller.
+ */
+export async function runSessionOf(
+  db: KobeDb,
+  teamId: string,
+  runId: string,
+): Promise<RunSession | undefined> {
+  return withTeam(db, teamId, async (tx) => {
+    const rows = await tx
+      .select({ threadId: runs.threadId, userId: threads.ownerUserId })
+      .from(runs)
+      .innerJoin(threads, and(eq(threads.teamId, runs.teamId), eq(threads.id, runs.threadId)))
+      .where(and(eq(runs.teamId, teamId), eq(runs.id, runId), eq(threads.teamId, teamId)))
+      .limit(1);
+    return rows[0];
   });
 }
 

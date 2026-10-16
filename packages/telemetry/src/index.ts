@@ -1,6 +1,24 @@
 export { loadTelemetryConfig, type TelemetryConfig } from "./config.js";
 export { filterAttributes, isContentKey } from "./content.js";
-export { initTelemetry, type InitOptions, type Telemetry } from "./init.js";
+export {
+  RELAY_SERVICE_NAME,
+  initTelemetry,
+  spanRelay,
+  type InitOptions,
+  type Telemetry,
+} from "./init.js";
+export {
+  RELAY_QUEUE_DEFAULTS,
+  SpanRelay,
+  type RelayQueueOptions,
+  type RelaySpan,
+} from "./relay.js";
+export {
+  recordRunRootSpan,
+  runParentContext,
+  sessionAttributes,
+  type RunRootSpan,
+} from "./run-trace.js";
 export { extractContext, injectTraceHeaders } from "./propagation.js";
 export { telemetryState } from "./state.js";
 export {
@@ -16,7 +34,8 @@ export {
   type SpanIds,
   type SpanOptions,
 } from "./spans.js";
-export { honoTracing } from "./hono.js";
-export { traceNodeRequest } from "./node-http.js";
+export { honoTracing, type HonoTracingOptions } from "./hono.js";
+export { traceNodeRequest, type RequestSpan } from "./node-http.js";
 export { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-export type { Span } from "@opentelemetry/api";
+export type { Attributes, Context, Span } from "@opentelemetry/api";
+export { ROOT_CONTEXT, trace } from "@opentelemetry/api";

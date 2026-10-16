@@ -13,10 +13,16 @@ import {
   isRunTokenActive,
   loadGatewayPrincipal,
   notifyModels,
+  runSessionOf,
   serverCallRunMatches,
+  type RunSession,
   recordModelUsage,
 } from "@kobe/db";
-import { deriveRunTokenKey, deriveServerCallTokenKey } from "@kobe/protocol/node";
+import {
+  deriveRunTokenKey,
+  deriveServerCallTokenKey,
+  deriveTraceSpanKey,
+} from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
@@ -91,6 +97,13 @@ const tokenRecords = new TtlCache<boolean>({
   ttlMs: Math.min(Math.max(config.cacheTtlMs, 1_000), 2_000),
 });
 
+/** A run's thread and owner never change: cached long, bounded (KOBE-274 sessions). */
+const runSessions = new TtlCache<RunSession | undefined>({
+  ttlMs: 10 * 60_000,
+  maxEntries: 10_000,
+  keep: (value) => value !== undefined,
+});
+
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
 const usage = new DbUsageSink({
   write: (records) => recordModelUsage(db, records),
@@ -120,6 +133,12 @@ const server = createModelGateway({
     key: deriveRunTokenKey(new TextEncoder().encode(config.sessionKey)),
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
+  },
+  // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
+  tracing: {
+    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.sessionKey)),
+    runSession: (teamId, runId) =>
+      runSessions.get(`${teamId}:${runId}`, () => runSessionOf(db, teamId, runId)),
   },
   // Server-originated calls (KOBE-234): the server derives the same key from the same secret.
   serverCalls: {
