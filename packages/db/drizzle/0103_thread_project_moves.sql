@@ -1,0 +1,3 @@
+ALTER TABLE "threads" ADD COLUMN "project_moves" jsonb DEFAULT '[]'::jsonb NOT NULL;--> statement-breakpoint
+CREATE INDEX "threads_owner_archived_idx" ON "threads" USING btree ("team_id","owner_user_id","archived_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "threads"."archived_at" IS NOT NULL AND "threads"."deleted_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "threads" ADD CONSTRAINT "threads_project_moves_array" CHECK (jsonb_typeof("threads"."project_moves") = 'array');

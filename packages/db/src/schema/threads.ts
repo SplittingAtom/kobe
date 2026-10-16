@@ -25,6 +25,16 @@ import { teams } from "./teams.js";
 // foreign-key checks and cascades (which bypass RLS) can never reach another team's rows. Other
 // areas reference a thread as (team_id, thread_id) → threads (team_id, id) for the same reason.
 
+/** One move of a thread between projects (CE19); null = no project. */
+export interface ThreadProjectMove {
+  readonly at: string;
+  readonly from: string | null;
+  readonly to: string | null;
+}
+
+/** The moves a thread keeps (the newest); older ones lose their marker. */
+export const THREAD_PROJECT_MOVES_MAX = 20;
+
 export const threadStatus = pgEnum("thread_status", ["idle", "running", "interrupted"]);
 export type ThreadStatus = (typeof threadStatus.enumValues)[number];
 
@@ -123,6 +133,13 @@ export const threads = pgTable(
      * (null source + entry = "forked from a thread that no longer exists").
      */
     forkedAtEntryId: text(),
+    /**
+     * The owner's moves of the thread between projects (CE19, KOBE-220), oldest first, at most
+     * {@link THREAD_PROJECT_MOVES_MAX}: `{ at, from, to }` (ISO time, project ids or null for no
+     * project). The chat marks each on the next run after it (`GET /v1/threads/{id}/markers`).
+     * Ids only, no foreign key: a deleted project leaves a move to "a project you can't open".
+     */
+    projectMoves: jsonb().$type<readonly ThreadProjectMove[]>().notNull().default([]),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -167,6 +184,10 @@ export const threads = pgTable(
     index("threads_owner_pinned_idx")
       .on(t.teamId, t.ownerUserId, t.pinnedAt.desc(), t.id.desc())
       .where(sql`${t.pinnedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    // The Archived group (CE19, KOBE-220): the owner's archived live threads, newest first.
+    index("threads_owner_archived_idx")
+      .on(t.teamId, t.ownerUserId, t.archivedAt.desc(), t.id.desc())
+      .where(sql`${t.archivedAt} IS NOT NULL AND ${t.deletedAt} IS NULL`),
     // A source's forks: the fork key's ON DELETE SET NULL looks them up on every purge.
     index("threads_forked_from_idx")
       .on(t.teamId, t.forkedFromThreadId)
@@ -191,6 +212,7 @@ export const threads = pgTable(
       sql`NOT ${t.isTest} OR (${t.projectId} IS NULL AND NOT ${t.sharedToProject})`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
+    check("threads_project_moves_array", sql`jsonb_typeof(${t.projectMoves}) = 'array'`),
     check("threads_fork_not_self", sql`${t.forkedFromThreadId} IS DISTINCT FROM ${t.id}`),
     check(
       "threads_forked_at_entry_id_length",
