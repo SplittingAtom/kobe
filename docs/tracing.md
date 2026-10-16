@@ -23,12 +23,32 @@ prompts, tool input or output, headers, or URLs (HTTP spans record the route tem
 raw path; the query string is content). Errors record the error type, never its message.
 
 Spans: `<METHOD> <route>` for each HTTP listener, `sandbox.ws.upgrade`, `sandbox.command` (run
-start, steer, stop), `mcp.tools/call`, `model_gateway.request` (GenAI attributes), `egress.connection`.
+start, steer, stop, compaction), `mcp.tools/call`, `model_gateway.request` (GenAI attributes),
+`egress.connection`, `server_call.<purpose>` (titles and follow-ups), the run root `kobe.run`, and
+the sandbox's `sandbox.run`, `sandbox.turn`, `sandbox.tool`, `sandbox.compaction` and
+`sandbox.workspace_sync` (relayed, below). Tool spans carry the tool's name only as the server's
+policy decision knows it (`unknown` otherwise) and the outcome; error codes are closed enums.
+
+## Run traces and sessions
+
+One run is one trace: its trace id is the run id's 32 hex digits and its root span `kobe.run` has
+the run id's low 64 bits as span id, so every component places spans in it without a lookup, and
+Langfuse scores can name a run's trace from the run id. The server records the root when the run
+ends (with `kobe.trace.sandbox_spans_dropped` when sandbox spans were lost); its command spans for
+the run (`run.start`, steer, stop) are children of the root and link to the request that caused
+them. A compaction is its own run, so its own trace. Title and follow-up calls land in the trace of
+the run that triggered them.
+
+Every span of a run carries `session.id` = the thread id and `user.id` = the thread owner's user
+id (an opaque uuid; never an email or a name), so Langfuse shows a conversation as one session.
+The gateway takes both from the server's record of the run or from the server-call token, never
+from the sandbox.
 
 ## Content capture
 
 `telemetry.captureContent: true` (env `KOBE_OTEL_CAPTURE_CONTENT=true`) adds `url.query`,
-`kobe.tool.input` / `kobe.tool.output` (MCP calls) and `gen_ai.prompt` (the model request body),
+`kobe.tool.input` / `kobe.tool.output` (MCP calls and the sandbox's tool spans) and `gen_ai.prompt`
+(the model request body),
 each truncated to 4096 characters. The gate is enforced twice: call sites add content only through
 `contentAttributes()`, and the exporter wrapper (`packages/telemetry/src/content.ts`) drops any
 content-keyed attribute when capture is off, whatever a call site recorded. Model responses are
@@ -36,10 +56,35 @@ not captured. Header values are never exported.
 
 ## Propagation
 
-W3C `traceparent` only (no baggage). Incoming HTTP and WebSocket-upgrade requests join the
-caller's trace; the MCP proxy passes it to the server's internal listener and the model gateway to
-Bifrost. It is not sent to connector servers or the internet. The sandbox agent does not export or
-propagate traces yet.
+W3C `traceparent` only (no baggage). The browser-facing API and the server's internal listener
+join the caller's trace. **No listener a sandbox can reach joins a caller's trace** (the model
+gateway, the MCP proxy, the egress proxy, the server's sandbox routes and WebSocket upgrade): run
+trace ids are predictable, so a sandbox could otherwise write spans into any run's trace. The model
+gateway opens `model_gateway.request` only after it attributed the call to a run (run token,
+server-call token, or a leased advisory run id), in that run's trace; it uses an incoming
+`traceparent` only for its parent span, and only when it names that very run's trace. Without an
+attributed run the call starts a fresh trace. The MCP proxy passes its context to the server's
+internal listener and the model gateway to Bifrost; nothing is sent to connector servers or the
+internet.
+
+## Sandbox spans
+
+The sandbox holds no collector endpoint and no credential (the sandbox template has no
+`KOBE_OTEL_*` variable; tests assert it). When the server's tracing is on, `run.start` and
+`thread.compact` carry a trace context to agents that announce the `trace_spans` capability. The
+agent records spans from Pi's RPC events for those runs only and sends them as `trace.spans` frames
+over its existing WebSocket; Pi's model calls carry the current run or turn span as `traceparent`.
+With tracing off the server sends no trace context, and the agent records and sends nothing.
+
+The server takes a frame only for a run leased to that connection (a run it never held closes the
+connection as a lease violation; a late frame is dropped quietly), parses each span on its own,
+remaps span ids with a keyed HMAC per run (so a sandbox can never produce or overwrite another
+span's id), drops duplicates and cycles, clamps times to the run, stamps team, user, thread, run,
+sandbox and the session itself, and strips content attributes when capture is off. Relayed spans
+go through their own bounded export queue (service name `kobe-sandbox-agent`), behind a per-replica
+budget with a per-team share, so they never delay or evict the server's own spans; drops are
+counted. Limits: 64 spans per frame, 10 frames per second per connection, 2048 spans per run, 512
+buffered spans in the agent. The contract is `packages/protocol/src/sandbox-wire/trace-frames.ts`.
 
 ## Backends
 

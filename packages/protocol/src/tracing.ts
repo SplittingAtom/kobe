@@ -14,16 +14,17 @@ import { z } from "zod";
  *   trace whichever HTTP request or replica caused them; a Langfuse score (KOBE-275) can name the
  *   trace from the run id alone. A compaction is its own run (KOBE-212), so it is its own trace,
  *   in the same session.
- * - Root span `kobe.run` with span id {@link runRootSpanId}, recorded by the server replica that ends
- *   the run (start = run created, end = terminal), with {@link TRACE_DROPPED_ATTRIBUTE} when sandbox
- *   spans were dropped. It links to the HTTP request span that created the run (a span link, not a
- *   parent: that request has its own trace).
- * - The server's `sandbox.command` spans for a run are children of the root; `run.start.trace` /
+ * - Root span `kobe.run` with span id {@link runRootSpanId}, recorded by the server replica holding
+ *   the run's sandbox connection once the run ended and its late-span grace passed (start = run
+ *   started, end = run ended), with {@link TRACE_DROPPED_ATTRIBUTE} when sandbox spans were dropped.
+ *   A run whose sandbox connection is lost for good has no root (its spans stay in its trace).
+ * - The server's `sandbox.command` spans for a run are children of the root and link to the span
+ *   that caused them (the HTTP request has its own trace); `run.start.trace` /
  *   `thread.compact.trace` hand the sandbox a `traceparent` naming the command span. The sandbox's
  *   spans come back as `trace.spans` frames (sandbox-wire/trace-frames.ts); the server exports them
  *   under the run's trace id (frames carry none) with **remapped span ids**: exported id =
  *   `mapSandboxSpanId` (`@kobe/protocol/node`) = the first 64 bits of
- *   HMAC-SHA256(`k_trace`, run id ‖ sandbox span id), `k_trace` = HKDF-SHA256 of the model-gateway
+ *   HMAC-SHA256(`k_trace`, run id ‖ 0x00 ‖ sandbox span id), `k_trace` = HKDF-SHA256 of the model-gateway
  *   session key with info {@link TRACE_SPAN_KDF_INFO}. A sandbox therefore never produces an
  *   exported span id, so it cannot overwrite another span in a backend that upserts by id.
  *
@@ -41,9 +42,9 @@ import { z } from "zod";
  * {@link TRACE_SESSION_ID_ATTRIBUTE} = the thread id and {@link TRACE_USER_ID_ATTRIBUTE} = the
  * thread's owner (`threads.owner_user_id`; opaque uuid, never an email or a name), the same source
  * everywhere so a session never shows two users. The server stamps them on relayed spans from the
- * connection's lease (never from the frame); the model gateway reads them with the run-token
- * activity check (one cached query; on the legacy advisory path, the leased run's row) or from the
- * server-call token's `thread_id` / `user_id` claims (which the server mints from the same row).
+ * connection's lease (never from the frame); the model gateway reads them from the attributed
+ * run's row (`runSessionOf`, cached per run, only while tracing is on) or from the server-call
+ * token's `thread_id` / `user_id` claims (the gateway checks them against the same record).
  * Never from the sandbox.
  */
 
