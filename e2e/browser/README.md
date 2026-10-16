@@ -7,7 +7,9 @@ row menus with the header rename (KOBE-292), auto-titles with the rail's hover c
 (KOBE-219), pin, archive and move to project (KOBE-220; it creates a project, so the member
 must be allowed to, and archives it afterwards), and sharing with the team between two members
 (KOBE-221; needs `KOBE_USER2`, skipped without it), and follow-up chips behind the team switch
-(KOBE-222; `KOBE_USER` must be a team admin; it turns the switch on and off again). It is **not** part
+(KOBE-222; `KOBE_USER` must be a team admin; it turns the switch on and off again), and `@file`
+mentions (KOBE-223; it drops a small file into the member's `uploads/` and deletes it at the
+end). It is **not** part
 of CI and not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
 (`@playwright/test` 1.55.0, Apache-2.0).
 
