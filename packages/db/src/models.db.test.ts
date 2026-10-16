@@ -9,6 +9,7 @@ import {
   bumpModelsConfig,
   isActiveRunLeasedTo,
   loadGatewayPrincipal,
+  runSessionOf,
 } from "./models/index.js";
 import {
   MODEL_CONTEXT_WINDOW_RANGE,
@@ -329,5 +330,31 @@ describe("gateway principal", () => {
       ),
     );
     expect(await isActiveRunLeasedTo(app.db, teamA, runId, sandboxId)).toBe(false);
+  });
+
+  it("run session (KOBE-274): the run's thread and its owner, only inside the run's team", async () => {
+    const { runId, threadId } = await withTeam(app.db, teamA, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: userId })
+        .returning({ id: threads.id });
+      if (!thread) throw new Error("no thread");
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: teamA,
+          threadId: thread.id,
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      if (!run) throw new Error("no run");
+      return { runId: run.id, threadId: thread.id };
+    });
+    expect(await runSessionOf(app.db, teamA, runId)).toEqual({ threadId, userId });
+    expect(await runSessionOf(app.db, teamB, runId)).toBeUndefined();
+    expect(await runSessionOf(app.db, teamA, randomUUID())).toBeUndefined();
   });
 });
