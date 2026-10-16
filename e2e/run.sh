@@ -1657,7 +1657,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model, agentId, reuseThread, approveAll, fileIds, projectId] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId, reuseThread, approveAll, fileIds, projectId, mentions] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1686,7 +1686,8 @@ const thread = reuseThread ? { status: 200, json: { thread_id: reuseThread } } :
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 out("thread_id", thread.json.thread_id ?? "-");
 const t0 = Date.now();
-const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content, ...(fileIds ? { file_ids: fileIds.split(",") } : {}) });
+// KOBE-223: optional @file mentions (comma-separated workspace paths picked with @).
+const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content, ...(fileIds ? { file_ids: fileIds.split(",") } : {}), ...(mentions ? { mentions: mentions.split(",") } : {}) });
 out("message", sent.status);
 const runId = sent.json.run_id;
 out("run", runId);
@@ -1748,7 +1749,7 @@ out("error_message", errorMessage);
 out("text", text);
 JS
     chat_run() { # content timeout-ms [model] [agent-id] [thread-id] [approve-all] [file-ids] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${CHAT_PROJECT:-}" 2>&1 | tail -17
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${CHAT_PROJECT:-}" "${CHAT_MENTIONS:-}" 2>&1 | tail -17
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -2638,24 +2639,27 @@ JS
     contains "uploads: attaching the file keeps its object until the thread goes" "${up_file:-none}" \
       "$(s3_ls "${up_thread:-none}")"
     # KOBE-223 (CE22): an @file mention. The upload is now a file of the Owner's workspace
-    # (uploads/<thread>/e2e-upload.txt); the message names it only by the composer's marker, the
-    # server rewrites it to the absolute sandbox path, and the real sandbox reads exactly that
-    # path. Mentions outside /workspace or of unknown files are refused before any run exists.
-    mention_out=$(chat_run "bash: cat @file(uploads/$up_thread/e2e-upload.txt); exit 0" 300000 "" "" "$up_thread" 1)
+    # (uploads/<thread>/e2e-upload.txt); the message names it by the composer's marker and lists
+    # it in `mentions`; the server rewrites it to the absolute sandbox path, and the real sandbox
+    # reads exactly that path. Unlisted `@file(...)` text stays literal; bad mentions are refused
+    # before any run exists.
+    mention_path="uploads/$up_thread/e2e-upload.txt"
+    mention_out=$(CHAT_MENTIONS="$mention_path" chat_run "bash: cat @file($mention_path); exit 0" 300000 "" "" "$up_thread" 1)
     printf '     mention message: %s\n' "$(printf '%s' "$mention_out" | tr '\n' ' ' | cut -c1-500)"
     mention_run=$(printf '%s\n' "$mention_out" | sed -n 's/^run=//p')
     contains "mentions: a message with an @file mention starts a run (201)" '^message=201$' "$mention_out"
     contains "mentions: the stored prompt names the absolute sandbox path, not the marker" \
-      "^bash: cat /workspace/uploads/$up_thread/e2e-upload.txt; exit 0\$" \
+      "^bash: cat /workspace/$mention_path; exit 0\$" \
       "$(psql_kobe "SELECT input FROM runs WHERE team_id = '$E2E_TEAM_ID' AND id = '${mention_run:-00000000-0000-4000-8000-000000000000}'")"
     contains "mentions: the agent read the mentioned file by that path" \
       "^text=fake-openai: tool said: ${UPLOAD_CONTENT}( |\$)" "$mention_out"
-    for bad in "@file(/etc/passwd)" "@file(../../etc/passwd)" "@file(uploads/$up_thread/missing.txt)"; do
+    mention_runs() { psql_kobe "SELECT count(*) FROM runs WHERE team_id = '$E2E_TEAM_ID' AND thread_id = '${up_thread:-00000000-0000-4000-8000-000000000000}'"; }
+    mention_before=$(mention_runs)
+    for bad in "/etc/passwd" "../../etc/passwd" "uploads/$up_thread/missing.txt"; do
       contains "mentions: $bad is refused (422)" '^message=422$' \
-        "$(chat_run "bash: cat $bad; exit 0" 30000 "" "" "$up_thread")"
+        "$(CHAT_MENTIONS="$bad" chat_run "bash: cat @file($bad); exit 0" 30000 "" "" "$up_thread")"
     done
-    contains "mentions: no refused mention left a run" '^0$' \
-      "$(psql_kobe "SELECT count(*) FROM runs WHERE team_id = '$E2E_TEAM_ID' AND thread_id = '${up_thread:-00000000-0000-4000-8000-000000000000}' AND input LIKE '%@file(%'")"
+    contains "mentions: no refused mention left a run" "^${mention_before:-x}\$" "$(mention_runs)"
     up_purged() { ! s3_ls "$up_thread" | grep -q "${up_file:-none}"; }
     as_owner "DELETE /v1/threads/$up_thread" >/dev/null
     contains "uploads: Delete forever of the thread answers 204" '^204 ' "$(as_owner "POST /v1/threads/$up_thread/purge")"

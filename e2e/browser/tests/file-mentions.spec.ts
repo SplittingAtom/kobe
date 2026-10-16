@@ -55,7 +55,7 @@ test("@file mention: pick a workspace file, the agent reads it by its absolute p
     await expect(list).toBeHidden();
     await expect(chat.composer).toHaveValue(`Use a tool to read @file(uploads/${name}) `);
     await expect(
-      page.getByRole("list", { name: "Mentioned files" }).getByText(`@${name}`),
+      page.getByRole("list", { name: "Mentioned files" }).getByText(`@uploads/${name}`),
     ).toBeVisible();
     await chat.composer.pressSequentially("and quote its one line. Do nothing else.");
     await chat.composer.press("Enter");
