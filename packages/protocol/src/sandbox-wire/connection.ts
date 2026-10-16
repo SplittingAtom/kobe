@@ -48,7 +48,9 @@
  *   `trace_spans` ({@link CAPABILITY_TRACE_SPANS}, trace-frames.ts, KOBE-274): `run.start.trace` /
  *   `thread.compact.trace` (sent only to agents with it) and the agent's `trace.spans` frames (a small
  *   frame). Unlike the others, a `trace.spans` frame the server won't take (no capability, no trace
- *   context for the run, a run ended over 30 s ago) is dropped silently, never answered with `error`.
+ *   context for the run, a run of this connection that ended, over the rate) is dropped and counted,
+ *   never answered with `error` and never closing the connection; invalid spans inside a valid
+ *   envelope are dropped one by one. A run the connection never held is still a `lease_violation`.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose

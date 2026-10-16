@@ -113,11 +113,15 @@ enforcement is switched on (KOBE-118). Details in `src/run-token.ts`.
 ## Run traces (KOBE-274)
 
 One run is one trace: trace id = the run id's hex digits (`runTraceId`), root span `kobe.run` with
-id `runRootSpanId` (the run id's low 64 bits), so the server, the model gateway and the sandbox
-agree without a lookup and a sandbox never picks the trace. Agents that list hello capability
-`trace_spans` get `run.start.trace` / `thread.compact.trace` (`{ traceparent, capture_content }`)
-when the server traces the run, and send their spans back as `trace.spans` frames (at most 64 spans,
-a small frame, closed span names with a strict attribute allow-list each, content only with
-`capture_content`). No trace context, no frames. The server checks the lease, stamps trace id, team,
-user, thread, run, sandbox, `session.id` (thread) and `user.id` (member) itself, drops spans that
-reuse its own span ids, and rate-limits per connection. Details in `src/sandbox-wire/trace-frames.ts`.
+id `runRootSpanId`, so the server, the model gateway and the sandbox agree without a lookup. These
+ids are predictable, so **no listener a sandbox can reach joins a caller's trace by propagation**:
+the model gateway starts `model_gateway.request` only after it attributed the call to a run, in that
+run's trace. Agents that list hello capability `trace_spans` get `run.start.trace` /
+`thread.compact.trace` (`{ traceparent, capture_content }`, decoded loosely) when the server traces
+the run, and send their spans as `trace.spans` frames: a strict envelope with up to 64 spans that
+the server parses one by one (closed span names, a strict attribute allow-list each, closed codes,
+content only with `capture_content`). No trace context, no frames. The server checks the lease,
+remaps every sandbox span id with `mapSandboxSpanId` (HMAC under `k_trace`, HKDF info
+`kobe/trace-span/v1`), clamps times to the run window, stamps identity, `session.id` (thread),
+`user.id` (thread owner) and the tool name from its own decisions, and exports through a separate
+bounded queue. Details in `src/tracing.ts` and `src/sandbox-wire/trace-frames.ts`.

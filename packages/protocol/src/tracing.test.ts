@@ -6,6 +6,7 @@ import {
   runTraceId,
   traceparentSchema,
 } from "./index.js";
+import { deriveRunTokenKey, deriveTraceSpanKey, mapSandboxSpanId } from "./node/index.js";
 import { EXAMPLE_IDS } from "./testing/index.js";
 
 const RUN = EXAMPLE_IDS.run;
@@ -63,5 +64,26 @@ describe("traceparent", () => {
       expect(parseTraceparent(bad), bad).toBeUndefined();
     }
     expect(() => formatTraceparent("0".repeat(32), runRootSpanId(RUN))).toThrow();
+  });
+});
+
+describe("sandbox span id remapping (k_trace)", () => {
+  const master = new TextEncoder().encode("m".repeat(32));
+  const key = deriveTraceSpanKey(master);
+
+  it("is deterministic per run and key, and differs across runs and keys", () => {
+    const id = mapSandboxSpanId(key, RUN, "1111111111111111");
+    expect(id).toMatch(/^[0-9a-f]{16}$/);
+    expect(mapSandboxSpanId(key, RUN, "1111111111111111")).toBe(id);
+    expect(mapSandboxSpanId(key, EXAMPLE_IDS.thread, "1111111111111111")).not.toBe(id);
+    const other = deriveTraceSpanKey(new TextEncoder().encode("n".repeat(32)));
+    expect(mapSandboxSpanId(other, RUN, "1111111111111111")).not.toBe(id);
+    expect(id).not.toBe("1111111111111111");
+  });
+
+  it("is domain separated from the run-token key and refuses short secrets", () => {
+    expect(Buffer.from(key).equals(Buffer.from(deriveRunTokenKey(master)))).toBe(false);
+    expect(() => deriveTraceSpanKey(new Uint8Array(8))).toThrow();
+    expect(() => mapSandboxSpanId(new Uint8Array(8), RUN, "1111111111111111")).toThrow();
   });
 });
