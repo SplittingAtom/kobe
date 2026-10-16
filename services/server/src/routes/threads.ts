@@ -59,6 +59,7 @@ import {
   type ThreadSummary,
 } from "../threads/schemas.js";
 import { searchThreadList } from "../threads/search.js";
+import { listThreadActivity } from "../threads/activity.js";
 import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { moveThread, setArchived, setPinned } from "../threads/organize.js";
@@ -188,6 +189,12 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       listThreads(tx, viewer, { projectId: query.project_id, cursor, limit: query.limit }),
     );
     return c.json(pageBody(page));
+  });
+
+  // The rail's run and approval dots (KOBE-301): polled, so one cheap query and no project read.
+  app.get("/activity", async (c) => {
+    const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
+    return c.json(await withTeam(db, viewer.teamId, (tx) => listThreadActivity(tx, viewer)));
   });
 
   app.get("/trash", async (c) => {

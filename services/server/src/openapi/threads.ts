@@ -13,6 +13,7 @@ import {
   switchAgentVersionBodySchema,
   threadCardSchema,
   threadDetailSchema,
+  threadActivityListSchema,
   threadPageSchema,
   threadSearchPageSchema,
   threadSummarySchema,
@@ -191,6 +192,21 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         description: "Archived threads stay searchable and follow the same retention.",
         parameters: [...queryParameters(trashQuerySchema), teamHeader],
         responses: { "200": json("ThreadPage", "A page of archived threads."), ...ERROR_RESPONSES },
+      },
+    },
+    "/v1/threads/activity": {
+      get: {
+        operationId: "listThreadActivity",
+        summary: "The caller's own threads with a run going or an approval waiting (KOBE-301)",
+        description:
+          "Polled by the rail's dots and the tab title: live, non-test threads the caller owns " +
+          "whose run is active; `approval` when an approval only they can decide waits there. " +
+          "Threads not listed are idle. At most 200.",
+        parameters: [teamHeader],
+        responses: {
+          "200": json("ThreadActivityList", "The caller's active threads."),
+          ...ERROR_RESPONSES,
+        },
       },
     },
     "/v1/threads/shared": {
@@ -442,6 +458,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     Error: withoutDialect(output(errorSchema)),
     Thread: withoutDialect(output(threadSummarySchema)),
     ThreadPage: withoutDialect(output(threadPageSchema)),
+    ThreadActivityList: withoutDialect(output(threadActivityListSchema)),
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     ThreadCard: withoutDialect(output(threadCardSchema)),

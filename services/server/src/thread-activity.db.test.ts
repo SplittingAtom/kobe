@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { threadPageSchema, threadSummarySchema } from "./threads/schemas.js";
+import {
+  threadActivityListSchema,
+  threadPageSchema,
+  threadSummarySchema,
+} from "./threads/schemas.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
@@ -111,5 +115,64 @@ describe("pending_approval on thread summaries (KOBE-301)", () => {
 
     expect(await flagIn(a.owner, "/v1/threads", threadA)).toBeUndefined();
     expect(await flagIn(b.owner, "/v1/threads", threadB)).toBe(true);
+  });
+});
+
+describe("GET /v1/threads/activity (KOBE-301)", () => {
+  const activity = async (p: Person) => {
+    const res = await as(p).get("/v1/threads/activity");
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    return threadActivityListSchema.parse(res.json).threads; // the documented shape, strictly
+  };
+  const setStatus = (team: string, threadId: string, status: string) =>
+    f.fx.admin.query(
+      `UPDATE threads SET status = $3::thread_status WHERE team_id = $1 AND id = $2`,
+      [team, threadId, status],
+    );
+
+  it("lists the caller's own running threads, `approval` while one waits for them", async () => {
+    const w = await f.world();
+    const idle = await f.thread(w.owner);
+    const busy = await f.thread(w.owner);
+    const asking = await f.thread(w.owner);
+    expect(await activity(w.owner)).toEqual([]);
+
+    await setStatus(w.team, busy, "running");
+    await setStatus(w.team, asking, "running");
+    const runId = await f.message(w.owner, asking, "hello");
+    await approval(w.team, { runId, threadId: asking, userId: w.owner.id }, "tc-1");
+    await approval(w.team, { runId, threadId: busy, userId: w.owner.id }, "tc-old", {
+      expiresIn: "-1 minute",
+    });
+    const listed = await activity(w.owner);
+    expect(new Map(listed.map((t) => [t.thread_id, t.activity]))).toEqual(
+      new Map([
+        [busy, "running"],
+        [asking, "approval"],
+      ]),
+    );
+    expect(listed.some((t) => t.thread_id === idle)).toBe(false);
+
+    // Trash ends the cue.
+    await f.fx.admin.query(`UPDATE threads SET deleted_at = now() WHERE team_id = $1 AND id = $2`, [
+      w.team,
+      busy,
+    ]);
+    expect((await activity(w.owner)).map((t) => t.thread_id)).toEqual([asking]);
+  });
+
+  it("never lists a teammate's shared thread or another team's", async () => {
+    const w = await f.world(1);
+    const mate = w.others[0] as Person;
+    const threadId = await f.thread(w.owner);
+    expect(
+      (await as(w.owner).post(`/v1/threads/${threadId}/share`, { visibility: "team" })).status,
+    ).toBe(200);
+    await setStatus(w.team, threadId, "running");
+    const other = await f.world();
+
+    expect((await activity(w.owner)).map((t) => t.thread_id)).toEqual([threadId]);
+    expect(await activity(mate)).toEqual([]);
+    expect(await activity(other.owner)).toEqual([]);
   });
 });

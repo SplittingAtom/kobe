@@ -195,6 +195,20 @@ export const threadSummarySchema = z.object({
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
+/**
+ * `GET /v1/threads/activity` (KOBE-301): the caller's own live threads with a run going;
+ * `approval` when an approval waits for them there. Threads not listed are idle.
+ */
+export const threadActivityListSchema = z.strictObject({
+  threads: z.array(
+    z.strictObject({
+      thread_id: wireUuidSchema,
+      activity: z.enum(["running", "approval"]),
+    }),
+  ),
+});
+export type ThreadActivityList = z.infer<typeof threadActivityListSchema>;
+
 /** Longest first message the hover card shows (KOBE-219); the rest is cut. */
 export const THREAD_CARD_MESSAGE_CHARS = 280;
 
