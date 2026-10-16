@@ -181,6 +181,11 @@ function ChatWorkspace({
   const runtime = useKobeRuntime({ session, adapter, threadId, onThreadIdChange: setThreadId });
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
+  // The server titled a thread after its first answer (KOBE-219): the rail reads the list again.
+  useEffect(
+    () => session.onThreadRetitled(() => void runtime.threads.reload()),
+    [session, runtime],
+  );
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   // The member's layout, from any device (CE8): loaded once, changes saved debounced.
   const layout = useLayoutPreferences(fetchFn);

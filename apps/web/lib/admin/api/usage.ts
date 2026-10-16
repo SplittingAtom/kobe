@@ -38,6 +38,11 @@ export interface AgentUsage extends UsageTotals {
   readonly scope: "team" | "personal" | "gallery" | null;
 }
 
+/** Who made the calls (KOBE-234 `run_usage.kind`): a run, or the server's title / follow-ups. */
+export interface KindUsage extends UsageTotals {
+  readonly kind: "run" | "title" | "followups";
+}
+
 export interface TeamUsageSummary extends UsageTotals {
   readonly teamId: string;
   readonly slug: string;
@@ -51,6 +56,8 @@ export interface UsageReport {
   readonly byUser: readonly UserUsage[];
   readonly byModel: readonly ModelUsage[];
   readonly byAgent: readonly AgentUsage[];
+  /** KOBE-219; absent from older servers. */
+  readonly byKind?: readonly KindUsage[];
   /** Site report only. */
   readonly byTeam?: readonly TeamUsageSummary[];
 }

@@ -52,6 +52,8 @@ export interface ControllerOptions {
   readonly reopenDelayMs?: (attempt: number) => number;
   /** Per-tab resume points (`resume.ts`); default sessionStorage, `null` to always replay. */
   readonly resumeStore?: ResumeStore | null | undefined;
+  /** The server titled the thread after a run (KOBE-219 `thread.updated`): the rail reads it. */
+  readonly onRetitled?: ((threadId: string, title: string) => void) | undefined;
 }
 
 const MAX_REOPEN_ATTEMPTS = 5;
@@ -80,6 +82,9 @@ export class ThreadController {
   readonly #reopenDelay: (attempt: number) => number;
   readonly #resume: ResumeStore | undefined;
   #stream: RunStream | undefined;
+  /** A completed run's stream kept open for its announced epilogue (KOBE-234/219). */
+  #epilogue: RunStream | undefined;
+  readonly #onRetitled: ((threadId: string, title: string) => void) | undefined;
   #reopenAttempts = 0;
   #reopenTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshing: Promise<void> | undefined;
@@ -97,6 +102,7 @@ export class ThreadController {
     this.#reopenDelay = options.reopenDelayMs ?? ((n) => Math.min(1000 * 2 ** n, 15_000));
     this.#resume =
       options.resumeStore === null ? undefined : (options.resumeStore ?? browserResumeStore());
+    this.#onRetitled = options.onRetitled;
   }
 
   // --- store ----------------------------------------------------------------------------------
@@ -336,6 +342,8 @@ export class ThreadController {
   /** Stops streaming (the thread is no longer on screen). */
   dispose(): void {
     this.#closeStream();
+    this.#epilogue?.close();
+    this.#epilogue = undefined;
     this.#disposed = true;
     this.#listeners.clear();
   }
@@ -396,6 +404,9 @@ export class ThreadController {
   }
 
   #onEvents(runId: string, events: readonly KobeEvent[]): void {
+    for (const event of events) {
+      if (event.type === "thread.updated") this.#retitled(event.payload);
+    }
     const live = this.#state.live;
     if (!live || live.runId !== runId) return;
     const wasStarted = live.started;
@@ -440,6 +451,17 @@ export class ThreadController {
     );
   }
 
+  /** The server's title for this thread (KOBE-219): the bar shows it at once, the rail reads it. */
+  #retitled(payload: { readonly thread_id: string; readonly title: string }): void {
+    if (payload.thread_id !== this.#state.threadId) return;
+    this.#set((s) =>
+      s.summary && s.summary.threadId === payload.thread_id
+        ? { ...s, summary: { ...s.summary, title: payload.title } }
+        : s,
+    );
+    this.#onRetitled?.(payload.thread_id, payload.title);
+  }
+
   #onTerminal(terminal: NonNullable<ThreadState["live"]>["terminal"]): void {
     if (!terminal) return;
     const messages: Record<typeof terminal.type, string> = {
@@ -461,11 +483,21 @@ export class ThreadController {
           ? { ...s.summary, leafEntryId: terminal.payload.leaf_entry_id ?? s.summary.leafEntryId }
           : s.summary,
     }));
+    // A run.completed that announces an epilogue: its stream stays open for the results.
+    if (terminal.type === "run.completed" && (terminal.payload.epilogue?.length ?? 0) > 0) {
+      this.#epilogue?.close();
+      this.#epilogue = this.#stream;
+    }
     this.#stream = undefined;
     void this.refresh();
   }
 
   #onSignal(runId: string, signal: StreamSignal): void {
+    if (this.#epilogue?.runId === runId && this.#stream?.runId !== runId) {
+      // The epilogue's stream ended (all results arrived, or the window closed): nothing to do.
+      if (signal.kind === "closed") this.#epilogue = undefined;
+      return;
+    }
     if (this.#stream?.runId !== runId && signal.kind !== "closed") return;
     if (signal.kind === "open") {
       this.#reopenAttempts = 0;

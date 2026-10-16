@@ -55,7 +55,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     expect(window.location.search).toBe(`?thread=${newer}`);
   });
 
-  it("creates a thread on the first message, titled with its first line", async () => {
+  it("creates a thread on the first message, shown by its first line until the server titles it", async () => {
     openApp(fake);
     const user = userEvent.setup();
     await screen.findByText("No threads yet.");
@@ -65,7 +65,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     );
     await waitFor(() => expect(fake.threads.size).toBe(1));
     const [thread] = [...fake.threads.values()];
-    expect(thread?.title).toBe("Plot revenue by month");
+    expect(thread?.title).toBeNull(); // KOBE-219: the server titles it after the first answer
     const run = await waitFor(() => {
       const r = fake.activeRun(must(thread).thread_id);
       expect(r).toBeDefined();
@@ -78,6 +78,49 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     expect(
       within(await list()).getByRole("button", { name: "Plot revenue by month" }),
     ).toBeTruthy();
+  });
+
+  it("shows the server's title in the rail and the bar as soon as it arrives (KOBE-219 ac-2)", async () => {
+    openApp(fake);
+    const user = userEvent.setup();
+    await screen.findByText("No threads yet.");
+    await user.type(await composer(), "What drives revenue?{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(1));
+    const [thread] = [...fake.threads.values()];
+    const run = await waitFor(() => must(fake.activeRun(must(thread).thread_id)));
+    await streaming(fake, run.run_id);
+    expect(
+      await within(await list()).findByRole("button", { name: "What drives revenue?" }),
+    ).toBeTruthy();
+    fake.agent.commitPrompt(run.run_id);
+    fake.agent.complete(run.run_id, { epilogue: ["title"] });
+    fake.agent.retitle(run.run_id, "Revenue drivers");
+    expect(
+      await within(await list()).findByRole("button", { name: "Revenue drivers" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.getElementById("kobe-thread-title")?.textContent).toBe("Revenue drivers"),
+    );
+    // No rename was sent: the title stays unlocked on the server.
+    expect(chatRequests(fake, "PATCH")).toEqual([]);
+  });
+
+  it("shows a thread's card on hover: first message, agent, last activity, message count (KOBE-219 ac-3)", async () => {
+    const t = fake.addThread("Budget review");
+    const u = fake.addEntry(t, null, { role: "user", content: "Where did the Q3 budget go?" });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "Mostly travel." }] });
+    openApp(fake);
+    const user = userEvent.setup();
+    const row = await within(await list()).findByRole("button", { name: "Budget review" });
+    await user.hover(row);
+    const card = await screen.findByTestId("thread-card", {}, { timeout: 3_000 });
+    await waitFor(() => expect(card.textContent).toContain("Where did the Q3 budget go?"));
+    expect(card.textContent).toContain("No agent");
+    expect(card.textContent).toMatch(/Messages\s*2/);
+    expect(card.querySelector("time")?.getAttribute("datetime")).toBe(
+      fake.threads.get(t)?.last_activity_at,
+    );
+    expect(chatRequests(fake, "GET").some((r) => r.path === `/v1/threads/${t}/card`)).toBe(true);
   });
 
   it("moves to Trash from the row's menu and restores (D18)", async () => {

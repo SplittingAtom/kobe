@@ -8,12 +8,20 @@
  * EventSource hides HTTP statuses: when the server refuses a (re)connection (204 after the end,
  * 410 compacted, 404, 409, 400) the source just closes. The stream then reports `closed` and the
  * caller asks the API what happened (run ended → render from entries; still active → reopen).
+ *
+ * Epilogue (KOBE-234/219): a `run.completed` that announces an `epilogue` is delivered at once,
+ * and the stream keeps listening for the announced results (`thread.updated`, …) until each
+ * arrived or `SERVER_CALL_EPILOGUE_MAX_MS` passed; it never reconnects during it (the server ends
+ * the response itself, and the title is on the thread row whatever happens here).
  */
 import {
+  EPILOGUE_EVENT_TYPES,
   KOBE_EVENT_TYPES,
+  SERVER_CALL_EPILOGUE_MAX_MS,
   isTerminalEventType,
   kobeEventSchema,
   type KobeEvent,
+  type KobeEventType,
 } from "@kobe/protocol";
 import "../security/zod-jitless";
 import { runEventsUrl } from "./api";
@@ -66,6 +74,9 @@ export function openRunStream(
   let closed = false;
   let buffer: KobeEvent[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Epilogue events still expected after `run.completed`; undefined before it. */
+  let awaiting: Set<KobeEventType> | undefined;
+  let epilogueTimer: ReturnType<typeof setTimeout> | undefined;
   const source = factory(runEventsUrl(runId, startingAfter));
 
   const flush = () => {
@@ -81,6 +92,7 @@ export function openRunStream(
     flush();
     closed = true;
     if (timer !== undefined) clearTimeout(timer);
+    if (epilogueTimer !== undefined) clearTimeout(epilogueTimer);
     source.close();
     if (signal) handlers.onSignal(signal);
   };
@@ -95,11 +107,26 @@ export function openRunStream(
     }
     const result = kobeEventSchema.safeParse(parsed);
     if (!result.success || result.data.run_id !== runId || result.data.seq <= lastSeq) return;
-    lastSeq = result.data.seq;
-    buffer.push(result.data);
-    if (isTerminalEventType(result.data.type)) {
-      // The server ends the response after a terminal event; don't let the browser reconnect.
-      finish({ kind: "closed" });
+    const event = result.data;
+    lastSeq = event.seq;
+    buffer.push(event);
+    if (awaiting !== undefined) {
+      awaiting.delete(event.type);
+      if (awaiting.size === 0) finish({ kind: "closed" });
+      else flush();
+      return;
+    }
+    if (isTerminalEventType(event.type)) {
+      const announced = event.type === "run.completed" ? (event.payload.epilogue ?? []) : [];
+      if (announced.length === 0) {
+        // The server ends the response after a terminal event; don't let the browser reconnect.
+        finish({ kind: "closed" });
+        return;
+      }
+      awaiting = new Set(announced.map((p) => EPILOGUE_EVENT_TYPES[p]));
+      epilogueTimer = setTimeout(() => finish({ kind: "closed" }), SERVER_CALL_EPILOGUE_MAX_MS);
+      if (timer !== undefined) clearTimeout(timer);
+      flush();
       return;
     }
     timer ??= setTimeout(flush, FLUSH_MS);
@@ -111,7 +138,7 @@ export function openRunStream(
   };
   source.onerror = () => {
     if (closed) return;
-    if (source.readyState === CLOSED) finish({ kind: "closed" });
+    if (source.readyState === CLOSED || awaiting !== undefined) finish({ kind: "closed" });
     else {
       flush();
       handlers.onSignal({ kind: "reconnecting" });

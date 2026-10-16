@@ -486,13 +486,23 @@ export class FakeKobe {
       ),
     commitPrompt: (runId: string) =>
       this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
-    complete: (runId: string) => {
+    /** `epilogue`: the server will title the thread after the run (KOBE-219). */
+    complete: (runId: string, options: { readonly epilogue?: readonly "title"[] } = {}) => {
       const run = this.run(runId);
       // Like the server: the leaf moves in the same transaction as the terminal event.
       this.#thread(run.thread_id).leaf_entry_id =
         run.tip ?? this.#thread(run.thread_id).leaf_entry_id;
-      this.#end(run, "completed", "run.completed", { leaf_entry_id: run.tip });
+      this.#end(run, "completed", "run.completed", {
+        leaf_entry_id: run.tip,
+        ...(options.epilogue ? { epilogue: [...options.epilogue] } : {}),
+      });
       this.#advance(run.thread_id);
+    },
+    /** The server's title call answered (KOBE-219): saved first, then `thread.updated`. */
+    retitle: (runId: string, title: string) => {
+      const run = this.run(runId);
+      this.#thread(run.thread_id).title = title;
+      this.emit(runId, "thread.updated", { thread_id: run.thread_id, title });
     },
     fail: (runId: string, code: string, message: string) => {
       this.#end(this.run(runId), "failed", "run.failed", { error: { code, message } });
@@ -1030,6 +1040,7 @@ export class FakeKobe {
       this.threads.delete(thread.thread_id);
       return new Response(null, { status: 204 });
     }
+    if (action === "card" && method === "GET") return json(200, this.#card(thread));
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));
     if (action === "pending-messages") return json(200, this.#pending(thread.thread_id));
@@ -1057,6 +1068,32 @@ export class FakeKobe {
       return json(200, this.#threadRuns(thread.thread_id));
     }
     return error(404, "not_found");
+  }
+
+  /** `GET /v1/threads/{id}/card` (KOBE-219), like the server: first message, agent, count. */
+  #card(thread: FakeThread): Json {
+    const messages = thread.entries.filter((e) => e.type === "message");
+    const role = (e: (typeof messages)[number]) =>
+      (e.payload as { message?: { role?: string } }).message?.role;
+    const first = messages.find((e) => role(e) === "user");
+    const content = (first?.payload as { message?: { content?: unknown } } | undefined)?.message
+      ?.content;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((p: { text?: string }) => p.text ?? "").join("")
+          : "";
+    const flat = text.replace(/\s+/g, " ").trim();
+    return {
+      thread_id: thread.thread_id,
+      first_message: flat === "" ? null : flat.slice(0, 280),
+      first_message_truncated: flat.length > 280,
+      agent_id: thread.agent_id ?? null,
+      agent_name: thread.agent_name ?? null,
+      last_activity_at: thread.last_activity_at,
+      message_count: messages.filter((e) => role(e) === "user" || role(e) === "assistant").length,
+    };
   }
 
   /** Like the server (KOBE-213): idle threads only; Pi's `compaction` entry becomes the leaf. */
@@ -1424,10 +1461,12 @@ export class FakeEventSource implements EventSourceLike {
         lastEventId: String(event.seq),
       });
       for (const listener of this.#listeners.get(event.type) ?? []) listener(message);
+      const epilogue = event.type === "run.completed" && (event.payload.epilogue?.length ?? 0) > 0;
       if (
         event.type.startsWith("run.") &&
         event.type !== "run.queued" &&
-        event.type !== "run.started"
+        event.type !== "run.started" &&
+        !epilogue // KOBE-234: the response stays open for the announced results
       ) {
         this.drop(); // the server ends the response after a terminal event
         return;

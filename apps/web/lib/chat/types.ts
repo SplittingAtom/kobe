@@ -14,6 +14,20 @@ import type {
   ThreadStatus,
 } from "@kobe/protocol";
 
+/** `GET /v1/threads/{id}/card` (CE18, KOBE-219), camelized: the rail's hover card. */
+export interface ThreadCard {
+  readonly threadId: string;
+  /** The first user message, whitespace collapsed, cut to 280 characters; null: none yet. */
+  readonly firstMessage: string | null;
+  readonly firstMessageTruncated: boolean;
+  readonly agentId: string | null;
+  /** Null for the default agent, or an agent no longer available. */
+  readonly agentName: string | null;
+  readonly lastActivityAt: string;
+  /** The member's messages and the agent's answers (tool-only turns not counted). */
+  readonly messageCount: number;
+}
+
 export interface ThreadSummary {
   readonly threadId: string;
   readonly title: string | null;

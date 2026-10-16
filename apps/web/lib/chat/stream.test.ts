@@ -106,6 +106,76 @@ describe("openRunStream", () => {
     expect(signals).toEqual([{ kind: "closed" }]);
   });
 
+  describe("epilogue (KOBE-219 ac-6)", () => {
+    const completed = (epilogue?: string[]) =>
+      JSON.stringify({
+        run_id: RUN,
+        seq: 2,
+        ts: "2026-10-02T10:00:00Z",
+        type: "run.completed",
+        payload: { leaf_entry_id: null, ...(epilogue ? { epilogue } : {}) },
+      });
+    const titled = JSON.stringify({
+      run_id: RUN,
+      seq: 3,
+      ts: "2026-10-02T10:00:05Z",
+      type: "thread.updated",
+      payload: { thread_id: THREAD, title: "Revenue drivers" },
+    });
+
+    it("keeps listening after a run.completed that announces a title, until thread.updated", () => {
+      const seen: string[] = [];
+      const signals: StreamSignal[] = [];
+      openRunStream(
+        RUN,
+        0,
+        { onEvents: (e) => seen.push(...e.map((x) => x.type)), onSignal: (s) => signals.push(s) },
+        factory,
+      );
+      const s = must(sources[0]);
+      s.send("text.delta", JSON.stringify(delta(1, "a")));
+      s.send("run.completed", completed(["title"]));
+      // The terminal event is delivered at once; the stream stays open for the epilogue.
+      expect(seen).toEqual(["text.delta", "run.completed"]);
+      expect(s.closed).toBe(false);
+      expect(signals).toEqual([]);
+      s.send("thread.updated", titled);
+      expect(seen).toEqual(["text.delta", "run.completed", "thread.updated"]);
+      expect(s.closed).toBe(true);
+      expect(signals).toEqual([{ kind: "closed" }]);
+    });
+
+    it("closes once the epilogue window is over without the announced event", () => {
+      const signals: StreamSignal[] = [];
+      openRunStream(RUN, 0, { onEvents: () => {}, onSignal: (x) => signals.push(x) }, factory);
+      const s = must(sources[0]);
+      s.send("run.completed", completed(["title"]));
+      vi.advanceTimersByTime(29_000);
+      expect(s.closed).toBe(false);
+      vi.advanceTimersByTime(2_000);
+      expect(s.closed).toBe(true);
+      expect(signals).toEqual([{ kind: "closed" }]);
+    });
+
+    it("does not reconnect when the server ends the response during the epilogue", () => {
+      const signals: StreamSignal[] = [];
+      openRunStream(RUN, 0, { onEvents: () => {}, onSignal: (x) => signals.push(x) }, factory);
+      const s = must(sources[0]);
+      s.send("run.completed", completed(["title"]));
+      s.readyState = 0; // EventSource would reconnect
+      s.onerror?.(new Event("error"));
+      expect(s.closed).toBe(true);
+      expect(signals).toEqual([{ kind: "closed" }]);
+    });
+
+    it("closes right after a run.completed without an epilogue, as before", () => {
+      openRunStream(RUN, 0, { onEvents: () => {}, onSignal: () => {} }, factory);
+      const s = must(sources[0]);
+      s.send("run.completed", completed());
+      expect(s.closed).toBe(true);
+    });
+  });
+
   it("reports a dropped connection while the browser reconnects, and a refusal as closed", () => {
     const signals: StreamSignal[] = [];
     openRunStream(RUN, 0, { onEvents: () => {}, onSignal: (s) => signals.push(s) }, factory);

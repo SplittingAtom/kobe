@@ -60,10 +60,12 @@ describe("model picker", () => {
     await user.selectOptions(await picker(), "glm");
     await user.type(await composer(), "Summarise the report{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
+    // Untitled: the server titles it after the first answer (KOBE-219).
     expect(chatRequests(fake, "POST")[0]).toMatchObject({
       path: "/v1/threads",
-      body: { title: "Summarise the report", model: "glm" },
+      body: { model: "glm" },
     });
+    expect(chatRequests(fake, "POST")[0]?.body).not.toHaveProperty("title");
     const [thread] = [...fake.threads.values()];
     expect(thread?.model).toBe("glm");
     await waitFor(async () => expect((await picker()).value).toBe("glm"));

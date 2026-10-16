@@ -39,7 +39,10 @@ export const MODELS_TTL_MS = 30_000;
 /** A fresh read this recent answers another fresh request. */
 const MODELS_FRESH_SHARE_MS = 1_000;
 
-/** A thread's first title: the first line of its first message, shortened. */
+/**
+ * A new thread's name in the rail until the server titles it (KOBE-219): the first line of its
+ * first message, shortened. Never sent: a thread created with a title would not be auto-titled.
+ */
 export function titleFrom(text: string): string | undefined {
   const line =
     text
@@ -77,6 +80,9 @@ export class ChatSession {
   #nextTitle: string | undefined;
   readonly #composerDrafts = new Map<string, string>();
   readonly #createdListeners = new Set<() => void>();
+  readonly #retitledListeners = new Set<(threadId: string, title: string) => void>();
+  /** First lines of threads created here, shown until their title arrives (KOBE-219). */
+  readonly #provisional = new Map<string, string>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
   /** Project for the thread `initialize` creates next (`/?project=<id>`, KOBE-164). */
@@ -116,6 +122,9 @@ export class ChatSession {
       eventSource: this.#options.eventSource,
       ...(this.#options.newKey ? { newKey: this.#options.newKey } : {}),
       ...(this.#options.reopenDelayMs ? { reopenDelayMs: this.#options.reopenDelayMs } : {}),
+      onRetitled: (id, title) => {
+        for (const listener of this.#retitledListeners) listener(id, title);
+      },
     });
   }
 
@@ -176,6 +185,16 @@ export class ChatSession {
 
   setNextTitle(text: string): void {
     this.#nextTitle = titleFrom(text);
+  }
+
+  /** The rail's name for a thread created here before its title arrives (KOBE-219). */
+  provisionalTitle(threadId: string): string | undefined {
+    return this.#provisional.get(threadId);
+  }
+
+  setProvisionalTitle(threadId: string, title: string | undefined): void {
+    if (title === undefined) this.#provisional.delete(threadId);
+    else this.#provisional.set(threadId, title);
   }
 
   takeNextTitle(): string | undefined {
@@ -290,6 +309,12 @@ export class ChatSession {
 
   threadCreated(): void {
     for (const listener of this.#createdListeners) listener();
+  }
+
+  /** The server titled a thread (KOBE-219 `thread.updated`); the rail reads its list again. */
+  onThreadRetitled(listener: (threadId: string, title: string) => void): () => void {
+    this.#retitledListeners.add(listener);
+    return () => this.#retitledListeners.delete(listener);
   }
 
   dispose(): void {

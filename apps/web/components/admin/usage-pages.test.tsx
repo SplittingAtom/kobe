@@ -83,6 +83,20 @@ describe("usage pages (KOBE-43)", () => {
     expect(await screen.findByRole("button", { name: "Save site budget" })).toBeTruthy();
   });
 
+  it("breaks usage down by kind: run calls and the server's titles (KOBE-219 ac-7)", async () => {
+    stubUsage({
+      ...REPORT,
+      by_kind: [
+        { kind: "run", ...totals(4.4, 2) },
+        { kind: "title", ...totals(0.1, 1) },
+      ],
+    });
+    renderTeam(<TeamUsagePage />);
+    const byKind = await screen.findByRole("table", { name: "By kind" });
+    expect(within(byKind).getByText("Runs")).toBeTruthy();
+    expect(within(byKind).getByText("Titles")).toBeTruthy();
+  });
+
   it("an empty range says so instead of drawing a chart", async () => {
     stubUsage({ ...REPORT, totals: { ...totals(0, 0), unpriced_calls: 0 }, series: [] });
     renderTeam(<TeamUsagePage />);
