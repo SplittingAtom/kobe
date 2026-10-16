@@ -168,8 +168,16 @@ export const threadSuggestionsSchema = z
 /**
  * Epilogue (events.ts): `run.completed.epilogue` lists the server calls the server will attempt
  * for that run; their results are appended to the same run's events after `run.completed`
- * (`thread.updated`, `thread.suggestions`). The event stream stays open until each announced
- * result arrived or this long after `run.completed`, whichever is first (sse.ts). A call that fails
- * or is skipped writes nothing.
+ * (`thread.updated`, `thread.suggestions`). The server starts the announced calls **concurrently**
+ * right after `run.completed` commits, each under its own `timeout_ms`, so the window is the
+ * longest call plus {@link SERVER_CALL_EPILOGUE_MARGIN_MS} (token minting, model resolution, the
+ * writes). The event stream stays open until each announced result arrived or the window closed,
+ * and the append guard refuses epilogue events after it (sse.ts, the server's append.ts). A call
+ * that fails or is skipped writes nothing. A title is saved on the thread first and its event
+ * appended after: a refused event (window closed) leaves the title saved, and the next thread read
+ * shows it.
  */
-export const SERVER_CALL_EPILOGUE_MAX_MS = 30_000;
+export const SERVER_CALL_EPILOGUE_MARGIN_MS = 10_000;
+export const SERVER_CALL_EPILOGUE_MAX_MS =
+  Math.max(...SERVER_CALL_PURPOSES.map((p) => SERVER_CALL_LIMITS[p].timeout_ms)) +
+  SERVER_CALL_EPILOGUE_MARGIN_MS;

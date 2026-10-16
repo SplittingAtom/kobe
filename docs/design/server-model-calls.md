@@ -92,11 +92,15 @@ rule from the server pods (port 8080) and, where server egress is restricted, th
    - **followups** when the team switch is on, the run was started by a member (not a schedule),
      and no budget line of the run's member is at 80 % or more.
      It writes `run.completed` with `epilogue: [...]` only for calls it will attempt.
-2. After commit, off the run's path: resolve the model; mint a token (TTL 30 s, `max_output_tokens`
+2. After commit, off the run's path, the announced calls start **concurrently**
+   (`services/server` `server-calls/epilogue.ts`, `runEpilogue`), so the epilogue window
+   (`SERVER_CALL_EPILOGUE_MAX_MS` = the longest call's timeout + a 10 s margin = 30 s) covers
+   both. Each: resolve the model; mint a token (TTL 30 s, `max_output_tokens`
    ≤ `SERVER_CALL_LIMITS[purpose]`); `POST <gateway>/v1/chat/completions` with
    `x-kobe-server-call`, `stream: false`, and the purpose's timeout; no retries.
 3. Result:
-   - title: normalise the reply (first line, no quotes or trailing punctuation, ≤ 80 chars,
+   - title (saved first, event second: a refused event, e.g. the window closed, leaves the title
+     saved and the next thread read shows it): normalise the reply (first line, no quotes or trailing punctuation, ≤ 80 chars,
      `generatedTitleSchema`), then `UPDATE threads SET title = $1 WHERE team_id = $2 AND id = $3
 AND title IS NULL AND NOT title_locked`; append `thread.updated` only when a row changed
      (a rename in the meantime wins);
@@ -111,7 +115,7 @@ Prompts carry the first user message and the start of the answer, truncated to
 
 `run.completed` stays the run's terminal event (it ends the run; nothing after it changes run
 state). With an `epilogue`, the SSE response stays open until each announced result was sent or
-`SERVER_CALL_EPILOGUE_MAX_MS` (30 s) after `run.completed`, then ends; a reconnect after that with
+`SERVER_CALL_EPILOGUE_MAX_MS` (30 s: the longest call plus a margin; the calls run concurrently) after `run.completed`, then ends; a reconnect after that with
 no new events is a 204 (`decideStreamOpen` with `epilogue_open`). Clients that stop at the terminal
 event lose nothing durable: the title is on the thread row, and follow-ups are a hint until the
 next send. Epilogue events are ordinary `run_events` rows (seq after the terminal), so a client

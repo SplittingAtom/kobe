@@ -3,6 +3,7 @@ import {
   EPILOGUE_EVENT_TYPES,
   MAX_SERVER_CALL_TOKEN_TTL_SECONDS,
   SERVER_CALL_AUDIENCE,
+  SERVER_CALL_EPILOGUE_MARGIN_MS,
   SERVER_CALL_EPILOGUE_MAX_MS,
   SERVER_CALL_LIMITS,
   SERVER_CALL_TOKEN_HEADER,
@@ -141,6 +142,15 @@ describe("server-call token", () => {
     expect(parse({ aud: "kobe.model-gateway" as typeof SERVER_CALL_AUDIENCE })).toBe(false);
     expect(parse({ purpose: "chat" as "title" })).toBe(false);
     expect(() => signServerCallToken(KEY, { ...CLAIMS, max_output_tokens: 10_000 })).toThrow();
+  });
+
+  it("sizes the epilogue window to the longest call plus the margin (calls run concurrently)", () => {
+    for (const p of ["title", "followups"] as const) {
+      expect(SERVER_CALL_EPILOGUE_MAX_MS).toBeGreaterThanOrEqual(
+        SERVER_CALL_LIMITS[p].timeout_ms + SERVER_CALL_EPILOGUE_MARGIN_MS,
+      );
+    }
+    expect(SERVER_CALL_EPILOGUE_MAX_MS).toBe(30_000);
   });
 
   it("skips follow-ups at 80 % and titles only at 100 % (CE21)", () => {

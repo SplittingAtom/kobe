@@ -52,9 +52,12 @@
 
 ## Review (Opus security/DB, approve with changes) and fixes
 
-- M1: 0099's CHECKs are `NOT VALID` (no VALIDATE; existing rows pass by construction), so the
-  migration is now **hand-written** (`-- kobe:hand-written`): within G3 it must merge before any
-  other schema-changing migration, or be renumbered by hand (parallel-work.md).
+- M1: the CHECKs are `NOT VALID` (no VALIDATE; existing rows pass by construction). Re-review N1:
+  0099 is drizzle's own generated migration again (column, DROP NOT NULL); the CHECKs live in the
+  **custom** migration 0100 (not declared in `schema/usage.ts`, which says why), whose SQL
+  db:rebase keeps. Checked in a scratch worktree: a further generated migration on top plus
+  `db:rebase origin/main` regenerated 0099 (+ the new change) and re-created 0100 with NOT VALID;
+  `drizzle-kit generate` afterwards: no changes. Later G3 migrations generate normally.
 - M2: the server's append guard allows after a terminal event only the announced epilogue types,
   once each, inside the window (`epilogue_refused` / `run_finished`); tests in
   `services/server/src/event-stream.db.test.ts`.
@@ -65,6 +68,10 @@
   reservation, stale cache); a 413 test at the 64 KiB server-call body limit.
 - L4: server calls have their own per-team rate/concurrency limiter; skips are logged at warn.
 - Replay: accepted; threat model in the design doc. TTL cap lowered to 30 s.
+- N2: the title and follow-up calls run concurrently (`services/server/src/server-calls/epilogue.ts`
+  `runEpilogue`, tested); `SERVER_CALL_EPILOGUE_MAX_MS` = longest timeout + 10 s margin (30 s); a
+  title is saved before its event, so a refused event leaves it saved. KOBE-219/222 plug their
+  calls and writes into `runEpilogue`.
 
 ## Acceptance text for KOBE-219 (coordinator applies in Hadron)
 
