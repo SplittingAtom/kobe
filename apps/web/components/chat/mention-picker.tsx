@@ -8,16 +8,18 @@ import {
   type TriggerItem,
 } from "@assistant-ui/react";
 import { FileIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
 import type { FilesApi } from "../../lib/files/api";
 import {
   fileItem,
   MENTION_TRIGGER,
+  mentionable,
   mentionFormatter,
   mentionQueryAt,
   mentionsIn,
   withoutMention,
 } from "../../lib/chat/mentions";
+import { useChatSession } from "./kobe-runtime";
 
 /** Wait after the last keystroke before asking the server. */
 const SEARCH_DEBOUNCE_MS = 120;
@@ -49,7 +51,9 @@ function useMentionSearch(
       void files.search(query, RESULTS).then(
         (res) => {
           if (!live) return;
-          setFound({ query, items: res.ok ? res.data.entries.map(fileItem) : [] });
+          // Names with invisible characters are never offered (the server leaves them out too).
+          const items = res.ok ? res.data.entries.filter(mentionable).map(fileItem) : [];
+          setFound({ query, items });
         },
         () => {
           if (live) setFound({ query, items: [] });
@@ -74,13 +78,15 @@ function useMentionSearch(
  * to pick, so Enter still sends a message that merely contains an `@`.
  */
 export function MentionPicker({
-  files,
+  draft,
   input,
 }: {
-  readonly files: FilesApi;
+  /** The composer draft the picks belong to (thread id, or the new-thread draft). */
+  readonly draft: string;
   readonly input: RefObject<HTMLTextAreaElement | null>;
 }) {
-  const { found, loading } = useMentionSearch(files, input);
+  const session = useChatSession();
+  const { found, loading } = useMentionSearch(session.files, input);
   const items = found?.items;
   const adapter = useMemo<TriggerAdapter | undefined>(
     () =>
@@ -97,7 +103,10 @@ export function MentionPicker({
       aria-label="Workspace files"
       className="bg-popover text-popover-foreground border-foreground/10 absolute bottom-full left-0 z-20 mb-2 max-h-72 w-full overflow-y-auto rounded-xl border p-1 shadow-lg"
     >
-      <ComposerPrimitive.TriggerPopover.Directive formatter={mentionFormatter} />
+      <ComposerPrimitive.TriggerPopover.Directive
+        formatter={mentionFormatter}
+        onInserted={(item) => session.mentions.add(draft, item.id)}
+      />
       <ComposerPrimitive.TriggerPopoverItems aria-label="Files">
         {(list) =>
           list.map((item, index) => (
@@ -121,23 +130,30 @@ export function MentionPicker({
 }
 
 const CHIP =
-  "border-foreground/10 bg-background flex min-w-0 max-w-64 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs";
+  "border-foreground/10 bg-background flex min-w-0 max-w-80 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs";
 
 /**
- * The files the draft mentions, as chips above the input (read from the markers in the text, so
- * they follow edits, undo, dictation and drafts). Removing a chip removes its marker.
+ * The files the draft mentions, as chips above the input: the picked files whose marker is still
+ * in the text (so they follow edits, undo and dictation; a typed `@file(...)` is no chip and stays
+ * literal). Each chip shows the whole workspace path. Removing a chip removes its marker.
  */
-export function MentionChips() {
+export function MentionChips({ draft }: { readonly draft: string }) {
   const aui = useAui();
+  const { mentions: store } = useChatSession();
   const text = useAuiState((s) => s.composer.text);
-  const mentions = useMemo(() => mentionsIn(text), [text]);
+  const picked = useSyncExternalStore(
+    store.subscribe,
+    () => store.get(draft),
+    () => store.get(draft),
+  );
+  const mentions = useMemo(() => mentionsIn(text, picked), [text, picked]);
   if (mentions.length === 0) return null;
   return (
     <ul aria-label="Mentioned files" className="flex flex-wrap gap-1.5 px-1">
       {mentions.map((m) => (
         <li key={m.raw} className={CHIP} title={m.sandboxPath}>
           <FileIcon aria-hidden className="text-muted-foreground size-3.5 shrink-0" />
-          <span className="truncate font-medium">@{m.name}</span>
+          <span className="truncate font-medium">@{m.path}</span>
           <button
             type="button"
             aria-label={`Remove mention of ${m.name}`}

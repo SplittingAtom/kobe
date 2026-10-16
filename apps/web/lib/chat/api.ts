@@ -148,6 +148,8 @@ export interface ChatApi {
       readonly content: string;
       readonly parentEntryId?: string | undefined;
       readonly fileIds?: readonly string[] | undefined;
+      /** Workspace paths picked with `@` (KOBE-223): only their markers are rewritten. */
+      readonly mentions?: readonly string[] | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -160,7 +162,11 @@ export interface ChatApi {
   reorderQueue(threadId: string, runIds: readonly string[]): Promise<ApiResult<ThreadRuns>>;
   getRun(runId: string): Promise<ApiResult<RunSnapshot>>;
   editQueued(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
-  steer(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
+  steer(
+    runId: string,
+    content: string,
+    mentions?: readonly string[],
+  ): Promise<ApiResult<RunSnapshot>>;
   cancel(runId: string): Promise<ApiResult<RunSnapshot>>;
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
   /** Tokens and spend of one run (KOBE-43), as the model gateway measured them. */
@@ -289,6 +295,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.fileIds === undefined || body.fileIds.length === 0
             ? {}
             : { file_ids: body.fileIds }),
+          ...(body.mentions === undefined || body.mentions.length === 0
+            ? {}
+            : { mentions: body.mentions }),
         },
         teamId,
         idempotencyKey,
@@ -302,7 +311,12 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
       send("POST", `/v1/threads/${enc(id)}/queue/order`, { run_ids: runIds }),
     getRun: (runId) => get(`/v1/runs/${enc(runId)}`),
     editQueued: (runId, content) => send("PATCH", `/v1/runs/${enc(runId)}`, { content }),
-    steer: (runId, content) => send("POST", `/v1/runs/${enc(runId)}/steer`, { content }),
+    steer: (runId, content, mentions) =>
+      send(
+        "POST",
+        `/v1/runs/${enc(runId)}/steer`,
+        mentions === undefined || mentions.length === 0 ? { content } : { content, mentions },
+      ),
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),

@@ -9,6 +9,7 @@ import type { ChatApi } from "./api";
 import { createFilesApi, type FilesApi } from "../files/api";
 import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
+import { MentionStore } from "./mentions";
 import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
@@ -71,6 +72,8 @@ export class ChatSession {
   readonly attachments: AttachmentStore;
   /** The caller's workspace files: the composer's `@` picker (KOBE-223) and sent chips. */
   readonly files: FilesApi;
+  /** Files picked with `@` per composer draft (KOBE-223). */
+  readonly mentions = new MentionStore();
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
   readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */

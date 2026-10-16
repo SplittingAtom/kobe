@@ -82,8 +82,11 @@ export function Composer({
   const queue = async () => {
     if (!controller || empty || blocker !== undefined) return;
     dictation.stop();
-    if (await controller.send(text.trim(), undefined, session.attachments.ready(draft))) {
+    const mentions = session.mentions.forText(draft, text);
+    const attach = session.attachments.ready(draft);
+    if (await controller.send(text.trim(), undefined, attach, mentions)) {
       session.attachments.sent(draft);
+      session.mentions.clear(draft);
       aui.composer.setText("");
     }
   };
@@ -137,9 +140,9 @@ export function Composer({
           onDrop={onDrop}
           className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
         >
-          <MentionPicker files={session.files} input={input} />
+          <MentionPicker draft={draft} input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
-          <MentionChips />
+          <MentionChips draft={draft} />
           <label htmlFor="kobe-composer" className="sr-only">
             Message
           </label>

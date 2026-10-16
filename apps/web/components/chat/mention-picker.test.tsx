@@ -28,10 +28,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const sent = () =>
+const posts = () =>
   fake.requests
     .filter((r) => r.method === "POST" && /\/v1\/threads\/[^/]+\/messages$/.test(r.path))
-    .map((r) => (r.body as { content?: string } | undefined)?.content);
+    .map((r) => r.body as { content?: string; mentions?: string[] } | undefined);
+const sent = () => posts().map((b) => b?.content);
+const listed = () => posts().map((b) => b?.mentions);
 
 const picker = () => screen.findByRole("listbox", { name: "Workspace files" });
 
@@ -57,12 +59,42 @@ describe("the @ picker (ac-1)", () => {
     await waitFor(() => expect(input.value).toBe("Compare @file(data/sales%20q3.csv) "));
     expect(screen.queryByRole("listbox", { name: "Workspace files" })).toBeNull();
     const chips = screen.getByRole("list", { name: "Mentioned files" });
-    expect(within(chips).getByText("@sales q3.csv")).toBeTruthy();
+    expect(within(chips).getByText("@data/sales q3.csv")).toBeTruthy();
     expect(within(chips).getByRole("listitem").getAttribute("title")).toBe(
       "/workspace/data/sales q3.csv",
     );
     await user.type(input, "please{Enter}");
     await waitFor(() => expect(sent()).toEqual(["Compare @file(data/sales%20q3.csv) please"]));
+    // The picked path is listed: the server rewrites only listed markers.
+    expect(listed()).toEqual([["data/sales q3.csv"]]);
+  });
+
+  it("a typed or pasted @file(...) is no chip and goes as literal text, without mentions", async () => {
+    openApp(fake, fake.addThread("Code"));
+    const user = userEvent.setup();
+    const input = await composer();
+    await user.click(input);
+    await user.paste("```python\n@file(cfg)\n```");
+    expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(sent()).toEqual(["```python\n@file(cfg)\n```"]));
+    expect(listed()).toEqual([undefined]);
+  });
+
+  it("never offers a file whose name holds invisible or format characters", async () => {
+    fake.workspaceFiles.set("data/sales\u200bhidden.csv", new Uint8Array(1));
+    fake.workspaceFiles.set(
+      `data/sales-tags.csv${String.fromCodePoint(0xe0041)}`,
+      new Uint8Array(1),
+    );
+    openApp(fake, fake.addThread("Sales"));
+    const user = userEvent.setup();
+    await user.type(await composer(), "@sales");
+    const options = within(await picker()).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "sales q3.csv/workspace/data",
+      "sales-brief.md/workspace/projects/p",
+    ]);
   });
 
   it("Escape closes the list without picking; removing a chip removes its mention", async () => {
@@ -100,6 +132,7 @@ describe("the @ picker (ac-1)", () => {
     expect(sent()).toEqual(["go"]);
     await user.keyboard("{Enter}");
     await waitFor(() => expect(sent()).toEqual(["go", "then @file(reports/summary.md)"]));
+    expect(listed()).toEqual([undefined, ["reports/summary.md"]]);
   });
 
   it("stays closed without matches, so Enter still sends a message with an @", async () => {
@@ -124,12 +157,16 @@ describe("mention helpers", () => {
     expect(mentionQueryAt("@x then", 2)).toBe("x");
   });
 
-  it("lists distinct mentions and removes one with its trailing space", () => {
-    const text = "a @file(x.csv) b @file(d/y%20z.md) c @file(x.csv) ";
-    expect(mentionsIn(text).map((m) => [m.name, m.sandboxPath])).toEqual([
+  it("lists distinct picked mentions only, and removes one with its trailing space", () => {
+    const text = "a @file(x.csv) b @file(d/y%20z.md) c @file(x.csv) @file(cfg) @file(d/y z.md) ";
+    const picked = new Set(["x.csv", "d/y z.md"]);
+    expect(mentionsIn(text, picked).map((m) => [m.name, m.sandboxPath])).toEqual([
       ["x.csv", "/workspace/x.csv"],
       ["y z.md", "/workspace/d/y z.md"],
     ]);
-    expect(withoutMention(text, "@file(x.csv)")).toBe("a b @file(d/y%20z.md) c ");
+    expect(mentionsIn(text, new Set())).toEqual([]);
+    expect(withoutMention(text, "@file(x.csv)")).toBe(
+      "a b @file(d/y%20z.md) c @file(cfg) @file(d/y z.md) ",
+    );
   });
 });

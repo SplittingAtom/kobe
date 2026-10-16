@@ -1,14 +1,16 @@
 /**
  * `@file` mentions in the composer (CE22, KOBE-223). A picked file goes into the message text as
- * the protocol's marker, `@file(<path>)`; the server resolves it against the owner's workspace and
- * rewrites it to the absolute `/workspace/...` path on send (never the client). These helpers
- * read the markers back for the chips and give assistant-ui's trigger popover its formatter.
+ * the protocol's marker, `@file(<path>)`, and into the draft's picked set ({@link MentionStore});
+ * a send lists the picked paths whose marker is still in the text (`mentions`), and the server
+ * rewrites exactly those markers to absolute `/workspace/...` paths. A typed or pasted
+ * `@file(...)` is never picked, so it stays literal text.
  */
 import type { DirectiveFormatter, DirectiveSegment, TriggerItem } from "@assistant-ui/react";
 import {
   decodeMentionPath,
   findMentionMarkers,
   mentionMarker,
+  mentionPathIssue,
   sandboxPathOf,
 } from "@kobe/protocol";
 import type { FileEntry } from "../files/api";
@@ -30,13 +32,17 @@ export interface ComposerMention {
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-/** The mentions in a composer text, in order, one per distinct marker. */
-export function mentionsIn(text: string): readonly ComposerMention[] {
+/**
+ * The picked mentions in a composer text, in order, one per distinct marker: markers of paths in
+ * `picked` written exactly as the picker writes them (anything else is literal text).
+ */
+export function mentionsIn(text: string, picked: ReadonlySet<string>): readonly ComposerMention[] {
   const seen = new Set<string>();
   const out: ComposerMention[] = [];
   for (const m of findMentionMarkers(text)) {
     const path = decodeMentionPath(m.encoded);
-    if (path === undefined || seen.has(m.raw)) continue;
+    if (path === undefined || seen.has(m.raw) || !picked.has(path)) continue;
+    if (m.raw !== mentionMarker(path)) continue;
     seen.add(m.raw);
     out.push({ raw: m.raw, path, name: nameOf(path), sandboxPath: sandboxPathOf(path) });
   }
@@ -62,6 +68,58 @@ export function mentionQueryAt(text: string, caret: number): string | null {
     }
   }
   return null;
+}
+
+/** Whether the picker may offer a file: never one whose name holds invisible characters (B1). */
+export function mentionable(entry: FileEntry): boolean {
+  return entry.type === "file" && mentionPathIssue(entry.path) === undefined;
+}
+
+const NO_PICKS: ReadonlySet<string> = new Set();
+
+/**
+ * The files picked with `@` per composer draft (the thread id, or the new-thread draft), for this
+ * tab. Picks are only ever added by the picker; a send lists those still marked in the text.
+ */
+export class MentionStore {
+  #picked = new Map<string, ReadonlySet<string>>();
+  readonly #listeners = new Set<() => void>();
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  readonly get = (draft: string): ReadonlySet<string> => this.#picked.get(draft) ?? NO_PICKS;
+
+  add(draft: string, path: string): void {
+    this.#set(draft, new Set([...this.get(draft), path]));
+  }
+
+  /** The picked paths whose marker is in `text`: the send's `mentions`. */
+  forText(draft: string, text: string): string[] {
+    return mentionsIn(text, this.get(draft)).map((m) => m.path);
+  }
+
+  clear(draft: string): void {
+    if (this.#picked.has(draft)) this.#set(draft, undefined);
+  }
+
+  /** A new thread was created by a send that failed: the picks follow the draft to it. */
+  move(from: string, to: string): void {
+    const picks = this.#picked.get(from);
+    if (picks === undefined) return;
+    this.#set(from, undefined);
+    this.#set(to, picks);
+  }
+
+  #set(draft: string, picks: ReadonlySet<string> | undefined): void {
+    const next = new Map(this.#picked);
+    if (picks === undefined) next.delete(draft);
+    else next.set(draft, picks);
+    this.#picked = next;
+    for (const l of this.#listeners) l();
+  }
 }
 
 /** A workspace file as an item of the picker. */

@@ -586,9 +586,10 @@ export class ThreadController {
     text: string,
     parentEntryId?: string,
     attach?: MessageFiles,
+    mentions?: readonly string[],
   ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId, attach);
+      return await this.#send(text, parentEntryId, attach, mentions);
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -597,7 +598,12 @@ export class ThreadController {
     }
   };
 
-  async #send(text: string, parentEntryId?: string, attach?: MessageFiles): Promise<boolean> {
+  async #send(
+    text: string,
+    parentEntryId?: string,
+    attach?: MessageFiles,
+    mentions?: readonly string[],
+  ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
     if (threadId === null || this.#state.sending !== undefined) return false;
@@ -612,7 +618,7 @@ export class ThreadController {
       followups: undefined, // shown until the next send (KOBE-222)
       queuePaused: false, // sending releases a queue held by Stop
     }));
-    const body = { content: text, parentEntryId, fileIds: attach?.fileIds };
+    const body = { content: text, parentEntryId, fileIds: attach?.fileIds, mentions };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;
@@ -650,10 +656,10 @@ export class ThreadController {
   }
 
   /** Steer now (D17): inject into the current run at Pi's next safe point. */
-  readonly steer = async (text: string): Promise<boolean> => {
+  readonly steer = async (text: string, mentions?: readonly string[]): Promise<boolean> => {
     const runId = currentRunId(this.#state);
-    if (runId === undefined) return this.send(text);
-    const res = await this.#busy("steer", () => this.#api.steer(runId, text));
+    if (runId === undefined) return this.send(text, undefined, undefined, mentions);
+    const res = await this.#busy("steer", () => this.#api.steer(runId, text, mentions));
     if (!res.ok) {
       this.#fail(res.error, text);
       return false;
