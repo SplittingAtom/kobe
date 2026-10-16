@@ -311,3 +311,21 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Budget usage lines (KOBE-301): amber from 80 %, red from 100 %, from the status colours. */
+.budgetWarn {
+  color: var(--kobe-status-attention);
+}
+
+.budgetFull {
+  color: var(--kobe-status-failed);
+  font-weight: 600;
+}
+
+.budgetIcon {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-inline-end: 0.25rem;
+  vertical-align: -0.125rem;
+}

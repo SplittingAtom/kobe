@@ -1,5 +1,6 @@
 "use client";
 
+import { TriangleAlertIcon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { ApiResult } from "../../../lib/api/client";
 import {
@@ -46,6 +47,43 @@ export function tokensOf(spent: number, limit: number | null): string {
   return `${formatTokens(spent)} of ${formatTokens(limit)} tokens (${pct(spent, limit)} %)`;
 }
 
+/** Amber from this share of a budget, red from the next (KOBE-301). */
+export const BUDGET_WARN_PERCENT = 80;
+export const BUDGET_FULL_PERCENT = 100;
+
+export type BudgetLevel = "ok" | "warn" | "full";
+
+export function budgetLevel(percent: number | null): BudgetLevel {
+  if (percent === null) return "ok";
+  if (percent >= BUDGET_FULL_PERCENT) return "full";
+  return percent >= BUDGET_WARN_PERCENT ? "warn" : "ok";
+}
+
+/** The share of a budget used, or null without a budget. */
+export const percentOf = (spent: number, limit: number | null): number | null =>
+  limit === null ? null : pct(spent, limit);
+
+const LEVEL_CLASS: Record<BudgetLevel, string | undefined> = {
+  ok: undefined,
+  warn: styles.budgetWarn,
+  full: styles.budgetFull,
+};
+
+/**
+ * One usage line: amber from 80 % of the budget and red from 100 % (status colours, KOBE-301),
+ * with an icon and the percentage in the text, so colour never says it alone.
+ */
+function BudgetLine({ text, percent }: { readonly text: string; readonly percent: number | null }) {
+  const level = budgetLevel(percent);
+  return (
+    <span className={LEVEL_CLASS[level]} data-budget-level={level}>
+      {level !== "ok" && <TriangleAlertIcon aria-hidden className={styles.budgetIcon} />}
+      {text}
+      {level === "full" && " · used up"}
+    </span>
+  );
+}
+
 /** The site budget, in percent only. */
 export function usedOf(percent: number | null): string {
   return percent === null ? "No budget" : `${percent} % used`;
@@ -55,14 +93,26 @@ function Usage({ amounts, spent }: { readonly amounts: BudgetAmounts; readonly s
   return (
     <>
       <td>
-        {spentOf(spent.monthUsd, amounts.monthlyUsd)}
+        <BudgetLine
+          text={spentOf(spent.monthUsd, amounts.monthlyUsd)}
+          percent={percentOf(spent.monthUsd, amounts.monthlyUsd)}
+        />
         <br />
-        {tokensOf(spent.monthTokens, amounts.monthlyTokens)}
+        <BudgetLine
+          text={tokensOf(spent.monthTokens, amounts.monthlyTokens)}
+          percent={percentOf(spent.monthTokens, amounts.monthlyTokens)}
+        />
       </td>
       <td>
-        {spentOf(spent.dayUsd, amounts.dailyUsd)}
+        <BudgetLine
+          text={spentOf(spent.dayUsd, amounts.dailyUsd)}
+          percent={percentOf(spent.dayUsd, amounts.dailyUsd)}
+        />
         <br />
-        {tokensOf(spent.dayTokens, amounts.dailyTokens)}
+        <BudgetLine
+          text={tokensOf(spent.dayTokens, amounts.dailyTokens)}
+          percent={percentOf(spent.dayTokens, amounts.dailyTokens)}
+        />
       </td>
     </>
   );
@@ -178,15 +228,27 @@ function Body({
         <dl className={styles.dl}>
           <dt>This month ({budgets.period.month.slice(0, 7)}, UTC)</dt>
           <dd>
-            {spentOf(budgets.team.spent.monthUsd, budgets.team.monthlyUsd)}
+            <BudgetLine
+              text={spentOf(budgets.team.spent.monthUsd, budgets.team.monthlyUsd)}
+              percent={percentOf(budgets.team.spent.monthUsd, budgets.team.monthlyUsd)}
+            />
             <br />
-            {tokensOf(budgets.team.spent.monthTokens, budgets.team.monthlyTokens)}
+            <BudgetLine
+              text={tokensOf(budgets.team.spent.monthTokens, budgets.team.monthlyTokens)}
+              percent={percentOf(budgets.team.spent.monthTokens, budgets.team.monthlyTokens)}
+            />
           </dd>
           <dt>Today (UTC)</dt>
           <dd>
-            {spentOf(budgets.team.spent.dayUsd, budgets.team.dailyUsd)}
+            <BudgetLine
+              text={spentOf(budgets.team.spent.dayUsd, budgets.team.dailyUsd)}
+              percent={percentOf(budgets.team.spent.dayUsd, budgets.team.dailyUsd)}
+            />
             <br />
-            {tokensOf(budgets.team.spent.dayTokens, budgets.team.dailyTokens)}
+            <BudgetLine
+              text={tokensOf(budgets.team.spent.dayTokens, budgets.team.dailyTokens)}
+              percent={percentOf(budgets.team.spent.dayTokens, budgets.team.dailyTokens)}
+            />
           </dd>
           <dt>Requests per minute per member</dt>
           <dd>{budgets.effectiveRequestsPerMinute}</dd>
@@ -280,13 +342,29 @@ function Body({
         <dl className={styles.dl}>
           <dt>This month</dt>
           <dd>
-            Dollars: {usedOf(budgets.site.percentUsed.monthUsd)}; tokens:{" "}
-            {usedOf(budgets.site.percentUsed.monthTokens)}
+            Dollars:{" "}
+            <BudgetLine
+              text={usedOf(budgets.site.percentUsed.monthUsd)}
+              percent={budgets.site.percentUsed.monthUsd}
+            />
+            ; tokens:{" "}
+            <BudgetLine
+              text={usedOf(budgets.site.percentUsed.monthTokens)}
+              percent={budgets.site.percentUsed.monthTokens}
+            />
           </dd>
           <dt>Today</dt>
           <dd>
-            Dollars: {usedOf(budgets.site.percentUsed.dayUsd)}; tokens:{" "}
-            {usedOf(budgets.site.percentUsed.dayTokens)}
+            Dollars:{" "}
+            <BudgetLine
+              text={usedOf(budgets.site.percentUsed.dayUsd)}
+              percent={budgets.site.percentUsed.dayUsd}
+            />
+            ; tokens:{" "}
+            <BudgetLine
+              text={usedOf(budgets.site.percentUsed.dayTokens)}
+              percent={budgets.site.percentUsed.dayTokens}
+            />
           </dd>
         </dl>
       </section>
