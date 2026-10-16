@@ -631,6 +631,11 @@ export const AUDIT_EVENTS = {
     shared: z.boolean(),
     visibility: z.enum(["private", "project"]),
   }),
+  /**
+   * The owner moved the thread to another project, or out of one (null: no project; CE19,
+   * KOBE-220). A thread shared to its old project is unshared too (`thread.sharing_changed`).
+   */
+  "thread.moved": event("team", { threadId: id, from: id.nullable(), to: id.nullable() }),
   /** A new private thread copied from `sourceThreadId`; `threadId` is the fork. */
   "thread.forked": event("team", {
     threadId: id,

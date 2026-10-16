@@ -11,6 +11,7 @@ import {
   CircleXIcon,
   CpuIcon,
   FoldVerticalIcon,
+  FolderInputIcon,
   GitForkIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
@@ -31,10 +32,12 @@ import {
 } from "react";
 import {
   approvalKey,
+  placeProjectMarkers,
   placeRunMarkers,
   runToolKey,
   type ApprovalMarker,
   type EntryMarker,
+  type ProjectMarker,
   type RunMarker,
   type SkillMarker,
   type ThreadMarkers,
@@ -53,6 +56,8 @@ import { Markdown } from "./markdown";
  */
 interface MarkerData {
   readonly runsAt: ReadonlyMap<string, readonly RunMarker[]>;
+  /** Project moves (CE19, KOBE-220) above the prompt of the run they mark, by message id. */
+  readonly projectsAt: ReadonlyMap<string, readonly ProjectMarker[]>;
   /** By {@link approvalKey}: tool call ids are only unique within a run. */
   readonly approvals: ReadonlyMap<string, ApprovalMarker>;
   /** Skill uses (KOBE-297) by {@link approvalKey}, and by {@link runToolKey} for the live run. */
@@ -61,10 +66,12 @@ interface MarkerData {
 }
 
 const NO_RUNS: ReadonlyMap<string, readonly RunMarker[]> = new Map();
+const NO_MOVES: ReadonlyMap<string, readonly ProjectMarker[]> = new Map();
 const NO_APPROVALS: ReadonlyMap<string, ApprovalMarker> = new Map();
 const NO_SKILLS: ReadonlyMap<string, SkillMarker> = new Map();
 const MarkersContext = createContext<MarkerData>({
   runsAt: NO_RUNS,
+  projectsAt: NO_MOVES,
   approvals: NO_APPROVALS,
   skills: NO_SKILLS,
   skillsByRun: NO_SKILLS,
@@ -146,9 +153,9 @@ function useThreadMarkers(): ThreadMarkers | null {
   return read !== null && read.threadId === threadId ? read.markers : null;
 }
 
-function samePlacement(
-  a: ReadonlyMap<string, readonly RunMarker[]>,
-  b: ReadonlyMap<string, readonly RunMarker[]>,
+function samePlacement<T>(
+  a: ReadonlyMap<string, readonly T[]>,
+  b: ReadonlyMap<string, readonly T[]>,
 ): boolean {
   if (a.size !== b.size) return false;
   for (const [id, runs] of a) {
@@ -176,6 +183,13 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
     markers === null || !projection ? NO_RUNS : placeRunMarkers(markers.runs, projection);
   if (!samePlacement(placed.current, next)) placed.current = next;
   const runsAt = placed.current;
+  const movesPlaced = useRef(NO_MOVES);
+  const moves =
+    markers?.projects === undefined || !projection
+      ? NO_MOVES
+      : placeProjectMarkers(markers.projects, projection);
+  if (!samePlacement(movesPlaced.current, moves)) movesPlaced.current = moves;
+  const projectsAt = movesPlaced.current;
   const skills = useMemo(
     () =>
       new Map((markers?.skills ?? []).map((m) => [approvalKey(m.userEntryId, m.toolCallId), m])),
@@ -186,8 +200,8 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
     [markers],
   );
   const value = useMemo(
-    () => ({ runsAt, approvals, skills, skillsByRun }),
-    [runsAt, approvals, skills, skillsByRun],
+    () => ({ runsAt, projectsAt, approvals, skills, skillsByRun }),
+    [runsAt, projectsAt, approvals, skills, skillsByRun],
   );
   return <MarkersContext.Provider value={value}>{children}</MarkersContext.Provider>;
 }
@@ -273,6 +287,30 @@ export function MarkerPart({ data }: DataMessagePartProps) {
   return marker?.kind === "model" || marker?.kind === "compaction" ? (
     <EntryMarkerRow marker={marker} />
   ) : null;
+}
+
+const projectLabel = (id: string | null, name: string | null) =>
+  name ?? (id === null ? null : "a project you can't open");
+
+/** "Moved to project Q4": the project's instructions apply from this message on (CE19). */
+function ProjectMoveRow({ move }: { readonly move: ProjectMarker }) {
+  const to = projectLabel(move.toProjectId, move.toProjectName);
+  const from = projectLabel(move.fromProjectId, move.fromProjectName);
+  return (
+    <MarkerRow kind="project" icon={FolderInputIcon}>
+      {to === null ? (
+        <>
+          Moved out of {from === null ? "its project" : "project"}
+          {from !== null && <span className="text-foreground font-medium">{from}</span>}
+        </>
+      ) : (
+        <>
+          Moved to project <span className="text-foreground font-medium">{to}</span>
+          <span>· its instructions apply from here</span>
+        </>
+      )}
+    </MarkerRow>
+  );
 }
 
 /** A failed run's message, short enough for one marker row. */
@@ -395,11 +433,16 @@ export function MessageMarkers({
 }) {
   const meta = useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
   const id = useAuiState((s) => s.message.id);
-  const runs = useContext(MarkersContext).runsAt.get(id);
+  const data = useContext(MarkersContext);
+  const runs = data.runsAt.get(id);
+  const moves = place === "before" ? data.projectsAt.get(id) : undefined;
   const entries = place === "before" ? meta?.before : meta?.after;
   return (
     <div className={cn("flex flex-col gap-1 empty:hidden", className)}>
       {place === "before" && <ForkMarker />}
+      {moves?.map((move) => (
+        <ProjectMoveRow key={move.runId} move={move} />
+      ))}
       {place === "after" && runs?.map((run) => <RunMarkerRow key={run.runId} run={run} />)}
       {entries?.map((marker) => (
         <EntryMarkerRow key={marker.entryId} marker={marker} />

@@ -30,6 +30,7 @@ import {
   findThread,
   isLockTimeout,
   listEntries,
+  listOwnOrganized,
   listThreads,
   listTrash,
   restoreThread,
@@ -49,6 +50,7 @@ import {
   entriesQuerySchema,
   entryIdSchema,
   listThreadsQuerySchema,
+  moveThreadBodySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
   trashQuerySchema,
@@ -59,6 +61,7 @@ import {
 import { searchThreadList } from "../threads/search.js";
 import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
+import { moveThread, setArchived, setPinned } from "../threads/organize.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
 
@@ -90,6 +93,8 @@ const ERRORS = {
     "The thread is busy (a run is active or queued, or it is being written). Try again.",
   ],
   thread_in_trash: [409, "The thread is in Trash. Restore it first."],
+  thread_archived: [409, "The thread is archived. Unarchive it first."],
+  test_thread: [409, "A test conversation can't be pinned, archived or moved."],
   not_in_trash: [409, "The thread is not in Trash."],
   not_in_project: [409, "Only threads in a project can be shared to it."],
   nothing_to_fork: [409, "The thread has no messages to fork."],
@@ -195,6 +200,20 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     );
     return c.json(pageBody(page));
   });
+
+  // The rail's Pinned and Archived groups (CE19, KOBE-220): the caller's own, newest first.
+  for (const which of ["pinned", "archived"] as const) {
+    app.get(`/${which}`, async (c) => {
+      const query = parseQuery(c, trashQuerySchema);
+      if (!query) return invalidRequest(c);
+      const cursor = cursorParam(query.cursor);
+      if (cursor === undefined) return fail(c, "invalid_cursor");
+      const page = await asViewer(c, (tx, viewer) =>
+        listOwnOrganized(tx, viewer, { which, cursor, limit: query.limit }),
+      );
+      return c.json(pageBody(page));
+    });
+  }
 
   // Before `/:id`: clears the caller's own builder test threads (KOBE-85).
   app.delete("/test", async (c) => {
@@ -382,6 +401,29 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = await parseBody(c, switchAgentVersionBodySchema);
     if (!id || !body) return invalidRequest(c, "Give the version to switch to, or nothing.");
     return change(c, (tx, viewer) => switchAgentVersion(tx, viewer, id, body.version));
+  });
+
+  /** Pin, unpin, archive, unarchive (CE19, KOBE-220): the owner's own; idempotent. */
+  const organize = {
+    pin: (tx: KobeTx, viewer: Viewer, id: string) => setPinned(tx, viewer, id, true),
+    unpin: (tx: KobeTx, viewer: Viewer, id: string) => setPinned(tx, viewer, id, false),
+    archive: (tx: KobeTx, viewer: Viewer, id: string) => setArchived(tx, viewer, id, true),
+    unarchive: (tx: KobeTx, viewer: Viewer, id: string) => setArchived(tx, viewer, id, false),
+  } as const;
+  for (const [action, apply] of Object.entries(organize)) {
+    app.post(`/:id/${action}`, async (c) => {
+      const id = threadIdParam(c);
+      if (!id) return invalidRequest(c);
+      return change(c, (tx, viewer) => apply(tx, viewer, id));
+    });
+  }
+
+  /** Move to project (CE19): where the caller may start a thread; the next run is marked. */
+  app.post("/:id/move", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, moveThreadBodySchema);
+    if (!id || !body) return invalidRequest(c, "Give project_id: a project id, or null.");
+    return change(c, (tx, viewer) => moveThread(tx, viewer, id, body.project_id));
   });
 
   app.delete("/:id", async (c) => {

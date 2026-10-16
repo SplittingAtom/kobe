@@ -7,11 +7,14 @@ import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import { createFilesApi } from "../files/api";
+import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
 import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
+import { organizeRequest, type OrganizeChange } from "./organize";
+import type { ThreadListSync } from "./thread-list-sync";
 import type { RunnableAgent, ThreadSummary } from "./types";
 
 export interface ChatSessionOptions {
@@ -26,6 +29,8 @@ export interface ChatSessionOptions {
   readonly fetchFn?: typeof fetch | undefined;
   /** Tests replace the XHR upload transport (KOBE-145). */
   readonly uploadTransport?: UploadTransport | undefined;
+  /** This browser's other tabs (CE19 pin, archive, move); the session closes it on dispose. */
+  readonly listSync?: ThreadListSync | undefined;
 }
 
 interface Held {
@@ -81,6 +86,7 @@ export class ChatSession {
   readonly #composerDrafts = new Map<string, string>();
   readonly #createdListeners = new Set<() => void>();
   readonly #retitledListeners = new Set<(threadId: string, title: string) => void>();
+  readonly #listChangedListeners = new Set<() => void>();
   /** First lines of threads created here, shown until their title arrives (KOBE-219). */
   readonly #provisional = new Map<string, string>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
@@ -97,6 +103,8 @@ export class ChatSession {
   #agents:
     | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
     | undefined;
+  #projects:
+    { readonly at: number; readonly result: Promise<ApiResult<readonly Project[]>> } | undefined;
   #models:
     | {
         readonly at: number;
@@ -114,6 +122,7 @@ export class ChatSession {
     });
     this.sentFiles = new SentFileCache(createFilesApi(options.teamId, options.fetchFn));
     this.#options = options;
+    options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
   }
 
   #create(threadId: string | null): ThreadController {
@@ -301,6 +310,23 @@ export class ChatSession {
     return result;
   }
 
+  /**
+   * The projects the member may start threads in, so may move a thread to (CE19: the live ones
+   * they can open), read at most every `MODELS_TTL_MS`. The server decides each move again.
+   */
+  projects(): Promise<ApiResult<readonly Project[]>> {
+    const now = Date.now();
+    const cached = this.#projects;
+    if (cached && now - cached.at < MODELS_TTL_MS) return cached.result;
+    const result = createProjectsApi(this.teamId, this.#options.fetchFn).list(false);
+    this.#projects = { at: now, result };
+    // A failed read is not kept: the next menu asks again.
+    void result.then((res) => {
+      if (!res.ok && this.#projects?.result === result) this.#projects = undefined;
+    });
+    return result;
+  }
+
   /** Called when a new thread got its first message (the thread list reads its title again). */
   onThreadCreated(listener: () => void): () => void {
     this.#createdListeners.add(listener);
@@ -317,7 +343,33 @@ export class ChatSession {
     return () => this.#retitledListeners.delete(listener);
   }
 
+  /** A thread was pinned, archived or moved, here or in another tab: the rail reads its list. */
+  onThreadListChanged(listener: () => void): () => void {
+    this.#listChangedListeners.add(listener);
+    return () => this.#listChangedListeners.delete(listener);
+  }
+
+  #listChanged(threadId: string): void {
+    for (const listener of this.#listChangedListeners) listener();
+    // The open conversation follows too (its project bar, its archived note).
+    void this.peek(threadId)?.refresh();
+  }
+
+  /**
+   * Pins, archives or moves one of the member's threads (CE19, KOBE-220). Once the server saved
+   * it, this tab's rail and the thread read again, and the other tabs are told.
+   */
+  async organize(threadId: string, change: OrganizeChange): Promise<ApiResult<ThreadSummary>> {
+    const res = await organizeRequest(this.api, threadId, change);
+    if (res.ok) {
+      this.#listChanged(threadId);
+      this.#options.listSync?.post(threadId);
+    }
+    return res;
+  }
+
   dispose(): void {
+    this.#options.listSync?.close();
     this.attachments.dispose();
     this.sentFiles.dispose();
     for (const held of this.#held.values()) held.controller.dispose();

@@ -61,7 +61,15 @@ describe("thread row menu (KOBE-292)", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((i) => i.textContent),
-    ).toEqual(["Copy", "Regenerate", "Regenerate with", "Delete"]);
+    ).toEqual([
+      "Copy",
+      "Regenerate",
+      "Regenerate with",
+      "Pin",
+      "Move to project",
+      "Archive",
+      "Delete",
+    ]);
   });
 
   it("Copy puts the branch on screen on the clipboard as Markdown, without opening it", async () => {

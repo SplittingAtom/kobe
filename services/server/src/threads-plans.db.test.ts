@@ -16,9 +16,12 @@ import {
   touchThread,
 } from "./runs/store.js";
 import { sweepRuns } from "./runs/sweeper.js";
+import { moveThread, setArchived, setPinned } from "./threads/organize.js";
+import { projectMarkers } from "./threads/project-moves.js";
 import {
   findThread,
   listEntries,
+  listOwnOrganized,
   listThreads,
   listTrash,
   setLeaf,
@@ -244,6 +247,21 @@ describe("hot thread queries use the team-leading index with the break-glass pol
         await listThreads(tx, viewer(), { cursor: null, limit: 20 });
         await listTrash(tx, viewer(), { cursor: null, limit: 20 });
         await findThread(tx, viewer(), threadId);
+      }),
+    );
+    await expectIndexed(statements);
+  });
+
+  it("Pinned and Archived lists, pin, archive, move and its markers (CE19, KOBE-220)", async () => {
+    const statements = await capture(() =>
+      inTeamRolledBack(async (tx) => {
+        await listOwnOrganized(tx, viewer(), { which: "pinned", cursor: null, limit: 20 });
+        await listOwnOrganized(tx, viewer(), { which: "archived", cursor: null, limit: 20 });
+        await setPinned(tx, viewer(), threadId, true);
+        await setArchived(tx, viewer(), threadId, true);
+        await setArchived(tx, viewer(), threadId, false);
+        await moveThread(tx, viewer(), threadId, null);
+        await projectMarkers(tx, viewer(), threadId);
       }),
     );
     await expectIndexed(statements);

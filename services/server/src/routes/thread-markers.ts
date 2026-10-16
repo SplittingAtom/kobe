@@ -12,6 +12,7 @@ import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { projectMarkers, projectMarkerSchema } from "../threads/project-moves.js";
 
 /** Most rows of each kind one answer carries (newest kept; a thread rarely has more). */
 export const MAX_MARKERS = 500;
@@ -55,6 +56,11 @@ export const threadMarkersSchema = z.strictObject({
   approvals: z.array(approvalMarkerSchema),
   /** Skills the thread's runs used (KOBE-297): "Used skill" on the answer, "Read skill" on the step. */
   skills: z.array(skillMarkerSchema),
+  /**
+   * Moves to another project (CE19, KOBE-220), each on the first run that started after it: the
+   * project's context applies from there. At most one per run, at most 20.
+   */
+  projects: z.array(projectMarkerSchema),
   /** True when a list held more than {@link MAX_MARKERS}: only the newest are returned. */
   truncated: z.boolean(),
 });
@@ -198,6 +204,7 @@ export function threadMarkerRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
         runs: runs.runs,
         approvals: approvals.approvals,
         skills: skills.skills,
+        projects: await projectMarkers(tx, viewer, threadId),
         truncated: runs.truncated || approvals.truncated || skills.truncated,
       } satisfies ThreadMarkers;
     });

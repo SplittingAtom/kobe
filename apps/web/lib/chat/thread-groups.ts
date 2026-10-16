@@ -1,8 +1,8 @@
 /**
  * The rail's thread groups (CE5, KOBE-198) in their fixed order: Pinned → projects → ungrouped →
  * Scheduled → Shared with me → Archived → Trash. A group shows only when it has threads. Pinned and
- * Archived have no data yet (CE19 adds `pinned_at` / `archived_at` in Phase C); "archived" in the
- * thread list adapter is Trash (D18), not CE19's Archive.
+ * Archived are the owner's organization (CE19, KOBE-220: `pinned_at`, `archived_at`); "archived"
+ * in the thread list adapter's own status is Trash (D18), not CE19's Archive.
  */
 import type { ThreadSummary } from "./types";
 
@@ -34,6 +34,9 @@ export interface ThreadPlacement {
   readonly scheduled: boolean;
   /** Shared to the caller by someone else (KOBE-163): read-only. */
   readonly shared: boolean;
+  /** CE19: in the Pinned group (by pin time, the list's order), or in Archived. */
+  readonly pinned: boolean;
+  readonly archived: boolean;
 }
 
 export function placementCustom(thread: ThreadSummary): Record<string, unknown> {
@@ -41,6 +44,8 @@ export function placementCustom(thread: ThreadSummary): Record<string, unknown> 
     projectId: thread.projectId,
     scheduled: thread.scheduleId != null,
     shared: thread.readOnly === true,
+    pinned: thread.pinnedAt != null,
+    archived: thread.archivedAt != null,
   };
 }
 
@@ -52,13 +57,18 @@ export function placementOf(custom: unknown): ThreadPlacement {
     projectId: typeof c.projectId === "string" ? c.projectId : null,
     scheduled: c.scheduled === true,
     shared: c.shared === true,
+    pinned: c.pinned === true,
+    archived: c.archived === true,
   };
 }
 
+/** A project wins over Scheduled: a scheduled thread the member moved belongs to the project. */
 function kindOf(p: ThreadPlacement): GroupKind {
   if (p.shared) return "shared";
-  if (p.scheduled) return "scheduled";
-  return p.projectId === null ? "ungrouped" : "project";
+  if (p.archived) return "archived";
+  if (p.pinned) return "pinned";
+  if (p.projectId !== null) return "project";
+  return p.scheduled ? "scheduled" : "ungrouped";
 }
 
 /** A thread in a group: assistant-ui's item id and its position in the list it came from. */
@@ -72,6 +82,8 @@ export interface ThreadGroup {
   readonly key: string;
   readonly kind: GroupKind;
   readonly label: string;
+  /** A project group's project: a thread dropped on its header moves there (CE19). */
+  readonly projectId?: string | undefined;
   readonly threads: readonly GroupedThread[];
 }
 
@@ -98,7 +110,8 @@ export function groupThreads(
       kind === "project"
         ? (projectName(placement.projectId ?? "") ?? "Project")
         : LABELS[kind as Exclude<GroupKind, "project">];
-    const group = buckets.get(key) ?? { key, kind, label, threads: [] };
+    const projectId = kind === "project" ? (placement.projectId ?? undefined) : undefined;
+    const group = buckets.get(key) ?? { key, kind, label, projectId, threads: [] };
     buckets.set(key, { ...group, threads: [...group.threads, { id, index }] });
   });
   if (trashIds.length > 0) {

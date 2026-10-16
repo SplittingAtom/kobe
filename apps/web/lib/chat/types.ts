@@ -60,6 +60,12 @@ export interface ThreadSummary {
   readonly forkedFromThreadId?: string | null;
   readonly forkedFromTitle?: string | null;
   readonly forkedAtEntryId?: string | null;
+  /**
+   * The owner's organization (CE19, KOBE-220): pinned (the rail's Pinned group) or archived (the
+   * Archived group, still found by search); never both. Absent on older answers: neither.
+   */
+  readonly pinnedAt?: string | null;
+  readonly archivedAt?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;

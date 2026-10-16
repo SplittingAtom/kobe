@@ -31,6 +31,12 @@ function SearchResults({
           <button type="button" className={styles.hitTitle} onClick={() => onOpen(hit.threadId)}>
             {hit.title ?? "Untitled conversation"}
           </button>
+          {/* Archived threads stay searchable (CE19), marked so the member knows where they live. */}
+          {hit.archivedAt != null && (
+            <span className={styles.hitBadge} data-kobe-archived="">
+              Archived
+            </span>
+          )}
           {hit.snippet && (
             <p className={styles.snippet}>
               {hit.snippet.map((segment, i) =>

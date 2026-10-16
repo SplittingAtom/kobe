@@ -6,7 +6,7 @@ import {
   type ThreadSearchHit as SearchHit,
 } from "@kobe/db";
 import { visibilityOf } from "./share.js";
-import { findThreads, type Viewer } from "./repository.js";
+import { findThreads, ownOrganization, type Viewer } from "./repository.js";
 import type { ThreadSearchHit } from "./schemas.js";
 
 /**
@@ -57,7 +57,7 @@ export async function searchThreadList(
     // open it (`findThreads`, KOBE-216).
     const sourceIds = [...new Set(page.hits.flatMap((h) => h.forkedFromThreadId ?? []))];
     const sources = await findThreads(tx, viewer, sourceIds);
-    const threads = page.hits.map((hit) => toWire(hit, sources));
+    const threads = page.hits.map((hit) => ownOrganization(toWire(hit, sources), viewer));
     return { ok: true, body: { threads, next_cursor: page.nextCursor } };
   } catch (err) {
     // `failed`/`no_team` are server faults: rethrown to the 500 handler (messages carry no SQL).
@@ -89,6 +89,9 @@ function toWire(
     forked_from_thread_id: source ? hit.forkedFromThreadId : null,
     forked_from_title: source?.title ?? null,
     forked_at_entry_id: hit.forkedAtEntryId,
+    // Archived threads stay searchable (CE19): the hit says so.
+    pinned_at: hit.pinnedAt?.toISOString() ?? null,
+    archived_at: hit.archivedAt?.toISOString() ?? null,
     model: hit.modelAlias,
     leaf_entry_id: hit.leafEntryId,
     last_activity_at: hit.lastActivityAt.toISOString(),

@@ -66,6 +66,8 @@ export type ThreadError =
   | "project_not_found"
   | "no_agent"
   | "model_not_enabled"
+  | "thread_archived"
+  | "test_thread"
   | PinError;
 
 export type ThreadResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
@@ -82,12 +84,16 @@ export const THREAD_LOCK_TIMEOUT = "2s";
 export { isLockTimeout } from "@kobe/db";
 const DAY_MS = 86_400_000;
 
-type TimeColumn = typeof threads.lastActivityAt | typeof threads.deletedAt;
+type TimeColumn =
+  | typeof threads.lastActivityAt
+  | typeof threads.deletedAt
+  | typeof threads.pinnedAt
+  | typeof threads.archivedAt;
 
 const micros = (column: TimeColumn) =>
   sql<string>`(extract(epoch from ${column}) * 1000000)::bigint::text`;
 
-const summaryColumns = {
+export const summaryColumns = {
   id: threads.id,
   title: threads.title,
   status: threads.status,
@@ -106,9 +112,11 @@ const summaryColumns = {
   scheduleId: threads.scheduleId,
   forkedFromThreadId: threads.forkedFromThreadId,
   forkedAtEntryId: threads.forkedAtEntryId,
+  pinnedAt: threads.pinnedAt,
+  archivedAt: threads.archivedAt,
 };
 
-type SummaryRow = {
+export type SummaryRow = {
   id: string;
   title: string | null;
   status: ThreadSummary["status"];
@@ -127,6 +135,8 @@ type SummaryRow = {
   scheduleId?: string | null;
   forkedFromThreadId?: string | null;
   forkedAtEntryId?: string | null;
+  pinnedAt?: Date | null;
+  archivedAt?: Date | null;
 };
 
 /**
@@ -153,6 +163,8 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     forked_from_thread_id: null,
     forked_from_title: null,
     forked_at_entry_id: row.forkedAtEntryId ?? null,
+    pinned_at: row.pinnedAt?.toISOString() ?? null,
+    archived_at: row.archivedAt?.toISOString() ?? null,
     deleted_at: row.deletedAt?.toISOString() ?? null,
     purge_after: row.deletedAt
       ? new Date(row.deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS).toISOString()
@@ -191,11 +203,19 @@ export async function summarize(
     ids.size === 0 ? new Map<string, SummaryRow>() : await findThreads(tx, viewer, [...ids]);
   return rows.map((row) => {
     const source = row.forkedFromThreadId ? sources.get(row.forkedFromThreadId) : undefined;
-    const summary = toSummary(row);
+    // Pin and archive are the owner's own organization (CE19): a project reader never sees them.
+    const summary = ownOrganization(toSummary(row), viewer);
     return source
       ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
       : summary;
   });
+}
+
+/** The summary with `pinned_at` / `archived_at` only for its owner (CE19, KOBE-220). */
+export function ownOrganization<T extends ThreadSummary>(summary: T, viewer: Viewer): T {
+  return summary.owner_user_id === viewer.userId
+    ? summary
+    : { ...summary, pinned_at: null, archived_at: null };
 }
 
 /** {@link summarize} for one row. */
@@ -235,8 +255,9 @@ async function toPage(
 
 /**
  * The thread list (§6.1 `GET /v1/threads`), most recent activity first. Without a project: the
- * viewer's own live threads. With a project: its live threads the viewer may read (own, or shared
- * if the viewer is a project member). Never Trash.
+ * viewer's own live threads in the rail's normal groups, so neither pinned nor archived (CE19:
+ * those are {@link listOwnOrganized}). With a project: its live threads the viewer may read (own,
+ * or shared if the viewer is a project member), pinned and archived ones included. Never Trash.
  */
 export async function listThreads(
   tx: KobeTx,
@@ -245,7 +266,11 @@ export async function listThreads(
 ): Promise<Page<ThreadSummary>> {
   const scope = options.projectId
     ? and(eq(threads.projectId, options.projectId), readableBy(viewer))
-    : and(eq(threads.teamId, viewer.teamId), eq(threads.ownerUserId, viewer.userId));
+    : and(
+        eq(threads.teamId, viewer.teamId),
+        eq(threads.ownerUserId, viewer.userId),
+        sql`${threads.pinnedAt} IS NULL AND ${threads.archivedAt} IS NULL`,
+      );
   const rows = await tx
     .select({ ...summaryColumns, position: micros(threads.lastActivityAt) })
     .from(threads)
@@ -259,6 +284,35 @@ export async function listThreads(
       ),
     )
     .orderBy(desc(threads.lastActivityAt), desc(threads.id))
+    .limit(options.limit + 1);
+  return toPage(tx, viewer, rows, options.limit);
+}
+
+/**
+ * The viewer's own pinned or archived live threads (CE19, KOBE-220), newest pin or archive first:
+ * the rail's Pinned and Archived groups (indexes `threads_owner_pinned_idx`,
+ * `threads_owner_archived_idx`). A thread is in at most one: archiving unpins it.
+ */
+export async function listOwnOrganized(
+  tx: KobeTx,
+  viewer: Viewer,
+  options: { which: "pinned" | "archived"; cursor: ActivityCursor | null; limit: number },
+): Promise<Page<ThreadSummary>> {
+  const column = options.which === "pinned" ? threads.pinnedAt : threads.archivedAt;
+  const rows = await tx
+    .select({ ...summaryColumns, position: micros(column) })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.teamId, viewer.teamId),
+        eq(threads.ownerUserId, viewer.userId),
+        sql`${column} IS NOT NULL AND ${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
+        options.which === "pinned" ? sql`${threads.archivedAt} IS NULL` : undefined,
+        options.cursor ? after(column, options.cursor) : undefined,
+      ),
+    )
+    // NULLS LAST as the indexes are built, so the scan is already in order (no sort).
+    .orderBy(sql`${column} DESC NULLS LAST`, sql`${threads.id} DESC NULLS LAST`)
     .limit(options.limit + 1);
   return toPage(tx, viewer, rows, options.limit);
 }
@@ -369,7 +423,7 @@ export async function findThreads(
 }
 
 /** Locks the thread for a change by its owner, or says why the viewer can't change it. */
-async function lockForChange(
+export async function lockForChange(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
@@ -382,7 +436,7 @@ async function lockForChange(
   return { ok: true, thread: found.thread };
 }
 
-async function hasRunIn(
+export async function hasRunIn(
   tx: KobeTx,
   viewer: Viewer,
   threadId: string,
@@ -552,7 +606,7 @@ export async function switchAgentVersion(
   return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
 
-const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STATUSES];
+export const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STATUSES];
 
 /**
  * Moves the thread to Trash (D18 soft delete). Refused while it has an active or queued run: Stop

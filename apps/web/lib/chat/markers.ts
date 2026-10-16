@@ -68,8 +68,25 @@ export interface SkillMarker {
   readonly source: "team" | "personal" | "builtin";
 }
 
+/**
+ * The thread moved to another project (CE19, KOBE-220), shown above the prompt of the first run
+ * that started after the move: from there the agent works with the new project's instructions.
+ * A name is null when the viewer can't open the project (or for no project, id null).
+ */
+export interface ProjectMarker {
+  readonly runId: string;
+  readonly userEntryId: string | null;
+  readonly parentEntryId: string | null;
+  readonly fromProjectId: string | null;
+  readonly fromProjectName: string | null;
+  readonly toProjectId: string | null;
+  readonly toProjectName: string | null;
+}
+
 export interface ThreadMarkers {
   readonly runs: readonly RunMarker[];
+  /** Absent from servers before KOBE-220. */
+  readonly projects?: readonly ProjectMarker[] | undefined;
   readonly approvals: readonly ApprovalMarker[];
   /** Absent from servers before KOBE-297. */
   readonly skills?: readonly SkillMarker[] | undefined;
@@ -195,6 +212,23 @@ export function placeRunMarkers(
           : undefined;
     if (at === undefined) continue;
     placed.set(at, [...(placed.get(at) ?? []), run]);
+  }
+  return placed;
+}
+
+/**
+ * Where each project move shows, by message id: above the prompt of the run it marks. A run whose
+ * prompt is not in the loaded tree (never mirrored, another page) is left out.
+ */
+export function placeProjectMarkers(
+  moves: readonly ProjectMarker[],
+  projection: Projection,
+): ReadonlyMap<string, readonly ProjectMarker[]> {
+  const placed = new Map<string, ProjectMarker[]>();
+  for (const move of moves) {
+    const at = move.userEntryId === null ? undefined : projection.nodeOfEntry.get(move.userEntryId);
+    if (at === undefined) continue;
+    placed.set(at, [...(placed.get(at) ?? []), move]);
   }
   return placed;
 }

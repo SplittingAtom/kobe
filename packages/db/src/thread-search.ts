@@ -67,6 +67,9 @@ export interface ThreadSearchHit {
    */
   readonly forkedFromThreadId: string | null;
   readonly forkedAtEntryId: string | null;
+  /** Pinned or archived by the owner (CE19, KOBE-220): search shows archived threads, marked. */
+  readonly pinnedAt: Date | null;
+  readonly archivedAt: Date | null;
   /** Relevance; hits are ordered by score, then most recent activity. */
   readonly score: number;
   /** Best-matching entry (may be on an inactive branch); null for a title-only match. */
@@ -96,6 +99,8 @@ interface HitRow extends Record<string, unknown> {
   leaf_entry_id: string | null;
   forked_from_thread_id: string | null;
   forked_at_entry_id: string | null;
+  pinned_micros: string | null;
+  archived_micros: string | null;
   score: number;
   matched_entry_id: string | null;
   headline: string | null;
@@ -212,6 +217,8 @@ function toHit(row: HitRow): ThreadSearchHit {
     leafEntryId: row.leaf_entry_id,
     forkedFromThreadId: row.forked_from_thread_id,
     forkedAtEntryId: row.forked_at_entry_id,
+    pinnedAt: row.pinned_micros === null ? null : fromMicros(row.pinned_micros),
+    archivedAt: row.archived_micros === null ? null : fromMicros(row.archived_micros),
     score: row.score,
     matchedEntryId: row.matched_entry_id,
     snippet: row.headline === null ? null : parseSnippet(row.headline),
@@ -248,7 +255,8 @@ function searchQuery(
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
              t.agent_version, t.status, t.shared_to_project, t.model_alias, t.last_activity_at,
-             t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id
+             t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id,
+             t.pinned_at, t.archived_at
       FROM threads t
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
@@ -303,6 +311,8 @@ function searchQuery(
            r.activity_micros::text AS activity_micros, r.leaf_entry_id,
            r.forked_from_thread_id, r.forked_at_entry_id,
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
+           (extract(epoch FROM r.pinned_at) * 1000000)::bigint::text AS pinned_micros,
+           (extract(epoch FROM r.archived_at) * 1000000)::bigint::text AS archived_micros,
            r.score, r.matched_entry_id,
            CASE WHEN r.rn <= ${p.limit} AND r.matched_entry_id IS NOT NULL THEN
              (SELECT ts_headline(${TS_CONFIG}::regconfig,

@@ -53,6 +53,12 @@ export interface TeamRetentionNotice {
   readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
 }
 
+/**
+ * The rail reads this many pinned and archived threads (CE19): one page each, the most recent.
+ * Older archived threads are found by search.
+ */
+export const ORGANIZED_PAGE = 100;
+
 const RUNNABLE_PAGE_SIZE = 200;
 /** A guard, not a limit anyone reaches: 10 pages of 200. */
 const RUNNABLE_MAX_PAGES = 10;
@@ -77,6 +83,17 @@ export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
+  /** The caller's pinned threads, newest pin first (CE19, KOBE-220). */
+  listPinned(): Promise<ApiResult<ThreadPage>>;
+  /** The caller's archived threads, most recently archived first (CE19). */
+  listArchived(): Promise<ApiResult<ThreadPage>>;
+  /** Pin, unpin, archive or unarchive one of the caller's threads (CE19); idempotent. */
+  organizeThread(
+    threadId: string,
+    action: "pin" | "unpin" | "archive" | "unarchive",
+  ): Promise<ApiResult<ThreadSummary>>;
+  /** Moves the thread to a project the caller may start threads in, or out (null; CE19). */
+  moveThread(threadId: string, projectId: string | null): Promise<ApiResult<ThreadSummary>>;
   /** A new thread; `model` is an enabled alias, or null/absent for the team default (KOBE-44). */
   createThread(
     title?: string,
@@ -210,6 +227,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
+    listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
+    listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),
+    organizeThread: (id, action) => send("POST", `/v1/threads/${enc(id)}/${action}`),
+    moveThread: (id, projectId) =>
+      send("POST", `/v1/threads/${enc(id)}/move`, { project_id: projectId }),
     shareThread: (id, visibility) => send("POST", `/v1/threads/${enc(id)}/share`, { visibility }),
     forkThread: (id, options = {}) =>
       send("POST", `/v1/threads/${enc(id)}/fork`, {

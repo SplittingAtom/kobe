@@ -1,24 +1,41 @@
 "use client";
 
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
+import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
 import styles from "./chat.module.css";
 import { ThreadRowMenu } from "./thread-row-menu";
 
 /**
- * One thread in the rail (D16): open it; its ⋯ menu copies, regenerates or moves it to Trash
- * (KOBE-292; rename is the conversation header's pencil). In Trash: restore or delete forever.
- * Hovering or focusing the row shows its card (CE18, KOBE-219).
+ * One thread in the rail (D16): open it; its ⋯ menu copies, regenerates, pins, moves, archives or
+ * moves it to Trash (KOBE-292, KOBE-220; rename is the conversation header's pencil). In Trash:
+ * restore or delete forever. Hovering or focusing the row shows its card (CE18, KOBE-219). The
+ * member's own rows can be dragged onto a project header to move there (CE19).
  */
 function ThreadItem({ archived }: { readonly archived: boolean }) {
   const aui = useAui();
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
   // "Forked from …" on hover (CE16), from the list answer (`metadataOf`).
   const forkHint = useAuiState((s) => s.threadListItem.custom?.["forkHint"]);
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const shared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
+  const movable = !archived && !shared && remoteId !== undefined;
 
   return (
-    <li>
+    <li
+      data-kobe-thread={remoteId}
+      draggable={movable || undefined}
+      onDragStart={
+        movable
+          ? (e) => {
+              e.dataTransfer.setData(THREAD_DRAG_TYPE, remoteId);
+              e.dataTransfer.effectAllowed = "move";
+            }
+          : undefined
+      }
+    >
       <ThreadListItemPrimitive.Root className={`group/row ${styles.threadItem}`}>
         <RailThreadCard>
           <ThreadListItemPrimitive.Trigger

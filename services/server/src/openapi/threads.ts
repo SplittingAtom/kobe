@@ -8,6 +8,7 @@ import {
   entryPageSchema,
   errorSchema,
   listThreadsQuerySchema,
+  moveThreadBodySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
   threadCardSchema,
@@ -94,7 +95,9 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         operationId: "listThreads",
         summary: "List the viewer's threads (or a project's readable threads), newest first",
         description:
-          "Keyset pagination on (last_activity_at, id). Never Trash. With `q`, full-text search " +
+          "Keyset pagination on (last_activity_at, id). Never Trash. Without `project_id`, " +
+          "pinned and archived threads are left out (`/v1/threads/pinned`, `/archived`, CE19). " +
+          "With `q`, full-text search " +
           '(KOBE-33): web-search syntax (`"phrase"`, `-exclude`, `or`) over user/assistant ' +
           "messages (all terms in one message) and titles (plus fuzzy title matching), ranked by " +
           "relevance with snippets; `cursor` is then a search cursor and `limit` is capped at 50. " +
@@ -171,6 +174,23 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "The viewer's Trash, most recently deleted first (restorable for 30 days)",
         parameters: [...queryParameters(trashQuerySchema), teamHeader],
         responses: { "200": json("ThreadPage", "A page of trashed threads."), ...ERROR_RESPONSES },
+      },
+    },
+    "/v1/threads/pinned": {
+      get: {
+        operationId: "listPinnedThreads",
+        summary: "The viewer's pinned threads, most recently pinned first (CE19)",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of pinned threads."), ...ERROR_RESPONSES },
+      },
+    },
+    "/v1/threads/archived": {
+      get: {
+        operationId: "listArchivedThreads",
+        summary: "The viewer's archived threads, most recently archived first (CE19)",
+        description: "Archived threads stay searchable and follow the same retention.",
+        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        responses: { "200": json("ThreadPage", "A page of archived threads."), ...ERROR_RESPONSES },
       },
     },
     "/v1/threads/{id}": {
@@ -339,6 +359,23 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    ...organizeOperations(),
+    "/v1/threads/{id}/move": {
+      post: {
+        operationId: "moveThread",
+        summary: "Move the thread to a project, or out of one (owner only, CE19)",
+        description:
+          "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`).",
+        parameters: change([idParameter]),
+        requestBody: body("MoveThreadBody"),
+        responses: {
+          "200": json("Thread", "The moved thread."),
+          "404": json("Error", "`thread_not_found`, or `project_not_found` (also: not allowed)."),
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`thread_busy`, `thread_in_trash` or `test_thread`."),
+        },
+      },
+    },
     "/v1/threads/{id}/restore": {
       post: {
         operationId: "restoreThread",
@@ -352,6 +389,35 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
       },
     },
   };
+}
+
+const ORGANIZE = {
+  pin: ["pinThread", "Pin the thread (the Pinned group, by pin time; owner only, CE19)"],
+  unpin: ["unpinThread", "Unpin the thread (owner only, CE19)"],
+  archive: ["archiveThread", "Archive the thread: out of the normal groups, unpinned (CE19)"],
+  unarchive: ["unarchiveThread", "Unarchive the thread (owner only, CE19)"],
+} as const;
+
+/** Pin, unpin, archive, unarchive: idempotent, no body. */
+function organizeOperations() {
+  return Object.fromEntries(
+    Object.entries(ORGANIZE).map(([action, [operationId, summary]]) => [
+      `/v1/threads/{id}/${action}`,
+      {
+        post: {
+          operationId,
+          summary,
+          parameters: change([idParameter]),
+          responses: {
+            "200": json("Thread", "The thread."),
+            "404": notFound,
+            ...ERROR_RESPONSES,
+            "409": json("Error", "`thread_in_trash`, `thread_archived` (pin) or `test_thread`."),
+          },
+        },
+      },
+    ]),
+  );
 }
 
 export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
@@ -369,6 +435,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ShareThreadBody: withoutDialect(input(shareThreadRequestSchema)),
     ForkThreadBody: withoutDialect(input(forkThreadRequestSchema)),
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
+    MoveThreadBody: withoutDialect(input(moveThreadBodySchema)),
     SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),
   };

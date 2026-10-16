@@ -15,6 +15,7 @@ import type { MenuBindings, MenuChoice } from "../../lib/shell/menu";
 import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
 import { useChatSession } from "./kobe-runtime";
 import { useThreadTeamModels, type TeamModelsLoad } from "./use-team-models";
+import { useOrganizeMenu } from "./use-organize-menu";
 
 const NO_ANSWER = "There is no answer to regenerate yet.";
 const OPENING = "Opening the conversation…";
@@ -95,20 +96,31 @@ interface Notice {
 /**
  * A listed thread's ⋯ menu in the rail (KOBE-292): Copy (the branch on screen as Markdown),
  * Regenerate and Regenerate with (its last answer, as the answer's own buttons do, after opening
- * the thread) and Delete (to Trash, confirmed). KOBE-220 binds Pin, Archive and Move here.
+ * the thread), Pin, Move to project and Archive (CE19, KOBE-220, `useOrganizeMenu`) and Delete
+ * (to Trash, no confirm: it can be undone).
  */
 export function ThreadRowMenu() {
   const aui = useAui();
   const session = useChatSession();
   const threadId = useAuiState((s) => s.threadListItem.remoteId);
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
-  const listedShared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
+  const custom = useAuiState((s) => s.threadListItem.custom);
+  const listedShared = placementOf(custom).shared;
   const models = useThreadTeamModels();
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useHeldThread(threadId, open);
   const readOnly = listedShared || state?.summary?.readOnly === true;
   const projection = useMemo(() => (state ? projectionOf(state) : undefined), [state]);
+  const organize = useOrganizeMenu({
+    threadId: threadId ?? "",
+    title,
+    custom,
+    open,
+    readOnly,
+    state,
+    notify: setNotice,
+  });
   useEffect(() => {
     if (notice === null) return;
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
@@ -190,6 +202,7 @@ export function ThreadRowMenu() {
           },
         }
       : {}),
+    ...organize,
     "trash-thread": { onSelect: trash, destructive: true, blocker: readOnly ? NOT_YOURS : null },
   };
 

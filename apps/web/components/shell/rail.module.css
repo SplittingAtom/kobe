@@ -216,6 +216,13 @@
   color: var(--admin-fg);
 }
 
+/* A thread row dragged over a project header (CE19): dropping moves it there. */
+.groupToggle[data-drop-target="true"] {
+  color: var(--admin-fg);
+  outline: 2px dashed var(--admin-accent);
+  outline-offset: -2px;
+}
+
 .chevron {
   width: 0.875rem;
   height: 0.875rem;

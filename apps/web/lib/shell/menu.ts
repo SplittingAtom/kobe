@@ -1,8 +1,7 @@
 /**
  * The rail's row menus (KOBE-292): a menu is a scope of the command registry (`thread-menu`,
  * `file-menu`), and a row binds the commands it offers (what they do, whether they can run now).
- * `ActionMenu` renders the bound ones in registry order. KOBE-220 adds Pin, Archive and Move by
- * registering them in `thread-menu` and binding them in the thread row.
+ * `ActionMenu` renders the bound ones in registry order (KOBE-220 added Pin, Archive and Move).
  */
 import { COMMANDS, type CommandId, type RegisteredCommand } from "./commands";
 

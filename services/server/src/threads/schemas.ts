@@ -106,6 +106,13 @@ export const listThreadsQuerySchema = z.strictObject({
 });
 export type ListThreadsQuery = z.infer<typeof listThreadsQuerySchema>;
 
+/**
+ * `POST /v1/threads/{id}/move` (CE19, KOBE-220): the project to move the thread to, where the
+ * caller may start a thread; null = out of its project ("Your threads").
+ */
+export const moveThreadBodySchema = z.strictObject({ project_id: uuidSchema.nullable() });
+
+/** Trash, and the Pinned and Archived lists (CE19): newest first, keyset pages. */
 export const trashQuerySchema = z.strictObject({
   cursor: z.string().max(256).optional(),
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
@@ -165,6 +172,11 @@ export const threadSummarySchema = z.object({
   ...threadOrganizationSchema.pick({ forked_from_thread_id: true, forked_at_entry_id: true }).shape,
   /** The source's title when the viewer may open it (null: untitled, not a fork, or no access). */
   forked_from_title: z.string().nullable(),
+  /**
+   * The owner's organization (CE19, KOBE-220): pinned (the Pinned group, by this time) or
+   * archived (out of the normal groups, still searchable, retention unchanged); never both.
+   */
+  ...threadOrganizationSchema.pick({ pinned_at: true, archived_at: true }).shape,
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { TeamInvites } from "../../app/team-invites";
 import type { ApiError } from "../../lib/api/client";
 import { createChatApi } from "../../lib/chat/api";
+import { browserThreadListSync, type ThreadListSync } from "../../lib/chat/thread-list-sync";
 import { ChatSession } from "../../lib/chat/session";
 import type { EventSourceFactory } from "../../lib/chat/stream";
 import type { UploadTransport } from "../../lib/chat/uploads";
@@ -186,6 +187,11 @@ function ChatWorkspace({
     () => session.onThreadRetitled(() => void runtime.threads.reload()),
     [session, runtime],
   );
+  // Pinned, archived or moved, in this tab or another one (CE19, KOBE-220).
+  useEffect(
+    () => session.onThreadListChanged(() => void runtime.threads.reload()),
+    [session, runtime],
+  );
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   // The member's layout, from any device (CE8): loaded once, changes saved debounced.
   const layout = useLayoutPreferences(fetchFn);
@@ -246,6 +252,8 @@ export interface ChatAppProps {
   readonly newKey?: (() => string) | undefined;
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
   readonly uploadTransport?: UploadTransport | undefined;
+  /** This browser's other tabs (CE19); default: a `BroadcastChannel` per team. */
+  readonly threadListSync?: ((teamId: string) => ThreadListSync | undefined) | undefined;
 }
 
 /**
@@ -259,6 +267,7 @@ export function ChatApp({
   newKey,
   reopenDelayMs,
   uploadTransport,
+  threadListSync = browserThreadListSync,
 }: ChatAppProps) {
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
@@ -274,8 +283,9 @@ export function ChatApp({
             reopenDelayMs,
             uploadTransport,
             fetchFn,
+            listSync: threadListSync(teamId),
           }),
-    [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport],
+    [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport, threadListSync],
   );
   useEffect(() => () => session?.dispose(), [session]);
   const [appEl, setAppEl] = useState<HTMLDivElement | null>(null);

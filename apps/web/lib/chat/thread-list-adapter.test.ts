@@ -34,8 +34,34 @@ describe("thread list adapter", () => {
       projectId: null,
       scheduled: false,
       shared: false,
+      pinned: false,
+      archived: false,
       forkHint: null,
     });
+  });
+
+  it("lists pinned threads first (by pin time) and archived ones after the page (CE19)", async () => {
+    const { fake, adapter } = setup();
+    const a = fake.addThread("A");
+    const b = fake.addThread("B");
+    const c = fake.addThread("C");
+    const d = fake.addThread("D");
+    Object.assign(fake.threads.get(a) ?? {}, { pinned_at: "2026-10-01T10:00:00.000Z" });
+    Object.assign(fake.threads.get(c) ?? {}, { pinned_at: "2026-10-02T10:00:00.000Z" });
+    Object.assign(fake.threads.get(d) ?? {}, { archived_at: "2026-10-03T10:00:00.000Z" });
+    const page = await adapter.list();
+    expect(
+      page.threads.map((t) => [t.title, t.custom?.["pinned"], t.custom?.["archived"]]),
+    ).toEqual([
+      ["C", true, false],
+      ["A", true, false],
+      ["B", false, false],
+      ["D", false, true],
+    ]);
+    // Later pages are the activity list only: pinned and archived threads never repeat.
+    const pinnedReads = fake.requests.filter((r) => r.path.startsWith("/v1/threads/pinned"));
+    expect(pinnedReads).toHaveLength(1);
+    expect(b).toBeDefined();
   });
 
   it("creates a thread untitled, shows its first line until the server titles it, and seeds its controller", async () => {

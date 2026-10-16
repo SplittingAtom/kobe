@@ -1,4 +1,5 @@
 import {
+  ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowLeftIcon,
   ArrowDownIcon,
@@ -22,6 +23,7 @@ import {
   ExternalLinkIcon,
   FoldVerticalIcon,
   FolderIcon,
+  FolderInputIcon,
   FolderKanbanIcon,
   GitForkIcon,
   GripVerticalIcon,
@@ -33,6 +35,8 @@ import {
   PaperclipIcon,
   PauseIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   PlayIcon,
   RefreshCcwDotIcon,
   RefreshCwIcon,
@@ -188,8 +192,9 @@ const LIST = [
   { id: "export-threads", name: "Export my conversations", icon: DownloadIcon, scope: "rail" },
   // A Files row's ⋯ menu button (the call site names the file: "Actions for report.csv").
   { id: "file-row-actions", name: "File actions", icon: EllipsisIcon, scope: "rail" },
-  // The thread row's menu (KOBE-292), in menu order. KOBE-220 adds Pin, Archive and Move here.
-  // Copy: the branch on screen as Markdown. Regenerate (with): the thread's last answer.
+  // The thread row's menu (KOBE-292), in menu order. Copy: the branch on screen as Markdown.
+  // Regenerate (with): the thread's last answer. Pin, Archive and Move (CE19, KOBE-220): a row
+  // binds Pin or Unpin, Archive or Unarchive; Move lists the projects as a submenu.
   { id: "copy-thread", name: "Copy", icon: CopyIcon, scope: "thread-menu" },
   { id: "regenerate-thread", name: "Regenerate", icon: RefreshCwIcon, scope: "thread-menu" },
   {
@@ -198,6 +203,11 @@ const LIST = [
     icon: RefreshCcwDotIcon,
     scope: "thread-menu",
   },
+  { id: "pin-thread", name: "Pin", icon: PinIcon, scope: "thread-menu" },
+  { id: "unpin-thread", name: "Unpin", icon: PinOffIcon, scope: "thread-menu" },
+  { id: "move-thread", name: "Move to project", icon: FolderInputIcon, scope: "thread-menu" },
+  { id: "archive-thread", name: "Archive", icon: ArchiveIcon, scope: "thread-menu" },
+  { id: "unarchive-thread", name: "Unarchive", icon: ArchiveRestoreIcon, scope: "thread-menu" },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.
