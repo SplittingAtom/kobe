@@ -42,20 +42,24 @@ export function matchSkillRead(
 }
 
 /**
- * What `run.start` lists, as recorded with the run: each bundle with its source (from the
- * resolver's effective skills, by hash), then the built-ins. A bundle whose source is unknown is
- * left out: it can't be told apart, so it is not counted.
+ * What `run.start` lists, as recorded with the run: each bundle with the source of the effective
+ * skill it was listed for (same name and hash), then the built-ins. Two skills with identical
+ * bytes share one `sk-<hash>/` directory, so a read of it can only be told as one of them: the
+ * first listed (named before personal before offered) keeps the path, the others are not recorded.
+ * A bundle with no matching effective skill is left out rather than guessed.
  */
 export function runSkillRefs(
   bundles: readonly SkillBundleRef[],
   effective: readonly SkillRef[],
   builtins: readonly string[],
 ): RunSkillRef[] {
-  const sourceOf = new Map(effective.map((s) => [s.hash, s.source]));
   const refs: RunSkillRef[] = [];
+  const paths = new Set<string>();
   for (const b of bundles) {
-    const source = sourceOf.get(b.sha256);
-    if (source !== undefined) refs.push({ name: b.name, source, sha256: b.sha256 });
+    const skill = effective.find((s) => s.name === b.name && s.hash === b.sha256);
+    if (skill?.source === undefined || paths.has(b.sha256)) continue;
+    paths.add(b.sha256);
+    refs.push({ name: b.name, source: skill.source, sha256: b.sha256 });
   }
   for (const name of builtins) refs.push({ name, source: "builtin" });
   return refs;

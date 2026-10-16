@@ -93,9 +93,12 @@ export async function loadSkillFacts(
   });
   const usable = user.usable.map((s) => ({ ...s, source: "personal" as const }));
   // Only approved versions, like named team skills: an offer never widens what review allows.
+  // Sorted by name: which offered skills a full run leaves out (`skill_limit`) is stable.
   const offered = (
     await approvedTeamSkills(tx, args.teamId, await offeredSkillNames(tx, args.teamId))
-  ).map(fromTeam);
+  )
+    .map(fromTeam)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const approved = new Set(agent.map((s) => s.name));
   // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
   const blockedHashes = await blockedAmong(

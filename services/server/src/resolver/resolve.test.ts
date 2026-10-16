@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveEffective, type ResolveInput } from "./resolve.js";
+import { RUN_SKILLS_MAX, resolveEffective, type ResolveInput } from "./resolve.js";
 
 const base: ResolveInput = {
   agent: {
@@ -270,6 +270,44 @@ describe("team skills offered to all agents (KOBE-297)", () => {
         }),
       ),
     ).toEqual(["same"]);
+  });
+
+  it("caps the run at the run.start limit: named, then personal, then offered; the rest are skill_limit", () => {
+    const many = (prefix: string, n: number) =>
+      Array.from({ length: n }, (_, i) => sk(`${prefix}-${String(i).padStart(2, "0")}`));
+    const r = resolveEffective(
+      with_({
+        agent: { skills: many("named", 32) },
+        user: { skills: many("mine", 3) },
+        team: { offeredSkills: many("offered", 32) },
+      }),
+    );
+    expect(RUN_SKILLS_MAX).toBe(64);
+    const names = r.ok ? r.value.skills.map((s) => s.name) : [];
+    expect(names).toHaveLength(64);
+    expect(names.slice(0, 35)).toEqual([
+      ...many("named", 32).map((s) => s.name),
+      ...many("mine", 3).map((s) => s.name),
+    ]);
+    expect(names.at(-1)).toBe("offered-28");
+    expect(r.ok && r.value.omissions).toEqual(
+      ["offered-29", "offered-30", "offered-31"].map((name) => ({
+        kind: "skill",
+        name,
+        reason: "skill_limit",
+      })),
+    );
+  });
+
+  it("exactly at the limit, nothing is omitted", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: Array.from({ length: 32 }, (_, i) => sk(`n${i}`)) },
+        team: { offeredSkills: Array.from({ length: 32 }, (_, i) => sk(`o${i}`)) },
+      }),
+    );
+    expect(r.ok && r.value.skills).toHaveLength(64);
+    expect(r.ok && r.value.omissions).toEqual([]);
   });
 
   it("a blocklisted offered skill is left out", () => {

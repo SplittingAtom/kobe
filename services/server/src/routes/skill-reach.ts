@@ -4,7 +4,7 @@ import { withTeam } from "@kobe/db";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
-import { agentNames, setOfferToAll, skillReach } from "../skills/reach.js";
+import { MAX_OFFERED_SKILLS, agentNames, setOfferToAll, skillReach } from "../skills/reach.js";
 import { findSkill, type SkillLocation, type SkillRecord } from "../skills/store.js";
 import { skillUsageInTx } from "../skills/usage.js";
 import { parseBody } from "../teams/http.js";
@@ -60,8 +60,16 @@ export function skillReachRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
       return c.json({ code: "invalid_request", message: "Send offerToAll: true or false." }, 400);
     const skill = await visible(c);
     if (!skill || skill.scope !== "team") return notFound(c);
-    const value = await setOfferToAll(db, c.get("team").id, skill.id, body.offerToAll);
-    return value === null ? notFound(c) : c.json({ offerToAll: value });
+    const result = await setOfferToAll(db, c.get("team").id, skill.id, body.offerToAll);
+    if (result.ok) return c.json({ offerToAll: result.offerToAll });
+    if (result.error === "not_found") return notFound(c);
+    return c.json(
+      {
+        code: "offer_limit",
+        message: `A team can offer at most ${MAX_OFFERED_SKILLS} skills to all agents. Turn the offer off for another skill first.`,
+      },
+      409,
+    );
   });
 
   app.get("/:id/usage", async (c) => {

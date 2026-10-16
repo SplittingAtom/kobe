@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { withTeam, type AgentScope } from "@kobe/db";
+import { sql, withTeam, type AgentScope } from "@kobe/db";
+import { skillUsageQuery } from "./skills/usage.js";
 import { PINNED_AGENTS } from "./runs/agents.js";
 import { RunFixture, type FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
@@ -356,5 +357,108 @@ describe("ac-2: Offer to all agents", () => {
     const asMember = await f.on(0, member).get(`/v1/skills/${skillId}/reach`);
     expect(asMember.json.agents.some((a: { canEdit: boolean }) => a.canEdit)).toBe(false);
     expect(await f.auditActions(w.team)).toContain("skill.offer.changed");
+  });
+
+  it("a member without builder rights sees published names only, never drafts or exclusivity", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id);
+    const member = await f.member(w.team);
+    const skillId = await seedTeamSkill(w.team, w.owner.id, "private-detail");
+    const named = await publishAgent(w.owner, { name: "Named", skills: ["private-detail"] });
+    const solo = await publishAgent(w.owner, { name: "Solo", skills: "exclusive" });
+    // A draft that was never published, naming the skill.
+    const draft = await f.on(0, w.owner).post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Secret draft", skills: ["private-detail"] },
+      prompt: "x",
+    });
+    expect(draft.status).toBe(201);
+    type Row = { id: string; via: string | null; exclusive: boolean; inDraft: boolean };
+    const seen = async () =>
+      ((await f.on(0, member).get(`/v1/skills/${skillId}/reach`)).json.agents as Row[]).filter(
+        (a) => a.id !== undefined,
+      );
+    const off = await seen();
+    expect(off.map((a) => a.id)).not.toContain(draft.json.agent.id);
+    expect(off.find((a) => a.id === named)).toMatchObject({ via: null, inDraft: false });
+    expect(off.some((a) => a.exclusive || a.inDraft || a.via === "named")).toBe(false);
+    await f.on(0, w.owner).request("PUT", `/v1/skills/${skillId}/offer`, { offerToAll: true });
+    const on = await seen();
+    expect(on.find((a) => a.id === named)?.via).toBe("offer");
+    expect(on.find((a) => a.id === solo)?.via).toBeNull();
+    // The admin (a builder) still sees the draft and how each agent names it.
+    const admin = (await f.on(0, w.owner).get(`/v1/skills/${skillId}/reach`)).json.agents as Row[];
+    expect(admin.find((a) => a.id === draft.json.agent.id)).toMatchObject({ inDraft: true });
+    expect(admin.find((a) => a.id === named)?.via).toBe("named");
+  });
+
+  it("refuses to offer more than 32 skills in a team, and turning one off makes room", async () => {
+    const w = await f.world();
+    const ids: string[] = [];
+    for (let i = 0; i < 33; i += 1) {
+      ids.push(await seedTeamSkill(w.team, w.owner.id, `cap-${String(i).padStart(2, "0")}`));
+    }
+    const put = (id: string, offerToAll: boolean) =>
+      f.on(0, w.owner).request("PUT", `/v1/skills/${id}/offer`, { offerToAll });
+    for (const id of ids.slice(0, 32)) expect((await put(id, true)).status).toBe(200);
+    const refused = await put(must(ids[32], "33rd"), true);
+    expect(refused.status).toBe(409);
+    expect(refused.json).toMatchObject({ code: "offer_limit" });
+    expect(refused.json.message).toMatch(/at most 32/);
+    expect((await put(must(ids[0], "first"), false)).status).toBe(200);
+    expect((await put(must(ids[32], "33rd"), true)).status).toBe(200);
+  });
+
+  it("H1: a run over the run.start cap starts with 64 skills; the rest are skill_limit omissions", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id);
+    const named = Array.from({ length: 32 }, (_, i) => `named-${String(i).padStart(2, "0")}`);
+    const offered = Array.from({ length: 33 }, (_, i) => `offered-${String(i).padStart(2, "0")}`);
+    for (const slug of named) await seedTeamSkill(w.team, w.owner.id, slug);
+    // 33 offered: one past the route's cap, set directly to test the resolver's own cap.
+    for (const slug of offered) await seedTeamSkill(w.team, w.owner.id, slug, ["approved"], true);
+    const thread = await threadWith(w.owner, await publishAgent(w.owner, { skills: named }));
+    const { run, ws, frame } = await start(w, thread);
+    expect(frame.config?.skills).toHaveLength(64);
+    expect(frame.config?.skill_bundles).toHaveLength(64);
+    expect(frame.config?.skills?.slice(0, 32)).toEqual(named);
+    ws.reply(frame, "ok");
+    await f.until(w.team, run, "completed");
+    const omitted = (await f.events(w.team, run)).find((e) => e.type === "context.omitted");
+    expect(omitted?.payload).toEqual({
+      items: [{ kind: "skill", name: "offered-32", reason: "skill_limit" }],
+    });
+  });
+
+  it("M1: the usage read uses runs_skill_uses_idx for the app role under RLS", async () => {
+    const w = await f.world();
+    // A team with many threads and runs, few of which used a skill: the shape the index is for.
+    await f.fx.admin.query(
+      `INSERT INTO threads (team_id, id, owner_user_id, title)
+       SELECT $1, gen_random_uuid(), $2, 't' FROM generate_series(1, 500)`,
+      [w.team, w.owner.id],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO runs (team_id, thread_id, trigger, status, started_at, ended_at, skills_used)
+       SELECT t.team_id, t.id, 'user', 'completed', now(), now(),
+              CASE WHEN g = 1 AND random() < 0.05
+                   THEN '[{"tool_call_id":"t","name":"x","source":"team"}]'::jsonb
+                   ELSE '[]'::jsonb END
+         FROM threads t CROSS JOIN generate_series(1, 20) g
+        WHERE t.team_id = $1`,
+      [w.team],
+    );
+    await f.fx.admin.query(`ANALYZE runs; ANALYZE threads`);
+    const plan = await withTeam(f.fx.db, w.team, async (tx) => {
+      const res = await tx.execute<{ "QUERY PLAN": string }>(
+        sql`EXPLAIN ${skillUsageQuery(w.team, { source: "team", name: "x" })}`,
+      );
+      return res.rows.map((r) => r["QUERY PLAN"]).join("\n");
+    });
+    console.info(`usage plan:\n${plan}`);
+    expect(plan).toMatch(
+      /Index Scan using runs_skill_uses_idx on runs r|Bitmap Index Scan on runs_skill_uses_idx/,
+    );
+    expect(plan).toMatch(/Index Cond: \(\(team_id = .*\) AND \(created_at > /s);
   });
 });

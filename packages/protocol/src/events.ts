@@ -104,6 +104,8 @@ const contextOmissionSchema = z.strictObject({
     "not_user_connected",
     "no_team_default",
     "not_approved",
+    // KOBE-297: over the run.start cap (`SKILL_BUNDLES_MAX`); offered skills go first.
+    "skill_limit",
   ]),
 });
 

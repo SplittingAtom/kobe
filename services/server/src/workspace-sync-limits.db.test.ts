@@ -148,7 +148,9 @@ async function counters(b: Box) {
 
 describe("database in-flight caps and lock timeouts", () => {
   it("lets one sandbox hold one commit at a time and never wait long on its row lock", async () => {
-    const e = env({}, { lockTimeoutMs: 300 });
+    // 2 s (was 300 ms): all six requests must arrive while the first still waits on the lock, also
+    // on a loaded CI runner; otherwise a late one takes the freed slot and gets a second 503.
+    const e = env({}, { lockTimeoutMs: 2_000 });
     const b = await box();
     expect((await upload(e, b, "x")).status).toBe(201);
     // Another transaction holds the workspace's row lock (a long commit, a collection).

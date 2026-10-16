@@ -86,6 +86,24 @@ describe("runSkillRefs", () => {
     ).toEqual(refs);
   });
 
+  it("gives a shared directory (identical bytes) to the first skill listed, by name, not by hash", () => {
+    const refs = runSkillRefs(
+      [
+        { name: "team-one", sha256: A, size: 1 },
+        { name: "my-copy", sha256: A, size: 1 },
+      ],
+      [
+        { name: "team-one", hash: A, source: "team" },
+        { name: "my-copy", hash: A, source: "personal" },
+      ],
+      [],
+    );
+    expect(refs).toEqual([{ name: "team-one", source: "team", sha256: A }]);
+    expect(
+      matchSkillRead("read", { path: `/run/kobe-skills/store/sk-${A}/SKILL.md` }, refs),
+    ).toEqual({ name: "team-one", source: "team", sha256: A });
+  });
+
   it("drops a bundle whose source is unknown rather than guessing", () => {
     expect(runSkillRefs([{ name: "x", sha256: A, size: 1 }], [], [])).toEqual([]);
   });

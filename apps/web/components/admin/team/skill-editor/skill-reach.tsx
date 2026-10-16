@@ -150,7 +150,7 @@ function Usage({ skill }: { readonly skill: SkillSummary }) {
   if (state.status !== "ready") return null;
   return (
     <section aria-labelledby="skill-usage-heading">
-      <h2 id="skill-usage-heading">Usage in this team</h2>
+      <h2 id="skill-usage-heading">Usage in this team (last 90 days)</h2>
       <UsageText usage={state.data} />
     </section>
   );

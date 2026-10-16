@@ -91,6 +91,12 @@ async function earlierCalls(
   return uses;
 }
 
+/**
+ * Usage covers this many days of runs (KOBE-297 review M1): the read uses `runs_skill_uses_idx`
+ * (migration 0102: team_id, created_at, where a run used a skill) and never scans the team's runs.
+ */
+export const SKILL_USAGE_DAYS = 90;
+
 /** One agent a skill was used by: null id = runs with no agent. */
 export interface SkillUsageAgent {
   readonly agentId: string | null;
@@ -103,31 +109,49 @@ export interface SkillUsage {
   readonly agents: readonly SkillUsageAgent[];
 }
 
+type UsageSkill = {
+  readonly source: "team" | "personal";
+  readonly name: string;
+  readonly ownerUserId?: string;
+};
+
 /**
- * How often a skill was used in this team (KOBE-297): uses (SKILL.md reads), the last one, and by
- * which agents. A team skill counts every member's runs; a personal one only `ownerUserId`'s
- * (nobody else's runs can carry it). Reads run rows of the team (RLS and an explicit team filter).
+ * The usage read (exported so a test can EXPLAIN it): the team's runs of the window that used a
+ * skill, through `runs_skill_uses_idx` (its predicate is repeated here word for word).
  */
-export async function skillUsageInTx(
-  tx: KobeTx,
-  teamId: string,
-  skill: { readonly source: "team" | "personal"; readonly name: string; ownerUserId?: string },
-): Promise<SkillUsage> {
+export function skillUsageQuery(teamId: string, skill: UsageSkill) {
   const owner =
     skill.source === "personal" && skill.ownerUserId !== undefined
       ? sql`AND t.owner_user_id = ${skill.ownerUserId}::uuid`
       : sql``;
-  const res = await tx.execute<{ agent_id: string | null; uses: string; last: Date | string }>(sql`
+  return sql`
     SELECT t.agent_id, count(*) AS uses, max(coalesce(r.ended_at, r.started_at, r.created_at)) AS last
       FROM runs r
       JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
       CROSS JOIN LATERAL jsonb_array_elements(r.skills_used) AS u(use)
      WHERE r.team_id = ${teamId} AND t.team_id = ${teamId}
        AND jsonb_array_length(r.skills_used) > 0
+       AND r.created_at > now() - make_interval(days => ${SKILL_USAGE_DAYS})
        AND u.use->>'source' = ${skill.source} AND u.use->>'name' = ${skill.name}
        ${owner}
      GROUP BY t.agent_id
-     ORDER BY count(*) DESC`);
+     ORDER BY count(*) DESC`;
+}
+
+/**
+ * How often a skill was used in this team in the last {@link SKILL_USAGE_DAYS} days (KOBE-297):
+ * uses (SKILL.md reads), the last one, and by which agents. A team skill counts every member's
+ * runs; a personal one only `ownerUserId`'s (nobody else's runs can carry it). Reads run rows of
+ * the team (RLS and an explicit team filter).
+ */
+export async function skillUsageInTx(
+  tx: KobeTx,
+  teamId: string,
+  skill: UsageSkill,
+): Promise<SkillUsage> {
+  const res = await tx.execute<{ agent_id: string | null; uses: string; last: Date | string }>(
+    skillUsageQuery(teamId, skill),
+  );
   let uses = 0;
   let last: Date | null = null;
   const agents: SkillUsageAgent[] = [];

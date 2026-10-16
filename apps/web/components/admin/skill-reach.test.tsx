@@ -127,6 +127,22 @@ describe("team skill reach (KOBE-297)", () => {
     );
   });
 
+  it("shows the server's refusal when the team already offers the most skills", async () => {
+    stubApi({
+      ...BASE,
+      "GET /v1/skills/s-1/reach": [200, REACH],
+      "GET /v1/skills/s-1/usage": [200, USAGE],
+      "PUT /v1/skills/s-1/offer": [
+        409,
+        { code: "offer_limit", message: "A team can offer at most 32 skills to all agents." },
+      ],
+    });
+    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    await reachList();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Offer to all agents" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/at most 32 skills/);
+  });
+
   it("Add to agent… opens the builder of a team agent the caller may edit, with the skill added", async () => {
     stubApi({
       ...BASE,

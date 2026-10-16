@@ -32,11 +32,9 @@
   things by (`user_entry_id`, `tool_call_id`). Cap 64 uses per run. No protocol change: the chat
   reads `skills` from `GET /v1/threads/{id}/markers` on open, after each run and after each
   successful `read` result (so the live answer gets the badge within the run).
-- **Usage (count, agents, last used):** aggregated from `runs.skills_used` of the team
-  (`GET /v1/skills/{id}/usage`): team skills to their owner and team admins, personal ones to
-  their owner (own runs only). Other members' personal agents are counted without a name. No
-  index: the query reads the team's runs; add a partial index if a large team makes the skill
-  page slow (flag for review).
+- **Usage (count, agents, last used):** aggregated from `runs.skills_used` of the team's last 90
+  days (`GET /v1/skills/{id}/usage`): team skills to their owner and team admins, personal ones to
+  their owner (own runs only). Other members' personal agents are counted without a name.
 - **Offer to all (ac-2):** `resolveSkills` adds the team's offered skills (newest approved
   version, as for named ones; `loadSkillFacts` reads them in the run-start transaction and the
   blocklist covers their hashes) after the agent's and the user's skills, to non-exclusive agents
@@ -53,9 +51,31 @@
 - **Picker (ac-3):** each option shows Built-in / Team / Personal; equal name and origin adds the
   slug; the button names the origin when the name is shared (`lib/chat/agent-origin.ts`).
 
+## Review (Opus, approve with H1) and fixes
+
+- H1: a run carries at most 64 skills (`RUN_SKILLS_MAX` = protocol `SKILL_BUNDLES_MAX`): named,
+  then personal, then offered (sorted by name); the rest are omitted with the new
+  `context.omitted` reason `skill_limit` (protocol enum, additive; web text). A team offers at
+  most 32 skills (`PUT …/offer` → 409 `offer_limit`, under a team advisory lock). Tests: resolver
+  unit (65 → 64 + omissions, exactly 64), DB (32 named + 33 offered → start with 64, one omission;
+  33rd offer refused, room after turning one off), web (refusal shown).
+- M1: usage is windowed to 90 days and reads the partial index `runs_skill_uses_idx (team_id,
+created_at) WHERE jsonb_array_length(skills_used) > 0`, custom migration **0102** (IF NOT EXISTS;
+  lock note in the SQL and docs/install.md). EXPLAIN as the app role under RLS (test
+  "M1: the usage read uses runs_skill_uses_idx"): `Bitmap Index Scan on runs_skill_uses_idx`,
+  `Index Cond: ((team_id = …) AND (created_at > (now() - '90 days'::interval)))`.
+- L1: members who may not read a team agent's definition see only published, active agents by
+  their published name, `via` offer or none; no draft, exclusivity or naming detail (DB test).
+- L2: `runSkillRefs` pairs each bundle with the effective skill of the same name and hash; a
+  shared directory (identical bytes) goes to the first listed skill only (unit test).
+- Flaky test: the full server run once failed `workspace-sync-limits` "commits racing collection…"
+  (30 s timeout; passes alone and on main). Per the review, `:150` now waits with
+  `lockTimeoutMs: 2_000` (was 300 ms) so all six requests arrive while the first still waits.
+
 ## Open questions
 
-- No index for usage (above). Personal skill usage is per team (runs are team rows).
+- Personal skill usage is per team (runs are team rows). `skill_refs` stays on ended runs
+  (≤ ~7 KB); clearing it at run end is a possible follow-up (review I2).
 
 ## Evidence
 

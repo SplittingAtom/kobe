@@ -6,6 +6,7 @@ import {
   isNull,
   siteAgents,
   siteAgentVersions,
+  sql,
   teamAgents,
   teamAgentVersions,
   teamSkills,
@@ -52,6 +53,7 @@ interface AgentRow {
   readonly scope: AgentScope;
   readonly ownerUserId: string | null;
   readonly slug: string;
+  readonly status: string;
   readonly draft: Record<string, unknown>;
   readonly current: Record<string, unknown> | undefined;
 }
@@ -67,6 +69,7 @@ async function teamAgentRows(tx: KobeTx, teamId: string): Promise<AgentRow[]> {
       id: teamAgents.id,
       ownerUserId: teamAgents.ownerUserId,
       slug: teamAgents.slug,
+      status: teamAgents.status,
       draft: teamAgents.frontmatter,
       current: teamAgentVersions.frontmatter,
     })
@@ -90,6 +93,7 @@ async function siteAgentRows(tx: KobeTx, userId: string): Promise<AgentRow[]> {
       scope: siteAgents.scope,
       ownerUserId: siteAgents.ownerUserId,
       slug: siteAgents.slug,
+      status: siteAgents.status,
       draft: siteAgents.frontmatter,
       current: siteAgentVersions.frontmatter,
     })
@@ -105,31 +109,50 @@ async function siteAgentRows(tx: KobeTx, userId: string): Promise<AgentRow[]> {
   return rows.map((r) => ({ ...r, current: r.current ?? undefined }));
 }
 
+const nameOf = (frontmatter: Record<string, unknown>, slug: string) =>
+  typeof frontmatter.name === "string" ? frontmatter.name : slug;
+
+/**
+ * One agent's row, as far as the caller may see it. Someone who may read the definition
+ * (`agentAccess`: builders for team agents, everyone for the gallery and their own) gets how it
+ * names the skill, its exclusivity and its draft; anyone else only published, active agents, by
+ * their published name, reached or not by the offer (L1 of the KOBE-297 review).
+ */
 function reachOf(
   row: AgentRow,
   slug: string,
   offered: boolean,
   actor: { userId: string; role: TeamRole },
-): ReachAgent {
+): ReachAgent | undefined {
+  const access = agentAccess(actor, { scope: row.scope, ownerUserId: row.ownerUserId });
   const current = skillsOf(row.current);
+  if (!access.readDefinition) {
+    if (row.current === undefined || row.status !== "active") return undefined;
+    return {
+      id: row.id,
+      scope: row.scope,
+      slug: row.slug,
+      name: nameOf(row.current, row.slug),
+      via: offered && !current.exclusive ? "offer" : null,
+      exclusive: false,
+      inDraft: false,
+      canEdit: false,
+    };
+  }
   const draft = skillsOf(row.draft);
-  const named = current.names.includes(slug);
-  const name = (row.current ?? row.draft).name;
   return {
     id: row.id,
     scope: row.scope,
     slug: row.slug,
-    name: typeof name === "string" ? name : row.slug,
-    via: named
+    name: nameOf(row.current ?? row.draft, row.slug),
+    via: current.names.includes(slug)
       ? "named"
       : offered && row.current !== undefined && !current.exclusive
         ? "offer"
         : null,
     exclusive: (row.current === undefined ? draft : current).exclusive,
     inDraft: draft.names.includes(slug),
-    canEdit:
-      row.scope === "team" &&
-      agentAccess(actor, { scope: row.scope, ownerUserId: row.ownerUserId }).edit,
+    canEdit: row.scope === "team" && access.edit,
   };
 }
 
@@ -152,27 +175,50 @@ export function skillReach(
     ];
     const offered = skill.offerToAll && approved;
     const agents = rows
-      .map((r) => reachOf(r, skill.slug, offered, viewer))
+      .flatMap((r) => reachOf(r, skill.slug, offered, viewer) ?? [])
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     return { offerToAll: skill.offerToAll, approved, agents };
   });
 }
 
-/** Turns "Offer to all agents" on or off; audits a real change. Null: no such team skill. */
+/**
+ * Most team skills one team may offer to all agents (KOBE-297). With an agent's own (at most 32,
+ * agent file) a run stays near the run.start cap; the resolver still caps the run itself.
+ */
+export const MAX_OFFERED_SKILLS = 32;
+
+export type OfferResult =
+  | { readonly ok: true; readonly offerToAll: boolean }
+  | { readonly ok: false; readonly error: "not_found" | "offer_limit" };
+
+/**
+ * Turns "Offer to all agents" on or off; audits a real change. Turning it on is refused once the
+ * team offers {@link MAX_OFFERED_SKILLS}; a team-wide advisory lock makes the count exact.
+ */
 export function setOfferToAll(
   db: KobeDb,
   teamId: string,
   skillId: string,
   offerToAll: boolean,
-): Promise<boolean | null> {
+): Promise<OfferResult> {
   return withTeam(db, teamId, async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skill_offer:${teamId}`}, 0))`,
+    );
     const [skill] = await tx
       .select({ slug: teamSkills.slug, offerToAll: teamSkills.offerToAll })
       .from(teamSkills)
       .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)))
       .for("update");
-    if (!skill) return null;
-    if (skill.offerToAll === offerToAll) return offerToAll;
+    if (!skill) return { ok: false, error: "not_found" };
+    if (skill.offerToAll === offerToAll) return { ok: true, offerToAll };
+    if (offerToAll) {
+      const offered = await tx
+        .select({ id: teamSkills.id })
+        .from(teamSkills)
+        .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.offerToAll, true)));
+      if (offered.length >= MAX_OFFERED_SKILLS) return { ok: false, error: "offer_limit" };
+    }
     await tx
       .update(teamSkills)
       .set({ offerToAll })
@@ -182,7 +228,7 @@ export function setOfferToAll(
       teamId,
       target: { skillId, slug: skill.slug, offerToAll },
     });
-    return offerToAll;
+    return { ok: true, offerToAll };
   });
 }
 
