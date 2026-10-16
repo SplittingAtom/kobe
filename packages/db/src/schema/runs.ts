@@ -81,6 +81,30 @@ export type RunKind = (typeof RUN_KINDS)[number];
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
 export const RUN_INPUT_MAX_CHARS = 200_000;
 
+/** Where a skill a run loaded comes from (KOBE-297): a team skill, a personal one, the image. */
+export const RUN_SKILL_SOURCES = ["team", "personal", "builtin"] as const;
+export type RunSkillSource = (typeof RUN_SKILL_SOURCES)[number];
+
+/**
+ * One skill the run was given at start (KOBE-297), as the server listed it in `run.start`: a bundle
+ * (`sha256` set) or a built-in (no hash). Written by the server only.
+ */
+export interface RunSkillRef {
+  readonly name: string;
+  readonly source: RunSkillSource;
+  readonly sha256?: string;
+}
+
+/** A skill the run used (KOBE-297): the server saw its SKILL.md read by this tool call. */
+export interface RunSkillUse {
+  readonly tool_call_id: string;
+  readonly name: string;
+  readonly source: RunSkillSource;
+}
+
+/** Most skill uses one run records (a run reading the same skills over and over adds nothing). */
+export const RUN_SKILL_USES_MAX = 64;
+
 const textList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
 /**
@@ -160,6 +184,19 @@ export const runs = pgTable(
     stopRequestedAt: timestamp({ withTimezone: true }),
     /** Client-supplied idempotency key of the message (KOBE-30), unique per thread. */
     clientKey: text(),
+    /**
+     * The skills the run was started with (KOBE-297), written with `run.start` (and again by a
+     * recovery restart, which re-resolves them): the only paths whose SKILL.md read counts as a
+     * use. Server-written; `[]` for runs from before it and for runs with no skills.
+     */
+    skillRefs: jsonb().$type<readonly RunSkillRef[]>().notNull().default([]),
+    /**
+     * Skills the run used (KOBE-297): a successful `read` of a SKILL.md under one of `skill_refs`'
+     * directories, matched by the server (never a sandbox label), at most
+     * {@link RUN_SKILL_USES_MAX}. Kept with the run (not in `run_events`, which D18 compacts), so the
+     * chat's "Used skill" badge and the per-skill usage outlive the event stream.
+     */
+    skillsUsed: jsonb().$type<readonly RunSkillUse[]>().notNull().default([]),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
