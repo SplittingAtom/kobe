@@ -36,8 +36,9 @@
 1. **Sync at the prompt** (`translate.ts`): `message_end` with role user asks for an entry sync.
    Pi's own entries (setup, branch marker, prompt) are mirrored while the run is active.
 2. **Late batch of an ended run** (`ingest.ts`): the CAS still refuses the batch and rolls it back.
-   Then, if the run's prompt was never bound, Pi's entries (the batch's, else read now, up to three
-   reads while Pi has not written it yet) go through `findRunPrompt` (`runs/run-prompt-pi.ts`,
+   Then, if the run's prompt was never bound, Pi's entries (the batch's, else read now; the first
+   attempt finishes before the late frames are acked, up to two more reads follow in the background
+   while Pi has not written it yet) go through `findRunPrompt` (`runs/run-prompt-pi.ts`,
    review M1/M2, re-review N1/N2): the prompt is found by the entry tree, never by array order,
    from the run's own `kobe.branch` marker under `runs.parent_entry_id` (required when the run has
    one; a branch-less run starts at the root), through setup entries, to exactly one user message.
@@ -131,3 +132,7 @@ No migration (no schema change).
   prompt once as the leaf; event list now has `entry.committed`) and "Stop before the first token
   (KOBE-290)" on real Pi with the fake model's new `kobe-slow-start` marker. **Unproven until G1 CI**
   (no k3d outside CI).
+- Flake (coordinator, 2026-10-15): "a first run stopped right after Pi announced it…" failed 3/12.
+  Cause: the late path ran fire-and-forget after the ack, so the test's reads/acks wait raced the
+  keep's commit (product: an ack did not mean the prompt was kept). Now the first attempt is
+  awaited before the ack; the test is deterministic (30 consecutive green runs of the file).

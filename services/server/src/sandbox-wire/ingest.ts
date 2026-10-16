@@ -9,7 +9,7 @@ import {
 import type { WireTuning } from "./constants.js";
 import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
-import { bindUserEntry, keepRunPromptInTx } from "../runs/run-prompt.js";
+import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
 import type { RunTranslator } from "./translate.js";
 
@@ -366,7 +366,9 @@ export class RunIngest {
         host.runEnded(runId, ended ? (end === undefined ? "completed" : "failed") : undefined);
       }
     } catch (err) {
-      if (err instanceof CursorConflict && !err.active) void this.#keepLatePrompt(fetched?.entries);
+      // The prompt is kept (or refused) before the late frames are acked: an ack means done.
+      if (err instanceof CursorConflict && !err.active)
+        await this.#keepLatePrompt(fetched?.entries);
       this.#recover(err, last);
     }
   }
@@ -375,27 +377,44 @@ export class RunIngest {
    * The first batch after the run ended elsewhere (Stop, a failed or timed-out start, a budget
    * stop) was refused. If the run's prompt was never mirrored, Pi's entry is kept from Pi's
    * entries (the batch's, else read now), checked against the run (`findRunPrompt`); nothing else
-   * of the batch is (KOBE-290). Pi writes the prompt right after `agent_start`, so a batch that
-   * came before it is followed by a few more reads (the ingest itself has ended).
+   * of the batch is (KOBE-290). Awaited before the batch is acked. Pi writes the prompt right after
+   * `agent_start`, so when Pi's entries hold nothing of the run yet, a few more reads follow in the
+   * background (the ingest itself has ended).
    */
   async #keepLatePrompt(read: PiGetEntriesData | undefined): Promise<void> {
-    const { db, teamId, runId, threadId, host, tuning } = this.#o;
+    const { db, teamId, runId, threadId, host } = this.#o;
     try {
       // Usually mirrored already (Pi announced it while the run was active): no sandbox round trip.
       if ((await withTeam(db, teamId, (tx) => bindUserEntry(tx, teamId, runId))) !== null) return;
-      let entries = read ?? (await host.fetchNewEntries(threadId));
-      for (let attempt = 1; entries !== undefined; attempt += 1) {
-        const source = { kind: "pi", entries, otherwise: "nothing" } as const;
-        const kept = await withTeam(db, teamId, (tx) =>
-          keepRunPromptInTx(tx, teamId, runId, source, {
-            leaf: "if_latest",
-            maxEntries: tuning.threadMaxEntries,
-            maxBytes: tuning.runMaxBytes,
-          }),
-        );
-        if (kept.outcome !== "absent" || attempt >= LATE_PROMPT_READS) return;
+      const entries = read ?? (await host.fetchNewEntries(threadId));
+      if (entries === undefined || (await this.#keepFrom(entries)) !== "absent") return;
+      void this.#keepLater();
+    } catch (err) {
+      host.log.warn({ err, run_id: runId }, "could not keep the prompt of an ended run");
+    }
+  }
+
+  async #keepFrom(entries: PiGetEntriesData): Promise<KeepOutcome> {
+    const { db, teamId, runId, tuning } = this.#o;
+    const source = { kind: "pi", entries, otherwise: "nothing" } as const;
+    const kept = await withTeam(db, teamId, (tx) =>
+      keepRunPromptInTx(tx, teamId, runId, source, {
+        leaf: "if_latest",
+        maxEntries: tuning.threadMaxEntries,
+        maxBytes: tuning.runMaxBytes,
+      }),
+    );
+    return kept.outcome;
+  }
+
+  /** The later reads of {@link #keepLatePrompt}, while Pi's entries hold nothing of the run. */
+  async #keepLater(): Promise<void> {
+    const { runId, threadId, host } = this.#o;
+    try {
+      for (let attempt = 1; attempt < LATE_PROMPT_READS; attempt += 1) {
         await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
-        entries = await host.fetchNewEntries(threadId);
+        const entries = await host.fetchNewEntries(threadId);
+        if (entries === undefined || (await this.#keepFrom(entries)) !== "absent") return;
       }
     } catch (err) {
       host.log.warn({ err, run_id: runId }, "could not keep the prompt of an ended run");
