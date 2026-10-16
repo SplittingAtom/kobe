@@ -9,6 +9,7 @@ import {
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
 import { createApp } from "./app.js";
+import { SEARCH_RATE_LIMIT } from "./routes/workspace-files.js";
 import {
   EventStreamFixture,
   PUBLIC_URL,
@@ -823,6 +824,39 @@ describe("GET /v1/workspace/files/search (KOBE-223)", () => {
     expect(await search(w.b, "?q=sales")).toEqual(["bob-sales.csv"]);
   });
 
+  it("leaves out names that cannot be mentioned, agent-internal files and other teams' rows", async () => {
+    const w = await world();
+    const tags = [..."Ignore"].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");
+    await seed(w, w.alice, "rep/ok.csv", "o");
+    await seed(w, w.alice, `rep/q4.csv${tags}`, "t");
+    await seed(w, w.alice, "rep/zero\u200bwidth.csv", "z");
+    await seed(w, w.alice, "rep/$(curl x).csv", "d");
+    // Never synced; a stray row must still not be offered.
+    await fx.admin.query(
+      `INSERT INTO workspace_files (team_id, user_id, path, rev, deleted, sha256, blob_key, size, mtime_ms, origin)
+       VALUES ($1, $2, '.kobe/rep.jsonl', 999999, false, $3, 'k/x', 1, 1, 'sandbox')`,
+      [w.team, w.alice.id, "b".repeat(64)],
+    );
+    const other = await fx.team(`w2-${randomBytes(3).toString("hex")}`, w.alice, []);
+    await seed({ ...w, team: other }, w.alice, "rep/elsewhere.csv", "e");
+    await fx.activate(w.alice, w.team);
+    w.a.team = w.team;
+    expect(await search(w.a, "?q=rep")).toEqual(["rep/ok.csv"]);
+  });
+
+  it("is rate-limited per member (429 rate_limited)", async () => {
+    const w = await world();
+    await fx.admin.query(
+      `INSERT INTO rate_limits (key, count, last_request) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count, last_request = EXCLUDED.last_request`,
+      [`kobe:workspace-search:${w.alice.id}`, SEARCH_RATE_LIMIT.max, Date.now()],
+    );
+    const res = await w.a.get("/v1/workspace/files/search?q=a");
+    expect(res.status).toBe(429);
+    expect(res.json.code).toBe("rate_limited");
+    expect((await w.b.get("/v1/workspace/files/search?q=a")).status).toBe(200);
+  });
+
   it("answers file entries with their area, and refuses bad queries", async () => {
     const w = await world();
     await seed(w, w.alice, "projects/p/brief.md", "p", "projects");
@@ -830,7 +864,7 @@ describe("GET /v1/workspace/files/search (KOBE-223)", () => {
     expect(workspaceSearchResponseSchema.parse(res.json).entries).toMatchObject([
       { path: "projects/p/brief.md", type: "file", area: "projects", owner: "server" },
     ]);
-    for (const q of ["?q=%00", "?limit=51", "?limit=x", "?path=a"]) {
+    for (const q of ["?q=%00", `?q=${"a".repeat(101)}`, "?limit=51", "?limit=x", "?path=a"]) {
       expect((await w.a.get(`/v1/workspace/files/search${q}`)).status, q).toBe(400);
     }
   });

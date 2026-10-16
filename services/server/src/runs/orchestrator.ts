@@ -37,7 +37,7 @@ import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
-import { rewriteMentions } from "./mentions.js";
+import { checkMentionPaths, rewriteMentions } from "./mentions.js";
 import { compactThread } from "./compaction.js";
 import {
   budgetStoppedEvent,
@@ -271,6 +271,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     options: { readonly clientKey?: string; readonly scheduled?: ScheduledSubmit } = {},
   ): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
+    // A member's mentions are checked before any upload is staged (KOBE-223 N1).
+    if (command.trigger === "user") checkMentionPaths(command.mentions ?? []);
     const fileIds = command.file_ids ?? [];
     if (fileIds.length > 0 && this.#attachments === undefined) {
       throw new RunError("attachments_unavailable");
@@ -340,11 +342,22 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         if (seen) return { result: { run_id: seen.id, queued: seen.status === "queued" } };
       }
       // @file mentions (KOBE-223) resolve against the owner's own workspace, never the client's
-      // word; scheduled prompts are sent as written.
-      const input =
-        command.trigger === "user"
-          ? await rewriteMentions(tx, ownerOf(teamId, thread), command.content)
-          : command.content;
+      // word. A member's bad mention refuses the message; a schedule's file that is gone by now
+      // stays literal text and the run goes ahead.
+      const mentioned = await rewriteMentions(
+        tx,
+        ownerOf(teamId, thread),
+        command.content,
+        command.mentions ?? [],
+        command.trigger === "user" ? "refuse" : "keep",
+      );
+      if (mentioned.skipped > 0) {
+        this.#log.warn(
+          { team_id: teamId, thread_id: thread.id, skipped: mentioned.skipped },
+          "mentioned files not found; left as text",
+        );
+      }
+      const input = mentioned.text;
       // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
       const budgetBlocked = await this.#budgetBlocksSchedule(tx, actor, scheduled !== undefined);
       const parent = command.parent_entry_id ?? null;
@@ -433,7 +446,14 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       await this.#assertMayRun(tx, actor, false);
       return {
         run: found.run,
-        message: await rewriteMentions(tx, ownerOf(actor.team_id, found.thread), body.content),
+        message: (
+          await rewriteMentions(
+            tx,
+            ownerOf(actor.team_id, found.thread),
+            body.content,
+            body.mentions ?? [],
+          )
+        ).text,
       };
     });
     // A compaction (KOBE-213) has no turn to steer.
@@ -528,7 +548,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (run.status !== "queued") {
         throw new RunError("invalid_transition", "Only queued messages can be edited.");
       }
-      const input = await rewriteMentions(tx, ownerOf(actor.team_id, thread), body.content);
+      const { text: input } = await rewriteMentions(
+        tx,
+        ownerOf(actor.team_id, thread),
+        body.content,
+        body.mentions ?? [],
+      );
       await tx.execute(sql`
         UPDATE runs SET input = ${input} WHERE team_id = ${actor.team_id} AND id = ${runId}`);
       await touchThread(tx, actor.team_id, run.threadId);

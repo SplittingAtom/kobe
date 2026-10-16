@@ -1,5 +1,6 @@
 import { sql, type KobeTx } from "@kobe/db";
 import {
+  mentionPathIssue,
   WORKSPACE_EXCLUDED_PREFIXES,
   WORKSPACE_SEARCH_MAX_RESULTS,
   type WorkspaceFileEntry,
@@ -12,10 +13,22 @@ type SearchRow = { path: string; size: string; mtime_ms: string; sha256: string 
 const INTERNAL = WORKSPACE_EXCLUDED_PREFIXES.map((p) => underPattern(p.slice(0, -1)));
 
 /**
+ * Rows one search reads at most, in path order through the primary key (team, user, path): the
+ * work per call is bounded however many files a workspace holds; files past the bound are not
+ * found (KOBE-223 S1).
+ */
+export const SEARCH_SCAN_MAX = 20_000;
+/** Matches taken from the scan, before ranking. */
+const SEARCH_MATCH_MAX = 500;
+
+/**
  * The caller's own synced files whose path contains `query` (case-insensitive), for the composer's
  * `@` picker (KOBE-223). Files only (manifest rows are files; symlinks are never synced), live
- * rows only, agent-internal paths never. Names starting with the query come first, then newest.
- * Rows come from the owner's (team, user) only; the caller runs it inside `withTeam()`.
+ * rows only, agent-internal paths never, and never a path that cannot be mentioned
+ * (`mentionPathIssue`: invisible, format or shell characters). Reads at most
+ * {@link SEARCH_SCAN_MAX} rows by index and no per-row regex; names starting with the query come
+ * first, then newest. Rows come from the owner's (team, user) only; the caller runs it inside
+ * `withTeam()`.
  */
 export async function searchFiles(
   tx: KobeTx,
@@ -26,14 +39,25 @@ export async function searchFiles(
   const q = query.toLowerCase();
   const internal = INTERNAL.map((pattern) => sql`AND path NOT LIKE ${pattern}`);
   const res = await tx.execute<SearchRow>(sql`
-    SELECT path, size, mtime_ms, sha256 FROM workspace_files
-     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND NOT deleted
-       ${sql.join(internal, sql` `)}
-       AND strpos(lower(path), ${q}) > 0
-     ORDER BY starts_with(lower(regexp_replace(path, '^.*/', '')), ${q}) DESC,
-              mtime_ms DESC, path COLLATE "C"
-     LIMIT ${Math.min(Math.max(limit, 1), WORKSPACE_SEARCH_MAX_RESULTS)}`);
-  return res.rows.map(searchEntry);
+    SELECT path, size, mtime_ms, sha256 FROM (
+      SELECT path, size, mtime_ms, sha256 FROM workspace_files
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND NOT deleted
+       ORDER BY path LIMIT ${SEARCH_SCAN_MAX}
+    ) AS scanned
+     WHERE strpos(lower(path), ${q}) > 0 ${sql.join(internal, sql` `)}
+     LIMIT ${SEARCH_MATCH_MAX}`);
+  const cap = Math.min(Math.max(limit, 1), WORKSPACE_SEARCH_MAX_RESULTS);
+  const startsWith = (r: SearchRow) => baseName(r.path).toLowerCase().startsWith(q);
+  return res.rows
+    .filter((r) => mentionPathIssue(r.path) === undefined)
+    .sort(
+      (a, b) =>
+        Number(startsWith(b)) - Number(startsWith(a)) ||
+        Number(b.mtime_ms) - Number(a.mtime_ms) ||
+        (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+    )
+    .slice(0, cap)
+    .map(searchEntry);
 }
 
 function searchEntry(r: SearchRow): WorkspaceFileEntry {

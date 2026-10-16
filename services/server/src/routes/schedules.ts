@@ -10,6 +10,8 @@ import { listMemberships, withTeam, type KobeTx } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { RunError } from "../runs/errors.js";
+import { checkMentionsExist } from "../runs/mentions.js";
 import { principalActive } from "../runs/store.js";
 import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
@@ -39,6 +41,23 @@ import {
   updateSchedule,
   type ScheduleRow,
 } from "../schedules/store.js";
+
+/** A schedule's `@file` mentions checked against the owner's workspace now (KOBE-223 S3). */
+async function mentionsAnswer(
+  tx: KobeTx,
+  owner: { readonly teamId: string; readonly userId: string },
+  mentions: readonly string[],
+): Promise<Answer | null> {
+  try {
+    await checkMentionsExist(tx, owner, mentions);
+    return null;
+  } catch (err) {
+    if (err instanceof RunError && err.code === "invalid_mention") {
+      return scheduleError("invalid_mention", { message: err.message });
+    }
+    throw err;
+  }
+}
 
 /**
  * Schedules API (KOBE-173, spec D32; contract in @kobe/protocol `schedules.ts`): a member's
@@ -126,11 +145,14 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
         }
         const blocked = body.active ? await capAnswer(tx, userId, teamId, elsewhere, userId) : null;
         if (blocked) return blocked;
+        const refused = await mentionsAnswer(tx, { teamId, userId }, body.mentions);
+        if (refused) return refused;
         const row = await insertSchedule(tx, {
           teamId,
           userId,
           agentId: body.agent_id,
           prompt: body.prompt,
+          mentions: body.mentions,
           recurrence: body.recurrence,
           tz: body.tz,
           active: body.active,
@@ -187,6 +209,10 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
             return scheduleError("agent_not_runnable");
           }
         }
+        if (patch.mentions !== undefined) {
+          const refused = await mentionsAnswer(tx, { teamId, userId }, patch.mentions);
+          if (refused) return refused;
+        }
         const active = patch.active ?? row.active;
         const activating = active && !row.active;
         if (activating) {
@@ -205,6 +231,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
           {
             ...(patch.agent_id !== undefined ? { agentId: patch.agent_id } : {}),
             ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+            ...(patch.mentions !== undefined ? { mentions: patch.mentions } : {}),
             ...(patch.recurrence !== undefined ? { recurrence: patch.recurrence } : {}),
             ...(patch.tz !== undefined ? { tz: patch.tz } : {}),
             ...(patch.notify_email !== undefined ? { notifyEmail: patch.notify_email } : {}),

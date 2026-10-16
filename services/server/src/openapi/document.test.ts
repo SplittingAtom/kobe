@@ -105,9 +105,14 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
   it("matches §6.1: messages take content (+ parent_entry_id, file_ids) and answer run_id, queued", () => {
     const schemas = (doc.components as { schemas: Record<string, { properties: object }> }).schemas;
     const props = (name: string) => Object.keys(schemas[name]?.properties ?? {});
-    expect(props("SubmitMessageBody")).toEqual(["parent_entry_id", "content", "file_ids"]);
+    expect(props("SubmitMessageBody")).toEqual([
+      "parent_entry_id",
+      "content",
+      "file_ids",
+      "mentions",
+    ]);
     expect(props("SubmitMessageResult")).toEqual(["run_id", "queued"]);
-    expect(props("SteerBody")).toEqual(["content"]);
+    expect(props("SteerBody")).toEqual(["content", "mentions"]);
     for (const op of ["steer", "cancel", "retry"]) {
       expect(
         Object.keys((doc.paths as Record<string, object>)[`/v1/runs/{id}/${op}`] ?? {}),
