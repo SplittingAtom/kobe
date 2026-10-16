@@ -239,7 +239,7 @@ export async function summarize(
       read_only: !own,
       owner_name: own ? null : (owners.get(row.ownerUserId) ?? null),
       ...maskedProject(row, viewer, viewable),
-      ...(waiting.has(row.id) ? { pending_approval: true } : {}),
+      ...(waiting.has(row.id) ? { pending_approval: true as const } : {}),
     };
     return source
       ? { ...summary, forked_from_thread_id: source.id, forked_from_title: source.title }
