@@ -2637,6 +2637,25 @@ JS
       "$(psql_kobe "SELECT run_id IS NOT NULL FROM files WHERE team_id = '$E2E_TEAM_ID' AND id = '${up_file:-00000000-0000-4000-8000-000000000000}'")"
     contains "uploads: attaching the file keeps its object until the thread goes" "${up_file:-none}" \
       "$(s3_ls "${up_thread:-none}")"
+    # KOBE-223 (CE22): an @file mention. The upload is now a file of the Owner's workspace
+    # (uploads/<thread>/e2e-upload.txt); the message names it only by the composer's marker, the
+    # server rewrites it to the absolute sandbox path, and the real sandbox reads exactly that
+    # path. Mentions outside /workspace or of unknown files are refused before any run exists.
+    mention_out=$(chat_run "bash: cat @file(uploads/$up_thread/e2e-upload.txt); exit 0" 300000 "" "" "$up_thread" 1)
+    printf '     mention message: %s\n' "$(printf '%s' "$mention_out" | tr '\n' ' ' | cut -c1-500)"
+    mention_run=$(printf '%s\n' "$mention_out" | sed -n 's/^run=//p')
+    contains "mentions: a message with an @file mention starts a run (201)" '^message=201$' "$mention_out"
+    contains "mentions: the stored prompt names the absolute sandbox path, not the marker" \
+      "^bash: cat /workspace/uploads/$up_thread/e2e-upload.txt; exit 0\$" \
+      "$(psql_kobe "SELECT input FROM runs WHERE team_id = '$E2E_TEAM_ID' AND id = '${mention_run:-00000000-0000-4000-8000-000000000000}'")"
+    contains "mentions: the agent read the mentioned file by that path" \
+      "^text=fake-openai: tool said: ${UPLOAD_CONTENT}( |\$)" "$mention_out"
+    for bad in "@file(/etc/passwd)" "@file(../../etc/passwd)" "@file(uploads/$up_thread/missing.txt)"; do
+      contains "mentions: $bad is refused (422)" '^message=422$' \
+        "$(chat_run "bash: cat $bad; exit 0" 30000 "" "" "$up_thread")"
+    done
+    contains "mentions: no refused mention left a run" '^0$' \
+      "$(psql_kobe "SELECT count(*) FROM runs WHERE team_id = '$E2E_TEAM_ID' AND thread_id = '${up_thread:-00000000-0000-4000-8000-000000000000}' AND input LIKE '%@file(%'")"
     up_purged() { ! s3_ls "$up_thread" | grep -q "${up_file:-none}"; }
     as_owner "DELETE /v1/threads/$up_thread" >/dev/null
     contains "uploads: Delete forever of the thread answers 204" '^204 ' "$(as_owner "POST /v1/threads/$up_thread/purge")"
