@@ -42,7 +42,7 @@ export interface FilesApi {
    * The caller's own synced files whose path contains `query` (KOBE-223, the composer's `@`
    * picker): names starting with it first, then newest; at most 50.
    */
-  search(query: string, limit?: number): Promise<ApiResult<FileSearchResult>>;
+  search(query: string, limit?: number, signal?: AbortSignal): Promise<ApiResult<FileSearchResult>>;
   download(path: string): Promise<ApiResult<Uint8Array>>;
   upload(folder: string, file: File): Promise<ApiResult<FileEntry>>;
   remove(path: string): Promise<ApiResult<void>>;
@@ -69,10 +69,10 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
   const opts = { teamId, fetchFn };
   return {
     list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
-    search: (q, limit) =>
+    search: (q, limit, signal) =>
       apiRequest(
         `/v1/workspace/files/search${query({ q, limit: limit === undefined ? undefined : String(limit) })}`,
-        opts,
+        { ...opts, signal },
       ),
     read: (path, maxBytes, wholeOnly = false) =>
       apiReadCapped(`/v1/workspace/file${query({ path })}`, maxBytes, { ...opts, wholeOnly }),

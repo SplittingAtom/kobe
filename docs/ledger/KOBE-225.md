@@ -37,12 +37,19 @@ Plus `?` (`keyboard-shortcuts`, the sheet) and Up arrow in the composer (`edit-l
   `blockerOf` in `slash.ts`) is the one rule for the `/` menu, the palette and the keys.
 - **Keys** (`components/shell/shortcut-keys.tsx`, pure half `lib/shell/shortcuts.ts`): one
   document keydown listener, bubbling, skips `defaultPrevented` (Escape and Enter keep their
-  owners) and repeats. Not in text fields (except Mod+K anywhere, Mod+. and Mod+Shift+Enter in
-  the composer), not while `isComposing`/keyCode 229, not while a modal dialog is open (role
-  dialog with `aria-modal` or Radix `data-state=open`, alertdialog: palette, confirms, the rail
-  drawer, the artifact sheet), not when an iframe has the focus. Letters also match by `code`
-  (non-Latin layouts); punctuation ignores Shift. A refused key shows "Label: reason" in a
-  visible status line for 4 s (role=status), and does nothing.
+  owners) and repeats. Every Mod chord runs from the message box (review M1: the focus is
+  usually there) and is `preventDefault`ed, so Cmd+[ never goes Back; from other fields (search,
+  edit box) only Mod+K; a bare `?` never from a field. Not while `isComposing`/keyCode 229, not
+  while a modal dialog is open (role dialog with `aria-modal` or Radix `data-state=open`,
+  alertdialog: palette, confirms, the rail drawer, the artifact sheet; also non-modal Radix
+  popovers such as Move or the gauge, on purpose: conservative, review N4), not when an iframe
+  has the focus. Shift must match exactly (Cmd+Shift+[ / ] stay the browser's tab keys), except
+  `/` and `?`, which some layouts type with Shift. The typed character decides when it is
+  printable ASCII (Dvorak, AZERTY); `code` is the fallback only for non-Latin keys (review S1,
+  S2). A refused key shows "Label: reason" in a visible status line for 4 s (role=status).
+- **Alias:** New conversation also answers Mod+Shift+O (`alias` on the command; tooltips,
+  `aria-keyshortcuts` and the sheet show it first), since browsers keep Mod+N for a new window
+  outside an installed app (review S3).
 - **Palette** (`components/shell/command-palette.tsx`, pure half `lib/shell/palette.ts`): Radix
   Dialog (focus trap; focus goes back to what had it, then the picked action runs, so an action
   that moves focus keeps it); input `role=combobox` with `aria-controls`/`aria-activedescendant`,
@@ -50,22 +57,32 @@ Plus `?` (`keyboard-shortcuts`, the sheet) and Up arrow in the composer (`edit-l
   href or `palette`, registry order, navigation last (consoles via `useOpenConsoles`), blocked
   ones disabled with the reason. Choices (Regenerate with, Move, Share, Model) are a second step;
   Backspace on empty or Escape goes back. Threads: `GET /v1/threads?q=`; files:
-  `GET /v1/workspace/files/search` (invisible-character names left out, as `@`); both debounced
-  250 ms, 8 per group, newest query only (`use-palette-search.ts`). A reader's palette blocks
-  all but read-only-safe actions (layout actions are read-only-safe).
-- **Up arrow** (composer `onKeyDown`): only with no modifier, no IME, value `""`, caret 0 and no
+  `GET /v1/workspace/files/search` (invisible-character names left out, as `@`); both from 2
+  characters, debounced 250 ms, 8 per group, aborted (`AbortController` through `apiRequest`)
+  when a newer query replaces them, cached per query while open, paused 10 s after a 429; no rows
+  while the next answers load, so a fast Enter never opens an older query's result (review S4)
+  (`use-palette-search.ts`). A reader's palette blocks
+  all but read-only-safe actions (layout actions are read-only-safe). Reader state comes from
+  `useThreadReadOnly` (`threadReadOnly(custom, summary)`, the KOBE-224 rule), so a deep link to a
+  shared thread the list has not shown counts too (review S6).
+- **Up arrow** (composer `onKeyDown`): only with no modifier, no IME (`isComposing` or Safari's
+  keyCode 229), value `""`, caret 0 and no
   open trigger popover; runs the bound `edit-last-message` when not blocked, else does nothing
   silently (no refusal toast for a stray arrow).
-- `useNavigate` moved to `components/shell/use-navigate.ts` (slash menu and palette);
-  `useListedThreads` extracted from the rail for the previous/next order.
+- **Previous/next** follow the rail exactly: `ThreadGroupsProvider` (`components/shell/thread-groups.tsx`)
+  reads the listed threads, Trash and project names once and groups them; the rail and the
+  stepper both use it (review M2). Folded groups are stepped through; Archived and Trash are not.
+- **Artifact column** hidden with Mod+Shift+A stays mounted (`data-hidden` on the grid's column,
+  CSS `display: none`), so previews keep their state (review S5).
+- `useNavigate` moved to `components/shell/use-navigate.ts` (slash menu and palette).
 
 ## Departures and known limits
 
 - **Mod+N:** Chrome and Firefox reserve Ctrl/Cmd+N in a normal tab (new window) and never pass it
-  to the page; it works in an installed app window. New conversation stays one Mod+K away.
-- **Previous/next order** sorts project groups by id-equal label ("Project"), not by project
-  name as the rail does: with two or more projects the step order between project groups may
-  differ from the rail's. Inside a group it matches.
+  to the page; it works in an installed app window. Mod+Shift+O is its alias everywhere (the sheet
+  says so).
+- **Browser chords** (Ctrl+Shift+A/D/E, Cmd+.) are not on the browsers' reserved lists; still to
+  check by hand in Chrome, Firefox and Safari on gate1.
 - **Iframes:** artifact previews are sandboxed and cross-origin, so their keys never reach the
   page; the handler also ignores a press while an iframe has the focus. Shortcuts resume once
   the member clicks back into the conversation (the sheet says so).
@@ -78,18 +95,22 @@ Plus `?` (`keyboard-shortcuts`, the sheet) and Up arrow in the composer (`edit-l
 
 ## Evidence
 
-- ac-1: `components/shell/command-palette.test.tsx` (11: dialog/combobox ARIA, focus trap and
+- ac-1: `components/shell/command-palette.test.tsx` (13: + fast Enter after typing, 2-letter
+  minimum and aborted requests; dialog/combobox ARIA, focus trap and
   return, every registered action listed with key or reason, run by words, blocked says why and
   stays open, Regenerate with choices + back, edit keeps focus, thread by title, file opens in
   the column, one debounced request each, navigation via the router, reader blocked);
   `lib/shell/palette.test.ts`.
-- ac-2: `components/shell/shortcut-keys.test.tsx` (18: each of the twelve, refusals, the `?` sheet
-  lists exactly 12 in order and returns focus, tooltips' `aria-keyshortcuts`, not in fields, IME,
-  dialogs, iframes or after another handler); `lib/shell/shortcuts.test.ts`;
+- ac-2: `components/shell/shortcut-keys.test.tsx` (33: each of the twelve on the page and in the
+  composer, default prevented; the alias; refusals; a reader's refusals; previous/next with two
+  projects named against recency; the `?` sheet lists exactly 12 in order and returns focus;
+  tooltips' `aria-keyshortcuts`; only Mod+K from other fields; Shift+[ / ] left alone; IME,
+  dialogs, iframes, another handler first); `lib/shell/shortcuts.test.ts`;
   `components/shell/icon-action.test.tsx`; `lib/chat/thread-groups.test.ts` (order, ends).
 - ac-3: `components/chat/edit-last.test.tsx` (7: opens the last question focused; not with text,
   in the `/` or `@` menus, with modifiers or IME, during a run, or in a draft).
 - Browser (gate1, later): `e2e/browser/tests/command-palette.spec.ts` (palette runs New
-  conversation, opens a thread by a word of it, `?` sheet lists 12).
-- Commands: `pnpm format:check`, `pnpm lint`, web `typecheck`, web vitest (151 files, 1444 tests)
+  conversation, opens a thread by a word of it, Mod+B and Mod+[ from the composer, `?` sheet
+  lists 12).
+- Commands: `pnpm format:check`, `pnpm lint`, web `typecheck`, web vitest (151 files, 1467 tests)
   green.

@@ -1,9 +1,7 @@
 "use client";
 
-import { useAuiState } from "@assistant-ui/react";
 import { Dialog } from "radix-ui";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { placementOf } from "../../lib/chat/thread-groups";
 import type { FileEntry } from "../../lib/files/api";
 import { formatShortcut } from "../../lib/shell/commands";
 import type { MenuChoice } from "../../lib/shell/menu";
@@ -20,10 +18,11 @@ import { cn } from "../../lib/utils";
 import { useOpenConsoles } from "../admin/console-links";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { useChatSession } from "../chat/kobe-runtime";
+import { useThreadReadOnly } from "../chat/use-thread-read-only";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { useBindCommands, useBoundCommands, useWantCommands } from "./command-bindings";
 import { useRail } from "./rail-state";
-import { usePaletteSearch, type ThreadHit } from "./use-palette-search";
+import { PALETTE_SEARCH_MIN_CHARS, usePaletteSearch, type ThreadHit } from "./use-palette-search";
 import { useNavigate } from "./use-navigate";
 
 /** One row of the list: what it shows and what picking it does. */
@@ -116,8 +115,7 @@ function useRows(
   const bound = useBoundCommands();
   const navigate = useNavigate();
   const consoles = useOpenConsoles();
-  const custom = useAuiState((s) => s.threadListItem.custom);
-  const readOnly = placementOf(custom).shared;
+  const readOnly = useThreadReadOnly();
   const panel = useArtifactPanel();
   const rail = useRail();
   const session = useChatSession();
@@ -282,8 +280,8 @@ function PaletteBody(props: BodyProps) {
             : (search.error ??
               (rows.length === 0
                 ? "Nothing matches."
-                : query.trim() === "" && step.kind === "root"
-                  ? "Type to search threads and files too."
+                : query.trim().length < PALETTE_SEARCH_MIN_CHARS && step.kind === "root"
+                  ? "Type two letters or more to search threads and files too."
                   : "")))}
         {said.n % 2 === 1 ? "\u00a0" : ""}
       </p>

@@ -2,14 +2,14 @@
 
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useMemo } from "react";
-import { adjacentThread, groupThreads, threadOrder } from "../../lib/chat/thread-groups";
+import { adjacentThread, threadOrder } from "../../lib/chat/thread-groups";
 import type { MenuBinding, MenuBindings } from "../../lib/shell/menu";
 import { useArtifactPanel, type ArtifactPanelApi } from "../chat/artifact-state";
 import { useDetail } from "../chat/detail";
 import { useBindCommands } from "./command-bindings";
 import { useRail, type RailApi } from "./rail-state";
 import { toggleTheme, useTheme } from "./use-theme";
-import { useListedThreads } from "./use-listed-threads";
+import { useThreadGroups } from "./thread-groups";
 
 const NO_ARTIFACTS = "This conversation has no artifacts yet.";
 const FIRST = "This is the first conversation.";
@@ -38,12 +38,15 @@ function artifactsBinding(panel: ArtifactPanelApi): MenuBinding {
   };
 }
 
-/** Previous and next conversation (Mod+[ and Mod+]) in the rail's order, without wrapping. */
+/**
+ * Previous and next conversation (Mod+[ and Mod+]) in the rail's exact order (its groups, from
+ * the same provider), folded groups included, Archived and Trash left out; no wrapping.
+ */
 function useThreadSteps(): MenuBindings {
   const aui = useAui();
-  const listed = useListedThreads();
+  const { groups } = useThreadGroups();
   const current = useAuiState((s) => s.threads.mainThreadId);
-  const order = useMemo(() => threadOrder(groupThreads(listed, [], () => undefined)), [listed]);
+  const order = useMemo(() => threadOrder(groups), [groups]);
   const step = (dir: -1 | 1, end: string): MenuBinding => {
     const target = adjacentThread(order, current, dir);
     const others = order.some((id) => id !== current);

@@ -19,7 +19,7 @@ import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { ariaKeyShortcuts } from "../../lib/shell/commands";
-import { READ_ONLY } from "../../lib/chat/thread-commands";
+import { IN_TRASH, READ_ONLY } from "../../lib/chat/thread-commands";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
@@ -28,7 +28,6 @@ import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
 
 const NOTHING_TO_STEER = "Nothing is running to steer.";
-const IN_TRASH = "Restore the conversation first.";
 
 /**
  * The composer's own actions for the palette and the shortcuts (CE23, KOBE-225): Go to the message
@@ -59,7 +58,9 @@ function wantsEditLast(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
     !e.altKey &&
     !e.ctrlKey &&
     !e.metaKey &&
+    // Safari ends a composition with a keydown that is no longer composing but reports 229.
     !e.nativeEvent.isComposing &&
+    e.nativeEvent.keyCode !== 229 &&
     el.value === "" &&
     el.selectionStart === 0 &&
     // An open trigger popover (the @ picker, the / menu) owns the arrows.

@@ -240,6 +240,60 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     ]);
   });
 
+  it("Enter right after typing never opens a result of the previous query", async () => {
+    const { t } = conversation();
+    const budget = fake.addThread("Budget 2027");
+    fake.addEntry(budget, null, { role: "user", content: "plan" });
+    openApp(fake, t);
+    await ready();
+    const { dialog } = await openPalette();
+    const user = userEvent.setup();
+    await user.keyboard("budget");
+    await within(dialog).findByRole("group", { name: "Threads" }, WAIT);
+    // The next query's answers are not in yet: the old rows are gone, Enter opens nothing.
+    await user.keyboard(" zz{Enter}");
+    expect(within(dialog).queryByRole("group", { name: "Threads" })).toBeNull();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(threadParam()).toBe(t);
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBe(dialog);
+  });
+
+  it("searches from two letters, and aborts the requests a newer query replaces", async () => {
+    const { t } = conversation();
+    const signals: { path: string; signal: AbortSignal | undefined }[] = [];
+    let release = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const inner = fake.fetch;
+    const fetchFn: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path.includes("q=")) {
+        signals.push({ path, signal: init?.signal ?? undefined });
+        await held;
+      }
+      return inner(input, init);
+    };
+    vi.stubGlobal("fetch", fetchFn);
+    window.history.replaceState(null, "", `/?thread=${t}`);
+    render(<ChatApp fetchFn={fetchFn} eventSource={fake.eventSource} reopenDelayMs={() => 0} />);
+    await ready();
+    const { dialog } = await openPalette();
+    const user = userEvent.setup();
+    await user.keyboard("s");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(signals).toEqual([]);
+    expect(within(dialog).getByText(/Type two letters or more/)).toBeTruthy();
+    await user.keyboard("u");
+    await waitFor(() => expect(signals).toHaveLength(2), WAIT);
+    await user.keyboard("m");
+    await waitFor(() => expect(signals).toHaveLength(4), WAIT);
+    expect(signals.slice(0, 2).map((s) => s.signal?.aborted)).toEqual([true, true]);
+    expect(signals.slice(2).map((s) => s.signal?.aborted)).toEqual([false, false]);
+    release();
+    await within(dialog).findByRole("group", { name: "Files" }, WAIT);
+  });
+
   it("navigation commands go where their links go, client-side", async () => {
     const push = vi.fn();
     const router = { push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn() };

@@ -19,12 +19,15 @@ export function ShellGrid({
   conversation,
   artifactWidth = null,
   artifactSheet = false,
+  artifactHidden = false,
 }: {
   readonly rail: ReactNode;
   readonly artifact: ReactNode;
   readonly conversation: ReactNode;
   readonly artifactWidth?: number | null;
   readonly artifactSheet?: boolean;
+  /** The member hid the column (CE23, KOBE-225): no space, its tabs and previews stay mounted. */
+  readonly artifactHidden?: boolean;
 }) {
   const style =
     artifactWidth === null
@@ -40,6 +43,7 @@ export function ShellGrid({
         className={styles.artifact}
         data-shell-region="artifact"
         {...(artifactSheet ? { "data-sheet-open": "" } : {})}
+        {...(artifactHidden ? { "data-hidden": "" } : {})}
       >
         {artifact}
       </div>

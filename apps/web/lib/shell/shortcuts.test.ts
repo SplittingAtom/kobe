@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { command } from "./commands";
+import { command, COMMANDS, type CommandId } from "./commands";
 import {
   CE23_SHORTCUTS,
   matchesShortcut,
   shortcutAllowed,
   shortcutCommand,
+  shortcutOf,
+  shortcutsOf,
   type KeyPress,
   type PressPlace,
 } from "./shortcuts";
@@ -59,10 +61,61 @@ describe("the twelve CE23 shortcuts", () => {
     expect(shortcutCommand(press("k"), false)).toBeNull();
   });
 
-  it("finds a letter by its key on a non-Latin layout, and punctuation typed with Shift", () => {
+  it("leaves Shift chords of punctuation to the browser (Cmd+Shift+[ is the previous tab)", () => {
+    expect(shortcutCommand(cmd("[", { shiftKey: true }), true)).toBeNull();
+    expect(shortcutCommand(cmd("{", { shiftKey: true, code: "BracketLeft" }), true)).toBeNull();
+    expect(shortcutCommand(cmd("}", { shiftKey: true, code: "BracketRight" }), true)).toBeNull();
+    expect(shortcutCommand(ctrl(">", { shiftKey: true, code: "Period" }), false)).toBeNull();
+    // Cmd+Shift+/ types ? on a US layout: macOS's Help search, not ours.
+    expect(shortcutCommand(cmd("?", { shiftKey: true, code: "Slash" }), true)).toBeNull();
+  });
+
+  it("takes the character a Latin layout typed, never a second physical key", () => {
+    // Dvorak: physical B types x (cut stays cut); physical N types b (the rail, not New).
+    expect(shortcutCommand(cmd("x", { code: "KeyB" }), true)).toBeNull();
+    expect(shortcutCommand(cmd("b", { code: "KeyN" }), true)).toBe("toggle-rail");
+    // Dvorak: physical . types e, which is not Stop.
+    expect(shortcutCommand(cmd("e", { code: "Period" }), true)).toBeNull();
+    // AZERTY: Ctrl+Shift+Q sits on physical A; only the A key is the artifact column.
+    expect(shortcutCommand(ctrl("Q", { shiftKey: true, code: "KeyA" }), false)).toBeNull();
+    expect(shortcutCommand(ctrl("A", { shiftKey: true, code: "KeyQ" }), false)).toBe(
+      "toggle-artifacts",
+    );
+    // German: / is Shift+7, the character decides.
+    expect(shortcutCommand(ctrl("/", { shiftKey: true, code: "Digit7" }), false)).toBe(
+      "focus-composer",
+    );
+  });
+
+  it("falls back to the physical key only when the layout typed no Latin character", () => {
     expect(shortcutCommand(ctrl("и", { code: "KeyB" }), false)).toBe("toggle-rail");
-    expect(shortcutCommand(ctrl("/", { shiftKey: true }), false)).toBe("focus-composer");
-    expect(shortcutCommand(ctrl("ö", { code: "BracketLeft" }), false)).toBe("previous-thread");
+    expect(shortcutCommand(ctrl("ü", { code: "BracketLeft" }), false)).toBe("previous-thread");
+    expect(shortcutCommand(ctrl("ü", { code: "BracketLeft", shiftKey: true }), false)).toBeNull();
+  });
+
+  it("New conversation also answers Mod+Shift+O, the key browsers pass to the page", () => {
+    expect(shortcutCommand(ctrl("O", { shiftKey: true }), false)).toBe("new-thread");
+    expect(shortcutCommand(cmd("o", { shiftKey: true }), true)).toBe("new-thread");
+    expect(shortcutsOf(command("new-thread"))).toEqual(["Mod+Shift+O", "Mod+N"]);
+  });
+
+  it("no press is two commands' key: each key's own press finds its command", () => {
+    const pressOf = (shortcut: string, mac: boolean): KeyPress => {
+      const keys = shortcut.split("+");
+      const key = keys.at(-1) ?? "";
+      const mod = keys.includes("Mod");
+      return press(key, {
+        shiftKey: keys.includes("Shift"),
+        metaKey: mod && mac,
+        ctrlKey: mod && !mac,
+      });
+    };
+    for (const c of COMMANDS) {
+      for (const k of shortcutsOf(c)) {
+        expect(shortcutCommand(pressOf(k, false), false)).toBe(c.id);
+        expect(shortcutCommand(pressOf(k, true), true)).toBe(c.id);
+      }
+    }
   });
 
   it("opens the sheet with a plain ?, typed with or without Shift", () => {
@@ -71,6 +124,8 @@ describe("the twelve CE23 shortcuts", () => {
     expect(matchesShortcut("?", ctrl("?"), false)).toBe(false);
   });
 });
+
+const keyOf = (id: CommandId) => shortcutOf(id);
 
 describe("shortcutAllowed: where a shortcut may run", () => {
   const free: PressPlace = {
@@ -82,19 +137,25 @@ describe("shortcutAllowed: where a shortcut may run", () => {
   };
 
   it("runs everywhere outside text fields", () => {
-    for (const id of CE23_SHORTCUTS) expect(shortcutAllowed(id, free)).toBe(true);
+    for (const id of CE23_SHORTCUTS) expect(shortcutAllowed(id, free, keyOf(id))).toBe(true);
+    expect(shortcutAllowed("keyboard-shortcuts", free, "?")).toBe(true);
   });
 
-  it("lets only the palette run from a text field; the composer also Stop and Steer", () => {
+  it("runs every chord from the message box; from other fields only the palette", () => {
     const field = { ...free, editing: true };
     const composer = { ...field, composer: true };
-    expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, field))).toEqual(["command-palette"]);
-    expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, composer))).toEqual([
-      "command-palette",
-      "stop",
-      "steer",
+    expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, composer, keyOf(id)))).toEqual([
+      ...CE23_SHORTCUTS,
     ]);
-    expect(shortcutAllowed("keyboard-shortcuts", field)).toBe(false);
+    expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, field, keyOf(id)))).toEqual([
+      "command-palette",
+    ]);
+  });
+
+  it("never runs a bare key (?) from a text field: it is typing", () => {
+    const field = { ...free, editing: true };
+    expect(shortcutAllowed("keyboard-shortcuts", field, "?")).toBe(false);
+    expect(shortcutAllowed("keyboard-shortcuts", { ...field, composer: true }, "?")).toBe(false);
   });
 
   it("never runs during IME composition, over a dialog, or from an iframe", () => {
@@ -102,8 +163,9 @@ describe("shortcutAllowed: where a shortcut may run", () => {
       { ...free, composing: true },
       { ...free, dialog: true },
       { ...free, frame: true },
+      { ...free, editing: true, composer: true, composing: true },
     ]) {
-      expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, place))).toEqual([]);
+      expect(CE23_SHORTCUTS.filter((id) => shortcutAllowed(id, place, keyOf(id)))).toEqual([]);
     }
   });
 });

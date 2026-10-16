@@ -124,6 +124,25 @@ describe("threadOrder and adjacentThread", () => {
     expect(threadOrder(groups)).toEqual(["p", "s", "a"]);
   });
 
+  it("orders project groups by name, as the rail, whatever the threads' recency", () => {
+    const projects = [
+      { id: "z1", custom: { projectId: "Z" } },
+      { id: "a1", custom: { projectId: "A" } },
+      { id: "z2", custom: { projectId: "Z" } },
+      { id: "u", custom: {} },
+    ];
+    const names = new Map([
+      ["Z", "Zeta"],
+      ["A", "Alpha"],
+    ]);
+    expect(threadOrder(groupThreads(projects, [], (id) => names.get(id)))).toEqual([
+      "a1",
+      "z1",
+      "z2",
+      "u",
+    ]);
+  });
+
   it("steps without wrapping; from a draft both go to the first", () => {
     const order = ["p", "s", "a"];
     expect(adjacentThread(order, "s", -1)).toBe("p");

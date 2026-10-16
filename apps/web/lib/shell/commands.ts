@@ -106,6 +106,8 @@ export interface Command {
   readonly group?: "areas" | "consoles";
   /** CE23 notation: `Mod` is Cmd on macOS and Ctrl elsewhere, e.g. `Mod+Shift+F`. */
   readonly shortcut?: string;
+  /** A second key for the same command, where browsers keep the first (Mod+N, a new window). */
+  readonly alias?: string;
   /** Navigation commands: where they go. */
   readonly href?: string;
   /** Absent means always available. */
@@ -238,6 +240,7 @@ const LIST = [
     icon: SquarePenIcon,
     scope: "rail",
     shortcut: "Mod+N",
+    alias: "Mod+Shift+O",
     slash: "new",
     readOnlySafe: true,
   },

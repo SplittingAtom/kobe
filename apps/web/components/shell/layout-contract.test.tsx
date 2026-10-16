@@ -70,9 +70,13 @@ describe("CSS contract", () => {
     const floors =
       "minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px)) minmax(400px, 1fr);";
     expect(
-      flat(rules(SHELL, ".grid:has(> .artifact:not(:empty))")).some((b) => b.includes(floors)),
+      flat(rules(SHELL, ".grid:has(> .artifact:not(:empty):not([data-hidden]))")).some((b) =>
+        b.includes(floors),
+      ),
     ).toBe(true);
     expect(declares(SHELL, ".artifact:empty", "display: none;")).toBe(true);
+    // Hidden by the member (KOBE-225): no column, its previews still mounted.
+    expect(declares(SHELL, ".artifact[data-hidden]", "display: none;")).toBe(true);
     // The resize handle has its own strip, off the column's scrollbar (review round 1).
     expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
   });

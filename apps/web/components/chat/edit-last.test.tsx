@@ -101,6 +101,8 @@ describe("Up arrow edits the last sent message (ac-3)", { timeout: 30_000 }, () 
     fireEvent.keyDown(input, { key: "ArrowUp", shiftKey: true });
     fireEvent.keyDown(input, { key: "ArrowUp", altKey: true });
     fireEvent.keyDown(input, { key: "ArrowUp", isComposing: true });
+    // Safari: the keydown that ends a composition is no longer composing but reports 229.
+    fireEvent.keyDown(input, { key: "ArrowUp", keyCode: 229 });
     await new Promise((r) => setTimeout(r, 50));
     expect(editBox()).toBeNull();
   });

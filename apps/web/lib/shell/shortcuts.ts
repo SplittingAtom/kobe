@@ -5,7 +5,7 @@
  * handler (`components/shell/shortcut-keys.tsx`) runs the command's live binding, the same one its
  * button, the `/` menu and the palette run.
  */
-import { command, COMMANDS, type CommandId } from "./commands";
+import { command, COMMANDS, type CommandId, type RegisteredCommand } from "./commands";
 
 /** The twelve, in the spec's order: the `?` sheet lists exactly these. */
 export const CE23_SHORTCUTS = [
@@ -22,6 +22,11 @@ export const CE23_SHORTCUTS = [
   "next-thread",
   "focus-composer",
 ] as const satisfies readonly CommandId[];
+
+/** What the sheet adds to a row. */
+export const SHEET_NOTES: Partial<Readonly<Record<CommandId, string>>> = {
+  "new-thread": "Mod+N works in an installed app only: browsers keep it for a new window.",
+};
 
 /** The sheet's words where a command's name is one state of a toggle ("Collapse the rail"). */
 export const SHEET_NAMES: Partial<Readonly<Record<CommandId, string>>> = {
@@ -40,8 +45,12 @@ export const COMPOSER_KEYS: readonly { readonly keys: string; readonly name: str
   { keys: "@", name: "Mention a workspace file" },
 ];
 
+/** macOS (and iPadOS, which reports itself as a Mac): `Mod` is Cmd there. */
 export function isMacPlatform(): boolean {
-  return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  if (typeof navigator === "undefined") return false;
+  const hinted = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+    ?.platform;
+  return /Mac|iPhone|iPad|iOS/i.test(hinted || navigator.platform || navigator.userAgent);
 }
 
 /** What a press carries that matters here (a DOM `KeyboardEvent` fits). */
@@ -54,7 +63,7 @@ export interface KeyPress {
   readonly altKey: boolean;
 }
 
-/** The physical key of a punctuation shortcut: the fallback when a layout maps it elsewhere. */
+/** The physical key in the US place of a punctuation shortcut. */
 const CODES: Readonly<Record<string, string>> = {
   ".": "Period",
   "[": "BracketLeft",
@@ -62,18 +71,32 @@ const CODES: Readonly<Record<string, string>> = {
   "/": "Slash",
 };
 
+/** Characters some layouts type with Shift (German `/` is Shift+7): Shift is theirs to need. */
+const SHIFT_FREE: ReadonlySet<string> = new Set(["/", "?"]);
+
+/** A printable ASCII character: what the layout typed is the key (Dvorak, AZERTY, Colemak). */
+const usable = (key: string) => /^[\x21-\x7e]$/u.test(key);
+
+function physical(want: string): string | undefined {
+  return /^[a-z]$/i.test(want) ? `Key${want.toUpperCase()}` : CODES[want];
+}
+
+/**
+ * Whether the key is `want`: the character the layout typed when it is printable ASCII, so
+ * Dvorak's and AZERTY's letters are theirs; only when it is not (a non-Latin layout, a dead key)
+ * the physical key in `want`'s US place.
+ */
 function keyMatches(want: string, press: KeyPress): boolean {
-  if (want.length === 1 && /[a-z]/i.test(want)) {
-    // A letter: the character, or the key in its place on a non-Latin layout.
-    return press.key.toLowerCase() === want.toLowerCase() || press.code === `Key${want}`;
-  }
-  return press.key === want || (CODES[want] !== undefined && press.code === CODES[want]);
+  if (want.length > 1) return press.key === want;
+  if (usable(press.key)) return press.key.toLowerCase() === want.toLowerCase();
+  return physical(want) !== undefined && press.code === physical(want);
 }
 
 /**
  * Whether `press` is `shortcut` on this platform. `Mod` is Cmd on macOS (Ctrl must be up) and
- * Ctrl elsewhere (Meta must be up); Alt is never part of a CE23 key. A punctuation key ignores
- * Shift, which some layouts need to type it; a plain `?` is the character itself.
+ * Ctrl elsewhere (Meta must be up); Alt is never part of a CE23 key. Shift must match exactly
+ * (Cmd+Shift+[ stays the browser's previous tab), except for `/` and `?`, which some layouts
+ * type with Shift: there the character itself decides.
  */
 export function matchesShortcut(shortcut: string, press: KeyPress, mac: boolean): boolean {
   if (press.altKey) return false;
@@ -83,17 +106,36 @@ export function matchesShortcut(shortcut: string, press: KeyPress, mac: boolean)
   const shift = keys.includes("Shift");
   const [wantMeta, wantCtrl] = mod ? (mac ? [true, false] : [false, true]) : [false, false];
   if (press.metaKey !== wantMeta || press.ctrlKey !== wantCtrl) return false;
-  const punctuation = !/^[a-z]$/i.test(key) && key.length === 1;
-  if (!punctuation && press.shiftKey !== shift) return false;
-  if (punctuation && shift && !press.shiftKey) return false;
+  const shiftFree = SHIFT_FREE.has(key) && usable(press.key);
+  if (!shiftFree && press.shiftKey !== shift) return false;
   return keyMatches(key, press);
 }
 
-const KEYED = COMMANDS.filter((c) => c.shortcut !== undefined);
+/**
+ * A command's keys as shown: the alias first where there is one (New conversation's Mod+Shift+O
+ * works in every tab; Mod+N only in an installed app), then its CE23 shortcut.
+ */
+export function shortcutsOf(cmd: RegisteredCommand): readonly string[] {
+  return [cmd.alias, cmd.shortcut].filter((k): k is string => k !== undefined);
+}
 
-/** The registry command whose shortcut `press` is, if any. */
+const KEYED = COMMANDS.filter((c) => shortcutsOf(c).length > 0);
+
+/** The registry command `press` names, and which of its keys it is. */
+export function matchedShortcut(
+  press: KeyPress,
+  mac: boolean,
+): { readonly id: CommandId; readonly shortcut: string } | null {
+  for (const c of KEYED) {
+    const shortcut = shortcutsOf(c).find((k) => matchesShortcut(k, press, mac));
+    if (shortcut !== undefined) return { id: c.id, shortcut };
+  }
+  return null;
+}
+
+/** The registry command whose shortcut (or alias) `press` is, if any. */
 export function shortcutCommand(press: KeyPress, mac: boolean): CommandId | null {
-  return KEYED.find((c) => matchesShortcut(c.shortcut ?? "", press, mac))?.id ?? null;
+  return matchedShortcut(press, mac)?.id ?? null;
 }
 
 /** Where the press happened, as far as the rules below care. */
@@ -110,20 +152,18 @@ export interface PressPlace {
   readonly frame: boolean;
 }
 
-/** Keys that also work from the message box: what the composer documents beside Enter. */
-const COMPOSER_SAFE: ReadonlySet<CommandId> = new Set(["command-palette", "stop", "steer"]);
-
 /**
- * Whether `id` may run for a press at `place`. Never while an IME composes, from an iframe (an
- * artifact's preview: sandboxed and cross-origin, so its keys normally never reach the page) or
- * over a modal dialog. In a text field only the palette runs, and in the message box also Stop
- * and Steer; everything else is typing.
+ * Whether a press of `shortcut` for `id` may run at `place`. Never while an IME composes, from an
+ * iframe (an artifact's preview: sandboxed and cross-origin, so its keys normally never reach the
+ * page) or over a modal dialog. A bare key (`?`) never runs from a text field: it is typing. From
+ * the message box, where the focus usually is, every Mod chord runs (none of them edits text);
+ * from any other field (the search, an edit box) only the palette.
  */
-export function shortcutAllowed(id: CommandId, place: PressPlace): boolean {
+export function shortcutAllowed(id: CommandId, place: PressPlace, shortcut: string): boolean {
   if (place.composing || place.frame || place.dialog) return false;
   if (!place.editing) return true;
-  if (id === "command-palette") return true;
-  return place.composer && COMPOSER_SAFE.has(id);
+  if (!shortcut.startsWith("Mod+")) return false;
+  return place.composer || id === "command-palette";
 }
 
 /** The CE23 shortcut of `id` (all twelve have one). */

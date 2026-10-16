@@ -10,6 +10,7 @@ import { currentRunId, isBusy, isStopping, type ThreadState } from "./thread-sta
 export const NOTHING_RUNNING = "Nothing is running.";
 export const STOPPING = "Stopping…";
 export const READ_ONLY = "This conversation is shared with you read-only.";
+export const IN_TRASH = "Restore the conversation first.";
 /** A draft (no thread yet): its actions wait for the first message. */
 export const NO_THREAD = "Send a first message to start the conversation.";
 
@@ -18,7 +19,7 @@ export function renameBlocker(state: ThreadState): string | null {
   if (state.threadId === null) return NO_THREAD;
   if (state.summary === undefined) return "Opening the conversation…";
   if (state.summary.readOnly === true) return READ_ONLY;
-  if (state.summary.deletedAt != null) return "Restore the conversation first.";
+  if (state.summary.deletedAt != null) return IN_TRASH;
   return null;
 }
 

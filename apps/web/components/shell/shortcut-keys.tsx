@@ -1,17 +1,16 @@
 "use client";
 
-import { useAuiState } from "@assistant-ui/react";
 import { useEffect, useRef, useState } from "react";
-import { placementOf } from "../../lib/chat/thread-groups";
 import { command, type CommandId } from "../../lib/shell/commands";
 import type { MenuBindings } from "../../lib/shell/menu";
 import {
   isMacPlatform,
+  matchedShortcut,
   shortcutAllowed,
-  shortcutCommand,
   type PressPlace,
 } from "../../lib/shell/shortcuts";
 import { commandBlocker } from "../../lib/shell/slash";
+import { useThreadReadOnly } from "../chat/use-thread-read-only";
 import { useBoundCommands } from "./command-bindings";
 
 /** How long a refused shortcut's reason stays on screen. */
@@ -80,10 +79,10 @@ function runBinding(id: CommandId, bindings: MenuBindings, readOnly: boolean): s
  */
 export function ShortcutKeys() {
   const bound = useBoundCommands();
-  const custom = useAuiState((s) => s.threadListItem.custom);
-  const latest = useRef({ bound, readOnly: placementOf(custom).shared });
+  const readOnly = useThreadReadOnly();
+  const latest = useRef({ bound, readOnly });
   useEffect(() => {
-    latest.current = { bound, readOnly: placementOf(custom).shared };
+    latest.current = { bound, readOnly };
   });
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -91,8 +90,9 @@ export function ShortcutKeys() {
     const mac = isMacPlatform();
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat) return;
-      const id = shortcutCommand(e, mac);
-      if (id === null || !shortcutAllowed(id, placeOf(e))) return;
+      const match = matchedShortcut(e, mac);
+      if (match === null || !shortcutAllowed(match.id, placeOf(e), match.shortcut)) return;
+      const { id } = match;
       e.preventDefault();
       const refused = runBinding(id, latest.current.bound, latest.current.readOnly);
       setNotice((prev) => (refused === null ? null : { text: refused, n: (prev?.n ?? 0) + 1 }));

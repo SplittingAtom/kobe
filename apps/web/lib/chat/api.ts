@@ -82,7 +82,11 @@ export interface ToolOutput {
 
 export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
-  searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
+  searchThreads(
+    q: string,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
   /** The caller's pinned threads, newest pin first (CE19, KOBE-220). */
   listPinned(): Promise<ApiResult<ThreadPage>>;
@@ -231,7 +235,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
 
   return {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
-    searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
+    searchThreads: (q, cursor, signal) =>
+      apiRequest(`/v1/threads${query({ q, cursor })}`, { teamId, fetchFn, signal }),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
     listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
     listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),

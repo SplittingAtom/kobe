@@ -3,7 +3,13 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useState } from "react";
 import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
-import { NO_THREAD, READ_ONLY, stopBinding, threadReadOnly } from "../../lib/chat/thread-commands";
+import {
+  IN_TRASH,
+  NO_THREAD,
+  READ_ONLY,
+  stopBinding,
+  threadReadOnly,
+} from "../../lib/chat/thread-commands";
 import { branchPointOfMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import type { MenuBinding, MenuBindings } from "../../lib/shell/menu";
 import { useBindCommands, useCommandsWanted } from "../shell/command-bindings";
@@ -46,13 +52,15 @@ function useEditLastBinding(extras: KobeThreadExtras, readOnly: boolean): MenuBi
   const running = useAuiState((s) => s.thread.isRunning);
   const blocker = readOnly
     ? READ_ONLY
-    : lastId === undefined
-      ? NO_MESSAGE
-      : running
-        ? WAIT_FOR_ANSWER
-        : branchPointOfMeta(extras.projection, lastMeta) === undefined
-          ? NOT_EDITABLE
-          : null;
+    : extras.state.summary?.deletedAt != null
+      ? IN_TRASH
+      : lastId === undefined
+        ? NO_MESSAGE
+        : running
+          ? WAIT_FOR_ANSWER
+          : branchPointOfMeta(extras.projection, lastMeta) === undefined
+            ? NOT_EDITABLE
+            : null;
   return {
     onSelect: () => {
       if (lastId !== undefined) aui.thread.message({ id: lastId }).composer().beginEdit();

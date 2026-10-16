@@ -8,7 +8,8 @@ import {
   COMPOSER_KEYS,
   isMacPlatform,
   SHEET_NAMES,
-  shortcutOf,
+  SHEET_NOTES,
+  shortcutsOf,
 } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { chatPortalContainer } from "../ui/chat-portal";
@@ -61,14 +62,24 @@ export function ShortcutSheet() {
         >
           <Dialog.Title className="m-0 text-base font-semibold">Keyboard shortcuts</Dialog.Title>
           <Dialog.Description className="text-muted-foreground m-0 text-sm">
-            Press ? to see them again. They don&apos;t work while you type in a field (except{" "}
-            {formatShortcut("Mod+K", mac)}) or while an artifact preview has the focus.
+            Press ? to see them again. They work from the message box too; from other fields only{" "}
+            {formatShortcut("Mod+K", mac)} does. Not while an artifact preview has the focus: click
+            the conversation first.
           </Dialog.Description>
           <ul className="m-0 list-none p-0" aria-label="Shortcuts">
             {CE23_SHORTCUTS.map((id) => (
               <li key={id} className={ROW} data-kobe-shortcut={id}>
-                <span>{SHEET_NAMES[id] ?? command(id).name}</span>
-                <Keys keys={shortcutOf(id)} mac={mac} />
+                <span>
+                  <span data-kobe-shortcut-name="">{SHEET_NAMES[id] ?? command(id).name}</span>
+                  {SHEET_NOTES[id] && (
+                    <span className="text-muted-foreground block text-xs">{SHEET_NOTES[id]}</span>
+                  )}
+                </span>
+                <span className="flex shrink-0 gap-1">
+                  {shortcutsOf(command(id)).map((k) => (
+                    <Keys key={k} keys={k} mac={mac} />
+                  ))}
+                </span>
               </li>
             ))}
           </ul>

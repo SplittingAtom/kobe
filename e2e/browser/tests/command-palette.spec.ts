@@ -2,7 +2,8 @@ import { expect, test } from "./support/chat.js";
 
 /**
  * KOBE-225 (CE23): Ctrl/Cmd+K opens the palette; an action runs from it (New conversation), a
- * thread opens by a word of it, and `?` opens the sheet with the twelve shortcuts.
+ * thread opens by a word of it, chords run from the message box, and `?` opens the sheet with the
+ * twelve shortcuts.
  */
 test("the palette runs an action and opens a thread; ? lists twelve shortcuts", async ({
   chat,
@@ -39,6 +40,17 @@ test("the palette runs an action and opens a thread; ? lists twelve shortcuts", 
   await expect(palette).toBeHidden();
   await expect.poll(() => new URL(page.url()).searchParams.get("thread")).toBe(first);
   await expect(chat.answers.last()).toContainText("ALPHA");
+
+  // Chords work from the message box, where the focus usually is: Mod+B folds the rail.
+  const rail = page.locator('aside[aria-label="Workspace"]');
+  await chat.composer.focus();
+  await chat.composer.press("ControlOrMeta+b");
+  await expect(rail).toHaveAttribute("data-collapsed", "");
+  await chat.composer.press("ControlOrMeta+b");
+  await expect(rail).not.toHaveAttribute("data-collapsed", "");
+  // Mod+[ goes to the previous conversation in the app, never Back in the browser.
+  await chat.composer.press("ControlOrMeta+BracketLeft");
+  await expect(page).toHaveURL(/\?thread=/);
 
   // The ? sheet lists the twelve, outside any text field.
   await chat.answers.last().click();

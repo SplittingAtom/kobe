@@ -9,7 +9,7 @@ import {
   SHORTCUTS_BOUND,
   type CommandId,
 } from "../../lib/shell/commands";
-import { isMacPlatform } from "../../lib/shell/shortcuts";
+import { isMacPlatform, shortcutsOf } from "../../lib/shell/shortcuts";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -110,7 +110,14 @@ export function IconAction({
   const descriptionId = useId();
   const named = label ?? cmd.name;
   const name = badge ? `${named}, ${badge}` : named;
-  const keys = shortcut === undefined ? (SHORTCUTS_BOUND ? cmd.shortcut : undefined) : shortcut;
+  const keys: readonly string[] =
+    shortcut === undefined
+      ? SHORTCUTS_BOUND
+        ? shortcutsOf(cmd)
+        : []
+      : shortcut === null
+        ? []
+        : [shortcut];
   const target = href ?? cmd.href;
   const inert = isInert(disabled, rest["aria-disabled"]);
   const describedBy = [rest["aria-describedby"], description ? descriptionId : undefined]
@@ -121,7 +128,7 @@ export function IconAction({
     ...rest,
     "aria-label": name,
     "data-command": id,
-    ...(keys ? { "aria-keyshortcuts": ariaKeyShortcuts(keys) } : {}),
+    ...(keys.length > 0 ? { "aria-keyshortcuts": keys.map(ariaKeyShortcuts).join(" ") } : {}),
     ...(describedBy ? { "aria-describedby": describedBy } : {}),
     ...(inert ? { "aria-disabled": true } : {}),
     onClick: (e: MouseEvent<HTMLElement>) => {
@@ -174,7 +181,11 @@ export function IconAction({
         </TooltipTrigger>
         <TooltipContent side={side}>
           {name}
-          {keys && <kbd className={styles.keys}>{formatShortcut(keys, isMacPlatform())}</kbd>}
+          {keys.map((k) => (
+            <kbd key={k} className={styles.keys}>
+              {formatShortcut(k, isMacPlatform())}
+            </kbd>
+          ))}
           {description && <span className={styles.description}>{description}</span>}
         </TooltipContent>
       </Tooltip>

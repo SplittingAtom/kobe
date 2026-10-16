@@ -145,12 +145,10 @@ export function WorkspaceRail({
   teamName,
   listError,
   filesApi,
-  fetchFn,
 }: {
   readonly teamName: string;
   readonly listError: ApiError | null;
   readonly filesApi: FilesApi;
-  readonly fetchFn: typeof fetch | undefined;
 }) {
   const rail = useRail();
   if (!rail) throw new Error("WorkspaceRail needs a RailProvider");
@@ -200,7 +198,7 @@ export function WorkspaceRail({
             tabIndex={-1}
             className={styles.section}
           >
-            <RailThreads listError={listError} fetchFn={fetchFn} />
+            <RailThreads listError={listError} />
           </section>
           <RailDivider
             share={rail.threadsShare}
