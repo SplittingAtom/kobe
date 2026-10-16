@@ -2,8 +2,9 @@
 
 Playwright specs for the chat surfaces of v1.1 Phase A/B, run in a real browser against a running
 Kobe: scroll follow, the steering panel, the context gauge, Compact now, root edit, Regenerate
-with another model, Fork to a new thread, the theme toggle with its popups, and the rail's
-row menus with the header rename (KOBE-292). It is **not** part
+with another model, Fork to a new thread, the theme toggle with its popups, the rail's
+row menus with the header rename (KOBE-292), and auto-titles with the rail's hover card
+(KOBE-219). It is **not** part
 of CI and not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
 (`@playwright/test` 1.55.0, Apache-2.0).
 
