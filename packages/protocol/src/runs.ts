@@ -49,6 +49,9 @@ export const RUN_TRANSITION_CAUSES = [
   "error", // → failed: provider/Pi error, isolation runtime missing, sandbox could not start
   "sandbox_lost", // → interrupted: sandbox or Pi died mid-run
   "user_cancelled", // → cancelled: Stop, or a queued message deleted
+  // → cancelled by the server, not a person: the owner of a scheduled run was deactivated or left
+  // the team (KOBE-180, KOBE-252). Clients see the same `run.interrupted` (`cancelled`) as a Stop.
+  "system_cancelled",
   "budget_exhausted", // → budget_stopped: 100 % budget, after the current model step (D30)
 ] as const;
 export const runTransitionCauseSchema = z.enum(RUN_TRANSITION_CAUSES);
@@ -64,7 +67,7 @@ export const RUN_TRANSITIONS: Readonly<
   queued: {
     running: ["dequeued"],
     failed: ["error"],
-    cancelled: ["user_cancelled"],
+    cancelled: ["user_cancelled", "system_cancelled"],
     budget_stopped: ["budget_exhausted"],
   },
   running: {
@@ -72,14 +75,14 @@ export const RUN_TRANSITIONS: Readonly<
     completed: ["settled"],
     failed: ["error"],
     interrupted: ["sandbox_lost"],
-    cancelled: ["user_cancelled"],
+    cancelled: ["user_cancelled", "system_cancelled"],
     budget_stopped: ["budget_exhausted"],
   },
   waiting_approval: {
     running: ["approval_resolved"],
     failed: ["approval_expired", "error"],
     interrupted: ["sandbox_lost"],
-    cancelled: ["user_cancelled"],
+    cancelled: ["user_cancelled", "system_cancelled"],
     budget_stopped: ["budget_exhausted"],
   },
   completed: {},

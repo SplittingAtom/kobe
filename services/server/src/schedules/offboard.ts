@@ -65,7 +65,8 @@ type Runs = Pick<ServerRunOrchestrator, "cancelScheduledRuns">;
 /**
  * The `deactivated` lifecycle hook: in every team of the user (memberships are kept while
  * deactivated), pause their schedules, then cancel their in-flight scheduled runs. Every team is
- * attempted; throws afterwards if any failed, so the deactivation reports the step incomplete.
+ * attempted; throws afterwards if any failed, so the deactivation reports the step incomplete,
+ * and the scheduler's owner sweep finishes it at its next tick (KOBE-252).
  */
 export async function stopUserSchedules(db: KobeDb, runs: Runs, userId: string): Promise<void> {
   const teams = await listMemberships(db, userId);

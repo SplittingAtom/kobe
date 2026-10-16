@@ -41,7 +41,8 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     const result = await removeMember(db, teamId, userId.data);
     if (!result.ok) return membershipError(c, result.error);
     // Their scheduled runs here stop while the sandbox still answers (KOBE-180); the schedules were
-    // paused with the removal. A failure is logged: the runs then end with the sandbox teardown.
+    // paused with the removal. A failure is logged; the scheduler's owner sweep cancels what is left
+    // at its next tick (KOBE-252, scheduler/owner-sweep.ts).
     try {
       await deps.runs.cancelScheduledRuns(teamId, userId.data, "member_removed");
     } catch (err) {

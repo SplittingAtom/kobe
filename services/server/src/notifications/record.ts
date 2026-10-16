@@ -6,9 +6,9 @@ import { loadSkippedReport } from "../policy/skipped-actions.js";
 /**
  * The notification kind for a scheduled run that ended in `to` (KOBE-176 contract), or null when
  * the end does not notify. A completed run with skipped actions reports those (not `succeeded`);
- * a budget stop is a failure. `cancelled` never notifies: its only cause is `user_cancelled`,
- * i.e. the owner's own Stop, or the system cancelling a deactivated or removed owner's runs
- * (KOBE-180), who must not be told anything.
+ * a budget stop is a failure. `cancelled` never notifies: its causes are `user_cancelled` (the
+ * owner's own Stop) and `system_cancelled` (the system cancelling a deactivated or removed owner's
+ * runs, KOBE-180/KOBE-252), whose owner must not be told anything.
  */
 export function notificationKindOf(to: RunStatus, skippedCount: number): NotificationKind | null {
   switch (to) {

@@ -30,10 +30,11 @@ export interface CancelScheduledContext {
  * Cancels the in-flight scheduled runs (`trigger = schedule`; queued, running or waiting for an
  * approval) of `userId` in one team (KOBE-180, D7/D32): the owner was deactivated or left the team,
  * so nothing they scheduled may keep working. Interactive runs are left to the sandbox teardown.
- * Each run ends like a Stop (`cancelled`, abort requested durably so the sweep re-sends it) and is
- * audited as the system. A run that cannot be cancelled (e.g. its thread stays locked) is logged
- * and skipped so the others still stop; the function throws at the end if any failed (the caller
- * reports the step incomplete). Returns the cancelled run ids.
+ * Each run ends like a Stop (`cancelled`, abort requested durably so the sweep re-sends it), with
+ * the cause `system_cancelled` (KOBE-252), and is audited as the system. A run that cannot be
+ * cancelled (e.g. its thread stays locked) is logged and skipped so the others still stop; the
+ * function throws at the end if any failed (the caller reports the step incomplete; the
+ * scheduler's owner sweep finishes it, KOBE-252). Returns the cancelled run ids.
  */
 export async function cancelScheduledRuns(
   ctx: CancelScheduledContext,
@@ -66,7 +67,7 @@ export async function cancelScheduledRuns(
             thread,
             run,
             "cancelled",
-            "user_cancelled",
+            "system_cancelled",
             cancelledEvent(thread),
           );
           if (wasActive) await requestStop(tx, teamId, run.id, "abort");

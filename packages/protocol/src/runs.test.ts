@@ -77,6 +77,11 @@ describe("run transition table", () => {
     expect(canTransition("running", "failed", "approval_expired")).toBe(false);
     expect(canTransition("running", "completed", "settled")).toBe(true);
     expect(canTransition("running", "completed", "dequeued")).toBe(false);
+    // The server's own cancel (KOBE-252) ends a run like a Stop, from any live state.
+    for (const from of ["queued", "running", "waiting_approval"] as const) {
+      expect(canTransition(from, "cancelled", "system_cancelled")).toBe(true);
+    }
+    expect(canTransition("running", "failed", "system_cancelled")).toBe(false);
   });
 
   it("uses every declared cause somewhere", () => {

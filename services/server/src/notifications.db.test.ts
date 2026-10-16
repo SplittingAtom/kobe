@@ -170,7 +170,7 @@ describe("a notification per scheduled run end (ac-1)", () => {
     const w = await world({ notifyEmail: true });
     const reply = await running(w, "user");
     await end(w, reply.runId, { status: "completed" });
-    // Deactivation and removal cancel scheduled runs as `user_cancelled` (KOBE-180): no notification.
+    // Deactivation and removal cancel scheduled runs (`system_cancelled`): no notification.
     const cancelled = await running(w);
     expect(await deps().runs.cancelScheduledRuns(w.team, w.owner.id, "owner_deactivated")).toEqual([
       cancelled.runId,

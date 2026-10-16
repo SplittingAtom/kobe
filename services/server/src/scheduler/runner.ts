@@ -6,10 +6,11 @@ import { logger as rootLogger } from "../logger.js";
 import { RunError } from "../runs/errors.js";
 import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
 import { recordSkip, ScheduleSkip, scheduledFire, type DueSchedule } from "./fire.js";
+import { sweepInactiveOwners } from "./owner-sweep.js";
 
 export interface SchedulerRunnerOptions {
   readonly db: KobeDb;
-  readonly runs: Pick<ServerRunOrchestrator, "submitMessage">;
+  readonly runs: Pick<ServerRunOrchestrator, "submitMessage" | "cancelScheduledRuns">;
   /** The clock; tests inject a fixed one. */
   readonly now?: () => Date;
   /** How late an occurrence may still fire (catch-up after downtime). */
@@ -74,7 +75,11 @@ export class SchedulerRunner {
     this.#timer = undefined;
   }
 
-  /** One pass over every team. A failing team is logged and does not stop the others. */
+  /**
+   * One pass over every team: fire what is due, then finish stopping the schedules of owners who
+   * were deactivated or removed (KOBE-252, owner-sweep.ts). A failing team is logged and does not
+   * stop the others.
+   */
   async tick(): Promise<TickResult> {
     let fired = 0;
     let skipped = 0;
@@ -88,6 +93,10 @@ export class SchedulerRunner {
           else if (outcome === "skipped") skipped += 1;
           else if (outcome === "failed") failed += 1;
         }
+        await sweepInactiveOwners(
+          { db: this.#opts.db, runs: this.#opts.runs, log: this.#log },
+          teamId,
+        );
       } catch (err) {
         failed += 1;
         this.#log.error({ err, team_id: teamId }, "scheduler pass failed for a team");
