@@ -491,51 +491,186 @@ describe("more read paths (S3)", () => {
 });
 
 describe("a member who leaves (S2)", () => {
-  it("ends their shares when they are removed from the team, audited as the system", async () => {
-    const x = await world();
-    await share(x.author, x.threadId, "team");
-    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).status).toBe(200);
-    const removed = await as(x.admin).delete(`/v1/team/members/${x.author.id}`);
-    expect(removed.status, JSON.stringify(removed.json)).toBe(204);
-    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
-    expect(await sharedIds(x.reader)).not.toContain(x.threadId);
-    expect(await sharedIds(x.admin)).not.toContain(x.threadId);
+  /** Collects the access hints (`access:<run>`) sent while `fn` runs. */
+  async function hintsDuring(fn: () => Promise<void>): Promise<string[]> {
+    const heard: string[] = [];
+    const listen = (msg: { channel: string; payload?: string | undefined }) => {
+      if (msg.channel === "kobe_run_events" && msg.payload?.startsWith("access:")) {
+        heard.push(msg.payload);
+      }
+    };
+    f.fx.admin.on("notification", listen);
+    await f.fx.admin.query("LISTEN kobe_run_events");
+    try {
+      await fn();
+      await new Promise((r) => setTimeout(r, 300));
+      return heard;
+    } finally {
+      f.fx.admin.off("notification", listen);
+      await f.fx.admin.query("UNLISTEN kobe_run_events");
+    }
+  }
+
+  /** The newest `thread.sharing_changed` rows of the team, with their actor kind. */
+  async function sharingRows(team: string) {
     const { rows } = await f.fx.admin.query<{
       actor_kind: string;
       target: Record<string, unknown>;
     }>(
       `SELECT actor_kind, target FROM audit_log
-        WHERE team_id = $1 AND action = 'thread.sharing_changed' ORDER BY seq DESC LIMIT 1`,
-      [x.w.team],
+        WHERE team_id = $1 AND action = 'thread.sharing_changed' ORDER BY seq`,
+      [team],
     );
-    expect(rows[0]).toEqual({
-      actor_kind: "system",
-      target: {
-        threadId: x.threadId,
-        projectId: null,
-        shared: false,
-        visibility: "private",
-        from: "team",
-      },
-    });
-  });
+    return rows;
+  }
 
-  it("ends their shares when their account is deactivated", async () => {
+  /** Every way `p` could read the thread: its read paths, Shared with me, search, the stream. */
+  async function unreadable(p: Person, threadId: string, runId: string) {
+    expect(await readStatuses(p, threadId, runId)).toEqual(ALL_GONE);
+    expect(await sharedIds(p)).not.toContain(threadId);
+    expect(await searchIds(p, "wombat")).not.toContain(threadId);
+    expect((await f.fx.open(0, p, runId)).status).toBe(404);
+  }
+
+  it("ends their team and project shares on removal, audited as the system, streams told", async () => {
     const x = await world();
     await share(x.author, x.threadId, "team");
+    const project = await as(x.admin).post("/v1/projects", {
+      name: `L${randomBytes(2).toString("hex")}`,
+      members_mode: "selected",
+      member_user_ids: [x.author.id, x.reader.id],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const inProject = await as(x.author).post("/v1/threads", {
+      project_id: project.json.id,
+      title: "p",
+    });
+    const projectThread = inProject.json.thread_id as string;
+    await share(x.author, projectThread, "project");
+    expect((await as(x.reader).get(`/v1/threads/${projectThread}`)).status).toBe(200);
+
+    const heard = await hintsDuring(async () => {
+      const removed = await as(x.admin).delete(`/v1/team/members/${x.author.id}`);
+      expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    });
+    expect(heard).toContain(`access:${x.runId}`);
+    await unreadable(x.reader, x.threadId, x.runId);
+    await unreadable(x.admin, x.threadId, x.runId);
+    expect((await as(x.reader).get(`/v1/threads/${projectThread}`)).status).toBe(404);
+    const ended = (await sharingRows(x.w.team)).slice(-2);
+    expect(ended).toEqual(
+      expect.arrayContaining([
+        {
+          actor_kind: "system",
+          target: {
+            threadId: x.threadId,
+            projectId: null,
+            shared: false,
+            visibility: "private",
+            from: "team",
+          },
+        },
+        {
+          actor_kind: "system",
+          target: {
+            threadId: projectThread,
+            projectId: project.json.id,
+            shared: false,
+            visibility: "private",
+            from: "project",
+          },
+        },
+      ]),
+    );
+  });
+
+  it("ends their shares in every team on deactivation, streams told", async () => {
+    const x = await world();
+    await share(x.author, x.threadId, "team");
+    // The author is in a second team too, with a team-shared thread there.
+    const other = await f.world();
+    await f.fx.addMember(other.team, x.author);
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO threads (team_id, owner_user_id, title, shared_to_team)
+       VALUES ($1, $2, 'there', true) RETURNING id`,
+      [other.team, x.author.id],
+    );
+    const there = rows[0]?.id ?? "";
+    expect((await as(other.owner).get(`/v1/threads/${there}`)).status).toBe(200);
     const siteAdmin = await f.member(x.w.team);
     await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [
       siteAdmin.id,
     ]);
-    const off = await as(siteAdmin).post(`/v1/site/users/${x.author.id}/deactivate`, {});
-    expect(off.status, JSON.stringify(off.json)).toBeLessThan(300);
-    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
-    expect(await audit(x.w.team)).toContainEqual({
-      threadId: x.threadId,
-      projectId: null,
-      shared: false,
-      visibility: "private",
-      from: "team",
+    const heard = await hintsDuring(async () => {
+      const off = await as(siteAdmin).post(`/v1/site/users/${x.author.id}/deactivate`, {});
+      expect(off.status, JSON.stringify(off.json)).toBeLessThan(300);
+      expect(off.json.incompleteSteps ?? off.json.incomplete_steps ?? []).not.toContain(
+        "thread-shares",
+      );
     });
+    expect(heard).toContain(`access:${x.runId}`);
+    await unreadable(x.reader, x.threadId, x.runId);
+    expect((await as(other.owner).get(`/v1/threads/${there}`)).status).toBe(404);
+    for (const [team, threadId] of [
+      [x.w.team, x.threadId],
+      [other.team, there],
+    ] as const) {
+      expect((await sharingRows(team)).at(-1)).toEqual({
+        actor_kind: "system",
+        target: { threadId, projectId: null, shared: false, visibility: "private", from: "team" },
+      });
+    }
+  });
+});
+
+describe("a share counts only while its owner is an active member (R1 backstop)", () => {
+  it("ignores a share that committed after the owner's removal", async () => {
+    const x = await world();
+    const removed = await as(x.admin).delete(`/v1/team/members/${x.author.id}`);
+    expect(removed.status).toBe(204);
+    // The owner's share request passed its checks before the removal and committed after it.
+    await f.fx.admin.query(
+      `UPDATE threads SET shared_to_team = true WHERE team_id = $1 AND id = $2`,
+      [x.w.team, x.threadId],
+    );
+    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
+    expect(await sharedIds(x.reader)).not.toContain(x.threadId);
+    expect(await searchIds(x.reader, "wombat")).not.toContain(x.threadId);
+    expect((await f.fx.open(0, x.reader, x.runId)).status).toBe(404);
+  });
+
+  it("ignores the shares of a deactivated owner even when ending them failed", async () => {
+    const x = await world();
+    await share(x.author, x.threadId, "team");
+    expect((await f.fx.open(0, x.reader, x.runId)).status).not.toBe(404);
+    // Deactivated, but none of the lifecycle steps ran (as when the thread-shares step failed).
+    await f.fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [x.author.id]);
+    expect(await readStatuses(x.reader, x.threadId, x.runId)).toEqual(ALL_GONE);
+    expect(await sharedIds(x.reader)).not.toContain(x.threadId);
+    expect(await searchIds(x.reader, "wombat")).not.toContain(x.threadId);
+    expect((await f.fx.open(0, x.reader, x.runId)).status).toBe(404);
+    // The share itself is untouched: reactivation shows it again.
+    await f.fx.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [x.author.id]);
+    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).status).toBe(200);
+  });
+
+  it("checks the owner with the membership and user primary keys", async () => {
+    await f.fx.admin.query("BEGIN");
+    try {
+      await f.fx.admin.query("SET LOCAL enable_seqscan = off");
+      const { rows } = await f.fx.admin.query<{ "QUERY PLAN": unknown }>(
+        `EXPLAIN (FORMAT JSON)
+         SELECT t.id FROM threads t
+          WHERE t.team_id = gen_random_uuid() AND t.shared_to_team
+            AND EXISTS (SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
+                         WHERE m.team_id = t.team_id AND m.user_id = t.owner_user_id
+                           AND u.deactivated_at IS NULL)`,
+      );
+      const plan = JSON.stringify(rows[0]?.["QUERY PLAN"]);
+      expect(plan).toMatch(/"Index Name":"team_members_[a-z_]*pk[a-z]*"/);
+      expect(plan).toMatch(/"Index Name":"users_pkey"/);
+    } finally {
+      await f.fx.admin.query("ROLLBACK");
+    }
   });
 });

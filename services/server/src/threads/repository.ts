@@ -188,14 +188,28 @@ function readableBy(viewer: Viewer): SQL {
   return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR (${sharedWith(viewer)} AND ${threads.deletedAt} IS NULL))`;
 }
 
-/** Shared to the viewer by its scope: with the team, or to one of their projects (D23, CE20). */
+/** The thread's owner is still a member of its team and not deactivated (see {@link sharedWith}). */
+function ownerIsActiveMember(): SQL {
+  return sql`EXISTS (SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
+    WHERE m.team_id = ${threads.teamId} AND m.user_id = ${threads.ownerUserId}
+      AND u.deactivated_at IS NULL)`;
+}
+
+/**
+ * Shared to the viewer by its scope: with the team, or to one of their projects (D23, CE20), and
+ * only while its owner is a current, active member of the team (KOBE-221, fail closed): a share
+ * never outlives the one person who could revoke it, whatever happened to `endSharesOf`. One
+ * primary-key lookup each in `team_members` and `users`.
+ */
 function sharedWith(viewer: Viewer): SQL {
-  if (viewer.projectIds.length === 0) return sql`${threads.sharedToTeam}`;
-  const project = and(
-    eq(threads.sharedToProject, true),
-    inArray(threads.projectId, [...viewer.projectIds]),
-  );
-  return sql`(${threads.sharedToTeam} OR ${project})`;
+  const scope =
+    viewer.projectIds.length === 0
+      ? sql`${threads.sharedToTeam}`
+      : sql`(${threads.sharedToTeam} OR ${and(
+          eq(threads.sharedToProject, true),
+          inArray(threads.projectId, [...viewer.projectIds]),
+        )})`;
+  return sql`${scope} AND ${ownerIsActiveMember()}`;
 }
 
 /**
@@ -249,9 +263,19 @@ export async function viewableProjects(
     ),
   );
   for (const projectId of unknown) {
-    if ((await loadAccess(tx, viewer, projectId))?.can.view) visible.add(projectId);
+    if (await canViewProject(tx, viewer, projectId)) visible.add(projectId);
   }
   return visible;
+}
+
+/** Whether the viewer may open the project: a member, or a team admin (as the markers decide). */
+export async function canViewProject(
+  tx: KobeTx,
+  viewer: Viewer,
+  projectId: string,
+): Promise<boolean> {
+  if (viewer.projectIds.includes(projectId)) return true;
+  return (await loadAccess(tx, viewer, projectId))?.can.view === true;
 }
 
 /** `project_id: null` for someone else's thread in a project the viewer may not open. */
@@ -343,9 +367,7 @@ export async function listThreads(
   // Others' threads of a project only for those who may open it: a team share is no way to list
   // the threads of a project one can't see (CE20).
   const projectOpen =
-    options.projectId !== undefined &&
-    (viewer.projectIds.includes(options.projectId) ||
-      (await loadAccess(tx, viewer, options.projectId))?.can.view === true);
+    options.projectId !== undefined && (await canViewProject(tx, viewer, options.projectId));
   const scope = options.projectId
     ? and(
         eq(threads.projectId, options.projectId),

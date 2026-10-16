@@ -56,9 +56,19 @@ project ∈ viewer's projects) AND deleted_at IS NULL`, always with `team_id`. E
 - **S2 (fail closed):** removing a member ends every share of their threads in the team, in the
   removal's transaction (`endSharesOf`, `share-scope.ts`, called from `teams/members.ts`), each
   audited `thread.sharing_changed` with the system actor and with the access hint sent. Deactivation
-  does the same per team right after its transaction (one `withTeam` per team: a transaction can
-  hold only one team); a team that fails is logged. Reactivation does not share again. No admin
+  does the same per team in a lifecycle hook (see R1). Reactivation does not share again. No admin
   write action.
+- **R1 (re-review, backstop):** a share counts only while its owner is a current, active member of
+  the thread's team: `sharedWith` (repository), the search CTE and the stream's access SQL all add
+  `EXISTS (team_members m JOIN users u ... u.deactivated_at IS NULL)`, two primary-key lookups
+  (plan checked in `thread-team-sharing.db.test.ts`). `endSharesOf` stays the durable cleanup.
+  Deactivation's step is now the `thread-shares` lifecycle hook (`endUserShares`), which throws on
+  any failed team, so it shows in `incompleteSteps`. Tested: a share committed after the owner's
+  removal, and a deactivation whose steps never ran, are unreadable everywhere (stream included).
+- **R2:** searching a project the viewer may not open passes `ownOnly` to the search, so the page
+  is filtered before paging.
+- **R3:** the removal and deactivation tests LISTEN for the access hint, cover a project share
+  ending, and a deactivated user in two teams.
 - **S3:** team-scope tests for tool output, pending drafts, shared files (meta and content),
   artifact detail/content/frame, an approval by a reader, a test thread, and the real Trash and
   move paths sending the hint (LISTEN in the test). A reader's approval attempt is 404 (decided by
@@ -101,3 +111,7 @@ test:db` 1471 green (probe suite included). Known: `@kobe/cli test:db` pg_dump f
 
 After the review fixes: format, lint, typecheck and every package's unit tests green;
 `@kobe/db test:db` 1128 and `@kobe/server test:db` 1478 green.
+
+After the re-review fixes: format, lint, typecheck and unit tests green (`sandbox-agent` had two
+timing failures under the full parallel run, untouched here, green when rerun alone);
+`@kobe/db test:db` 1129 and `@kobe/server test:db` 1481 green.

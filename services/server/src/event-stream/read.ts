@@ -104,10 +104,19 @@ const PAGE_SQL = `
    WHERE r.team_id = $1 AND r.id = $2
    ORDER BY p.seq`;
 
+/**
+ * A share counts only while the thread's owner is an active member of its team (KOBE-221), as in
+ * the thread API's `sharedWith`; `t` is the thread.
+ */
+const OWNER_ACTIVE = `EXISTS (SELECT 1 FROM team_members om JOIN users ou ON ou.id = om.user_id
+           WHERE om.team_id = t.team_id AND om.user_id = t.owner_user_id
+             AND ou.deactivated_at IS NULL)`;
+
 const RUN_SQL = `
   SELECT r.thread_id, t.owner_user_id, t.project_id,
-         (t.shared_to_project AND t.deleted_at IS NULL) AS shared,
-         (t.shared_to_team AND t.deleted_at IS NULL) AS team_shared, r.ended_at IS NOT NULL AS ended,
+         (t.shared_to_project AND t.deleted_at IS NULL AND ${OWNER_ACTIVE}) AS shared,
+         (t.shared_to_team AND t.deleted_at IS NULL AND ${OWNER_ACTIVE}) AS team_shared,
+         r.ended_at IS NOT NULL AS ended,
          r.events_compacted_at IS NOT NULL AS compacted, r.last_seq
     FROM runs r
     JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
@@ -129,10 +138,10 @@ const ACCESS_SQL = `
          (SELECT t.project_id FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
            WHERE r.team_id = $2 AND r.id = $4) AS project_id,
-         COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL FROM runs r
+         COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL AND ${OWNER_ACTIVE} FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
            WHERE r.team_id = $2 AND r.id = $4), false) AS shared,
-         COALESCE((SELECT t.shared_to_team AND t.deleted_at IS NULL FROM runs r
+         COALESCE((SELECT t.shared_to_team AND t.deleted_at IS NULL AND ${OWNER_ACTIVE} FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
            WHERE r.team_id = $2 AND r.id = $4), false) AS team_shared`;
 

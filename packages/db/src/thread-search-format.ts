@@ -43,6 +43,11 @@ export const searchThreadsInputSchema = z.strictObject({
   /** Only threads in this project (§6.1 `project_id`). */
   projectId: uuid.optional(),
   /**
+   * Only the viewer's own threads (KOBE-221): the caller sets it when `projectId` is a project the
+   * viewer may not open, so a team share is no way to search a hidden project's threads.
+   */
+  ownOnly: z.boolean().default(false),
+  /**
    * Only threads with activity at or after this instant. Pass now minus the team retention period
    * (D18) so threads due for purge are never surfaced; omit while a legal hold applies or retention
    * is "forever".

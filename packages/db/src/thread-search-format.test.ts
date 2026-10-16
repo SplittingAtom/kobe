@@ -74,6 +74,7 @@ describe("searchThreadsInputSchema", () => {
       viewerUserId: id,
       query: "hi",
       projectIds: [],
+      ownOnly: false,
       limit: 20,
       timeoutMs: 3000,
     });

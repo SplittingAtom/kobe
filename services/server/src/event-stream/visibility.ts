@@ -8,9 +8,12 @@ export interface ThreadVisibility {
   readonly ownerUserId: string;
   /** The thread's project, null for a thread outside any project. */
   readonly projectId?: string | null;
-  /** Shared to its project and not in Trash. */
+  /**
+   * Shared to its project, not in Trash, its owner an active member of the team (the reader's
+   * SQL decides all three, `event-stream/read.ts`).
+   */
   readonly sharedToProject?: boolean;
-  /** Shared with the team and not in Trash. */
+  /** Shared with the team, not in Trash, its owner an active member of the team. */
   readonly sharedToTeam?: boolean;
 }
 

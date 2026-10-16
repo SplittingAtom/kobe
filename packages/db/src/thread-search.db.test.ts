@@ -381,6 +381,34 @@ describe("visibility (ac-2)", () => {
     expect(await ids(teamB, { viewerUserId: colleague, query: "wombat" })).toEqual([]);
   });
 
+  it("ignores shares of an owner who left the team or was deactivated, and honours ownOnly", async () => {
+    const me = await newUser(teamA);
+    const gone = await newUser(teamA);
+    const off = await newUser(teamA);
+    const left = await newThread(teamA, {
+      ownerUserId: gone,
+      sharedToTeam: true,
+      entries: [userMsg("quokka from a leaver")],
+    });
+    const deactivated = await newThread(teamA, {
+      ownerUserId: off,
+      sharedToTeam: true,
+      entries: [userMsg("quokka from a deactivated owner")],
+    });
+    const own = await newThread(teamA, { ownerUserId: me, entries: [userMsg("my quokka")] });
+    expect((await ids(teamA, { viewerUserId: me, query: "quokka" })).sort()).toEqual(
+      [left, deactivated, own].sort(),
+    );
+    expect(await ids(teamA, { viewerUserId: me, query: "quokka", ownOnly: true })).toEqual([own]);
+    await withTeam(app.db, teamA, (tx) =>
+      tx
+        .delete(teamMembers)
+        .where(and(eq(teamMembers.teamId, teamA), eq(teamMembers.userId, gone))),
+    );
+    await owner.db.update(users).set({ deactivatedAt: new Date() }).where(eq(users.id, off));
+    expect(await ids(teamA, { viewerUserId: me, query: "quokka" })).toEqual([own]);
+  });
+
   it("excludes threads in Trash", async () => {
     const me = await newUser(teamA);
     await newThread(teamA, { ownerUserId: me, deleted: true, entries: [userMsg("binned lemur")] });

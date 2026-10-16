@@ -1,5 +1,15 @@
 import type { ThreadVisibility } from "@kobe/protocol";
-import { and, eq, sql, SYSTEM_ACTOR, threads, type KobeTx } from "@kobe/db";
+import {
+  and,
+  eq,
+  listMemberships,
+  sql,
+  SYSTEM_ACTOR,
+  threads,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
 import { canCreateInProject } from "./references.js";
@@ -118,4 +128,28 @@ export async function endSharesOf(tx: KobeTx, teamId: string, userId: string): P
     });
   }
   return shared.length;
+}
+
+/**
+ * A deactivated user's shares end in every team they belong to (KOBE-221): the `deactivated`
+ * lifecycle hook, one `withTeam` per team (a transaction holds one team). Throws when any team
+ * failed, so the step is reported as incomplete; reads already ignore the shares of a deactivated
+ * owner (`sharedWith`), so a failure never leaves them readable.
+ */
+export async function endUserShares(db: KobeDb, userId: string): Promise<void> {
+  const teams = await listMemberships(db, userId);
+  const failures: unknown[] = [];
+  for (const { teamId } of teams) {
+    try {
+      await withTeam(db, teamId, (tx) => endSharesOf(tx, teamId, userId));
+    } catch (err) {
+      failures.push(err);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `${failures.length} of ${teams.length} teams' thread shares not ended`,
+    );
+  }
 }

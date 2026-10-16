@@ -14,8 +14,6 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { revokeAllInvitesSentBy } from "../invitations/team-invites.js";
-import { logger } from "../logger.js";
-import { endSharesOf } from "../threads/share-scope.js";
 
 /** True when the user exists and is deactivated. */
 export async function isDeactivated(db: KobeDb, userId: string): Promise<boolean> {
@@ -51,18 +49,6 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
     }
     return changed.length > 0;
   });
-  // Their shared threads go private in every team they are still a member of (KOBE-221): nobody
-  // else could revoke them. One `withTeam` per team (a transaction holds one team), right after the
-  // deactivation; a team that fails is logged and the others still go. Reactivation does not share
-  // them again.
-  const teamIds = (await listMemberships(db, userId)).map((m) => m.teamId);
-  for (const teamId of teamIds) {
-    try {
-      await withTeam(db, teamId, (tx) => endSharesOf(tx, teamId, userId));
-    } catch (err) {
-      logger.error({ err, team_id: teamId }, "ending a deactivated user's thread shares failed");
-    }
-  }
   // Their pending team invitations lose their authority (acceptance re-checks it as well).
   await revokeAllInvitesSentBy(db, userId);
   return changed;

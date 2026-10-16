@@ -267,8 +267,13 @@ function searchQuery(
         AND t.deleted_at IS NULL
         AND NOT t.is_test
         AND (t.owner_user_id = ${p.viewerUserId}
-             OR t.shared_to_team
-             OR (t.shared_to_project AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
+             OR (NOT ${p.ownOnly}::boolean AND (t.shared_to_team
+                  OR (t.shared_to_project
+                      AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
+                 -- A share counts only while its owner is an active member (KOBE-221).
+                 AND EXISTS (SELECT 1 FROM team_members om JOIN users ou ON ou.id = om.user_id
+                             WHERE om.team_id = ${teamId} AND om.user_id = t.owner_user_id
+                               AND ou.deactivated_at IS NULL)))
         ${projectFilter}
         ${activityFilter}
         AND EXISTS (SELECT 1 FROM team_members m

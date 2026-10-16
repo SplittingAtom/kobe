@@ -46,6 +46,7 @@ import {
 import type { RunAgentResolver } from "./runs/seams.js";
 import { createOffboarding, type Offboarding } from "./offboarding/index.js";
 import { stopUserSchedules } from "./schedules/offboard.js";
+import { endUserShares } from "./threads/share-scope.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -403,6 +404,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   lifecycle.on("deactivated", {
     name: "schedules",
     run: (userId) => stopUserSchedules(database.db, runs, userId),
+  });
+  // Their shared threads go private in every team (KOBE-221); reactivation does not share again.
+  lifecycle.on("deactivated", {
+    name: "thread-shares",
+    run: (userId) => endUserShares(database.db, userId),
   });
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
