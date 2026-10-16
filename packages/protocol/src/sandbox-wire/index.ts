@@ -8,4 +8,5 @@ export * from "./skill-bundles.js";
 export * from "./memory-frames.js";
 export * from "./project-frames.js";
 export * from "./web-search-frames.js";
+export * from "./trace-frames.js";
 export * from "./mcp-config.js";

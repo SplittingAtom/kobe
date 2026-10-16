@@ -24,6 +24,7 @@ import {
 } from "./project-frames.js";
 import { runMcpContextSchema } from "./mcp-config.js";
 import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
+import { traceSpansFrameSchema, wireTraceContextSchema } from "./trace-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
@@ -265,6 +266,7 @@ export const sandboxToServerFrameSchema = z.union([
   memoryReadFrameSchema,
   projectFileProposeFrameSchema,
   webSearchQueryFrameSchema,
+  traceSpansFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -446,6 +448,11 @@ export const runStartFrameSchema = frame("run.start", {
   project: runProjectContextSchema.optional(),
   /** The run's effective MCP connectors (KOBE-111, mcp-config.ts); only for agents with capability `mcp`. */
   mcp: runMcpContextSchema.optional(),
+  /**
+   * The run's trace context (KOBE-274, trace-frames.ts): only for agents with capability
+   * `trace_spans`, and only when the server traces this run. Absent = record and send no spans.
+   */
+  trace: wireTraceContextSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */
@@ -504,6 +511,8 @@ export const threadCompactFrameSchema = frame("thread.compact", {
   model_limits: modelLimitsSchema.optional(),
   /** Run-bound gateway token for `run_id` (run-token.ts), as `run.start.run_token`. */
   run_token: runTokenGrantSchema,
+  /** The compaction run's trace context (KOBE-274), as `run.start.trace`. */
+  trace: wireTraceContextSchema.optional(),
 });
 
 export const piUiResponseFrameSchema = frame("pi.ui_response", {
