@@ -136,6 +136,80 @@ describe("append (ac-1)", () => {
     expect(await fx.seqsInDb(finance, run)).toEqual([1]);
   });
 
+  describe("epilogue after run.completed (KOBE-234)", () => {
+    const THREAD = randomUUID();
+    const title = { type: "thread.updated", payload: { thread_id: THREAD, title: "Revenue" } };
+    const suggestions = {
+      type: "thread.suggestions",
+      payload: { thread_id: THREAD, suggestions: ["By month?"] },
+    };
+    const code = (p: Promise<unknown>) =>
+      p.then(
+        () => "ok",
+        (e: unknown) => (e instanceof AppendError ? e.code : String(e)),
+      );
+    const completed = async (payload: Record<string, unknown>) => {
+      const run = await fx.run(finance, alice);
+      await appendRunEvents(fx.db, finance, run, [
+        { type: "run.completed", payload: { leaf_entry_id: null, ...payload } },
+      ]);
+      return run;
+    };
+
+    it("takes each announced epilogue event once, then nothing else", async () => {
+      const run = await completed({ epilogue: ["title", "followups"] });
+      expect(await code(appendRunEvents(fx.db, finance, run, [title]))).toBe("ok");
+      expect(await code(appendRunEvents(fx.db, finance, run, [title]))).toBe("epilogue_refused");
+      // Once an epilogue event is the last, the run is still ended for everything else.
+      expect(await code(appendRunEvents(fx.db, finance, run, [delta("late")]))).toBe(
+        "run_finished",
+      );
+      expect(await code(appendRunEvents(fx.db, finance, run, [suggestions]))).toBe("ok");
+      expect(await code(appendRunEvents(fx.db, finance, run, [suggestions]))).toBe(
+        "epilogue_refused",
+      );
+      expect(
+        await code(
+          appendRunEvents(fx.db, finance, run, [
+            { type: "run.failed", payload: { error: { code: "x", message: "x" } } },
+          ]),
+        ),
+      ).toBe("run_finished");
+      expect(await fx.seqsInDb(finance, run)).toEqual([1, 2, 3]);
+    });
+
+    it("refuses epilogue events that were not announced, twice in one batch, or before the end", async () => {
+      const titled = await completed({ epilogue: ["title"] });
+      expect(await code(appendRunEvents(fx.db, finance, titled, [suggestions]))).toBe(
+        "epilogue_refused",
+      );
+      expect(await code(appendRunEvents(fx.db, finance, titled, [title, title]))).toBe(
+        "epilogue_refused",
+      );
+      expect(await code(appendRunEvents(fx.db, finance, titled, [title, delta("x")]))).toBe(
+        "run_finished",
+      );
+      const none = await completed({});
+      expect(await code(appendRunEvents(fx.db, finance, none, [title]))).toBe("epilogue_refused");
+      const live = await fx.run(finance, alice);
+      expect(await code(appendRunEvents(fx.db, finance, live, [title]))).toBe("epilogue_refused");
+      const failed = await fx.run(finance, alice);
+      await appendRunEvents(fx.db, finance, failed, [
+        { type: "run.failed", payload: { error: { code: "x", message: "x" } } },
+      ]);
+      expect(await code(appendRunEvents(fx.db, finance, failed, [title]))).toBe("epilogue_refused");
+    });
+
+    it("closes the epilogue window SERVER_CALL_EPILOGUE_MAX_MS after run.completed", async () => {
+      const run = await completed({ epilogue: ["title"] });
+      await fx.admin.query(
+        `UPDATE run_events SET created_at = created_at - interval '31 seconds' WHERE run_id = $1`,
+        [run],
+      );
+      expect(await code(appendRunEvents(fx.db, finance, run, [title]))).toBe("epilogue_refused");
+    });
+  });
+
   it.each([
     ["run.completed", { leaf_entry_id: null }],
     ["run.interrupted", { reason: "cancelled", last_entry_id: null, retryable: false }],
