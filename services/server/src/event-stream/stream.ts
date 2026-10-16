@@ -1,11 +1,17 @@
 import {
+  epilogueOpen,
   formatSseEvent,
   formatSseRetry,
   isKobeEventType,
   isTerminalEventType,
+  SERVER_CALL_EPILOGUE_MAX_MS,
+  serverCallPurposeSchema,
   SSE_KEEPALIVE_FRAME,
   SSE_KEEPALIVE_MS,
   SSE_RETRY_MS,
+  type KobeEvent,
+  type KobeEventType,
+  type ServerCallPurpose,
 } from "@kobe/protocol";
 import { logger as rootLogger } from "../logger.js";
 import type { HubSubscriber, RunEventHub } from "./hub.js";
@@ -42,6 +48,30 @@ export interface StreamSource {
   revalidate(): Promise<boolean>;
 }
 
+/**
+ * An ended run's epilogue (KOBE-234): what its `run.completed` announced, which epilogue events
+ * were already written, and when it completed (database clock).
+ */
+export interface EpilogueState {
+  readonly purposes: readonly ServerCallPurpose[];
+  readonly written: ReadonlySet<KobeEventType>;
+  readonly completedAtMs: number;
+}
+
+/** The epilogue a `run.completed` announces, or undefined when none. */
+export function announcedEpilogue(event: KobeEvent): EpilogueState | undefined {
+  if (event.type !== "run.completed") return undefined;
+  const raw = (event.payload as { epilogue?: unknown }).epilogue;
+  const purposes = Array.isArray(raw)
+    ? raw.flatMap((p) => {
+        const parsed = serverCallPurposeSchema.safeParse(p);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
+  if (purposes.length === 0) return undefined;
+  return { purposes, written: new Set(), completedAtMs: Date.parse(event.ts) };
+}
+
 export interface RunEventStreamInput {
   readonly runId: string;
   /** Resume cursor: the last seq the client has. */
@@ -57,6 +87,11 @@ export interface RunEventStreamInput {
    * stream alone would never reach a client that stopped reading. Without it the stream errors.
    */
   readonly abortConnection?: (() => void) | undefined;
+  /**
+   * The run ended before the cursor and its epilogue is still open (a reconnect after
+   * `run.completed`, KOBE-234): the stream waits for the announced events as it would have.
+   */
+  readonly epilogue?: EpilogueState;
 }
 
 export type StreamEndReason =
@@ -97,6 +132,10 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   let unsubscribe: (() => void) | undefined;
   let ticker: NodeJS.Timeout | undefined;
+  // KOBE-234: after a `run.completed` that announces an epilogue, the stream stays open for the
+  // announced events until each arrived or the window closed (then it ends, as after a terminal).
+  let epilogue: { state: EpilogueState; written: Set<KobeEventType> } | undefined;
+  let epilogueTimer: NodeJS.Timeout | undefined;
 
   const signal = () => {
     const w = wake;
@@ -104,11 +143,28 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
     w?.();
   };
 
+  const waitForEpilogue = (state: EpilogueState) => {
+    epilogue = { state, written: new Set(state.written) };
+    const left = state.completedAtMs + SERVER_CALL_EPILOGUE_MAX_MS - Date.now();
+    epilogueTimer = setTimeout(signal, Math.max(0, left) + 1);
+    epilogueTimer.unref();
+  };
+
+  const epilogueStillOpen = () =>
+    epilogue !== undefined &&
+    epilogueOpen({
+      epilogue: epilogue.state.purposes,
+      written: epilogue.written,
+      completedAtMs: epilogue.state.completedAtMs,
+      nowMs: Date.now(),
+    });
+
   const cleanup = (reason: StreamEndReason) => {
     if (ended) return;
     ended = true;
     unsubscribe?.();
     if (ticker) clearInterval(ticker);
+    if (epilogueTimer) clearTimeout(epilogueTimer);
     signal();
     input.onEnd?.(reason);
   };
@@ -201,21 +257,32 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
             if (event.seq <= lastSent) continue;
             text += formatSseEvent(event);
             lastSent = event.seq;
+            epilogue?.written.add(event.type);
             if (isKobeEventType(event.type) && isTerminalEventType(event.type)) {
+              const announced = announcedEpilogue(event);
+              if (announced) {
+                waitForEpilogue(announced);
+                continue;
+              }
               endReason ??= "terminal";
               break;
             }
           }
+          if (epilogue && !epilogueStillOpen()) endReason ??= "terminal";
           if (page.run.lastSeq > lastSent) dirty = true;
           if (text) {
             enqueue(ctrl, text);
             return;
           }
         }
-        if (page.run.ended && page.run.lastSeq <= lastSent) {
+        if (page.run.ended && page.run.lastSeq <= lastSent && !epilogueStillOpen()) {
           endReason ??= "terminal";
           continue;
         }
+      }
+      if (epilogue && !epilogueStillOpen()) {
+        endReason ??= "terminal";
+        continue;
       }
       if (keepaliveDue) {
         enqueue(ctrl, SSE_KEEPALIVE_FRAME);
@@ -230,6 +297,7 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
     start(ctrl) {
       controller = ctrl;
       unsubscribe = input.hub.subscribe(input.runId, subscriber);
+      if (input.epilogue) waitForEpilogue(input.epilogue);
       ctrl.enqueue(encoder.encode(formatSseRetry(t.retryMs)));
       lastChunkAt = Date.now();
       ticker = setInterval(tick, t.keepaliveMs);

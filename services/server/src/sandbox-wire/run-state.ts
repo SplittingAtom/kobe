@@ -3,6 +3,7 @@ import {
   nextThreadStatus,
   type RunStatus,
   type RunTransitionCause,
+  type ServerCallPurpose,
   type ThreadStatus,
 } from "@kobe/protocol";
 import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx, type RunKind } from "@kobe/db";
@@ -13,6 +14,7 @@ import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
+import { wantsTitleInTx } from "../threads/title.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -71,10 +73,17 @@ function budgetStoppedEvent(scope: BudgetScope): NewRunEvent {
   };
 }
 
-function terminalEvent(end: RunEnd, leaf: string | null): NewRunEvent {
+function terminalEvent(
+  end: RunEnd,
+  leaf: string | null,
+  epilogue: readonly ServerCallPurpose[],
+): NewRunEvent {
   switch (end.status) {
     case "completed":
-      return { type: "run.completed", payload: { leaf_entry_id: leaf } };
+      return {
+        type: "run.completed",
+        payload: { leaf_entry_id: leaf, ...(epilogue.length > 0 ? { epilogue } : {}) },
+      };
     case "failed":
       return { type: "run.failed", payload: { error: end.error } };
     case "interrupted":
@@ -103,6 +112,8 @@ export async function endRunInTx(
   interruptCause?: InterruptCause,
   /** What Pi has of the run's prompt, when the caller read it (KOBE-290; else: leased or not). */
   prompt?: PromptSource,
+  /** Server calls this server can make after a completed message run (KOBE-234/219). */
+  serverCalls: readonly ServerCallPurpose[] = [],
 ): Promise<{ ended: boolean; threadId?: string }> {
   let end = requested;
   const head = await tx.execute<{ thread_id: string }>(sql`
@@ -159,7 +170,11 @@ export async function endRunInTx(
   const terminal =
     budgetScope && to === "budget_stopped"
       ? budgetStoppedEvent(budgetScope)
-      : terminalEvent(end, threadRow.leaf_entry_id);
+      : terminalEvent(
+          end,
+          threadRow.leaf_entry_id,
+          to === "completed" ? await epilogueOf(tx, teamId, runId, threadId, serverCalls) : [],
+        );
   // A message whose run ends before Pi's first turn_end stays in the conversation (KOBE-290).
   const kept = to === "completed" ? [] : await keepPromptAtEndInTx(tx, teamId, runId, prompt);
   // A scheduled run's denied calls (D32) are reported on its terminal event and in its thread.
@@ -207,6 +222,22 @@ export async function endRunInTx(
   }
   await auditExpiredApprovals(tx, teamId, expired);
   return { ended: true, threadId };
+}
+
+/**
+ * What `run.completed` announces (KOBE-234 Flow 1): only calls this server can make and the run
+ * qualifies for. Decided here, in the transaction that completes the run, so a stream that sees
+ * the terminal event knows whether to wait.
+ */
+async function epilogueOf(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  threadId: string,
+  serverCalls: readonly ServerCallPurpose[],
+): Promise<ServerCallPurpose[]> {
+  if (!serverCalls.includes("title")) return [];
+  return (await wantsTitleInTx(tx, teamId, runId, threadId)) ? ["title"] : [];
 }
 
 function expiryCauseOfEnd(to: RunStatus) {

@@ -263,6 +263,7 @@ export class SandboxConnection implements RegisteredConnection {
       threadId,
       cursor,
       tuning: ctx.tuning,
+      serverCalls: ctx.serverCalls,
       createTranslator: () =>
         createRunTranslator({
           teamId: this.target.teamId,

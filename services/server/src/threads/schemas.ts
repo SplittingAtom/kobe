@@ -168,6 +168,26 @@ export const threadSummarySchema = z.object({
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
+/** Longest first message the hover card shows (KOBE-219); the rest is cut. */
+export const THREAD_CARD_MESSAGE_CHARS = 280;
+
+/** `GET /v1/threads/{id}/card` (CE18, KOBE-219): the rail's hover card. */
+export const threadCardSchema = z.object({
+  thread_id: wireUuidSchema,
+  /** The thread's first user message, whitespace collapsed, cut to 280 characters; null: none. */
+  first_message: z.string().max(THREAD_CARD_MESSAGE_CHARS).nullable(),
+  /** True when `first_message` was cut. */
+  first_message_truncated: z.boolean(),
+  /** The pinned agent; null for the site default agent. */
+  agent_id: wireUuidSchema.nullable(),
+  /** The pinned agent's name; null for the default agent or one no longer available. */
+  agent_name: z.string().nullable(),
+  last_activity_at: timestamp,
+  /** The member's messages and the agent's answers (tool-only turns not counted), all branches. */
+  message_count: z.number().int().min(0),
+});
+export type ThreadCard = z.infer<typeof threadCardSchema>;
+
 export const threadEntrySchema = z.object({
   entry_id: idSchema,
   parent_id: idSchema.nullable(),

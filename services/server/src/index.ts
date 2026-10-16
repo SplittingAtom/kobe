@@ -41,6 +41,7 @@ import { onScheduledRunEnded } from "./scheduler/run-hook.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
 import { runTokenKeyFromEnv } from "./sandbox-wire/run-token.js";
+import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
 import {
@@ -90,6 +91,9 @@ const bifrostAdmin = modelsConfig
   : undefined;
 // Run-bound model-gateway tokens (KOBE-118): keyed from the gateway session key; unset: off.
 const runTokenKey = runTokenKeyFromEnv(process.env);
+// The server's own model calls (KOBE-219 auto-titles): the gateway's address and a token key from
+// the same session key. Either unset: no titles (logged once below).
+const serverCallKey = serverCallKeyFromEnv(process.env);
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
 const isServer = config.process === "server";
@@ -115,6 +119,9 @@ if (config.process === "scheduler") {
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
+    ...(config.modelGatewayUrl && serverCallKey
+      ? { serverCalls: { gatewayUrl: config.modelGatewayUrl, key: serverCallKey } }
+      : {}),
     connectors: loadConnectorUrlPolicy(process.env),
     auditForwardingDestinations: destinationsOf(config.auditForwarding),
     auditForwardingSecrets: forwardingSecrets(config.auditForwarding),
@@ -143,6 +150,9 @@ if (config.process === "scheduler") {
         }
       : {}),
   });
+  if (!config.modelGatewayUrl || !serverCallKey) {
+    logger.info("model gateway or its session key not configured: threads are not auto-titled");
+  }
   if (config.smtp.security === "none") {
     logger.warn(
       { smtpHost: config.smtp.host },

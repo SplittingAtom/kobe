@@ -35,6 +35,11 @@ predates these keys still renders (KOBE-40). Keep in sync with values.yaml.
 {{- toJson (list "bifrost-admin-password" "bifrost-encryption-key" "provider-keys" "virtual-keys") -}}
 {{- end -}}
 
+{{/* The model-gateway shim's in-cluster URL (Service port 80): the server's own calls (KOBE-219). */}}
+{{- define "kobe.modelGatewayUrl" -}}
+{{- printf "http://%s-model-gateway" (include "kobe.fullname" .) -}}
+{{- end -}}
+
 {{- define "kobe.bifrostUrl" -}}
 {{- printf "http://%s-bifrost:8080" (include "kobe.fullname" .) -}}
 {{- end -}}
@@ -70,11 +75,15 @@ valueFrom:
 
 {{/*
 Server env (services/server/src/models/config.ts): Bifrost's admin API (it reconciles Bifrost) and
-both sealing secrets. The scheduler gets none of this.
+both sealing secrets, and the model gateway for its own calls after a run (KOBE-219 auto-titles,
+with a server-call token from the gateway session key it already has). The scheduler gets none of
+this.
 */}}
 {{- define "kobe.serverModelsEnv" -}}
 - name: KOBE_BIFROST_URL
   value: {{ include "kobe.bifrostUrl" . | quote }}
+- name: KOBE_MODEL_GATEWAY_URL
+  value: {{ include "kobe.modelGatewayUrl" . | quote }}
 - name: KOBE_BIFROST_ADMIN_USERNAME
   value: kobe
 - name: KOBE_BIFROST_ADMIN_PASSWORD

@@ -4,6 +4,7 @@ import {
   MAX_RUN_TOKEN_TTL_SECONDS,
   WEB_SEARCH_UNAVAILABLE_MESSAGES,
   type PolicyEngine,
+  type ServerCallPurpose,
   type ToolRegistry,
 } from "@kobe/protocol";
 import { z } from "zod";
@@ -65,6 +66,8 @@ export interface SandboxWireOptions {
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
+  /** Server calls a completed run may announce (KOBE-234/219); unset: none. */
+  readonly serverCalls?: readonly ServerCallPurpose[];
   /** Connections one replica accepts. */
   readonly maxConnections?: number;
   /** Run the lost-sandbox sweep on a timer (default true; tests call `sweep()`). */
@@ -243,6 +246,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     tuning,
     replicaId,
     ...(options.runTokenKey ? { runTokenKey: options.runTokenKey } : {}),
+    serverCalls: options.serverCalls ?? [],
     tools,
     policy: {
       db,

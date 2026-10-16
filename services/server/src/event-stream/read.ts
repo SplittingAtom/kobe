@@ -1,5 +1,10 @@
 import pg from "pg";
-import type { KobeEvent } from "@kobe/protocol";
+import {
+  serverCallPurposeSchema,
+  type KobeEvent,
+  type KobeEventType,
+  type ServerCallPurpose,
+} from "@kobe/protocol";
 import type { TeamRole } from "@kobe/db";
 
 /** Most events one read returns: what a stream holds in memory at a time. */
@@ -31,6 +36,16 @@ export interface Page {
   readonly events: readonly KobeEvent[];
 }
 
+export interface EpilogueRecord {
+  /** Seq of the announcing `run.completed`. */
+  readonly terminalSeq: number;
+  readonly purposes: readonly ServerCallPurpose[];
+  /** Event types written after it. */
+  readonly written: ReadonlySet<KobeEventType>;
+  /** When it was written (database clock), ms since the epoch. */
+  readonly completedAtMs: number;
+}
+
 export interface Access {
   readonly sessionLive: boolean;
   /** The user's role in the team, null when no longer a member. */
@@ -50,6 +65,12 @@ export interface StreamReader {
    * watchers of a run cost one read per wake-up, not one per stream.
    */
   readPage(teamId: string, runId: string, after: number): Promise<Page>;
+  /**
+   * An ended run's epilogue (KOBE-234): what its `run.completed` announced, the epilogue events
+   * written after it and its seq; null when the run did not end with an announcing
+   * `run.completed`. Reads the run's last few events only (at most two follow the terminal).
+   */
+  epilogue(teamId: string, runId: string): Promise<EpilogueRecord | null>;
   /** Session, membership and thread owner in one statement (periodic revalidation). */
   access(input: {
     teamId: string;
@@ -87,6 +108,13 @@ const RUN_SQL = `
     FROM runs r
     JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
    WHERE r.team_id = $1 AND r.id = $2`;
+
+const EPILOGUE_SQL = `
+  SELECT e.seq, e.type, e.payload -> 'epilogue' AS epilogue, e.created_at
+    FROM runs r
+    JOIN run_events e ON e.team_id = r.team_id AND e.run_id = r.id AND e.seq > r.last_seq - 3
+   WHERE r.team_id = $1 AND r.id = $2
+   ORDER BY e.seq`;
 
 const ACCESS_SQL = `
   SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id = $1 AND s.expires_at > now()) AS session_live,
@@ -207,6 +235,28 @@ export function createStreamReader(options: {
         inFlight.set(key, pending);
       }
       return pending;
+    },
+    async epilogue(teamId, runId) {
+      const rows = await inTeam<{
+        seq: number;
+        type: string;
+        epilogue: unknown;
+        created_at: Date;
+      }>(teamId, EPILOGUE_SQL, [teamId, runId]);
+      const at = rows.findIndex((r) => r.type === "run.completed");
+      const terminal = rows[at];
+      if (!terminal || !Array.isArray(terminal.epilogue)) return null;
+      const purposes = terminal.epilogue.flatMap((p) => {
+        const parsed = serverCallPurposeSchema.safeParse(p);
+        return parsed.success ? [parsed.data] : [];
+      });
+      if (purposes.length === 0) return null;
+      return {
+        terminalSeq: Number(terminal.seq),
+        purposes,
+        written: new Set(rows.slice(at + 1).map((r) => r.type as KobeEventType)),
+        completedAtMs: new Date(terminal.created_at).getTime(),
+      };
     },
     async access({ teamId, runId, userId, sessionId }) {
       const [row] = await inTeam<{

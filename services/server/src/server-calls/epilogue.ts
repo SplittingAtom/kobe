@@ -1,6 +1,7 @@
 import { SERVER_CALL_LIMITS, type ServerCallPurpose } from "@kobe/protocol";
 import type { Logger } from "pino";
 import { AppendError, type NewRunEvent } from "../event-stream/append.js";
+import { ServerCallError } from "../models/gateway-client.js";
 
 /**
  * The epilogue of a completed run (KOBE-234; contract in `@kobe/protocol` server-call.ts, design in
@@ -36,7 +37,11 @@ export interface EpilogueResult {
 }
 
 const errorCode = (err: unknown): string =>
-  err instanceof AppendError ? err.code : err instanceof Error ? err.name : "unknown";
+  err instanceof AppendError || err instanceof ServerCallError
+    ? err.code
+    : err instanceof Error
+      ? err.name
+      : "unknown";
 
 async function titleStep(d: EpilogueDeps, call: NonNullable<EpilogueDeps["title"]>) {
   let title: string | undefined;

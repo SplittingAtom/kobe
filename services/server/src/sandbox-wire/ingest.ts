@@ -1,4 +1,4 @@
-import type { PiEventFrame, PiGetEntriesData } from "@kobe/protocol";
+import type { PiEventFrame, PiGetEntriesData, ServerCallPurpose } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import {
   appendRunEventsInTx,
@@ -49,6 +49,8 @@ export interface RunIngestOptions {
   readonly createTranslator: () => RunTranslator;
   readonly host: IngestHost;
   readonly tuning: WireTuning;
+  /** Server calls `run.completed` may announce (KOBE-234/219); default none. */
+  readonly serverCalls?: readonly ServerCallPurpose[];
 }
 
 const SETTLE_SYNC_ATTEMPTS = 3;
@@ -356,7 +358,8 @@ export class RunIngest {
             end === undefined
               ? ({ status: "completed" } as const)
               : ({ status: "failed", error: failureInfo(end, "model_error") } as const);
-          return (await endRunInTx(tx, teamId, runId, outcome)).ended;
+          const calls = this.#o.serverCalls ?? [];
+          return (await endRunInTx(tx, teamId, runId, outcome, undefined, undefined, calls)).ended;
         }
         return false;
       });

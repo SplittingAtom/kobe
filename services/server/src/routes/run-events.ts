@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { decideStreamOpen, resolveResumeCursor } from "@kobe/protocol";
+import { decideStreamOpen, epilogueOpen, resolveResumeCursor } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
@@ -72,11 +72,29 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
       );
     }
 
+    // A reconnect after `run.completed` while its epilogue is open (KOBE-234) streams again.
+    const record = run.ended && !run.compacted ? await reader.epilogue(team.id, runId) : null;
+    const pastTerminal = record !== null && cursor.after >= record.terminalSeq;
+    const epilogue = pastTerminal
+      ? {
+          purposes: record.purposes,
+          written: record.written,
+          completedAtMs: record.completedAtMs,
+        }
+      : undefined;
     const decision = decideStreamOpen({
       ended: run.ended,
       events_compacted: run.compacted,
       last_seq: run.lastSeq,
       cursor: cursor.after,
+      epilogue_open:
+        epilogue !== undefined &&
+        epilogueOpen({
+          epilogue: epilogue.purposes,
+          written: epilogue.written,
+          completedAtMs: epilogue.completedAtMs,
+          nowMs: Date.now(),
+        }),
     });
     if (decision.kind === "gone") {
       return c.json(
@@ -127,6 +145,7 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
       timings,
       onEnd: release,
       abortConnection: nodeResponseDestroyer(c.env),
+      ...(epilogue ? { epilogue } : {}),
     });
     return new Response(body, { status: 200, headers: SSE_HEADERS });
   });

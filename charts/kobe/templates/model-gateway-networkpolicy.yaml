@@ -1,8 +1,9 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $g := include "kobe.modelGatewayValues" . | fromJson -}}
-# Model gateway shim (KOBE-40). Ingress: only sandboxes (team namespaces), only the shim's port; the
-# team namespace's own policy says the same from the sending side, this is the receiving side that
-# holds regardless of how the CNI applies egress selectors (KOBE-22 kube-router finding).
+# Model gateway shim (KOBE-40). Ingress: only sandboxes (team namespaces) and the server's pods (its
+# own calls after a run with a server-call token, KOBE-219/234), only the shim's port; the team
+# namespace's own policy says the same from the sending side, this is the receiving side that holds
+# regardless of how the CNI applies egress selectors (KOBE-22 kube-router finding).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -23,6 +24,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kobe.splittingatom.io/team-namespace: "true"
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
       ports:
         - protocol: TCP
           port: 8080

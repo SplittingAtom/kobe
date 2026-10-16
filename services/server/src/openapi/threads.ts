@@ -10,6 +10,7 @@ import {
   listThreadsQuerySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
+  threadCardSchema,
   threadDetailSchema,
   threadPageSchema,
   threadSearchPageSchema,
@@ -207,6 +208,23 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/card": {
+      get: {
+        operationId: "getThreadCard",
+        summary: "The rail's hover card: first message, agent, last activity, message count",
+        description:
+          "CE18 (KOBE-219): read when the card opens. The first user message is cut to 280 " +
+          "characters; the count holds the member's messages and the agent's answers on every " +
+          "branch (turns that only called tools are not counted). Readable by whoever may read " +
+          "the thread. Never wakes a sandbox.",
+        parameters: [idParameter, teamHeader],
+        responses: {
+          "200": json("ThreadCard", "The thread's card."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
     "/v1/threads/{id}/entries": {
       get: {
         operationId: "listThreadEntries",
@@ -343,6 +361,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadPage: withoutDialect(output(threadPageSchema)),
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
+    ThreadCard: withoutDialect(output(threadCardSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     ToolOutput: withoutDialect(output(toolOutputSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),

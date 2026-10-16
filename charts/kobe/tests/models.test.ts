@@ -210,6 +210,21 @@ describe("shim sizing", () => {
   });
 });
 
+describe("server calls (KOBE-219)", () => {
+  const ms = render();
+
+  it("gives the server the gateway's in-cluster URL; its config accepts it", () => {
+    const vars = env(ms, "kobe-server");
+    expect(vars).toContainEqual({
+      name: "KOBE_MODEL_GATEWAY_URL",
+      value: "http://kobe-model-gateway",
+    });
+    expect(vars.map((v) => v.name)).toContain("KOBE_SESSION_KEY_MODEL_GATEWAY");
+    // The scheduler starts no server calls: no gateway URL there.
+    expect(env(ms, "kobe-scheduler").map((v) => v.name)).not.toContain("KOBE_MODEL_GATEWAY_URL");
+  });
+});
+
 describe("network policies", () => {
   const ms = render({ "postgres.mode": "cnpg" });
   const policy = (name: string) => find(ms, "NetworkPolicy", name)?.spec;
@@ -247,7 +262,7 @@ describe("network policies", () => {
     expect(find(local, "NetworkPolicy", "kobe-bifrost")?.spec.egress).toContainEqual(ollama);
   });
 
-  it("the shim admits only team namespaces and reaches only DNS, Bifrost and Postgres", () => {
+  it("the shim admits only team namespaces and the server (KOBE-219), and reaches only DNS, Bifrost and Postgres", () => {
     const shim = policy("kobe-model-gateway");
     expect(shim?.ingress).toEqual([
       {
@@ -255,6 +270,8 @@ describe("network policies", () => {
           {
             namespaceSelector: { matchLabels: { "kobe.splittingatom.io/team-namespace": "true" } },
           },
+          // The server's own calls (auto-titles): its pods only, never the web or the scheduler.
+          { podSelector: { matchLabels: component("server") } },
         ],
         ports: [{ protocol: "TCP", port: 8080 }],
       },

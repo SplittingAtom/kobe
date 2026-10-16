@@ -1,4 +1,4 @@
-import type { ToolRegistry } from "@kobe/protocol";
+import type { ServerCallPurpose, ToolRegistry } from "@kobe/protocol";
 import type {
   ARTIFACT_PUT_REFUSALS,
   FILE_SHARE_REFUSALS,
@@ -74,6 +74,8 @@ export interface WireContext {
   readonly replicaId: string;
   /** Derived run token key (KOBE-118); unset: no run tokens are minted. */
   readonly runTokenKey?: Uint8Array;
+  /** Server calls a completed run may announce (KOBE-234/219); empty: none configured. */
+  readonly serverCalls: readonly ServerCallPurpose[];
   readonly tools: ToolRegistry;
   readonly policy: PolicyCheckDeps;
   /** Storage for `artifact.put` (KOBE-129). */

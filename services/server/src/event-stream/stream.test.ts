@@ -3,7 +3,13 @@ import type { KobeEvent } from "@kobe/protocol";
 import { SseReader } from "../testing/sse.js";
 import type { HubSubscriber, RunEventHub } from "./hub.js";
 import { PAGE_MAX_ROWS, type Page } from "./read.js";
-import { createRunEventStream, type StreamEndReason, type StreamTimings } from "./stream.js";
+import {
+  createRunEventStream,
+  type RunEventStreamInput,
+  type StreamEndReason,
+  type StreamTimings,
+} from "./stream.js";
+import { SERVER_CALL_EPILOGUE_MAX_MS } from "@kobe/protocol";
 
 const RUN = "0b6f0d4e-5a3c-4d8e-9a43-5f7b0f2d1c11";
 
@@ -40,6 +46,28 @@ class FakeLog {
       );
     }
     if (terminal) this.ended = true;
+  }
+
+  /** `run.completed` announcing an epilogue (KOBE-234), `ageMs` after it was written. */
+  completeWithEpilogue(ageMs = 0): void {
+    this.events.push({
+      run_id: RUN,
+      seq: this.events.length + 1,
+      ts: new Date(Date.now() - ageMs).toISOString(),
+      type: "run.completed",
+      payload: { leaf_entry_id: null, epilogue: ["title"] },
+    } as KobeEvent);
+    this.ended = true;
+  }
+
+  titled(): void {
+    this.events.push({
+      run_id: RUN,
+      seq: this.events.length + 1,
+      ts: new Date().toISOString(),
+      type: "thread.updated",
+      payload: { thread_id: RUN, title: "Revenue" },
+    } as KobeEvent);
   }
 
   source = {
@@ -87,7 +115,13 @@ const FAST: Partial<StreamTimings> = {
   revalidateMs: 50,
 };
 
-function open(log: FakeLog, hub: FakeHub, cursor = 0, timings = FAST) {
+function open(
+  log: FakeLog,
+  hub: FakeHub,
+  cursor = 0,
+  timings = FAST,
+  epilogue?: RunEventStreamInput["epilogue"],
+) {
   const ends: StreamEndReason[] = [];
   const body = createRunEventStream({
     runId: RUN,
@@ -96,6 +130,7 @@ function open(log: FakeLog, hub: FakeHub, cursor = 0, timings = FAST) {
     hub,
     timings,
     onEnd: (r) => ends.push(r),
+    ...(epilogue ? { epilogue } : {}),
   });
   return { reader: new SseReader(body), ends };
 }
@@ -123,6 +158,70 @@ describe("run event stream", () => {
     expect(seqs(await reader.rest())).toEqual([6, 7, 8]);
     expect(ends).toEqual(["terminal"]);
     expect(hub.size).toBe(0);
+  });
+
+  describe("epilogue (KOBE-234/219 ac-6)", () => {
+    it("stays open after run.completed that announces a title, until thread.updated", async () => {
+      const log = new FakeLog();
+      const hub = new FakeHub();
+      log.append(2);
+      log.completeWithEpilogue();
+      const { reader, ends } = open(log, hub);
+      expect((await reader.nextEvent())?.seq).toBe(1);
+      expect((await reader.nextEvent())?.seq).toBe(2);
+      expect((await reader.nextEvent())?.type).toBe("run.completed");
+      await new Promise((r) => setTimeout(r, 60));
+      expect(ends).toEqual([]);
+      log.titled();
+      hub.hint(4);
+      const rest = await reader.rest();
+      expect(rest.map((e) => e.type)).toEqual(["thread.updated"]);
+      expect(ends).toEqual(["terminal"]);
+      expect(hub.size).toBe(0);
+    });
+
+    it("ends when the window closes without the announced event", async () => {
+      const log = new FakeLog();
+      log.completeWithEpilogue(SERVER_CALL_EPILOGUE_MAX_MS - 100);
+      const { reader, ends } = open(log, new FakeHub());
+      expect((await reader.rest()).map((e) => e.type)).toEqual(["run.completed"]);
+      expect(ends).toEqual(["terminal"]);
+    });
+
+    it("ends at once when the epilogue is already delivered in the replay", async () => {
+      const log = new FakeLog();
+      log.completeWithEpilogue();
+      log.titled();
+      const { reader, ends } = open(log, new FakeHub(), 0, { ...FAST, keepaliveMs: 10_000 });
+      expect((await reader.rest()).map((e) => e.type)).toEqual(["run.completed", "thread.updated"]);
+      expect(ends).toEqual(["terminal"]);
+    });
+
+    it("a reconnect after run.completed waits for the epilogue it was told about", async () => {
+      const log = new FakeLog();
+      const hub = new FakeHub();
+      log.completeWithEpilogue();
+      const completedAtMs = Date.parse(log.events[0]?.ts ?? "");
+      const { reader, ends } = open(log, hub, 1, FAST, {
+        purposes: ["title"],
+        written: new Set(),
+        completedAtMs,
+      });
+      await new Promise((r) => setTimeout(r, 60));
+      expect(ends).toEqual([]);
+      log.titled();
+      hub.hint(2);
+      expect((await reader.rest()).map((e) => e.type)).toEqual(["thread.updated"]);
+      expect(ends).toEqual(["terminal"]);
+    });
+
+    it("a run.completed without an epilogue still ends the stream", async () => {
+      const log = new FakeLog();
+      log.append(1, true);
+      const { reader, ends } = open(log, new FakeHub());
+      expect((await reader.rest()).map((e) => e.type)).toEqual(["run.completed"]);
+      expect(ends).toEqual(["terminal"]);
+    });
   });
 
   it("pages through long backlogs gaplessly", async () => {

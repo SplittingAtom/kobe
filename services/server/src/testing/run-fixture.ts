@@ -235,6 +235,8 @@ export class RunFixture {
       readonly runTokenKey?: Uint8Array;
       /** A run's sandbox byte budget (default: the wire's). */
       readonly runMaxBytes?: number;
+      /** The server's own model calls (KOBE-219 titles): a (fake) gateway and the token key. */
+      readonly serverCalls?: { readonly gatewayUrl: string; readonly key: Uint8Array };
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
@@ -244,6 +246,7 @@ export class RunFixture {
       ...(options.modelTokenDefaults === undefined
         ? {}
         : { modelTokenDefaults: options.modelTokenDefaults }),
+      ...(options.serverCalls === undefined ? {} : { serverCalls: options.serverCalls }),
       sandboxWire: {
         sweep: false,
         ...(options.runTokenKey === undefined ? {} : { runTokenKey: options.runTokenKey }),

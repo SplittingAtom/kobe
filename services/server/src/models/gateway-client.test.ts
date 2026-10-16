@@ -1,0 +1,211 @@
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  SERVER_CALL_AUDIENCE,
+  SERVER_CALL_LIMITS,
+  SERVER_CALL_PATH,
+  SERVER_CALL_TOKEN_HEADER,
+  serverCallRequestSchema,
+} from "@kobe/protocol";
+import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
+import {
+  createServerCallClient,
+  ServerCallError,
+  serverCallKeyFromEnv,
+  type ServerCallInput,
+} from "./gateway-client.js";
+
+/**
+ * KOBE-219 ac-8 (KOBE-234 contract): the server's call to the model gateway carries the
+ * server-call token in its own header and nothing else that is a credential — no session token,
+ * no run token or run id, no provider key — and the body is one the gateway accepts.
+ */
+const MASTER = "g".repeat(48);
+const KEY = deriveServerCallTokenKey(new TextEncoder().encode(MASTER));
+// Secrets the server process holds that must never reach the gateway on this path.
+const PROVIDER_KEY_SECRET = "p".repeat(48);
+const PROVIDER_KEY = "sk-provider-0123456789abcdef";
+
+interface Seen {
+  readonly method: string;
+  readonly url: string;
+  readonly headers: IncomingHttpHeaders;
+  readonly body: string;
+}
+
+let server: Server;
+let base = "";
+const seen: Seen[] = [];
+let reply: (res: ServerResponse) => void = () => undefined;
+
+beforeAll(async () => {
+  server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c: Buffer) => (body += c.toString("utf8")));
+    req.on("end", () => {
+      seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
+      reply(res);
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(() => new Promise<void>((r) => server.close(() => r())));
+afterEach(() => {
+  seen.length = 0;
+});
+
+const ok = (content: unknown) => (res: ServerResponse) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
+};
+
+const input = (over: Partial<ServerCallInput> = {}): ServerCallInput => ({
+  purpose: "title",
+  teamId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  userId: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+  threadId: "3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
+  runId: "4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80",
+  model: "openai/gpt-x",
+  messages: [{ role: "user", content: "What drives revenue?" }],
+  signal: AbortSignal.timeout(5_000),
+  ...over,
+});
+
+describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
+  it("sends the server-call token alone, non-streaming, to POST /v1/chat/completions", async () => {
+    reply = ok("Revenue drivers");
+    const client = createServerCallClient({ url: base, key: KEY });
+    expect(await client.complete(input())).toBe("Revenue drivers");
+
+    expect(seen).toHaveLength(1);
+    const [req] = seen;
+    expect(req?.method).toBe("POST");
+    expect(req?.url).toBe(SERVER_CALL_PATH);
+    const body = serverCallRequestSchema.parse(JSON.parse(req?.body ?? ""));
+    expect(body).toMatchObject({ model: "openai/gpt-x", stream: false });
+    expect(body.max_tokens).toBeLessThanOrEqual(SERVER_CALL_LIMITS.title.max_output_tokens);
+
+    const token = req?.headers[SERVER_CALL_TOKEN_HEADER];
+    const verified = verifyServerCallToken(KEY, token, Math.floor(Date.now() / 1000));
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.claims).toMatchObject({
+      aud: SERVER_CALL_AUDIENCE,
+      purpose: "title",
+      team_id: input().teamId,
+      user_id: input().userId,
+      thread_id: input().threadId,
+      run_id: input().runId,
+      model: "openai/gpt-x",
+      max_output_tokens: SERVER_CALL_LIMITS.title.max_output_tokens,
+    });
+    expect(verified.claims.exp - verified.claims.iat).toBeLessThanOrEqual(30);
+  });
+
+  it("never sends a session token, run token, run id or provider key", async () => {
+    reply = ok("Revenue drivers");
+    process.env.KOBE_MODELS_PROVIDER_KEY_SECRET = PROVIDER_KEY_SECRET;
+    try {
+      const client = createServerCallClient({ url: base, key: KEY });
+      await client.complete(input());
+    } finally {
+      delete process.env.KOBE_MODELS_PROVIDER_KEY_SECRET;
+    }
+    const [req] = seen;
+    const names = Object.keys(req?.headers ?? {}).sort();
+    // Only transport headers, the token, and (when tracing is on) the trace context.
+    const allowed = new Set([
+      "connection",
+      "content-length",
+      "content-type",
+      "host",
+      "accept",
+      "accept-encoding",
+      "accept-language",
+      "sec-fetch-mode",
+      "user-agent",
+      "traceparent",
+      "tracestate",
+      SERVER_CALL_TOKEN_HEADER,
+    ]);
+    expect(names.filter((n) => !allowed.has(n))).toEqual([]);
+    for (const credential of [
+      "authorization",
+      "x-api-key",
+      "x-goog-api-key",
+      "api-key",
+      "x-kobe-run-token",
+      "x-kobe-run-id",
+    ]) {
+      expect(req?.headers[credential]).toBeUndefined();
+    }
+    expect(req?.url).not.toContain("key=");
+    const everything = JSON.stringify(req);
+    for (const secret of [MASTER, PROVIDER_KEY_SECRET, PROVIDER_KEY]) {
+      expect(everything).not.toContain(secret);
+    }
+    // The token is not a session token (JWT) nor a run token.
+    expect(String(req?.headers[SERVER_CALL_TOKEN_HEADER])).toMatch(/^ksc1\./);
+  });
+
+  it("reports a refusal by the gateway's code, never its text", async () => {
+    reply = (res) => {
+      res.writeHead(402, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "budget_exhausted", message: "secret text" } }));
+    };
+    const client = createServerCallClient({ url: base, key: KEY });
+    const err = await client.complete(input()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ServerCallError);
+    expect((err as ServerCallError).code).toBe("budget_exhausted");
+    expect((err as ServerCallError).status).toBe(402);
+    expect(String((err as Error).message)).not.toContain("secret text");
+  });
+
+  it("falls back to the status when the refusal names no usable code", async () => {
+    reply = (res) => {
+      res.writeHead(503, { "content-type": "text/plain" });
+      res.end("upstream down: Bearer abc");
+    };
+    const client = createServerCallClient({ url: base, key: KEY });
+    const err = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
+    expect(err.code).toBe("http_503");
+  });
+
+  it("refuses a reply without text and stops at the timeout", async () => {
+    reply = ok([{ type: "image" }]);
+    const client = createServerCallClient({ url: base, key: KEY });
+    const bad = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
+    expect(bad.code).toBe("bad_reply");
+
+    reply = () => undefined; // never answers
+    const slow = (await client
+      .complete(input({ signal: AbortSignal.timeout(50) }))
+      .catch((e: unknown) => e)) as ServerCallError;
+    expect(slow.code).toBe("timeout");
+  });
+
+  it("does not follow redirects (the token never leaves for another host)", async () => {
+    reply = (res) => {
+      res.writeHead(307, { location: "http://169.254.169.254/" });
+      res.end();
+    };
+    const client = createServerCallClient({ url: base, key: KEY });
+    const err = (await client.complete(input()).catch((e: unknown) => e)) as ServerCallError;
+    expect(err.code).toMatch(/^(http_307|unreachable)$/);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("derives its key only from the gateway session key", () => {
+    expect(serverCallKeyFromEnv({})).toBeUndefined();
+    expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: "short" })).toBeUndefined();
+    expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: MASTER })).toEqual(KEY);
+  });
+});

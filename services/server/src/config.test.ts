@@ -102,6 +102,20 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads the model gateway's address for the server's own calls (KOBE-219)", () => {
+    expect(loadConfig(REQUIRED).modelGatewayUrl).toBeUndefined();
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_MODEL_GATEWAY_URL: "http://kobe-model-gateway" })
+        .modelGatewayUrl,
+    ).toBe("http://kobe-model-gateway");
+    expect(() => loadConfig({ ...REQUIRED, KOBE_MODEL_GATEWAY_URL: "ftp://x" })).toThrow(
+      /KOBE_MODEL_GATEWAY_URL/,
+    );
+    expect(() =>
+      loadConfig({ ...REQUIRED, KOBE_MODEL_GATEWAY_URL: "http://u:p@kobe-model-gateway" }),
+    ).toThrow(/KOBE_MODEL_GATEWAY_URL/);
+  });
+
   it("requires a postgres database URL", () => {
     const { KOBE_DATABASE_URL: _, ...rest } = REQUIRED;
     expect(() => loadConfig(rest)).toThrow(/KOBE_DATABASE_URL/);

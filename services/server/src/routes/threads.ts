@@ -57,6 +57,7 @@ import {
   type ThreadSummary,
 } from "../threads/schemas.js";
 import { searchThreadList } from "../threads/search.js";
+import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
@@ -288,6 +289,14 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       };
     });
     return detail ? c.json(detail) : fail(c, "thread_not_found");
+  });
+
+  /** The rail's hover card (CE18, KOBE-219): read when the card opens. */
+  app.get("/:id/card", async (c) => {
+    const id = threadIdParam(c);
+    if (!id) return invalidRequest(c);
+    const card = await asViewer(c, (tx, viewer) => threadCard(tx, viewer, id));
+    return card ? c.json(card) : fail(c, "thread_not_found");
   });
 
   app.get("/:id/entries", async (c) => {

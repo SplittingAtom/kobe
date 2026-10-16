@@ -55,6 +55,15 @@ const configSchema = z.object({
   KOBE_MCP_PROXY_URL: z
     .url({ protocol: /^https?$/, error: "KOBE_MCP_PROXY_URL must be an http(s) URL" })
     .optional(),
+  // The model gateway's in-cluster address for the server's own calls (KOBE-219 auto-titles).
+  // Unset: no server calls. A plain origin: the server-call token must not go anywhere else.
+  KOBE_MODEL_GATEWAY_URL: z
+    .url({ protocol: /^https?$/, error: "KOBE_MODEL_GATEWAY_URL must be an http(s) URL" })
+    .refine((u) => {
+      const url = new URL(u);
+      return url.username === "" && url.password === "" && url.search === "" && url.hash === "";
+    }, "KOBE_MODEL_GATEWAY_URL must be a plain origin without credentials")
+    .optional(),
   // UTC hour the nightly retention pass runs in (KOBE-18, D18).
   KOBE_RETENTION_HOUR_UTC: z.coerce
     .number({ error: "KOBE_RETENTION_HOUR_UTC must be a number" })
@@ -167,6 +176,8 @@ export interface Config {
   readonly mcpProxyInternalKey: string | undefined;
   /** The MCP proxy's base URL, for the pinning probe (KOBE-101). */
   readonly mcpProxyUrl: string | undefined;
+  /** The model gateway's origin for the server's own calls (KOBE-219); unset: none. */
+  readonly modelGatewayUrl: string | undefined;
   /** UTC hour of the nightly retention pass (KOBE-18). */
   readonly retentionHourUtc: number;
   /** The nightly retention pass is paused (KOBE-243). */
@@ -209,6 +220,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     internalPort: base.data.KOBE_INTERNAL_PORT,
     mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
     mcpProxyUrl: base.data.KOBE_MCP_PROXY_URL,
+    modelGatewayUrl:
+      base.data.KOBE_MODEL_GATEWAY_URL === undefined
+        ? undefined
+        : new URL(base.data.KOBE_MODEL_GATEWAY_URL).origin,
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
     retentionPaused: base.data.KOBE_RETENTION_PAUSED,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,

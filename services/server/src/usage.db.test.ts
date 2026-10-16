@@ -400,3 +400,63 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
     expect(threadUsageResponseSchema.safeParse(r.json).error).toBeUndefined();
   });
 });
+
+describe("usage kinds (KOBE-219 ac-7, KOBE-234 run-less rows)", () => {
+  it("per-run usage and the gauge read run calls only; dashboards break usage down by kind", async () => {
+    const db = h.deps.database.db;
+    const { threadId, runId } = await withTeam(db, finance, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: finance, ownerUserId: ids.bob })
+        .returning({ id: threads.id });
+      if (!thread) throw new Error("no thread");
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: finance,
+          threadId: thread.id,
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      if (!run) throw new Error("no run");
+      return { threadId: thread.id, runId: run.id };
+    });
+    const t0 = Date.now() - 30_000;
+    await recordModelUsage(db, [
+      usage({ runId, at: new Date(t0), inputTokens: 5_000, outputTokens: 200 }),
+      // The server's title call after the run: no sandbox, newer, a much smaller prompt.
+      usage({
+        runId,
+        sandboxId: undefined,
+        kind: "title",
+        at: new Date(t0 + 10_000),
+        inputTokens: 300,
+        outputTokens: 12,
+      }),
+    ]);
+    const run = await as.bob.get(`/v1/runs/${runId}/usage`);
+    expect(run.status, JSON.stringify(run.json)).toBe(200);
+    expect(run.json).toMatchObject({ run_id: runId, calls: 1, input_tokens: 5_000 });
+    const thread = await as.bob.get(`/v1/threads/${threadId}/usage`);
+    expect(thread.json.runs).toEqual([expect.objectContaining({ run_id: runId, calls: 1 })]);
+    expect(thread.json.totals.calls).toBe(1);
+    expect(thread.json.latest_call).toMatchObject({ run_id: runId, input_tokens: 5_000 });
+    expect(threadUsageResponseSchema.safeParse(thread.json).error).toBeUndefined();
+
+    const team = await as.alice.get("/v1/team/usage");
+    expect(team.status, JSON.stringify(team.json)).toBe(200);
+    const byKind = Object.fromEntries(
+      team.json.by_kind.map((k: { kind: string; calls: number }) => [k.kind, k.calls]),
+    );
+    expect(byKind.title).toBe(1);
+    expect(byKind.run).toBeGreaterThan(0);
+    expect(team.json.totals.calls).toBe(byKind.run + byKind.title);
+    const site = await as.siteAdmin.get("/v1/site/usage");
+    expect(
+      site.json.by_kind.find((k: { kind: string }) => k.kind === "title")?.calls,
+    ).toBeGreaterThanOrEqual(1);
+  });
+});
