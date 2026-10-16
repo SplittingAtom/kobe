@@ -9,6 +9,7 @@ import {
   composer,
   crushedIconButtons,
   openApp,
+  openRowMenu,
   streamed,
   streaming,
 } from "./testing";
@@ -30,6 +31,12 @@ afterEach(() => {
 });
 
 const list = () => screen.findByRole("list", { name: "Your threads" });
+
+/** Delete in a thread row's ⋯ menu (KOBE-292): moves it to Trash once confirmed. */
+async function trashFromMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
+  const menu = await openRowMenu(`Actions for ${title}`);
+  await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+}
 
 describe("thread list (RemoteThreadListAdapter)", () => {
   it("lists the caller's threads newest first and opens one", async () => {
@@ -73,41 +80,42 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     ).toBeTruthy();
   });
 
-  it("renames, moves to Trash and restores (D18)", async () => {
+  it("moves to Trash from the row's menu and restores (D18)", async () => {
     const t = fake.addThread("Budget");
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
     openApp(fake);
     const user = userEvent.setup();
-    const items = within(await list());
-    await user.click(await items.findByRole("button", { name: "Rename Budget" }));
-    const input = screen.getByLabelText("New title for Budget");
-    await user.clear(input);
-    await user.type(input, "Budget 2027{Enter}");
-    await waitFor(() => expect(fake.threads.get(t)?.title).toBe("Budget 2027"));
-    expect(chatRequests(fake, "PATCH").at(-1)).toMatchObject({
-      body: { title: "Budget 2027" },
+    await list();
+    await trashFromMenu(user, "Budget");
+    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    expect(chatRequests(fake, "DELETE").at(-1)).toMatchObject({
+      path: `/v1/threads/${t}`,
       team: fake.teamId,
     });
-
-    await user.click(await items.findByRole("button", { name: "Move Budget 2027 to Trash" }));
-    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
     await user.click(screen.getByRole("button", { name: "Trash" }));
     expect(screen.getByText("Threads in Trash are deleted for good after 30 days.")).toBeTruthy();
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
-    await user.click(await trash.findByRole("button", { name: "Restore Budget 2027" }));
+    // Trash rows keep their own two actions, no menu.
+    expect(trash.queryByRole("button", { name: "Actions for Budget" })).toBeNull();
+    await user.click(await trash.findByRole("button", { name: "Restore Budget" }));
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).toBeNull());
     expect(chatRequests(fake, "POST").at(-1)?.path).toBe(`/v1/threads/${t}/restore`);
   });
 
   it("deletes a thread in Trash forever after confirming (KOBE-18)", async () => {
     const t = fake.addThread("Old plan");
-    const confirm = vi.fn(() => false);
+    const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
     openApp(fake);
     const user = userEvent.setup();
-    await user.click(
-      await within(await list()).findByRole("button", { name: "Move Old plan to Trash" }),
-    );
+    await list();
+    await trashFromMenu(user, "Old plan");
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    confirm.mockClear();
+    confirm.mockReturnValue(false);
     await user.click(screen.getByRole("button", { name: "Trash" }));
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
     // Cancelled: nothing is sent.
@@ -167,9 +175,11 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     const user = userEvent.setup();
     await user.type(await composer(), "work{Enter}");
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
-    await user.click(
-      await within(await list()).findByRole("button", { name: "Move Busy to Trash" }),
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
     );
+    await trashFromMenu(user, "Busy");
     expect((await screen.findAllByText("Stop the run and clear the queue first."))[0]).toBeTruthy();
     expect(fake.threads.get(t)?.deleted_at).toBeNull();
   });

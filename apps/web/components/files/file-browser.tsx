@@ -8,8 +8,24 @@ import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
 import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
 import { ErrorNotice } from "../admin/error-notice";
-import { IconAction } from "../shell/icon-action";
+import { copyText } from "../../lib/clipboard";
+import type { MenuBindings } from "../../lib/shell/menu";
+import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
 import { useFolder } from "./use-folder";
+
+const COPY_FAILED = {
+  status: 0,
+  code: "client_error",
+  message: "The path could not be copied: the browser refused the clipboard.",
+} as const;
+
+/** A cancelled delete gives the focus back to the row's ⋯ button (KOBE-292). */
+function focusRowMenu(list: HTMLElement | null, name: string): void {
+  const row = [...(list?.querySelectorAll<HTMLElement>("li[data-file]") ?? [])].find(
+    (li) => li.dataset["file"] === name,
+  );
+  row?.querySelector<HTMLElement>('[data-command="file-row-actions"]')?.focus();
+}
 
 /** The sandbox syncs shortly after it starts; read the listing again after this. */
 const DEFAULT_REFRESH_AFTER_WAKE_MS = 4000;
@@ -128,11 +144,33 @@ function ConfirmDelete({
   );
 }
 
+/** A row's ⋯ menu (KOBE-292): Open, Download (files), Copy path, Delete (unless read-only). */
+function rowBindings(
+  entry: FileEntry,
+  handlers: {
+    readonly onOpen: (() => void) | undefined;
+    readonly onDownload: () => void;
+    readonly onCopyPath: () => void;
+    readonly onDelete: () => void;
+  },
+): MenuBindings {
+  const readOnly = isReadOnlyPath(entry.path);
+  return {
+    ...(handlers.onOpen ? { "open-file": { onSelect: handlers.onOpen } } : {}),
+    ...(entry.type === "file" ? { "download-file": { onSelect: handlers.onDownload } } : {}),
+    "copy-file-path": { onSelect: handlers.onCopyPath },
+    ...(readOnly
+      ? {}
+      : { "delete-file": { onSelect: handlers.onDelete, destructive: true, movesFocus: true } }),
+  };
+}
+
 function Row({
   entry,
   onOpen,
   onOpenFile,
   onDownload,
+  onCopyPath,
   onDelete,
 }: {
   readonly entry: FileEntry;
@@ -140,12 +178,14 @@ function Row({
   /** Views a file in the artifact column (KOBE-268); without it a file's name is plain text. */
   readonly onOpenFile: ((entry: FileEntry) => void) | undefined;
   onDownload(entry: FileEntry): void;
+  onCopyPath(entry: FileEntry): void;
   onDelete(entry: FileEntry): void;
 }) {
   const readOnly = isReadOnlyPath(entry.path);
   const dir = entry.type === "dir";
+  const open = dir ? () => onOpen(entry.path) : onOpenFile && (() => onOpenFile(entry));
   return (
-    <li data-file={entry.name} className="flex items-center gap-2 py-1">
+    <li data-file={entry.name} className="group/row flex items-center gap-2 py-1">
       {dir ? (
         <FolderIcon aria-hidden className="size-4 shrink-0" />
       ) : (
@@ -176,22 +216,19 @@ function Row({
       {entry.sizeBytes !== null && (
         <span className="text-muted-foreground text-xs">{formatBytes(entry.sizeBytes)}</span>
       )}
-      {!dir && (
-        <IconAction
-          command="download-file"
-          label={`Download ${entry.name}`}
-          onClick={() => onDownload(entry)}
-        />
-      )}
-      {!readOnly && (
-        // Set apart from Download, so a slip doesn't open the delete prompt (KOBE-269).
-        <IconAction
-          command="delete-file"
-          label={`Delete ${entry.name}`}
-          className="ms-2"
-          onClick={() => onDelete(entry)}
-        />
-      )}
+      <ActionMenu
+        trigger="file-row-actions"
+        label={`Actions for ${entry.name}`}
+        scope="file-menu"
+        size="md"
+        className={ROW_REVEAL}
+        bindings={rowBindings(entry, {
+          onOpen: open,
+          onDownload: () => onDownload(entry),
+          onCopyPath: () => onCopyPath(entry),
+          onDelete: () => onDelete(entry),
+        })}
+      />
     </li>
   );
 }
@@ -221,6 +258,7 @@ export function FileBrowser({
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState("");
   const readOnly = isReadOnlyPath(path);
+  const list = useRef<HTMLUListElement>(null);
 
   const open = useCallback((next: string) => {
     setPath(next);
@@ -240,6 +278,14 @@ export function FileBrowser({
     if (!res.ok) return setActionError(describeFileError(res.error));
     saveBytes(entry.name, res.data);
     setNotice(`Downloaded ${entry.name}`);
+  };
+
+  /** The path inside the workspace (the agent's working directory), as the listing names it. */
+  const copyPath = (entry: FileEntry) => {
+    copyText(entry.path).then(
+      () => setNotice(`Copied the path of ${entry.name}`),
+      () => setActionError(COPY_FAILED),
+    );
   };
 
   const remove = async (entry: FileEntry) => {
@@ -313,7 +359,11 @@ export function FileBrowser({
       {!folder.loading && !folder.error && folder.entries.length === 0 && (
         <p className="text-muted-foreground m-0 text-xs">This folder is empty.</p>
       )}
-      <ul aria-label={`Files in ${where}`} className="m-0 list-none divide-y ps-0 text-sm">
+      <ul
+        ref={list}
+        aria-label={`Files in ${where}`}
+        className="m-0 list-none divide-y ps-0 text-sm"
+      >
         {folder.entries.map((entry) => (
           <Row
             key={entry.path}
@@ -321,6 +371,7 @@ export function FileBrowser({
             onOpen={open}
             onOpenFile={onOpenFile}
             onDownload={(e) => void download(e)}
+            onCopyPath={copyPath}
             onDelete={setPending}
           />
         ))}
@@ -339,7 +390,10 @@ export function FileBrowser({
           entry={pending}
           busy={busy}
           onConfirm={() => void remove(pending)}
-          onCancel={() => setPending(null)}
+          onCancel={() => {
+            setPending(null);
+            focusRowMenu(list.current, pending.name);
+          }}
         />
       )}
       <p role="status" className="sr-only">

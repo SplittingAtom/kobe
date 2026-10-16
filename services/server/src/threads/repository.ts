@@ -432,7 +432,9 @@ export async function updateThread(
   const [row] = await tx
     .update(threads)
     .set({
-      ...(body.title !== undefined ? { title: body.title } : {}),
+      // The owner's own name locks the title against auto-titling (CE18, KOBE-292), and
+      // clearing it hands the name back to auto-titling.
+      ...(body.title !== undefined ? { title: body.title, titleLocked: body.title !== null } : {}),
       ...(body.shared_to_project !== undefined ? { sharedToProject: body.shared_to_project } : {}),
       ...(modelChanged ? { modelAlias: body.model ?? null } : {}),
     })

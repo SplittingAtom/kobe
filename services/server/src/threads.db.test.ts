@@ -532,6 +532,18 @@ describe("rename", () => {
     expect((await as.bob.patch(`/v1/threads/${id}`, {})).status).toBe(400);
     expect((await as.bob.patch(`/v1/threads/${id}`, { status: "idle" })).status).toBe(400);
   });
+
+  it("a rename locks the title against auto-titling; clearing it unlocks (KOBE-292)", async () => {
+    const id = await newThread(as.bob, { title: "first line" });
+    const locked = async () =>
+      (await admin.query("SELECT title_locked FROM threads WHERE id = $1", [id])).rows[0]
+        ?.title_locked;
+    expect(await locked()).toBe(false);
+    expect((await as.bob.patch(`/v1/threads/${id}`, { title: "Budget" })).status).toBe(200);
+    expect(await locked()).toBe(true);
+    expect((await as.bob.patch(`/v1/threads/${id}`, { title: null })).status).toBe(200);
+    expect(await locked()).toBe(false);
+  });
 });
 
 describe("Trash and restore (D18 soft delete)", () => {

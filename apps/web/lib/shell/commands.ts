@@ -13,11 +13,13 @@ import {
   ChevronsUpDownIcon,
   CircleUserIcon,
   CircleXIcon,
+  ClipboardCopyIcon,
   CopyIcon,
   CornerDownRightIcon,
   DownloadIcon,
   EllipsisIcon,
   EllipsisVerticalIcon,
+  ExternalLinkIcon,
   FoldVerticalIcon,
   FolderIcon,
   FolderKanbanIcon,
@@ -32,6 +34,7 @@ import {
   PauseIcon,
   PencilIcon,
   PlayIcon,
+  RefreshCcwDotIcon,
   RefreshCwIcon,
   ServerCogIcon,
   SquareIcon,
@@ -55,8 +58,13 @@ import type { ConsoleKind } from "../admin/nav/types";
  * because they act on the message or thread on screen; C6/C7 add a handler map for the palette.
  */
 
-/** Where the command's icon sits. `thread`: the conversation's own chrome (banner, jump pill). */
-export type CommandScope = "bar" | "rail" | "thread" | "message" | "composer" | "artifact";
+/**
+ * Where the command's icon sits. `thread`: the conversation's own chrome (banner, jump pill).
+ * `thread-menu` and `file-menu`: the items of the rail's row menus (KOBE-292, `ActionMenu`), in
+ * registry order; a row binds the ones it offers (`lib/shell/menu.ts`).
+ */
+export type CommandScope =
+  "bar" | "rail" | "thread" | "message" | "composer" | "artifact" | "thread-menu" | "file-menu";
 
 /** What availability depends on; grows with the palette (thread state, selection). */
 export interface CommandContext {
@@ -172,15 +180,33 @@ const LIST = [
   // Under 768 px the rail is a drawer the bar opens (CE8, KOBE-201).
   { id: "open-rail", name: "Show the workspace", icon: PanelLeftOpenIcon, scope: "rail" },
   { id: "refresh-files", name: "Refresh files", icon: RefreshCwIcon, scope: "rail" },
-  { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "rail" },
-  { id: "trash-thread", name: "Move to Trash", icon: Trash2Icon, scope: "rail" },
+  // A thread row's ⋯ menu button (KOBE-292; the call site names the thread: "Actions for Budget").
+  { id: "thread-row-actions", name: "Thread actions", icon: EllipsisIcon, scope: "rail" },
+  // Trash rows keep their two icons.
   { id: "restore-thread", name: "Restore", icon: ArchiveRestoreIcon, scope: "rail" },
   { id: "delete-thread", name: "Delete forever", icon: CircleXIcon, scope: "rail" },
   { id: "export-threads", name: "Export my conversations", icon: DownloadIcon, scope: "rail" },
-  // The Files section's rows (call sites name the file: "Download report.csv").
-  { id: "download-file", name: "Download", icon: DownloadIcon, scope: "rail" },
-  { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "rail" },
-  // The conversation's chrome.
+  // A Files row's ⋯ menu button (the call site names the file: "Actions for report.csv").
+  { id: "file-row-actions", name: "File actions", icon: EllipsisIcon, scope: "rail" },
+  // The thread row's menu (KOBE-292), in menu order. KOBE-220 adds Pin, Archive and Move here.
+  // Copy: the branch on screen as Markdown. Regenerate (with): the thread's last answer.
+  { id: "copy-thread", name: "Copy", icon: CopyIcon, scope: "thread-menu" },
+  { id: "regenerate-thread", name: "Regenerate", icon: RefreshCwIcon, scope: "thread-menu" },
+  {
+    id: "regenerate-thread-with",
+    name: "Regenerate with",
+    icon: RefreshCcwDotIcon,
+    scope: "thread-menu",
+  },
+  // Delete moves the thread to Trash (D18), after a confirm.
+  { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
+  // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.
+  { id: "open-file", name: "Open", icon: ExternalLinkIcon, scope: "file-menu" },
+  { id: "download-file", name: "Download", icon: DownloadIcon, scope: "file-menu" },
+  { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
+  { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "file-menu" },
+  // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
+  { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread" },
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
   // Closes a notice banner (retention, a file that left the workspace).

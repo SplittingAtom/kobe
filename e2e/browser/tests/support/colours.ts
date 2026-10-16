@@ -1,4 +1,21 @@
-import type { Locator } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
+
+export type Theme = "light" | "dark";
+
+/** Background luminance on either side of this reads as light or dark. */
+const LIGHT_ABOVE = 0.5;
+/** Text and background must stay this far apart in luminance to read. */
+export const MIN_CONTRAST = 0.3;
+
+/** `paint` (of the popup `name`) reads as `theme`, with legible text. */
+export function expectThemed(name: string, paint: Paint, theme: Theme): void {
+  const where = `${name} in ${theme}: ${paint.background} / ${paint.text}`;
+  if (theme === "light") expect(paint.backgroundLuminance, where).toBeGreaterThan(LIGHT_ABOVE);
+  else expect(paint.backgroundLuminance, where).toBeLessThan(LIGHT_ABOVE);
+  expect(Math.abs(paint.backgroundLuminance - paint.textLuminance), where).toBeGreaterThan(
+    MIN_CONTRAST,
+  );
+}
 
 /** What a popup paints: its own background (or the nearest painted ancestor's) and text colour. */
 export interface Paint {

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, type MatcherFunction } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { expect } from "vitest";
 import type { UploadTransport } from "../../lib/chat/uploads";
 import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -22,6 +23,12 @@ export function openApp(
       uploadTransport={uploadTransport}
     />,
   );
+}
+
+/** Opens a rail row's ⋯ menu (KOBE-292) by its button's name; returns the menu, named alike. */
+export async function openRowMenu(name: string): Promise<HTMLElement> {
+  await userEvent.setup().click(await screen.findByRole("button", { name }));
+  return screen.findByRole("menu", { name });
 }
 
 export function chatRequests(fake: FakeKobe, method?: string) {

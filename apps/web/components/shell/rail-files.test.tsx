@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { ChatApp } from "../chat/chat-app";
+import { openRowMenu } from "../chat/testing";
 
 interface Seen {
   readonly method: string;
@@ -86,6 +87,18 @@ async function open() {
   await user.click(await within(panel).findByRole("button", { name: "Open files" }));
   await within(panel).findByText("report.csv");
   return { user, panel };
+}
+
+/** A row's ⋯ menu (KOBE-292): its item names, or chooses `action` in it. */
+async function rowMenu(name: string): Promise<HTMLElement> {
+  return openRowMenu(`Actions for ${name}`);
+}
+const menuNames = (menu: HTMLElement) =>
+  within(menu)
+    .getAllByRole("menuitem")
+    .map((i) => i.textContent);
+async function fileAction(user: ReturnType<typeof userEvent.setup>, name: string, action: string) {
+  await user.click(within(await rowMenu(name)).getByRole("menuitem", { name: action }));
 }
 
 const wakes = () =>
@@ -189,13 +202,44 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     await within(panel).findByText("report.csv");
   });
 
+  it("each row has one ⋯ menu: Open, Download, Copy path, Delete (KOBE-292, ac-3)", async () => {
+    const { user, panel } = await open();
+    // No loose row icons any more.
+    expect(within(panel).queryByRole("button", { name: "Download report.csv" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Delete report.csv" })).toBeNull();
+    const button = within(panel).getByRole("button", { name: "Actions for report.csv" });
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
+    // The standard 32 px target, as the row icons had (KOBE-269).
+    expect(button.className).toMatch(/\bsize-8\b/);
+    const menu = await rowMenu("report.csv");
+    expect(menu.closest("[data-kobe-chat]")).not.toBeNull();
+    // The workspace API has no rename or move: not offered.
+    expect(menuNames(menu)).toEqual(["Open", "Download", "Copy path", "Delete"]);
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(button);
+    expect(menuNames(await rowMenu("notes"))).toEqual(["Open", "Copy path", "Delete"]);
+    await user.keyboard("{Escape}");
+
+    await fileAction(user, "notes", "Open");
+    expect(await within(panel).findByText("todo.md")).toBeTruthy();
+    await fileAction(user, "todo.md", "Copy path");
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe("notes/todo.md"));
+    expect(await within(panel).findByText("Copied the path of todo.md")).toBeTruthy();
+  });
+
+  it("opens a file from its menu in the artifact column", async () => {
+    const { user } = await open();
+    await fileAction(user, "report.csv", "Open");
+    expect(await screen.findByRole("tab", { name: "report.csv", selected: true })).toBeTruthy();
+  });
+
   it("downloads a file", async () => {
     const create = vi.fn(() => "blob:x");
     const revoke = vi.fn();
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Download report.csv" }));
+    const { user } = await open();
+    await fileAction(user, "report.csv", "Download");
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(seen.some((s) => s.url === "/v1/workspace/file?path=report.csv")).toBe(true);
     expect(revoke).toHaveBeenCalled();
@@ -203,9 +247,13 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
 
   it("asks before deleting, and deletes on confirm", async () => {
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Delete report.csv" }));
+    await fileAction(user, "report.csv", "Delete");
     const confirm = within(panel).getByRole("alertdialog");
     expect(confirm.textContent).toMatch(/report\.csv/);
+    // The confirm keeps the focus the menu would give back to its button.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(confirm).getByRole("button", { name: "Cancel" })),
+    );
     expect(seen.some((s) => s.method === "DELETE")).toBe(false);
     await user.click(within(confirm).getByRole("button", { name: "Delete" }));
     await waitFor(() =>
@@ -218,9 +266,12 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
 
   it("cancelling the confirmation deletes nothing", async () => {
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Delete report.csv" }));
+    await fileAction(user, "report.csv", "Delete");
     await user.click(within(panel).getByRole("button", { name: "Cancel" }));
     expect(within(panel).queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(
+      within(panel).getByRole("button", { name: "Actions for report.csv" }),
+    );
     expect(seen.some((s) => s.method === "DELETE")).toBe(false);
   });
 
@@ -228,7 +279,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     overrides["DELETE /v1/workspace/files"] = () =>
       Response.json({ code: "legal_hold", message: "held" }, { status: 409 });
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Delete report.csv" }));
+    await fileAction(user, "report.csv", "Delete");
     await user.click(
       within(within(panel).getByRole("alertdialog")).getByRole("button", { name: "Delete" }),
     );
@@ -240,7 +291,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     overrides["DELETE /v1/workspace/files"] = () =>
       Response.json({ code: "read_only", message: "under a legal hold" }, { status: 409 });
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Delete report.csv" }));
+    await fileAction(user, "report.csv", "Delete");
     await user.click(
       within(within(panel).getByRole("alertdialog")).getByRole("button", { name: "Delete" }),
     );
@@ -250,17 +301,26 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   it("marks uploads and projects read-only, with no upload there; rail drops can be deleted", async () => {
     const { user, panel } = await open();
     expect(within(panel).getAllByText("Read-only").length).toBeGreaterThan(0);
-    expect(within(panel).queryByRole("button", { name: "Delete uploads" })).toBeNull();
+    // Read-only rows offer no Delete (KOBE-292: in their menus).
+    expect(menuNames(await rowMenu("uploads"))).toEqual(["Open", "Copy path"]);
+    await user.keyboard("{Escape}");
     await user.click(within(panel).getByRole("button", { name: "Open folder uploads" }));
     await within(panel).findByText("brief.pdf");
-    expect(
-      within(panel).queryByRole("button", { name: "Delete 0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d" }),
-    ).toBeNull();
+    expect(menuNames(await rowMenu("0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d"))).toEqual([
+      "Open",
+      "Copy path",
+    ]);
+    await user.keyboard("{Escape}");
     // A file directly in uploads/ is a rail drop (KOBE-199): its owner may delete it.
-    expect(within(panel).getByRole("button", { name: "Delete brief.pdf" })).toBeTruthy();
+    expect(menuNames(await rowMenu("brief.pdf"))).toEqual([
+      "Open",
+      "Download",
+      "Copy path",
+      "Delete",
+    ]);
+    await user.keyboard("{Escape}");
     expect(within(panel).queryByLabelText(/Upload a file/)).toBeNull();
     expect(within(panel).getByText(/read-only/i, { selector: "p" })).toBeTruthy();
-    expect(within(panel).getByRole("button", { name: "Download brief.pdf" })).toBeTruthy();
   });
 
   it("uploads into the current folder", async () => {
