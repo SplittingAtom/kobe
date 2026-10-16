@@ -32,7 +32,7 @@ afterEach(() => {
 
 const list = () => screen.findByRole("list", { name: "Your threads" });
 
-/** Delete in a thread row's ⋯ menu (KOBE-292): moves it to Trash once confirmed. */
+/** Delete in a thread row's ⋯ menu (KOBE-292): moves it to Trash. */
 async function trashFromMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
   const menu = await openRowMenu(`Actions for ${title}`);
   await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
@@ -107,15 +107,14 @@ describe("thread list (RemoteThreadListAdapter)", () => {
 
   it("deletes a thread in Trash forever after confirming (KOBE-18)", async () => {
     const t = fake.addThread("Old plan");
-    const confirm = vi.fn(() => true);
+    const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
     openApp(fake);
     const user = userEvent.setup();
     await list();
     await trashFromMenu(user, "Old plan");
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
-    confirm.mockClear();
-    confirm.mockReturnValue(false);
+    expect(confirm).not.toHaveBeenCalled(); // Trash is undoable: only Delete forever asks
     await user.click(screen.getByRole("button", { name: "Trash" }));
     const trash = within(await screen.findByRole("list", { name: "Trash" }));
     // Cancelled: nothing is sent.

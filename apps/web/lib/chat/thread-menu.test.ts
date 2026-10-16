@@ -33,7 +33,7 @@ describe("visibleBranch / threadMarkdown", () => {
   it("copies the branch on screen only, as Markdown with the title, text parts only", () => {
     const p = projectThread(twoVersions(), "a3");
     expect(visibleBranch(p).map((i) => i.message.role)).toEqual(["user", "assistant"]);
-    expect(threadMarkdown("Budget", p)).toBe(
+    expect(threadMarkdown("Budget", p).markdown).toBe(
       [
         "# Budget",
         "",
@@ -52,15 +52,16 @@ describe("visibleBranch / threadMarkdown", () => {
   });
 
   it("follows the leaf: the other version is copied when it is the one shown", () => {
-    const md = threadMarkdown("Budget", projectThread(twoVersions(), "a1"));
+    const md = threadMarkdown("Budget", projectThread(twoVersions(), "a1")).markdown;
     expect(md).toContain("Version one");
     expect(md).not.toContain("Here is the chart.");
   });
 
   it("an empty conversation is its title alone", () => {
-    expect(threadMarkdown("Untitled conversation", projectThread([], null))).toBe(
-      "# Untitled conversation\n",
-    );
+    expect(threadMarkdown("Untitled conversation", projectThread([], null))).toEqual({
+      markdown: "# Untitled conversation\n",
+      partial: false,
+    });
   });
 });
 

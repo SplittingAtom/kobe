@@ -24,25 +24,77 @@ export function visibleBranch(projection: Projection): readonly ProjectedItem[] 
 
 const ROLE_HEADING: Readonly<Record<string, string>> = { user: "You", assistant: "Assistant" };
 
-/** A message's text parts (reasoning, tool calls and notices are not part of the copy). */
-function textOf(message: ProjectedItem["message"]): string {
-  const content = message.content;
-  if (typeof content === "string") return content.trim();
-  return content
-    .flatMap((part) => (part.type === "text" ? [part.text.trim()] : []))
-    .filter((t) => t !== "")
-    .join("\n\n");
+/** Stands in for an offloaded answer part whose body no route serves (only tool outputs). */
+export const LONG_ANSWER_LEFT_OUT = "[long answer not included]";
+/** Ends a copy whose entries could not all be read. */
+export const MESSAGES_LEFT_OUT = "[messages that could not be loaded are not included]";
+
+/** What a copy could not read (`conversationMarkdown` finds out). */
+export interface CopyGaps {
+  /** Offloaded entries that are tool outputs: left out like every tool output. */
+  readonly toolOutputs?: ReadonlySet<string> | undefined;
+  /** Not every page of entries was read. */
+  readonly unread?: boolean | undefined;
 }
 
-/** The conversation on screen as Markdown: the title, then each message under its author. */
-export function threadMarkdown(title: string, projection: Projection): string {
+export interface CopiedThread {
+  readonly markdown: string;
+  /** Something stands in for content that is not included. */
+  readonly partial: boolean;
+}
+
+/** The offloaded entries of the branch on screen (their bodies are not in the entry list). */
+export function offloadedOnBranch(projection: Projection): readonly string[] {
+  return visibleBranch(projection).flatMap((item) => {
+    const content = item.message.content;
+    if (typeof content === "string") return [];
+    return content.flatMap((part) =>
+      part.type === "data-kobe-offloaded" ? [(part.data as { entryId: string }).entryId] : [],
+    );
+  });
+}
+
+/**
+ * A message's text parts (reasoning, tool calls and notices are not part of the copy); an
+ * offloaded part that is not a tool output becomes a placeholder.
+ */
+function textOf(
+  message: ProjectedItem["message"],
+  toolOutputs: ReadonlySet<string>,
+): { readonly text: string; readonly partial: boolean } {
+  const content = message.content;
+  if (typeof content === "string") return { text: content.trim(), partial: false };
+  let partial = false;
+  const texts = content.flatMap((part) => {
+    if (part.type === "text") return [part.text.trim()];
+    if (part.type !== "data-kobe-offloaded") return [];
+    if (toolOutputs.has((part.data as { entryId: string }).entryId)) return [];
+    partial = true;
+    return [LONG_ANSWER_LEFT_OUT];
+  });
+  return { text: texts.filter((t) => t !== "").join("\n\n"), partial };
+}
+
+/**
+ * The conversation on screen as Markdown: the title, then each message under its author, with a
+ * placeholder line wherever something could not be included (`partial`).
+ */
+export function threadMarkdown(
+  title: string,
+  projection: Projection,
+  gaps: CopyGaps = {},
+): CopiedThread {
+  const toolOutputs = gaps.toolOutputs ?? new Set<string>();
   const blocks = [`# ${title}`];
+  let partial = gaps.unread === true;
   for (const item of visibleBranch(projection)) {
-    const body = textOf(item.message);
-    if (body === "") continue;
-    blocks.push(`## ${ROLE_HEADING[item.message.role] ?? item.message.role}`, body);
+    const body = textOf(item.message, toolOutputs);
+    partial ||= body.partial;
+    if (body.text === "") continue;
+    blocks.push(`## ${ROLE_HEADING[item.message.role] ?? item.message.role}`, body.text);
   }
-  return `${blocks.join("\n\n")}\n`;
+  if (gaps.unread) blocks.push(MESSAGES_LEFT_OUT);
+  return { markdown: `${blocks.join("\n\n")}\n`, partial };
 }
 
 /** The last answer's prompt and the entry to branch it from, or undefined when there is none. */

@@ -236,7 +236,7 @@ export function ThreadView({
       style={COMPOSER_VARS}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">
-        <ThreadTitle state={state} editable={contextInBar} />
+        <ThreadTitle state={state} controller={extras.controller} editable={contextInBar} />
         {!contextInBar && <AgentChips />}
         {label && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>

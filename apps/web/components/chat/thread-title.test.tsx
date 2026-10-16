@@ -65,17 +65,71 @@ describe("conversation header name (KOBE-292)", () => {
     expect(patches()).toEqual([]);
   });
 
-  it("an unchanged or empty name sends nothing", async () => {
+  it("an unchanged name sends nothing", async () => {
     const t = fake.addThread("Budget");
     openApp(fake, t);
     const user = userEvent.setup();
     await user.click(within(await header()).getByRole("button", { name: "Rename Budget" }));
     await user.keyboard("{Enter}");
+    expect(await heading()).toBeTruthy();
+    expect(patches()).toEqual([]);
+  });
+
+  it("an empty name clears it: untitled, and unlocked on the server", async () => {
+    const t = fake.addThread("Budget");
+    openApp(fake, t);
+    const user = userEvent.setup();
     await user.click(within(await header()).getByRole("button", { name: "Rename Budget" }));
     await user.clear(screen.getByRole("textbox", { name: "Conversation name" }));
     await user.keyboard("{Enter}");
-    expect(await heading()).toBeTruthy();
-    expect(patches()).toEqual([]);
+    await waitFor(() => expect(fake.threads.get(t)?.title).toBeNull());
+    expect(patches().at(-1)?.body).toEqual({ title: null });
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Untitled conversation" }),
+    ).toBeTruthy();
+    expect(
+      within(await rail()).getByRole("button", { name: "Untitled conversation" }),
+    ).toBeTruthy();
+  });
+
+  it("leaving the field saves a changed name", async () => {
+    const t = fake.addThread("Budget");
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.click(within(await header()).getByRole("button", { name: "Rename Budget" }));
+    await user.type(screen.getByRole("textbox", { name: "Conversation name" }), " review");
+    await user.click(await composer());
+    await waitFor(() => expect(fake.threads.get(t)?.title).toBe("Budget review"));
+    expect(screen.queryByRole("textbox", { name: "Conversation name" })).toBeNull();
+    // The focus stays where the member put it.
+    expect(document.activeElement).toBe(await composer());
+  });
+
+  it("a refused rename keeps the field open with the server's reason", async () => {
+    const t = fake.addThread("Budget");
+    fake.failNext.set(
+      `PATCH /v1/threads/${t}`,
+      Response.json(
+        { code: "thread_in_trash", message: "Restore the thread first." },
+        { status: 409 },
+      ),
+    );
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.click(within(await header()).getByRole("button", { name: "Rename Budget" }));
+    const input = screen.getByRole("textbox", { name: "Conversation name" });
+    await user.type(input, " 2027{Enter}");
+    const alert = (await screen.findAllByText("Restore the thread first.")).find(
+      (el) => el.getAttribute("role") === "alert" && el.closest("header") !== null,
+    );
+    expect(alert).toBeTruthy();
+    expect((input as HTMLInputElement).value).toBe("Budget 2027");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(fake.threads.get(t)?.title).toBe("Budget");
+    // Trying again succeeds and closes it.
+    await user.type(input, "{Enter}");
+    await waitFor(() => expect(fake.threads.get(t)?.title).toBe("Budget 2027"));
+    expect(screen.queryByRole("textbox", { name: "Conversation name" })).toBeNull();
   });
 
   it("offers no pencil on a new conversation, a read-only one or one in Trash", async () => {

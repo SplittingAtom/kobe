@@ -4,9 +4,11 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { modelName } from "../../lib/admin/api/team/models";
 import { copyText } from "../../lib/clipboard";
+import { conversationMarkdown } from "../../lib/chat/thread-copy";
+import { placementOf } from "../../lib/chat/thread-groups";
 import { modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
 import type { ThreadController } from "../../lib/chat/thread-controller";
-import { lastAnswerPoint, regenerateBlocker, threadMarkdown } from "../../lib/chat/thread-menu";
+import { lastAnswerPoint, regenerateBlocker } from "../../lib/chat/thread-menu";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { projectThread } from "../../lib/chat/tree";
 import type { MenuBindings, MenuChoice } from "../../lib/shell/menu";
@@ -17,6 +19,8 @@ import { useThreadTeamModels, type TeamModelsLoad } from "./use-team-models";
 const NO_ANSWER = "There is no answer to regenerate yet.";
 const OPENING = "Opening the conversation…";
 const NOTICE_MS = 2500;
+const PARTIAL = "some long answers or messages could not be included and are marked in the text.";
+const NOT_YOURS = "This conversation is shared with you read-only: only its owner can delete it.";
 const noopSubscribe = () => () => {};
 const noState = () => undefined;
 
@@ -98,10 +102,12 @@ export function ThreadRowMenu() {
   const session = useChatSession();
   const threadId = useAuiState((s) => s.threadListItem.remoteId);
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
+  const listedShared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
   const models = useThreadTeamModels();
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useHeldThread(threadId, open);
+  const readOnly = listedShared || state?.summary?.readOnly === true;
   const projection = useMemo(() => (state ? projectionOf(state) : undefined), [state]);
   useEffect(() => {
     if (notice === null) return;
@@ -119,12 +125,22 @@ export function ThreadRowMenu() {
   };
 
   const copy = () => {
-    const markdown = withThread(async (_c, s) => {
-      if (s.phase !== "ready") throw new Error("not read");
-      return threadMarkdown(title, projectionOf(s));
+    const copied = conversationMarkdown(session.api, threadId, title).then((res) => {
+      if (!res.ok) throw new Error(res.error.message);
+      return res.data;
     });
-    copyText(markdown).then(
-      () => setNotice({ short: "Copied", full: `Copied “${title}” as Markdown.` }),
+    copyText(copied.then((c) => c.markdown)).then(
+      async () => {
+        const { partial } = await copied;
+        setNotice(
+          partial
+            ? {
+                short: "Copied (partial)",
+                full: `Copied “${title}” as Markdown, in part: ${PARTIAL}`,
+              }
+            : { short: "Copied", full: `Copied “${title}” as Markdown.` },
+        );
+      },
       () => setNotice({ short: "Not copied", full: `“${title}” could not be copied.` }),
     );
   };
@@ -145,10 +161,14 @@ export function ThreadRowMenu() {
     }).catch(() => session.peek(threadId)?.reportError(NOT_SENT));
   };
 
+  // Undoable from Trash, so no confirm (only Delete forever asks). The list shows a refusal.
   const trash = () => {
-    if (window.confirm(`Move “${title}” to Trash? You can restore it from Trash for 30 days.`)) {
-      void aui.threadListItem.archive();
-    }
+    // Typed void, but the remote list's archive is the adapter's promise: wrap it to catch.
+    Promise.resolve()
+      .then(() => aui.threadListItem.archive())
+      .catch(() =>
+        setNotice({ short: "Not deleted", full: `“${title}” could not be moved to Trash.` }),
+      );
   };
 
   const blocker =
@@ -170,7 +190,7 @@ export function ThreadRowMenu() {
           },
         }
       : {}),
-    "trash-thread": { onSelect: trash, destructive: true },
+    "trash-thread": { onSelect: trash, destructive: true, blocker: readOnly ? NOT_YOURS : null },
   };
 
   return (

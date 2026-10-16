@@ -132,7 +132,7 @@ describe("thread row menu (KOBE-292)", () => {
     expect(messagePosts()).toHaveLength(1); // the "more" message only
   });
 
-  it("Delete moves the thread to Trash after confirming", async () => {
+  it("Delete moves the thread to Trash at once: it can be restored, so nothing asks", async () => {
     const { t } = answered("Budget");
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
@@ -141,15 +141,57 @@ describe("thread row menu (KOBE-292)", () => {
     await user.click(
       within(await openRowMenu("Actions for Budget")).getByRole("menuitem", { name: "Delete" }),
     );
-    expect(confirm).toHaveBeenCalledWith(
-      "Move “Budget” to Trash? You can restore it from Trash for 30 days.",
+    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    expect(confirm).not.toHaveBeenCalled();
+    expect(chatRequests(fake, "DELETE").at(-1)?.path).toBe(`/v1/threads/${t}`);
+  });
+
+  it("Delete is unavailable on a conversation shared with you read-only, with the reason", async () => {
+    const { t } = answered("Budget");
+    must(fake.threads.get(t)).read_only = true;
+    openApp(fake);
+    const user = userEvent.setup();
+    const menu = await openRowMenu("Actions for Budget");
+    const item = within(menu).getByRole("menuitem", { name: "Delete" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.getAttribute("title")).toBe(
+      "This conversation is shared with you read-only: only its owner can delete it.",
     );
-    expect(fake.threads.get(t)?.deleted_at).toBeNull();
-    confirm.mockReturnValue(true);
+    await user.click(item);
+    expect(chatRequests(fake, "DELETE")).toEqual([]);
+  });
+
+  it("a refused move to Trash is shown", async () => {
+    const { t } = answered("Budget");
+    fake.failNext.set(
+      `DELETE /v1/threads/${t}`,
+      Response.json(
+        { code: "thread_busy", message: "Stop the run and clear the queue first." },
+        { status: 409 },
+      ),
+    );
+    openApp(fake);
+    const user = userEvent.setup();
     await user.click(
       within(await openRowMenu("Actions for Budget")).getByRole("menuitem", { name: "Delete" }),
     );
-    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
-    expect(chatRequests(fake, "DELETE").at(-1)?.path).toBe(`/v1/threads/${t}`);
+    expect((await screen.findAllByText("Stop the run and clear the queue first."))[0]).toBeTruthy();
+    expect(await screen.findByText("“Budget” could not be moved to Trash.")).toBeTruthy();
+    expect(fake.threads.get(t)?.deleted_at).toBeNull();
+  });
+
+  it("Copy says it is partial when part of an answer can't be included", async () => {
+    const t = fake.addThread("Long");
+    const u1 = fake.addEntry(t, null, { role: "user", content: "write it all" });
+    fake.addEntry(t, u1, say("a very long answer"), { offloaded: true });
+    openApp(fake);
+    const user = userEvent.setup();
+    await user.click(
+      within(await openRowMenu("Actions for Long")).getByRole("menuitem", { name: "Copy" }),
+    );
+    expect(await screen.findByText("Copied (partial)")).toBeTruthy();
+    expect(await navigator.clipboard.readText()).toBe(
+      "# Long\n\n## You\n\nwrite it all\n\n## Assistant\n\n[long answer not included]\n",
+    );
   });
 });

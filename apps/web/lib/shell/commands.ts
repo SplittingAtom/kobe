@@ -198,7 +198,7 @@ const LIST = [
     icon: RefreshCcwDotIcon,
     scope: "thread-menu",
   },
-  // Delete moves the thread to Trash (D18), after a confirm.
+  // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.
   { id: "open-file", name: "Open", icon: ExternalLinkIcon, scope: "file-menu" },
