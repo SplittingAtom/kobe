@@ -16,6 +16,7 @@ import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
+import { CommandBindingsProvider } from "../shell/command-bindings";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider } from "../shell/rail-state";
@@ -197,50 +198,53 @@ function ChatWorkspace({
   const layout = useLayoutPreferences(fetchFn);
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
-      <RetentionNotice />
-      <RailProvider preferences={layout.preferences} onSave={layout.save}>
-        <DetailProvider preferences={layout.preferences} onSave={layout.save}>
-          <ThreadUsageProvider>
-            <TeamModelsProvider>
-              <ThreadMarkersProvider>
-                <ArtifactPanelProvider
-                  teamId={session.teamId}
-                  threadId={threadId}
-                  preferences={layout.preferences}
-                  onSavePreferences={layout.save}
-                >
-                  <FileGoneNotice />
-                  <ShellSlot name="search">
-                    <ThreadSearch onOpenThread={setThreadId} />
-                  </ShellSlot>
-                  <ShellSlot name="context">
-                    <ContextRow />
-                  </ShellSlot>
-                  <ShellSlot name="nav">
-                    <RailDrawerButton />
-                  </ShellSlot>
-                  <WorkspaceGrid
-                    rail={
-                      <WorkspaceRail
-                        teamName={teamName || "Workspace"}
-                        listError={listError}
-                        filesApi={filesApi}
-                        fetchFn={fetchFn}
-                      />
-                    }
-                    artifact={<ArtifactPanel filesApi={filesApi} />}
-                    conversation={
-                      <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                        <ThreadView onOpenThread={setThreadId} contextInBar />
-                      </main>
-                    }
-                  />
-                </ArtifactPanelProvider>
-              </ThreadMarkersProvider>
-            </TeamModelsProvider>
-          </ThreadUsageProvider>
-        </DetailProvider>
-      </RailProvider>
+      {/* What each action does now, for the `/` menu (KOBE-224) and the palette (KOBE-225). */}
+      <CommandBindingsProvider>
+        <RetentionNotice />
+        <RailProvider preferences={layout.preferences} onSave={layout.save}>
+          <DetailProvider preferences={layout.preferences} onSave={layout.save}>
+            <ThreadUsageProvider>
+              <TeamModelsProvider>
+                <ThreadMarkersProvider>
+                  <ArtifactPanelProvider
+                    teamId={session.teamId}
+                    threadId={threadId}
+                    preferences={layout.preferences}
+                    onSavePreferences={layout.save}
+                  >
+                    <FileGoneNotice />
+                    <ShellSlot name="search">
+                      <ThreadSearch onOpenThread={setThreadId} />
+                    </ShellSlot>
+                    <ShellSlot name="context">
+                      <ContextRow />
+                    </ShellSlot>
+                    <ShellSlot name="nav">
+                      <RailDrawerButton />
+                    </ShellSlot>
+                    <WorkspaceGrid
+                      rail={
+                        <WorkspaceRail
+                          teamName={teamName || "Workspace"}
+                          listError={listError}
+                          filesApi={filesApi}
+                          fetchFn={fetchFn}
+                        />
+                      }
+                      artifact={<ArtifactPanel filesApi={filesApi} />}
+                      conversation={
+                        <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                          <ThreadView onOpenThread={setThreadId} contextInBar />
+                        </main>
+                      }
+                    />
+                  </ArtifactPanelProvider>
+                </ThreadMarkersProvider>
+              </TeamModelsProvider>
+            </ThreadUsageProvider>
+          </DetailProvider>
+        </RailProvider>
+      </CommandBindingsProvider>
     </AssistantRuntimeProvider>
   );
 }

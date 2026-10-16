@@ -4,6 +4,7 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import type { ThreadState } from "../../lib/chat/thread-state";
+import { useBindCommands } from "../shell/command-bindings";
 import { IconAction } from "../shell/icon-action";
 
 const UNTITLED = "Untitled conversation";
@@ -95,6 +96,9 @@ export function ThreadTitle({
     close(focusPencil);
     void controller?.refresh();
   };
+
+  // `/rename` (KOBE-224) opens the same field as the pencil.
+  useBindCommands(editable && canRename(state) ? { "rename-thread": { onSelect: open } } : {});
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

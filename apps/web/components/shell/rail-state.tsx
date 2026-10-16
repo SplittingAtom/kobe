@@ -16,6 +16,7 @@ import {
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
+import { useBindCommands } from "./command-bindings";
 import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
 
@@ -200,8 +201,11 @@ export function RailProvider({
 /** Bar row two's Files (CE3): shows the rail's Files section. Nothing outside a rail. */
 export function FilesButton() {
   const rail = useRail();
-  if (!rail) return null;
-  return <IconAction command="files" onClick={() => rail.reveal("files")} />;
+  const reveal = rail ? () => rail.reveal("files") : undefined;
+  // `/files` (KOBE-224) does what the button does.
+  useBindCommands(reveal ? { files: { onSelect: reveal } } : {});
+  if (!reveal) return null;
+  return <IconAction command="files" onClick={reveal} />;
 }
 
 /** Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). */

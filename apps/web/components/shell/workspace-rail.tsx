@@ -1,11 +1,12 @@
 "use client";
 
-import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
+import { ThreadListPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { FileBrowser } from "../files/file-browser";
+import { useBindCommands } from "./command-bindings";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
 import {
@@ -48,6 +49,9 @@ function useRevealFocus({ revealed, collapsed }: RailApi) {
  * while the rail is expanded, so focus can return to the icon that opened a drawer.
  */
 function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
+  const aui = useAui();
+  // `/new` (KOBE-224) runs what the New buttons run (`ThreadListPrimitive.New`'s own call).
+  useBindCommands({ "new-thread": { onSelect: () => aui.threads.switchToNewThread() } });
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
       <ThreadListPrimitive.New asChild>

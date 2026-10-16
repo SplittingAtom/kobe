@@ -20,6 +20,7 @@ import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
+import { ThreadCommands } from "./thread-commands";
 import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chips";
 import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
@@ -269,6 +270,7 @@ export function ThreadView({
         </div>
       )}
       <OpenThreadContext.Provider value={onOpenThread}>
+        <ThreadCommands extras={extras} />
         <ThreadPrimitive.ViewportProvider>
           <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
         </ThreadPrimitive.ViewportProvider>

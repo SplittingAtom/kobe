@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { compactBlocker } from "../../lib/chat/thread-state";
+import type { MenuBindings } from "../../lib/shell/menu";
 import { CompactDialog } from "../chat/compact-dialog";
 import { AgentChips } from "../chat/agent-chips";
 import { AgentPickerMenu } from "../chat/agent-picker";
@@ -10,6 +11,7 @@ import { DetailToggle } from "../chat/detail";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { ModelPicker } from "../chat/model-picker";
 import { ThreadActionsMenu } from "../chat/thread-actions";
+import { useBindCommands } from "./command-bindings";
 import { ThreadContextGauge } from "./context-gauge";
 import { FilesButton } from "./rail-state";
 
@@ -34,15 +36,21 @@ export function ContextRow() {
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   // The thread whose Compact dialog is open: never another thread's (CE15, KOBE-213).
   const [compactFor, setCompactFor] = useState<string | null>(null);
-  if (!extras) return null;
-  const { controller, state } = extras;
+  const state = extras?.state;
+  const controller = extras?.controller ?? null;
   // A shared conversation is read-only and one in Trash can't run: no model to choose.
-  const canRun = state.summary?.readOnly !== true && state.summary?.deletedAt == null;
+  const canRun = state?.summary?.readOnly !== true && state?.summary?.deletedAt == null;
   // Compact now (CE15, KOBE-213): the owner's saved thread only; enabled while idle.
-  const blocker = compactBlocker(state);
-  const threadId = state.threadId;
+  const blocker = state ? compactBlocker(state) : null;
+  const threadId = state?.threadId ?? null;
   const openCompact =
     canRun && controller !== null && threadId !== null ? () => setCompactFor(threadId) : undefined;
+  // `/compact` (KOBE-224) runs what the gauge's action and the actions menu run.
+  const bindings: MenuBindings = openCompact
+    ? { "compact-thread": { onSelect: openCompact, blocker } }
+    : {};
+  useBindCommands(bindings);
+  if (!extras || !state) return null;
   return (
     <>
       <AgentControl />

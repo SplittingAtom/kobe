@@ -12,6 +12,7 @@ import {
   type RunPhase,
   type SteeringMode,
 } from "../../lib/chat/steering";
+import { stopBinding } from "../../lib/chat/thread-commands";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { currentRunId, isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import { useBudgetFinishing, useElapsed, useThrottledText } from "../../lib/chat/use-steering";
@@ -171,7 +172,7 @@ function ControlsRow({
             side="top"
             variant="destructive"
             disabled={isBusy(state, "stop")}
-            onClick={() => void controller.stop()}
+            onClick={stopBinding(controller, state).onSelect}
           >
             <SquareIcon aria-hidden className="size-3 fill-current" />
           </IconAction>
