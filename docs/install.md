@@ -689,6 +689,21 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   As above, check `pg_index.indisvalid` for `memory_doc_versions_tool_call_idx` and
   `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
 
+- **Schedule latest-event index (KOBE-252, migration `*_events_schedule_latest`).** A column and
+  an index on `events` are added; the column is a catalog change only, but the index is built
+  with a plain `CREATE INDEX`, which blocks writes to `events` while it scans. On a large site,
+  add both first, then upgrade (the migration skips existing ones):
+
+  ```sql
+  ALTER TABLE events ADD COLUMN IF NOT EXISTS schedule_id uuid;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS events_schedule_latest_idx
+    ON events (team_id, schedule_id, created_at DESC)
+    WHERE kind IN ('schedule.fire', 'schedule.skip');
+  ```
+
+  As above, check `pg_index.indisvalid` for `events_schedule_latest_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
