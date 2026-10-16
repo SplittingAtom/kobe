@@ -2,7 +2,7 @@
 pandas==3.0.6
 numpy==2.5.3
 duckdb==1.5.6
-pyarrow==25.0.1
+pyarrow==26.0.0
 matplotlib==3.11.2
 openpyxl==3.1.5
 python-docx==1.2.0
