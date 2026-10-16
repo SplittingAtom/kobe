@@ -4,8 +4,13 @@
 - **Branch / worktree:** `group-3-phase-c-org` in `../Kobe-g3`
 - **Depends on:** KOBE-215 (`pinned_at`, `archived_at`, `threads_owner_pinned_idx`), KOBE-198
   (rail groups), KOBE-161 (`canCreateInProject`), KOBE-292 (row menu, command registry)
-- **Migration:** `0103_thread_project_moves.sql` (generated): `threads.project_moves jsonb NOT
-NULL DEFAULT '[]'` with an array check, and `threads_owner_archived_idx`.
+- **Migrations (KOBE-234 pattern, review M1):** `0103_thread_project_moves.sql` (generated, the
+  column only: constant default, catalog-only) and custom `0104_thread_project_moves_checks.sql`:
+  `threads_project_moves_shape` CHECK (array, at most 20) `NOT VALID`, and
+  `CREATE INDEX IF NOT EXISTS threads_owner_archived_idx` (docs/install.md "Upgrading": build it
+  CONCURRENTLY first on a large site). db:rebase dry run in a throwaway worktree: generated ones
+  merged into one, 0104's SQL kept verbatim, then `drizzle-kit generate` "No schema changes";
+  `db:check` clean on the branch.
 
 ## What changed
 
@@ -64,10 +69,14 @@ NULL DEFAULT '[]'` with an array check, and `threads_owner_archived_idx`.
   in the per-run context file (no Pi restart), and project memory and policy follow
   `threads.project_id` live. Earlier answers may name the old project's paths; those stay readable
   while the member is still in that project.
-- **Marker:** each move is kept in `threads.project_moves` (newest 20, `{at, from, to}`);
+- **Marker:** each move is kept in `threads.project_moves` (newest 20, `{at, from, to, runs}`;
+  `at` is `clock_timestamp()`, `runs` the count of message runs started at the move, review L1:
+  the marker goes on the next started run by count, since a run's `started_at` is its
+  transaction's start and can precede a move it waited for on the thread lock);
   `GET /v1/threads/{id}/markers` gains `projects`: one marker per first message run that started
   after a move (several moves before a run collapse to first `from` → last `to`; a round trip
-  shows none). Names only for projects the viewer may open. The chat shows "Moved to project X ·
+  shows none). Id and name only for projects the viewer may open; otherwise `*_hidden` and
+  "Moved to another project" (review L2). The chat shows "Moved to project X ·
   its instructions apply from here" above that run's prompt. The agent learns the project from that
   run's context ("This conversation belongs to the project …"), not the history of moves.
 
@@ -98,7 +107,8 @@ NULL DEFAULT '[]'` with an array check, and `threads_owner_archived_idx`.
   another tab's change reloads), `lib/chat/thread-groups.test.ts`,
   `lib/chat/thread-list-adapter.test.ts`, `lib/chat/thread-list-sync.test.ts`.
 - **ac-2:** db test "move to project" (allowed, audited, refused for non-member / archived /
-  unknown project like thread creation, unshared, refused while busy and for a test thread, next
+  unknown project like thread creation, another team's project, another team's member, the
+  DB cap, unshared, refused while busy and for a test thread, next
   run's `run.start.project` is the new project and its marker, names hidden from non-members);
   web tests (submenu, refusal wording, drop on a project header, the marker row);
   `lib/chat/tree-markers.test.ts` (placement above the prompt).

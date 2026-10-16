@@ -6424,6 +6424,9 @@
                 "from_project_name": {
                   "type": ["string", "null"]
                 },
+                "from_project_hidden": {
+                  "type": "boolean"
+                },
                 "to_project_id": {
                   "anyOf": [
                     {
@@ -6444,6 +6447,9 @@
                 },
                 "to_project_name": {
                   "type": ["string", "null"]
+                },
+                "to_project_hidden": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -6452,8 +6458,10 @@
                 "parent_entry_id",
                 "from_project_id",
                 "from_project_name",
+                "from_project_hidden",
                 "to_project_id",
-                "to_project_name"
+                "to_project_name",
+                "to_project_hidden"
               ],
               "additionalProperties": false
             }
