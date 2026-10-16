@@ -84,6 +84,8 @@ export interface ServerDepsOptions {
   };
   /** SIEM destinations configured by Helm values (KOBE-19); the admin health view lists them. */
   readonly auditForwardingDestinations?: readonly ForwardDestination[];
+  /** Configured forwarding credentials the health view must never show (`forwardingSecrets`). */
+  readonly auditForwardingSecrets?: readonly string[];
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
   /** Agent version limits (KOBE-46); defaults in `AGENT_LIMIT_DEFAULTS`. */
@@ -174,6 +176,8 @@ export interface ServerDeps {
   readonly auditAnchor: AuditAnchorLogger;
   /** Destinations audit events are forwarded to (empty: forwarding off). */
   readonly auditForwardingDestinations: readonly ForwardDestination[];
+  /** Configured forwarding credentials redacted from errors on read (KOBE-182). */
+  readonly auditForwardingSecrets: readonly string[];
   /** Aggregated audit of unauthenticated auth attempts (flushed on close). */
   readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
@@ -408,6 +412,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     auditForwardingDestinations: options.auditForwardingDestinations ?? [],
+    auditForwardingSecrets: options.auditForwardingSecrets ?? [],
     lifecycle,
     offboarding,
     sandboxWire,

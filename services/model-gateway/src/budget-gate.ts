@@ -23,7 +23,9 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   cannot together overshoot a budget on one shim replica by more than the last admitted
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
  *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
- *   replica's reservations free themselves), memory for tests.
+ *   replica's reservations free themselves), memory for tests. In Postgres the check reads
+ *   each line's spend itself, in one snapshot with the reservations (KOBE-286), so the cached
+ *   spend below only refuses early; it never admits a call the database would refuse.
  * - **A request larger than the whole budget** (KOBE-259): a call whose input estimate alone (with
  *   no output at all) exceeds a budget's limit itself (not what is left) could never fit, so it is
  *   refused at once, alone or not, with a final 402 `budget_below_call`. A budget below one call's
@@ -40,8 +42,6 @@ export interface BudgetStore {
 }
 
 export { MEMBER_SHARE };
-/** A reservation whose ledger row never lands (lost write) ends after this long. */
-export const SETTLE_TIMEOUT_MS = 30_000;
 
 const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
   site: "The site's",
@@ -88,14 +88,15 @@ export class BudgetGate implements CallGate {
       /** Where reservations live; default: this process's memory (tests, no shared state). */
       readonly reservations?: ReservationStore;
       /**
-       * How long a settled reservation keeps counting (KOBE-120): the other replicas' cached
-       * spend may not show the call's cost yet. Default 0 (ended at once); production passes
-       * the budget cache TTL.
+       * How long a settled reservation keeps counting. Default 0 (ended at once), as production
+       * runs: the database check reads the spend itself (KOBE-286), so a written call counts
+       * there and a longer hold would only count it twice. Only for stores judged on the
+       * caller's spend.
        */
       readonly settleHoldMs?: number;
       /** Extend the reservations of calls still running this often (a TTL/2 heartbeat). */
       readonly heartbeatMs?: number;
-      /** A reservation could not be ended (it then expires on its own). */
+      /** A reservation call failed: a reserve (then 503) or an end (it then expires by itself). */
       readonly onError?: (err: unknown) => void;
     },
   ) {
@@ -217,9 +218,10 @@ export class BudgetGate implements CallGate {
 
   /**
    * The release of one reservation. `written`: the call's ledger row is on its way, so the
-   * reservation stays until {@link settle} (the row landed and the cached spend was dropped, so
-   * the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most; otherwise it ends now. A
-   * failure to end it is only logged: the reservation then expires by itself.
+   * reservation is renewed for a full reservation TTL and stays until {@link settle} ends it
+   * once the row landed (cut short, a row landing late would count nowhere; counted twice
+   * meanwhile is harmless, KOBE-286); otherwise it ends now. A failure is only logged: the
+   * reservation then expires by itself.
    */
   private releaser(call: CallContext, callId: string): (written: boolean) => void {
     // A call still running keeps its reservation alive (no expiry while it streams).
@@ -232,14 +234,17 @@ export class BudgetGate implements CallGate {
     beat?.unref();
     return (written) => {
       if (beat) clearInterval(beat);
-      const keep = written && call.callId ? SETTLE_TIMEOUT_MS : undefined;
-      this.reservations.end(call.teamId, [callId], keep).catch(this.onError);
+      if (written && call.callId) {
+        this.reservations.extend(call.teamId, [callId]).catch(this.onError);
+      } else {
+        this.reservations.end(call.teamId, [callId]).catch(this.onError);
+      }
     };
   }
 
   /**
-   * The ledger rows of these calls were written: their reservations end, after
-   * `settleHoldMs`, so that replicas whose cached spend predates the rows still count them.
+   * The ledger rows of these calls were written: their reservations end (after `settleHoldMs`,
+   * 0 in production: the database check now sees the rows' spend instead, KOBE-286).
    */
   settle(teamId: string, callIds: readonly string[]): void {
     const hold = this.settleHoldMs > 0 ? this.settleHoldMs : undefined;

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { entry } from "../fixtures.js";
 import { loadAuditForwardingConfig } from "./config.js";
 import { exportLogsRequest, otlpSink } from "./otlp.js";
-import { formatSyslogMessage, syslogSink } from "./syslog.js";
+import { formatSyslogMessage, syslogSdId, syslogSink } from "./syslog.js";
 
 const closers: (() => void)[] = [];
 afterEach(() => closers.splice(0).forEach((close) => close()));
@@ -57,6 +57,13 @@ describe("syslog (RFC 5424)", () => {
     expect(body.action).toBe("identity.team.created");
   });
 
+  it("puts the configured enterprise number in the SD-ID (KOBE-182)", () => {
+    expect(formatSyslogMessage(entry(), { enterpriseNumber: "61234" })).toContain(
+      '[kobe@61234 seq="',
+    );
+    expect(syslogSdId()).toBe("kobe@32473");
+  });
+
   it("limits MSGID to 32 characters and uses - for empty header fields", () => {
     const message = formatSyslogMessage(entry({ action: "x".repeat(60) }), { hostname: "" });
     expect(message.split(" ")[2]).toBe("-");
@@ -68,14 +75,14 @@ describe("syslog (RFC 5424)", () => {
     const server = net.createServer();
     collect(server, received);
     const port = await listen(server);
-    await syslogSink({ host: "127.0.0.1", port, tls: false }).send([
+    await syslogSink({ host: "127.0.0.1", port, tls: false, enterpriseNumber: "61234" }).send([
       entry({ seq: 1 }),
       entry({ seq: 2 }),
     ]);
     await settle();
     const messages = unframe(Buffer.concat(received[0] ?? []));
     expect(messages).toHaveLength(2);
-    expect(messages[1]).toContain('seq="2"');
+    expect(messages[1]).toContain('[kobe@61234 seq="2"');
   });
 
   it("rejects when nothing listens", async () => {
@@ -187,7 +194,7 @@ describe("forwarding config", () => {
         KOBE_AUDIT_OTLP_HEADERS: "authorization=Bearer%20x, x-team=a",
       }),
     ).toEqual({
-      syslog: { host: "siem.example.test", port: 6514, tls: true },
+      syslog: { host: "siem.example.test", port: 6514, tls: true, enterpriseNumber: "32473" },
       otlp: {
         url: "https://otel.example.test:4318/v1/logs",
         headers: { authorization: "Bearer x", "x-team": "a" },
@@ -202,6 +209,24 @@ describe("forwarding config", () => {
     expect(() => loadAuditForwardingConfig({ KOBE_AUDIT_SYSLOG_URL: "tcp://h" })).toThrow(/port/);
     expect(() => loadAuditForwardingConfig({ KOBE_AUDIT_OTLP_URL: "ftp://x" })).toThrow(
       /KOBE_AUDIT_OTLP_URL/,
+    );
+  });
+
+  it("reads the syslog enterprise number as digits only (KOBE-182)", () => {
+    const syslog = (n: string | undefined) =>
+      loadAuditForwardingConfig({
+        KOBE_AUDIT_SYSLOG_URL: "tcp://h:514",
+        KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER: n,
+      }).syslog?.enterpriseNumber;
+    expect(syslog(undefined)).toBe("32473");
+    expect(syslog("")).toBe("32473");
+    expect(syslog("61234")).toBe("61234");
+    for (const bad of ["abc", "12.3", "-1", "0", "0123", "12345678901", "1 2"]) {
+      expect(() => syslog(bad), bad).toThrow(/KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER/);
+    }
+    // Validated even while syslog is off, so a typo shows before it is turned on.
+    expect(() => loadAuditForwardingConfig({ KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER: "x" })).toThrow(
+      /ENTERPRISE_NUMBER/,
     );
   });
 });

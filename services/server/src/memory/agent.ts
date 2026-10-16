@@ -2,7 +2,6 @@ import {
   APPROVAL_TTL_MS,
   MEMORY_INDEX_FILE,
   MEMORY_INDEX_MAX_LINES,
-  MEMORY_RECALL_MAX_FILES,
   type MemoryScope,
   type MemoryToolsResponse,
   type PolicyDecision,
@@ -36,11 +35,13 @@ import { canAccessProject } from "./access.js";
 import {
   MemoryStorageError,
   listMemory,
+  currentObject,
   readCurrent,
   writeMemory,
-  type DocRow,
+  type ListedDoc,
   type MemoryTarget,
 } from "./store.js";
+import { searchFiles, type Reresolve } from "./search.js";
 import { readSwitches } from "./switches.js";
 
 /**
@@ -442,16 +443,8 @@ export interface ReadRequest extends MemoryCaller {
   readonly refused: (reason: MemoryRefusal, scope?: MemoryScope) => void;
 }
 
-/** Most docs a search or listing looks at (the answer holds at most 20 files). */
-const SEARCH_DOCS_MAX = 200;
-/** Cap on the content one `recall` answer carries. */
-const READ_CONTENT_MAX_BYTES = 256 * 1024;
-
-type FileOut = { scope: MemoryScope; path: string; content?: string; version: number };
-
 async function targetsFor(
   tx: KobeTx,
-  deps: MemoryAgentDeps,
   req: ReadRequest,
 ): Promise<{ targets: MemoryTarget[] } | { fail: MemoryReply; reason: MemoryRefusal }> {
   const run = await loadRun(tx, req);
@@ -482,74 +475,40 @@ async function targetsFor(
   return { targets };
 }
 
-async function searchFiles(
-  tx: KobeTx,
-  deps: MemoryAgentDeps,
-  blobs: BlobStore,
+/**
+ * `memory.read`. Never throws. The checks and the doc listing run in one short team transaction;
+ * the bodies are read after it commits (KOBE-240, `search.ts`: the race with changes in between,
+ * and the one re-resolve of a vanished object under the same checks).
+ */
+export async function readMemory(
+  deps: Pick<MemoryAgentDeps, "db" | "blobs" | "log">,
   req: ReadRequest,
-  targets: readonly MemoryTarget[],
-): Promise<{ files: FileOut[]; truncated: boolean }> {
-  const { path, query } = req.input;
-  const docs: DocRow[] = [];
-  for (const target of targets) {
-    docs.push(...(await listMemory(tx, req.teamId, target)));
-  }
-  if (path !== undefined) {
-    const doc = docs.find((d) => d.path === path);
-    const content = doc ? await readCurrent(tx, blobs, req.teamId, doc) : null;
-    return doc && content !== null
-      ? {
-          files: [{ scope: doc.scope, path: doc.path, content, version: doc.currentVersion }],
-          truncated: false,
-        }
-      : { files: [], truncated: false };
-  }
-  const sorted = [...docs].sort((a, b) =>
-    a.path === b.path ? a.scope.localeCompare(b.scope) : a.path.localeCompare(b.path),
-  );
-  if (query === undefined) {
-    return {
-      files: sorted
-        .slice(0, MEMORY_RECALL_MAX_FILES)
-        .map((d) => ({ scope: d.scope, path: d.path, version: d.currentVersion })),
-      truncated: sorted.length > MEMORY_RECALL_MAX_FILES,
-    };
-  }
-  const needle = query.toLowerCase();
-  const files: FileOut[] = [];
-  let bytes = 0;
-  let truncated = sorted.length > SEARCH_DOCS_MAX;
-  for (const doc of sorted.slice(0, SEARCH_DOCS_MAX)) {
-    const content = await readCurrent(tx, blobs, req.teamId, doc);
-    if (content === null || !`${doc.path}\n${content}`.toLowerCase().includes(needle)) continue;
-    bytes += Buffer.byteLength(content, "utf8");
-    if (files.length >= MEMORY_RECALL_MAX_FILES || bytes > READ_CONTENT_MAX_BYTES) {
-      truncated = true;
-      break;
-    }
-    files.push({ scope: doc.scope, path: doc.path, content, version: doc.currentVersion });
-  }
-  return { files, truncated };
-}
-
-/** `memory.read`. Never throws. */
-export async function readMemory(deps: MemoryAgentDeps, req: ReadRequest): Promise<MemoryReply> {
+): Promise<MemoryReply> {
   if (!deps.blobs) return NO_STORAGE;
   const blobs = deps.blobs;
   try {
-    const result = await withTeam(deps.db, req.teamId, async (tx) => {
-      const t = await targetsFor(tx, deps, req);
+    const listed = await withTeam(deps.db, req.teamId, async (tx) => {
+      const t = await targetsFor(tx, req);
       if ("fail" in t) return t;
-      return { found: await searchFiles(tx, deps, blobs, req, t.targets) };
+      const docs: ListedDoc[] = [];
+      for (const target of t.targets) docs.push(...(await listMemory(tx, req.teamId, target)));
+      return { docs };
     });
-    if ("fail" in result) {
-      req.refused(result.reason, req.input.scope);
-      return result.fail;
+    if ("fail" in listed) {
+      req.refused(listed.reason, req.input.scope);
+      return listed.fail;
     }
-    if (req.input.path !== undefined && result.found.files.length === 0) {
+    const reresolve: Reresolve = (doc) =>
+      withTeam(deps.db, req.teamId, async (tx) => {
+        const t = await targetsFor(tx, req);
+        const target = "fail" in t ? undefined : t.targets.find((x) => x.scope === doc.scope);
+        return target ? currentObject(tx, req.teamId, target, doc.id) : undefined;
+      });
+    const found = await searchFiles({ blobs, reresolve }, req.input, listed.docs);
+    if (req.input.path !== undefined && found.files.length === 0) {
       return fail("not_found", "There is no such memory file.");
     }
-    return { ok: true, op: "read", files: result.found.files, truncated: result.found.truncated };
+    return { ok: true, op: "read", files: found.files, truncated: found.truncated };
   } catch (err) {
     deps.log.error({ err, run_id: req.runId }, "memory.read failed");
     return NO_STORAGE;

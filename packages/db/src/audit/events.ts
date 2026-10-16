@@ -956,6 +956,20 @@ export const AUDIT_EVENTS = {
     userId: id,
     reason: z.enum(["not_live", "not_allowed", "sandbox_mismatch"]),
   }),
+  /**
+   * The sandbox agent found Pi's private runtime changed by another process and stopped that Pi;
+   * the run (a message's `run.start` or a compaction) failed `runtime_tampered` (KOBE-271).
+   * Written with the run's failure, once per run; ids only, never the agent's reason (system).
+   */
+  "sandbox.runtime_tampered": event("team", {
+    sandboxId: id,
+    userId: id,
+    threadId: id,
+    runId: id,
+    runKind: z.enum(["message", "compaction"]),
+    /** The server replica holding the sandbox's connection. */
+    replicaId: id,
+  }),
   /** A sandbox exceeded a wire or storage limit; connection closed or run stopped (system). */
   "sandbox.limit_exceeded": event("team", {
     sandboxId: id,

@@ -318,11 +318,14 @@ describe("BudgetGate (KOBE-42)", () => {
       expect(errors).toHaveLength(1);
     });
 
-    it("ends the reservation through the store: now, or kept while the row is pending", async () => {
+    it("ends the reservation through the store: now, or kept a full TTL while the row is pending", async () => {
       const ended: { calls: readonly string[]; keepMs: number | undefined }[] = [];
+      const extended: (readonly string[])[] = [];
       const store: ReservationStore = {
         reserve: async () => ({ ok: true }),
-        extend: async () => undefined,
+        extend: async (_t, calls) => {
+          extended.push(calls);
+        },
         end: async (_t, calls, keepMs) => {
           ended.push({ calls, keepMs });
         },
@@ -339,9 +342,12 @@ describe("BudgetGate (KOBE-42)", () => {
       da.release?.(false);
       db.release?.(true);
       g.settle(teamId, [b.callId ?? ""]);
+      // KOBE-286 review L1: a written call's hold is not cut short while its row is on its way
+      // (it would count zero times if the row landed late): renewed for a full TTL, then ended
+      // by the settle.
+      expect(extended).toEqual([[b.callId]]);
       expect(ended).toEqual([
         { calls: [a.callId], keepMs: undefined },
-        { calls: [b.callId], keepMs: 30_000 },
         { calls: [b.callId], keepMs: undefined },
       ]);
     });
@@ -372,7 +378,7 @@ describe("BudgetGate (KOBE-42)", () => {
       await new Promise((r) => setTimeout(r, 40));
       expect(beats).toBe(seen); // the heartbeat stops with the call
       g.settle(teamId, [c.callId ?? ""]);
-      expect(ended).toEqual([30_000, 1_000]);
+      expect(ended).toEqual([1_000]);
     });
 
     it("a refused reservation gives the rate-limit token back", async () => {

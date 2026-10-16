@@ -30,6 +30,7 @@ export type RunFailureCode = ModelRunErrorCode | "model_output_limit";
  * | `message_update` `text_delta`/`thinking_delta` | `text.delta` / `reasoning.delta` (batched)        |
  * | `message_end` (assistant)                    | message id queued for `entry.committed` binding;    |
  * |                                              | an error stop is remembered (see `failure`)         |
+ * | `message_end` (user: the prompt, a steer)    | mirror new session entries (KOBE-290)               |
  * | `tool_execution_start`                       | `tool.call` (input as executed, risk from registry) |
  * | `tool_execution_end`                         | `tool.result` (text preview, capped)                |
  * | `turn_end`, `entry_appended`                 | mirror new session entries (`get_entries since`)    |
@@ -174,6 +175,9 @@ export function createRunTranslator(options: {
         return { ...NOTHING, events: produced, dropped };
       }
       case "message_end":
+        // Pi has written the prompt (or a steer) to its session: mirror it now, so a run that
+        // ends before its first turn_end keeps the member's message (KOBE-290).
+        if (roleOf(event) === "user") return { ...NOTHING, syncEntries: true };
         if (roleOf(event) === "assistant") {
           const message = event.message as { stopReason?: unknown; errorMessage?: unknown };
           lastStop =

@@ -75,7 +75,9 @@ export interface ModelFileState {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const GATEWAY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
+/** `GATEWAY_MODEL_PATTERN`: the wire's own gateway-model limit (KOBE-280). */
+export const GATEWAY_MODEL =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
 const MAX_TOKEN_CHARS = 8192;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

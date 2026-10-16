@@ -280,6 +280,7 @@ events say `scope: "site"`; rows recorded before say `scope: "install"` and keep
 | `sandbox.web_search_queried`                 | team  | `sandboxId`, `userId`, `runId`, `toolCallId`, `provider`                                                                                                                                                                                               | A `web_search` reached the provider (KOBE-114); counts toward the per-run cap (50); never records the query (system)                                                                                                                                                                       |
 | `sandbox.lease_violation`                    | team  | `sandboxId`, `userId`, `violation` (unknown_run, unknown_thread, unknown_command), `frameType`                                                                                                                                                         | A sandbox named something not leased to it; connection closed (system; at most one per 5 minutes)                                                                                                                                                                                          |
 | `sandbox.limit_exceeded`                     | team  | `sandboxId`, `userId`, `limit` (frame_rate, byte_rate, frame_size, run_events, run_bytes, thread_entries, workspace_bytes, workspace_files, workspace_file_size), `runId?`                                                                             | A sandbox exceeded a wire, storage or workspace-sync limit (KOBE-27: push refused for size, count or quota); connection closed, run failed or push refused (system; throttled)                                                                                                             |
+| `sandbox.runtime_tampered`                   | team  | `sandboxId`, `userId`, `threadId`, `runId`, `runKind` (message, compaction), `replicaId` (server replica holding the connection)                                                                                                                       | Pi's private runtime was changed by another process; the agent stopped Pi and the run failed `runtime_tampered` (KOBE-271). Written with the run's failure, once per run; never the agent's reason (system; no IP or user agent)                                                           |
 | `sandbox.token_rejected`                     | team  | `sandboxId`, `userId`, `reason` (not_live, not_allowed, sandbox_mismatch)                                                                                                                                                                              | A validly signed sandbox-wire token was refused (system; throttled)                                                                                                                                                                                                                        |
 | `workspace.restored`                         | team  | `sandboxId`, `userId`, `files`, `bytes`, `durationMs`                                                                                                                                                                                                  | A sandbox restored its `/workspace` onto an empty volume from the durable S3 copy (rebuild; counts reported by the sandbox) (KOBE-27; system)                                                                                                                                              |
 | `workspace.integrity_failed`                 | team  | `sandboxId`, `userId`, `failures`                                                                                                                                                                                                                      | A sandbox uploaded bytes that did not hash to their name; nothing stored (KOBE-27; system; one row per minute per sandbox, `failures` counts every mismatch since the last row)                                                                                                            |
@@ -423,8 +424,7 @@ number of rows sent.
 
 **Forwarding (KOBE-19).** Off by default; Helm values `auditForwarding.syslog` (RFC 5424 over TCP
 or TLS, octet-counted frames, APP-NAME `kobe-audit`, MSGID the action, structured data
-`[kobe@32473 seq id team actorKind actor hash]`, body the event as JSON; `32473` is the enterprise
-number RFC 5612 reserves for documentation) and `auditForwarding.otlp` (OTLP/HTTP logs, JSON
+`[kobe@<PEN> seq id team actorKind actor hash]`, body the event as JSON) and `auditForwarding.otlp` (OTLP/HTTP logs, JSON
 encoding; the action is the log body, fields are `kobe.audit.*` attributes; auth headers from a
 Secret). Both carry the same fields as the site export, including the chain hashes.
 
@@ -439,8 +439,40 @@ Secret). Both carry the same fields as the site export, including the chain hash
   kept. `GET /v1/site/audit/forwarding` (site admins) reports per destination `status`
   (`ok`, `retrying`, `failing` from 5 failures in a row, `pending`), `behind` (events not yet
   delivered), `lastSuccessAt`, `lastError`, `nextAttemptAt`.
-- **TLS.** The collector's certificate is verified against the server image's trust store
-  (`NODE_EXTRA_CA_CERTS` for a private CA).
+- **Errors never carry credentials (KOBE-182).** Before an error is stored or logged, every
+  configured secret (OTLP header values, URL user and password) becomes `[redacted]`, every URL
+  keeps only `scheme://host[:port]` (userinfo, path and query become `[redacted]`), and
+  `Bearer`/`Basic` credentials go. The health view applies the same full pass on read, so errors
+  stored by an older release are covered too.
+- **Admin console (KOBE-182).** Site console → System → _Audit forwarding_ shows the same per
+  destination: status, events behind, events delivered, last delivery, next attempt and the last
+  error.
+- **Enterprise number (KOBE-182).** The SD-ID is `kobe@<PEN>`, the PEN from
+  `auditForwarding.syslog.enterpriseNumber` (env `KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER`; digits, no
+  leading zero, at most 10; anything else fails at install and at startup). The default, `32473`, is
+  the number RFC 5612 reserves for documentation: an organisation with its own registered IANA
+  Private Enterprise Number should set it. Match SIEM rules on the APP-NAME `kobe-audit` and the
+  MSGID, not on the SD-ID, so changing the number does not break them.
+- **TLS and a private CA (KOBE-182).** The collector's certificate is verified against the server's
+  trust store: the public CAs, plus a private CA from `server.extraCaBundle`. Name one Secret
+  (`secretName`) or one ConfigMap (`configMapName`, e.g. one filled by trust-manager) and the `key`
+  holding the PEM certificates (default `ca.crt`); the chart mounts that key read-only at
+  `/etc/kobe/extra-ca/ca-bundle.pem` on the server and sets `NODE_EXTRA_CA_CERTS` to it, so the
+  private CA is trusted in addition to the public ones (OTLP, OIDC and S3 over TLS benefit too).
+  Node reads the bundle only at start: restart the server (`kubectl rollout restart`) after
+  rotating it.
+
+  ```yaml
+  server:
+    extraCaBundle:
+      secretName: siem-ca # kubectl create secret generic siem-ca --from-file=ca.crt=./ca.pem
+  auditForwarding:
+    syslog:
+      enabled: true
+      host: siem.example.test
+      port: 6514
+      tls: true
+  ```
 
 ## Reading the log
 
@@ -452,6 +484,10 @@ Secret). Both carry the same fields as the site export, including the chain hash
 
 Pages are newest first: pass `nextCursor` back as `before`. Pass `after` (for example `after=0`)
 to page oldest first, as an export does. Unknown parameters return 400.
+
+Sandbox security events are team rows, so both views show them: for example a tampered Pi
+runtime is `GET /v1/site/audit?action=sandbox.runtime_tampered` (or `category=sandbox`), and the
+same filter on `/v1/team/audit` for the team's admins (KOBE-271).
 
 ## IP and user agent
 

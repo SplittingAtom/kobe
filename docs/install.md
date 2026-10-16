@@ -553,6 +553,16 @@ scratch.
 
 Every value is validated by `charts/kobe/values.schema.json`; unknown keys are rejected.
 
+### Private certificate authorities
+
+When a service the server calls over TLS (a syslog or OTLP collector for audit forwarding, an OIDC
+issuer, S3) has a certificate from your own CA, give the server that CA: `server.extraCaBundle`
+names one Secret (`secretName`) or one ConfigMap (`configMapName`) and the `key` holding PEM
+certificates (default `ca.crt`). The chart mounts it read-only and sets `NODE_EXTRA_CA_CERTS`, so
+the CA is trusted in addition to the public ones; certificates are still verified. Restart the
+server after rotating the bundle (Node reads it at start). See
+[audit forwarding](audit-log.md#export-and-forwarding).
+
 ### Migrations
 
 Install and upgrade with `--wait`. Schema migrations run as the database owner in a Job — the
@@ -688,6 +698,28 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
   As above, check `pg_index.indisvalid` for `memory_doc_versions_tool_call_idx` and
   `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
+
+- **Scheduler indexes (KOBE-252, migration `*_events_schedule_latest`).** On a large site, run
+  this before upgrading (the migration then skips what exists):
+
+  ```sql
+  ALTER TABLE events ADD COLUMN IF NOT EXISTS schedule_id uuid;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS events_schedule_latest_idx
+    ON events (team_id, schedule_id, created_at DESC)
+    WHERE kind IN ('schedule.fire', 'schedule.skip');
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS runs_schedule_live_idx
+    ON runs (team_id, thread_id)
+    WHERE trigger = 'schedule' AND status IN ('queued', 'running', 'waiting_approval');
+  ```
+
+  Without it, the upgrade builds both indexes with a plain `CREATE INDEX` inside the migration's
+  single transaction. That transaction has already altered `events` (a new column and a
+  `NOT VALID` check), which takes an ACCESS EXCLUSIVE lock held until commit, so **reads and
+  writes of `events`** wait for the whole `events` index build, and writes to `runs` wait for the
+  `runs` build. The previous release keeps serving during the upgrade, so the site stalls that long.
+
+  As above, check `pg_index.indisvalid` for both indexes and `DROP INDEX CONCURRENTLY IF EXISTS`
+  an invalid leftover before upgrading.
 
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres

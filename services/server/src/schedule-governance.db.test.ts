@@ -24,7 +24,8 @@ const DUE = new Date("2026-10-10T09:00:00Z");
 const NOW = new Date("2026-10-10T09:20:00Z");
 const NEXT_DAY = new Date("2026-10-11T09:20:00Z");
 
-type Person = "admin" | "madmin" | "bob" | "erin" | "carol" | "dave" | "fred" | "gina";
+type Person =
+  "admin" | "madmin" | "bob" | "erin" | "carol" | "dave" | "fred" | "gina" | "hank" | "ivy";
 // Finance: admin team_admin; bob, erin, carol, dave builders. Marketing: madmin team_admin; bob, erin.
 const PEOPLE: readonly Person[] = [
   "admin",
@@ -35,6 +36,8 @@ const PEOPLE: readonly Person[] = [
   "dave",
   "fred",
   "gina",
+  "hank",
+  "ivy",
 ];
 const ids = {} as Record<Person, string>;
 const as = {} as Record<Person, TestBrowser>;
@@ -112,6 +115,8 @@ beforeAll(async () => {
     [finance, "dave", "builder"],
     [finance, "fred", "builder"],
     [finance, "gina", "builder"],
+    [finance, "hank", "builder"],
+    [finance, "ivy", "builder"],
     [marketing, "madmin", "team_admin"],
     [marketing, "bob", "builder"],
     [marketing, "erin", "builder"],
@@ -471,6 +476,70 @@ describe("an admin pause does not outlive the owner's deactivation or removal (r
     expect(refused.status).toBe(409);
     expect(refused.json.code).toBe("schedule_owner_inactive");
     expect((await scheduleRow(id))?.active).toBe(false);
+  });
+});
+
+describe("a failed deactivation step is finished by the scheduler's sweep (KOBE-252)", () => {
+  /** The transition cause each cancelled run was reported with. */
+  const causes = new Map<string, string>();
+  let unsubscribe: () => void = () => undefined;
+  beforeAll(() => {
+    unsubscribe = deps.runs.onTransition((t) => {
+      if (t.to === "cancelled") causes.set(t.run.run_id, t.cause);
+    });
+  });
+  afterAll(() => unsubscribe());
+
+  it("a removal whose run cancel failed: the run is cancelled at the next tick, once", async () => {
+    const id = await schedule("hank", financeAgent);
+    const [runId] = (await fire([id])) as [string];
+    const cancel = deps.runs.cancelScheduledRuns;
+    deps.runs.cancelScheduledRuns = () => Promise.reject(new Error("database went away"));
+    try {
+      const removed = await as.admin.request("DELETE", `/v1/team/members/${ids.hank}`);
+      expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    } finally {
+      deps.runs.cancelScheduledRuns = cancel;
+    }
+    // The pause commits with the removal; only the cancel was left undone.
+    expect((await scheduleRow(id))?.paused_by).toBe("deactivation");
+    expect(await runStatus(runId)).toBe("running");
+    await runner(NOW).tick();
+    expect(await runStatus(runId)).toBe("cancelled");
+    expect(await cancelAudit(runId)).toEqual([{ actor_kind: "system", reason: "member_removed" }]);
+    expect(causes.get(runId)).toBe("system_cancelled");
+    await runner(NOW).tick();
+    expect(await cancelAudit(runId)).toHaveLength(1);
+    expect(await scheduleAudit(id)).toHaveLength(1);
+  });
+
+  it("a deactivation whose schedule step never ran: paused and cancelled at the next tick", async () => {
+    const id = await schedule("ivy", financeAgent);
+    const [runId] = (await fire([id])) as [string];
+    // Deactivated without the lifecycle hooks (as if the schedules hook failed in every team).
+    await adminPg.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.ivy]);
+    await runner(NOW).tick();
+    expect(await scheduleRow(id)).toEqual({
+      active: false,
+      paused_by: "deactivation",
+      next_due_at: null,
+    });
+    expect(await scheduleAudit(id)).toEqual([
+      { action: "schedule.deactivated", actor_kind: "system", by: "deactivation" },
+    ]);
+    expect(await runStatus(runId)).toBe("cancelled");
+    expect(await cancelAudit(runId)).toEqual([
+      { actor_kind: "system", reason: "owner_deactivated" },
+    ]);
+    expect(causes.get(runId)).toBe("system_cancelled");
+  });
+
+  it("a user's own Stop is still user_cancelled", async () => {
+    const id = await schedule("carol", financeAgent);
+    const [runId] = (await fire([id])) as [string];
+    const stopped = await as.carol.post(`/v1/runs/${runId}/cancel`);
+    expect(stopped.status, JSON.stringify(stopped.json)).toBe(200);
+    expect(causes.get(runId)).toBe("user_cancelled");
   });
 });
 

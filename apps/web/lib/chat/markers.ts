@@ -3,8 +3,9 @@
  * conversation turn. Two sources:
  * - entries of the Pi tree (`model_change`, `compaction`), placed by the tree projection where
  *   they sit (`tree.ts`), so they never become messages or branches of their own;
- * - what only the server knows (`GET /v1/threads/{id}/markers`): runs that ended interrupted or
- *   budget-stopped, and decided approvals, placed on the messages the projection already has.
+ * - what only the server knows (`GET /v1/threads/{id}/markers`): runs that ended interrupted,
+ *   budget-stopped, stopped or failed, and decided approvals, placed on the messages the
+ *   projection already has.
  * Forks need no data: assistant-ui knows each message's branches (`markers.tsx`).
  */
 import type { ApprovalResolutionCause } from "@kobe/protocol";
@@ -13,7 +14,19 @@ import type { Projection } from "./tree";
 import type { ThreadEntry } from "./types";
 
 export type EntryMarker =
-  | { readonly kind: "model"; readonly entryId: string; readonly model: string }
+  | {
+      readonly kind: "model";
+      readonly entryId: string;
+      readonly model: string;
+      /** The branch records no model above it: "Model: X", not a change (KOBE-280). */
+      readonly first: boolean;
+      /**
+       * The model in effect where the marker's row of markers starts (after the message above it,
+       * or at the fork it is carried from); null: none yet. A chain of model markers is shown as
+       * its net change from this model (`netModelMarkers`).
+       */
+      readonly from: string | null;
+    }
   | {
       readonly kind: "compaction";
       readonly entryId: string;
@@ -24,10 +37,12 @@ export type EntryMarker =
       readonly tokensBefore?: number | undefined;
     };
 
-/** A run that ended without finishing its answer (`runs.status`). */
+/** A run that ended without finishing its answer (`runs.status`); stopped or failed: KOBE-290. */
 export interface RunMarker {
   readonly runId: string;
-  readonly status: "interrupted" | "budget_stopped";
+  readonly status: "interrupted" | "budget_stopped" | "cancelled" | "failed";
+  /** A failed run's message (the server's text for its failure code). */
+  readonly message?: string | undefined;
   readonly userEntryId: string | null;
   readonly parentEntryId: string | null;
 }
@@ -92,15 +107,36 @@ function foldedCount(
   return count;
 }
 
-/** The marker an entry shows, if it shows one. */
+/** The models a branch records above an entry (KOBE-280); null: none yet. */
+export interface BranchModels {
+  /** The latest one (`recordedModel`). */
+  readonly model: string | null;
+  /** The one in effect where the entry's row of markers starts. */
+  readonly from: string | null;
+}
+
+/**
+ * The marker an entry shows, if it shows one. A model marker that changes nothing (a KOBE-259
+ * limits re-select, a Pi started without a model and then reused) is dropped when its row is shown
+ * (`netModelMarkers`).
+ */
 export function entryMarker(
   entry: ThreadEntry,
   parsed: ReadonlyMap<string, ParsedEntry>,
   parentOf: ReadonlyMap<string, string | null>,
   byId: ReadonlyMap<string, ThreadEntry>,
+  branch: BranchModels,
 ): EntryMarker | undefined {
   const p = parsed.get(entry.entryId);
-  if (p?.kind === "modelChange") return { kind: "model", entryId: entry.entryId, model: p.model };
+  if (p?.kind === "modelChange") {
+    return {
+      kind: "model",
+      entryId: entry.entryId,
+      model: p.model,
+      first: branch.model === null,
+      from: branch.from,
+    };
+  }
   if (p?.kind !== "compaction") return undefined;
   const folded =
     p.firstKeptEntryId === null

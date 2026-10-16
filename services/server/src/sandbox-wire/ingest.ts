@@ -1,5 +1,5 @@
 import type { PiEventFrame, PiGetEntriesData } from "@kobe/protocol";
-import { sql, type KobeDb } from "@kobe/db";
+import { sql, withTeam, type KobeDb } from "@kobe/db";
 import {
   appendRunEventsInTx,
   MAX_APPEND_BATCH,
@@ -9,6 +9,7 @@ import {
 import type { WireTuning } from "./constants.js";
 import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
+import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
 import type { RunTranslator } from "./translate.js";
 
@@ -50,6 +51,8 @@ export interface RunIngestOptions {
 }
 
 const SETTLE_SYNC_ATTEMPTS = 3;
+/** Reads of Pi's entries for an ended run's prompt (KOBE-290). */
+const LATE_PROMPT_READS = 3;
 
 export class LimitExceeded extends Error {
   constructor(readonly limit: "run_events" | "run_bytes" | "thread_entries") {
@@ -285,9 +288,10 @@ export class RunIngest {
     const first = frames[0];
     const last = frames[frames.length - 1];
     if (first === undefined || last === undefined) return;
+    let fetched: { readonly entries?: PiGetEntriesData; readonly lost: boolean } | undefined;
     try {
       // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
-      const fetched = sync ? await this.#fetchEntries(settled) : undefined;
+      fetched = sync ? await this.#fetchEntries(settled) : undefined;
       const entries = fetched?.entries;
       // KOBE-258: a run whose entries could not be saved never ends completed (a model failure
       // is still the reason shown: it is why the run went wrong).
@@ -306,10 +310,10 @@ export class RunIngest {
           const mirrored = await mirrorEntriesInTx(tx, teamId, threadId, entries, threadMaxEntries);
           if (mirrored.capped) throw new LimitExceeded("thread_entries");
           mirroredBytes = mirrored.bytes;
-          if (mirrored.orphans > 0) {
+          if (mirrored.orphans > 0 || mirrored.reserved > 0) {
             host.log.warn(
-              { run_id: runId, orphans: mirrored.orphans },
-              "entries with unknown parents skipped",
+              { run_id: runId, orphans: mirrored.orphans, reserved: mirrored.reserved },
+              "entries with unknown parents or server-only ids skipped",
             );
           }
           committed.push(
@@ -362,7 +366,58 @@ export class RunIngest {
         host.runEnded(runId, ended ? (end === undefined ? "completed" : "failed") : undefined);
       }
     } catch (err) {
+      // The prompt is kept (or refused) before the late frames are acked: an ack means done.
+      if (err instanceof CursorConflict && !err.active)
+        await this.#keepLatePrompt(fetched?.entries);
       this.#recover(err, last);
+    }
+  }
+
+  /**
+   * The first batch after the run ended elsewhere (Stop, a failed or timed-out start, a budget
+   * stop) was refused. If the run's prompt was never mirrored, Pi's entry is kept from Pi's
+   * entries (the batch's, else read now), checked against the run (`findRunPrompt`); nothing else
+   * of the batch is (KOBE-290). Awaited before the batch is acked. Pi writes the prompt right after
+   * `agent_start`, so when Pi's entries hold nothing of the run yet, a few more reads follow in the
+   * background (the ingest itself has ended).
+   */
+  async #keepLatePrompt(read: PiGetEntriesData | undefined): Promise<void> {
+    const { db, teamId, runId, threadId, host } = this.#o;
+    try {
+      // Usually mirrored already (Pi announced it while the run was active): no sandbox round trip.
+      if ((await withTeam(db, teamId, (tx) => bindUserEntry(tx, teamId, runId))) !== null) return;
+      const entries = read ?? (await host.fetchNewEntries(threadId));
+      if (entries === undefined || (await this.#keepFrom(entries)) !== "absent") return;
+      void this.#keepLater();
+    } catch (err) {
+      host.log.warn({ err, run_id: runId }, "could not keep the prompt of an ended run");
+    }
+  }
+
+  async #keepFrom(entries: PiGetEntriesData): Promise<KeepOutcome> {
+    const { db, teamId, runId, tuning } = this.#o;
+    const source = { kind: "pi", entries, otherwise: "nothing" } as const;
+    const kept = await withTeam(db, teamId, (tx) =>
+      keepRunPromptInTx(tx, teamId, runId, source, {
+        leaf: "if_latest",
+        maxEntries: tuning.threadMaxEntries,
+        maxBytes: tuning.runMaxBytes,
+      }),
+    );
+    return kept.outcome;
+  }
+
+  /** The later reads of {@link #keepLatePrompt}, while Pi's entries hold nothing of the run. */
+  async #keepLater(): Promise<void> {
+    const { runId, threadId, host } = this.#o;
+    try {
+      for (let attempt = 1; attempt < LATE_PROMPT_READS; attempt += 1) {
+        await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
+        const entries = await host.fetchNewEntries(threadId);
+        if (entries === undefined || (await this.#keepFrom(entries)) !== "absent") return;
+      }
+    } catch (err) {
+      host.log.warn({ err, run_id: runId }, "could not keep the prompt of an ended run");
     }
   }
 
@@ -392,6 +447,7 @@ export class RunIngest {
 
   #recover(err: unknown, last: number): void {
     const { host, runId } = this.#o;
+    const received = this.#next - 1;
     if (err instanceof LimitExceeded) {
       // Nothing of the batch was stored. The run fails and is stopped; frames are acked so the
       // agent can forget them.
@@ -411,10 +467,11 @@ export class RunIngest {
       this.#cursor = err.cursor;
       this.#next = err.cursor + 1;
       if (!err.active) {
-        // Ended elsewhere (Stop, sweep): late frames are acknowledged and not executed.
+        // Ended elsewhere (Stop, sweep): late frames (the queued ones too) are acknowledged and
+        // not executed.
         this.#ended = true;
         host.sendError("run_not_active", "the run has ended", "pi.event");
-        host.sendAck(runId, last);
+        host.sendAck(runId, Math.max(last, received));
         host.runEnded(runId, undefined);
         return;
       }

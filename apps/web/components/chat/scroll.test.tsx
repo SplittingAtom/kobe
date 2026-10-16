@@ -98,6 +98,19 @@ function grow(px: number) {
   });
 }
 
+/**
+ * Content shrinks by `px` (at a run's end the "Working…" line goes and the steering panel folds,
+ * which grows the list's box): like a browser, a position past the new bottom is clamped to it.
+ */
+function shrink(px: number) {
+  content -= px;
+  if (list().scrollTop > maxTop()) {
+    list().scrollTop = maxTop();
+    list().dispatchEvent(new Event("scroll"));
+  }
+  for (const run of observers) run();
+}
+
 const pill = () => screen.queryByRole("button", { name: /^Jump to latest/ });
 
 let kobe: FakeKobe;
@@ -221,6 +234,135 @@ describe("Jump to latest (ac-1)", () => {
     grow(300);
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
     await waitFor(() => expect(pill()).toBeNull());
+  });
+});
+
+describe("a scroll up in the last frames of a stream (KOBE-288)", () => {
+  it("a message queued during a run re-pins once, not again when its run starts later", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    grow(300);
+    // Sent while the run holds the thread: it queues (the panel shows it, the list doesn't).
+    await send("and a table");
+    await waitFor(() => expect(document.querySelectorAll("li[data-queued]")).toHaveLength(1));
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+    scrollTo(200);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+
+    // The run ends and the queued one starts: its prompt joins the list (the message count
+    // changes for the first time since the send).
+    act(() => {
+      kobe.agent.commitPrompt(runId);
+      kobe.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "Done" }] });
+      kobe.agent.complete(runId);
+    });
+    expect(await screen.findByText("and a table")).toBeTruthy();
+    await waitFor(() => expect(document.querySelectorAll("li[data-queued]")).toHaveLength(0));
+    expect(list().dataset.kobeFollow).toBe("unpinned");
+    expect(list().scrollTop).toBe(200);
+  });
+
+  it("a send that fails before it renders re-pins nothing later (a Retry starting)", async () => {
+    const t = threadWithHistory("Sales");
+    // An upload that never finishes holds the send back (it fails with "Wait for the files…").
+    openApp(kobe, t, () => new Promise(() => {}));
+    expect(await screen.findByText("Sales answer")).toBeTruthy();
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+    const runId = await startRun(t, "draw a chart");
+    act(() => kobe.agent.loseSandbox(runId));
+    const retry = await screen.findByRole("button", { name: "Retry from last entry" });
+
+    // Not running, so the send waits for its message to render; it never does.
+    const user = userEvent.setup();
+    await user.upload(await screen.findByLabelText("Choose files to attach"), [
+      new File(["abc"], "notes.txt", { type: "text/plain" }),
+    ]);
+    await send("with the file");
+    expect((await screen.findAllByText(/Wait for the files to finish/)).length).toBeGreaterThan(0);
+
+    scrollTo(200);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+    // Retry is not a send: its run's prompt joins the list without asking for the bottom.
+    await user.click(retry);
+    await waitFor(() => expect(kobe.latestRun(t).retry_of_run_id).toBe(runId));
+    await streaming(kobe, kobe.latestRun(t).run_id);
+    act(() => kobe.agent.delta(kobe.latestRun(t).run_id, "m1", "Second attempt"));
+    await waitFor(() => expect(list().textContent).toContain("Second attempt"));
+    expect(list().dataset.kobeFollow).toBe("unpinned");
+    expect(list().scrollTop).toBe(200);
+  });
+
+  it("still unpins when the run's end shrinks the list onto the member's position", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    grow(300);
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+
+    scrollTo(maxTop() - 30);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+    act(() => {
+      kobe.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "Done" }] });
+      kobe.agent.complete(runId);
+      shrink(60);
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
+    expect(list().dataset.kobeFollow).toBe("unpinned");
+    expect(pill()).toBeTruthy();
+    const held = list().scrollTop;
+    grow(400);
+    expect(list().scrollTop).toBe(held);
+  });
+
+  it("still unpins when new content lands in the same frame, before the list re-renders", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    grow(300);
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+
+    // One frame: the last words grow the list, the member's wheel turn scrolls it up, then the
+    // resize observer runs. React has not re-rendered in between (one act), so assistant-ui still
+    // follows and scrolls to the bottom once more; that scroll is not the member's.
+    act(() => {
+      content += 80;
+      list().dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }));
+      list().scrollTop = list().scrollTop - 120;
+      list().dispatchEvent(new Event("scroll"));
+      for (const run of observers) run();
+    });
+    act(() => kobe.agent.complete(runId));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
+    expect(list().dataset.kobeFollow).toBe("unpinned");
+    expect(pill()).toBeTruthy();
+    const held = list().scrollTop;
+    grow(400);
+    expect(list().scrollTop).toBe(held);
+  });
+
+  it("re-pins when the member scrolls down to the bottom while the list grows", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+    scrollTo(200);
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("unpinned"));
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    grow(300);
+    expect(list().scrollTop).toBe(200);
+
+    act(() => {
+      content += 50; // still growing as the member reaches the bottom
+      list().dispatchEvent(new WheelEvent("wheel", { deltaY: maxTop() - 200 }));
+      list().scrollTop = maxTop();
+      list().dispatchEvent(new Event("scroll"));
+    });
+    await waitFor(() => expect(list().dataset.kobeFollow).toBe("pinned"));
+    grow(200);
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
   });
 });
 

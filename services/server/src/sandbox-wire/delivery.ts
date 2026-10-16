@@ -14,8 +14,9 @@ import {
   type ServerToSandboxFrame,
   type ThreadCompactFrame,
 } from "@kobe/protocol";
-import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
+import { sql, withTeam, type KobeTx, type SandboxCommandKind } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
+import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import type { Logger } from "pino";
 import { completeCommand, markDelivered, pendingCommands, type CommandRow } from "./commands.js";
@@ -30,6 +31,12 @@ import {
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
 import { mintRunToken } from "./run-token.js";
+import {
+  RUNTIME_TAMPERED,
+  auditRuntimeTamperInTx,
+  withTamperAudit,
+  type RuntimeTamperReport,
+} from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
 /** What delivery needs from its connection. */
@@ -66,6 +73,10 @@ export type IssuedCommand =
 
 const ANSWERED_MAX = 4_096;
 const DRAIN_BATCH = 20;
+
+/** The sandbox stopped Pi for a tampered runtime: a security event (KOBE-271). */
+const tampered = (outcome: CommandOutcome): boolean =>
+  !outcome.ok && outcome.error.code === RUNTIME_TAMPERED;
 
 const failure = (code: string, message: string): CommandOutcome => ({
   ok: false,
@@ -563,9 +574,23 @@ export class CommandDelivery {
     const end = outcome.ok
       ? ({ status: "completed" } as const)
       : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
-    const { ended } = await withAppendTx(this.#ctx.db, teamId, (tx) =>
-      endRunInTx(tx, teamId, runId, end),
-    );
+    // A refused start: Pi's entries say whether it holds the prompt (KOBE-290). Network I/O before
+    // the transaction; unreadable entries keep nothing (Pi's own entry comes with the next sync).
+    const read = outcome.ok ? undefined : await this.fetchNewEntries(threadId);
+    const prompt: PromptSource | undefined =
+      read === undefined ? undefined : { kind: "pi", entries: read, otherwise: "unsent" };
+    const { ended } = await this.#endTx(outcome, runId, threadId, "message", async (tx) => {
+      const result = await endRunInTx(tx, teamId, runId, end, undefined, prompt);
+      // Ended before (Stop while the sandbox prepared the run): the prompt is kept all the same.
+      if (!result.ended && prompt !== undefined) {
+        await keepRunPromptInTx(tx, teamId, runId, prompt, {
+          leaf: "if_latest",
+          maxEntries: this.#ctx.tuning.threadMaxEntries,
+          maxBytes: this.#ctx.tuning.runMaxBytes,
+        });
+      }
+      return result;
+    });
     this.#host.endLease(runId);
     if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
   }
@@ -583,8 +608,8 @@ export class CommandDelivery {
         code: outcome.error.code,
         error: outcome.error.message.slice(0, 300),
       };
-      // A tampered runtime is a security event, logged like a run's (stored as its failure code).
-      if (outcome.error.code === "runtime_tampered") {
+      // A tampered runtime is a security event: logged here, audited with the run end (KOBE-271).
+      if (tampered(outcome)) {
         this.#host.log.warn(
           { ...detail, sandbox_id: this.#host.sandboxId, security: true },
           "compaction stopped: Pi's runtime was tampered with",
@@ -597,7 +622,7 @@ export class CommandDelivery {
     const end = outcome.ok
       ? ({ status: "completed" } as const)
       : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
-    const { ended } = await withAppendTx(this.#ctx.db, teamId, async (tx) => {
+    const { ended } = await this.#endTx(outcome, runId, threadId, "compaction", async (tx) => {
       if (entries !== undefined) {
         const mirrored = await mirrorEntriesInTx(
           tx,
@@ -615,6 +640,41 @@ export class CommandDelivery {
     });
     this.#host.endLease(runId);
     if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status: end.status });
+  }
+
+  /**
+   * The transaction ending a run (`withAppendTx`). For a tampered runtime it also writes
+   * `sandbox.runtime_tampered` as its last write, and the row alone if it cannot commit (KOBE-271).
+   */
+  #endTx<T>(
+    outcome: CommandOutcome,
+    runId: string,
+    threadId: string,
+    runKind: RuntimeTamperReport["runKind"],
+    work: (tx: KobeTx) => Promise<T>,
+  ): Promise<T> {
+    const { db } = this.#ctx;
+    const { teamId } = this.#host.target;
+    if (!tampered(outcome)) return withAppendTx(db, teamId, work);
+    const report = this.#tamper(runId, threadId, runKind);
+    return withTamperAudit(db, report, this.#host.log, () =>
+      withAppendTx(db, teamId, async (tx) => {
+        const result = await work(tx);
+        await auditRuntimeTamperInTx(tx, report);
+        return result;
+      }),
+    );
+  }
+
+  /** The ids of a tampered-runtime report from this connection (KOBE-271). */
+  #tamper(
+    runId: string,
+    threadId: string,
+    runKind: RuntimeTamperReport["runKind"],
+  ): RuntimeTamperReport {
+    const { teamId, userId } = this.#host.target;
+    const { sandboxId } = this.#host;
+    return { teamId, userId, sandboxId, replicaId: this.#ctx.replicaId, threadId, runId, runKind };
   }
 
   async #record(issued: Extract<IssuedCommand, { kind: "row" }>, outcome: CommandOutcome) {

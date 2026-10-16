@@ -178,6 +178,11 @@ export const runs = pgTable(
     uniqueIndex("runs_client_key_unique")
       .on(t.teamId, t.threadId, t.clientKey)
       .where(sql`${t.clientKey} IS NOT NULL`),
+    // A team's in-flight scheduled runs (KOBE-252, the scheduler's owner sweep):
+    // `runs_schedule_live_idx` on (team_id, thread_id) WHERE trigger = 'schedule' AND status IN
+    // ('queued', 'running', 'waiting_approval'). SQL-only (hand-written migration
+    // `*_events_schedule_latest.sql`, IF NOT EXISTS so large sites can build it CONCURRENTLY
+    // first, docs/install.md); not declared here.
     // Pending stops the sweep re-sends (few rows at any time).
     index("runs_stop_pending_idx")
       .on(t.teamId, t.stopRequestedAt)

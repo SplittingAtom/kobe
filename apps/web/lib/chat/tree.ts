@@ -20,8 +20,8 @@
  * message is the head) and `lastEntryOfNode` (the entry to continue from when a branch is chosen).
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
-import { parseEntry, type ParsedEntry } from "./entries";
-import { entryMarker, type EntryMarker } from "./markers";
+import { parseEntry, recordedModel, type ParsedEntry } from "./entries";
+import { entryMarker, type BranchModels, type EntryMarker } from "./markers";
 import {
   childCarry,
   innerMarkers,
@@ -44,7 +44,10 @@ export type KobeMessageMeta =
       /** Where an edit of this message branches from (its entry's parent). */
       readonly parentEntryId: string | null;
       readonly text: string;
+      /** Not an entry yet: the run's prompt as sent, shown until Pi saves it (no edit, no fork). */
       readonly pending: boolean;
+      /** Its run still holds the thread ("Sent, waiting for the agent"); never once it ended. */
+      readonly waiting?: boolean | undefined;
       /** Files sent with it (chips): from the send while pending, from Pi's text once committed. */
       readonly attachments?: readonly ChipFile[] | undefined;
       /** Skipped-actions reports of a run that left no answer after this prompt (KOBE-181). */
@@ -182,12 +185,15 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     parentNode: string | null;
     group: string | null;
     carry: Carry;
+    /** The models the branch records above this entry (KOBE-280). */
+    models: BranchModels;
   };
+  const none: BranchModels = { model: null, from: null };
   const stack: Frame[] = (children.get(null) ?? [])
-    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [] }))
+    .map((entry): Frame => ({ entry, parentNode: null, group: null, carry: [], models: none }))
     .reverse();
   while (stack.length > 0) {
-    const { entry, parentNode, group, carry } = stack.pop() as Frame;
+    const { entry, parentNode, group, carry, models } = stack.pop() as Frame;
     const p = parsed.get(entry.entryId) as ParsedEntry;
     const kids = children.get(entry.entryId) ?? [];
     let ctx: string | null;
@@ -212,7 +218,7 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
       openGroup = group;
       next = placer.hidden({
         entry,
-        marker: entryMarker(entry, parsed, parentOf, byId),
+        marker: entryMarker(entry, parsed, parentOf, byId, models),
         ctx,
         listed: ctx === null ? 0 : (nodes.get(ctx)?.entries.length ?? 0),
         carry,
@@ -223,12 +229,18 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
 
     const branches = kids.length > 1 && openGroup !== null;
     const childrenCarry = childCarry(next, kids.length);
+    // A message, or a fork that starts carrying, starts a new row of markers below it.
+    const model = recordedModel(entry, p) ?? models.model;
+    const message = p.kind === "user" || isAssistantSide(p);
+    const startsRow = message || (kids.length > 1 && next === null);
+    const childModels: BranchModels = { model, from: startsRow ? model : models.from };
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({
         entry: kids[i] as ThreadEntry,
         parentNode: branches ? openGroup : childParent,
         group: branches ? null : openGroup,
         carry: childrenCarry,
+        models: childModels,
       });
     }
   }
@@ -348,6 +360,30 @@ function toolDeps(
   return deps;
 }
 
+/**
+ * Empty answers Pi wrote when a run was stopped before its first token (KOBE-290) that a later
+ * run branched beside: Pi keeps them, but they are no version of anything, so they would show as
+ * a fork ("2 branches") on the next message. Hidden unless something hangs below or the member
+ * chose that branch (the leaf).
+ */
+function staleStoppedAnswers(
+  entries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  leafEntryId: string | null,
+): ReadonlySet<string> {
+  const kids = new Map<string | null, number>();
+  for (const e of entries) kids.set(e.parentId, (kids.get(e.parentId) ?? 0) + 1);
+  const stale = new Set<string>();
+  for (const e of entries) {
+    const p = parsed.get(e.entryId);
+    const empty =
+      p?.kind === "assistant" && p.problem?.reason === "aborted" && p.pieces.length === 0;
+    if (!empty || e.entryId === leafEntryId || (kids.get(e.entryId) ?? 0) > 0) continue;
+    if ((kids.get(e.parentId) ?? 0) > 1) stale.add(e.entryId);
+  }
+  return stale;
+}
+
 /** The conversation as assistant-ui messages, with the head on the active branch. */
 export function projectThread(
   entries: readonly ThreadEntry[],
@@ -357,7 +393,11 @@ export function projectThread(
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
   const isSummary = (e: ThreadEntry) => parsed.get(e.entryId)?.kind === "skipped";
   const summaries = entries.filter(isSummary);
-  const treeEntries = summaries.length === 0 ? entries : entries.filter((e) => !isSummary(e));
+  const stale = staleStoppedAnswers(entries, parsed, leafEntryId);
+  const treeEntries =
+    summaries.length === 0 && stale.size === 0
+      ? entries
+      : entries.filter((e) => !isSummary(e) && !stale.has(e.entryId));
   const results = new Map<string, ToolResultInfo>();
   const resultEntries = new Map<string, ThreadEntry>();
   for (const entry of treeEntries) {
@@ -687,6 +727,7 @@ function overlayLive(
       parentEntryId,
       text: live.prompt.text,
       pending: true,
+      waiting: active,
       ...(live.prompt.files && live.prompt.files.length > 0
         ? { attachments: live.prompt.files }
         : {}),
@@ -700,7 +741,7 @@ function overlayLive(
         content: [{ type: "text", text: live.prompt.text }],
         metadata: { custom: meta },
       },
-      deps: [live.prompt.text, parentNode, live.prompt.files],
+      deps: [live.prompt.text, parentNode, live.prompt.files, active],
     });
     anchor = id;
   }

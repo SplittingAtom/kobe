@@ -32,6 +32,14 @@ export const events = pgTable(
     ref: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     dueAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The schedule a `schedule.fire` / `schedule.skip` concerns (KOBE-252), beside
+     * `ref.schedule_id`. A typed column because the latest-event lookup must use an index under
+     * RLS: only leakproof quals become index conditions there, and uuid equality is leakproof
+     * while `lower(ref->>'schedule_id')` is not. NULL on other kinds and on events written before
+     * KOBE-252.
+     */
+    scheduleId: uuid(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -47,6 +55,13 @@ export const events = pgTable(
     // kind = 'schedule.fire'. SQL-only (migration `*_schedules_rls.sql`, IF NOT EXISTS so large
     // installs can build it CONCURRENTLY first, docs/install.md); not declared here.
     // The index only dedups non-null keys, so a fire must carry both.
+    // A schedule's latest fire or skip (KOBE-252, scheduler skip dedupe): the index
+    // `events_schedule_latest_idx` on (team_id, schedule_id, created_at DESC) WHERE kind IN
+    // ('schedule.fire', 'schedule.skip'). SQL-only (hand-written migration
+    // `*_events_schedule_latest.sql`, IF NOT EXISTS so large sites can build it CONCURRENTLY
+    // first, docs/install.md); not declared here. The same migration adds the SQL-only check
+    // `events_schedule_id_ref` (schedule_id IS NULL OR schedule_id::text =
+    // lower(ref->>'schedule_id'), NOT VALID).
     check(
       "events_schedule_fire_keys",
       sql`${t.kind} <> 'schedule.fire' OR (${t.ref}->>'schedule_id' IS NOT NULL AND ${t.dueAt} IS NOT NULL)`,

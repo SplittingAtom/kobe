@@ -173,9 +173,8 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (models !== undefined && input.model != null) {
     args.push("--model", `${KOBE_PROVIDER_ID}/${input.model.gatewayModel}`);
   }
-  // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62. The system prompt is
-  // wired at spawn (see `PiLaunch.systemPrompt`). All change `key`, so a thread restarts Pi when
-  // its config changes.
+  // Seam (not wired here): mcp_servers → KOBE-62. The system prompt is wired at spawn (see
+  // `PiLaunch.systemPrompt`). Both change `key`, so a thread restarts Pi when its config changes.
 
   const env: Record<string, string> = {};
   for (const name of INHERITED_ENV) {

@@ -31,6 +31,7 @@ export function expiryCauseOf(cause: RunTransitionCause): ExpiryCause {
     case "approval_expired":
       return "ttl";
     case "user_cancelled":
+    case "system_cancelled":
       return "run_cancelled";
     case "budget_exhausted":
       return "budget_exhausted";

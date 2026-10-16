@@ -233,6 +233,8 @@ export class RunFixture {
       readonly modelTokenDefaults?: ModelTokenDefaults;
       /** Mint run tokens (KOBE-118) for agents announcing `run_token`. */
       readonly runTokenKey?: Uint8Array;
+      /** A run's sandbox byte budget (default: the wire's). */
+      readonly runMaxBytes?: number;
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
@@ -250,6 +252,7 @@ export class RunFixture {
           resultPollMs: 100,
           lostGraceMs: 0,
           helloTimeoutMs: 2_000,
+          ...(options.runMaxBytes === undefined ? {} : { runMaxBytes: options.runMaxBytes }),
           commandTimeoutMs: {
             ...WIRE_DEFAULTS.commandTimeoutMs,
             "run.start": options.startTimeoutMs ?? 5_000,

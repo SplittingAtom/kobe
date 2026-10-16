@@ -60,6 +60,8 @@ export interface CommittedEntry {
   readonly type: string;
   /** Absent when the server stored it by `blob_ref` (over 64 KB). */
   readonly payload: Readonly<Record<string, unknown>> | undefined;
+  /** The streamed message it finalises (assistant messages only). */
+  readonly messageId?: string | undefined;
 }
 
 export interface LiveRun {
@@ -315,6 +317,7 @@ export function applyRunEvents(run: LiveRun, events: readonly KobeEvent[]): Appl
         parentId: event.payload.parent_id,
         type: event.payload.entry_type,
         payload: event.payload.payload as Readonly<Record<string, unknown>> | undefined,
+        messageId: event.payload.message_id,
       });
     }
   }

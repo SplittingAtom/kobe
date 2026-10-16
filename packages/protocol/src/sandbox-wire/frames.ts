@@ -309,11 +309,20 @@ export const PI_MODEL_APIS = [
 export const piModelApiSchema = z.enum(PI_MODEL_APIS);
 export type PiModelApi = z.infer<typeof piModelApiSchema>;
 
-/** `<gateway provider>/<model>` as the model gateway names models (KOBE-40 `gateway_model`). */
+/**
+ * `<gateway provider>/<model>` as the model gateway names models (KOBE-40 `gateway_model`): a
+ * provider of at most 64 characters and a model of at most 191. The one limit for the wire and the
+ * kobe-models model file, which ships on its own and pins a copy (KOBE-280), so a `run.start` the
+ * agent accepts never starts Pi on a model its model file refuses.
+ */
+export const GATEWAY_MODEL_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]{0,190}$/;
+/** The longest id {@link GATEWAY_MODEL_PATTERN} allows (64 + "/" + 191). */
+export const GATEWAY_MODEL_MAX_LENGTH = 256;
 export const gatewayModelSchema = z
   .string()
-  .max(256)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
+  .max(GATEWAY_MODEL_MAX_LENGTH)
+  .regex(GATEWAY_MODEL_PATTERN);
 
 /** Upper bound of a model's context window (and so its output limit) on the wire (KOBE-259). */
 export const MODEL_LIMITS_MAX_TOKENS = 10_000_000;

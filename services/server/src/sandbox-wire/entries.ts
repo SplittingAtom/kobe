@@ -22,6 +22,8 @@ export interface MirrorResult {
   readonly inserted: readonly PiSessionEntry[];
   /** Entries skipped because their parent is unknown (a broken or hostile tree). */
   readonly orphans: number;
+  /** Entries skipped because their id is one only the server writes (`ks-`, `ku-`): hostile. */
+  readonly reserved: number;
   /** Entries whose id already exists (normal for overlapping syncs). */
   readonly existing: number;
   /** The thread reached `maxEntries`: later entries were not stored. */
@@ -31,6 +33,34 @@ export interface MirrorResult {
   readonly leafId: string | null;
 }
 
+/**
+ * Entry ids of prompts the server keeps for runs that ended before Pi ever received them
+ * (KOBE-290, `runs/run-prompt.ts`). Pi's ids are short hex, so these never collide; like the
+ * skipped-actions note they are not in Pi's session.
+ */
+export const UNSENT_PROMPT_PREFIX = "ku-";
+
+export function unsentPromptEntryId(runId: string): string {
+  return `${UNSENT_PROMPT_PREFIX}${runId.replaceAll("-", "").slice(0, 24)}`;
+}
+
+export function isUnsentPromptEntryId(entryId: string): boolean {
+  return entryId.startsWith(UNSENT_PROMPT_PREFIX);
+}
+
+/** Ids only the server writes (the skipped-actions note `ks-`, an unsent prompt `ku-`). */
+export function isServerEntryId(entryId: string): boolean {
+  return entryId.startsWith("ks-") || isUnsentPromptEntryId(entryId);
+}
+
+/**
+ * Rows of `thread_entries` that Pi's session holds: not the server's own entries (a scheduled
+ * run's skipped-actions note, an unsent prompt). They are never the sync cursor, never restored
+ * into Pi, and never where Pi continues from.
+ */
+export const piSessionEntrySql = sql`NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
+       AND entry_id NOT LIKE ${`${UNSENT_PROMPT_PREFIX}%`}`;
+
 export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
   const parsed = piGetEntriesDataSchema.safeParse(data);
   return parsed.success ? parsed.data : undefined;
@@ -38,8 +68,8 @@ export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
 
 /**
  * The last mirrored entry of a thread (the `get_entries since` cursor), by append order. Entries
- * the server wrote itself (the scheduled run's skipped-actions report) are not in Pi's session, so
- * they are never the cursor: Pi would not know them.
+ * the server wrote itself (the scheduled run's skipped-actions report, an unsent prompt) are not
+ * in Pi's session, so they are never the cursor: Pi would not know them.
  */
 export async function lastMirroredEntryId(
   tx: KobeTx,
@@ -48,8 +78,7 @@ export async function lastMirroredEntryId(
 ): Promise<string | undefined> {
   const res = await tx.execute<{ entry_id: string }>(sql`
     SELECT entry_id FROM thread_entries
-     WHERE team_id = ${teamId} AND thread_id = ${threadId}
-       AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND ${piSessionEntrySql}
      ORDER BY seq DESC LIMIT 1`);
   return res.rows[0]?.entry_id;
 }
@@ -66,7 +95,7 @@ export async function threadHasConversation(
   const res = await tx.execute(sql`
     SELECT 1 FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
-       AND payload -> 'message' ->> 'role' IN ('user', 'assistant')
+       AND payload -> 'message' ->> 'role' IN ('user', 'assistant') AND ${piSessionEntrySql}
      LIMIT 1`);
   return (res.rowCount ?? 0) > 0;
 }
@@ -114,7 +143,12 @@ export async function mirrorEntriesInTx(
   const inserted: PiSessionEntry[] = [];
   let orphans = 0;
   let existing = 0;
+  let reserved = 0;
   for (const entry of data.entries) {
+    if (isServerEntryId(entry.id)) {
+      reserved += 1;
+      continue;
+    }
     if (known.has(entry.id)) {
       existing += 1;
       continue;
@@ -144,14 +178,17 @@ export async function mirrorEntriesInTx(
       })),
     );
   }
-  const leafId = data.leafId !== null && known.has(data.leafId) ? data.leafId : null;
+  const leafId =
+    data.leafId !== null && known.has(data.leafId) && !isServerEntryId(data.leafId)
+      ? data.leafId
+      : null;
   if (leafId !== null || inserted.length > 0) {
     await tx.execute(sql`
       UPDATE threads
          SET leaf_entry_id = COALESCE(${leafId}, leaf_entry_id), last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  return { inserted, orphans, existing, leafId, capped, bytes };
+  return { inserted, orphans, reserved, existing, leafId, capped, bytes };
 }
 
 function isAssistantMessage(entry: PiSessionEntry): boolean {
@@ -198,7 +235,7 @@ const RESTORE_PAGE_ROWS = 16;
 /**
  * The thread's entries in append order as `session.restore` parts of bounded size (D13, D15),
  * read page by page (keyset on `seq`, one short transaction each), so a long thread is never held
- * in memory at once. Server-written entries (the skipped-actions report) are left out: Pi never
+ * in memory at once. Server-written entries (the skipped-actions report, unsent prompts) are left out: Pi never
  * had them, and as the last entry one would become the session's resume point. The last part has `final: true` (an empty thread yields one empty final part).
  */
 export async function* restoreParts(
@@ -214,7 +251,7 @@ export async function* restoreParts(
       const res = await tx.execute<{ seq: number; payload: PiSessionEntry }>(sql`
         SELECT seq, payload FROM thread_entries
          WHERE team_id = ${teamId} AND thread_id = ${threadId} AND seq > ${after}
-           AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
+           AND ${piSessionEntrySql}
          ORDER BY seq LIMIT ${RESTORE_PAGE_ROWS}`);
       return res.rows;
     });

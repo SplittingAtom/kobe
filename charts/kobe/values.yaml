@@ -182,6 +182,15 @@ server:
     teamStorageQuotaBytes: 10737418240
     # Hours an upload that never joined a thread is kept (1..720).
     orphanHours: 24
+  # Extra CA certificates the server trusts for its outgoing TLS (KOBE-182): a syslog or OTLP
+  # collector (auditForwarding), an OIDC issuer or S3 endpoint signed by a private CA. Name one
+  # Secret or one ConfigMap (not both) and the key holding PEM certificates; the server mounts it
+  # read-only and sets NODE_EXTRA_CA_CERTS, so these CAs are trusted in addition to the public
+  # ones. Node reads the bundle only at start: restart the server after rotating it.
+  extraCaBundle:
+    secretName: ""
+    configMapName: ""
+    key: ca.crt
 
 scheduler:
   # Replicas > 1 are safe: each due occurrence is claimed under a row lease and a unique index
@@ -449,12 +458,16 @@ clamav:
 # newest event when first enabled; use the export for history.
 auditForwarding:
   # Syslog (RFC 5424) over TCP. With tls: true the collector's certificate must chain to a CA
-  # the server image trusts.
+  # the server trusts: a public one, or a private CA given in server.extraCaBundle.
   syslog:
     enabled: false
     host: ""
     port: 6514
     tls: true
+    # IANA private enterprise number in the RFC 5424 structured-data ID (kobe@<number>). 32473
+    # is the number RFC 5612 reserves for documentation; set your organisation's registered PEN
+    # if it has one. Digits only.
+    enterpriseNumber: 32473
   # OTLP/HTTP logs (JSON). endpoint is the full logs URL, e.g. https://collector:4318/v1/logs.
   # headersSecret names a Secret with key "headers": "Name=value,Name2=value2" (auth tokens).
   otlp:

@@ -364,6 +364,37 @@
             "contextWindow": { "type": "integer", "minimum": 1024, "maximum": 10000000 }
           }
         },
+        "extraCaBundle": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "server.extraCaBundle: one Secret or one ConfigMap holding PEM CA certificates",
+          "properties": {
+            "secretName": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+            },
+            "configMapName": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "pattern": "^[-._a-zA-Z0-9]+$",
+              "not": { "enum": [".", ".."] }
+            }
+          },
+          "not": {
+            "required": ["secretName", "configMapName"],
+            "properties": {
+              "secretName": { "minLength": 1 },
+              "configMapName": { "minLength": 1 }
+            }
+          }
+        },
         "uploads": {
           "type": "object",
           "additionalProperties": false,
@@ -1070,7 +1101,14 @@
             "enabled": { "type": "boolean" },
             "host": { "type": "string", "pattern": "^[A-Za-z0-9.:\\[\\]-]*$" },
             "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-            "tls": { "type": "boolean" }
+            "tls": { "type": "boolean" },
+            "enterpriseNumber": {
+              "type": ["integer", "string"],
+              "minimum": 1,
+              "maximum": 9999999999,
+              "pattern": "^[1-9][0-9]{0,9}$",
+              "description": "auditForwarding.syslog.enterpriseNumber: an IANA private enterprise number (digits)"
+            }
           }
         },
         "otlp": {

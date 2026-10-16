@@ -39,10 +39,11 @@ afterEach(() => {
 const ask = (content: string) => ({ role: "user", content });
 const say = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
 
-/** Like Pi 1.0: a settings entry at the root, then one turn. */
+/** Like Pi 1.0: the session's first model and a settings entry at the root, then one turn. */
 function oneTurn() {
   const t = fake.addThread("Report");
-  const root = fake.addSystemEntry(t, null, "thinking_level_change", { thinkingLevel: "off" });
+  const first = fake.addSystemEntry(t, null, "model_change", { provider: "kobe", modelId: "kimi" });
+  const root = fake.addSystemEntry(t, first, "thinking_level_change", { thinkingLevel: "off" });
   const u1 = fake.addEntry(t, root, ask("summarise it"));
   fake.addEntry(t, u1, say("kimi answer"));
   return { t, root };
@@ -75,6 +76,12 @@ async function answer(t: string, modelId: string, text: string) {
   expect(await screen.findByText(text)).toBeTruthy();
   return run;
 }
+
+/** The model markers shown, by their text. */
+const modelMarkers = () =>
+  [...document.querySelectorAll('[data-kobe-marker="model"]')].map((m) =>
+    (m.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
 
 /** The model marker shown on the version on screen, and whether it sits above the prompt. */
 function markerAbovePrompt(model: string): boolean {
@@ -124,17 +131,19 @@ describe("Regenerate with another model (KOBE-217)", () => {
     expect(screen.queryByText("kimi answer")).toBeNull();
     await waitFor(() => expect(version()).toBe("Version 2 of 2"));
     expect(markerAbovePrompt("glm")).toBe(true);
+    // The session's first model reads as the thread's, not as a change (KOBE-280).
+    expect(modelMarkers()).toEqual(["Model: kimi", "Model changed to glm"]);
     await waitFor(async () => expect((await picker()).value).toBe("glm"));
 
-    // The first version had no switch: its marker stays with the new branch.
+    // The first version had no switch: its change marker stays with the new branch.
     await userEvent
       .setup()
       .click(must(screen.getAllByRole("button", { name: "Previous version" })[0]));
     expect(await screen.findByText("kimi answer")).toBeTruthy();
-    expect(document.querySelector('[data-kobe-marker="model"]')).toBeNull();
+    expect(modelMarkers()).toEqual(["Model: kimi"]);
   });
 
-  it("switching back is a visible marker of its own (ac-3)", async () => {
+  it("switching back to the thread's first model shows it as the thread's model (ac-3)", async () => {
     const { t } = oneTurn();
     openApp(fake, t);
     await screen.findByText("kimi answer");
@@ -147,6 +156,9 @@ describe("Regenerate with another model (KOBE-217)", () => {
     await answer(t, "kimi", "kimi again");
     await waitFor(() => expect(version()).toBe("Version 3 of 3"));
     expect(markerAbovePrompt("kimi")).toBe(true);
+    // Version 3 branches below version 2's switch (like real Pi); the chain kimi → glm → kimi has
+    // no message between, so it nets out to the thread's first model: no change shows (KOBE-280).
+    expect(modelMarkers()).toEqual(["Model: kimi"]);
     await waitFor(async () => expect((await picker()).value).toBe("kimi"));
   });
 

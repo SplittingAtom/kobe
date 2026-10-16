@@ -12,6 +12,7 @@ import { projectRunContext } from "../projects/run-context.js";
 import { listRunAttachments } from "../uploads/attach-list.js";
 import { sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
+import { piBranchPoint } from "./run-prompt.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { readApprovalFloor } from "../policy/approval-floor.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
@@ -182,7 +183,13 @@ export async function promoteInTx(
     }
     const model = resolution.model;
     const approvalMode = resolved.approvalMode;
-    const parentEntryId = next.parentEntryId ?? thread.leafEntryId;
+    // An unsent prompt (KOBE-290) is not in Pi's session: Pi continues from its parent.
+    const parentEntryId = await piBranchPoint(
+      tx,
+      teamId,
+      threadId,
+      next.parentEntryId ?? thread.leafEntryId,
+    );
     const started: NewRunEvent = {
       type: "run.started",
       payload: {

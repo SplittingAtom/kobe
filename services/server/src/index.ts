@@ -6,6 +6,7 @@ import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
 import { destinationsOf, sinksFor } from "./audit/forward/index.js";
+import { forwardingSecrets } from "./audit/forward/redact.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
@@ -116,6 +117,7 @@ if (config.process === "scheduler") {
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
     connectors: loadConnectorUrlPolicy(process.env),
     auditForwardingDestinations: destinationsOf(config.auditForwarding),
+    auditForwardingSecrets: forwardingSecrets(config.auditForwarding),
     ...(config.mcpProxyUrl && config.mcpProxyInternalKey
       ? {
           connectorProbe: createProxyProbe({
@@ -215,6 +217,7 @@ const auditForwarder =
           AUDIT_FORWARD_LOCK,
         ),
         log: logger,
+        secrets: forwardingSecrets(config.auditForwarding),
       })
     : undefined;
 auditForwarder?.start();

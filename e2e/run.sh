@@ -801,8 +801,15 @@ out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")
 const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
 out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
 out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
+// KOBE-290: a reload still shows the stopped prompt (Pi never had it: the server keeps it), once;
+// the deleted queued message is gone.
+const reload = await call("GET", "/v1/threads/" + id);
+const said = (text) => (reload.json.entries || []).filter((e) => e.payload?.message?.role === "user" &&
+  JSON.stringify(e.payload.message.content).includes(text));
+out("reload", reload.status + ":" + said("hello").length + ":" + said("again").length + ":" +
+  (said("hello")[0]?.entry_id === reload.json.leaf_entry_id));
 JS
-runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -13)
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -14)
 printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
 contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
 contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
@@ -812,8 +819,9 @@ contains "pending messages: the active prompt, then the queue (KOBE-32)" '^pendi
 contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
 contains "Stop pauses the message queued behind it (KOBE-26)" '^paused=true:queued$' "$runs_out"
 contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
-contains "the event stream records the start and the stop, then ends" '^events=run.started,(sandbox.waking,)?run.interrupted$' "$runs_out"
+contains "the event stream records the start, the kept prompt and the stop, then ends" '^events=run.started,(sandbox.waking,)?entry.committed,run.interrupted$' "$runs_out"
 contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
+contains "KOBE-290: after a reload the stopped prompt is there once, as the leaf; the deleted one is not" '^reload=200:1:0:true$' "$runs_out"
 
 # Throwaway clusters only: this section mints sandbox-wire tokens with the site's real keys.
 # KOBE-26 (Gate 1: "killing a sandbox mid-run yields interrupted + Retry and history survives").
@@ -1892,6 +1900,86 @@ JS
     compact_usage() { psql_kobe "SELECT count(*) FROM run_usage u JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id WHERE u.team_id = '$E2E_TEAM_ID' AND r.thread_id = '${compact_thread:-00000000-0000-4000-8000-000000000000}' AND r.kind = 'compaction' AND r.status = 'completed'"; }
     contains "the summary call is billed to the completed compaction run" '^[1-9][0-9]*$' "$(wait_for 30 '^[1-9]' compact_usage)"
 
+    # KOBE-290: Stop before the first token on real Pi. The fake model holds back its answer to a
+    # `kobe-slow-start` prompt, so the run is stopped once Pi has the prompt (the server mirrors it
+    # when Pi announces it) and before any text. A reload then shows the prompt once.
+    echo "==> Stop before the first token (KOBE-290)"
+    read -r -d '' STOP_EARLY_JS <<'JS' || true
+const [team, content] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const headers = () => ({ origin, "content-type": "application/json", "x-kobe-team": team,
+  cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") });
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body) });
+  for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+  const text = await res.text();
+  let json = {}; try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text };
+};
+const out = (k, v) => console.log(k + "=" + v);
+let login;
+for (let i = 0; i < 4; i++) {
+  login = await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" });
+  if (login.status !== 429) break;
+  await new Promise((r) => setTimeout(r, 11000));
+}
+out("signin", login.status);
+await call("PUT", "/v1/me/teams/active", { teamId: team });
+const thread = await call("POST", "/v1/threads", { title: "kobe-290" });
+const id = thread.json.thread_id;
+const sent = await call("POST", "/v1/threads/" + id + "/messages", { content });
+out("message", sent.status);
+const runId = sent.json.run_id;
+// Follow the run until Pi's prompt is committed (entry.committed, a user message), counting text.
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 240000);
+let committed = false, deltas = 0;
+try {
+  const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (!committed) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const type = (block.match(/^event: (.*)$/m) || [])[1];
+      let payload = {}; try { payload = JSON.parse((block.match(/^data: (.*)$/m) || [])[1]).payload ?? {}; } catch {}
+      if (type === "text.delta") deltas += 1;
+      if (type === "entry.committed" && payload.payload?.message?.role === "user") committed = true;
+    }
+  }
+  controller.abort();
+} catch (e) { if (!committed) out("stream_error", e.name); }
+clearTimeout(timer);
+out("committed", committed + ":" + deltas);
+out("cancel", (await call("POST", "/v1/runs/" + runId + "/cancel")).json.status);
+// Pi settles after the abort; its late frames are refused, the prompt stays.
+await new Promise((r) => setTimeout(r, 5000));
+const reload = await call("GET", "/v1/threads/" + id);
+const entries = reload.json.entries || [];
+const prompts = entries.filter((e) => e.payload?.message?.role === "user" && JSON.stringify(e.payload.message.content).includes(content));
+out("reload", reload.status + ":" + prompts.length + ":" + (prompts[0]?.entry_id === reload.json.leaf_entry_id));
+out("answers", entries.filter((e) => e.payload?.message?.role === "assistant").length);
+const run = await call("GET", "/v1/runs/" + runId);
+out("run", run.json.status + ":" + (run.json.user_entry_id === prompts[0]?.entry_id));
+const markers = await call("GET", "/v1/threads/" + id + "/markers");
+out("marker", (markers.json.runs || []).map((r) => r.status + ":" + (r.user_entry_id === prompts[0]?.entry_id)).join(",") || "-");
+JS
+    stop_early_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$STOP_EARLY_JS" "$E2E_TEAM_ID" "kobe-slow-start stop me $RANDOM" 2>&1 || true)
+    printf '     stop early: %s\n' "$(tr '\n' ' ' <<<"$stop_early_out")"
+    contains "KOBE-290: the prompt is mirrored once Pi has it, before any text" '^committed=true:0$' "$stop_early_out"
+    contains "KOBE-290: Stop cancels the run before the first token" '^cancel=cancelled$' "$stop_early_out"
+    contains "KOBE-290: after a reload the prompt is there once, as the leaf" '^reload=200:1:true$' "$stop_early_out"
+    contains "KOBE-290: the aborted answer of the stopped run is not stored" '^answers=0$' "$stop_early_out"
+    contains "KOBE-290: the run is bound to its prompt entry" '^run=cancelled:true$' "$stop_early_out"
+    contains "KOBE-290: after a reload the prompt carries a Stopped marker" '^marker=cancelled:true$' "$stop_early_out"
+
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
@@ -2349,6 +2437,113 @@ JS
     contains "projects: an archived project refuses new files (409 archived)" '^archived_upload=409:archived$' "$pr_out"
     contains "projects: archived projects are listed only when asked" '^archived_listed=false$' "$pr_out"
     contains "projects: ...and are listed when asked" '^archived_listed_when_asked=true$' "$pr_out"
+
+    # KOBE-284 (Gate B ac-2): KOBE-216's "Fork to a new thread" at a chosen message, with a title.
+    # The Owner has a private thread with two exchanges and forks it at the first answer: the new
+    # thread has the title, the history up to that answer only and the fork provenance, and the
+    # source is unchanged. The fork's first run continues from the copied history (Pi rebuilds the
+    # session from the copied entries; the fake model echoes the conversation it was given for
+    # "history?"). The reader, a team member who cannot open the source, is refused (404).
+    echo "==> fork at a message (KOBE-284)"
+    read -r -d '' FORK_JS <<'JS' || true
+const [team, mode, readerEmail, sourceId, markerA, markerB, title, forkArg, chosenArg] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const out = (k, v) => console.log(k + "=" + v);
+const session = async (email) => {
+  const jar = new Map();
+  const call = async (method, path, body) => {
+    const headers = { origin, "x-kobe-team": team, cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+    const text = await res.text();
+    let json = {}; try { json = JSON.parse(text); } catch {}
+    return { status: res.status, json, text };
+  };
+  let login;
+  for (let i = 0; i < 4; i++) { // sign-in is rate limited (3 per 10 s): wait out a 429
+    login = await call("POST", "/api/auth/sign-in/email", { email, password: "e2e owner password" });
+    if (login.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 11000));
+  }
+  await call("PUT", "/v1/me/teams/active", { teamId: team });
+  call.login = login.status;
+  return call;
+};
+const ids = (detail) => (detail.json.entries ?? []).map((e) => e.entry_id);
+const sig = (detail) => ids(detail).length + ":" + detail.json.leaf_entry_id + ":" + detail.json.title + ":" + detail.json.forked_from_thread_id;
+const owner = await session("owner@e2e.test");
+const src = "/v1/threads/" + sourceId;
+if (mode === "fork") {
+  const reader = await session(readerEmail);
+  out("signin", owner.login + ":" + reader.login);
+  const before = await owner("GET", src);
+  const all = ids(before);
+  const isAnswer = (e, marker) => e.type === "message" && e.payload?.message?.role === "assistant" && JSON.stringify(e.payload).includes(marker);
+  const chosen = before.json.entries?.find((e) => isAnswer(e, markerA))?.entry_id;
+  const second = before.json.entries?.find((e) => isAnswer(e, markerB))?.entry_id;
+  out("chosen_id", chosen ?? "-");
+  out("chosen_is_middle", chosen !== undefined && second !== undefined && all.indexOf(chosen) < all.indexOf(second) && before.json.leaf_entry_id === second);
+  out("source_sig", sig(before));
+  const fork = await owner("POST", src + "/fork", { entry_id: chosen, title });
+  out("fork", fork.status);
+  out("fork_id", fork.json.thread_id ?? "-");
+  const mine = await owner("GET", "/v1/threads/" + fork.json.thread_id);
+  out("fork_title", mine.status + ":" + (mine.json.title === title));
+  out("fork_history", chosen !== undefined && ids(mine).join(",") === all.slice(0, all.indexOf(chosen) + 1).join(",") ? "prefix" : ids(mine).join(",") + " vs " + all.join(","));
+  out("fork_leaf", mine.json.leaf_entry_id === chosen && ids(mine).at(-1) === chosen);
+  out("fork_without_second", !JSON.stringify(mine.json.entries ?? []).includes(markerB));
+  out("provenance", (mine.json.forked_from_thread_id === sourceId) + ":" + (mine.json.forked_at_entry_id === chosen) + ":" + (mine.json.forked_from_title === before.json.title));
+  out("source_after_fork", sig(await owner("GET", src)));
+  const refused = await reader("POST", src + "/fork", { entry_id: chosen, title: "not yours" });
+  out("reader_fork", refused.status + ":" + (refused.json.code ?? "-"));
+} else {
+  out("signin", owner.login);
+  const mine = await owner("GET", "/v1/threads/" + forkArg);
+  const next = (mine.json.entries ?? []).find((e) => e.parent_id === chosenArg);
+  out("fork_continued", mine.status + ":" + (next !== undefined && mine.json.leaf_entry_id !== chosenArg));
+  out("source_after_run", sig(await owner("GET", src)));
+}
+JS
+    fork_js() { # mode source-id marker-a marker-b title [fork-id] [chosen-id] → the FORK_JS output
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- \
+        node --input-type=module -e "$FORK_JS" "$E2E_TEAM_ID" "$1" reader@e2e.test "$2" "$3" "$4" "$5" "${6:-}" "${7:-}" 2>&1 | tail -16
+    }
+    fk_id="$(date +%s)-$RANDOM"
+    fk_a="fork-first-$fk_id" fk_b="fork-second-$fk_id" fk_title="E2E fork $fk_id"
+    fk_chat=$(chat_run "$fk_a" 300000)
+    fk_src=$(sed -n 's/^thread_id=//p' <<<"$fk_chat")
+    contains "fork: the source's first exchange completed" '^terminal=run.completed$' "$fk_chat"
+    contains "fork: the source's second exchange completed" '^terminal=run.completed$' \
+      "$(chat_run "$fk_b" 300000 "" "" "${fk_src:-00000000-0000-4000-8000-000000000000}")"
+    fk_out=$(fork_js fork "${fk_src:-00000000-0000-4000-8000-000000000000}" "$fk_a" "$fk_b" "$fk_title")
+    printf '     fork: %s\n' "$(tr '\n' ' ' <<<"$fk_out" | cut -c1-900)"
+    fk_chosen=$(sed -n 's/^chosen_id=//p' <<<"$fk_out")
+    fk_thread=$(sed -n 's/^fork_id=//p' <<<"$fk_out")
+    fk_sig=$(sed -n 's/^source_sig=//p' <<<"$fk_out")
+    contains "fork: both users signed in" '^signin=200:200$' "$fk_out"
+    contains "fork: the chosen entry is the first answer, before the second exchange" '^chosen_is_middle=true$' "$fk_out"
+    contains "fork: the Owner forks at that entry with a title (201)" '^fork=201$' "$fk_out"
+    contains "fork: the new thread has the title" '^fork_title=200:true$' "$fk_out"
+    contains "fork: its history is the source's up to the chosen entry" '^fork_history=prefix$' "$fk_out"
+    contains "fork: its history ends at the chosen entry" '^fork_leaf=true$' "$fk_out"
+    contains "fork: the second exchange is not in it" '^fork_without_second=true$' "$fk_out"
+    contains "fork: forked_from_thread_id, forked_at_entry_id (and the source title) are set" \
+      '^provenance=true:true:true$' "$fk_out"
+    if [[ -n "$fk_sig" ]] && grep -qxF "source_after_fork=$fk_sig" <<<"$fk_out"; then ok "fork: the source thread is unchanged"
+    else fail "fork: the source thread is unchanged (before $fk_sig)"; fi
+    contains "fork: a member who cannot open the source is refused (404)" '^reader_fork=404:thread_not_found$' "$fk_out"
+    fk_run=$(chat_run "history?" 300000 "" "" "${fk_thread:-00000000-0000-4000-8000-000000000000}")
+    contains "fork: the fork's first run completed" '^terminal=run.completed$' "$fk_run"
+    contains "fork: the model is given the copied history" "^text=fake-openai: history said: .*user: $fk_a \| assistant: fake-openai: $fk_a" "$fk_run"
+    if grep -qF "$fk_b" <<<"$fk_run"; then fail "fork: the model is not given the exchange after the fork point"
+    else ok "fork: the model is not given the exchange after the fork point"; fi
+    fk_after=$(fork_js after "${fk_src:-00000000-0000-4000-8000-000000000000}" "$fk_a" "$fk_b" "$fk_title" \
+      "${fk_thread:-00000000-0000-4000-8000-000000000000}" "${fk_chosen:--}")
+    contains "fork: the run continued the fork from the chosen entry" '^fork_continued=200:true$' "$fk_after"
+    if [[ -n "$fk_sig" ]] && grep -qxF "source_after_run=$fk_sig" <<<"$fk_after"; then ok "fork: the fork's run left the source unchanged"
+    else fail "fork: the fork's run left the source unchanged (before $fk_sig)"; fi
 
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the

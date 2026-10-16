@@ -80,7 +80,42 @@ export function childCarry(carry: Carry, kids: number): Carry {
   return kids > 1 ? (carry ?? []) : carry;
 }
 
-const markersOf = (placed: readonly PlacedMarker[]) => placed.map((m) => m.marker);
+type ModelMarker = EntryMarker & { readonly kind: "model" };
+
+/**
+ * A row of markers as shown (KOBE-280): model changes with no message between them show only their
+ * net result, the model in effect for the next message, and nothing when that is the model already
+ * in effect before them. The branch's first model ("Model: X") always shows and is what the
+ * changes after it are judged against.
+ */
+export function netModelMarkers(markers: readonly EntryMarker[]): EntryMarker[] {
+  const shown: EntryMarker[] = [];
+  let current: string | null | undefined;
+  let pending: ModelMarker | undefined;
+  const settle = () => {
+    if (pending === undefined) return;
+    if (pending.model !== current) shown.push(pending);
+    current = pending.model;
+    pending = undefined;
+  };
+  for (const marker of markers) {
+    if (marker.kind !== "model") {
+      settle();
+      shown.push(marker);
+    } else if (marker.first) {
+      settle();
+      shown.push(marker);
+      current = marker.model;
+    } else {
+      if (current === undefined) current = marker.from;
+      pending = marker;
+    }
+  }
+  settle();
+  return shown;
+}
+
+const markersOf = (placed: readonly PlacedMarker[]) => netModelMarkers(placed.map((m) => m.marker));
 
 /**
  * A node's markers by place, and what they were built from (deps). `listed` is how many entries
@@ -107,7 +142,7 @@ export function nodeMarkers(
     ...(after.length > 0 ? { after } : {}),
     deps: [...carried, ...inside, ...tails.flatMap((d) => d.markers)].flatMap((m) => [
       m.entry,
-      m.marker.kind === "compaction" ? m.marker.folded : undefined,
+      ...(m.marker.kind === "compaction" ? [m.marker.folded] : [m.marker.first, m.marker.from]),
     ]),
   };
 }

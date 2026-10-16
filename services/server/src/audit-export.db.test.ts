@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SYSTEM_ACTOR, auditStandalone } from "@kobe/db";
 import { AUDIT_FORWARD_LOCK, AuditForwarder, backoffMs } from "./audit/forward/forwarder.js";
 import { otlpSink } from "./audit/forward/otlp.js";
+import { forwardingSecrets } from "./audit/forward/redact.js";
 import { syslogSink } from "./audit/forward/syslog.js";
 import { createPgReconcileLock } from "./sandbox/reconcile-lock.js";
 import type { TestBrowser } from "./testing/browser.js";
@@ -295,6 +296,39 @@ describe("forwarding", () => {
     await forwarder.runOnce();
     expect(c.otlp.records.map(seqOf)).toEqual(lost.map((s) => s.seq)); // nothing skipped or doubled
     expect(await readHealth("otlp")).toMatchObject({ status: "ok", failures: 0, behind: 0 });
+  });
+
+  it("never puts collector credentials in the health view (KOBE-182)", async () => {
+    const otlp = {
+      url: "https://siem-user:pa55word@collector.example.test/v1/logs?token=t0ken-abc",
+      headers: { authorization: "Bearer hdr-s3cret-1" },
+    };
+    const now = new Date(Date.now() + 24 * 3_600_000); // past any backoff left by earlier tests
+    const forwarder = new AuditForwarder({
+      db: h.deps.database.db,
+      sinks: [
+        otlpSink(otlp), // fetch refuses the URL and quotes it, credentials included
+        {
+          name: "syslog",
+          send: () => Promise.reject(new Error("collector refused Bearer hdr-s3cret-1")),
+        },
+      ],
+      lock: createPgReconcileLock(h.deps.database.pool, undefined, `${AUDIT_FORWARD_LOCK}.t4`),
+      log: { warn: () => undefined, error: () => undefined },
+      now: () => now,
+      secrets: forwardingSecrets({ otlp }),
+    });
+    await forwarder.runOnce();
+    await record("cred-1");
+    await forwarder.runOnce();
+    for (const destination of ["otlp", "syslog"]) {
+      const health = await readHealth(destination);
+      expect(health.failures, destination).toBeGreaterThan(0);
+      expect(health.lastError, destination).toContain("[redacted]");
+      for (const secret of ["siem-user", "pa55word", "t0ken-abc", "hdr-s3cret-1"]) {
+        expect(health.lastError, destination).not.toContain(secret);
+      }
+    }
   });
 
   it("lets one replica forward at a time", async () => {

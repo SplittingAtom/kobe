@@ -64,11 +64,10 @@ const budgets = new BudgetGate(
         .update(`kobe.budget-reservations:${config.sessionKey}`)
         .digest("hex"),
     }),
-    // A settled hold keeps counting until the other replicas' cached spend has caught up, and a
+    // Settled reservations end at once: the reservation reads the spend itself (KOBE-286). A
     // running call extends its hold, so the TTL need not exceed the longest call.
-    settleHoldMs: config.budgetCacheTtlMs,
     heartbeatMs: Math.floor(config.reservationTtlMs / 2),
-    onError: (err) => logger.warn({ err }, "budget reservation could not be ended"),
+    onError: (err) => logger.warn({ err }, "budget reservation call failed"),
   },
 );
 const listener = new ModelsListener({

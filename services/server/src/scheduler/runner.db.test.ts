@@ -87,6 +87,15 @@ const skips = (scheduleId: string) =>
       WHERE team_id = $1 AND kind = 'schedule.skip' AND ref->>'schedule_id' = $2 ORDER BY created_at`,
     [team, scheduleId],
   );
+/** Every fire and skip of the schedule carries the typed schedule_id (KOBE-252). */
+const keyed = async (scheduleId: string) =>
+  (
+    await rows<{ schedule_id: string | null }>(
+      `SELECT schedule_id FROM events
+        WHERE team_id = $1 AND kind IN ('schedule.fire', 'schedule.skip') AND ref->>'schedule_id' = $2`,
+      [team, scheduleId],
+    )
+  ).map((r) => r.schedule_id);
 const nextDue = async (id: string) =>
   (
     await rows<{ next_due_at: Date | null }>(`SELECT next_due_at FROM schedules WHERE id = $1`, [
@@ -328,6 +337,7 @@ describe("catch-up after downtime (ac-3)", () => {
     const [fire] = await fires(id);
     expect(fire?.due_at.toISOString()).toBe(DUE.toISOString());
     expect(await skips(id)).toEqual([{ reason: "collapsed" }]);
+    expect(await keyed(id)).toEqual([id, id]);
     expect((await nextDue(id))?.toISOString()).toBe("2026-10-11T09:00:00.000Z");
   });
 
@@ -337,6 +347,7 @@ describe("catch-up after downtime (ac-3)", () => {
     await runnerOn(owners[0] as ServerDeps, owners[0]?.runs, late).tick();
     expect(await threadsOf(id)).toHaveLength(0);
     expect(await skips(id)).toEqual([{ reason: "missed" }]);
+    expect(await keyed(id)).toEqual([id]);
     expect((await nextDue(id))?.toISOString()).toBe("2026-10-11T09:00:00.000Z");
   });
 });

@@ -34,7 +34,8 @@
   align-items: flex-end;
 }
 
-.controls label {
+/* Field captions stack; a choice stays inline before its text, as in admin.module.css (KOBE-283). */
+.controls label:not(:has(input:is([type="checkbox"], [type="radio"]))) {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;

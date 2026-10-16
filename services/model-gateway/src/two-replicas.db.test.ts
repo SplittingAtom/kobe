@@ -40,7 +40,8 @@ import { DbUsageSink } from "./usage/sink.js";
  * KOBE-121 (ac-1): two independent gateway replicas (own pool, gate, sink and listener) share one
  * Postgres. Concurrent calls from several members against a small hard team token budget must not
  * overshoot it by more than one call, whichever replica serves them, including calls fired right
- * after the first wave ended (their ledger rows may not be visible yet: the settled holds cover it).
+ * after the first wave ended (their ledger rows may not be visible yet: until a row lands its call
+ * keeps its hold, and the reservation reads the spend itself, KOBE-286).
  */
 const KEY = "m".repeat(40);
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
@@ -81,7 +82,6 @@ async function startReplica(): Promise<Replica> {
         ttlMs: 60_000,
         salt: createHash("sha256").update("two-replicas").digest("hex"),
       }),
-      settleHoldMs: 600_000,
     },
   );
   const principals = new PrincipalCache(

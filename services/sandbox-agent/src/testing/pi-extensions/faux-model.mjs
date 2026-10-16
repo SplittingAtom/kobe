@@ -2,7 +2,9 @@
 // calls without credentials. The script is the user prompt: `faux:` + a JSON array of steps, each
 // `{ "tool", "args", "id" }` (one tool call), `{ "calls": [...] }` (parallel calls in one message),
 // `{ "text" }`, `{ "thinking", "stopReason" }` (reasoning only, e.g. cut off at the output limit,
-// KOBE-258) or `{ "echoUsers": true }` (replies with every user message the model was given).
+// KOBE-258), `{ "echoUsers": true }` (replies with every user message the model was given) or
+// `{ "waitForAbort": true }` (no first token until the run is aborted: Stop before the answer,
+// KOBE-290).
 // The n-th assistant message after the prompt plays step n (then "done").
 // It selects its model on every prompt (an `input` handler runs before Pi checks the model, while
 // `session_start` may still be pending when the first prompt arrives) and activates `codemode` when the built-in is loaded (it
@@ -23,7 +25,19 @@ function textOf(message) {
     .join("");
 }
 
-function step(context) {
+/** Resolves when the call's signal aborts (or after 60 s, so a stuck test still ends). */
+function aborted(signal) {
+  return new Promise((resolve) => {
+    if (signal === undefined || signal.aborted) return resolve();
+    const timer = setTimeout(resolve, 60_000);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function step(context, options) {
   const messages = context.messages ?? [];
   let userIndex = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -36,6 +50,10 @@ function step(context) {
   const steps = JSON.parse(textOf(messages[userIndex]).slice("faux:".length));
   const played = messages.slice(userIndex + 1).filter((m) => m.role === "assistant").length;
   const next = steps[played] ?? { text: "done" };
+  if (next.waitForAbort) {
+    await aborted(options?.signal);
+    return fauxAssistantMessage("too late");
+  }
   // KOBE-123: reply with the system prompt the model was given.
   if (next.echoSystemPrompt) {
     // Pi 1.0.0 carries the prompt as system messages: `content` plus named, ordered `sections`

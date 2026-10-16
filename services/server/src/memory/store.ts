@@ -349,10 +349,17 @@ export async function deleteMemory(
 }
 
 export interface ListedDoc extends DocRow {
+  /** Object key of the current version (server-written; never sent to a client). */
+  readonly blobRef: string;
   readonly sizeBytes: number;
   readonly updatedBy: string | null;
   readonly actorKind: "user" | "agent";
 }
+
+const ownerWhere = (target: MemoryTarget) =>
+  target.scope === "user"
+    ? and(eq(memoryDocs.scope, "user"), eq(memoryDocs.ownerUserId, target.ownerUserId))
+    : and(eq(memoryDocs.scope, "project"), eq(memoryDocs.projectId, target.projectId));
 
 /** Live docs of one scope owner, newest first; `MEMORY.md` is just another path. */
 export async function listMemory(
@@ -360,13 +367,11 @@ export async function listMemory(
   teamId: string,
   target: MemoryTarget,
 ): Promise<ListedDoc[]> {
-  const owner =
-    target.scope === "user"
-      ? and(eq(memoryDocs.scope, "user"), eq(memoryDocs.ownerUserId, target.ownerUserId))
-      : and(eq(memoryDocs.scope, "project"), eq(memoryDocs.projectId, target.projectId));
+  const owner = ownerWhere(target);
   const rows = await tx
     .select({
       ...DOC_COLUMNS,
+      blobRef: memoryDocVersions.blobRef,
       sizeBytes: memoryDocVersions.sizeBytes,
       updatedBy: memoryDocVersions.actorUserId,
       actorKind: memoryDocVersions.actorKind,
@@ -383,6 +388,39 @@ export async function listMemory(
     .where(and(eq(memoryDocs.teamId, teamId), owner, isNull(memoryDocs.deletedAt)))
     .orderBy(desc(memoryDocs.updatedAt), asc(memoryDocs.path));
   return rows as ListedDoc[];
+}
+
+/**
+ * The live doc `docId` of the target with its current version and object key, or undefined when
+ * it is gone, deleted or not the target's. A search re-resolves a doc whose listed object vanished.
+ */
+export async function currentObject(
+  tx: KobeTx,
+  teamId: string,
+  target: MemoryTarget,
+  docId: string,
+): Promise<{ readonly currentVersion: number; readonly blobRef: string } | undefined> {
+  const owner = ownerWhere(target);
+  const [row] = await tx
+    .select({ currentVersion: memoryDocs.currentVersion, blobRef: memoryDocVersions.blobRef })
+    .from(memoryDocs)
+    .innerJoin(
+      memoryDocVersions,
+      and(
+        eq(memoryDocVersions.teamId, memoryDocs.teamId),
+        eq(memoryDocVersions.docId, memoryDocs.id),
+        eq(memoryDocVersions.version, memoryDocs.currentVersion),
+      ),
+    )
+    .where(
+      and(
+        eq(memoryDocs.teamId, teamId),
+        eq(memoryDocs.id, docId),
+        owner,
+        isNull(memoryDocs.deletedAt),
+      ),
+    );
+  return row;
 }
 
 export interface DocVersion {

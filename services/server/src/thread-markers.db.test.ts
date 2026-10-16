@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MAX_MARKERS, threadMarkersSchema } from "./routes/thread-markers.js";
+import { FAILURE_MESSAGES } from "./runs/failure-codes.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
@@ -90,6 +91,40 @@ describe("GET /v1/threads/{id}/markers", () => {
     expect(body.approvals.every((a) => a.run_id === first && a.user_entry_id === "e-1")).toBe(true);
     // Never the checked input or the reasons: the marker needs the outcome only.
     expect(JSON.stringify(res.json)).not.toContain("secret");
+  });
+
+  it("lists started runs that were stopped or failed, a failure with the server's own message (KOBE-290)", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const own = ws.sb.respond;
+    let refuse = false;
+    ws.sb.respond = (frame) =>
+      refuse && frame.type === "run.start"
+        ? {
+            v: 1,
+            type: "command.result",
+            command_id: frame.command_id,
+            ok: false,
+            error: { code: "model_not_configured", message: "sandbox text, never shown" },
+          }
+        : own?.(frame);
+    const threadId = await f.thread(w.owner);
+    const stopped = await f.message(w.owner, threadId, "stop me");
+    const deleted = await f.message(w.owner, threadId, "delete me");
+    await ws.started(stopped);
+    expect((await as(w.owner).post(`/v1/runs/${deleted}/cancel`)).status).toBe(200);
+    expect((await as(w.owner).post(`/v1/runs/${stopped}/cancel`)).status).toBe(200);
+    await f.fx.replica(0).deps.runs.idle();
+    refuse = true;
+    const failed = await f.message(w.owner, threadId, "fail me");
+    await f.until(w.team, failed, "failed");
+    const res = await as(w.owner).get(`/v1/threads/${threadId}/markers`);
+    const body = threadMarkersSchema.parse(res.json);
+    expect(body.runs.map((r) => [r.run_id, r.status, r.message ?? null])).toEqual([
+      [stopped, "cancelled", null],
+      [failed, "failed", FAILURE_MESSAGES.model_not_configured],
+    ]);
+    expect(JSON.stringify(res.json)).not.toContain("sandbox text");
   });
 
   it("is visible like the thread: teammates and other teams get 404, bad ids 400", async () => {

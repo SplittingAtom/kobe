@@ -112,6 +112,27 @@ describe("fake LLM tool list echo (KOBE-158)", () => {
   });
 });
 
+describe("fake LLM history echo (KOBE-284)", () => {
+  it("answers 'history?' with the earlier user and assistant messages on one line", async () => {
+    const res = await chat([
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "first  question" },
+      { role: "assistant", content: [{ type: "text", text: "first\nanswer" }] },
+      { role: "assistant", content: null, tool_calls: [] },
+      { role: "user", content: [{ type: "text", text: "second" }] },
+      { role: "user", content: "history?" },
+    ]);
+    expect(res.choices[0]?.message.content).toBe(
+      "fake-openai: history said: user: first question | assistant: first answer | user: second",
+    );
+  });
+
+  it("says nothing when the conversation starts with the question", async () => {
+    const res = await chat([{ role: "user", content: "history?" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: history said: ");
+  });
+});
+
 describe("steps script (KOBE-244: several tool calls in one run)", () => {
   const steps = [
     { name: "bash", args: { command: "echo one" } },
@@ -157,5 +178,34 @@ describe("steps script (KOBE-244: several tool calls in one run)", () => {
     ]);
     const id = (r: typeof a) => (r.choices[0]?.message.tool_calls as { id: string }[])[0]?.id;
     expect(id(a)).not.toBe(id(b));
+  });
+});
+
+describe("fake LLM slow start (KOBE-290 e2e)", () => {
+  it("holds back the answer to a 'kobe-slow-start' prompt until the caller goes away", async () => {
+    const abort = new AbortController();
+    const pending = fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-fake",
+        stream: true,
+        messages: [{ role: "user", content: "kobe-slow-start stop me" }],
+      }),
+      signal: abort.signal,
+    }).then(
+      () => "answered",
+      () => "aborted",
+    );
+    const early = await Promise.race([
+      pending,
+      new Promise((resolve) => setTimeout(() => resolve("waiting"), 300)),
+    ]);
+    expect(early).toBe("waiting");
+    abort.abort();
+    expect(await pending).toBe("aborted");
+    // The server still answers others.
+    const res = await chat([{ role: "user", content: "hello" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
   });
 });

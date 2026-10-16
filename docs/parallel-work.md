@@ -73,6 +73,30 @@ and a dev database that ran them must be reset. Do it just before your PR merges
 (`drizzle-kit check`, schema-vs-migrations check, journal order test, cross-team probe) must stay
 green afterwards.
 
+### Hand-written migrations
+
+A migration whose first line is `-- kobe:hand-written` changes the schema with SQL that drizzle
+cannot generate (renames, `IF NOT EXISTS`, `NOT VALID`). `db:rebase` keeps its SQL **and its
+snapshot** and only renumbers it, so it refuses (`scripts/migration-plan.mjs`) when:
+
+- the branch also has a generated migration (land them in separate PRs), or
+- `main` changed the schema after the branch forked: the kept snapshot would miss main's change.
+
+So a branch with a hand-written migration merges **before** any other schema-changing PR in the
+queue (group-1-fixes, KOBE-252's `0098_events_schedule_latest`, is such a branch). If main moved
+anyway, rebase it by hand:
+
+1. `git merge origin/main`, taking main's `drizzle/` (journal and snapshots) on conflict.
+2. Move the hand-written SQL to the next free number, and add its journal entry (next `idx`, a
+   `when` after main's last).
+3. Re-derive its snapshot: copy main's newest snapshot, apply the migration's schema change to it
+   (the same column, constraint or rename as in the old snapshot's diff against its predecessor),
+   set a new `id` and `prevId` = main's newest snapshot `id`.
+4. `pnpm --filter @kobe/db db:check` must print no changes; run `pnpm --filter @kobe/db test:db`.
+
+SQL-only objects (indexes, policies, `NOT VALID` checks) are not in the snapshot, so they need no
+step 3.
+
 ## Shared environments
 
 - **Postgres for tests:** `KOBE_TEST_DATABASE_URL` points at a server, not a database. Each test

@@ -5,6 +5,7 @@
 import { isActiveRunStatus } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
 import type { SentFile } from "./attachments";
+import { parseEntry } from "./entries";
 import type { CommittedEntry, LiveRun } from "./live";
 import type { LiveOverlay } from "./tree";
 import type { PendingMessage, RunSnapshot, ThreadEntry, ThreadSummary } from "./types";
@@ -224,10 +225,22 @@ export function liveOverlay(state: ThreadState): LiveOverlay | undefined {
   if (!live) return undefined;
   const running = currentRunId(state) === live.runId;
   if (!live.started && !running) return undefined; // still queued: shown in the queue
-  const unsavedPrompt = !live.promptCommitted && state.livePrompt !== undefined;
+  const prompt = promptSaved(live, state.entries) ? undefined : state.livePrompt;
   // An ended run stays on screen only for what the entries don't have (text cut off by Stop).
-  if (!running && live.messages.length === 0 && !unsavedPrompt) return undefined;
-  return { run: live, active: running, prompt: state.livePrompt };
+  if (!running && live.messages.length === 0 && prompt === undefined) return undefined;
+  return { run: live, active: running, prompt };
+}
+
+/**
+ * The run's prompt is in the tree: the stream said so, or the tree holds a user message the run
+ * committed. The second covers a prompt over 64 KiB, streamed without its body (KOBE-288): only
+ * the thread read shows its role, and the copy shown from the send must give way to it.
+ */
+export function promptSaved(live: LiveRun, entries: readonly ThreadEntry[]): boolean {
+  if (live.promptCommitted) return true;
+  if (live.committed.length === 0) return false;
+  const committed = new Set(live.committed);
+  return entries.some((e) => committed.has(e.entryId) && parseEntry(e).kind === "user");
 }
 
 function emptyRun(runId: string): LiveRun {

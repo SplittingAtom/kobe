@@ -1,4 +1,4 @@
-import { and, desc, eq, events, inArray, schedules, sql, type KobeTx } from "@kobe/db";
+import { and, desc, eq, events, schedules, sql, type KobeTx } from "@kobe/db";
 import type { ScheduleRecurrence } from "@kobe/protocol";
 import { resolveAgentPin } from "../agents/versions.js";
 import { principalActive } from "../runs/store.js";
@@ -55,9 +55,14 @@ async function leaseRow(tx: KobeTx, due: DueSchedule) {
   return row;
 }
 
+/** The event kinds the latest-event lookup reads; the same literal list as the index predicate. */
+const FIRE_OR_SKIP = sql.raw(`('schedule.fire', 'schedule.skip')`);
+
 /**
- * The schedule's latest fire or skip event. `created_at` ties inside one fire transaction (a
- * `collapsed` skip and its fire): the later `due_at`, the fire, wins.
+ * The schedule's latest fire or skip event, through `events_schedule_latest_idx` (KOBE-252): the
+ * typed `schedule_id` (uuid equality is leakproof, so it is an index condition under RLS) and the
+ * index's literal kind list (provable with bound parameters). `created_at` ties inside one fire
+ * transaction (a `collapsed` skip and its fire): the later `due_at`, the fire, wins.
  */
 async function latestEvent(
   tx: KobeTx,
@@ -69,8 +74,8 @@ async function latestEvent(
     .where(
       and(
         eq(events.teamId, due.teamId),
-        inArray(events.kind, ["schedule.fire", "schedule.skip"]),
-        sql`${events.ref}->>'schedule_id' = ${due.id}`,
+        sql`${events.kind} IN ${FIRE_OR_SKIP}`,
+        eq(events.scheduleId, due.id),
       ),
     )
     .orderBy(desc(events.createdAt), sql`${events.dueAt} DESC NULLS LAST`)
@@ -101,6 +106,7 @@ export async function recordSkip(
     kind: "schedule.skip",
     status: "processed",
     ref: { schedule_id: due.id, reason, skipped_at: now.toISOString() },
+    scheduleId: due.id,
     dueAt: due.dueAt,
   });
 }
@@ -148,6 +154,7 @@ export function scheduledFire(due: DueSchedule, ctx: FireContext): ScheduledSubm
           kind: "schedule.fire",
           status: "processed",
           ref: { schedule_id: due.id, thread_id: ctx.threadId },
+          scheduleId: due.id,
           dueAt: plan.fireAt,
         })
         .onConflictDoNothing()
@@ -160,6 +167,7 @@ export function scheduledFire(due: DueSchedule, ctx: FireContext): ScheduledSubm
           kind: "schedule.skip",
           status: "processed",
           ref: { schedule_id: due.id, reason: "collapsed", fired_for: plan.fireAt.toISOString() },
+          scheduleId: due.id,
           dueAt: due.dueAt,
         });
       }

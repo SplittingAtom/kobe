@@ -139,6 +139,7 @@ describe("workloads", () => {
     });
     expect(audit(on, "kobe-server")).toEqual([
       { name: "KOBE_AUDIT_SYSLOG_URL", value: "tls://siem.example.test:6514" },
+      { name: "KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER", value: "32473" },
       { name: "KOBE_AUDIT_OTLP_URL", value: "https://otel.example.test:4318/v1/logs" },
       {
         name: "KOBE_AUDIT_OTLP_HEADERS",
@@ -156,7 +157,10 @@ describe("workloads", () => {
         }),
         "kobe-server",
       ),
-    ).toEqual([{ name: "KOBE_AUDIT_SYSLOG_URL", value: "tcp://h:514" }]);
+    ).toEqual([
+      { name: "KOBE_AUDIT_SYSLOG_URL", value: "tcp://h:514" },
+      { name: "KOBE_AUDIT_SYSLOG_ENTERPRISE_NUMBER", value: "32473" },
+    ]);
     expect(renderError({ "auditForwarding.syslog.enabled": "true" })).toMatch(/syslog.host/);
     expect(renderError({ "auditForwarding.otlp.enabled": "true" })).toMatch(/otlp.endpoint/);
   });

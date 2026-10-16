@@ -22,3 +22,10 @@ BRIEF.md
 
 __pycache__/
 *.pyc
+
+# Browser suite against a deployment (e2e/browser, KOBE-285): installs, session and results
+e2e/browser/node_modules/
+e2e/browser/.auth/
+e2e/browser/test-results/
+e2e/browser/playwright-report/
+e2e/browser-results/

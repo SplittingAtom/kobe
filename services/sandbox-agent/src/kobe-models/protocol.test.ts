@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
+  GATEWAY_MODEL_PATTERN as PROTOCOL_GATEWAY_MODEL,
   KOBE_MODEL_ERROR_PREFIX as PROTOCOL_PREFIX,
   MODEL_LIMITS_MAX_TOKENS as PROTOCOL_MAX_TOKENS,
   MODEL_RUN_ERROR_CODES as PROTOCOL_CODES,
@@ -9,6 +10,7 @@ import {
 } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  GATEWAY_MODEL,
   KOBE_MODEL_ERROR_PREFIX,
   MODEL_LIMITS_MAX_TOKENS,
   MODEL_RUN_ERROR_CODES,
@@ -26,19 +28,37 @@ const valid = {
   run_id: RUN,
 };
 
+const parses = (text: string): boolean => {
+  try {
+    parseModelFile(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 describe("kobe-models protocol", () => {
   it("pins its copies of the @kobe/protocol constants (the extension ships on its own)", () => {
     expect(KOBE_MODEL_ERROR_PREFIX).toBe(PROTOCOL_PREFIX);
     expect([...MODEL_RUN_ERROR_CODES]).toEqual([...PROTOCOL_CODES]);
     expect([...PI_MODEL_APIS]).toEqual([...PROTOCOL_APIS]);
     expect(MODEL_LIMITS_MAX_TOKENS).toBe(PROTOCOL_MAX_TOKENS);
-    // The gateway model pattern matches the contract's.
-    for (const gateway_model of ["kobe-vllm/qwen3", "gemini/gemini-2.5-pro", "x/y:z"]) {
-      expect(() =>
-        parseModelFile(JSON.stringify({ ...valid, model: { ...valid.model, gateway_model } })),
-      ).not.toThrow();
+    // One gateway-model limit (KOBE-280): the model file checks the contract's own pattern.
+    expect(GATEWAY_MODEL.source).toBe(PROTOCOL_GATEWAY_MODEL.source);
+    expect(GATEWAY_MODEL.flags).toBe(PROTOCOL_GATEWAY_MODEL.flags);
+    // The wire and the model file agree on every id, up to the 191-character model part.
+    const ids = [
+      ["kobe-vllm/qwen3", true],
+      ["gemini/gemini-2.5-pro", true],
+      ["x/y:z", true],
+      [`p/${"m".repeat(191)}`, true],
+      [`p/${"m".repeat(192)}`, false],
+    ] as const;
+    for (const [gateway_model, accepted] of ids) {
+      const file = JSON.stringify({ ...valid, model: { ...valid.model, gateway_model } });
+      expect(parses(file)).toBe(accepted);
       expect(piThreadConfigSchema.safeParse({ model: { alias: "a", gateway_model } }).success).toBe(
-        true,
+        accepted,
       );
     }
   });
