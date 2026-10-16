@@ -100,7 +100,8 @@ export async function loadGatewayPrincipal(
   db: KobeDb,
   teamId: string,
   userId: string,
-  sandboxId: string,
+  /** Undefined for a server call (KOBE-234): no sandbox and no eval; `sandbox` is `unrecorded`. */
+  sandboxId: string | undefined,
 ): Promise<GatewayPrincipal> {
   return withTeam(db, teamId, async (tx) => {
     const member = await tx
@@ -137,6 +138,9 @@ export async function loadGatewayPrincipal(
       ...new Set(enabled.map((e) => `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`)),
     ].sort();
     // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
+    if (sandboxId === undefined) {
+      return { member: member.length > 0, sandbox: "unrecorded", virtualKey: vk, enabledModels };
+    }
     const [evalRun] = await tx
       .select({ status: orbitEvals.status, model: orbitEvals.model })
       .from(orbitEvals)

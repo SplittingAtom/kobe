@@ -15,7 +15,7 @@ import {
   notifyModels,
   recordModelUsage,
 } from "@kobe/db";
-import { deriveRunTokenKey } from "@kobe/protocol/node";
+import { deriveRunTokenKey, deriveServerCallTokenKey } from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
@@ -25,6 +25,7 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
+import { ServerCallReplay } from "./server-call.js";
 import { BudgetGate } from "./budget-gate.js";
 import { DbReservations } from "./reservations-db.js";
 import { DbUsageSink } from "./usage/sink.js";
@@ -118,6 +119,11 @@ const server = createModelGateway({
     key: deriveRunTokenKey(new TextEncoder().encode(config.sessionKey)),
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
+  },
+  // Server-originated calls (KOBE-234): the server derives the same key from the same secret.
+  serverCalls: {
+    key: deriveServerCallTokenKey(new TextEncoder().encode(config.sessionKey)),
+    replay: new ServerCallReplay(),
   },
   bifrostUrl: config.bifrostUrl,
   limiter: new CallLimiter({ perSandbox: config.maxCallsPerSandbox, total: config.maxCalls }),

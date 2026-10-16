@@ -1,3 +1,4 @@
+import type { ServerCallPurpose } from "@kobe/protocol";
 import type { Logger } from "pino";
 import type { RouteKind } from "./routes.js";
 import type { UsageReading } from "./usage/meter.js";
@@ -16,9 +17,15 @@ import type { UsageReading } from "./usage/meter.js";
 export interface CallContext {
   readonly teamId: string;
   readonly userId: string;
-  readonly sandboxId: string;
-  /** From `x-kobe-run-id`, verified leased to this sandbox; undefined when not sent. */
+  /** The calling sandbox; undefined for a server call (KOBE-234). */
+  readonly sandboxId: string | undefined;
+  /**
+   * The run the call is attributed to: a sandbox call's verified run (run token or leased
+   * `x-kobe-run-id`; undefined when none), a server call's triggering run.
+   */
   readonly runId: string | undefined;
+  /** Set on a server call (KOBE-234): what it is for; its usage row's `kind`. */
+  readonly purpose?: ServerCallPurpose;
   readonly route: RouteKind;
   readonly path: string;
   /** The model the request names (body `model`, or Gemini's path), when it does. */

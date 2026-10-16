@@ -1,0 +1,138 @@
+import type { IncomingHttpHeaders } from "node:http";
+import {
+  RUN_TOKEN_HEADER,
+  SERVER_CALL_MAX_BODY_BYTES,
+  SERVER_CALL_PATH,
+  SERVER_CALL_TOKEN_HEADER,
+  serverCallRequestSchema,
+  type ServerCallClaims,
+} from "@kobe/protocol";
+import { verifyServerCallToken } from "@kobe/protocol/node";
+import { CREDENTIAL_HEADERS } from "./credentials.js";
+import type { Route } from "./routes.js";
+
+/**
+ * Server-originated model calls (KOBE-234; contract in `@kobe/protocol` server-call.ts, design in
+ * docs/design/server-model-calls.md). A request carrying {@link SERVER_CALL_TOKEN_HEADER} is a
+ * server call and nothing else: the header alone (no API-key header, `?key=`, run token or run id
+ * beside it), a verified token never used before on this replica, the one route, and a body of the
+ * contract's shape naming the token's model within its output cap. The member, enabled models,
+ * budgets (with the purpose's soft limit) and the usage row then follow the sandbox path.
+ */
+export interface ServerCallOptions {
+  /** `deriveServerCallTokenKey` over the gateway's session key (the server derives the same). */
+  readonly key: Uint8Array;
+  readonly replay: ServerCallReplay;
+}
+
+/**
+ * Single use per replica: a `jti` is refused once seen, until its token expires. Bounded: past
+ * `maxEntries` live entries a new token is refused (fail closed) rather than forgetting one.
+ */
+export class ServerCallReplay {
+  private readonly seen = new Map<string, number>();
+
+  constructor(private readonly maxEntries = 100_000) {}
+
+  /** True when `jti` was unused (it is now used); false for a replay or a full table. */
+  claim(jti: string, expSeconds: number, nowSeconds: number): boolean {
+    if (this.seen.size >= this.maxEntries) this.prune(nowSeconds);
+    if (this.seen.has(jti) || this.seen.size >= this.maxEntries) return false;
+    this.seen.set(jti, expSeconds);
+    return true;
+  }
+
+  private prune(nowSeconds: number): void {
+    for (const [jti, exp] of this.seen) if (exp <= nowSeconds) this.seen.delete(jti);
+  }
+}
+
+export type ServerCallRefusal = {
+  readonly ok: false;
+  readonly status: 400 | 401 | 403;
+  readonly code: string;
+  readonly message: string;
+};
+
+const refuse = (status: 400 | 401 | 403, code: string, message: string): ServerCallRefusal => ({
+  ok: false,
+  status,
+  code,
+  message,
+});
+
+const INVALID = refuse(401, "invalid_server_call_token", "A valid server call token is required.");
+
+/** Whether the request presents itself as a server call (the header, in any form). */
+export function isServerCall(headers: IncomingHttpHeaders): boolean {
+  return headers[SERVER_CALL_TOKEN_HEADER] !== undefined;
+}
+
+export function authenticateServerCall(
+  options: ServerCallOptions | undefined,
+  headers: IncomingHttpHeaders,
+  search: URLSearchParams,
+  route: Route | undefined,
+  method: string | undefined,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): { readonly ok: true; readonly claims: ServerCallClaims } | ServerCallRefusal {
+  const sandboxCredential =
+    CREDENTIAL_HEADERS.some((h) => headers[h] !== undefined) ||
+    search.has("key") ||
+    headers[RUN_TOKEN_HEADER] !== undefined ||
+    headers["x-kobe-run-id"] !== undefined;
+  if (sandboxCredential) {
+    return refuse(
+      400,
+      "ambiguous_credentials",
+      "A server call carries its server call token and no other credential.",
+    );
+  }
+  const presented = headers[SERVER_CALL_TOKEN_HEADER];
+  if (!options || typeof presented !== "string") return INVALID;
+  const verified = verifyServerCallToken(options.key, presented.trim(), nowSeconds);
+  if (!verified.ok) return INVALID;
+  const { claims } = verified;
+  if (!options.replay.claim(claims.jti, claims.exp, nowSeconds)) {
+    return refuse(401, "server_call_token_replayed", "That server call token was already used.");
+  }
+  if (method !== "POST" || route?.path !== SERVER_CALL_PATH) {
+    return refuse(
+      403,
+      "server_call_route_refused",
+      `A server call may only use POST ${SERVER_CALL_PATH}.`,
+    );
+  }
+  return { ok: true, claims };
+}
+
+/** The most a server call's body may hold (the contract's cap, never above the gateway's own). */
+export function serverCallBodyLimit(maxBodyBytes: number): number {
+  return Math.min(maxBodyBytes, SERVER_CALL_MAX_BODY_BYTES);
+}
+
+/**
+ * The body against the contract and the token: shape (no tools, no streaming), the token's model,
+ * an output limit within the token's. Returns the output limit (the budget reservation's
+ * allowance).
+ */
+export function checkServerCallBody(
+  body: Buffer,
+  claims: ServerCallClaims,
+): { readonly ok: true; readonly maxOutputTokens: number } | ServerCallRefusal {
+  const bad = (message: string) => refuse(400, "server_call_body_refused", message);
+  let json: unknown;
+  try {
+    json = JSON.parse(body.toString("utf8"));
+  } catch {
+    return bad("The body must be JSON.");
+  }
+  const parsed = serverCallRequestSchema.safeParse(json);
+  if (!parsed.success) {
+    return bad("A server call is a plain chat completion: no tools, no streaming, text only.");
+  }
+  if (parsed.data.model !== claims.model) return bad("The model is not the token's.");
+  const limit = parsed.data.max_tokens ?? parsed.data.max_completion_tokens ?? Infinity;
+  if (limit > claims.max_output_tokens) return bad("The output limit is above the token's.");
+  return { ok: true, maxOutputTokens: limit };
+}
