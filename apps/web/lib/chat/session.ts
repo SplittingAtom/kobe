@@ -6,7 +6,7 @@
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
-import { createFilesApi } from "../files/api";
+import { createFilesApi, type FilesApi } from "../files/api";
 import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
 import { SentFileCache } from "./sent-files";
@@ -69,6 +69,8 @@ export class ChatSession {
   readonly api: ChatApi;
   /** Files attached to the composer drafts of this tab (KOBE-145). */
   readonly attachments: AttachmentStore;
+  /** The caller's workspace files: the composer's `@` picker (KOBE-223) and sent chips. */
+  readonly files: FilesApi;
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
   readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
@@ -120,7 +122,8 @@ export class ChatSession {
       teamId: options.teamId,
       transport: options.uploadTransport ?? xhrUploadTransport,
     });
-    this.sentFiles = new SentFileCache(createFilesApi(options.teamId, options.fetchFn));
+    this.files = createFilesApi(options.teamId, options.fetchFn);
+    this.sentFiles = new SentFileCache(this.files);
     this.#options = options;
     options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
   }

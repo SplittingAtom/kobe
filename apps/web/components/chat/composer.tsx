@@ -13,6 +13,7 @@ import {
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
+import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerDictation, useSteer } from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
@@ -49,6 +50,7 @@ export function Composer({
   const draft = remoteId ?? NEW_DRAFT;
   const blocker = session.attachments.blocker(draft);
   const picker = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
   // A fork at a prompt opens with that prompt as its draft (KOBE-216), once.
   useEffect(() => {
@@ -87,6 +89,8 @@ export function Composer({
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
+    // An open trigger popover (the @ picker) takes Enter to pick, not to queue.
+    if (e.currentTarget.getAttribute("aria-expanded") === "true") return;
     if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void steer();
@@ -115,110 +119,116 @@ export function Composer({
     );
   }
 
+  // Trigger popovers (KOBE-223 `@` files; the `/` menu joins this root) share the input's keys.
   return (
-    <ComposerPrimitive.Root
-      className="relative flex w-full flex-col gap-2"
-      onSubmit={() => {
-        dictation.stop();
-        // A new thread is created by this send: its title is the message's first line.
-        if (remoteId === undefined) session.setNextTitle(text);
-      }}
-    >
-      <div
-        data-dragging={dragging || undefined}
-        onDragOver={onDragOver}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
+    <ComposerPrimitive.TriggerPopoverRoot>
+      <ComposerPrimitive.Root
+        className="relative flex w-full flex-col gap-2"
+        onSubmit={() => {
+          dictation.stop();
+          // A new thread is created by this send: its title is the message's first line.
+          if (remoteId === undefined) session.setNextTitle(text);
+        }}
       >
-        <ComposerAttachments draft={draft} threadId={remoteId} />
-        <label htmlFor="kobe-composer" className="sr-only">
-          Message
-        </label>
-        <ComposerPrimitive.Input
-          id="kobe-composer"
-          placeholder={
-            running ? "Type to queue a message, or steer the agent" : "Message the agent"
-          }
-          aria-describedby="kobe-composer-hint"
-          onKeyDown={onKeyDown}
-          submitMode="enter"
-          rows={1}
-          enterKeyHint="send"
-          className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none"
-        />
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
-          <input
-            ref={picker}
-            type="file"
-            multiple
-            tabIndex={-1}
-            aria-label="Choose files to attach"
-            className="sr-only"
-            onChange={onPick}
+        <div
+          data-dragging={dragging || undefined}
+          onDragOver={onDragOver}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
+        >
+          <MentionPicker files={session.files} input={input} />
+          <ComposerAttachments draft={draft} threadId={remoteId} />
+          <MentionChips />
+          <label htmlFor="kobe-composer" className="sr-only">
+            Message
+          </label>
+          <ComposerPrimitive.Input
+            ref={input}
+            id="kobe-composer"
+            placeholder={
+              running ? "Type to queue a message, or steer the agent" : "Message the agent"
+            }
+            aria-describedby="kobe-composer-hint"
+            onKeyDown={onKeyDown}
+            submitMode="enter"
+            rows={1}
+            enterKeyHint="send"
+            className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none"
           />
-          <IconAction
-            command="attach"
-            className="size-7 rounded-full"
-            onClick={() => picker.current?.click()}
-          />
-          {modelPicker && (
-            <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
-          )}
-          <span className="flex-1" />
-          {dictation.supported && (
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              tabIndex={-1}
+              aria-label="Choose files to attach"
+              className="sr-only"
+              onChange={onPick}
+            />
             <IconAction
-              command="dictate"
-              label={dictation.listening ? "Stop dictation" : "Dictate"}
-              variant={dictation.listening ? "destructive" : "ghost"}
+              command="attach"
               className="size-7 rounded-full"
-              aria-pressed={dictation.listening}
-              onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
-            >
-              <MicIcon
-                aria-hidden
-                className={dictation.listening ? "size-4 animate-pulse" : "size-4"}
-              />
-            </IconAction>
-          )}
-          {running ? (
-            // CE10: the primary button queues during a run; Steer now and Stop sit in the
-            // steering panel above the input.
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-full px-3"
-              onClick={() => void queue()}
-              disabled={empty || blocker !== undefined}
-            >
-              Queue
-            </Button>
-          ) : (
-            <ComposerPrimitive.Send asChild>
+              onClick={() => picker.current?.click()}
+            />
+            {modelPicker && (
+              <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
+            )}
+            <span className="flex-1" />
+            {dictation.supported && (
               <IconAction
-                command="send"
-                type="button"
-                variant="default"
+                command="dictate"
+                label={dictation.listening ? "Stop dictation" : "Dictate"}
+                variant={dictation.listening ? "destructive" : "ghost"}
                 className="size-7 rounded-full"
-                disabled={blocker !== undefined}
-              />
-            </ComposerPrimitive.Send>
-          )}
+                aria-pressed={dictation.listening}
+                onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
+              >
+                <MicIcon
+                  aria-hidden
+                  className={dictation.listening ? "size-4 animate-pulse" : "size-4"}
+                />
+              </IconAction>
+            )}
+            {running ? (
+              // CE10: the primary button queues during a run; Steer now and Stop sit in the
+              // steering panel above the input.
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-full px-3"
+                onClick={() => void queue()}
+                disabled={empty || blocker !== undefined}
+              >
+                Queue
+              </Button>
+            ) : (
+              <ComposerPrimitive.Send asChild>
+                <IconAction
+                  command="send"
+                  type="button"
+                  variant="default"
+                  className="size-7 rounded-full"
+                  disabled={blocker !== undefined}
+                />
+              </ComposerPrimitive.Send>
+            )}
+          </div>
         </div>
-      </div>
-      <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
-        {blocker !== undefined ? (
-          <span role="status">{blocker}</span>
-        ) : dictation.error ? (
-          <span role="alert">{dictation.error}</span>
-        ) : dictation.listening ? (
-          "Listening… speak your prompt, then press the mic again to stop"
-        ) : running ? (
-          "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
-        ) : (
-          "Enter sends · Shift+Enter new line"
-        )}
-      </p>
-    </ComposerPrimitive.Root>
+        <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
+          {blocker !== undefined ? (
+            <span role="status">{blocker}</span>
+          ) : dictation.error ? (
+            <span role="alert">{dictation.error}</span>
+          ) : dictation.listening ? (
+            "Listening… speak your prompt, then press the mic again to stop"
+          ) : running ? (
+            "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
+          ) : (
+            "Enter sends · Shift+Enter new line"
+          )}
+        </p>
+      </ComposerPrimitive.Root>
+    </ComposerPrimitive.TriggerPopoverRoot>
   );
 }

@@ -785,6 +785,35 @@ export class FakeKobe {
       });
     }
     if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
+    if (url.pathname === "/v1/workspace/files/search" && method === "GET") {
+      // KOBE-223: path contains q (case-insensitive), names starting with it first.
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const name = (path: string) => path.split("/").at(-1) ?? "";
+      const entries = [...this.workspaceFiles]
+        .filter(([path]) => path.toLowerCase().includes(q))
+        .sort(
+          ([a], [b]) =>
+            Number(name(b).toLowerCase().startsWith(q)) -
+            Number(name(a).toLowerCase().startsWith(q)),
+        )
+        .slice(0, limit)
+        .map(([path, bytes]) => ({
+          name: name(path),
+          path,
+          type: "file",
+          size_bytes: bytes.length,
+          mtime: NOW,
+          source: "synced",
+          owner: path.startsWith("uploads/") || path.startsWith("projects/") ? "server" : "sandbox",
+          area: path.startsWith("uploads/")
+            ? "uploads"
+            : path.startsWith("projects/")
+              ? "projects"
+              : "workspace",
+        }));
+      return json(200, { entries });
+    }
     if (url.pathname === "/v1/workspace/files" && method === "GET") {
       const dir = url.searchParams.get("path") ?? "";
       this.workspaceListings.push(dir);

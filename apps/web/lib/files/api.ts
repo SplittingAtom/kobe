@@ -32,8 +32,17 @@ export interface FolderListing {
   readonly nextCursor?: string | null;
 }
 
+export interface FileSearchResult {
+  readonly entries: readonly FileEntry[];
+}
+
 export interface FilesApi {
   list(path: string, cursor?: string): Promise<ApiResult<FolderListing>>;
+  /**
+   * The caller's own synced files whose path contains `query` (KOBE-223, the composer's `@`
+   * picker): names starting with it first, then newest; at most 50.
+   */
+  search(query: string, limit?: number): Promise<ApiResult<FileSearchResult>>;
   download(path: string): Promise<ApiResult<Uint8Array>>;
   upload(folder: string, file: File): Promise<ApiResult<FileEntry>>;
   remove(path: string): Promise<ApiResult<void>>;
@@ -60,6 +69,11 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
   const opts = { teamId, fetchFn };
   return {
     list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
+    search: (q, limit) =>
+      apiRequest(
+        `/v1/workspace/files/search${query({ q, limit: limit === undefined ? undefined : String(limit) })}`,
+        opts,
+      ),
     read: (path, maxBytes, wholeOnly = false) =>
       apiReadCapped(`/v1/workspace/file${query({ path })}`, maxBytes, { ...opts, wholeOnly }),
     download: (path) => apiDownload(`/v1/workspace/file${query({ path })}`, opts),
