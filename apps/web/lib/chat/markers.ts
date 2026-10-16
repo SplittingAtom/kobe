@@ -58,14 +58,31 @@ export interface ApprovalMarker {
   readonly cause: ApprovalResolutionCause | null;
 }
 
+/** A skill the server saw a run use (KOBE-297): its SKILL.md was read by this tool call. */
+export interface SkillMarker {
+  readonly runId: string;
+  /** The run's prompt: tool call ids are only unique within a run. */
+  readonly userEntryId: string | null;
+  readonly toolCallId: string;
+  readonly name: string;
+  readonly source: "team" | "personal" | "builtin";
+}
+
 export interface ThreadMarkers {
   readonly runs: readonly RunMarker[];
   readonly approvals: readonly ApprovalMarker[];
+  /** Absent from servers before KOBE-297. */
+  readonly skills?: readonly SkillMarker[] | undefined;
   /** Older markers were left out (the server returns the newest 500 of each). */
   readonly truncated?: boolean | undefined;
 }
 
-/** The key an approval's marker is found by: its run's prompt and the tool call. */
+/** The key a skill marker of the live run is found by before its prompt is in the tree. */
+export function runToolKey(runId: string, toolCallId: string): string {
+  return `${runId}\u0000${toolCallId}`;
+}
+
+/** The key an approval's (or a skill's) marker is found by: its run's prompt and the tool call. */
 export function approvalKey(promptEntryId: string | undefined | null, toolCallId: string): string {
   return `${promptEntryId ?? ""}\u0000${toolCallId}`;
 }

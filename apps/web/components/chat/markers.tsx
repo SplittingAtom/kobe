@@ -32,9 +32,11 @@ import {
 import {
   approvalKey,
   placeRunMarkers,
+  runToolKey,
   type ApprovalMarker,
   type EntryMarker,
   type RunMarker,
+  type SkillMarker,
   type ThreadMarkers,
 } from "../../lib/chat/markers";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
@@ -53,11 +55,25 @@ interface MarkerData {
   readonly runsAt: ReadonlyMap<string, readonly RunMarker[]>;
   /** By {@link approvalKey}: tool call ids are only unique within a run. */
   readonly approvals: ReadonlyMap<string, ApprovalMarker>;
+  /** Skill uses (KOBE-297) by {@link approvalKey}, and by {@link runToolKey} for the live run. */
+  readonly skills: ReadonlyMap<string, SkillMarker>;
+  readonly skillsByRun: ReadonlyMap<string, SkillMarker>;
 }
 
 const NO_RUNS: ReadonlyMap<string, readonly RunMarker[]> = new Map();
 const NO_APPROVALS: ReadonlyMap<string, ApprovalMarker> = new Map();
-const MarkersContext = createContext<MarkerData>({ runsAt: NO_RUNS, approvals: NO_APPROVALS });
+const NO_SKILLS: ReadonlyMap<string, SkillMarker> = new Map();
+const MarkersContext = createContext<MarkerData>({
+  runsAt: NO_RUNS,
+  approvals: NO_APPROVALS,
+  skills: NO_SKILLS,
+  skillsByRun: NO_SKILLS,
+});
+
+/** The thread's markers as placed for the messages (for components outside this file). */
+export function useMarkerData(): MarkerData {
+  return useContext(MarkersContext);
+}
 
 /** A failed read is tried once more after this; then the markers wait for the next trigger. */
 const RETRY_MS = 500;
@@ -72,7 +88,10 @@ function useOnSet(value: string | null, read: () => void) {
   }, [value, read]);
 }
 
-/** What makes the markers stale: a run ended, an approval was decided, a run was interrupted. */
+/**
+ * What makes the markers stale: a run ended, an approval was decided, a run was interrupted, a
+ * file was read (it may have been a skill's SKILL.md, KOBE-297: the server decides).
+ */
 function useTriggers() {
   const state = useKobeExtras()?.state;
   const live = state?.live;
@@ -84,6 +103,11 @@ function useTriggers() {
           .join(",")
       : null,
     interrupted: state?.interruptedRun?.runId ?? null,
+    read: live
+      ? Object.entries(live.tools)
+          .flatMap(([id, t]) => (t.result?.tool === "read" && !t.result.is_error ? [id] : []))
+          .join(",")
+      : null,
   };
 }
 
@@ -114,10 +138,11 @@ function useThreadMarkers(): ThreadMarkers | null {
     void attempt(true);
   }, [controller, threadId]);
   useEffect(load, [load]);
-  const { ended, decided, interrupted } = useTriggers();
+  const { ended, decided, interrupted, read: reads } = useTriggers();
   useOnSet(ended, load);
   useOnSet(decided, load);
   useOnSet(interrupted, load);
+  useOnSet(reads, load);
   return read !== null && read.threadId === threadId ? read.markers : null;
 }
 
@@ -151,7 +176,19 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
     markers === null || !projection ? NO_RUNS : placeRunMarkers(markers.runs, projection);
   if (!samePlacement(placed.current, next)) placed.current = next;
   const runsAt = placed.current;
-  const value = useMemo(() => ({ runsAt, approvals }), [runsAt, approvals]);
+  const skills = useMemo(
+    () =>
+      new Map((markers?.skills ?? []).map((m) => [approvalKey(m.userEntryId, m.toolCallId), m])),
+    [markers],
+  );
+  const skillsByRun = useMemo(
+    () => new Map((markers?.skills ?? []).map((m) => [runToolKey(m.runId, m.toolCallId), m])),
+    [markers],
+  );
+  const value = useMemo(
+    () => ({ runsAt, approvals, skills, skillsByRun }),
+    [runsAt, approvals, skills, skillsByRun],
+  );
   return <MarkersContext.Provider value={value}>{children}</MarkersContext.Provider>;
 }
 

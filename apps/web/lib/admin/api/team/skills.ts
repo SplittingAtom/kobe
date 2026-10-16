@@ -66,3 +66,59 @@ export function uploadSkillZip(
     teamId,
   });
 }
+
+/** An agent a team skill reaches, or one the caller may add it to (KOBE-297). */
+export interface SkillReachAgent {
+  readonly id: string;
+  readonly scope: "team" | "personal" | "gallery";
+  readonly slug: string;
+  readonly name: string;
+  /** How its runs get the skill now: named by its current version, by the offer, or not. */
+  readonly via: "named" | "offer" | null;
+  readonly exclusive: boolean;
+  /** Its draft names the skill (runs get it once that is published). */
+  readonly inDraft: boolean;
+  readonly canEdit: boolean;
+}
+
+export interface SkillReach {
+  readonly offerToAll: boolean;
+  /** A version is approved: without one no agent gets the skill. */
+  readonly approved: boolean;
+  readonly agents: readonly SkillReachAgent[];
+}
+
+/** Which agents a team skill reaches (`GET /v1/skills/{id}/reach`). */
+export function getSkillReach(teamId: string, id: string): Promise<ApiResult<SkillReach>> {
+  return apiRequest(`/v1/skills/${enc(id)}/reach`, { teamId });
+}
+
+/** "Offer to all agents" on or off (team admins). */
+export function setSkillOffer(
+  teamId: string,
+  id: string,
+  offerToAll: boolean,
+): Promise<ApiResult<{ offerToAll: boolean }>> {
+  return apiRequest(`/v1/skills/${enc(id)}/offer`, {
+    method: "PUT",
+    json: { offerToAll },
+    teamId,
+  });
+}
+
+export interface SkillUsage {
+  readonly uses: number;
+  readonly lastUsedAt: string | null;
+  /** Null id and name: runs with no agent, or an agent the caller can't see. */
+  readonly agents: readonly {
+    readonly agentId: string | null;
+    readonly scope: "team" | "personal" | "gallery" | null;
+    readonly name: string | null;
+    readonly uses: number;
+  }[];
+}
+
+/** How often runs in this team used the skill (owners and team admins). */
+export function getSkillUsage(teamId: string, id: string): Promise<ApiResult<SkillUsage>> {
+  return apiRequest(`/v1/skills/${enc(id)}/usage`, { teamId });
+}

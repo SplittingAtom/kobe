@@ -60,6 +60,8 @@ export interface FakeRunnableAgent {
   readonly id: string;
   readonly scope: "team" | "personal" | "gallery";
   readonly galleryKey?: string;
+  /** Default: derived from the name. */
+  readonly slug?: string;
   readonly name: string;
   readonly description?: string;
   readonly model: string | null;
@@ -325,7 +327,7 @@ export class FakeKobe {
   }
 
   /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
-  readonly threadMarkers = new Map<string, { runs: Json[]; approvals: Json[] }>();
+  readonly threadMarkers = new Map<string, { runs: Json[]; approvals: Json[]; skills?: Json[] }>();
 
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();

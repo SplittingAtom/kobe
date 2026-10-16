@@ -33,7 +33,7 @@ const group = agentChoices;
 const checked = async () =>
   (within(await group()).getAllByRole("radio") as HTMLInputElement[])
     .filter((r) => r.checked)
-    .map((r) => r.closest("label")?.querySelector("span")?.textContent);
+    .map((r) => r.closest("label")?.querySelector(".font-medium")?.textContent);
 
 describe("default agent", () => {
   it("preselects the gallery agent Kobe by key, not by display name", async () => {

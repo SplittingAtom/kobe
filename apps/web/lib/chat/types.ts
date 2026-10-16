@@ -59,6 +59,8 @@ export interface RunnableAgent {
   readonly scope: "team" | "personal" | "gallery";
   /** Stable key of a gallery agent (e.g. "kobe"); absent for team and personal agents. */
   readonly galleryKey?: string;
+  /** Unique within its scope (team, the user's personal agents, the gallery). */
+  readonly slug?: string;
   readonly name: string;
   readonly description?: string;
   /** The model the agent's current version pins (alias or id); null = not pinned. */

@@ -56,13 +56,51 @@ describe("agent picker", () => {
     const radios = within(await group()).getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
       "No agentA plain conversation",
-      "Ledger BotReconciles books",
-      "Pinned BotAlways GLMModel: GLM 5.3",
-      "My Helper",
+      "Ledger BotTeamReconciles books",
+      "Pinned BotBuilt-inAlways GLMModel: GLM 5.3",
+      "My HelperPersonal",
     ]);
     expect(radios[0]?.checked).toBe(true);
     const read = fake.requests.find((r) => r.path.startsWith("/v1/agents/runnable"));
     expect(read?.team).toBe(fake.teamId);
+  });
+
+  it("KOBE-297: shows each agent's origin and tells equal names apart", async () => {
+    fake.runnableAgents.length = 0;
+    fake.runnableAgents.push(
+      {
+        id: "g-kobe",
+        scope: "gallery",
+        galleryKey: "kobe",
+        slug: "kobe",
+        name: "Kobe",
+        model: null,
+      },
+      { id: "t-kobe", scope: "team", slug: "kobe-team1", name: "Kobe", model: null },
+      { id: "t-ops", scope: "team", slug: "kobe-ops", name: "Kobe", model: null },
+      { id: "p-kobe", scope: "personal", slug: "kobe-mine", name: "Kobe", model: null },
+      { id: "t-solo", scope: "team", slug: "solo", name: "Solo", model: null },
+    );
+    openApp(fake);
+    const radios = within(await group()).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
+      "No agentA plain conversation",
+      "KobeBuilt-in",
+      "KobeTeamkobe-team1",
+      "KobeTeamkobe-ops",
+      "KobePersonal",
+      "SoloTeam",
+    ]);
+    // Screen readers hear the origin with the name, and the slug where the origin is shared.
+    expect(within(await group()).getByRole("radio", { name: "Kobe, Built-in" })).toBeTruthy();
+    expect(within(await group()).getByRole("radio", { name: "Kobe, Team, kobe-ops" })).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(within(await group()).getByRole("radio", { name: "Kobe, Team, kobe-team1" }));
+    expect(
+      await screen.findByRole("button", { name: "Chat with: Kobe (Team, kobe-team1)" }),
+    ).toBeTruthy();
+    await user.click(within(await group()).getByRole("radio", { name: "Solo, Team" }));
+    expect(await screen.findByRole("button", { name: "Chat with: Solo" })).toBeTruthy();
   });
 
   it("starts a plain conversation by default", async () => {

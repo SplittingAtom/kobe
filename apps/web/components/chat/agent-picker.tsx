@@ -2,8 +2,14 @@
 
 import { ChevronDownIcon } from "lucide-react";
 import { Popover } from "radix-ui";
-import { useEffect, useId, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
+import {
+  agentChoiceName,
+  agentLabels,
+  chosenAgentText,
+  type AgentLabel,
+} from "../../lib/chat/agent-origin";
 import type { RunnableAgent } from "../../lib/chat/types";
 import { cn } from "../../lib/utils";
 import { useChatSession } from "./kobe-runtime";
@@ -69,9 +75,11 @@ const OPTION =
  */
 function AgentPicker({
   agents,
+  labels,
   models,
 }: {
   readonly agents: Agents;
+  readonly labels: ReadonlyMap<string, AgentLabel>;
   readonly models: TeamModels | null;
 }) {
   const session = useChatSession();
@@ -104,28 +112,44 @@ function AgentPicker({
           <span className="font-medium">No agent</span>
           <span className="text-muted-foreground text-xs">A plain conversation</span>
         </label>
-        {agents.map((agent) => (
-          <label key={agent.id} className={OPTION}>
-            <input
-              type="radio"
-              name={`${id}-agent`}
-              className="sr-only"
-              checked={chosen?.id === agent.id}
-              onChange={() => session.setDraftAgent(agent)}
-            />
-            <span className="font-medium">{agent.name}</span>
-            {agent.description && (
-              <span className="text-muted-foreground line-clamp-2 text-xs">
-                {agent.description}
+        {agents.map((agent) => {
+          const label = labels.get(agent.id);
+          return (
+            <label key={agent.id} className={OPTION}>
+              <input
+                type="radio"
+                name={`${id}-agent`}
+                className="sr-only"
+                aria-label={agentChoiceName(agent, label)}
+                checked={chosen?.id === agent.id}
+                onChange={() => session.setDraftAgent(agent)}
+              />
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+                <span className="font-medium">{agent.name}</span>
+                {label && (
+                  <span className="text-muted-foreground rounded border px-1 text-[0.6875rem] leading-4">
+                    {label.origin}
+                  </span>
+                )}
+                {label?.slug !== undefined && (
+                  <span className="text-muted-foreground font-mono text-[0.6875rem]">
+                    {label.slug}
+                  </span>
+                )}
               </span>
-            )}
-            {agent.model !== null && (
-              <span className={cn("text-muted-foreground text-xs")}>
-                Model: {modelLabel(agent.model)}
-              </span>
-            )}
-          </label>
-        ))}
+              {agent.description && (
+                <span className="text-muted-foreground line-clamp-2 text-xs">
+                  {agent.description}
+                </span>
+              )}
+              {agent.model !== null && (
+                <span className={cn("text-muted-foreground text-xs")}>
+                  Model: {modelLabel(agent.model)}
+                </span>
+              )}
+            </label>
+          );
+        })}
       </div>
     </div>
   );
@@ -137,10 +161,18 @@ function AgentPicker({
  * once, not by the popover's content, which mounts on every open.
  */
 export function AgentPickerMenu() {
+  const session = useChatSession();
   const agents = useAgents();
   const models = useTeamModels();
-  const chosen = useDraftAgentName();
+  const labels = useMemo(() => agentLabels(agents), [agents]);
+  const draft = useSyncExternalStore(
+    session.subscribeDraftAgent,
+    () => session.draftAgent,
+    () => null,
+  );
   if (agents.length === 0) return null;
+  const listed = draft === null ? undefined : agents.find((a) => a.id === draft.id);
+  const chosen = draft === null ? null : chosenAgentText(listed ?? draft, labels.get(draft.id));
   return (
     <Popover.Root>
       <Popover.Trigger className="hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
@@ -152,7 +184,7 @@ export function AgentPickerMenu() {
         sideOffset={4}
         className="bg-background z-50 w-80 rounded-lg border p-2 shadow-md"
       >
-        <AgentPicker agents={agents} models={models} />
+        <AgentPicker agents={agents} labels={labels} models={models} />
       </Popover.Content>
     </Popover.Root>
   );
