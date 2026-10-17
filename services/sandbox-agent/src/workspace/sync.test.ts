@@ -46,7 +46,9 @@ afterEach(async () => {
   server.blobs.clear();
   server.reports.length = 0;
   server.failWith = undefined;
+  server.failDownloads = 0;
   server.horizon = 0;
+  server.moves.length = 0;
 });
 
 /** Read-only areas are 0555/0444: make them removable. */
@@ -418,6 +420,64 @@ describe("workspace sync (agent)", () => {
     expect(await exists(root, "data")).toBe(false);
     expect(await text(root, "archive/data/node_modules/cache.bin")).toBe("cache");
     expect(await woken.push()).toMatchObject({ changes: 0 });
+  });
+
+  it("a restore retried after a transient error keeps the unsynced edit a replayed rename moved (review R1)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O");
+    const first = await started(root);
+    await first.push();
+    await first.pull(); // remembers the revision for the replay on wake
+    await put(root, "reports/q3.md", "N, edited, never pushed");
+    // Asleep: the member moves the folder; something else needs a download on wake.
+    server.serverMove("reports", "archive/reports");
+    server.serverWrite("other.txt", "new while asleep");
+    server.failDownloads = 1; // the first restore attempt fails after its rename
+    const woken = await started(root);
+    expect(await text(root, "archive/reports/q3.md")).toBe("N, edited, never pushed");
+    expect(await text(root, "other.txt")).toBe("new while asleep");
+    await woken.push();
+    expect(server.content("archive/reports/q3.md")).toBe("N, edited, never pushed");
+  });
+
+  it("an upload made while asleep, then moved, wins over the stale renamed file, which is kept beside it (review R1)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O, stale");
+    const first = await started(root);
+    await first.push();
+    await first.pull();
+    await new Promise((r) => setTimeout(r, 5));
+    server.serverWrite("reports/q3.md", "X, the member's upload");
+    server.serverMove("reports", "archive/reports");
+    const woken = await started(root);
+    expect(await text(root, "archive/reports/q3.md")).toBe("X, the member's upload");
+    const copies = (await readdir(path.join(root, "archive/reports"))).filter((n) =>
+      n.startsWith("q3.conflict-"),
+    );
+    expect(copies).toHaveLength(1);
+    expect(await text(root, `archive/reports/${copies[0] ?? ""}`)).toBe("O, stale");
+    await woken.push();
+    expect(server.content("archive/reports/q3.md")).toBe("X, the member's upload");
+  });
+
+  it("a commit to the old path that lands after the move is not hidden by the rename (review R2)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O");
+    const sync = await started(root);
+    await sync.push();
+    await sync.pull();
+    await put(root, "reports/q3.md", "N, pushed after the move");
+    server.serverMove("reports", "archive/reports");
+    // The push was planned before the move and its commit lands after it: a put onto the
+    // tombstone, accepted at a revision newer than the moved rows.
+    await sync.push();
+    expect(server.content("reports/q3.md")).toBe("N, pushed after the move");
+    await sync.pull(); // the nudge: replay the rename, then the rows
+    expect(await text(root, "archive/reports/q3.md")).toBe("N, pushed after the move");
+    await sync.push();
+    // The new path is current on the server; the resurrected old path keeps the same content.
+    expect(server.content("archive/reports/q3.md")).toBe("N, pushed after the move");
+    expect(server.content("reports/q3.md")).toBe("N, pushed after the move");
   });
 
   it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {

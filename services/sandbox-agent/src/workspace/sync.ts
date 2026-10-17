@@ -74,6 +74,11 @@ interface Known {
   readonly executable: boolean;
   readonly origin: "sandbox" | "server";
   readonly updatedMs: number;
+  /**
+   * Carried here by a local rename (KOBE-304): `rev` is the old path's, so it must not shadow the
+   * new path's rows (review R2); the next row of this path replaces it.
+   */
+  readonly moved?: true;
 }
 
 export interface RestoreStats {
@@ -232,13 +237,16 @@ export class WorkspaceSync {
     }
   }
 
-  /** Known states follow a local rename: the moved files keep their base for the next push. */
+  /**
+   * Known states follow a local rename made now: the moved files keep their content base, marked
+   * `moved` so the new path's rows are always evaluated against them (review R2).
+   */
   #rekey(moves: readonly AppliedMove[]): void {
     for (const { from, to } of moves) {
       for (const [path, k] of [...this.#known]) {
         if (path !== from && !path.startsWith(`${from}/`)) continue;
         this.#known.delete(path);
-        this.#known.set(`${to}${path.slice(from.length)}`, k);
+        this.#known.set(`${to}${path.slice(from.length)}`, { ...k, moved: true });
       }
     }
   }
@@ -569,9 +577,15 @@ export class WorkspaceSync {
         continue;
       }
       if (movedHere(e.path)) {
-        // Renamed here from its old path: the local file is that file, edited since; keep it
-        // (pushed next, based on this row).
+        // Renamed here from its old path (by this attempt or an earlier one, review R1). Moved
+        // rows keep the source's mtime: a local file newer than the row is an edit made since the
+        // last sync, kept and pushed onto this row; an older one lost to a newer server version
+        // (an upload made while the sandbox slept) and is kept beside it as a conflict copy.
         this.#known.set(e.path, known(e));
+        if (file.mtimeMs > e.mtime_ms) continue;
+        if ((await hashFile(this.#o.root, e.path))?.sha256 === e.sha256) continue;
+        await this.#conflictCopy(e.path);
+        downloads.push(e);
         continue;
       }
       // The volume and the copy differ. A sandbox-written row: the volume is newer work, keep it
@@ -668,7 +682,7 @@ export class WorkspaceSync {
 
   async #pull(): Promise<number> {
     // Moves first, as local renames of whole trees (KOBE-304): their rows then find the files.
-    this.#rekey(await this.#replayMoves(this.#seenRev));
+    this.#rekey((await this.#replayMoves(this.#seenRev)).filter((m) => m.now));
     const { head, entries, full } = await this.#manifestSince(this.#seenRev);
     let applied = 0;
     if (full && this.#seenRev > 0) applied += await this.#dropUnlisted(entries, head);
@@ -679,7 +693,7 @@ export class WorkspaceSync {
     const touchedOwned = entries.some((e) => isServerOwnedPath(e.path));
     for (const e of entries) {
       const k = this.#known.get(e.path);
-      if (k && k.rev >= e.rev) continue; // our own write, or already applied
+      if (k && !k.moved && k.rev >= e.rev) continue; // our own write, or already applied
       const file = await statLocal(this.#o.root, e.path);
       const unchanged =
         file === undefined
@@ -694,6 +708,12 @@ export class WorkspaceSync {
         }
         this.#known.set(e.path, known(e));
         applied += 1;
+        continue;
+      }
+      if (file && !owned && k?.moved && !k.deleted && k.rev > e.rev) {
+        // A commit to the old path landed after the move (a push that raced it, review R2): the
+        // renamed local file is newer than the moved row. Keep it; it is pushed onto this row.
+        this.#known.set(e.path, known(e));
         continue;
       }
       if (file && !owned && k && !k.deleted && k.sha256 !== undefined && k.sha256 === e.sha256) {

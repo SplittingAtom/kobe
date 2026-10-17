@@ -33,6 +33,8 @@ export class FakeSyncServer {
   horizon = 0;
   /** Answer every request with this status (e.g. 404: sync not configured). */
   failWith: number | undefined;
+  /** The next this many file downloads answer 500 (a transient server error). */
+  failDownloads = 0;
   #server: Server | undefined;
 
   async start(): Promise<string> {
@@ -211,6 +213,10 @@ export class FakeSyncServer {
         return { status: "applied", path, entry: this.#write(path, f, "sandbox") };
       });
       return json(200, { head_rev: this.head, results });
+    }
+    if (req.method === "GET" && route === "/file" && this.failDownloads > 0) {
+      this.failDownloads -= 1;
+      return json(500, { code: "internal", message: "" });
     }
     if (req.method === "GET" && route === "/file") {
       const row = this.rows.get(url.searchParams.get("path") ?? "");

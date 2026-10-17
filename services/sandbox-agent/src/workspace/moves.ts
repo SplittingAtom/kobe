@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rename } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import {
   isExcludedPath,
@@ -6,10 +6,11 @@ import {
   workspacePathIssue,
   type WorkspaceMoveRecord,
 } from "@kobe/protocol";
-import { writeFileAtomic } from "../atomic-file.js";
+import { openAgentTemp, tempPathFor } from "../atomic-file.js";
 import type { WireLogger } from "../wire/client.js";
 import type { SyncClient } from "./client.js";
 import { ensureParents, parentsAreDirs, pruneEmptyParents } from "./fs.js";
+import { assertOnVolume } from "./volume.js";
 
 /**
  * Server moves as local renames (KOBE-304 review S1–S3). The file browser's move changes the
@@ -89,6 +90,12 @@ export async function applyLocalMove(
   return "renamed";
 }
 
+/** Something is at `rel` (its parents real directories). */
+async function present(root: string, rel: string): Promise<boolean> {
+  if (!(await parentsAreDirs(root, rel))) return false;
+  return (await lstat(path.join(root, rel)).catch(() => undefined)) !== undefined;
+}
+
 /** Where the agent remembers the last revision it pulled, for the replay on wake. */
 const STATE_DIR = ".kobe";
 const STATE_FILE = "workspace-sync.json";
@@ -96,6 +103,11 @@ const STATE_FILE = "workspace-sync.json";
 export interface AppliedMove {
   readonly from: string;
   readonly to: string;
+  /**
+   * Renamed by this replay. False: renamed before (its source is gone and its destination is
+   * there), e.g. by a restore attempt that then failed, or before a crash (review R1).
+   */
+  readonly now: boolean;
 }
 
 /** Fetches journalled moves and applies them; remembers the last pulled revision on the volume. */
@@ -118,8 +130,10 @@ export class MoveReplay {
       const { moves, more } = await this.#client.moves(since, after);
       for (const move of moves) {
         const outcome = await applyLocalMove(this.#root, move).catch(() => "refused" as const);
-        if (outcome === "renamed") applied.push({ from: move.from, to: move.to });
-        else if (outcome === "exists" || outcome === "refused") {
+        if (outcome === "renamed") applied.push({ from: move.from, to: move.to, now: true });
+        else if (outcome === "absent" && (await present(this.#root, move.to))) {
+          applied.push({ from: move.from, to: move.to, now: false });
+        } else if (outcome === "exists" || outcome === "refused") {
           // The pull alone converges (download the new path, keep a conflicting local file).
           this.#logger.warn(
             { rev: move.rev, outcome },
@@ -154,11 +168,21 @@ export class MoveReplay {
       const stat = await lstat(dir).catch(() => undefined);
       if (!stat) await mkdir(dir, { mode: 0o700 });
       else if (!stat.isDirectory()) return;
-      await writeFileAtomic(
-        path.join(dir, STATE_FILE),
-        JSON.stringify({ seen_rev: seenRev }),
-        0o600,
-      );
+      // Written on the volume only: a `.kobe` swapped for a link must not make the agent write
+      // into an agent-only directory elsewhere (KOBE-71 confused deputy, review nit).
+      const final = path.join(dir, STATE_FILE);
+      const temp = tempPathFor(final);
+      const handle = await openAgentTemp(temp, 0o600);
+      try {
+        await assertOnVolume(handle, this.#root, temp);
+        await handle.writeFile(JSON.stringify({ seen_rev: seenRev }));
+        await handle.close();
+        await rename(temp, final);
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        await rm(temp, { force: true }).catch(() => undefined);
+        throw error;
+      }
     } catch (error) {
       this.#logger.warn(
         { err: error instanceof Error ? error.message : String(error) },
