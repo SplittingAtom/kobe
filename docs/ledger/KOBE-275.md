@@ -46,17 +46,17 @@
 - **Not audited** per click (ticket); reading totals needs no break-glass (counts only).
 - **Export:** `feedback.json` in the member's thread export lists their own ratings in the team
   (with comments), on their threads and on threads shared with them; never another member's.
-- **Totals** (`GET /v1/agents/{id}/feedback?from&to`, range rules as usage, then snapped to whole
-  UTC days ending at the start of today: review R1, `wholeDays`, feedback only): per version
-  up/down/rate, reason counts, by model alias, and a daily series by `updated_at`. Every number
-  stands on `FEEDBACK_MIN_RATERS` = 5 distinct raters other than the caller (S1); below it the totals
-  show `enough: false`, and a breakdown (versions, a version's models or reasons, days) is null
-  unless all its non-empty cells pass, so no hidden cell is the total minus the rest (R2).
-  `bucket=hour` is a 400. **Residual (for Chris):** two overlapping whole-day ranges can still
-  differ by one finished day (`[D1, D10)` vs `[D1, D11)`), each side over k; closing that needs fixed
-  windows or noise. Accepted for now. Who: team agent → whoever may edit it (builder-owner) or team
-  admins; personal → its owner; gallery → team admins. The SQL selects no comment, thread, run,
-  entry or user column (tests grep the response).
+- **Totals** (`GET /v1/agents/{id}/feedback?window=7|30|90`, Chris 2026-10-16: fixed windows only):
+  the last 7, 30 (default) or 90 finished UTC days, ending at the start of today; any other query
+  (custom `from`/`to`, `bucket`, repeated `window`) is a 400. Per version up/down/rate, reason
+  counts, by model alias, and a daily series by `updated_at`. Every number stands on
+  `FEEDBACK_MIN_RATERS` = 5 distinct raters other than the caller (S1); below it the totals show
+  `enough: false`, and a breakdown (versions, a version's models or reasons, days) is null unless all
+  its non-empty cells pass, so no hidden cell is the total minus the rest (R2). **Residual
+  (accepted):** comparing nested windows, or the same window on different days, can still narrow
+  raters down over time; exact counts can't fully prevent that (`docs/answer-feedback.md`). Who:
+  team agent → whoever may edit it (builder-owner) or team admins; personal → its owner; gallery →
+  team admins. The SQL selects no comment, thread, run, entry or user column (tests grep it).
 - **Langfuse:** Langfuse's public scores API (OTLP has no scores) with the exporter's own endpoint and
   headers, on only when `KOBE_OTEL_ENDPOINT` ends in `/api/public/otel`. Score id = the rating's id
   (change → upsert, clear → delete), trace id = `runTraceId(run)`, `BOOLEAN` 1/0, metadata ids and
@@ -87,9 +87,10 @@ The agent console's quality view; the API is done and tested (`answer-feedback.d
 - "Not enough ratings yet" when `totals.enough` is false; "Not enough ratings to break down" where
   `versions`, `series`, a version's `models` or `reasons` is null (`min_raters` in the answer);
   days only, and say that today's ratings show tomorrow.
+- A window picker with the three windows only (7, 30, 90 days; `window_days` in the answer).
 - Content: totals (up, down, rate), a per-version table (version, up, down, rate, top reasons from
   `reasons`), a by-model breakdown per version (`models`, null = "unknown"), a series chart of
-  `series` (up/down per day) with the usage console's range picker (30 days default, max 400).
+  `series` (up/down per day).
 - Empty state ("No ratings yet"); never link to threads or members (none are in the answer).
 
 ## Open questions (for Chris or the coordinator)

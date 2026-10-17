@@ -5,6 +5,7 @@ import {
   type FeedbackCounts,
   type FeedbackReason,
   type FeedbackReasonCounts,
+  type FeedbackWindowDays,
 } from "@kobe/protocol";
 import { sql, withTeam, type AgentScope, type KobeDb } from "@kobe/db";
 
@@ -21,7 +22,7 @@ import { sql, withTeam, type AgentScope, type KobeDb } from "@kobe/db";
  * - a breakdown (the versions, a version's models, a version's reasons, the days) is shown only
  *   when every one of its non-empty cells passes, so a withheld cell is never the total minus the
  *   shown ones (review R2);
- * - the range is whole UTC days ending at the start of today ({@link wholeDays}, review R1).
+ * - the range is a preset window of finished UTC days ({@link finishedDays}, review R1).
  * Time = the rating's last change (`updated_at`).
  */
 
@@ -36,19 +37,14 @@ export interface FeedbackRange {
 }
 
 const DAY_MS = 86_400_000;
-const dayFloor = (t: number) => Math.floor(t / DAY_MS) * DAY_MS;
-const dayCeil = (t: number) => (t % DAY_MS === 0 ? t : dayFloor(t) + DAY_MS);
 
 /**
- * The range in whole UTC days, ending at the start of today at the latest (review R1): `from`
- * down to midnight, `to` up to midnight, then capped at today's. Two queries thus never differ by
- * less than a finished day, and a rating counts only once its day is over. Feedback totals only:
- * the usage dashboards keep their own ranges.
+ * The last `days` finished UTC days, ending at the start of today. The only ranges the totals take
+ * (fixed windows, Chris 2026-10-16): no custom range, so two queries can't be cut to a chosen day.
  */
-export function wholeDays(range: FeedbackRange, now = new Date()): FeedbackRange {
-  const from = dayFloor(range.from.getTime());
-  const to = Math.max(from, Math.min(dayCeil(range.to.getTime()), dayFloor(now.getTime())));
-  return { from: new Date(from), to: new Date(to) };
+export function finishedDays(days: FeedbackWindowDays, now = new Date()): FeedbackRange {
+  const to = Math.floor(now.getTime() / DAY_MS) * DAY_MS;
+  return { from: new Date(to - days * DAY_MS), to: new Date(to) };
 }
 
 type Cell = { readonly up: number; readonly down: number; readonly raters: number };
@@ -136,11 +132,14 @@ export async function agentFeedbackTotals(
   teamId: string,
   callerId: string,
   agent: FeedbackAgent,
-  range: FeedbackRange,
+  days: FeedbackWindowDays,
+  now = new Date(),
 ): Promise<AgentFeedbackTotals> {
+  const range = finishedDays(days, now);
   const rows = await readRows(db, teamId, callerId, agent, range);
   const base = {
     agent_id: agent.id,
+    window_days: days,
     from: range.from.toISOString(),
     to: range.to.toISOString(),
     bucket: "day" as const,

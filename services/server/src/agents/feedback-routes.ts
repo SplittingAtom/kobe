@@ -1,8 +1,8 @@
 import type { Context, Hono } from "hono";
 import type { KobeDb, TeamRole } from "@kobe/db";
 import { teamRoleAllows } from "../authz/permissions.js";
-import { agentFeedbackTotals, wholeDays } from "../feedback/totals.js";
-import { parseUsageRange } from "../routes/usage.js";
+import { FEEDBACK_DEFAULT_WINDOW_DAYS, feedbackTotalsQuerySchema } from "@kobe/protocol";
+import { agentFeedbackTotals } from "../feedback/totals.js";
 import { forbidden, invalidRequest, notFound } from "./http.js";
 import type { ResolvedAgent } from "./version-routes.js";
 
@@ -32,9 +32,9 @@ export function mayReadFeedbackTotals(found: ResolvedAgent, role: TeamRole): boo
 }
 
 /**
- * `GET /v1/agents/{id}/feedback?from&to` (KOBE-275): the agent's per-version rating totals in the
- * active team (`from`/`to` as for usage: ISO times, default the last 30 days; then snapped to
- * whole UTC days ending at the start of today, review R1; `bucket=hour` is refused). Counts only, each over at least `FEEDBACK_MIN_RATERS` other raters, no
+ * `GET /v1/agents/{id}/feedback?window=7|30|90` (KOBE-275): the agent's per-version rating totals
+ * in the active team over the last 7, 30 (default) or 90 finished UTC days. Any other query is a
+ * 400 (no custom ranges). Counts only, each over at least `FEEDBACK_MIN_RATERS` other raters, no
  * content (D5/D10), so it needs no break-glass and is not audited.
  */
 export function mountFeedbackTotals<E extends { Variables: object }>(
@@ -47,19 +47,19 @@ export function mountFeedbackTotals<E extends { Variables: object }>(
     if (!mayReadFeedbackTotals(found, options.role(c))) {
       return forbidden(c, "Only the agent's owners and team admins see its ratings.");
     }
-    const query = c.req.query();
-    if (query.bucket !== undefined && query.bucket !== "day") {
-      return invalidRequest(c, "Ratings are counted by day.");
+    // One window, once: a repeated parameter would read as its first value.
+    const repeated = Object.values(c.req.queries()).some((values) => values.length > 1);
+    const query = feedbackTotalsQuerySchema.safeParse(c.req.query());
+    if (repeated || !query.success) {
+      return invalidRequest(c, "Pick a window of the last 7, 30 or 90 days (window=7, 30 or 90).");
     }
-    const range = parseUsageRange({ ...query, bucket: "day" });
-    if (typeof range === "string") return invalidRequest(c, range);
     return c.json(
       await agentFeedbackTotals(
         options.db,
         options.teamId(c),
         options.userId(c),
         { scope: found.agent.scope, id: found.agent.id },
-        wholeDays(range),
+        query.data.window ?? FEEDBACK_DEFAULT_WINDOW_DAYS,
       ),
     );
   });

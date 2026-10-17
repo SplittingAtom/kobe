@@ -81,3 +81,14 @@ describe("threadFeedbackSchema", () => {
     expect(parsed.answers).toHaveLength(2);
   });
 });
+
+describe("feedbackTotalsQuerySchema", () => {
+  it("takes only the preset windows", async () => {
+    const { feedbackTotalsQuerySchema } = await import("./feedback.js");
+    expect(feedbackTotalsQuerySchema.parse({})).toEqual({});
+    expect(feedbackTotalsQuerySchema.parse({ window: "90" })).toEqual({ window: 90 });
+    for (const q of [{ window: "14" }, { from: "2026-10-01T00:00:00Z" }, { bucket: "day" }]) {
+      expect(feedbackTotalsQuerySchema.safeParse(q).success, JSON.stringify(q)).toBe(false);
+    }
+  });
+});

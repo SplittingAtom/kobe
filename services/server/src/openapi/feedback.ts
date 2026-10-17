@@ -1,11 +1,15 @@
 import { z } from "zod";
-import { answerFeedbackSchema, putFeedbackBodySchema, threadFeedbackSchema } from "@kobe/protocol";
+import {
+  agentFeedbackTotalsSchema,
+  answerFeedbackSchema,
+  putFeedbackBodySchema,
+  threadFeedbackSchema,
+} from "@kobe/protocol";
 
 /**
  * OpenAPI for answer feedback (KOBE-275, `routes/feedback.ts`): rating an answer (a run) and the
- * caller's ratings in a thread. The schemas are `@kobe/protocol` feedback.ts. The agent owners'
- * totals (`GET /v1/agents/{id}/feedback`) live with the agent routes, which this document does not
- * cover.
+ * caller's ratings in a thread, and the agent owners' totals (`agents/feedback-routes.ts`). The
+ * schemas are `@kobe/protocol` feedback.ts.
  */
 
 type JsonSchema = Record<string, unknown>;
@@ -76,6 +80,36 @@ export function feedbackOpenApiPaths(): Record<string, Record<string, unknown>> 
         },
       },
     },
+    "/v1/agents/{id}/feedback": {
+      get: {
+        operationId: "getAgentFeedbackTotals",
+        summary: "An agent's answer ratings per version, model, reason and day (counts only)",
+        description:
+          "For the agent's owners and the team's admins (a gallery agent: team admins), in the " +
+          "active team, over a preset window: the last 7, 30 (default) or 90 finished UTC days. " +
+          "No custom ranges. Numbers show only over `min_raters` raters other than the caller; a " +
+          "breakdown is null unless every one of its cells has that many. Residual: comparing " +
+          "nested windows, or the same window on different days, can still narrow raters down " +
+          "over time.",
+        parameters: [
+          ID,
+          {
+            name: "window",
+            in: "query",
+            required: false,
+            schema: { type: "string", enum: ["7", "30", "90"], default: "30" },
+          },
+          TEAM_HEADER,
+        ],
+        responses: {
+          "200": json("AgentFeedbackTotals", "The totals and the breakdowns that may be shown."),
+          "400": json("Error", "`invalid_request`: any query but window=7, 30 or 90."),
+          ...COMMON,
+          "404": json("Error", "`not_found`: no agent with that id that you can see."),
+          "409": json("Error", "`no_active_team` or `team_mismatch`."),
+        },
+      },
+    },
     "/v1/threads/{id}/feedback": {
       get: {
         operationId: "getThreadFeedback",
@@ -108,5 +142,6 @@ export function feedbackOpenApiSchemas(): Record<string, JsonSchema> {
     PutFeedbackBody: schemaOf(putFeedbackBodySchema, "input"),
     AnswerFeedback: schemaOf(answerFeedbackSchema, "output"),
     ThreadFeedback: schemaOf(threadFeedbackSchema, "output"),
+    AgentFeedbackTotals: schemaOf(agentFeedbackTotalsSchema, "output"),
   };
 }

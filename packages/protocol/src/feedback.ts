@@ -17,7 +17,7 @@ import { idSchema, timestampSchema, uuidSchema } from "./common.js";
  * - `PUT /v1/runs/{run_id}/feedback` ({@link putFeedbackBodySchema}) → {@link AnswerFeedback}
  * - `DELETE /v1/runs/{run_id}/feedback` → 204 (also when there was none)
  * - `GET /v1/threads/{thread_id}/feedback` → {@link ThreadFeedback} (rateable answers, own ratings)
- * - `GET /v1/agents/{agent_id}/feedback?from&to&bucket` → {@link AgentFeedbackTotals}
+ * - `GET /v1/agents/{agent_id}/feedback?window=7|30|90` → {@link AgentFeedbackTotals}
  */
 
 export const FEEDBACK_RATINGS = ["up", "down"] as const;
@@ -150,24 +150,40 @@ const shownCountsSchema = z.strictObject({
   rate: z.number().min(0).max(1).nullable(),
 });
 
+/** The windows the totals offer: the last 7, 30 or 90 finished UTC days (default 30). */
+export const FEEDBACK_WINDOWS_DAYS = [7, 30, 90] as const;
+export type FeedbackWindowDays = (typeof FEEDBACK_WINDOWS_DAYS)[number];
+export const FEEDBACK_DEFAULT_WINDOW_DAYS: FeedbackWindowDays = 30;
+
+/** `GET /v1/agents/{agent_id}/feedback?window=7|30|90`: the only query it takes. */
+export const feedbackTotalsQuerySchema = z.strictObject({
+  window: z
+    .enum(FEEDBACK_WINDOWS_DAYS.map(String) as ["7", "30", "90"])
+    .transform((w) => Number(w) as FeedbackWindowDays)
+    .optional(),
+});
+
 /**
- * `GET /v1/agents/{agent_id}/feedback?from&to`: ratings in the active team of answers by this
- * agent, by published version (builder test threads are never rated), model alias (null =
- * unknown), reason and day of the rating's last change.
+ * `GET /v1/agents/{agent_id}/feedback?window=7|30|90`: ratings in the active team of answers by
+ * this agent over the last 7, 30 or 90 finished UTC days (ending at the start of today), by
+ * published version (builder test threads are never rated), model alias (null = unknown), reason
+ * and day of the rating's last change.
  *
  * Counts only: no thread, run, member or comment is reachable through it. Small numbers would
  * single people out (review S1, R1, R2), so:
- * - the range is whole UTC days, ending at the start of today at the latest (`from` is snapped down
- *   to midnight, `to` up, then capped): no two queries differ by less than a finished day;
+ * - only the preset windows: no custom range, so two queries can't be cut to a chosen day;
  * - `totals` shows numbers only over {@link FEEDBACK_MIN_RATERS} raters (else `enough: false`);
  * - a breakdown (the versions, a version's models, a version's reasons, the days) is shown only
  *   when every one of its non-empty cells has that many raters; otherwise it is null, "not enough
  *   ratings to break down", so no hidden cell can be worked out from the total and the rest.
+ * Residual (accepted): comparing nested windows (7 vs 30 days), or the same window on different
+ * days, can still narrow raters down over time; exact counts can't fully prevent that.
  */
 export const agentFeedbackTotalsSchema = z.strictObject({
   agent_id: uuidSchema,
   from: timestampSchema,
   to: timestampSchema,
+  window_days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
   bucket: z.literal("day"),
   min_raters: z.number().int().positive(),
   totals: feedbackCountsSchema,

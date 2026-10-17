@@ -426,12 +426,6 @@ describe("totals for agent owners (ac-3)", () => {
     for (const secret of ["SECRET", x.threadId, x.runId, x.author.id, x.reader.id]) {
       expect(res.text).not.toContain(secret);
     }
-    expect((await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?bucket=hour`)).status).toBe(
-      400,
-    );
-    expect(
-      (await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?from=yesterday`)).status,
-    ).toBe(400);
   });
 
   it("hides a whole breakdown when any of its cells is under five raters (no differencing)", async () => {
@@ -464,29 +458,32 @@ describe("totals for agent owners (ac-3)", () => {
     ]);
   });
 
-  it("counts whole finished days only, so ranges a minute apart or a new rating today reveal nothing", async () => {
+  it("takes only the preset windows of finished days, so a new rating today reveals nothing", async () => {
     const x = await world();
     const agent = { scope: "team", id: x.agentId, version: 1 };
     await seedRatings(x.w.team, agent, 6, { rating: "up", daysAgo: 2 });
-    const before = (await totals(x.w.owner, x.agentId)).json;
-    expect(before.totals).toMatchObject({ enough: true, up: 6 });
-    // Today's ratings don't count yet, whatever the range asks for.
+    await seedRatings(x.w.team, agent, 5, { rating: "down", daysAgo: 20 });
+    const week = (await totals(x.w.owner, x.agentId, "?window=7")).json;
+    expect(week).toMatchObject({ window_days: 7, totals: { enough: true, up: 6, down: 0 } });
+    expect(Date.parse(week.to) - Date.parse(week.from)).toBe(7 * 86_400_000);
+    expect(week.to).toMatch(/T00:00:00\.000Z$/);
+    const month = (await totals(x.w.owner, x.agentId)).json;
+    expect(month).toMatchObject({ window_days: 30, totals: { up: 6, down: 5 } });
+    expect((await totals(x.w.owner, x.agentId, "?window=90")).json.totals).toEqual(month.totals);
+    // Today's ratings don't count until the day is over.
     await seedRatings(x.w.team, agent, 1, { rating: "down", daysAgo: 0 });
-    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
-    expect((await totals(x.w.owner, x.agentId)).json).toEqual(before);
-    expect((await totals(x.w.owner, x.agentId, `?to=${tomorrow}`)).json.totals).toEqual(
-      before.totals,
-    );
-    // Two ranges a minute apart inside a day give the same answer, snapped to midnight.
-    const start = new Date(Date.now() - 5 * 86_400_000);
-    const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000).toISOString();
-    const [a, b] = [
-      (await totals(x.w.owner, x.agentId, `?from=${at(0)}&to=${at(4 * 24 * 60)}`)).json,
-      (await totals(x.w.owner, x.agentId, `?from=${at(1)}&to=${at(4 * 24 * 60 + 1)}`)).json,
-    ];
-    expect(a).toEqual(b);
-    expect(a.from).toMatch(/T00:00:00\.000Z$/);
-    expect(a.to).toMatch(/T00:00:00\.000Z$/);
+    expect((await totals(x.w.owner, x.agentId)).json).toEqual(month);
+    // No custom ranges, buckets or other windows.
+    for (const q of [
+      "?window=14",
+      "?window=7&window=30",
+      `?from=${new Date(Date.now() - 3 * 86_400_000).toISOString()}`,
+      `?to=${new Date().toISOString()}`,
+      "?bucket=day",
+      "?window=30&from=2026-01-01T00:00:00Z",
+    ]) {
+      expect((await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback${q}`)).status, q).toBe(400);
+    }
   });
 
   it("doesn't count the caller among the raters, and shows a one-rater agent nothing", async () => {
