@@ -5,6 +5,8 @@ import {
   MODEL_PROVIDER_KINDS,
   PROVIDER_ID_PATTERN,
   PROVIDER_MODEL_PATTERN,
+  THINKING_CONTROLS,
+  THINKING_LEVELS,
 } from "../schema/models.js";
 import {
   BUDGET_PERIODS,
@@ -553,12 +555,23 @@ export const AUDIT_EVENTS = {
     imageSupportChanged: z.boolean().optional(),
     /** Its output limit, context window or reasoning flag changed (KOBE-259). */
     limitsChanged: z.boolean().optional(),
+    /** Its thinking settings when added or changed (KOBE-260). */
+    thinking: z
+      .strictObject({
+        control: z.enum(THINKING_CONTROLS),
+        allowed: z.boolean(),
+        default: z.enum(THINKING_LEVELS).nullable(),
+        max: z.enum(THINKING_LEVELS).nullable(),
+      })
+      .optional(),
   }),
   /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
   "models.team.changed": event("team", {
     alias: modelAlias,
     enabled: z.boolean(),
     isDefault: z.boolean(),
+    /** The team's thinking maximum for the model (KOBE-260); null: the site's. */
+    thinkingMax: z.enum(THINKING_LEVELS).nullable().optional(),
   }),
   /** A team admin turned post-run follow-up suggestions on or off for the team (KOBE-222, CE21). */
   "models.followups.changed": event("team", { enabled: z.boolean() }),

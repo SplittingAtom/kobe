@@ -7,7 +7,8 @@ import { invalidRequest, parseBody } from "../teams/http.js";
 
 /**
  * Team models (`/v1/team/models`, spec D6, D8, D30). Every member sees the catalog and what the
- * team enabled (agents name these aliases); team admins enable a subset and choose the default.
+ * team enabled (agents name these aliases); team admins enable a subset, choose the default and
+ * may lower a model's thinking maximum (KOBE-260).
  */
 export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
@@ -22,7 +23,11 @@ export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.put("/:alias", requireTeamPermission("team.models.manage"), async (c) => {
     const alias = aliasSchema.safeParse(c.req.param("alias"));
     const input = await parseBody(c, teamModelSchema);
-    if (!input) return invalidRequest(c, 'Send {"enabled": true|false, "is_default"?: true}.');
+    if (!input)
+      return invalidRequest(
+        c,
+        'Send {"enabled": true|false, "is_default"?: true, "thinking_max"?: level|null}.',
+      );
     const result = alias.success
       ? await setTeamModel(db, c.get("team").id, alias.data, input, c.get("user").id)
       : "not_in_catalog";
@@ -34,6 +39,9 @@ export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     }
     if (result === "default_requires_enabled") {
       return invalidRequest(c, "Only an enabled model can be the team's default.");
+    }
+    if (typeof result === "object") {
+      return c.json({ code: result.error, message: result.message }, 400);
     }
     const models = await listTeamModels(db, c.get("team").id);
     return c.json({ models, default: models.find((m) => m.is_default)?.alias ?? null });

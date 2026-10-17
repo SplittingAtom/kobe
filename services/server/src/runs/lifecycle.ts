@@ -7,10 +7,11 @@ import {
   type RunProjectContext,
   type RunMcpContext,
   type SandboxAttachment,
+  type ThinkingLevel,
 } from "@kobe/protocol";
 import { projectRunContext } from "../projects/run-context.js";
 import { listRunAttachments } from "../uploads/attach-list.js";
-import { sql, type KobeTx } from "@kobe/db";
+import { and, eq, runs, sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
 import { piBranchPoint } from "./run-prompt.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
@@ -36,7 +37,13 @@ import {
 import type { Omission } from "../resolver/resolve.js";
 import { recordRunSkillRefsInTx } from "../skills/usage.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
-import { modelAcceptsImages, resolveRunModel, type RunModelConfig } from "./models.js";
+import { runThinkingLevel } from "../models/thinking.js";
+import {
+  modelAcceptsImages,
+  resolveRunModel,
+  type RunModelConfig,
+  type RunModelResolution,
+} from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
 /** Everything a replica needs to send `run.start` for a run it just moved to `running`. */
@@ -183,6 +190,8 @@ export async function promoteInTx(
       continue;
     }
     const model = resolution.model;
+    // KOBE-260: the conversation's level (or the model's default) clamped to the site and team.
+    const thinkingLevel = startThinkingLevel(resolution, thread.thinkingLevel ?? null);
     const approvalMode = resolved.approvalMode;
     // An unsent prompt (KOBE-290) is not in Pi's session: Pi continues from its parent.
     const parentEntryId = await piBranchPoint(
@@ -201,6 +210,7 @@ export async function promoteInTx(
           ? {}
           : { draft_revision: resolved.agent.draftRevision }),
         ...(model === undefined ? {} : { model: model.alias, model_source: requested.source }),
+        ...(thinkingLevel === undefined ? {} : { thinking_level: thinkingLevel }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },
     };
@@ -209,6 +219,13 @@ export async function promoteInTx(
       approvalMode,
     });
     transitions.push(applied.transition);
+    if (thinkingLevel !== undefined) {
+      // The gateway reads it for every call of the run (KOBE-260): fixed now, never raised.
+      await tx
+        .update(runs)
+        .set({ thinkingLevel })
+        .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
+    }
     await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
     // KOBE-77: what the resolver left out, right after `run.started` (never on a recovery restart).
     const items = omittedItems(resolved.omissions ?? []);
@@ -227,6 +244,7 @@ export async function promoteInTx(
             resolved,
             model,
             resolution.limits,
+            thinkingLevel,
           ),
           await listRunAttachments(
             tx,
@@ -307,9 +325,17 @@ function planOf(
   resolved: Resolved,
   model: RunModelConfig | undefined,
   modelLimits: CatalogTokenLimits | undefined,
+  thinkingLevel: ThinkingLevel | undefined,
 ): StartPlan {
-  const { model: _requested, ...rest } = resolved.config ?? {};
-  const config = { ...rest, ...(model === undefined ? {} : { model }) };
+  // The run's level replaces anything the resolver had (the server decides it, KOBE-260).
+  const { model: _requested, thinking_level: _thinking, ...rest } = resolved.config ?? {};
+  const config = {
+    ...rest,
+    ...(model === undefined ? {} : { model }),
+    ...(model === undefined || thinkingLevel === undefined
+      ? {}
+      : { thinking_level: thinkingLevel }),
+  };
   return {
     teamId: run.teamId,
     runId: run.id,
@@ -350,9 +376,13 @@ export async function restartPlanInTx(
     started ?? requestedModel(thread, resolved).alias,
   );
   if (!resolution.ok) return undefined;
+  // The level the run started with (KOBE-260), clamped again to the current settings.
+  const recorded = await recordedThinkingLevel(tx, run.teamId, run.id);
+  const thinkingLevel =
+    recorded === undefined ? undefined : startThinkingLevel(resolution, recorded);
   return withProject(
     withAttachments(
-      planOf(thread, run, resolved, resolution.model, resolution.limits),
+      planOf(thread, run, resolved, resolution.model, resolution.limits, thinkingLevel),
       await listRunAttachments(
         tx,
         run.teamId,
@@ -375,6 +405,28 @@ function withProject(plan: StartPlan, project: RunProjectContext | undefined): S
 
 function withAttachments(plan: StartPlan, attachments: readonly SandboxAttachment[]): StartPlan {
   return attachments.length === 0 ? plan : { ...plan, attachments };
+}
+
+/** The run's thinking level: the chosen one clamped into the model's policy for the team. */
+function startThinkingLevel(
+  resolution: Extract<RunModelResolution, { ok: true }>,
+  chosen: ThinkingLevel | null,
+): ThinkingLevel | undefined {
+  if (resolution.model === undefined || resolution.thinking === undefined) return undefined;
+  return runThinkingLevel(resolution.thinking.site, resolution.thinking.teamMax, chosen);
+}
+
+/** The level a run started with (`runs.thinking_level`), if any. */
+async function recordedThinkingLevel(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<ThinkingLevel | undefined> {
+  const [row] = await tx
+    .select({ level: runs.thinkingLevel })
+    .from(runs)
+    .where(and(eq(runs.teamId, teamId), eq(runs.id, runId)));
+  return row?.level ?? undefined;
 }
 
 /** The alias in the run's `run.started` event, if any. */

@@ -34,7 +34,7 @@ import { visibilityOf } from "./share.js";
 import { loadAccess } from "../projects/access.js";
 import { applyShareScope, recordShareScope, shareScopeRefusal } from "./share-scope.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
-import type { ThreadVisibility } from "@kobe/protocol";
+import type { ThinkingLevel, ThreadVisibility } from "@kobe/protocol";
 import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { trimLargeOutput } from "./entry-output.js";
@@ -112,6 +112,7 @@ export const summaryColumns = {
   sharedToProject: threads.sharedToProject,
   sharedToTeam: threads.sharedToTeam,
   modelAlias: threads.modelAlias,
+  thinkingLevel: threads.thinkingLevel,
   leafEntryId: threads.leafEntryId,
   lastActivityAt: threads.lastActivityAt,
   createdAt: threads.createdAt,
@@ -136,6 +137,8 @@ export type SummaryRow = {
   sharedToProject: boolean;
   sharedToTeam: boolean;
   modelAlias: string | null;
+  /** KOBE-260; absent in rows read without it. */
+  thinkingLevel?: ThinkingLevel | null;
   leafEntryId: string | null;
   lastActivityAt: Date;
   createdAt: Date;
@@ -164,6 +167,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     shared_to_project: row.sharedToProject,
     visibility: visibilityOf(row),
     model: row.modelAlias,
+    thinking_level: row.thinkingLevel ?? null,
     leaf_entry_id: row.leafEntryId,
     last_activity_at: row.lastActivityAt.toISOString(),
     created_at: row.createdAt.toISOString(),
@@ -525,6 +529,8 @@ export async function createThread(
     title: string | null;
     /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
     modelAlias?: string | null;
+    /** The conversation's thinking level (KOBE-260); clamped when each run starts. */
+    thinkingLevel?: ThinkingLevel | null;
     /**
      * A fork's provenance (CE16): its source and the entry it was taken at. Set here only: the
      * link is never updated afterwards (trigger `threads_guard_forked_from`, KOBE-215).
@@ -658,6 +664,10 @@ export async function updateThread(
     ...(body.title !== undefined ? { title: body.title, titleLocked: body.title !== null } : {}),
     ...applyShareScope(before, target),
     ...(modelChanged ? { modelAlias: body.model ?? null } : {}),
+    // KOBE-260: any level may be chosen; each run clamps it to the site and team settings.
+    ...(body.thinking_level !== undefined && body.thinking_level !== (before.thinkingLevel ?? null)
+      ? { thinkingLevel: body.thinking_level }
+      : {}),
   };
   // Nothing changes (the scope it already has, the same model): idempotent, nothing recorded.
   if (Object.keys(set).length === 0) {

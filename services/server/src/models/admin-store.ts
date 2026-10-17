@@ -22,6 +22,14 @@ import {
   type UpdateCatalogInput,
   type UpdateProviderInput,
 } from "./schemas.js";
+import {
+  NO_THINKING,
+  catalogThinking,
+  checkCatalogThinking,
+  thinkingColumns,
+  thinkingView,
+  type ThinkingView,
+} from "./thinking.js";
 import { outputLimitProblem, type ModelTokenDefaults } from "./token-limits.js";
 
 /**
@@ -58,6 +66,8 @@ export interface CatalogView {
   readonly context_window: number | null;
   /** The model reasons before answering: it gets the higher default output limit. */
   readonly reasoning: boolean;
+  /** KOBE-260: the thinking control, whether thinking is allowed, the default and maximum level. */
+  readonly thinking: ThinkingView;
   /** The model id to send to the gateway (`<gateway provider>/<model>`). */
   readonly gateway_model: string;
   /** Dollars per million tokens (KOBE-43); null: not set (cache prices then use the input's). */
@@ -104,6 +114,7 @@ export const catalogView = (r: CatalogRow, kind: ModelProviderKind): CatalogView
   max_output_tokens: r.maxOutputTokens,
   context_window: r.contextWindow,
   reasoning: r.reasoning,
+  thinking: thinkingView(catalogThinking(r)),
   gateway_model: `${gatewayProviderName(r.providerId, kind)}/${r.model}`,
   input_usd_per_mtok: r.inputUsdPerMtok,
   output_usd_per_mtok: r.outputUsdPerMtok,
@@ -323,6 +334,13 @@ export async function deleteProvider(db: KobeDb, id: string): Promise<DeleteProv
   });
 }
 
+/** The thinking settings do not fit the model (KOBE-260): the message says why. */
+export interface ThinkingInvalid {
+  readonly ok: false;
+  readonly error: "thinking_invalid";
+  readonly message: string;
+}
+
 /** The output limit does not fit the model's window (its own, else the default; KOBE-259). */
 export interface OutputLimitTooLarge {
   readonly ok: false;
@@ -336,7 +354,8 @@ export type AddCatalogResult =
       readonly ok: false;
       readonly error: "exists" | "provider_not_found" | "too_many" | "partial_prices";
     }
-  | OutputLimitTooLarge;
+  | OutputLimitTooLarge
+  | ThinkingInvalid;
 
 interface Prices {
   readonly inputUsdPerMtok: number | null;
@@ -395,6 +414,13 @@ export async function addCatalogEntry(
     ) {
       return { ok: false, error: "partial_prices" };
     }
+    const thinking = checkCatalogThinking(
+      input.thinking,
+      NO_THINKING,
+      provider.kind,
+      input.reasoning ?? false,
+    );
+    if (!thinking.ok) return thinking;
     const [row] = await tx
       .insert(modelCatalog)
       .values({
@@ -411,6 +437,7 @@ export async function addCatalogEntry(
         cacheWriteUsdPerMtok: input.cache_write_usd_per_mtok ?? null,
         ...limits,
         reasoning: input.reasoning ?? false,
+        ...thinkingColumns(thinking.policy),
         createdBy: userId,
       })
       .returning();
@@ -423,6 +450,7 @@ export async function addCatalogEntry(
         providerId: input.provider_id,
         model: input.model,
         pricesChanged: PRICE_KEYS.some((k) => input[k] !== undefined && input[k] !== null),
+        thinking: thinking.policy,
       },
     });
     return { ok: true, entry: catalogView(must(row), provider.kind) };
@@ -432,7 +460,8 @@ export async function addCatalogEntry(
 export type UpdateCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
   | { readonly ok: false; readonly error: "not_found" | "provider_not_found" | "partial_prices" }
-  | OutputLimitTooLarge;
+  | OutputLimitTooLarge
+  | ThinkingInvalid;
 
 export async function updateCatalogEntry(
   db: KobeDb,
@@ -470,6 +499,13 @@ export async function updateCatalogEntry(
       return { ok: false, error: "output_limit_exceeds_context", contextWindow: window };
     }
     const reasoning = input.reasoning ?? before.reasoning;
+    const thinking = checkCatalogThinking(
+      input.thinking,
+      catalogThinking(before),
+      provider.kind,
+      reasoning,
+    );
+    if (!thinking.ok) return thinking;
     const [row] = await tx
       .update(modelCatalog)
       .set({
@@ -480,6 +516,7 @@ export async function updateCatalogEntry(
         ...prices,
         ...limits,
         reasoning,
+        ...thinkingColumns(thinking.policy),
         updatedAt: new Date(),
       })
       .where(eq(modelCatalog.alias, alias))
@@ -498,6 +535,9 @@ export async function updateCatalogEntry(
           entry.maxOutputTokens !== before.maxOutputTokens ||
           entry.contextWindow !== before.contextWindow ||
           entry.reasoning !== before.reasoning,
+        ...(JSON.stringify(catalogThinking(entry)) === JSON.stringify(catalogThinking(before))
+          ? {}
+          : { thinking: catalogThinking(entry) }),
         pricesChanged:
           entry.inputUsdPerMtok !== before.inputUsdPerMtok ||
           entry.outputUsdPerMtok !== before.outputUsdPerMtok ||

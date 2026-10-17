@@ -8,6 +8,7 @@ import {
   type RunStatus,
   type RunTransitionCause,
   type RunTrigger,
+  type ThinkingLevel,
   type ThreadStatus,
 } from "@kobe/protocol";
 import { readBudgetStopScope, sql, type AgentScope, type KobeTx, type RunKind } from "@kobe/db";
@@ -210,6 +211,8 @@ export interface ThreadRow {
   readonly modelAlias: string | null;
   /** The project the thread belongs to (KOBE-161): its instructions go to every run. */
   readonly projectId: string | null;
+  /** The conversation's thinking level (KOBE-260); null or absent = the model's default. */
+  readonly thinkingLevel?: ThinkingLevel | null;
 }
 
 /** Fail fast instead of queueing behind a long-held thread row (KOBE-29/34: status writers). */
@@ -244,9 +247,10 @@ export async function lockThreadRow(
     deleted_at: Date | string | null;
     model_alias: string | null;
     project_id: string | null;
+    thinking_level: ThinkingLevel | null;
   }>(sql`
     SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
-           deleted_at, model_alias, project_id
+           deleted_at, model_alias, project_id, thinking_level
       FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const r = res.rows[0];
   return r
@@ -261,6 +265,7 @@ export async function lockThreadRow(
         deletedAt: asDate(r.deleted_at),
         modelAlias: r.model_alias,
         projectId: r.project_id,
+        thinkingLevel: r.thinking_level,
       }
     : undefined;
 }

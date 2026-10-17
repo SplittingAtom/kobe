@@ -4183,7 +4183,7 @@
       "put": {
         "operationId": "setTeamModel",
         "summary": "Enable or disable a catalog model for the team, or make it the default",
-        "description": "Team admins (`team.models.manage`). Only an enabled model can be default.",
+        "description": "Team admins (`team.models.manage`). Only an enabled model can be default. `thinking_max` lowers the site's thinking maximum for the team (never raises it).",
         "parameters": [
           {
             "name": "alias",
@@ -4228,7 +4228,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: a bad body, or a default that isn't enabled.",
+            "description": "`invalid_request`: a bad body, or a default that isn't enabled. `thinking_invalid`: a thinking maximum above the site's.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5348,6 +5348,17 @@
           "model": {
             "type": ["string", "null"]
           },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -5610,6 +5621,17 @@
                 },
                 "model": {
                   "type": ["string", "null"]
+                },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "leaf_entry_id": {
                   "anyOf": [
@@ -5913,6 +5935,17 @@
                 },
                 "model": {
                   "type": ["string", "null"]
+                },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "leaf_entry_id": {
                   "anyOf": [
@@ -6221,6 +6254,17 @@
           },
           "model": {
             "type": ["string", "null"]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "leaf_entry_id": {
             "anyOf": [
@@ -6720,6 +6764,17 @@
               }
             ]
           },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "test": {
             "type": "boolean"
           }
@@ -6751,6 +6806,17 @@
                 "type": "string",
                 "maxLength": 64,
                 "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
               },
               {
                 "type": "null"
@@ -6934,6 +7000,17 @@
           },
           "model": {
             "type": ["string", "null"]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "leaf_entry_id": {
             "anyOf": [
@@ -8727,6 +8804,17 @@
                     "type": "string"
                   }
                 },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "calls": {
                   "type": "integer",
                   "minimum": 0,
@@ -8774,6 +8862,7 @@
                 "run_id",
                 "user_entry_id",
                 "models",
+                "thinking_level",
                 "calls",
                 "input_tokens",
                 "output_tokens",
@@ -8894,6 +8983,49 @@
                 "reasoning": {
                   "type": "boolean"
                 },
+                "thinking": {
+                  "type": "object",
+                  "properties": {
+                    "control": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "reasoning_effort",
+                        "anthropic_adaptive",
+                        "anthropic_effort",
+                        "anthropic_budget",
+                        "gemini_budget"
+                      ]
+                    },
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "default": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "max": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["control", "allowed", "default", "max"],
+                  "additionalProperties": false
+                },
                 "gateway_model": {
                   "type": "string"
                 },
@@ -8956,6 +9088,42 @@
                 },
                 "is_default": {
                   "type": "boolean"
+                },
+                "thinking_max": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "thinking_in_team": {
+                  "type": "object",
+                  "properties": {
+                    "default": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "levels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["off", "low", "medium", "high"]
+                      }
+                    }
+                  },
+                  "required": ["default", "levels"],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -8967,6 +9135,7 @@
                 "max_output_tokens",
                 "context_window",
                 "reasoning",
+                "thinking",
                 "gateway_model",
                 "input_usd_per_mtok",
                 "output_usd_per_mtok",
@@ -8975,7 +9144,9 @@
                 "created_at",
                 "updated_at",
                 "enabled",
-                "is_default"
+                "is_default",
+                "thinking_max",
+                "thinking_in_team"
               ],
               "additionalProperties": false
             }
@@ -8995,6 +9166,17 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "thinking_max": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": ["enabled"],
