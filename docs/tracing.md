@@ -55,6 +55,19 @@ each truncated to 4096 characters. The gate is enforced twice: call sites add co
 content-keyed attribute when capture is off, whatever a call site recorded. Model responses are
 not captured. Header values are never exported.
 
+## Answer ratings as scores
+
+With a Langfuse endpoint (`…/api/public/otel`), a member's thumbs up or down on an answer
+(KOBE-275) becomes a score on the run's trace: name `answer_feedback`, `BOOLEAN` (1 up, 0 down),
+id = the rating's id (a change updates the score, clearing it deletes it), metadata = rating,
+reason codes, team, thread, run, agent scope/id/version and model alias (ids and codes only, no
+member id). The comment is sent only with `captureContent: true`. The server sends it to
+Langfuse's public scores API with the exporter's own endpoint and headers, after the rating's
+transaction commits, from one bounded queue per replica (changes to one rating coalesce; the worker
+reads the current row, so replicas converge; a failed call is logged and dropped). Other backends
+get no scores; the sandbox never sees the endpoint. A purged thread's ratings go from Postgres; the
+scores stay in Langfuse under its own retention, like the trace.
+
 ## Propagation
 
 W3C `traceparent` only (no baggage). Only the server's internal listener (behind its internal key)
