@@ -13,6 +13,7 @@ import {
 import { skippedActionsSchema } from "./notifications.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
+import { thinkingLevelSchema } from "./thinking.js";
 import {
   SERVER_CALL_PURPOSES,
   generatedTitleSchema,
@@ -138,6 +139,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
      * default. The agent's pin wins over the conversation's choice (user decision).
      */
     model_source: z.enum(["agent", "thread", "default"]).optional(),
+    /**
+     * The run's thinking level (KOBE-260): the conversation's choice or the model's default,
+     * clamped to the site and team settings. Absent: the model has no thinking control.
+     */
+    thinking_level: thinkingLevelSchema.optional(),
     retry_of_run_id: uuidSchema.optional(),
   }),
   "sandbox.waking": z.strictObject({
