@@ -1,4 +1,10 @@
-import type { ArgPattern, JsonObject, ToolDescriptor } from "@kobe/protocol";
+import type {
+  ArgPattern,
+  JsonObject,
+  RememberLimits,
+  RememberScope,
+  ToolDescriptor,
+} from "@kobe/protocol";
 import {
   allowGlobScoped,
   isLiteralGlob,
@@ -21,6 +27,20 @@ export interface PolicyRule {
   readonly arg_pattern?: ArgPattern;
   /** ISO timestamp; a rule at or past it is ignored. */
   readonly expires_at?: string;
+  /** User rules (KOBE-289): the scope the member chose. Absent (older callers) = until revoked. */
+  readonly remember_scope?: RememberScope;
+  /** `thread` rules: the only thread whose calls it allows. */
+  readonly thread_id?: string;
+  /** `run` rules: the only run whose calls it allows. */
+  readonly run_id?: string;
+  /** ISO timestamp the rule was made (admins' max duration counts from it). */
+  readonly created_at?: string;
+}
+
+/** The run a call belongs to: thread- and run-bound rules match only their own. */
+export interface CallBinding {
+  readonly thread_id: string;
+  readonly run_id: string;
 }
 
 /** The rules that apply to one decision: site floor, the active team's, and the caller's own. */
@@ -29,6 +49,11 @@ export interface PolicyRuleSet {
   readonly team: readonly PolicyRule[];
   /** The acting user's remember-rules in the active team. */
   readonly user: readonly PolicyRule[];
+  /**
+   * The team's effective remember limits (site floor tightened by the team, KOBE-289); absent =
+   * none set. Remembered rules a limit no longer allows stop applying at once.
+   */
+  readonly remember_limits?: RememberLimits;
 }
 
 export const EMPTY_RULE_SET: PolicyRuleSet = { site: [], team: [], user: [] };
@@ -45,14 +70,29 @@ export function isRuleActive(rule: PolicyRule, now: Date): boolean {
   return expires > now.getTime();
 }
 
+/**
+ * Whether a bound rule is bound to this call (KOBE-289): a `thread` rule only in its thread, a
+ * `run` rule only in its run. A bound rule without a call to compare against, or a `thread`/`run`
+ * rule that names none, never matches (fail closed).
+ */
+export function bindingMatches(rule: PolicyRule, binding: CallBinding | undefined): boolean {
+  if (rule.remember_scope === "thread" && rule.thread_id === undefined) return false;
+  if (rule.remember_scope === "run" && rule.run_id === undefined) return false;
+  if (rule.thread_id !== undefined && rule.thread_id !== binding?.thread_id) return false;
+  if (rule.run_id !== undefined && rule.run_id !== binding?.run_id) return false;
+  return true;
+}
+
 /** Whether `rule` applies to this call: active, tool glob matches the name, arg pattern matches. */
 export function ruleMatches(
   rule: PolicyRule,
   tool: ToolDescriptor,
   input: JsonObject,
   now: Date,
+  binding?: CallBinding,
 ): boolean {
   if (!isRuleActive(rule, now)) return false;
+  if (!bindingMatches(rule, binding)) return false;
   // Allow rules must name one built-in or one connector; a user's remember-rule exactly one tool
   // (stored rows are checked on write too).
   if (rule.effect === "allow" && !allowGlobScoped(rule.tool_glob)) return false;
@@ -71,9 +111,10 @@ export function matchingRules(
   tool: ToolDescriptor,
   input: JsonObject,
   now: Date,
+  binding?: CallBinding,
 ): PolicyRule[] {
   // Code-unit order (locale-independent).
   return rules
-    .filter((r) => r.effect === effect && ruleMatches(r, tool, input, now))
+    .filter((r) => r.effect === effect && ruleMatches(r, tool, input, now, binding))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
