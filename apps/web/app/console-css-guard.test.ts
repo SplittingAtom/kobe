@@ -187,18 +187,22 @@ const ON_TAILWIND = [
   "components/admin/policy-rules.tsx",
   "components/admin/shared-hosting-note.tsx",
   "components/admin/site/audit-forwarding-page.tsx",
+  "components/admin/site/break-glass-page.tsx",
+  "components/admin/site/break-glass-reader.tsx",
   "components/admin/site/connector-tool-review.tsx",
   "components/admin/site/connectors-page.tsx",
   "components/admin/site/egress-ceiling-page.tsx",
   "components/admin/site/gallery-page.tsx",
   "components/admin/site/invites-page.tsx",
   "components/admin/site/isolation-page.tsx",
+  "components/admin/site/legal-hold-page.tsx",
   "components/admin/site/memory-switches.tsx",
   "components/admin/site/model-catalog.tsx",
   "components/admin/site/model-limits.tsx",
   "components/admin/site/model-providers.tsx",
   "components/admin/site/models-page.tsx",
   "components/admin/site/policy-floor-page.tsx",
+  "components/admin/site/retention-page.tsx",
   "components/admin/site/roles-page.tsx",
   "components/admin/site/settings-page.tsx",
   "components/admin/site/site-budget.tsx",
@@ -250,10 +254,13 @@ const ON_TAILWIND = [
 
 /**
  * Whole directories on Tailwind (KOBE-295: the Team console, and the usage and budget parts it
- * shares with the Site console): no file in them may import a CSS module, new files included.
+ * shares with the Site console; KOBE-296: the Site console): no file in them may import a CSS
+ * module, new files included.
  */
 const TAILWIND_DIRS = [
+  "app/admin/site",
   "app/admin/team",
+  "components/admin/site",
   "components/admin/team",
   "components/admin/usage",
   "components/admin/budgets",
@@ -320,7 +327,7 @@ describe("console CSS modules (KOBE-294, KOBE-295, KOBE-296)", () => {
     expect(sources("components/ui/console").flatMap(moduleImports)).toEqual([]);
   });
 
-  it("the Team console and its shared parts import no CSS module, and no module lives there", () => {
+  it("the Site and Team consoles and their shared parts import no CSS module, and none lives there", () => {
     const files = TAILWIND_DIRS.flatMap(sources);
     expect(files.length).toBeGreaterThan(40);
     expect(files.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);

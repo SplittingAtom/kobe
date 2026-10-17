@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { LegalHoldPage } from "./site/legal-hold-page";
 import { SettingsPage } from "./site/settings-page";
-import { ME, renderSite, stubApi } from "./testing";
+import { answerConfirm, ME, renderSite, stubApi } from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -67,10 +67,13 @@ const RELEASING = hold({
   actions: { ...NO_ACTIONS, approveRelease: true, denyRelease: true },
 });
 
+// The console asks in its own dialog (useConfirm); the native one must never be used.
 beforeEach(() => {
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   );
 });
 afterEach(() => {
@@ -114,6 +117,8 @@ describe("site legal hold page", () => {
     expect(within(table).getByText(/Placed by Ada alone \(self-approved, flagged\)/)).toBeTruthy();
     expect(within(table).getByText("Data of Bob")).toBeTruthy();
     await userEvent.click(within(table).getByRole("button", { name: "Place" }));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await answerConfirm(/^Place the legal hold on /, "Place");
     await screen.findByText(/purges of this data are suspended/);
     expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/h-1/approve"))).toBe(true);
   });
@@ -144,8 +149,23 @@ describe("site legal hold page", () => {
         name: "Approve release",
       }),
     );
+    await answerConfirm(/^Release the legal hold on /, "Approve release");
     await screen.findByText(/purges of this data may resume/);
     expect(calls.some((c) => c.url.endsWith("/h-3/release/approve"))).toBe(true);
+  });
+});
+
+describe("site legal hold confirmation", () => {
+  it("sends nothing when the decision is cancelled", async () => {
+    const calls = stubApi({
+      "GET /v1/site/legal-hold": [200, { holds: [hold()], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+    });
+    renderSite(<LegalHoldPage />);
+    const table = await screen.findByRole("table", { name: "Holds and requests" });
+    await userEvent.click(within(table).getByRole("button", { name: "Deny" }));
+    await answerConfirm(/^Deny the legal hold on /, "Cancel");
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 });
 

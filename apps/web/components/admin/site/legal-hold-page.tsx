@@ -18,10 +18,31 @@ import {
   type SiteTeam,
   type RosterMember,
 } from "../../../lib/admin/api/site/teams";
+import {
+  Badge,
+  Button,
+  ChoiceGroup,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Radio,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  eventTrigger,
+  useConfirm,
+  type BadgeTone,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
-import styles from "../admin.module.css";
 
 interface PageData extends HoldList {
   readonly teams: readonly SiteTeam[];
@@ -42,15 +63,39 @@ const STATUS_LABELS = {
   released: "Released",
 } as const;
 
-const DECISIONS: Record<HoldDecision, { readonly verb: string; readonly done: string }> = {
-  approve: { verb: "Place", done: "The hold is in force: purges of this data are suspended." },
-  deny: { verb: "Deny", done: "Request denied." },
-  withdraw: { verb: "Withdraw", done: "Request withdrawn." },
-  "release/approve": { verb: "Release", done: "Released: purges of this data may resume." },
-  "release/deny": { verb: "Deny the release of", done: "Release denied: the hold stays in force." },
+const STATUS_TONES: Readonly<Record<LegalHold["status"], BadgeTone>> = {
+  pending: "attention",
+  active: "running",
+  denied: "neutral",
+  withdrawn: "neutral",
+  released: "neutral",
+};
+
+const DECISIONS: Record<
+  HoldDecision,
+  { readonly verb: string; readonly done: string; readonly tone: "primary" | "danger" }
+> = {
+  approve: {
+    verb: "Place",
+    done: "The hold is in force: purges of this data are suspended.",
+    tone: "primary",
+  },
+  deny: { verb: "Deny", done: "Request denied.", tone: "danger" },
+  withdraw: { verb: "Withdraw", done: "Request withdrawn.", tone: "danger" },
+  "release/approve": {
+    verb: "Release",
+    done: "Released: purges of this data may resume.",
+    tone: "danger",
+  },
+  "release/deny": {
+    verb: "Deny the release of",
+    done: "Release denied: the hold stays in force.",
+    tone: "primary",
+  },
   "release/withdraw": {
     verb: "Withdraw the release of",
     done: "Release request withdrawn: the hold stays in force.",
+    tone: "primary",
   },
 };
 
@@ -69,12 +114,24 @@ export function LegalHoldPage() {
   const { state, reload } = useResource(loadPage);
   const mutation = useMutation();
   const [releasing, setReleasing] = useState<LegalHold | null>(null);
+  const [confirm, confirmDialog] = useConfirm();
 
-  async function decide(hold: LegalHold, decision: HoldDecision) {
-    const { verb, done } = DECISIONS[decision];
-    if (!confirmed(`${verb} the legal hold on ${hold.team.name} (${holdScopeLabel(hold)})?`)) {
-      return;
-    }
+  async function decide(
+    hold: LegalHold,
+    decision: HoldDecision,
+    label: string,
+    trigger: HTMLElement | null,
+  ) {
+    const { verb, done, tone } = DECISIONS[decision];
+    const yes = await confirm(
+      {
+        title: `${verb} the legal hold on ${hold.team.name} (${holdScopeLabel(hold)})?`,
+        confirmLabel: label,
+        tone,
+      },
+      trigger,
+    );
+    if (!yes) return;
     if (
       await mutation.run(
         () => decideHold(hold.id, decision),
@@ -86,13 +143,10 @@ export function LegalHoldPage() {
 
   return (
     <>
-      <h1>Legal hold</h1>
-      <p className={styles.hint}>
-        A legal hold suspends every purge of a team&apos;s data, or of one user&apos;s data in a
-        team: retention and Trash purges, deletion of an offboarded member&apos;s workspace, and the
-        erasure of IP addresses from the audit log. Placing and releasing a hold each need a second
-        site admin. The person held is not told, and can&apos;t see the hold.
-      </p>
+      <PageHeader
+        title="Legal hold"
+        description="A legal hold suspends every purge of a team's data, or of one user's data in a team: retention and Trash purges, deletion of an offboarded member's workspace, and the erasure of IP addresses from the audit log. Placing and releasing a hold each need a second site admin. The person held is not told, and can't see the hold."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="legal holds">
         {(data) => (
@@ -114,15 +168,20 @@ export function LegalHoldPage() {
                 onCancel={() => setReleasing(null)}
               />
             )}
-            <HoldTable
-              holds={data.holds}
-              pending={mutation.pending}
-              onDecide={decide}
-              onRelease={setReleasing}
-            />
+            <Section title="Holds and requests">
+              <HoldTable
+                holds={data.holds}
+                pending={mutation.pending}
+                onDecide={(hold, decision, label, trigger) =>
+                  void decide(hold, decision, label, trigger)
+                }
+                onRelease={setReleasing}
+              />
+            </Section>
           </>
         )}
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }
@@ -176,51 +235,46 @@ function RequestForm({
   }
 
   return (
-    <>
-      <h2>Request a hold</h2>
-      <form onSubmit={onSubmit} className={styles.form} aria-label="Request a legal hold">
-        <label>
-          Team
-          <select required value={teamId} onChange={(e) => void chooseTeam(e.target.value)}>
-            <option value="">Choose a team…</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <fieldset>
-          <legend>Scope</legend>
-          {(["team", "user"] as const).map((s) => (
-            <label key={s}>
-              <input
-                type="radio"
+    <Section title="Request a hold">
+      <form onSubmit={onSubmit} aria-label="Request a legal hold">
+        <FormRow className="mt-0">
+          <Field label="Team">
+            <Select required value={teamId} onChange={(e) => void chooseTeam(e.target.value)}>
+              <option value="">Choose a team…</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <ChoiceGroup legend="Scope">
+            {(["team", "user"] as const).map((s) => (
+              <Radio
+                key={s}
                 name="scope"
                 value={s}
+                label={s === "team" ? "Whole team" : "One user's data in this team"}
                 checked={scope === s}
                 onChange={() => setScope(s)}
               />
-              {s === "team" ? "Whole team" : "One user's data in this team"}
-            </label>
-          ))}
-        </fieldset>
-        {scope === "user" && (
-          <label>
-            User
-            <select required value={userId} onChange={(e) => setUserId(e.target.value)}>
-              <option value="">Choose a member…</option>
-              {roster.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name} ({m.email})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label>
-          Reason
-          <textarea
+            ))}
+          </ChoiceGroup>
+          {scope === "user" && (
+            <Field label="User">
+              <Select required value={userId} onChange={(e) => setUserId(e.target.value)}>
+                <option value="">Choose a member…</option>
+                {roster.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name} ({m.email})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+        </FormRow>
+        <Field label="Reason" className="mb-3 max-w-2xl">
+          <Textarea
             required
             minLength={10}
             maxLength={2000}
@@ -228,18 +282,18 @@ function RequestForm({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
-        </label>
-        <button type="submit" disabled={mutation.pending}>
+        </Field>
+        <Button type="submit" variant="primary" disabled={mutation.pending}>
           Request hold
-        </button>
+        </Button>
       </form>
       {soleAdmin && (
-        <p className={styles.hint}>
+        <p className="text-sm text-console-muted">
           You are this site&apos;s only active admin, so you can place and release holds you asked
           for yourself. They are flagged as self-approved.
         </p>
       )}
-    </>
+    </Section>
   );
 }
 
@@ -266,13 +320,12 @@ function ReleaseForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={styles.form} aria-label="Ask to release a legal hold">
-      <h2>
+    <form onSubmit={onSubmit} aria-label="Ask to release a legal hold" className="mt-6">
+      <h2 className="m-0 mb-3 text-xl font-semibold">
         Release the hold on {hold.team.name} ({holdScopeLabel(hold)})
       </h2>
-      <label>
-        Why can it end?
-        <textarea
+      <Field label="Why can it end?" className="mb-3 max-w-2xl">
+        <Textarea
           required
           minLength={10}
           maxLength={2000}
@@ -280,14 +333,12 @@ function ReleaseForm({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
         />
-      </label>
-      <div className={styles.actions}>
-        <button type="submit" disabled={mutation.pending}>
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" disabled={mutation.pending}>
           Ask to release
-        </button>
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
+        </Button>
+        <Button onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   );
@@ -300,7 +351,7 @@ function approval(name: string, self: boolean, what: string): string {
 function HoldStatus({ hold }: { readonly hold: LegalHold }) {
   return (
     <>
-      {STATUS_LABELS[hold.status]}
+      <Badge tone={STATUS_TONES[hold.status]}>{STATUS_LABELS[hold.status]}</Badge>
       {hold.approvedBy && (
         <>
           <br />
@@ -349,62 +400,73 @@ function HoldTable({
 }: {
   readonly holds: readonly LegalHold[];
   readonly pending: boolean;
-  readonly onDecide: (hold: LegalHold, decision: HoldDecision) => void;
+  readonly onDecide: (
+    hold: LegalHold,
+    decision: HoldDecision,
+    label: string,
+    trigger: HTMLElement | null,
+  ) => void;
   readonly onRelease: (hold: LegalHold) => void;
 }) {
-  if (holds.length === 0) return <p>No legal holds yet.</p>;
+  if (holds.length === 0) return <EmptyState title="No legal holds yet." />;
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <caption>Holds and requests</caption>
-        <thead>
-          <tr>
-            <th scope="col">Team</th>
-            <th scope="col">Scope</th>
-            <th scope="col">Requested by</th>
-            <th scope="col">Reason</th>
-            <th scope="col">Status</th>
-            <th scope="col">
-              <span className={styles.visuallyHidden}>Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {holds.map((hold) => (
-            <tr key={hold.id}>
-              <td>{hold.team.name}</td>
-              <td>{holdScopeLabel(hold)}</td>
-              <td>
-                {hold.requestedBy.name}
-                <br />
+    <Table caption="Holds and requests" hideCaption>
+      <TableHead>
+        <TableRow>
+          <TableHeader>Team</TableHeader>
+          <TableHeader>Scope</TableHeader>
+          <TableHeader>Requested by</TableHeader>
+          <TableHeader>Reason</TableHeader>
+          <TableHeader>Status</TableHeader>
+          <TableHeader>
+            <span className="sr-only">Actions</span>
+          </TableHeader>
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {holds.map((hold) => (
+          <TableRow key={hold.id}>
+            <TableCell>{hold.team.name}</TableCell>
+            <TableCell>{holdScopeLabel(hold)}</TableCell>
+            <TableCell>
+              {hold.requestedBy.name}
+              <br />
+              <span className="text-sm text-console-muted">
                 <DateTime value={hold.requestedAt} />
-              </td>
-              <td>{hold.reason}</td>
-              <td>
-                <HoldStatus hold={hold} />
-              </td>
-              <td>
-                <div className={styles.actions}>
-                  {BUTTONS.filter(([allowed]) => hold.actions[allowed]).map(
-                    ([allowed, decision, label]) => (
-                      <button
-                        key={allowed}
-                        type="button"
-                        disabled={pending}
-                        onClick={() =>
-                          decision === "release" ? onRelease(hold) : onDecide(hold, decision)
-                        }
-                      >
-                        {label}
-                      </button>
-                    ),
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              </span>
+            </TableCell>
+            <TableCell>{hold.reason}</TableCell>
+            <TableCell>
+              <HoldStatus hold={hold} />
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-wrap gap-1.5">
+                {BUTTONS.filter(([allowed]) => hold.actions[allowed]).map(
+                  ([allowed, decision, label]) => (
+                    <Button
+                      key={allowed}
+                      size="sm"
+                      variant={
+                        decision === "release" || DECISIONS[decision].tone === "primary"
+                          ? "secondary"
+                          : "danger"
+                      }
+                      disabled={pending}
+                      onClick={(e) =>
+                        decision === "release"
+                          ? onRelease(hold)
+                          : onDecide(hold, decision, label, eventTrigger(e))
+                      }
+                    >
+                      {label}
+                    </Button>
+                  ),
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

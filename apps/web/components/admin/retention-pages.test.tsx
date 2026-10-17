@@ -24,11 +24,14 @@ const view = (
 
 const AT = "2026-10-11T03:00:00.000Z";
 
-let confirm: ReturnType<typeof vi.fn>;
-
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
 beforeEach(() => {
-  confirm = vi.fn(() => true);
-  vi.stubGlobal("confirm", confirm);
+  vi.stubGlobal(
+    "confirm",
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
+  );
 });
 afterEach(() => {
   cleanup();
@@ -103,13 +106,27 @@ describe("Site retention maximum (KOBE-18)", () => {
     expect(await screen.findByRole("radio", { name: "Forever" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "1 year" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(await answerConfirm("Cap every team at 1 year?", "Cap at 1 year")).toMatch(
+      /deleted for good every night/,
+    );
     await screen.findByText(/Scheduled: from .* the maximum is 1 year/);
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ maximum: "1y" });
     await userEvent.click(await screen.findByRole("button", { name: "Cancel change" }));
     await screen.findByText("Cancelled: the maximum stays forever.");
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+  });
+
+  it("sends nothing when lowering the maximum is cancelled", async () => {
+    const calls = stubApi({
+      "GET /v1/site/retention": [200, { maximum: "forever", applied: "forever", pending: null }],
+    });
+    renderSite(<RetentionMaximumPage />);
+    await userEvent.click(await screen.findByRole("radio", { name: "30 days" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await answerConfirm("Cap every team at 30 days?", "Cancel");
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
   });
 });
 

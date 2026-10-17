@@ -17,11 +17,10 @@ export function useFocusAfterRemoval(ids: readonly string[] | null, fallbackId: 
     const after = pending.current;
     if (after === null || ids === null || ids.includes(after.id)) return;
     pending.current = null;
-    const controls = [
-      ...(container.current?.querySelectorAll<HTMLElement>("[data-remove]") ?? []),
-    ];
-    (controls[Math.min(after.index, controls.length - 1)] ?? document.getElementById(fallbackId))
-      ?.focus();
+    const controls = [...(container.current?.querySelectorAll<HTMLElement>("[data-remove]") ?? [])];
+    (
+      controls[Math.min(after.index, controls.length - 1)] ?? document.getElementById(fallbackId)
+    )?.focus();
   }, [ids, fallbackId]);
 
   return {
