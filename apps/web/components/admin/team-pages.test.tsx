@@ -194,8 +194,43 @@ describe("Team invitations", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Revoke invitation to c@x.io" }),
     );
+    // A confirm dialog (KOBE-294): nothing is revoked until the person confirms.
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Revoke the invitation to c@x.io?",
+    });
+    expect(summary(calls)).not.toContain("DELETE /v1/team/invites/i-1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
     await screen.findByText("Revoked the invitation to c@x.io.");
     expect(summary(calls)).toContain("DELETE /v1/team/invites/i-1");
+  });
+
+  it("keeps the invitation when the revoke is cancelled", async () => {
+    const calls = stubApi({
+      "GET /v1/team/invites": [
+        200,
+        {
+          invitations: [
+            {
+              id: "i-1",
+              email: "c@x.io",
+              role: "member",
+              invitedBy: { id: ME.id, name: ME.name },
+              createdAt: "",
+              expiresAt: "",
+              status: "pending",
+            },
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamInvitesPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Revoke invitation to c@x.io" }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(summary(calls)).toEqual(["GET /v1/team/invites"]);
   });
 });
 

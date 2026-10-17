@@ -1,190 +1,12 @@
-/* Admin consoles (KOBE-20). The rest of the web app is unstyled browser defaults; this keeps to
-   system fonts and colours so the consoles read as the same app, with a layout that works from
-   phone width up. */
-
-.shell {
-  /* Both themes: app/theme.css (KOBE-282), which also sets the shared --admin-accent, --admin-danger,
-     --admin-danger-bg and --admin-warn-bg. */
-  --admin-fg: var(--kobe-console-fg);
-  --admin-muted: var(--kobe-console-muted);
-  --admin-bg: var(--kobe-console-bg);
-  --admin-panel: var(--kobe-console-panel);
-  --admin-border: var(--kobe-console-border);
-  min-height: 100vh;
-  color: var(--admin-fg);
-  background: var(--admin-bg);
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
-}
-
-.shell a {
-  color: var(--admin-accent);
-}
-
-.shell :focus-visible {
-  outline: 3px solid var(--admin-accent);
-  outline-offset: 2px;
-}
-
-.skipLink {
-  position: absolute;
-  left: -10000px;
-}
-
-.skipLink:focus {
-  position: static;
-  display: inline-block;
-  padding: 0.5rem 1rem;
-}
-
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--admin-border);
-}
-
-/* The header's right end: who is signed in, then the theme toggle (KOBE-282). */
-.headerEnd {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-/* The chat bar's icon button, without the chat's preflight: reset the browser's button look. */
-.themeToggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  color: var(--admin-muted);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
-  cursor: pointer;
-}
-
-.themeToggle:hover {
-  color: var(--admin-fg);
-  background: var(--admin-panel);
-}
-
-.themeToggle svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-.brandRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: baseline;
-}
-
-.brand,
-.who {
-  margin: 0;
-}
-
-.who {
-  color: var(--admin-muted);
-}
-
-.body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 48rem) {
-  .body {
-    grid-template-columns: 15rem minmax(0, 1fr);
-  }
-
-  .bodySingle {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.nav {
-  padding: 0.5rem 1rem 1rem;
-  background: var(--admin-panel);
-  border-bottom: 1px solid var(--admin-border);
-}
-
-@media (min-width: 48rem) {
-  .nav {
-    border-bottom: none;
-    border-right: 1px solid var(--admin-border);
-    min-height: calc(100vh - 3.5rem);
-  }
-}
-
-.navToggle {
-  margin-top: 0.5rem;
-}
-
-@media (max-width: 47.99rem) {
-  .navFolded {
-    display: none;
-  }
-}
-
-@media (min-width: 48rem) {
-  .navToggle {
-    display: none;
-  }
-}
-
-.navGroup ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.navHeading {
-  margin: 1rem 0 0.25rem;
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--admin-muted);
-}
-
-.navLink {
-  display: block;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.375rem;
-  text-decoration: none;
-}
-
-.navLink[aria-current="page"] {
-  background: var(--admin-bg);
-  font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--admin-accent);
-}
+/* Admin consoles (KOBE-20), for the pages not yet on Tailwind. The shell, the navigation and the
+   pages already moved use the console primitives (components/ui/console, KOBE-294); the shell's
+   variables (--admin-fg, …), link colour and focus ring are in app/admin/admin-global.css. KOBE-295
+   and KOBE-296 move the rest; delete each class as its last user goes (app/console-css-guard.test.ts
+   fails on a class still in use). */
 
 .soon {
   color: var(--admin-muted);
   font-size: 0.85em;
-}
-
-.main {
-  padding: 1rem;
-  max-width: 64rem;
-}
-
-@media (min-width: 48rem) {
-  .main {
-    padding: 1.5rem 2rem;
-  }
-}
-
-.main:focus {
-  outline: none;
 }
 
 .error {
@@ -202,14 +24,6 @@
   padding: 0.5rem 0.75rem;
   border-left: 4px solid #b7791f;
   background: var(--admin-warn-bg);
-}
-
-.notice:empty {
-  display: none;
-}
-
-.notice {
-  padding: 0.25rem 0;
 }
 
 .tableWrap {
@@ -256,11 +70,6 @@
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-}
-
-/* Choices side by side in a fieldset (exposure, retention period) keep apart. */
-.shell fieldset label:has(input:is([type="checkbox"], [type="radio"])) {
-  margin-inline-end: 1rem;
 }
 
 /* A connector's tool list: no bullets, so its checkboxes lead each row. */

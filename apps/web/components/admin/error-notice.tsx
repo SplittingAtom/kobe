@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { errorKind, type ApiError } from "../../lib/api/client";
 import { consoleHref } from "../../lib/admin/nav/registry";
-import styles from "./admin.module.css";
+import { Button, Notice } from "../ui/console";
 
 /**
  * Renders an API error with the way out it calls for. The text is the server's own message for
@@ -12,7 +12,7 @@ import styles from "./admin.module.css";
 export function ErrorNotice({ error }: { readonly error: ApiError }) {
   const kind = errorKind(error);
   return (
-    <div role="alert" className={styles.error}>
+    <Notice tone="error">
       <p>{error.message}</p>
       {kind === "signIn" && (
         <p>
@@ -29,9 +29,9 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
       )}
       {kind === "reload" && (
         <p>
-          <button type="button" onClick={() => window.location.reload()}>
+          <Button size="sm" onClick={() => window.location.reload()}>
             Reload
-          </button>
+          </Button>
         </p>
       )}
       {kind === "isolation" && (
@@ -40,7 +40,7 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
           the fix on the <Link href={`${consoleHref("site")}/isolation`}>Isolation</Link> page.
         </p>
       )}
-    </div>
+    </Notice>
   );
 }
 
@@ -55,7 +55,7 @@ export function MutationStatus({
   return (
     <>
       {error && <ErrorNotice error={error} />}
-      <p role="status" className={styles.notice}>
+      <p role="status" className="m-0 py-1 empty:hidden">
         {notice ?? ""}
       </p>
     </>

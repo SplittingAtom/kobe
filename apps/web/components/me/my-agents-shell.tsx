@@ -9,8 +9,8 @@ import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "../admin/console-context";
 import { ConsoleThemeToggle } from "../admin/console-theme-toggle";
 import { ErrorNotice } from "../admin/error-notice";
-import styles from "../admin/admin.module.css";
 import { ChatReturnLink } from "../shell/chat-return-link";
+import { ConsoleLayout, ConsoleMain, ConsoleWho } from "../ui/console";
 
 type State =
   | { readonly status: "loading" }
@@ -67,31 +67,30 @@ export function MyAgentsShell({
   }, [attempt]);
 
   return (
-    <div className={styles.shell} data-kobe-console="">
-      <header className={styles.header}>
-        <div className={styles.brandRow}>
-          <p className={styles.brand}>
-            <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> My area
-          </p>
-          <TeamSwitcher />
-        </div>
-        <div className={styles.headerEnd}>
-          {state.status === "ready" && <p className={styles.who}>{state.access.user.name}</p>}
+    <ConsoleLayout
+      brand={
+        <>
+          <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> My area
+        </>
+      }
+      headerStart={<TeamSwitcher />}
+      headerEnd={
+        <>
+          {state.status === "ready" && <ConsoleWho>{state.access.user.name}</ConsoleWho>}
           <ConsoleThemeToggle />
-        </div>
-      </header>
-      <div className={`${styles.body} ${styles.bodySingle}`}>
-        <main id="console-main" className={styles.main}>
-          {state.status === "loading" && <p role="status">Checking your access…</p>}
-          {state.status === "error" && <ErrorNotice error={state.error} />}
-          {state.status === "ready" && (
-            <ConsoleAccessContext.Provider value={state.access}>
-              {/* Keyed by team: a page never carries one team's state into another's. */}
-              <div key={state.access.team.id}>{children}</div>
-            </ConsoleAccessContext.Provider>
-          )}
-        </main>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <ConsoleMain>
+        {state.status === "loading" && <p role="status">Checking your access…</p>}
+        {state.status === "error" && <ErrorNotice error={state.error} />}
+        {state.status === "ready" && (
+          <ConsoleAccessContext.Provider value={state.access}>
+            {/* Keyed by team: a page never carries one team's state into another's. */}
+            <div key={state.access.team.id}>{children}</div>
+          </ConsoleAccessContext.Provider>
+        )}
+      </ConsoleMain>
+    </ConsoleLayout>
   );
 }

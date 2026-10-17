@@ -20,8 +20,8 @@ import { ConsoleNav } from "./console-nav";
 import { ConsoleThemeToggle } from "./console-theme-toggle";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
-import styles from "./admin.module.css";
 import { ChatReturnLink } from "../shell/chat-return-link";
+import { ConsoleLayout, ConsoleMain, ConsoleWho, Notice } from "../ui/console";
 
 const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<ConsoleAccess>>>> = {
   site: () => fetchSiteAccess(),
@@ -96,14 +96,14 @@ export function ConsoleShell({
     const needsTeam = state.status === "error" && state.error.code === "no_active_team";
     return (
       <Frame title={title} switcher={kind === "team" && needsTeam}>
-        <main id="console-main" className={styles.main}>
+        <ConsoleMain>
           <h1>{title}</h1>
           {state.status === "loading" ? (
             <p role="status">Checking your access…</p>
           ) : (
             <ErrorNotice error={state.error} />
           )}
-        </main>
+        </ConsoleMain>
       </Frame>
     );
   }
@@ -113,12 +113,12 @@ export function ConsoleShell({
     // In the team console, someone who is a team admin elsewhere can switch teams from here.
     return (
       <Frame title={title} switcher={kind === "team"}>
-        <main id="console-main" className={styles.main}>
+        <ConsoleMain>
           <h1>{title}</h1>
-          <p role="alert" className={styles.error}>
+          <Notice tone="error">
             {DENIED[kind]} <ChatReturnLink>Back to Kobe</ChatReturnLink>
-          </p>
-        </main>
+          </Notice>
+        </ConsoleMain>
       </Frame>
     );
   }
@@ -154,9 +154,12 @@ function Console({
   const allowed = section === null || canSee(section, access);
   return (
     <ConsoleAccessContext.Provider value={access}>
-      <Frame title={title} access={access}>
-        <ConsoleNav kind={kind} sections={visibleSections(access)} current={section} />
-        <main id="console-main" className={styles.main} tabIndex={-1} ref={main}>
+      <Frame
+        title={title}
+        access={access}
+        nav={<ConsoleNav kind={kind} sections={visibleSections(access)} current={section} />}
+      >
+        <ConsoleMain tabIndex={-1} ref={main}>
           {kind === "site" && <IsolationBanner hidden={section?.id === "isolation"} />}
           {allowed ? (
             // Keyed by team: a page never carries one team's state into another's.
@@ -166,13 +169,13 @@ function Console({
           ) : (
             <>
               <h1>{section.label}</h1>
-              <p role="alert" className={styles.error}>
+              <Notice tone="error">
                 Your role doesn&apos;t include this section.{" "}
                 <Link href={consoleHref(kind)}>Back to the {title.toLowerCase()}</Link>
-              </p>
+              </Notice>
             </>
           )}
-        </main>
+        </ConsoleMain>
       </Frame>
     </ConsoleAccessContext.Provider>
   );
@@ -182,34 +185,35 @@ function Frame({
   title,
   access,
   switcher = access?.console === "team",
+  nav,
   children,
 }: {
   readonly title: string;
   readonly access?: ConsoleAccess;
   /** Show the team switcher (team console, or when a team must be chosen first). */
   readonly switcher?: boolean;
+  readonly nav?: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
-    <div className={styles.shell} data-kobe-console="">
-      <a href="#console-main" className={styles.skipLink}>
-        Skip to content
-      </a>
-      <header className={styles.header}>
-        <div className={styles.brandRow}>
-          <p className={styles.brand}>
-            <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> {title}
-          </p>
-          {/* Top-left, as everywhere (D9). Switching reloads, so access is checked again. */}
-          {switcher && <TeamSwitcher />}
-        </div>
-        <div className={styles.headerEnd}>
+    <ConsoleLayout
+      brand={
+        <>
+          <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> {title}
+        </>
+      }
+      // Top-left, as everywhere (D9). Switching reloads, so access is checked again.
+      headerStart={switcher && <TeamSwitcher />}
+      headerEnd={
+        <>
           {access && <Who access={access} />}
           <ConsoleThemeToggle />
-        </div>
-      </header>
-      <div className={access ? styles.body : `${styles.body} ${styles.bodySingle}`}>{children}</div>
-    </div>
+        </>
+      }
+      nav={nav}
+    >
+      {children}
+    </ConsoleLayout>
   );
 }
 
@@ -217,11 +221,11 @@ function Who({ access }: { readonly access: ConsoleAccess }) {
   if (access.console === "site") {
     const role = access.siteRole === "owner" ? "Owner" : "Admin";
     return (
-      <p className={styles.who}>
+      <ConsoleWho>
         {access.user.name} · {role}
-      </p>
+      </ConsoleWho>
     );
   }
   // The team switcher beside the title already names the team and the caller's role in it.
-  return <p className={styles.who}>{access.user.name}</p>;
+  return <ConsoleWho>{access.user.name}</ConsoleWho>;
 }
