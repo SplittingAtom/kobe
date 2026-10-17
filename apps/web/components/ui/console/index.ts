@@ -27,6 +27,7 @@ export { Checkbox, ChoiceGroup, Radio, Select, Switch, Textarea, TextInput } fro
 export { ConsoleLayout, ConsoleMain, ConsoleWho } from "./layout";
 export { Notice, type NoticeTone } from "./notice";
 export { PageHeader } from "./page-header";
+export { RowMenu, type RowMenuItem } from "./row-menu";
 export { Card, Section } from "./section";
 export { SideNav, SideNavGroup, SideNavLink } from "./side-nav";
 export {

@@ -1,6 +1,7 @@
 "use client";
 
 import { exportTeamAgentToOrbit } from "../../../../lib/admin/api/team/agent-builder";
+import type { ApiResult, TextFile } from "../../../../lib/api/client";
 import { Button } from "../../../ui/console";
 import { ErrorNotice } from "../../error-notice";
 import { useMutation } from "../../use-resource";
@@ -13,6 +14,23 @@ function saveAsFile(text: string, filename: string): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Fetches one published version's Orbit YAML and downloads it (`<slug>-v<n>.orbit.yaml` unless
+ * the server names the file). A refusal comes back unsaved, for the caller to show.
+ */
+export async function downloadOrbitExport(
+  teamId: string,
+  agentId: string,
+  agentSlug: string,
+  version: number,
+): Promise<ApiResult<TextFile>> {
+  const res = await exportTeamAgentToOrbit(teamId, agentId, version);
+  if (res.ok) {
+    saveAsFile(res.data.text, res.data.filename ?? `${agentSlug}-v${version}.orbit.yaml`);
+  }
+  return res;
 }
 
 /**
@@ -41,13 +59,7 @@ export function OrbitExportButton({
         size={size}
         loading={mutation.pending}
         onClick={() =>
-          void mutation.run(async () => {
-            const res = await exportTeamAgentToOrbit(teamId, agentId, version);
-            if (res.ok) {
-              saveAsFile(res.data.text, res.data.filename ?? `${agentSlug}-v${version}.orbit.yaml`);
-            }
-            return res;
-          })
+          void mutation.run(() => downloadOrbitExport(teamId, agentId, agentSlug, version))
         }
       >
         {label}
