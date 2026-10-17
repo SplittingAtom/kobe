@@ -12,6 +12,7 @@ import type {
   RememberScope,
   RiskClass,
   RunStatus,
+  ThinkingLevel,
   ThreadStatus,
 } from "@kobe/protocol";
 
@@ -72,6 +73,8 @@ export interface ThreadSummary {
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   readonly model?: string | null;
+  /** The thinking level chosen for the thread (KOBE-260); null or absent = the model's default. */
+  readonly thinkingLevel?: ThinkingLevel | null;
   /** Set when a schedule started the thread (KOBE-173); drives the Scheduled folder. */
   readonly scheduleId?: string | null;
   /**

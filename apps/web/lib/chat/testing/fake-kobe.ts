@@ -24,6 +24,8 @@ interface FakeThread {
   created_at: string;
   /** The thread's chosen model alias (KOBE-44); null = the team default. */
   model: string | null;
+  /** The thread's chosen thinking level (KOBE-260); absent or null = the model's default. */
+  thinking_level?: string | null;
   /** The model the thread's agent pins (KOBE-44/47 seam); it wins over `model`. */
   agent_model?: string | null;
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
@@ -58,6 +60,8 @@ export interface FakeTeamModel {
   is_default: boolean;
   /** Tokens; absent or null: unknown (KOBE-210). */
   context_window?: number | null;
+  /** KOBE-260: what members may pick for it in the team; absent: no thinking control. */
+  thinking_in_team?: { readonly default: string | null; readonly levels: readonly string[] };
 }
 
 /** An agent as `GET /v1/agents/runnable` lists it (KOBE-122). */
@@ -1269,6 +1273,9 @@ export class FakeKobe {
       if (model !== null && !this.#modelEnabled(model)) return this.#modelNotEnabled();
       const threadId = this.addThread((body?.title as string | undefined) ?? null);
       this.#thread(threadId).model = model;
+      if (typeof body?.thinking_level === "string") {
+        this.#thread(threadId).thinking_level = body.thinking_level;
+      }
       if (body?.test === true) {
         Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
       } else if (typeof body?.agent_id === "string") {
@@ -1473,6 +1480,9 @@ export class FakeKobe {
           return this.#modelNotEnabled();
         }
         thread.model = model;
+      }
+      if (body && "thinking_level" in body) {
+        thread.thinking_level = (body.thinking_level as string | null) ?? null;
       }
       if (body && "title" in body) thread.title = (body.title as string | null) ?? null;
       return json(200, this.#summary(thread));

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ThinkingLevel } from "@kobe/protocol";
 import { useId, useState, useSyncExternalStore } from "react";
 import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
 import {
@@ -13,6 +14,7 @@ import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import type { MenuBinding } from "../../lib/shell/menu";
 import { useBindCommands } from "../shell/command-bindings";
 import { useChatSession } from "./kobe-runtime";
+import { ThinkingPicker } from "./thinking-picker";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
@@ -70,6 +72,9 @@ export function ModelPicker({
     () => null,
   );
   const [draft, setDraft] = useState<string | null>(() => session.draftModel);
+  const [draftThinking, setDraftThinking] = useState<ThinkingLevel | null>(
+    () => session.draftThinking,
+  );
   const disabled =
     state.summary?.deletedAt != null || isBusy(state, "model") || (!isNew && !controller);
 
@@ -82,6 +87,18 @@ export function ModelPicker({
     }
     void controller?.setModel(model);
   };
+  // KOBE-260: the conversation's thinking level, kept like the model on a new conversation.
+  const chooseThinking = (level: ThinkingLevel | null) => {
+    if (isNew) {
+      setDraftThinking(level);
+      session.setDraftThinking(level);
+      return;
+    }
+    void controller?.setThinkingLevel(level);
+  };
+  const thinkingChosen = isNew ? draftThinking : (state.summary?.thinkingLevel ?? null);
+  const thinkingDisabled =
+    state.summary?.deletedAt != null || isBusy(state, "thinking") || (!isNew && !controller);
   // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
   // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
   const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
@@ -120,6 +137,13 @@ export function ModelPicker({
         <span id={`${id}-pinned`} className={styles.hint}>
           This agent always uses {name}.
         </span>
+        <ThinkingPicker
+          models={loaded.data}
+          alias={pinned}
+          chosen={thinkingChosen}
+          disabled={thinkingDisabled}
+          onChoose={chooseThinking}
+        />
       </>
     );
   }
@@ -154,6 +178,15 @@ export function ModelPicker({
           )}
         </select>
       </label>
+      {!unavailable && (
+        <ThinkingPicker
+          models={loaded.data}
+          alias={chosen}
+          chosen={thinkingChosen}
+          disabled={thinkingDisabled}
+          onChoose={chooseThinking}
+        />
+      )}
       {unavailable && (
         <p id={`${id}-unavailable`} role="alert" className={styles.modelWarning}>
           {chosenName} isn&apos;t enabled for your team any more, so messages here can&apos;t run.

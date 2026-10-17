@@ -3,6 +3,7 @@
  * sends `X-Kobe-Team`, reads included, so a tab left on another team gets `team_mismatch` instead of
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
+import type { ThinkingLevel } from "@kobe/protocol";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
@@ -121,6 +122,8 @@ export interface ChatApi {
     model?: string | null,
     agent?: { readonly agentId: string; readonly test: boolean },
     projectId?: string | null,
+    /** The conversation's thinking level (KOBE-260); null/absent = the model's default. */
+    thinkingLevel?: ThinkingLevel | null,
   ): Promise<ApiResult<ThreadSummary>>;
   /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
   shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
@@ -138,6 +141,11 @@ export interface ChatApi {
   clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
   setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** Sets the thread's thinking level for its next runs (KOBE-260; null = the model's default). */
+  setThreadThinking(
+    threadId: string,
+    level: ThinkingLevel | null,
+  ): Promise<ApiResult<ThreadSummary>>;
   /** The site catalog with the team's enabled models and default (`GET /v1/team/models`). */
   listModels(): Promise<ApiResult<TeamModels>>;
   /** The thread with its entries after `after` (0 = from the start). */
@@ -289,11 +297,14 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         ...(options.entryId === undefined ? {} : { entry_id: options.entryId }),
         ...(options.title === undefined ? {} : { title: options.title }),
       }),
-    createThread: (title, model, agent, projectId) =>
+    createThread: (title, model, agent, projectId, thinkingLevel) =>
       send("POST", "/v1/threads", {
         ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),
         ...(title === undefined ? {} : { title }),
         ...(model === undefined || model === null ? {} : { model }),
+        ...(thinkingLevel === undefined || thinkingLevel === null
+          ? {}
+          : { thinking_level: thinkingLevel }),
         ...(agent === undefined
           ? {}
           : { agent_id: agent.agentId, ...(agent.test ? { test: true } : {}) }),
@@ -315,6 +326,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     clearTestThreads: (agentId) =>
       send("DELETE", `/v1/threads/test${query({ agent_id: agentId })}`),
     setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
+    setThreadThinking: (id, level) =>
+      send("PATCH", `/v1/threads/${enc(id)}`, { thinking_level: level }),
     listModels: () => listTeamModels(teamId, fetchFn),
     getThread: (id, after = 0) =>
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),

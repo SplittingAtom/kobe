@@ -4,7 +4,7 @@
  * queue, Steer, Stop; D14: Retry / Continue without retry; branch switch and edit-and-regenerate).
  * The server decides everything; this only shows what it says and asks again after each change.
  */
-import { isTerminalRunStatus, type KobeEvent } from "@kobe/protocol";
+import { isTerminalRunStatus, type KobeEvent, type ThinkingLevel } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
 import type { ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
@@ -836,6 +836,25 @@ export class ThreadController {
     }
     this.#set((s) => ({ ...s, summary: res.data }));
     this.#announce(model === null ? "The team's default model is used." : "Model changed.");
+    return true;
+  };
+
+  /**
+   * Chooses the thread's thinking level for its next runs (KOBE-260); null = the model's default.
+   * Each run is clamped to the site and team settings of its model by the server.
+   */
+  readonly setThinkingLevel = async (level: ThinkingLevel | null): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return false;
+    const res = await this.#busy("thinking", () => this.#api.setThreadThinking(threadId, level));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(
+      level === null ? "The model's default thinking level is used." : `Thinking: ${level}.`,
+    );
     return true;
   };
 

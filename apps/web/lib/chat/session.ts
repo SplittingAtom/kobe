@@ -3,6 +3,7 @@
  * A controller lives while a view holds it (`acquire` / `release`); a thread created by the thread
  * list (`seed`) is ready before its view mounts, so the first message goes to the same controller.
  */
+import type { ThinkingLevel } from "@kobe/protocol";
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
@@ -101,6 +102,7 @@ export class ChatSession {
   readonly #provisional = new Map<string, string>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
+  #nextThinking: ThinkingLevel | null = null;
   /** Project for the thread `initialize` creates next (`/?project=<id>`, KOBE-164). */
   #nextProjectId: string | null = null;
   /** Agent for the thread `initialize` creates next (null = plain chat; KOBE-122). */
@@ -262,6 +264,22 @@ export class ChatSession {
 
   setDraftModel(model: string | null): void {
     this.#nextModel = model;
+  }
+
+  /** The thinking level picked for a conversation not created yet (KOBE-260). */
+  get draftThinking(): ThinkingLevel | null {
+    return this.#nextThinking;
+  }
+
+  setDraftThinking(level: ThinkingLevel | null): void {
+    this.#nextThinking = level;
+  }
+
+  /** The draft's thinking level for the thread being created; the next draft starts without. */
+  takeNextThinking(): ThinkingLevel | null {
+    const level = this.#nextThinking;
+    this.#nextThinking = null;
+    return level;
   }
 
   /** The agent picked for a conversation not created yet (KOBE-122); null = plain chat. */
