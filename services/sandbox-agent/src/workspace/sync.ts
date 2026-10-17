@@ -315,16 +315,26 @@ export class WorkspaceSync {
     this.#soon.unref();
   }
 
-  /** Final push before the sandbox stops (hibernation, shutdown), bounded by `deadlineMs`. */
+  /**
+   * Final push before the sandbox stops (hibernation, shutdown), bounded by `deadlineMs`. A restore
+   * or pull in flight finishes first (within the deadline): nothing of this sync writes into the
+   * workspace after the flush, its saved revision (KOBE-304) included.
+   */
   async flush(deadlineMs: number): Promise<PushStats | undefined> {
     this.#stopped = true;
     clearInterval(this.#timer);
     clearTimeout(this.#soon);
-    if (!this.enabled || !this.#restored) return undefined;
-    const push = this.#push();
+    if (!this.enabled) return undefined;
     const timeout = new Promise<undefined>((r) =>
       setTimeout(() => r(undefined), deadlineMs).unref(),
     );
+    const settled = await Promise.race([this.#chain.then(() => true), timeout]);
+    if (settled === undefined) {
+      this.#o.logger.warn({ deadlineMs }, "workspace flush timed out");
+      return undefined;
+    }
+    if (!this.#restored) return undefined;
+    const push = this.#push();
     try {
       const stats = await Promise.race([push, timeout]);
       if (stats === undefined) this.#o.logger.warn({ deadlineMs }, "workspace flush timed out");

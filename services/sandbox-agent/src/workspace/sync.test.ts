@@ -241,6 +241,40 @@ describe("workspace sync (agent)", () => {
     expect(server.content("late.txt")).toBe("written just before hibernation");
   });
 
+  it("lets a restore in flight finish before the flush returns: nothing is written after it", async () => {
+    const root = await volume();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let asked = () => {};
+    const manifestAsked = new Promise<void>((r) => (asked = r));
+    class GatedClient extends SyncClient {
+      override async manifest(since: number, limit?: number) {
+        asked();
+        await gate;
+        return super.manifest(since, limit);
+      }
+    }
+    const sync = new WorkspaceSync({
+      root,
+      client: new GatedClient({ serverUrl, readToken: () => Promise.resolve(server.token) }),
+      logger: quiet,
+      intervalMs: 60_000,
+    });
+    syncs.push(sync);
+    sync.start();
+    await manifestAsked; // the restore is waiting on the server
+    let flushed = false;
+    const flush = sync.flush(5_000).then(() => (flushed = true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(flushed).toBe(false);
+    release();
+    await flush;
+    // The restore's last write (the saved revision, KOBE-304) happened before the flush returned.
+    const after = await readdir(root, { recursive: true });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await readdir(root, { recursive: true })).toEqual(after);
+  });
+
   it("never syncs symlinks and never writes through one", async () => {
     const root = await volume();
     const outside = await volume();
