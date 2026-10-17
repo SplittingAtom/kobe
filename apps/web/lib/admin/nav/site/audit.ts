@@ -1,4 +1,4 @@
-import { comingIn, defineSiteSection } from "../types";
+import { READY, defineSiteSection } from "../types";
 
 export default defineSiteSection({
   id: "audit",
@@ -7,5 +7,6 @@ export default defineSiteSection({
   group: "Governance",
   order: 10,
   minRole: "admin",
-  status: comingIn("KOBE-15"),
+  // GET /v1/site/audit and /integrity (KOBE-15, KOBE-17); the page is KOBE-291.
+  status: READY,
 });
