@@ -67,7 +67,8 @@ function coverageProblems(inventory: Inventory, files: RepoFiles): string[] {
   return [
     ...uncovered,
     ...drift.missing.map(
-      (k) => `charts/kobe/values.yaml key "${k}" is not in chartValues (first-party or row ids)`,
+      (k) =>
+        `charts/kobe/values.yaml key "${k}" is not in chartValues (first-party, site-provided or row ids)`,
     ),
     ...drift.stale.map((k) => `chartValues.${k} names a key charts/kobe/values.yaml no longer has`),
   ];
