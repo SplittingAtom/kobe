@@ -273,9 +273,12 @@ describe("answer_feedback", () => {
         exec(t, `UPDATE answer_feedback_history SET comment = 'x' WHERE team_id = '${t}'`),
       ),
     ).toBe("55000");
-    for (const table of ["answer_feedback", "answer_feedback_history"]) {
-      expect(await errorCode(owner.query(`TRUNCATE ${table}`)), table).toBe(LEGAL_HOLD_SQLSTATE);
-    }
+    expect(await errorCode(owner.query(`TRUNCATE answer_feedback_history`))).toBe(
+      LEGAL_HOLD_SQLSTATE,
+    );
+    // agent_eval_cases' rating key (KOBE-276) refuses a plain TRUNCATE before the hold guard runs.
+    expect(await errorCode(owner.query(`TRUNCATE answer_feedback`))).toBe("0A000");
+    expect(await count(t)).toBe(1);
     // After the release, nothing more is kept; the history goes with the thread.
     await release(h);
     await exec(t, `DELETE FROM answer_feedback WHERE team_id = '${t}'`);
