@@ -157,7 +157,9 @@ jobs:
   # db-core and every db-server shard passed (KOBE-300 split the old single db job).
   db:
     needs: [db-core, db-server]
-    if: ${{ !cancelled() }}
+    # always(): a skipped required check counts as passed, so this job must run (and fail)
+    # even when a shard was cancelled or skipped.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
