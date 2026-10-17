@@ -333,33 +333,6 @@ describe("Team invitations: errors, badges and focus (KOBE-294 review)", () => {
   });
 });
 
-const item = (over: Record<string, unknown>) => ({
-  id: "a-1",
-  scope: "team",
-  slug: "triage",
-  name: "Triage",
-  ownerUserId: "u-bob",
-  ownerName: "Bob",
-  status: "active",
-  archivedAt: null,
-  currentVersion: 2,
-  versionCount: 2,
-  runCount: 7,
-  lastRunAt: "2026-10-02T10:00:00Z",
-  tokens: 1234,
-  schedules: [],
-  orbitScore: { status: "none", attackSuccessRate: null, at: null },
-  canExport: true,
-  ...over,
-});
-const INVENTORY_1 = {
-  agents: [item({}), item({ id: "p-1", scope: "personal", slug: "mine", name: "Mine" })],
-  nextCursor: "mine:00000000-0000-0000-0000-000000000001",
-};
-const INVENTORY_2 = {
-  agents: [item({ id: "p-2", scope: "personal", slug: "zed", name: "Zed", ownerName: "Zoe" })],
-  nextCursor: null,
-};
 const LIST = "GET /v1/agents?scope=team&include_archived=true";
 const GALLERY_LIST = "GET /v1/agents?scope=gallery";
 const NO_GALLERY: [number, unknown] = [200, { agents: [] }];
@@ -382,146 +355,7 @@ const GALLERY = {
   ],
 };
 
-describe("Agent inventory", () => {
-  it("shows owner, scope, status, versions, usage and placeholders, and pages", async () => {
-    const calls = stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [200, INVENTORY_1],
-      "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001": [
-        200,
-        INVENTORY_2,
-      ],
-    });
-    renderTeam(<TeamAgentsPage />);
-    const row = (await screen.findByRole("row", { name: /Mine/ })) as HTMLElement;
-    expect(row.textContent).toMatch(/Bob/);
-    expect(row.textContent).toMatch(/Personal/);
-    expect(row.textContent).toMatch(/Active/);
-    expect(row.textContent).toMatch(/v2/);
-    expect(row.textContent).toMatch(/7/);
-    expect(row.textContent).toMatch(/1,234/);
-    expect(row.textContent?.match(/—/g)?.length).toBe(2);
-    expect(row.textContent).not.toMatch(/\$/);
-    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(await screen.findByRole("row", { name: /Zed/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
-    expect(summary(calls)).toContain(
-      "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001",
-    );
-  });
-
-  it("lists each agent's schedules with owner and status (KOBE-180)", async () => {
-    const schedule = (over: Record<string, unknown>) => ({
-      scheduleId: "s-1",
-      ownerUserId: "u-bob",
-      ownerName: "Bob",
-      status: "active",
-      pausedBy: null,
-      nextDueAt: "2026-10-12T09:00:00Z",
-      ...over,
-    });
-    stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [
-        200,
-        {
-          agents: [
-            item({
-              schedules: [
-                schedule({}),
-                schedule({
-                  scheduleId: "s-2",
-                  ownerName: "Carol",
-                  status: "paused",
-                  pausedBy: "team_admin",
-                }),
-                schedule({
-                  scheduleId: "s-3",
-                  ownerName: "Dan",
-                  status: "paused",
-                  pausedBy: "deactivation",
-                }),
-                schedule({ scheduleId: "s-4", ownerName: "Eve", status: "paused" }),
-              ],
-            }),
-          ],
-          nextCursor: null,
-        },
-      ],
-    });
-    renderTeam(<TeamAgentsPage />);
-    const row = (await screen.findByRole("row", { name: /Carol/ })) as HTMLElement;
-    const cells = within(row)
-      .getAllByRole("listitem")
-      .map((li) => li.textContent);
-    expect(cells).toEqual([
-      "Bob: active",
-      "Carol: paused by a team admin",
-      "Dan: paused (owner deactivated or removed)",
-      "Eve: paused",
-    ]);
-  });
-
-  it("suspends and reactivates any listed agent, personal ones included", async () => {
-    const calls = stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
-      "PUT /v1/agents/inventory/p-1/status": [
-        200,
-        { id: "p-1", scope: "personal", status: "suspended" },
-      ],
-    });
-    renderTeam(<TeamAgentsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Suspend Mine" }));
-    await answerConfirm("Suspend Mine?", "Suspend Mine");
-    await screen.findByText("Mine is suspended.");
-    const put = must(calls.find((c) => c.method === "PUT"));
-    expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
-    expect(put.headers.get("x-kobe-team")).toBe(TEAM.id);
-    expect(screen.getByRole("button", { name: "Reactivate Mine" })).toBeTruthy();
-  });
-
-  it("offers Export to Orbit only for published agents the caller may export", async () => {
-    const calls = stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [
-        200,
-        {
-          nextCursor: null,
-          agents: [
-            item({}),
-            item({ id: "d-1", slug: "draft", name: "Draft", currentVersion: null }),
-            item({ id: "p-1", scope: "personal", slug: "mine", name: "Mine", canExport: false }),
-            item({ id: "o-1", slug: "old", name: "Old", ownerName: "Zoe" }),
-          ],
-        },
-      ],
-    });
-    const downloads = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    vi.stubGlobal(
-      "URL",
-      Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => {} }),
-    );
-    const api = globalThis.fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) =>
-        url === "/v1/agents/a-1/versions/2/orbit" ? new Response("name: x\n") : api(url, init),
-      ),
-    );
-    renderTeam(<TeamAgentsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Export Triage to Orbit" }));
-    await waitFor(() => expect(downloads).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("button", { name: "Export Draft to Orbit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Export Mine to Orbit" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Export Old to Orbit" })).toBeTruthy();
-    expect(summary(calls)).not.toContain("GET /v1/agents/d-1/versions/null/orbit");
-  });
-
+describe("Agent inventory moved to its own page (KOBE-291)", () => {
   it("is not requested without the suspend permission", async () => {
     const calls = stubApi({ [LIST]: [200, AGENTS] });
     renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
@@ -529,67 +363,18 @@ describe("Agent inventory", () => {
     expect(summary(calls).some((c) => c.includes("inventory"))).toBe(false);
   });
 
-  it("shows the server's refusal of a suspension", async () => {
-    stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
-      "PUT /v1/agents/inventory/a-1/status": [
-        403,
-        { code: "forbidden", message: "Only team admins suspend agents." },
-      ],
-    });
+  it("links team admins to the Inventory", async () => {
+    stubApi({ [GALLERY_LIST]: NO_GALLERY, [LIST]: [200, AGENTS] });
     renderTeam(<TeamAgentsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
-    await answerConfirm("Suspend Triage?", "Suspend Triage");
-    expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
+    expect(await screen.findByText("v2")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Inventory" }).getAttribute("href")).toBe(
+      "/admin/team/inventory",
+    );
+    expect(screen.queryByRole("button", { name: /Suspend/ })).toBeNull();
   });
 });
 
-describe("Orbit scores in the inventory and gallery (KOBE-94)", () => {
-  const scored = (id: string, name: string, orbitScore: Record<string, unknown>) =>
-    item({ id, slug: id, name, orbitScore });
-
-  it("shows each agent's latest score and status", async () => {
-    stubApi({
-      [GALLERY_LIST]: NO_GALLERY,
-      [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [
-        200,
-        {
-          agents: [
-            scored("a-ok", "Okay", {
-              status: "passed",
-              attackSuccessRate: 0.1,
-              at: "2026-10-03T10:00:00Z",
-            }),
-            scored("a-bad", "Bad", {
-              status: "blocked",
-              attackSuccessRate: 0.6,
-              at: "2026-10-03T10:00:00Z",
-            }),
-            scored("a-err", "Broken", {
-              status: "errored",
-              attackSuccessRate: null,
-              at: "2026-10-03T10:00:00Z",
-            }),
-            scored("a-run", "Busy", { status: "evaluating", attackSuccessRate: null, at: null }),
-            scored("a-none", "Fresh", { status: "none", attackSuccessRate: null, at: null }),
-          ],
-          nextCursor: null,
-        },
-      ],
-    });
-    renderTeam(<TeamAgentsPage />);
-    const row = async (name: string) =>
-      (await screen.findByRole("rowheader", { name })).closest("tr") as HTMLElement;
-    expect((await row("Okay")).textContent).toContain("10% (passed)");
-    expect((await row("Bad")).textContent).toContain("60% (blocked)");
-    expect((await row("Broken")).textContent).toContain("Errored");
-    expect((await row("Busy")).textContent).toContain("Evaluating…");
-    expect((await row("Fresh")).textContent).not.toMatch(/passed|blocked|Errored|Evaluating/);
-  });
-
+describe("Orbit scores in the gallery (KOBE-94)", () => {
   it("shows a gallery agent's published score and date, or that it is not evaluated", async () => {
     const second = { ...GALLERY.agents[0], id: "g-2", slug: "writer", name: "Writer" };
     stubApi({
@@ -632,7 +417,6 @@ describe("Team agents", () => {
     stubApi({
       [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
-      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
     });
     renderTeam(<TeamAgentsPage />);
     expect(await screen.findByText("v2")).toBeTruthy();
@@ -653,7 +437,6 @@ describe("Team agents", () => {
   it("explains 503 isolation_runtime_missing and links to the fix", async () => {
     stubApi({
       [GALLERY_LIST]: NO_GALLERY,
-      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         503,
         {
@@ -674,7 +457,6 @@ describe("Team agents", () => {
   it("hides internals of other 5xx answers", async () => {
     stubApi({
       [GALLERY_LIST]: NO_GALLERY,
-      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         500,
         { code: "boom", message: "relation team_agents does not exist" },

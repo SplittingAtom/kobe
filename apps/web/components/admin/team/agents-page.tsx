@@ -18,10 +18,9 @@ import {
 import { useTeamAccess } from "../console-context";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
-import { AgentInventory } from "./agent-inventory";
 import { GalleryAgents } from "./gallery-agents";
 
-/** Team agents (spec D19; `/v1/agents?scope=team`) and, for team admins, the inventory (KOBE-86). */
+/** Team agents (spec D19; `/v1/agents?scope=team`); team admins suspend them in the Inventory. */
 export function TeamAgentsPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
@@ -32,7 +31,19 @@ export function TeamAgentsPage() {
     <>
       <PageHeader
         title="Team agents"
-        description="Builders create and publish team agents; team admins can suspend any of them in the inventory below. Archived agents were deleted after publishing: conversations pinned to them keep working."
+        description={
+          <>
+            Builders create and publish team agents
+            {canSuspend ? (
+              <>
+                ; team admins suspend them, and see their usage, schedules and Orbit scores, in the{" "}
+                <Link href="/admin/team/inventory">Inventory</Link>
+              </>
+            ) : null}
+            . Archived agents were deleted after publishing: conversations pinned to them keep
+            working.
+          </>
+        }
         actions={
           <Button asChild variant="primary">
             <Link href="/admin/team/agents/new">New agent</Link>
@@ -92,7 +103,6 @@ export function TeamAgentsPage() {
         }
       </ResourceView>
       <GalleryAgents teamId={teamId} canFork={canFork} onForked={reload} />
-      {canSuspend && <AgentInventory teamId={teamId} canSuspend onChanged={reload} />}
     </>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   listAgentInventory,
@@ -8,6 +9,7 @@ import {
   type InventoryPage,
   type InventorySchedule,
 } from "../../../lib/admin/api/team/agents";
+import { consoleHref } from "../../../lib/admin/nav/registry";
 import { scoreLabel } from "../../../lib/admin/orbit-score";
 import {
   Button,
@@ -40,28 +42,26 @@ const PLACEHOLDER = "—";
 export function AgentInventory({
   teamId,
   canSuspend,
-  onChanged,
 }: {
   readonly teamId: string;
   readonly canSuspend: boolean;
-  readonly onChanged: () => void;
 }) {
   const { state } = useResource(() => listAgentInventory(teamId));
   return (
     <Section
       id="inventory-heading"
-      title="Inventory"
-      description="Team agents and members' personal agents used in this team. Suspending a personal agent only stops it in this team."
+      title="Agents"
+      description={
+        <>
+          Team agents and members&apos; personal agents used in this team, with their schedules.
+          Suspending a personal agent only stops it in this team; a suspended agent&apos;s schedules
+          don&apos;t fire. Pause schedules in{" "}
+          <Link href={`${consoleHref("team")}/schedules`}>Schedules</Link>.
+        </>
+      }
     >
       <ResourceView state={state} label="the agent inventory">
-        {(first) => (
-          <InventoryTable
-            teamId={teamId}
-            first={first}
-            canSuspend={canSuspend}
-            onChanged={onChanged}
-          />
-        )}
+        {(first) => <InventoryTable teamId={teamId} first={first} canSuspend={canSuspend} />}
       </ResourceView>
     </Section>
   );
@@ -71,12 +71,10 @@ function InventoryTable({
   teamId,
   first,
   canSuspend,
-  onChanged,
 }: {
   readonly teamId: string;
   readonly first: InventoryPage;
   readonly canSuspend: boolean;
-  readonly onChanged: () => void;
 }) {
   const [agents, setAgents] = useState<readonly InventoryAgent[]>(first.agents);
   const [cursor, setCursor] = useState<string | null>(first.nextCursor);
@@ -117,7 +115,6 @@ function InventoryTable({
     );
     if (done) {
       setAgents((current) => current.map((a) => (a.id === agent.id ? { ...a, status: next } : a)));
-      onChanged();
     }
   }
 
