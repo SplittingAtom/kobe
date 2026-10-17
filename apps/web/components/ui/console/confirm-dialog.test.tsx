@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { act, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useConfirm } from "./confirm-dialog";
 
@@ -78,5 +78,51 @@ describe("useConfirm / ConfirmDialog", () => {
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(answer()).toBe("false"));
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+describe("focus and lifecycle (review S3, nits)", () => {
+  function Remove({ onAnswer }: { readonly onAnswer: (yes: boolean) => void }) {
+    const [confirm, dialog] = useConfirm();
+    const [gone, setGone] = useState(false);
+    return (
+      <div data-kobe-console="">
+        <main id="console-main" tabIndex={-1}>
+          {!gone && (
+            <button
+              type="button"
+              onClick={async () => {
+                const yes = await confirm({ title: "Remove Ada?", confirmLabel: "Remove" });
+                if (yes) setGone(true);
+                onAnswer(yes);
+              }}
+            >
+              Remove Ada
+            </button>
+          )}
+        </main>
+        {dialog}
+      </div>
+    );
+  }
+
+  it("when the asking control is gone, focus lands on the page's main", async () => {
+    const answers: boolean[] = [];
+    render(<Remove onAnswer={(yes) => answers.push(yes)} />);
+    await userEvent.click(screen.getByRole("button", { name: "Remove Ada" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove Ada?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(answers).toEqual([true]));
+    expect(screen.queryByRole("button", { name: "Remove Ada" })).toBeNull();
+    await waitFor(() => expect(document.activeElement?.id).toBe("console-main"));
+  });
+
+  it("an unanswered question resolves false when the component unmounts", async () => {
+    const answers: boolean[] = [];
+    const { unmount } = render(<Remove onAnswer={(yes) => answers.push(yes)} />);
+    await userEvent.click(screen.getByRole("button", { name: "Remove Ada" }));
+    await screen.findByRole("alertdialog");
+    act(() => unmount());
+    await waitFor(() => expect(answers).toEqual([false]));
   });
 });

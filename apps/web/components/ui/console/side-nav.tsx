@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { cn } from "../../../lib/utils";
 import { Button } from "./button";
+import { FOCUS_RING } from "./focus";
 
 const CloseContext = createContext<() => void>(() => undefined);
 
@@ -91,7 +92,7 @@ export function SideNavLink({
         href={href}
         onClick={close}
         aria-current={current ? "page" : undefined}
-        className="block rounded-md px-2 py-[0.3rem] text-console-accent no-underline aria-[current=page]:bg-console-bg aria-[current=page]:font-semibold aria-[current=page]:shadow-[inset_3px_0_0_var(--admin-accent)]"
+        className={`block rounded-md px-2 py-[0.3rem] text-console-accent no-underline aria-[current=page]:bg-console-bg aria-[current=page]:font-semibold aria-[current=page]:shadow-[inset_3px_0_0_var(--admin-accent)] ${FOCUS_RING}`}
       >
         {children}
       </Link>

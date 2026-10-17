@@ -2,6 +2,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FOCUS_RING } from "./focus";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { EmptyState } from "./empty-state";
@@ -175,5 +176,88 @@ describe("Badge", () => {
     const expired = screen.getByText("Expired");
     expect(expired.dataset["tone"]).toBe("attention");
     expect(expired.className).toContain("text-status-attention");
+  });
+});
+
+describe("API for KOBE-295/296 (review S5)", () => {
+  it("a loading button is busy and disabled, with a spinner and its label", async () => {
+    const onClick = vi.fn();
+    render(
+      <Button variant="primary" loading onClick={onClick}>
+        Save
+      </Button>,
+    );
+    const button = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+    await userEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("asChild styles a link as a button; buttons carry their own focus ring", () => {
+    render(
+      <>
+        <Button asChild variant="primary">
+          <a href="/me/agents/new">New agent</a>
+        </Button>
+        <Button variant="ghost">More</Button>
+      </>,
+    );
+    const link = screen.getByRole("link", { name: "New agent" });
+    expect(link.dataset["slot"]).toBe("console-button");
+    expect(link.className).toContain("bg-status-accent");
+    expect(screen.getByRole("button", { name: "More" }).className).toContain(
+      FOCUS_RING.split(" ")[0],
+    );
+  });
+
+  it("a success notice has its own tone and icon, and passes div props through", () => {
+    render(
+      <Notice tone="success" id="saved" data-testid="n" actions={<Button>Undo</Button>}>
+        Saved.
+      </Notice>,
+    );
+    const notice = screen.getByTestId("n");
+    expect(notice.id).toBe("saved");
+    expect(notice.dataset["tone"]).toBe("success");
+    expect(notice.className).toContain("bg-status-running-bg");
+    expect(notice.getAttribute("role")).toBeNull();
+    expect(within(notice).getByRole("button", { name: "Undo" })).toBeTruthy();
+  });
+
+  it("sections and cards take a heading level; the page header a back link", () => {
+    render(
+      <>
+        <PageHeader back={<a href="/me/agents">All agents</a>} title="Triage" />
+        <Section title="Versions">
+          <Section title="Drafts" level={3}>
+            <Card title="v2">Body</Card>
+          </Section>
+        </Section>
+      </>,
+    );
+    expect(screen.getByRole("link", { name: "All agents" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Versions" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Drafts" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Drafts" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "v2" })).toBeTruthy();
+  });
+
+  it("a table's scroll region is named and keyboard-focusable; numeric cells align end", () => {
+    render(
+      <Table caption="Spend" hideCaption>
+        <TableBody>
+          <TableRow>
+            <TableCell numeric>12.50</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const region = screen.getByRole("region", { name: "Spend" });
+    expect(region.tabIndex).toBe(0);
+    expect(screen.getByRole("table", { name: "Spend" })).toBeTruthy();
+    expect(region.querySelector("caption")?.className).toContain("sr-only");
+    expect(screen.getByRole("cell").className).toContain("text-end");
   });
 });

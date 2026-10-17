@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../../../lib/utils";
+import { FOCUS_RING } from "./focus";
 
 /**
  * The frame of the Site console, the Team console and the My area (KOBE-294): a skip link, a
@@ -29,7 +30,7 @@ export function ConsoleLayout({
     >
       <a
         href="#console-main"
-        className="sr-only focus:not-sr-only focus:inline-block focus:px-4 focus:py-2"
+        className={`sr-only text-console-accent focus:not-sr-only focus:inline-block focus:px-4 focus:py-2 ${FOCUS_RING}`}
       >
         Skip to content
       </a>

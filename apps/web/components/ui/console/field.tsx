@@ -7,48 +7,84 @@ interface FieldControl {
   readonly id: string;
   readonly describedBy: string | undefined;
   readonly invalid: boolean;
+  readonly required: boolean;
 }
 
 const FieldContext = createContext<FieldControl | null>(null);
 
+type ControlProps = {
+  id?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: ComponentProps<"input">["aria-invalid"];
+  required?: boolean;
+};
+
 /**
  * The accessibility props a control inside a `Field` takes from it: its id (the label's target;
- * set an id on the Field, not the control), the hint and error as its description, and
- * `aria-invalid` while there is an error. A description or `aria-invalid` the control sets itself
- * is kept. Outside a Field the control's own props pass through.
+ * set an id on the Field, not the control), the hint and error as its description,
+ * `aria-invalid` while there is an error, and `required`. A description, `aria-invalid` or
+ * `required` the control sets itself is kept. Outside a Field the control's own props pass through.
  */
 export function useFieldControl(props: {
   readonly id?: string | undefined;
   readonly "aria-describedby"?: string | undefined;
   readonly "aria-invalid"?: ComponentProps<"input">["aria-invalid"];
-}): {
-  id?: string;
-  "aria-describedby"?: string;
-  "aria-invalid"?: ComponentProps<"input">["aria-invalid"];
-} {
+  readonly required?: boolean | undefined;
+}): ControlProps {
   const field = useContext(FieldContext);
   const id = field ? field.id : props.id;
   const describedBy =
     [props["aria-describedby"], field?.describedBy].filter(Boolean).join(" ") || undefined;
   const invalid = props["aria-invalid"] ?? (field?.invalid ? true : undefined);
+  const required = props.required ?? (field?.required ? true : undefined);
   return {
     ...(id === undefined ? {} : { id }),
     ...(describedBy === undefined ? {} : { "aria-describedby": describedBy }),
     ...(invalid === undefined ? {} : { "aria-invalid": invalid }),
+    ...(required === undefined ? {} : { required }),
   };
+}
+
+/** "(required)" after a label: screen readers hear the control's own `required` instead. */
+export function RequiredMark() {
+  return (
+    <span aria-hidden="true" className="ms-1 text-sm font-normal text-console-muted">
+      (required)
+    </span>
+  );
+}
+
+/**
+ * An error under a control or a group, announced when it appears (`role="alert"`) and pointed
+ * at by the control's `aria-describedby`, so it is read again on focus.
+ */
+export function FieldError({
+  id,
+  children,
+}: {
+  readonly id: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <p id={id} role="alert" className="m-0 text-sm font-medium text-console-danger">
+      {children}
+    </p>
+  );
 }
 
 /**
  * One form control with its label above it, an optional hint and an error. The control (a
- * `TextInput`, `Textarea` or `Select` from ./inputs) is the child; it is labelled and described
- * through context, so the field needs no ids. Checkboxes, radios and switches carry their own
- * label inline instead (KOBE-283): use them outside a Field, or in a `ChoiceGroup`.
+ * `TextInput`, `Textarea` or `Select` from ./inputs) is the child; it is labelled, described and
+ * marked required through context, so the field needs no ids. Checkboxes, radios and switches
+ * carry their own label inline instead (KOBE-283): use them outside a Field, or in a
+ * `ChoiceGroup`.
  */
 export function Field({
   id: ownId,
   label,
   hint,
   error,
+  required = false,
   children,
   className,
 }: {
@@ -57,6 +93,8 @@ export function Field({
   readonly label: ReactNode;
   readonly hint?: ReactNode;
   readonly error?: ReactNode;
+  /** Marks the label and sets `required` on the control. */
+  readonly required?: boolean;
   readonly children: ReactNode;
   readonly className?: string;
 }) {
@@ -69,6 +107,7 @@ export function Field({
     <div data-slot="console-field" className={cn("flex min-w-0 flex-col gap-1", className)}>
       <label htmlFor={id} className="font-medium">
         {label}
+        {required && <RequiredMark />}
       </label>
       {hint && (
         <p id={hintId} className="m-0 text-sm text-console-muted">
@@ -76,15 +115,11 @@ export function Field({
         </p>
       )}
       <FieldContext.Provider
-        value={{ id, describedBy: describedBy || undefined, invalid: !!error }}
+        value={{ id, describedBy: describedBy || undefined, invalid: !!error, required }}
       >
         {children}
       </FieldContext.Provider>
-      {error && (
-        <p id={errorId} className="m-0 text-sm font-medium text-console-danger">
-          {error}
-        </p>
-      )}
+      {error && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   );
 }

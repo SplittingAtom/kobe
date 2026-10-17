@@ -135,3 +135,103 @@ describe("Switch", () => {
     expect(sw.getAttribute("aria-checked")).toBe("false");
   });
 });
+
+describe("required and errors (review S4)", () => {
+  it("a required Field marks its label and makes its control required", () => {
+    render(
+      <Field label="Email address" required>
+        <TextInput type="email" />
+      </Field>,
+    );
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    expect(input.required).toBe(true);
+    // The visible marker is hidden from screen readers: they hear the control's own "required".
+    const mark = screen.getByText("(required)");
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    expect(mark.closest("label")?.getAttribute("for")).toBe(input.id);
+  });
+
+  it("an error is announced when it appears", () => {
+    const { rerender } = render(
+      <Field label="Email address">
+        <TextInput />
+      </Field>,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(
+      <Field label="Email address" error="Enter an email address.">
+        <TextInput />
+      </Field>,
+    );
+    expect(screen.getByRole("alert").textContent).toBe("Enter an email address.");
+  });
+
+  it("a ChoiceGroup takes required (its radios) and an error (described, invalid, announced)", () => {
+    render(
+      <ChoiceGroup legend="Scope" required error="Pick a scope.">
+        <Radio name="scope" value="team" label="Team" />
+        <Radio name="scope" value="site" label="Site" />
+      </ChoiceGroup>,
+    );
+    const group = screen.getByRole("group", { name: /Scope/ });
+    expect(group.getAttribute("aria-invalid")).toBe("true");
+    expect(description(group)).toBe("Pick a scope.");
+    expect(screen.getByRole("alert").textContent).toBe("Pick a scope.");
+    for (const radio of within(group).getAllByRole("radio") as HTMLInputElement[]) {
+      expect(radio.required).toBe(true);
+    }
+  });
+
+  it("checkboxes in a required group are not each required (that would demand all of them)", () => {
+    render(
+      <ChoiceGroup legend="Weekdays" required>
+        <Checkbox label="Mon" />
+        <Checkbox label="Tue" />
+      </ChoiceGroup>,
+    );
+    for (const box of screen.getAllByRole("checkbox") as HTMLInputElement[]) {
+      expect(box.required).toBe(false);
+    }
+  });
+
+  it("primitive choices opt out of the legacy fieldset spacing (review S2)", () => {
+    render(
+      <ChoiceGroup legend="Period">
+        <Radio name="p" label="30 days" />
+      </ChoiceGroup>,
+    );
+    // The legacy rule in app/admin/admin-global.css skips labels with a data-slot.
+    expect(screen.getByText("30 days").closest("label")?.dataset["slot"]).toBe(
+      "console-choice-label",
+    );
+  });
+});
+
+describe("focus rings (review S1)", () => {
+  it("every focusable primitive carries its own ring", () => {
+    render(
+      <>
+        <TextInput aria-label="Name" />
+        <Select aria-label="Role">
+          <option>Member</option>
+        </Select>
+        <Textarea aria-label="Notes" />
+        <Checkbox label="Read only" />
+        <Switch label="Memory" />
+      </>,
+    );
+    for (const el of [
+      screen.getByRole("textbox", { name: "Name" }),
+      screen.getByRole("combobox", { name: "Role" }),
+      screen.getByRole("textbox", { name: "Notes" }),
+      screen.getByRole("checkbox"),
+      screen.getByRole("switch"),
+    ]) {
+      expect(el.className, el.tagName).toContain("focus-visible:outline-console-accent");
+    }
+    // Form-control boundaries use the 3:1 token (review M1), not the divider colour.
+    expect(screen.getByRole("textbox", { name: "Name" }).className).toContain(
+      "border-console-control",
+    );
+  });
+});
