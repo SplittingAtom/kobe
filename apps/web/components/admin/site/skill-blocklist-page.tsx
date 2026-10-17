@@ -9,10 +9,30 @@ import {
   unblockSkillHash,
   type BlockedSkill,
 } from "../../../lib/admin/api/site/skill-blocklist";
+import {
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
-import styles from "../admin.module.css";
+
+/** The list's heading: focus lands here after a removal (the list reloads from its first page). */
+const HEADING = "blocked-hashes";
 
 /**
  * The site skill blocklist (spec D22; `/v1/site/skill-blocklist`, KOBE-81): bundle hashes
@@ -24,20 +44,19 @@ export function SkillBlocklistPage() {
   const mutation = useMutation();
   return (
     <>
-      <h1>Skill blocklist</h1>
-      <p className={styles.hint}>
-        A skill bundle is identified by the SHA-256 of its canonical bundle, shown on each skill
-        version. Blocking a hash stops that exact bundle everywhere on the site: it can&apos;t be
-        uploaded again or approved by a team, and versions already uploaded are left out of runs
-        from the next run on, in every team. Removing the hash lifts the block.
-      </p>
+      <PageHeader
+        title="Skill blocklist"
+        description="A skill bundle is identified by the SHA-256 of its canonical bundle, shown on each skill version. Blocking a hash stops that exact bundle everywhere on the site: it can't be uploaded again or approved by a team, and versions already uploaded are left out of runs from the next run on, in every team. Removing the hash lifts the block."
+      />
       <BlockForm mutation={mutation} onAdded={() => setGeneration((g) => g + 1)} />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <BlockedList
-        key={generation}
-        mutation={mutation}
-        onRemoved={() => setGeneration((g) => g + 1)}
-      />
+      <Section id={HEADING} title="Blocked skill hashes">
+        <BlockedList
+          key={generation}
+          mutation={mutation}
+          onRemoved={() => setGeneration((g) => g + 1)}
+        />
+      </Section>
     </>
   );
 }
@@ -73,31 +92,31 @@ function BlockForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={styles.form} aria-label="Block a hash">
-      <label>
-        Bundle hash (SHA-256)
-        <input
-          required
-          maxLength={80}
-          spellCheck={false}
-          autoComplete="off"
-          value={hash}
-          onChange={(e) => setHash(e.target.value)}
-        />
-      </label>
-      <label>
-        Reason
-        <input
-          required
-          maxLength={REASON_MAX}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-      </label>
-      {hashError ? <p role="alert">{hashError}</p> : null}
-      <button type="submit" disabled={mutation.pending}>
-        Block hash
-      </button>
+    <form onSubmit={onSubmit} aria-label="Block a hash">
+      <FormRow>
+        <Field label="Bundle hash (SHA-256)" error={hashError}>
+          <TextInput
+            required
+            maxLength={80}
+            spellCheck={false}
+            autoComplete="off"
+            className="w-[36rem] max-w-full font-mono"
+            value={hash}
+            onChange={(e) => setHash(e.target.value)}
+          />
+        </Field>
+        <Field label="Reason">
+          <TextInput
+            required
+            maxLength={REASON_MAX}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </Field>
+        <Button type="submit" variant="primary" disabled={mutation.pending}>
+          Block hash
+        </Button>
+      </FormRow>
     </form>
   );
 }
@@ -115,6 +134,7 @@ function BlockedList({
     readonly cursor: string | null;
   } | null>(null);
   const paging = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
 
   return (
     <ResourceView state={state} label="blocked hashes">
@@ -122,13 +142,23 @@ function BlockedList({
         const entries = [...first.entries, ...(more?.entries ?? [])];
         const cursor = more ? more.cursor : first.nextCursor;
 
-        async function remove(entry: BlockedSkill) {
-          if (!confirmed(`Remove ${entry.contentHash.slice(0, 12)}… from the blocklist?`)) return;
+        async function remove(entry: BlockedSkill, trigger: HTMLElement | null) {
+          const yes = await confirm(
+            {
+              title: `Remove ${entry.contentHash.slice(0, 12)}… from the blocklist?`,
+              confirmLabel: "Remove from blocklist",
+            },
+            trigger,
+          );
+          if (!yes) return;
           const done = await mutation.run(
             () => unblockSkillHash(entry.contentHash),
             () => "Removed from the blocklist.",
           );
-          if (done) onRemoved();
+          if (done) {
+            document.getElementById(HEADING)?.focus();
+            onRemoved();
+          }
         }
 
         async function loadMore() {
@@ -145,53 +175,59 @@ function BlockedList({
           });
         }
 
-        if (entries.length === 0) return <p>No hashes are blocked.</p>;
+        if (entries.length === 0) {
+          return (
+            <>
+              <EmptyState title="No hashes are blocked." />
+              {confirmDialog}
+            </>
+          );
+        }
         return (
-          <>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Blocked skill hashes</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Hash</th>
-                    <th scope="col">Reason</th>
-                    <th scope="col">Added</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e) => (
-                    <tr key={e.contentHash}>
-                      <th scope="row">
-                        <code>{e.contentHash}</code>
-                      </th>
-                      <td>{e.reason}</td>
-                      <td>
-                        <DateTime value={e.addedAt} />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          disabled={mutation.pending}
-                          onClick={() => void remove(e)}
-                        >
-                          Remove<span className={styles.visuallyHidden}> {e.contentHash}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div>
+            <Table caption="Blocked skill hashes" hideCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Hash</TableHeader>
+                  <TableHeader>Reason</TableHeader>
+                  <TableHeader>Added</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {entries.map((e) => (
+                  <TableRow key={e.contentHash}>
+                    <TableRowHeader>
+                      <code className="break-all font-normal">{e.contentHash}</code>
+                    </TableRowHeader>
+                    <TableCell>{e.reason}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <DateTime value={e.addedAt} />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={mutation.pending}
+                        onClick={(ev) => void remove(e, eventTrigger(ev))}
+                      >
+                        Remove<span className="sr-only"> {e.contentHash}</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
             <MutationStatus error={paging.error} notice={null} />
             {cursor ? (
-              <button type="button" disabled={paging.pending} onClick={() => void loadMore()}>
+              <Button disabled={paging.pending} onClick={() => void loadMore()}>
                 Load more
-              </button>
+              </Button>
             ) : null}
-          </>
+            {confirmDialog}
+          </div>
         );
       }}
     </ResourceView>

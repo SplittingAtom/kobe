@@ -10,7 +10,9 @@ import { MutationStatus } from "../error-notice";
 import { ISOLATION_EVENT } from "../isolation-banner";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
+import { Badge, Button, Notice, PageHeader } from "../../ui/console";
+
+const DL = "m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 [&_dd]:m-0 [&_dt]:font-medium";
 
 const STATE_LABEL = {
   verified: "Verified",
@@ -39,17 +41,17 @@ export function IsolationPage() {
 
   return (
     <>
-      <h1>Isolation</h1>
-      <p className={styles.hint}>
-        Kobe runs agents only in a gVisor or Kata sandbox. There is no way to turn this off.
-      </p>
+      <PageHeader
+        title="Isolation"
+        description="Kobe runs agents only in a gVisor or Kata sandbox. There is no way to turn this off."
+      />
       <ResourceView state={state} label="isolation status">
         {(initial) => <IsolationDetails status={fresh ?? initial} />}
       </ResourceView>
       <p>
-        <button type="button" onClick={() => void recheck()} disabled={mutation.pending}>
+        <Button onClick={() => void recheck()} disabled={mutation.pending}>
           {mutation.pending ? "Checking…" : "Re-check now"}
-        </button>
+        </Button>
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </>
@@ -59,9 +61,21 @@ export function IsolationPage() {
 function IsolationDetails({ status }: { readonly status: IsolationStatus }) {
   return (
     <>
-      <dl className={styles.dl} aria-label="Isolation status">
+      <dl className={DL} aria-label="Isolation status">
         <dt>Runtime check</dt>
-        <dd>{STATE_LABEL[status.state]}</dd>
+        <dd>
+          <Badge
+            tone={
+              status.state === "verified"
+                ? "running"
+                : status.state === "missing"
+                  ? "failed"
+                  : "neutral"
+            }
+          >
+            {STATE_LABEL[status.state]}
+          </Badge>
+        </dd>
         <dt>Agents</dt>
         <dd>{status.agentsEnabled ? "Enabled" : "Disabled"}</dd>
         <dt>RuntimeClass</dt>
@@ -94,31 +108,35 @@ function IsolationDetails({ status }: { readonly status: IsolationStatus }) {
 function Fix({ status }: { readonly status: Extract<IsolationStatus, { state: "missing" }> }) {
   const runtimeClass = status.runtimeClassName ?? "gvisor";
   return (
-    <section aria-labelledby="isolation-fix" className={styles.banner}>
-      <h2 id="isolation-fix">Agents are disabled: isolation runtime missing</h2>
-      <p>{status.message}</p>
-      <ol>
-        <li>
-          Install gVisor on every node, one node at a time (as root):{" "}
-          <code>sudo scripts/install-gvisor-k3s.sh</code>
-        </li>
-        <li>
-          Create the RuntimeClass once per cluster:{" "}
-          <code>kubectl apply -f charts/kobe/runtimeclass-gvisor.yaml</code>
-        </li>
-        <li>
-          Install the agent-sandbox controller: <code>scripts/install-agent-sandbox.sh</code>
-        </li>
-        <li>
-          Check that the chart value <code>isolation.runtimeClassName</code> names a RuntimeClass
-          that exists (<code>{runtimeClass}</code>) and that its handler is <code>runsc</code>{" "}
-          (gVisor) or <code>kata…</code> (Kata). The handler counts, not the name.
-        </li>
-        <li>Press “Re-check now”. Agents start working as soon as the check passes.</li>
-      </ol>
-      <p className={styles.hint}>
-        Details: <code>{status.docs}</code> in the Kobe repository.
-      </p>
+    <section aria-labelledby="isolation-fix" className="mt-4">
+      <Notice tone="warn" role="none">
+        <h2 id="isolation-fix" className="m-0 text-xl font-semibold">
+          Agents are disabled: isolation runtime missing
+        </h2>
+        <p>{status.message}</p>
+        <ol className="my-2 ps-5 [&_li]:my-1">
+          <li>
+            Install gVisor on every node, one node at a time (as root):{" "}
+            <code>sudo scripts/install-gvisor-k3s.sh</code>
+          </li>
+          <li>
+            Create the RuntimeClass once per cluster:{" "}
+            <code>kubectl apply -f charts/kobe/runtimeclass-gvisor.yaml</code>
+          </li>
+          <li>
+            Install the agent-sandbox controller: <code>scripts/install-agent-sandbox.sh</code>
+          </li>
+          <li>
+            Check that the chart value <code>isolation.runtimeClassName</code> names a RuntimeClass
+            that exists (<code>{runtimeClass}</code>) and that its handler is <code>runsc</code>{" "}
+            (gVisor) or <code>kata…</code> (Kata). The handler counts, not the name.
+          </li>
+          <li>Press “Re-check now”. Agents start working as soon as the check passes.</li>
+        </ol>
+        <p className="text-sm text-console-muted">
+          Details: <code>{status.docs}</code> in the Kobe repository.
+        </p>
+      </Notice>
     </section>
   );
 }

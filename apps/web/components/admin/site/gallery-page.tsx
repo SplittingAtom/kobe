@@ -13,7 +13,20 @@ import { GalleryScoreCell } from "../gallery-score";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { useState } from "react";
-import styles from "../admin.module.css";
+import {
+  Button,
+  EmptyState,
+  Field,
+  PageHeader,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 
 /**
  * Gallery agents (spec D19/D21; `/v1/site/gallery/agents`), read-only: they come from the
@@ -30,74 +43,74 @@ export function GalleryPage() {
 
   return (
     <>
-      <h1>Gallery agents</h1>
-      <p className={styles.hint}>
-        Gallery agents are available to every team, read-only; teams fork them to change them. They
-        come from the definitions shipped with Kobe and update with each release. A team can suspend
-        a gallery agent for itself in its agent inventory.
-      </p>
-      <p className={styles.hint}>
+      <PageHeader
+        title="Gallery agents"
+        description="Gallery agents are available to every team, read-only; teams fork them to change them. They come from the definitions shipped with Kobe and update with each release. A team can suspend a gallery agent for itself in its agent inventory."
+      />
+      <p className="text-sm text-console-muted">
         Orbit scores are published for every team to see. An eval runs in a team you belong to (its
         sandbox runtime and model budget) and takes several minutes; reload to see the score.
       </p>
       {myTeams.length > 0 && (
-        <p>
-          <label>
-            Run evals in team{" "}
-            <select value={hostTeam} onChange={(e) => setTeamId(e.target.value)}>
-              {myTeams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </p>
+        <Field label="Run evals in team" className="my-4 w-fit">
+          <Select value={hostTeam} onChange={(e) => setTeamId(e.target.value)}>
+            {myTeams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
       )}
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="gallery agents">
         {(agents) =>
           agents.length === 0 ? (
-            <p>The gallery is empty.</p>
+            <EmptyState title="The gallery is empty." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Gallery</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Agent</th>
-                    <th scope="col">Slug</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">Orbit score</th>
-                    <th scope="col">Updated</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.map((a) => (
-                    <tr key={a.id}>
-                      <th scope="row">
-                        {a.name}
-                        {a.description && <div className={styles.hint}>{a.description}</div>}
-                      </th>
-                      <td>
-                        <code>{a.slug}</code>
-                      </td>
-                      <td>{agentStatusLabel(a)}</td>
-                      <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
-                      <td>
-                        <GalleryScoreCell agentId={a.id} state={scores.state} />
-                      </td>
-                      <td>
-                        <DateTime value={a.updatedAt} />
-                      </td>
-                      <td>
+            <Table caption="Gallery">
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Agent</TableHeader>
+                  <TableHeader>Slug</TableHeader>
+                  <TableHeader>Status</TableHeader>
+                  <TableHeader>Version</TableHeader>
+                  <TableHeader>Orbit score</TableHeader>
+                  <TableHeader>Updated</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {agents.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableRowHeader>
+                      {a.name}
+                      {a.description && (
+                        <div className="text-sm font-normal text-console-muted">
+                          {a.description}
+                        </div>
+                      )}
+                    </TableRowHeader>
+                    <TableCell>
+                      <code>{a.slug}</code>
+                    </TableCell>
+                    <TableCell>{agentStatusLabel(a)}</TableCell>
+                    <TableCell>
+                      {a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}
+                    </TableCell>
+                    <TableCell>
+                      <GalleryScoreCell agentId={a.id} state={scores.state} />
+                    </TableCell>
+                    <TableCell>
+                      <DateTime value={a.updatedAt} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
                         {a.currentVersion !== null && hostTeam !== "" && (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
                             disabled={mutation.pending}
                             onClick={() =>
                               void mutation.run(
@@ -107,18 +120,20 @@ export function GalleryPage() {
                               )
                             }
                           >
-                            Run eval<span className={styles.visuallyHidden}> for {a.name}</span>
-                          </button>
-                        )}{" "}
-                        <a href={galleryExportHref(a.id)} download={`${a.slug}.md`}>
-                          Export<span className={styles.visuallyHidden}> {a.name}</span>
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                            Run eval<span className="sr-only"> for {a.name}</span>
+                          </Button>
+                        )}
+                        <Button size="sm" asChild>
+                          <a href={galleryExportHref(a.id)} download={`${a.slug}.md`}>
+                            Export<span className="sr-only"> {a.name}</span>
+                          </a>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>

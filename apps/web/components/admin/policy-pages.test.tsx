@@ -26,10 +26,13 @@ const rule = (
   ...extra,
 });
 
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
 beforeEach(() =>
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   ),
 );
 afterEach(() => {

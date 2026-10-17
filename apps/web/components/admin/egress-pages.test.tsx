@@ -28,10 +28,13 @@ const CEILING = {
   presets: ["package_registries", "git_hosts", "web_search"],
 };
 
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
 beforeEach(() =>
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   ),
 );
 afterEach(() => {
@@ -78,6 +81,10 @@ describe("Site egress ceiling", () => {
     await userEvent.click(screen.getByRole("button", { name: "Remove all package registries" }));
     await screen.findByText(/all out of the ceiling/);
     await userEvent.click(screen.getByRole("button", { name: "Delete *.example.com" }));
+    expect(summary(calls)).not.toContain("DELETE /v1/site/egress-ceiling/*.example.com");
+    expect(await answerConfirm("Delete *.example.com?", "Delete *.example.com")).toMatch(
+      /Every team that enabled it loses it/,
+    );
     await screen.findByText("Deleted *.example.com.");
     expect(summary(calls)).toContain("DELETE /v1/site/egress-ceiling/*.example.com");
   });
