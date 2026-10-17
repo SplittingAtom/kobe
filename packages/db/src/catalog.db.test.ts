@@ -38,6 +38,8 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   artifacts: threadBound("artifacts"),
   artifact_versions: threadBound("artifact_versions"),
   files: threadBound("files"),
+  // A rating's comment is thread content (KOBE-275).
+  answer_feedback: threadBound("answer_feedback"),
   // Memory is not thread content (KOBE-154): team grants only, user grants by owner.
   memory_docs:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
