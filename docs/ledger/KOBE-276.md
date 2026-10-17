@@ -102,3 +102,6 @@ API done and tested (`services/server/src/eval-cases.db.test.ts`):
   read-only, expiry); probe fixtures (`probe-fixtures/agents.ts`, cross-team probe green);
   catalog pins; `eval-cases.db.test.ts` "who reads cases" (member, reader, other builder, team
   admin 403; other team 404; site admin refused; personal agent hidden from team admin).
+- Runs (2026-10-17): format, lint, typecheck green; `turbo test` 27/27; `@kobe/db test:db` 49 files,
+  1206 tests; `@kobe/server test:db` 115 files, 1562 tests (after the two 275 test updates);
+  `test-image.sh` 39/39 on the remote Docker host.
