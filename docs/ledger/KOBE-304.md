@@ -97,3 +97,32 @@
 - Runs (2026-10-17): format, lint, typecheck, hygiene, wording, license OK; unit tests all green
   (web: 13 timing tests flaked under the parallel turbo run, green alone and in a full web run);
   `@kobe/db test:db` 1221 passed; `@kobe/server test:db` 1578 passed after the KOBE-276 fix.
+
+## Security review follow-up (2026-10-17)
+
+- **S1–S3 (one root cause):** the sandbox now applies a move as a **local rename**. Each move is
+  journalled (`workspace_moves`, 0116 generated + 0117 custom RLS; probe fixture; trimmed after
+  7 days; offboarding deletes it). The agent fetches `GET moves?since=&after=` and renames each
+  source to its destination before its pull (an awake sandbox is nudged by a `workspace.moved`
+  frame via a `mv` bus hint to the replica holding its socket, only if it announced
+  `workspace_moves`), and before its restore on wake (last pulled revision saved in
+  `.kobe/workspace-sync.json`). Symlink-safe: own areas only, source and parents lstat-checked,
+  real parent paths re-checked under the volume's real root right before `rename(2)`; an existing
+  destination is refused and logged, the pull then converges as before (conflict copy). Replay is
+  idempotent (a gone source is a no-op). A row whose sha256 equals the local base is never
+  downloaded; local edits stay newer work and are pushed onto the moved row.
+- **Budget:** besides 60 moves/min, a move starts only while the member's last minute of moves is
+  under 20 000 files and 20 GiB (429 `rate_limited`).
+- **Retry:** a repeat of a move done within the hour answers 200 as it did (not re-audited).
+- **Nits:** N1 prune realpath re-check; N3 comment; N5 NFC-equal sibling clash (409); N6 "Rename it
+  first" for a moved file whose own name breaks the rules; N7 documented. N8 (no read path for the
+  hold copy, as `workspace_files`), N9 (timing) and N10 (delete still answers 409 `legal_hold`)
+  stay open for the coordinator.
+- **Tests added:** `workspace-move-limits.db.test.ts` (journal, hint, budget, retry, 10 001 files,
+  507, lock timeout 503 + Retry-After, 413, malformed JSON, other team, non-ASCII, NFC/NFD,
+  `%2e%2e`, rename-first, long schedule prompt), `GET moves` in `workspace-sync.db.test.ts`,
+  `moves.test.ts`, `sync.test.ts` (whole-tree rename incl. caches and unsynced edits, file rename,
+  destination exists, replay on wake), `agent.wire.test.ts` (capability and hint). ENOSPC: moot
+  with renames (no second copy); not simulated.
+- **Tripwire test** (`agent.models.test.ts`, untouched): a 1 ms poll racing Pi's start; passes
+  alone and in the package run (4/4 and full suite); a load-dependent flake, not KOBE-304.
