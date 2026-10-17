@@ -10,7 +10,7 @@ import { RolesPage } from "./site/roles-page";
 import { SettingsPage } from "./site/settings-page";
 import { TeamsPage } from "./site/teams-page";
 import { UsersPage } from "./site/users-page";
-import { ME, renderSite, stubApi, summary } from "./testing";
+import { ME, answerConfirm, renderSite, stubApi, summary } from "./testing";
 
 const user = (id: string, name: string, siteRole: string, deactivatedAt: string | null = null) => ({
   id,
@@ -36,9 +36,12 @@ const forbidden = [
 ] as const;
 
 beforeEach(() => {
+  // The console asks in its own dialog (useConfirm); the native one must never be used.
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   );
 });
 afterEach(() => {
@@ -86,6 +89,9 @@ describe("Users", () => {
     });
     renderSite(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
+    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    const asked = await answerConfirm("Deactivate Bob?", "Deactivate");
+    expect(asked).toMatch(/Every session ends now/);
     const status = await screen.findByText(/Bob is deactivated/);
     expect(status.textContent).toMatch(/no active team admin: Finance/);
     expect(status.textContent).toMatch(/sandboxes/);
@@ -98,15 +104,26 @@ describe("Users", () => {
     );
   });
 
-  it("does nothing when the confirmation is declined", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false),
-    );
+  it("does nothing when the confirmation is declined, and returns focus to the button", async () => {
     const calls = stubApi({ "GET /v1/site/users": [200, USERS] });
     renderSite(<UsersPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
+    const button = await screen.findByRole("button", { name: "Deactivate Bob" });
+    await userEvent.click(button);
+    await answerConfirm("Deactivate Bob?", "Cancel");
     expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+
+  it("asks before reactivating", async () => {
+    const calls = stubApi({
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/users/u-gone/reactivate": [200, { user_id: "u-gone", deactivated: false }],
+    });
+    renderSite(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Reactivate Gus" }));
+    expect(await answerConfirm("Reactivate Gus?", "Reactivate")).toMatch(/sign in again/);
+    await screen.findByText("Gus can sign in again.");
+    expect(summary(calls)).toContain("POST /v1/site/users/u-gone/reactivate");
   });
 
   it("renders a 403 from the API as the answer, whatever the UI showed", async () => {
@@ -128,6 +145,7 @@ describe("Users", () => {
     });
     renderSite(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
+    await answerConfirm("Deactivate Bob?", "Deactivate");
     expect((await screen.findByRole("alert")).textContent).toMatch(/No Kobe user with that id/);
   });
 });
@@ -176,6 +194,10 @@ describe("Invitations", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resend to new@x.io" }));
     await screen.findByText("Invitation sent to new@x.io.");
     await userEvent.click(screen.getByRole("button", { name: "Revoke invitation to new@x.io" }));
+    expect(summary(calls)).not.toContain("DELETE /v1/site/invites/i-1");
+    expect(await answerConfirm("Revoke the invitation to new@x.io?", "Revoke")).toMatch(
+      /link stops working/,
+    );
     await screen.findByText("Revoked the invitation to new@x.io.");
     expect(summary(calls)).toContain("POST /v1/site/invites/i-1/resend");
     expect(summary(calls)).toContain("DELETE /v1/site/invites/i-1");
@@ -223,6 +245,8 @@ describe("Site roles", () => {
     });
     renderSite(<RolesPage />, "owner");
     await userEvent.click(await screen.findByRole("button", { name: "Revoke Admin from Abe" }));
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(await answerConfirm("Revoke Admin from Abe?", "Revoke Admin")).toMatch(/become a User/);
     await screen.findByText("Abe is now a User.");
     const grant = await screen.findByRole("form", { name: "Grant Admin" });
     // Only active plain users are offered.
@@ -238,6 +262,18 @@ describe("Site roles", () => {
       ["/v1/site/roles/u-admin", { role: "user" }],
       ["/v1/site/roles/u-bob", { role: "admin" }],
     ]);
+  });
+  it("asks before transferring ownership and sends nothing when cancelled", async () => {
+    const calls = stubApi({
+      "GET /v1/site/roles": [200, ROLES],
+      "GET /v1/site/users": [200, USERS],
+    });
+    renderSite(<RolesPage />, "owner");
+    const form = await screen.findByRole("form", { name: "Transfer ownership" });
+    await userEvent.selectOptions(within(form).getByLabelText("New Owner"), "u-bob");
+    await userEvent.click(within(form).getByRole("button", { name: "Transfer ownership" }));
+    expect(await answerConfirm("Make Bob the Owner?", "Cancel")).toMatch(/Only they can undo/);
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 });
 
@@ -405,6 +441,10 @@ describe("Web search setting", () => {
     });
     renderSite(<SettingsPage />, "admin");
     await userEvent.click(await screen.findByRole("button", { name: "Remove provider" }));
+    await answerConfirm("Remove the web search provider and its key?", "Cancel");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Remove provider" }));
+    await answerConfirm("Remove the web search provider and its key?", "Remove provider");
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
   });
 });

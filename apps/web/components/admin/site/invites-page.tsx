@@ -9,10 +9,32 @@ import {
   type SiteInvite,
   type InviteSent,
 } from "../../../lib/admin/api/site/invites";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
+import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
+
+/** The list's heading: focus lands here when a revoke empties the list. */
+const HEADING = "open-invitations";
 
 function sentNotice(result: InviteSent): string {
   return result.emailSent
@@ -24,7 +46,12 @@ function sentNotice(result: InviteSent): string {
 export function SiteInvitesPage() {
   const { state, reload } = useResource(listSiteInvites);
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const [email, setEmail] = useState("");
+  const focus = useFocusAfterRemoval(
+    state.status === "ready" ? state.data.map((i) => i.id) : null,
+    HEADING,
+  );
 
   async function onInvite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -38,98 +65,120 @@ export function SiteInvitesPage() {
     if (await mutation.run(() => resendSiteInvite(invite.id), sentNotice)) reload();
   }
 
-  async function revoke(invite: SiteInvite) {
-    if (!confirmed(`Revoke the invitation to ${invite.email}? The link stops working.`)) return;
+  async function revoke(invite: SiteInvite, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Revoke the invitation to ${invite.email}?`,
+        description: "The link stops working.",
+        confirmLabel: "Revoke",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => revokeSiteInvite(invite.id),
       () => `Revoked the invitation to ${invite.email}.`,
     );
-    if (done) reload();
+    if (done) {
+      focus.removed(invite.id, index);
+      reload();
+    }
   }
 
   return (
     <>
-      <h1>Invitations</h1>
-      <p className={styles.hint}>
-        An invitation brings someone into Kobe. Team admins then invite them into their teams.
-      </p>
-      <form onSubmit={onInvite} className={styles.form} aria-label="Invite someone">
-        <label>
-          Email address
-          <input
-            type="email"
-            name="email"
-            required
-            maxLength={254}
-            autoComplete="off"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </label>
-        <button type="submit" disabled={mutation.pending}>
-          Send invitation
-        </button>
+      <PageHeader
+        title="Invitations"
+        description="An invitation brings someone into Kobe. Team admins then invite them into their teams."
+      />
+      <form onSubmit={onInvite} aria-label="Invite someone">
+        <FormRow>
+          <Field label="Email address">
+            <TextInput
+              type="email"
+              name="email"
+              required
+              maxLength={254}
+              autoComplete="off"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            Send invitation
+          </Button>
+        </FormRow>
       </form>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="invitations">
-        {(invites) =>
-          invites.length === 0 ? (
-            <p>No open invitations.</p>
-          ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Open invitations</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Email</th>
-                    <th scope="col">Invited by</th>
-                    <th scope="col">Sent</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invites.map((i) => (
-                    <tr key={i.id}>
-                      <th scope="row">{i.email}</th>
-                      <td>{i.invitedBy.name}</td>
-                      <td>
-                        <DateTime value={i.createdAt} />
-                      </td>
-                      <td>
-                        <DateTime value={i.expiresAt} />
-                      </td>
-                      <td>{i.status === "expired" ? "Expired" : "Pending"}</td>
-                      <td>
-                        <div className={styles.actions}>
-                          <button
-                            type="button"
-                            disabled={mutation.pending}
-                            onClick={() => void resend(i)}
-                          >
-                            Resend<span className={styles.visuallyHidden}> to {i.email}</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={mutation.pending}
-                            onClick={() => void revoke(i)}
-                          >
-                            Revoke
-                            <span className={styles.visuallyHidden}> invitation to {i.email}</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </ResourceView>
+      <Section id={HEADING} title="Open invitations">
+        <ResourceView state={state} label="invitations">
+          {(invites) =>
+            invites.length === 0 ? (
+              <EmptyState title="No open invitations." />
+            ) : (
+              <div ref={focus.container}>
+                <Table caption="Open invitations" hideCaption>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeader>Email</TableHeader>
+                      <TableHeader>Invited by</TableHeader>
+                      <TableHeader>Sent</TableHeader>
+                      <TableHeader>Expires</TableHeader>
+                      <TableHeader>Status</TableHeader>
+                      <TableHeader>
+                        <span className="sr-only">Actions</span>
+                      </TableHeader>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {invites.map((i, index) => (
+                      <TableRow key={i.id}>
+                        <TableRowHeader>{i.email}</TableRowHeader>
+                        <TableCell>{i.invitedBy.name}</TableCell>
+                        <TableCell>
+                          <DateTime value={i.createdAt} />
+                        </TableCell>
+                        <TableCell>
+                          <DateTime value={i.expiresAt} />
+                        </TableCell>
+                        <TableCell>
+                          {i.status === "expired" ? (
+                            <Badge tone="attention">Expired</Badge>
+                          ) : (
+                            <Badge>Pending</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Button
+                              size="sm"
+                              disabled={mutation.pending}
+                              onClick={() => void resend(i)}
+                            >
+                              Resend<span className="sr-only"> to {i.email}</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              data-remove=""
+                              disabled={mutation.pending}
+                              onClick={(e) => void revoke(i, index, eventTrigger(e))}
+                            >
+                              Revoke
+                              <span className="sr-only"> invitation to {i.email}</span>
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )
+          }
+        </ResourceView>
+      </Section>
+      {confirmDialog}
     </>
   );
 }

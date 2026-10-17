@@ -8,10 +8,19 @@ import {
   type SiteWebSearch,
   type WebSearchProviderId,
 } from "../../../lib/admin/api/site/web-search";
+import {
+  Button,
+  Checkbox,
+  ChoiceGroup,
+  Field,
+  Select,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * Web search provider (`/v1/site/web-search`, KOBE-113): which provider the `web_search` tool
@@ -36,6 +45,7 @@ function WebSearchForm({
   readonly onSaved: () => void;
 }) {
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const [provider, setProvider] = useState<WebSearchProviderId | "">(setting.provider ?? "");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(setting.configured ? setting.enabled : true);
@@ -60,8 +70,15 @@ function WebSearchForm({
     }
   }
 
-  async function onRemove() {
-    if (!window.confirm("Remove the web search provider and its key?")) return;
+  async function onRemove(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: "Remove the web search provider and its key?",
+        confirmLabel: "Remove provider",
+      },
+      trigger,
+    );
+    if (!yes) return;
     if (
       await mutation.run(
         () => deleteSiteWebSearch(),
@@ -74,38 +91,39 @@ function WebSearchForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Web search">
-      <fieldset>
-        <legend>Web search</legend>
-        <label>
-          Search provider{" "}
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value as WebSearchProviderId | "")}
-          >
-            <option value="">Not set</option>
-            {setting.providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          API key{" "}
-          <input
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            placeholder={setting.hint ?? ""}
-            aria-describedby="web-search-hint"
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </label>
-        <label>
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />{" "}
-          Offer web search to teams
-        </label>
-        <p id="web-search-hint" className={styles.hint}>
+      <ChoiceGroup legend="Web search" stacked className="my-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Search provider">
+            <Select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as WebSearchProviderId | "")}
+            >
+              <option value="">Not set</option>
+              {setting.providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="API key">
+            <TextInput
+              type="password"
+              autoComplete="off"
+              value={apiKey}
+              placeholder={setting.hint ?? ""}
+              aria-describedby="web-search-hint"
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </Field>
+        </div>
+        <Checkbox
+          className="mt-2"
+          label="Offer web search to teams"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+        />
+        <p id="web-search-hint" className="m-0 mt-1 text-sm text-console-muted">
           {setting.hint
             ? `A key ending ${setting.hint} is stored. Leave the field empty to keep it. `
             : ""}
@@ -113,16 +131,23 @@ function WebSearchForm({
           {chosen ? ` Turning this on adds ${chosen.domain} to the egress ceiling.` : ""} Each team
           still chooses whether to use it.
         </p>
-      </fieldset>
-      <button type="submit" disabled={mutation.pending || !canSave}>
-        Save web search
-      </button>
-      {setting.configured && (
-        <button type="button" disabled={mutation.pending} onClick={onRemove}>
-          Remove provider
-        </button>
-      )}
+      </ChoiceGroup>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" variant="primary" disabled={mutation.pending || !canSave}>
+          Save web search
+        </Button>
+        {setting.configured && (
+          <Button
+            variant="danger"
+            disabled={mutation.pending}
+            onClick={(e) => void onRemove(eventTrigger(e))}
+          >
+            Remove provider
+          </Button>
+        )}
+      </div>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
+      {confirmDialog}
     </form>
   );
 }
