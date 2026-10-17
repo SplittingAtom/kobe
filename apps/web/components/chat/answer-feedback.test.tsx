@@ -156,8 +156,8 @@ describe("answer feedback (KOBE-275)", () => {
     const [only] = await answerBars(1);
     fake.failNext.set(
       `PUT /v1/runs/${r1}/feedback`,
-      new Response(JSON.stringify({ code: "legal_hold", message: "held" }), {
-        status: 409,
+      new Response(JSON.stringify({ code: "unavailable", message: "down" }), {
+        status: 503,
         headers: { "content-type": "application/json" },
       }),
     );

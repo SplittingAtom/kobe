@@ -64,6 +64,10 @@ export const answerFeedback = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     id: uuid().notNull().defaultRandom(),
+    /**
+     * The run's thread. Not tied to the run by a key (that would need a unique on runs): the only
+     * writer, `rateAnswer` (server `feedback/store.ts`), copies it from the run row.
+     */
     threadId: uuid().notNull(),
     runId: uuid().notNull(),
     /** The answer's last entry the member saw (optional): an entry of `thread_id`. */

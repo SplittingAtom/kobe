@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runTraceId } from "@kobe/protocol";
 import type { ScoreSink, TraceScore } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
+import type { GalleryDefinition } from "./gallery/definitions.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { runRetentionPass } from "./retention/index.js";
 import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
@@ -16,6 +18,11 @@ import type { Person } from "./testing/event-stream-fixture.js";
  * a Langfuse sink receives scores on the run's trace without the comment (capture off).
  */
 const ANY = { "if-match": "*" };
+const GALLERY: GalleryDefinition = {
+  key: "fixture-rated",
+  generation: 1,
+  file: "---\nname: Fixture Rated\ndescription: A fixture for the rating tests\n---\nYou answer.\n",
+};
 
 class RecordingSink implements ScoreSink {
   readonly calls: ({ op: "upsert"; score: TraceScore } | { op: "remove"; id: string })[] = [];
@@ -252,6 +259,30 @@ describe("who rates (ac-1)", () => {
     expect(left.rows).toEqual([{ user_id: x.author.id }]);
   });
 
+  it("lets a project-share reader rate, and nobody outside the project", async () => {
+    const x = await world();
+    const outsider = await f.member(x.w.team);
+    const project = await as(x.w.owner).post("/v1/projects", {
+      name: `P ${randomUUID().slice(0, 6)}`,
+      members_mode: "selected",
+      member_user_ids: [x.author.id, x.reader.id],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const moved = await as(x.author).post(`/v1/threads/${x.threadId}/move`, {
+      project_id: project.json.id,
+    });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+    expect((await rate(x.reader, x.runId, { rating: "up" })).status).toBe(404);
+    const shared = await as(x.author).post(`/v1/threads/${x.threadId}/share`, {
+      visibility: "project",
+    });
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    expect((await rate(x.reader, x.runId, { rating: "up" })).status).toBe(200);
+    expect((await mine(x.reader, x.threadId)).answers[0]?.feedback).toMatchObject({ rating: "up" });
+    expect((await rate(outsider, x.runId, { rating: "up" })).status).toBe(404);
+    expect((await as(outsider).get(`/v1/threads/${x.threadId}/feedback`)).status).toBe(404);
+  });
+
   it("never reaches another team's run", async () => {
     const x = await world();
     const y = await world();
@@ -269,74 +300,239 @@ describe("who rates (ac-1)", () => {
   });
 });
 
+/**
+ * Ratings of `agentId` by `n` fresh members in `teamId`, written directly (one thread and ended
+ * run each): enough raters for the totals without driving n sandboxes.
+ */
+async function seedRatings(
+  teamId: string,
+  agent: { scope: string; id: string; version: number | null },
+  n: number,
+  values: { rating: "up" | "down"; reasons?: string[]; model?: string | null },
+): Promise<string[]> {
+  const raters: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const userId = randomUUID();
+    await f.fx.admin.query(`INSERT INTO users (id, name, email) VALUES ($1, 'r', $2)`, [
+      userId,
+      `${userId}@rate.test`,
+    ]);
+    const thread = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO threads (team_id, owner_user_id, title) VALUES ($1, $2, 't') RETURNING id`,
+      [teamId, userId],
+    );
+    const threadId = thread.rows[0]?.id ?? "";
+    const run = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO runs (team_id, thread_id, trigger, status, started_at, ended_at)
+       VALUES ($1, $2, 'user', 'completed', now(), now()) RETURNING id`,
+      [teamId, threadId],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO answer_feedback (team_id, thread_id, run_id, user_id, rating, reasons,
+         agent_scope, agent_id, agent_version, model_alias)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10)`,
+      [
+        teamId,
+        threadId,
+        run.rows[0]?.id,
+        userId,
+        values.rating,
+        `{${(values.reasons ?? []).join(",")}}`,
+        agent.scope,
+        agent.id,
+        agent.version,
+        values.model ?? null,
+      ],
+    );
+    raters.push(userId);
+  }
+  return raters;
+}
+
+const totals = async (p: Person, agentId: string, query = "") => {
+  const res = await as(p).get(`/v1/agents/${agentId}/feedback${query}`);
+  expect(res.status, JSON.stringify(res.json)).toBe(200);
+  return res;
+};
+
+const WITHHELD = { enough: false, up: null, down: null, rate: null };
+
 describe("totals for agent owners (ac-3)", () => {
-  it("counts per version, model and reason, for owners and team admins only, with no content", async () => {
+  it("counts per version, model, reason and day over at least five other raters, with no content", async () => {
     const x = await world();
     await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "team" });
-    const second = await x.answer("second");
-    await rate(x.author, x.runId, {
-      rating: "down",
-      reasons: ["wrong", "too_slow"],
-      comment: "SECRET-1",
-    });
-    await rate(x.reader, x.runId, { rating: "down", reasons: ["wrong"], comment: "SECRET-2" });
-    await rate(x.author, second.runId, { rating: "up" });
-
-    const res = await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback`);
-    expect(res.status, JSON.stringify(res.json)).toBe(200);
-    expect(res.json).toMatchObject({
-      agent_id: x.agentId,
+    await rate(x.author, x.runId, { rating: "down", reasons: ["wrong"], comment: "SECRET-1" });
+    await rate(x.reader, x.runId, { rating: "down", reasons: ["unsafe"], comment: "SECRET-2" });
+    // Two real raters: below the minimum, nothing but "not enough" shows.
+    const few = await totals(x.w.owner, x.agentId);
+    expect(few.json).toMatchObject({
       bucket: "day",
-      totals: { up: 1, down: 2, rate: 1 / 3 },
+      min_raters: 5,
+      totals: WITHHELD,
+      versions: [],
+      series: [],
+    });
+
+    const agent = { scope: "team", id: x.agentId, version: 1 };
+    await seedRatings(x.w.team, agent, 4, { rating: "down", reasons: ["wrong"], model: "fast" });
+    await seedRatings(x.w.team, agent, 5, { rating: "up", model: "smart" });
+    const res = await totals(x.w.owner, x.agentId);
+    expect(res.json).toMatchObject({
+      totals: { enough: true, up: 5, down: 6, rate: 5 / 11 },
       versions: [
         {
           version: 1,
-          up: 1,
-          down: 2,
-          reasons: { wrong: 2, too_slow: 1, unsafe: 0, ignored_instructions: 0, other: 0 },
-          models: [{ model: null, up: 1, down: 2 }],
+          enough: true,
+          up: 5,
+          down: 6,
+          // wrong: 5 raters (the author and four); unsafe: one rater, withheld.
+          reasons: {
+            wrong: 5,
+            unsafe: null,
+            too_slow: null,
+            ignored_instructions: null,
+            other: null,
+          },
+          // fast: four raters, withheld; smart: five; the two real ones (model unknown) withheld.
+          models: [{ model: "smart", enough: true, up: 5, down: 0, rate: 1 }],
         },
       ],
     });
     expect(res.json.series).toHaveLength(1);
-    // Counts only: no comment, thread, run, entry or member is reachable.
-    for (const secret of ["SECRET", x.threadId, x.runId, second.runId, x.author.id, x.reader.id]) {
+    for (const secret of ["SECRET", x.threadId, x.runId, x.author.id, x.reader.id]) {
       expect(res.text).not.toContain(secret);
     }
+    // Days only.
+    expect((await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?bucket=hour`)).status).toBe(
+      400,
+    );
+    expect(
+      (await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?from=yesterday`)).status,
+    ).toBe(400);
+  });
 
-    // A plain member and a builder who doesn't own the agent are refused; its builder-owner reads.
+  it("doesn't count the caller among the raters, and shows a one-rater agent nothing", async () => {
+    const x = await world();
+    await f.fx.admin.query(
+      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      [x.w.team, x.reader.id],
+    );
+    const own = await publishedAgent(x.reader);
+    const agent = { scope: "team", id: own, version: 1 };
+    // One other rater: withheld.
+    await seedRatings(x.w.team, agent, 1, { rating: "down", reasons: ["unsafe"] });
+    expect((await totals(x.reader, own)).json).toMatchObject({
+      totals: WITHHELD,
+      versions: [],
+      series: [],
+    });
+    // Four others plus the owner's own rating: still four other raters.
+    await seedRatings(x.w.team, agent, 3, { rating: "up" });
+    const [mine] = await seedRatings(x.w.team, agent, 1, { rating: "up" });
+    await f.fx.admin.query(
+      `UPDATE answer_feedback SET user_id = $1 WHERE team_id = $2 AND user_id = $3`,
+      [x.reader.id, x.w.team, mine],
+    );
+    expect((await totals(x.reader, own)).json.totals).toEqual(WITHHELD);
+    // A fifth other rater: shown, the owner's own rating included in the numbers.
+    await seedRatings(x.w.team, agent, 1, { rating: "up" });
+    expect((await totals(x.reader, own)).json.totals).toEqual({
+      enough: true,
+      up: 5,
+      down: 1,
+      rate: 5 / 6,
+    });
+    // The team admin, as a sixth viewer, sees the same numbers (everyone is another rater).
+    expect((await totals(x.w.owner, own)).json.totals).toMatchObject({ enough: true, up: 5 });
+  });
+
+  it("is for owners and team admins: members, other builders and other teams are refused", async () => {
+    const x = await world();
     await f.fx.admin.query(
       `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
       [x.w.team, x.reader.id],
     );
     expect((await as(x.author).get(`/v1/agents/${x.agentId}/feedback`)).status).toBe(403);
     expect((await as(x.reader).get(`/v1/agents/${x.agentId}/feedback`)).status).toBe(403);
-    const own = await publishedAgent(x.reader);
-    expect((await as(x.reader).get(`/v1/agents/${own}/feedback`)).json.totals).toEqual({
-      up: 0,
-      down: 0,
-      rate: null,
-    });
-    // Another team's admin doesn't see the agent at all.
+    expect((await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback`)).status).toBe(200);
     const other = await f.world();
     expect((await as(other.owner).get(`/v1/agents/${x.agentId}/feedback`)).status).toBe(404);
-    // A bad range is a 400.
-    expect(
-      (await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?from=yesterday`)).status,
-    ).toBe(400);
+  });
+
+  it("shows a personal agent's totals to its owner only, never to a team admin", async () => {
+    const x = await world();
+    const created = await as(x.author).post("/v1/agents", {
+      scope: "personal",
+      frontmatter: { name: "Mine" },
+      prompt: "Mine.",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const id = created.json.agent.id as string;
+    await seedRatings(x.w.team, { scope: "personal", id, version: null }, 5, { rating: "up" });
+    expect((await totals(x.author, id)).json.totals).toMatchObject({ enough: true, up: 5 });
+    // To the team admin someone else's personal agent doesn't exist.
+    expect((await as(x.w.owner).get(`/v1/agents/${id}/feedback`)).status).toBe(404);
+  });
+
+  it("confines a gallery agent's totals to the active team, for its team admins", async () => {
+    await seedGalleryAgents(f.fx.db, [GALLERY]);
+    const x = await world();
+    const y = await world();
+    const list = await as(x.w.owner).get("/v1/agents?scope=gallery");
+    const id = (list.json.agents as { id: string; slug: string }[]).find(
+      (a) => a.slug === GALLERY.key,
+    )?.id as string;
+    expect(id).toBeDefined();
+    const agent = { scope: "gallery", id, version: 1 };
+    await seedRatings(x.w.team, agent, 5, { rating: "up" });
+    await seedRatings(y.w.team, agent, 7, { rating: "down" });
+    expect((await totals(x.w.owner, id)).json.totals).toMatchObject({ up: 5, down: 0 });
+    expect((await totals(y.w.owner, id)).json.totals).toMatchObject({ up: 0, down: 7 });
+    expect((await as(x.author).get(`/v1/agents/${id}/feedback`)).status).toBe(403);
   });
 });
 
 describe("ratings follow their thread (ac-4)", () => {
-  it("are purged with the thread from Trash, and kept with it under a legal hold", async () => {
+  it("are purged with the thread from Trash; a hold keeps them, silently", async () => {
     const x = await world();
     const y = await world();
     await rate(x.author, x.runId, { rating: "down", comment: "held note" });
-    await rate(y.author, y.runId, { rating: "up" });
-    const hold = await placeHold(x.w.team, x.author.id);
-    // Under the hold the rating can be neither changed nor cleared.
-    expect((await rate(x.author, x.runId, { rating: "up" })).json.code).toBe("legal_hold");
-    expect((await clear(x.author, x.runId)).json.code).toBe("legal_hold");
+    await rate(y.author, y.runId, { rating: "down", comment: "free note" });
+    await placeHold(x.w.team, x.author.id);
+    // Held and unheld members get the very same answers.
+    const shape = (res: { status: number; json: unknown }) => {
+      const body = res.json as Record<string, unknown> | null;
+      return {
+        status: res.status,
+        body: body && { ...body, run_id: "-", thread_id: "-", entry_id: "-", updated_at: "-" },
+      };
+    };
+    for (const body of [{ rating: "up" }, { rating: "down", reasons: ["other"] }]) {
+      expect(shape(await rate(x.author, x.runId, body))).toEqual(
+        shape(await rate(y.author, y.runId, body)),
+      );
+    }
+    const cleared = [await clear(x.author, x.runId), await clear(y.author, y.runId)];
+    expect(cleared.map((r) => [r.status, r.text])).toEqual([
+      [204, ""],
+      [204, ""],
+    ]);
+    expect((await mine(x.author, x.threadId)).answers[0]?.feedback).toBeNull();
+    // The held member's earlier values are kept; the unheld one's are not.
+    const kept = await f.fx.admin.query<{
+      team_id: string;
+      comment: string | null;
+      change: string;
+    }>(
+      `SELECT team_id, comment, change FROM answer_feedback_history
+        WHERE team_id = ANY($1::uuid[]) ORDER BY kept_at, change`,
+      [[x.w.team, y.w.team]],
+    );
+    expect(kept.rows).toEqual([
+      { team_id: x.w.team, comment: "held note", change: "changed" },
+      { team_id: x.w.team, comment: null, change: "changed" },
+      { team_id: x.w.team, comment: null, change: "cleared" },
+    ]);
     for (const t of [x, y]) {
       expect((await as(t.author).delete(`/v1/threads/${t.threadId}`)).status).toBe(200);
       await f.fx.admin.query(
@@ -345,12 +541,30 @@ describe("ratings follow their thread (ac-4)", () => {
       );
     }
     await runRetentionPass({ db: f.fx.db, logger: pino({ level: "silent" }) });
-    const left = await f.fx.admin.query<{ team_id: string }>(
-      `SELECT team_id FROM answer_feedback WHERE team_id = ANY($1::uuid[])`,
-      [[x.w.team, y.w.team]],
+    const threadsLeft = await f.fx.admin.query<{ team_id: string }>(
+      `SELECT team_id FROM threads WHERE id = ANY($1::uuid[])`,
+      [[x.threadId, y.threadId]],
     );
-    expect(left.rows).toEqual([{ team_id: x.w.team }]);
-    expect(hold).not.toBe("");
+    expect(threadsLeft.rows).toEqual([{ team_id: x.w.team }]);
+    const historyLeft = await f.fx.admin.query(
+      `SELECT 1 FROM answer_feedback_history WHERE team_id = $1`,
+      [x.w.team],
+    );
+    expect(historyLeft.rowCount).toBe(3);
+  });
+
+  it("keep a held reader's own comment on someone else's thread, silently", async () => {
+    const x = await world();
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "team" });
+    await rate(x.reader, x.runId, { rating: "down", comment: "reader's note" });
+    await placeHold(x.w.team, x.reader.id);
+    expect((await clear(x.reader, x.runId)).status).toBe(204);
+    expect((await mine(x.reader, x.threadId)).answers[0]?.feedback).toBeNull();
+    const kept = await f.fx.admin.query(
+      `SELECT user_id, comment FROM answer_feedback_history WHERE team_id = $1`,
+      [x.w.team],
+    );
+    expect(kept.rows).toEqual([{ user_id: x.reader.id, comment: "reader's note" }]);
   });
 
   it("are in the member's export with their comment, their own only", async () => {

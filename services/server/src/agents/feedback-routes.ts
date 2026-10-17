@@ -12,6 +12,7 @@ export interface FeedbackTotalsRouteOptions {
   readonly resolve: (c: Context) => Promise<ResolvedAgent | null>;
   readonly teamId: (c: Context) => string;
   readonly role: (c: Context) => TeamRole;
+  readonly userId: (c: Context) => string;
 }
 
 /**
@@ -31,9 +32,10 @@ export function mayReadFeedbackTotals(found: ResolvedAgent, role: TeamRole): boo
 }
 
 /**
- * `GET /v1/agents/{id}/feedback?from&to&bucket` (KOBE-275): the agent's per-version rating totals
- * in the active team (`from`/`to`/`bucket` as for usage: ISO times, default the last 30 days).
- * Counts only, no content (D5/D10), so it needs no break-glass and is not audited.
+ * `GET /v1/agents/{id}/feedback?from&to` (KOBE-275): the agent's per-version rating totals in the
+ * active team (`from`/`to` as for usage: ISO times, default the last 30 days; by day only, so
+ * `bucket=hour` is refused). Counts only, each over at least `FEEDBACK_MIN_RATERS` other raters, no
+ * content (D5/D10), so it needs no break-glass and is not audited.
  */
 export function mountFeedbackTotals<E extends { Variables: object }>(
   app: Hono<E>,
@@ -45,12 +47,17 @@ export function mountFeedbackTotals<E extends { Variables: object }>(
     if (!mayReadFeedbackTotals(found, options.role(c))) {
       return forbidden(c, "Only the agent's owners and team admins see its ratings.");
     }
-    const range = parseUsageRange(c.req.query());
+    const query = c.req.query();
+    if (query.bucket !== undefined && query.bucket !== "day") {
+      return invalidRequest(c, "Ratings are counted by day.");
+    }
+    const range = parseUsageRange({ ...query, bucket: "day" });
     if (typeof range === "string") return invalidRequest(c, range);
     return c.json(
       await agentFeedbackTotals(
         options.db,
         options.teamId(c),
+        options.userId(c),
         { scope: found.agent.scope, id: found.agent.id },
         range,
       ),

@@ -4187,7 +4187,7 @@
             }
           },
           "409": {
-            "description": "`run_not_ended`, `not_an_answer`, `thread_in_trash`, `test_thread`, `legal_hold`, `no_active_team` or `team_mismatch`.",
+            "description": "`run_not_ended`, `not_an_answer`, `thread_in_trash`, `test_thread`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4258,7 +4258,7 @@
             }
           },
           "409": {
-            "description": "`legal_hold`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {

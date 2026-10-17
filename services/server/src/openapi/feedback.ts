@@ -57,7 +57,7 @@ export function feedbackOpenApiPaths(): Record<string, Record<string, unknown>> 
           ),
           "409": json(
             "Error",
-            "`run_not_ended`, `not_an_answer`, `thread_in_trash`, `test_thread`, `legal_hold`, " +
+            "`run_not_ended`, `not_an_answer`, `thread_in_trash`, `test_thread`, " +
               "`no_active_team` or `team_mismatch`.",
           ),
         },
@@ -72,7 +72,7 @@ export function feedbackOpenApiPaths(): Record<string, Record<string, unknown>> 
           "204": { description: "Cleared, or there was none." },
           ...COMMON,
           "404": json("Error", "`run_not_found`: the id is not a uuid."),
-          "409": json("Error", "`legal_hold`, `no_active_team` or `team_mismatch`."),
+          "409": json("Error", "`no_active_team` or `team_mismatch`."),
         },
       },
     },

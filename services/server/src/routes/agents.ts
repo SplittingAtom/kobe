@@ -321,6 +321,7 @@ export function agentRoutes(
     resolve: resolveVersioned,
     teamId: (c) => (c as Ctx).get("team").id,
     role: (c) => (c as Ctx).get("team").role,
+    userId: (c) => (c as Ctx).get("user").id,
   });
 
   return app;

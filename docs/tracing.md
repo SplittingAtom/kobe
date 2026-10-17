@@ -53,7 +53,8 @@ from the sandbox.
 each truncated to 4096 characters. The gate is enforced twice: call sites add content only through
 `contentAttributes()`, and the exporter wrapper (`packages/telemetry/src/content.ts`) drops any
 content-keyed attribute when capture is off, whatever a call site recorded. Model responses are
-not captured. Header values are never exported.
+not captured. Header values are never exported. With a Langfuse backend it also sends answer-rating comments with their
+scores (below): Langfuse's operators can read them, and they outlive the thread's purge there.
 
 ## Answer ratings as scores
 

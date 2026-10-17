@@ -113,38 +113,54 @@ export const FEEDBACK_ERROR_HTTP_STATUS = {
   not_an_answer: 409,
   thread_in_trash: 409,
   test_thread: 409,
-  legal_hold: 409,
 } as const;
 export type FeedbackErrorCode = keyof typeof FEEDBACK_ERROR_HTTP_STATUS;
 
-/** Up and down counts; `rate` = up / (up + down), null with no ratings. */
+/**
+ * Fewest distinct raters, not counting the caller, behind any number the totals show (KOBE-275
+ * review S1): a cell with fewer is withheld ("not enough ratings yet"), so the totals never single
+ * out one member's ratings or reasons. The caller's own ratings still count in the numbers: they
+ * know them anyway.
+ */
+export const FEEDBACK_MIN_RATERS = 5;
+
+/**
+ * Up and down counts; `rate` = up / (up + down). `enough` is false when fewer than
+ * {@link FEEDBACK_MIN_RATERS} other members rated: then `up`, `down` and `rate` are null.
+ */
 export const feedbackCountsSchema = z.strictObject({
-  up: z.number().int().nonnegative(),
-  down: z.number().int().nonnegative(),
+  enough: z.boolean(),
+  up: z.number().int().nonnegative().nullable(),
+  down: z.number().int().nonnegative().nullable(),
   rate: z.number().min(0).max(1).nullable(),
 });
 export type FeedbackCounts = z.infer<typeof feedbackCountsSchema>;
 
-/** Thumbs-down reasons counted (one rating may give several). Every reason is present. */
+/**
+ * Thumbs-down reasons counted (one rating may give several). Every reason is present; null when
+ * fewer than {@link FEEDBACK_MIN_RATERS} other members gave it.
+ */
 export const feedbackReasonCountsSchema = z.strictObject(
-  Object.fromEntries(FEEDBACK_REASONS.map((r) => [r, z.number().int().nonnegative()])) as Record<
-    FeedbackReason,
-    z.ZodNumber
-  >,
+  Object.fromEntries(
+    FEEDBACK_REASONS.map((r) => [r, z.number().int().nonnegative().nullable()]),
+  ) as Record<FeedbackReason, z.ZodNullable<z.ZodNumber>>,
 );
 export type FeedbackReasonCounts = z.infer<typeof feedbackReasonCountsSchema>;
 
 /**
- * `GET /v1/agents/{agent_id}/feedback`: ratings in the active team of answers by this agent, per
- * published version (builder test threads are never rated), by model alias (null = unknown) and per
- * time bucket of the rating's last change. Counts only: no thread, run, member or comment is
- * reachable through it.
+ * `GET /v1/agents/{agent_id}/feedback?from&to`: ratings in the active team of answers by this
+ * agent, per published version (builder test threads are never rated), by model alias (null =
+ * unknown) and per day of the rating's last change (days only: finer buckets would single people
+ * out). Counts only: no thread, run, member or comment is reachable through it. `totals` is always
+ * present (with `enough`); versions, models and days below {@link FEEDBACK_MIN_RATERS} raters are
+ * left out.
  */
 export const agentFeedbackTotalsSchema = z.strictObject({
   agent_id: uuidSchema,
   from: timestampSchema,
   to: timestampSchema,
-  bucket: z.enum(["hour", "day"]),
+  bucket: z.literal("day"),
+  min_raters: z.number().int().positive(),
   totals: feedbackCountsSchema,
   versions: z.array(
     z.strictObject({
@@ -156,6 +172,12 @@ export const agentFeedbackTotalsSchema = z.strictObject({
       ),
     }),
   ),
-  series: z.array(z.strictObject({ start: timestampSchema, up: z.number(), down: z.number() })),
+  series: z.array(
+    z.strictObject({
+      start: timestampSchema,
+      up: z.number().int().nonnegative(),
+      down: z.number().int().nonnegative(),
+    }),
+  ),
 });
 export type AgentFeedbackTotals = z.infer<typeof agentFeedbackTotalsSchema>;
