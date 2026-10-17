@@ -49,7 +49,7 @@ context and `aria-describedby`/`aria-invalid`), `FormRow`, `TextInput`, `Textare
 `Checkbox`/`Radio` (inline in their label, KOBE-283), `ChoiceGroup` (fieldset + legend), `Switch`
 (Radix), `Button` (primary, secondary, danger; sm), `Table` + parts, `EmptyState`, `Notice`
 (info, warn, error), `Badge` (status tones), `ConfirmDialog` + `useConfirm`.
-Tests: `layout.test.tsx`, `field.test.tsx`, `display.test.tsx`, `confirm-dialog.test.tsx` (23).
+Tests: `layout.test.tsx`, `field.test.tsx`, `display.test.tsx`, `confirm-dialog.test.tsx` (36).
 
 **Reference migration:** console layout and nav (`console-shell.tsx`, `console-nav.tsx`, also the
 My-area shell, `error-notice.tsx`, `isolation-banner.tsx`, the theme toggle) and the Team console
@@ -69,6 +69,45 @@ table, badges, danger button, confirm dialog). Unused shell classes removed from
   `ON_TAILWIND` (files that import none: add each migrated page), and every `styles.x` a console
   file uses must still be defined in its module, so deleting classes is safe.
 
+## Review fixes (coordinator review, 2026-10-16)
+
+- **M1 control borders:** new token `--kobe-console-control-border` (`border-console-control`) on
+  text inputs, selects, textareas and secondary buttons; `console-border` stays for dividers.
+  Ratios: light `#80808c` 3.90:1 on the page (`#ffffff`), 3.55:1 on the panel (`#f4f4f6`); dark
+  `#74747f` 3.91:1 on the page (`#16161a`), 3.51:1 on the panel (`#202027`). Pinned (≥3:1) in
+  `theme-css.test.ts`.
+- **S1:** every focusable primitive carries `FOCUS_RING` (`focus.ts`); the console base rules for
+  links and `:focus-visible` are now declared permanent (plain content links) and pinned by the guard.
+- **S2:** the legacy KOBE-283 fieldset spacing skips labels with a `data-slot` (primitive choices).
+- **S3:** the confirm dialog falls back to `#console-main` when the asking control is gone or
+  disabled; Invitations then moves focus to the next row's Revoke, or the list heading when empty.
+- **S4:** `Field` and `ChoiceGroup` take `required` (marker, native `required`; a group passes it to
+  its radios only) and `error` (`role="alert"`, in `aria-describedby`, `aria-invalid`).
+- **S5:** `Notice` gets `success`, an `actions` slot and passes div props; `MutationStatus` shows
+  successes as a success Notice inside its live region. `Button` gets `loading`, `asChild`, `ghost`.
+  `Section`/`Card` take a heading `level` (Card a `title`), `PageHeader` a `back` link; `Table` a
+  hidden caption, a focusable named scroll region and numeric cells.
+- **S6 (rule for 295/296):** the consoles' CSS modules (admin, usage, agent-builder, skill-editor)
+  are wrapped in `@layer kobe-legacy`, between `base` and the utilities; the order
+  `properties, theme, base, kobe-legacy, components, utilities` is declared first in
+  `app/theme.css` (root layout). So a utility always beats a module rule on the same element.
+  Modules shared with the chat (`components/memory`, `components/files`) stay unlayered and still
+  win: don't nest primitives inside them. Move files whole: the guard fails on a file that imports
+  both the primitives and a CSS module. Delete a module (and its `CSS_MODULES` line) with its last user.
+- **S7:** a second snapshot pins `app/tailwind.css` without the console tokens (chat token mapping,
+  dark variant, layer order). The chat-rules snapshot changed only in its layer statement
+  (`kobe-legacy` added).
+- **S8:** console code's Radix portals must use `consolePortalContainer()`, all other code
+  `chatPortalContainer()`; a test covers both wrong cases.
+- **S9:** the spec also shoots the eval report (from the team agent's page), adds a 390 px pass
+  (landings, Members and Invitations, the opened nav), records a failing page and goes on, checks
+  ChoiceGroup spacing, and stores shots per platform (`console-shots/<platform>/…`).
+- **S10:** Invitations tests for a refused invite, a failed list, the badges and focus after revoke.
+- Nits: overlay token, unanswered confirms resolve false on replace and unmount, dialog scrolls in
+  short viewports, `text-start`, no `pe-6` on Select, disabled Switch label cursor, shell loading
+  and denied states use `PageHeader`, Invitations caption hidden (the section heading says it),
+  module-import guard catches `import * as` and side-effect imports.
+
 ## Open questions (for Chris or the coordinator)
 
 - ac-3 needs your gate1 run (below). Baseline PNGs show deployment data (names, emails, connector
@@ -86,7 +125,10 @@ table, badges, danger button, confirm dialog). Unused shell classes removed from
   every Site, Team and My-area page from the consoles' nav, plus new/detail pages, in light and dark,
   full page, times masked. **Chris to run against gate1 for the baseline**, on a build _before_
   this branch (main/G4): `KOBE_USER` = the Owner who is a team admin of Team1 (Team1 active):
-  `npx playwright test consoles --update-snapshots=all` → `e2e/browser/console-shots/`. Then on
+  `npx playwright test consoles --update-snapshots=all` → `e2e/browser/console-shots/<platform>/`
+  (take and compare on the same platform). Then on
   this branch: `npx playwright test consoles` for the diffs.
-- Checks (2026-10-16): format, lint, typecheck, web unit tests 159 files / 1534 tests green,
-  `next build` ok, public hygiene and site wording ok. No new dependencies.
+- Checks (2026-10-16, after the review fixes): format, lint, typecheck, web unit tests 159 files /
+  1558 tests green (one unrelated chat timing test, `conversation.test.tsx` interrupted runs, failed
+  once under full-suite load and passed 3/3 alone and on the rerun), `next build` ok (module rules
+  ship inside `@layer kobe-legacy`), public hygiene ok. No new dependencies.

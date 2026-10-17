@@ -120,6 +120,40 @@ describe("Tailwind on the consoles (KOBE-294)", () => {
       .join("\n");
     await expect(`${css}\n`).toMatchFileSnapshot("__snapshots__/chat-global.own.css.snap");
   });
+
+  it("the chat's token mapping, dark variant and layer order are unchanged", async () => {
+    // The shared entry minus the consoles' own tokens: what the chat's utilities resolve to.
+    const entry = withoutComments(read("app/tailwind.css"))
+      .split("\n")
+      .filter((line) => !/^\s*--color-console-/.test(line) && line.trim() !== "")
+      .join("\n");
+    await expect(`${entry}\n`).toMatchFileSnapshot("__snapshots__/chat-theme.css.snap");
+  });
+
+  it("the console base rules for plain links and focus stay (content relies on them)", () => {
+    const sels = selectors(own(consoles));
+    expect(sels).toContain("[data-kobe-console] a");
+    expect(sels).toContain("[data-kobe-console] :focus-visible");
+  });
+});
+
+describe("cascade layers (KOBE-294)", () => {
+  const ORDER = "@layer properties, theme, base, kobe-legacy, components, utilities;";
+
+  it("the root layout's stylesheet declares the order first, so it never depends on load order", () => {
+    expect(withoutComments(read("app/theme.css")).trimStart().startsWith(ORDER)).toBe(true);
+    expect(withoutComments(read("app/tailwind.css"))).toContain(
+      "@layer theme, base, kobe-legacy, components, utilities;",
+    );
+  });
+
+  it("every console CSS module sits in kobe-legacy, below the utilities", () => {
+    for (const module of CSS_MODULES) {
+      const css = withoutComments(read(module)).trim();
+      expect(css.startsWith("@layer kobe-legacy {"), module).toBe(true);
+      expect(postcss.parse(css).nodes.length, module).toBe(1);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -170,8 +204,10 @@ interface ModuleImport {
   readonly module: string;
 }
 
+/** `import x from`, `import * as x from` and bare `import "…module.css"` (binding ""). */
 function moduleImports(file: string): ModuleImport[] {
-  return [...read(file).matchAll(/import\s+(\w+)\s+from\s+"([^"]+\.module\.css)"/g)].map((m) => ({
+  const re = /import\s+(?:(?:\*\s+as\s+)?(\w+)\s+from\s+)?["']([^"']+\.module\.css)["']/g;
+  return [...read(file).matchAll(re)].map((m) => ({
     file,
     binding: m[1] ?? "",
     module: relative(WEB, join(WEB, dirname(file), m[2] ?? "")),
@@ -205,8 +241,19 @@ describe("console CSS modules (KOBE-294, KOBE-295, KOBE-296)", () => {
     expect(sources("components/ui/console").flatMap(moduleImports)).toEqual([]);
   });
 
+  it("a file that uses the console primitives imports no CSS module (pages move whole)", () => {
+    const usesPrimitives = (f: string) =>
+      /from\s+"(?:\.\.?\/)+(?:components\/)?ui\/console(?:\/[\w-]+)?"/.test(read(f));
+    const mixed = files.filter(
+      (f) => usesPrimitives(f) || f.startsWith(join("components", "ui", "console")),
+    );
+    expect(mixed.length).toBeGreaterThan(ON_TAILWIND.length / 2);
+    expect(mixed.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
+  });
+
   it("every class console code takes from a CSS module is still defined there", () => {
     const missing = imports.flatMap(({ file, binding, module }) => {
+      if (binding === "") return [];
       const defined = classes(module);
       const used = [
         ...read(file).matchAll(new RegExp(`\\b${binding}(?:\\.(\\w+)|\\["([\\w-]+)"\\])`, "g")),

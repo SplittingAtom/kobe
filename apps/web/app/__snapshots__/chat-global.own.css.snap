@@ -1,4 +1,4 @@
-@layer theme, base, components, utilities
+@layer theme, base, kobe-legacy, components, utilities
 body:has([data-kobe-chat]) {
   margin: 0;
 }
