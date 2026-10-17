@@ -2,7 +2,6 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { findSection } from "../../lib/admin/nav/registry";
-import { comingIn } from "../../lib/admin/nav/types";
 import { must } from "../../lib/testing/must";
 import { ConsoleLinks } from "./console-links";
 import { ConsoleOverview } from "./overview";
@@ -43,7 +42,10 @@ describe("console overview", () => {
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    const section = { ...must(findSection("site", "web-search")), status: comingIn("KOBE-999") };
+    const section = {
+      ...must(findSection("site", "web-search")),
+      status: { kind: "placeholder", ticket: "KOBE-999" } as const,
+    };
     render(<SectionPlaceholder section={section} />);
     expect(screen.getByRole("heading", { name: "Web search" })).toBeTruthy();
     expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-999.");

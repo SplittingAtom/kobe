@@ -479,19 +479,19 @@ Secret). Both carry the same fields as the site export, including the chain hash
 
 ## Reading the log
 
-| Endpoint                       | Who                              | Notes                                                                                                                                                                                                                                                                  |
-| ------------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/site/audit`           | Owner, Admin (`site.audit.read`) | Filters: `action`, `category` (agent, approval, audit, auth, egress, governance, identity, models, platform, policy, run, sandbox, site, thread, workspace; the historical `install` matches `site`), `actorId`, `teamId`, `since`, `until` (ISO). `limit` 1–200 (50). |
-| `GET /v1/team/audit`           | Team admin (`team.audit.read`)   | Same filters except `teamId`; only the active team's events; no `ip`, `userAgent`, `prevHash` or `hash`.                                                                                                                                                               |
-| `GET /v1/site/audit/integrity` | Owner, Admin (3 per minute)      | `{ ok, checked, head: { seq, hash }, problem?, anchor: { seq, hash, at, mac } }`: a full-chain check plus the attested head                                                                                                                                            |
+| Endpoint                       | Who                              | Notes                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/site/audit`           | Owner, Admin (`site.audit.read`) | Filters: `action`, `category` (the first segment of an action: agent, approval, audit, auth, egress, governance, identity, mcp, memory, models, platform, policy, project, retention, run, sandbox, schedule, site, skill, thread, workspace; the historical `install` matches `site`), `actorId`, `teamId`, `since`, `until` (ISO). `limit` 1–200 (50). |
+| `GET /v1/team/audit`           | Team admin (`team.audit.read`)   | Same filters except `teamId`; only the active team's events; no `ip`, `userAgent`, `prevHash` or `hash`.                                                                                                                                                                                                                                                 |
+| `GET /v1/site/audit/integrity` | Owner, Admin (3 per minute)      | `{ ok, checked, head: { seq, hash }, problem?, anchor: { seq, hash, at, mac } }`: a full-chain check plus the attested head                                                                                                                                                                                                                              |
 
 Pages are newest first: pass `nextCursor` back as `before`. Pass `after` (for example `after=0`)
 to page oldest first, as an export does. Unknown parameters return 400.
 
 In the web app, site admins read the log in the Site console under **Audit log** (filters by
-action, category, actor, team and time; the chain is verified on request with **Verify chain**, which shows the result and when it ran, and the IP and
-user agent are shown only until the erasure period has passed), and team admins under the Team
-console's **Audit view** (KOBE-291).
+action, category, actor, team and time; **Verify chain** runs the check on request and shows the
+result and when it ran; the IP and user agent are shown only until the erasure period has
+passed), and team admins under the Team console's **Audit view** (KOBE-291).
 
 Sandbox security events are team rows, so both views show them: for example a tampered Pi
 runtime is `GET /v1/site/audit?action=sandbox.runtime_tampered` (or `category=sandbox`), and the

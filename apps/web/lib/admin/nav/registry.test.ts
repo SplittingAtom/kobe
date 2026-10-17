@@ -21,21 +21,30 @@ import {
   type ConsoleAccess,
   type ConsoleSection,
   type SiteAccess,
+  OPEN_PLACEHOLDER_TICKETS,
   type TeamAccess,
-  type TicketId,
 } from "./types";
 import { must } from "../../testing/must";
 
-/**
- * Tickets a console placeholder may still name, each with why it is open (KOBE-291). A section
- * whose ticket is done must not stay "coming soon": the ticket that builds it adds the page, marks
- * it READY and removes its line here. A ticket with a ledger in docs/ledger counts as started.
- */
-const OPEN_PLACEHOLDER_TICKETS: Readonly<Record<string, string>> = {
-  "KOBE-63": "web search provider choice on hold (Chris, 2026-10-15)",
-};
+const REPO = new URL("../../../../../", import.meta.url);
+const LEDGER_DIR = new URL("docs/ledger/", REPO);
+const RUN_LEDGER = new URL("docs/RUN-LEDGER.md", REPO);
 
-const LEDGER_DIR = new URL("../../../../../docs/ledger/", import.meta.url);
+/**
+ * Whether the run ledger records `ticket` as finished: named (exactly, so KOBE-6 is not KOBE-63)
+ * in its "## Done" section, or on any line that says done or merged. Line-level on purpose: an
+ * open ticket that shares a line with "done" fails loudly (move it to its own line) rather than
+ * a done one passing quietly.
+ */
+function doneInRunLedger(ticket: string, text: string): boolean {
+  const id = new RegExp(`${ticket}(?!\\d)`);
+  let inDone = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("## ")) inDone = line.trim() === "## Done";
+    if (id.test(line) && (inDone || /\b(done|merged)\b/i.test(line))) return true;
+  }
+  return false;
+}
 
 const user = { id: "u-1", name: "Ada", email: "ada@example.com" };
 const site = (siteRole: SiteAccess["siteRole"]): SiteAccess => ({
@@ -115,39 +124,58 @@ describe("registry contents", () => {
   );
 
   it.each(["site", "team"] as const)(
-    "%s: a placeholder names a ticket that is still open (KOBE-291)",
+    "%s: a placeholder names only a ticket on the open list (KOBE-291)",
     (kind) => {
       for (const s of sectionsOf(kind)) {
         if (s.status.kind !== "placeholder") continue;
-        const { ticket } = s.status;
         expect(
-          OPEN_PLACEHOLDER_TICKETS,
-          `${s.id} waits for ${ticket}: if it is still open, add it to OPEN_PLACEHOLDER_TICKETS with why`,
-        ).toHaveProperty([ticket]);
-        expect(
-          existsSync(new URL(`${ticket}.md`, LEDGER_DIR)),
-          `${s.id} waits for ${ticket}, which has a ledger (work on it started or finished): build the page and mark it READY, or remove the entry`,
-        ).toBe(false);
+          Object.keys(OPEN_PLACEHOLDER_TICKETS),
+          `${s.id} waits for ${s.status.ticket}: add it to OPEN_PLACEHOLDER_TICKETS (types.ts) with why it is open`,
+        ).toContain(s.status.ticket);
       }
     },
   );
 
-  it("lists only tickets a placeholder still names, each with its reason", () => {
-    const named = new Set(
-      [...SITE_SECTIONS, ...TEAM_SECTIONS].flatMap((s) =>
-        s.status.kind === "placeholder" ? [s.status.ticket] : [],
-      ),
-    );
-    for (const [ticket, reason] of Object.entries(OPEN_PLACEHOLDER_TICKETS)) {
-      expect(
-        named.has(ticket as TicketId),
-        `${ticket}: no placeholder names it; drop its line`,
-      ).toBe(true);
+  it.each(Object.entries(OPEN_PLACEHOLDER_TICKETS))(
+    "%s on the open list is still open and still named (KOBE-291)",
+    (ticket, reason) => {
       expect(reason.trim()).not.toBe("");
-    }
+      expect(
+        existsSync(new URL(`${ticket}.md`, LEDGER_DIR)),
+        `${ticket} has a ledger (work on it started or finished): build its section, mark it READY and drop it from OPEN_PLACEHOLDER_TICKETS`,
+      ).toBe(false);
+      expect(
+        doneInRunLedger(ticket, readFileSync(RUN_LEDGER, "utf8")),
+        `${ticket} is done or merged in docs/RUN-LEDGER.md: build its section and drop it from OPEN_PLACEHOLDER_TICKETS`,
+      ).toBe(false);
+      const named = [...SITE_SECTIONS, ...TEAM_SECTIONS].some(
+        (s) => s.status.kind === "placeholder" && s.status.ticket === ticket,
+      );
+      expect(named, `${ticket}: no placeholder names it; drop its line`).toBe(true);
+    },
+  );
+
+  it("reads the run ledger's done tickets (the check above can fail)", () => {
+    const real = readFileSync(RUN_LEDGER, "utf8");
+    // KOBE-6 is in the run ledger's Done section; KOBE-63 must not match it.
+    expect(doneInRunLedger("KOBE-6", real)).toBe(true);
+    const text = [
+      "## Current",
+      "- KOBE-70 open",
+      "- KOBE-71 merged (#9)",
+      "## Done",
+      "- KOBE-72: shipped",
+      "## Later",
+      "- KOBE-73 planned",
+    ].join("\n");
+    expect(doneInRunLedger("KOBE-70", text)).toBe(false);
+    expect(doneInRunLedger("KOBE-71", text)).toBe(true);
+    expect(doneInRunLedger("KOBE-72", text)).toBe(true);
+    expect(doneInRunLedger("KOBE-73", text)).toBe(false);
+    expect(doneInRunLedger("KOBE-7", text)).toBe(false);
   });
 
-  it("keeps web search a placeholder on hold, with why (Chris)", () => {
+  it("keeps web search a placeholder on hold, with why", () => {
     const status = must(SITE_SECTIONS.find((s) => s.id === "web-search")).status;
     expect(status.kind).toBe("placeholder");
     expect(status.kind === "placeholder" && status.onHold).toMatch(/on hold/i);

@@ -26,7 +26,7 @@ test("Site audit log: events, filters and the chain status", async ({ page }) =>
   await expect(chain.getByText("Not verified yet.")).toBeVisible();
   await chain.getByRole("button", { name: "Verify chain" }).click();
   await expect(
-    chain.getByText(/Chain verified|The chain is broken|^Try again in a minute/),
+    chain.getByText(/Chain verified|The chain is broken|^Try again in a minute/).first(),
   ).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
@@ -40,7 +40,7 @@ test("Site audit log: events, filters and the chain status", async ({ page }) =>
   );
   await page.getByRole("button", { name: "Apply filters" }).click();
   expect((await filtered).status()).toBe(200);
-  await expect(events.or(page.getByText("No events match these filters."))).toBeVisible();
+  await expect(events.or(page.getByText("No events match these filters.").first())).toBeVisible();
   // The server filtered: every action shown is in the auth category.
   await expect(async () => {
     const actions = await events.locator("tbody td code").allTextContents();

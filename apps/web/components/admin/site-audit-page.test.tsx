@@ -123,10 +123,13 @@ describe("Site audit log (KOBE-291)", () => {
 
     await userEvent.click(within(region).getByRole("button", { name: "Verify chain" }));
     expect(await within(region).findByText("Chain verified")).toBeTruthy();
-    expect(region.textContent).toMatch(/Last verified/);
+    // Announced politely, with the count.
+    expect(within(region).getByRole("status").textContent).toMatch(
+      /^Chain verified at .*: 10 events\.$/,
+    );
     expect(
       within(region)
-        .getByText(/Last verified/)
+        .getByText(/Last checked/)
         .querySelector("time")
         ?.getAttribute("datetime"),
     ).toBe(VERIFIED.anchor.at);
@@ -158,15 +161,21 @@ describe("Site audit log (KOBE-291)", () => {
     const region = screen.getByRole("region", { name: "Chain integrity" });
     const verify = within(region).getByRole("button", { name: "Verify chain" });
     await userEvent.click(verify);
-    const alert = await within(region).findByRole("alert");
-    expect(alert.textContent).toMatch(/The chain is broken/);
-    expect(alert.textContent).toMatch(/Event #4: its contents do not match its hash/);
-    expect(region.textContent).toMatch(/Last verified/);
+    const note = await within(region).findByRole("note");
+    expect(note.textContent).toMatch(/The chain is broken/);
+    expect(note.textContent).toMatch(/Event #4: its contents do not match its hash/);
+    const live = within(region).getByRole("status");
+    expect(live.textContent).toMatch(
+      /^Chain verification failed at .*: the chain is broken at event #4\.$/,
+    );
+    expect(region.textContent).toMatch(/Last checked/);
 
     await userEvent.click(verify);
-    expect(await within(region).findByText(/^Try again in a minute/)).toBeTruthy();
-    // The refusal is a warning, and the last result stays.
-    expect(within(region).getAllByRole("alert")).toHaveLength(1);
+    expect(await within(region).findAllByText(/^Try again in a minute/)).toHaveLength(2);
+    expect(live.textContent).toMatch(/^Try again in a minute/);
+    // The refusal is a warning, not an error, and the previous result stays, marked as such.
+    expect(within(region).queryByRole("alert")).toBeNull();
+    expect(region.textContent).toMatch(/Previous result, checked/);
     expect(region.textContent).toMatch(/Event #4/);
     expect(summary(calls).filter((c) => c === INTEGRITY)).toHaveLength(2);
   });
@@ -181,7 +190,7 @@ describe("Site audit log (KOBE-291)", () => {
       actorId: BOB_ID,
       teamId: TEAM_ID,
       since: must(localToIso(since)),
-      until: must(localToIso(until)),
+      until: must(localToIso(until, { endOfMinute: true })),
     });
     const filtered = `GET /v1/site/audit?${query.toString()}`;
     const calls = stubPage({ [filtered]: [200, { events: [], nextCursor: null }] });
@@ -194,7 +203,9 @@ describe("Site audit log (KOBE-291)", () => {
     await userEvent.type(screen.getByLabelText("From"), since);
     await userEvent.type(screen.getByLabelText("To"), until);
     await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
-    expect(await screen.findByText("No events match these filters.")).toBeTruthy();
+    expect(
+      await screen.findByText("No events match these filters.", { selector: "p.font-medium" }),
+    ).toBeTruthy();
     expect(summary(calls)).toContain(filtered);
 
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -324,5 +335,155 @@ describe("audit page helpers", () => {
     expect(plainValue(3)).toBe("3");
     expect(plainValue(null)).toBe("null");
     expect(plainValue({ a: [1] })).toBe('{"a":[1]}');
+  });
+});
+
+describe("audit paging and filtering (KOBE-291 review)", () => {
+  it("drops a Load more page that answers after the filters changed", async () => {
+    let release: (r: Response) => void = () => undefined;
+    const late = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const calls = stubPage({
+      [LIST]: [200, { events: [event({ id: "first", seq: 50 })], nextCursor: "50" }],
+      "GET /v1/site/audit?limit=50&category=auth": [
+        200,
+        { events: [event({ id: "auth-1", seq: 7, action: "auth.sign_out" })], nextCursor: null },
+      ],
+    });
+    const api = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) =>
+        url === "/v1/site/audit?limit=50&before=50" ? late : api(url, init),
+      ),
+    );
+    renderSite(<SiteAuditPage />);
+    await table();
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await userEvent.selectOptions(screen.getByLabelText("Category"), "auth");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(await screen.findByText("auth.sign_out")).toBeTruthy();
+    // The unfiltered page arrives late: it must not join the auth view.
+    release(
+      new Response(
+        JSON.stringify({
+          events: [event({ id: "stale", seq: 49, action: "models.provider.added" })],
+          nextCursor: "49",
+        }),
+        { status: 200 },
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("models.provider.added")).toBeNull();
+    expect(within(await table()).getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(summary(calls)).toContain("GET /v1/site/audit?limit=50&category=auth");
+  });
+
+  it("disables the filter buttons and hides the old rows while a view loads", async () => {
+    let release: (r: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    stubPage();
+    const api = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) =>
+        url === "/v1/site/audit?limit=50&category=auth" ? pending : api(url, init),
+      ),
+    );
+    renderSite(<SiteAuditPage />);
+    await table();
+    await userEvent.selectOptions(screen.getByLabelText("Category"), "auth");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    expect(screen.getByRole("button", { name: "Apply filters" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Clear" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("table", { name: "Audit events, newest first" })).toBeNull();
+    const events = screen.getByRole("region", { name: "Events" });
+    expect(within(events).getByRole("status").textContent).toBe("Loading audit events…");
+    release(new Response(JSON.stringify({ events: [], nextCursor: null }), { status: 200 }));
+    await waitFor(() =>
+      expect(within(events).getByRole("status").textContent).toBe("No events match these filters."),
+    );
+    expect(screen.getByRole("button", { name: "Apply filters" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("announces each page and moves focus to the heading when the last page is in", async () => {
+    stubPage({
+      [LIST]: [200, { events: [event({ id: "a", seq: 3 })], nextCursor: "3" }],
+      "GET /v1/site/audit?limit=50&before=3": [
+        200,
+        { events: [event({ id: "b", seq: 2 }), event({ id: "c", seq: 1 })], nextCursor: null },
+      ],
+    });
+    renderSite(<SiteAuditPage />);
+    await table();
+    const events = screen.getByRole("region", { name: "Events" });
+    const live = within(events).getByRole("status");
+    expect(live.textContent).toBe("Showing 1 event; more can be loaded.");
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(live.textContent).toBe(
+        "Loaded 2 events more: 3 events shown, the whole log for these filters.",
+      ),
+    );
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Events" })),
+    );
+  });
+
+  it("shows times with seconds and the time zone", async () => {
+    stubPage({
+      [LIST]: [200, { events: [event({ at: "2026-10-15T10:30:45.000Z" })], nextCursor: null }],
+    });
+    renderSite(<SiteAuditPage />);
+    const time = must(
+      within(await table())
+        .getByRole("row", { name: /identity/ })
+        .querySelector("time"),
+    );
+    expect(time.getAttribute("datetime")).toBe("2026-10-15T10:30:45.000Z");
+    expect(time.textContent).toMatch(/\d{1,2}:\d{2}:45/);
+    expect(time.textContent).toMatch(/[A-Z]{2,5}|GMT|UTC/);
+  });
+
+  it("explains a refused action name, and shows other refusals as they come", async () => {
+    stubPage({
+      "GET /v1/site/audit?limit=50&action=sandbox.runtime_tamperd": [
+        400,
+        { code: "invalid_request", message: "Check the filters: limit 1-200, …" },
+      ],
+    });
+    renderSite(<SiteAuditPage />);
+    await table();
+    await userEvent.type(screen.getByLabelText("Action"), "sandbox.runtime_tamperd");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/No action is called sandbox\.runtime_tamperd/);
+    cleanup();
+
+    stubPage({
+      [LIST]: [403, { code: "forbidden", message: "You don't have permission to do that." }],
+    });
+    renderSite(<SiteAuditPage />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/don't have permission/);
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("makes To include its whole minute, and leaves From at its start", () => {
+    const to = must(localToIso("2026-10-15T10:30", { endOfMinute: true }));
+    const from = must(localToIso("2026-10-15T10:30"));
+    expect(Date.parse(to) - Date.parse(from)).toBe(59_999);
+    expect(localToIso("2026-10-15T10:30:15", { endOfMinute: true })).toBe(
+      localToIso("2026-10-15T10:30:15"),
+    );
+    expect(localToIso("")).toBeUndefined();
   });
 });

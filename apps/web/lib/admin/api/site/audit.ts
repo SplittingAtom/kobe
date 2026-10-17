@@ -5,7 +5,11 @@
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
-/** The event categories the server filters on (docs/audit-log.md, "Reading the log"). */
+/**
+ * The event categories the server filters on: the first segment of every action in
+ * `AUDIT_EVENTS` (packages/db/src/audit/events.ts). `audit-categories.test.ts` reads that file
+ * and fails when this list drifts from it (the web app can't import @kobe/db).
+ */
 export const AUDIT_CATEGORIES = [
   "agent",
   "approval",
@@ -14,12 +18,18 @@ export const AUDIT_CATEGORIES = [
   "egress",
   "governance",
   "identity",
+  "mcp",
+  "memory",
   "models",
   "platform",
   "policy",
+  "project",
+  "retention",
   "run",
   "sandbox",
+  "schedule",
   "site",
+  "skill",
   "thread",
   "workspace",
 ] as const;

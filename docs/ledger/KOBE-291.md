@@ -27,11 +27,8 @@
   its enabled connectors (`/v1/team/connectors`: site status, exposure, tool count, tools awaiting
   re-approval). The Agents page links team admins to it. Its tests moved to
   `team-inventory-page.test.tsx`.
-- **Guard** (`lib/admin/nav/registry.test.ts`): a placeholder must name a ticket listed in
-  `OPEN_PLACEHOLDER_TICKETS` (with why it is open) **and** without a ledger in `docs/ledger`
-  (a ledger means work started or finished: build the page or drop the entry); a listed ticket no
-  placeholder names fails too. Proven by pointing web search at KOBE-15 (fails on both counts).
-  Hadron isn't reachable from unit tests, so the ledger stands in for "done".
+- **Guard** (`lib/admin/nav/types.ts`, `registry.test.ts`; reworked after review): see
+  "Review fixes" below.
 - **Web search on hold:** `onHold(ticket, reason)` (types.ts) marks a placeholder paused on purpose;
   Site web search (KOBE-63) shows "on hold" in the nav, the overview and its page, with the reason.
 
@@ -63,14 +60,15 @@
 
 ## Tests and evidence
 
-- `components/admin/site-audit-page.test.tsx` (12): section gating (admin/owner yes, user no),
+- `components/admin/site-audit-page.test.tsx` (18): section gating (admin/owner yes, user no),
   rows and columns, read-only (GET only), no chain check on open, Verify chain verified/broken
-  with time, 429 keeps the last result, all six filters in
+  with time and announcements, 429 keeps the last result, the Load more race, loading state,
+  live-region messages and focus, seconds and zone, the inclusive To bound, 400 and 403, all six filters in
   the query, Clear, client-side validation (no request), paging keeps filters, 5xx hidden,
   erasure window, unknown erasure period, plain text and dropped fields, helpers.
 - `components/admin/site-backup-page.test.tsx` (4): ready section, last restore, never restored,
   paused, steps and docs pointer, no host/IP/URL on the page, refused audit read shown.
-- `components/admin/team-inventory-page.test.tsx` (9): the moved KOBE-86/94/180 tests plus skills,
+- `components/admin/team-inventory-page.test.tsx` (11): the moved KOBE-86/94/180 tests plus skills,
   connectors (enabled only, disabled by site, custom count, drift), empty and failed lists, links.
 - `team-pages.test.tsx`: Agents page no longer requests the inventory and links to it.
 - `overview.test.tsx`, `console-shell.test.tsx`: on-hold text in the overview, nav and page.
@@ -78,9 +76,44 @@
   status, a category filter checked against the rows, Clear; backup status and steps; inventory
   regions). `consoles.spec.ts` shoots them in light/dark (FIXED_PAGES) and audit + inventory at
   390 px: new screenshots, no baseline yet (`--update-snapshots` on first run).
-- Checks (2026-10-16): `format:check` ok, web lint ok, web typecheck ok, web unit tests 162 files /
-  1599 tests green, `next build` ok (routes `/admin/site/audit`, `/admin/site/backup`,
+- Checks (2026-10-16, after the review fixes): `format:check`, web lint and typecheck ok; web unit tests 163 files /
+  1611 tests green, `next build` ok (routes `/admin/site/audit`, `/admin/site/backup`,
   `/admin/team/inventory`), public hygiene ok. No server change, so no `test:db`.
+
+## Review fixes (coordinator review, 2026-10-16)
+
+- **Must: category list.** `AUDIT_CATEGORIES` now has all 21 categories the server accepts (adds
+  mcp, memory, project, retention, schedule, skill). `lib/admin/api/site/audit-categories.test.ts`
+  reads `AUDIT_EVENTS` in `packages/db/src/audit/events.ts` (the web app can't import @kobe/db)
+  and fails when the list differs from the actions' first segments. `docs/audit-log.md` updated.
+- **Load more / filters:** `use-audit-view.ts` owns the first page per applied filters: each
+  apply starts a new view id, shows "Loading audit events…" (old rows leave the screen, Apply and
+  Clear disabled), and drops late answers for older views. The table is keyed by view id and
+  ignores a "Load more" page that lands after it unmounted. One polite live region in Events
+  says what each load brought ("Showing 50 events; more can be loaded.", "Loaded 2 events more:
+  3 events shown, the whole log for these filters."); when the last page is in, focus moves to
+  the Events heading. A 400 with an action filter says the name is unknown.
+- **Chain announcements:** a status region mounted from the start announces verifying, verified
+  (with time and count), broken (the Notice is now a note, not a second alert), the rate limit and
+  failures. After a later failure the old result is labelled "Previous result, checked …".
+- **Times:** `DateTime precise` (seconds and time zone) in the audit table and "Last checked"; the
+  From hint names the viewer's time zone; **To** includes its whole minute (`+59 999 ms`).
+- **Inventory access tests:** section visible only with `team.agents.suspend` (member, builder,
+  admin without it, site owner: no); a 403 renders as an error; the Agents page shows no Inventory
+  link to builders or admins without the permission. Agents page link uses `consoleHref`.
+- **Backup restore snippet:** adds the S3 variables and the new Secret names
+  (`auth.existingSecret`, `envelope.keySecret`), placeholders only; tested.
+- **Guard approach:** the open list moved into `types.ts` as `OPEN_PLACEHOLDER_TICKETS`, and
+  `comingIn()`/`onHold()` accept only its ids, so naming any other ticket is a type error. For
+  each listed ticket the test checks: it has a reason; no `docs/ledger/<ticket>.md` exists; it is
+  not recorded as finished in `docs/RUN-LEDGER.md` (named exactly in "## Done", or on a line that
+  says done or merged; line-level on purpose, so a false match fails loudly); and a placeholder
+  still names it. A self-test proves the run-ledger matcher finds KOBE-6 and doesn't confuse
+  KOBE-6 with KOBE-63. Deterministic (files only). **Limit:** Hadron is the source of truth but
+  unit tests can't reach it, so a ticket closed in Hadron with neither a ledger nor a run-ledger
+  entry still passes; the list is one line per ticket and is reviewed whenever it is touched.
+- Nits: "Last checked" label; "hidden here" wording for erased IPs; code comments name the
+  product owner, not a person.
 
 ## Acceptance criteria
 

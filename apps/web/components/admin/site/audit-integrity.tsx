@@ -51,6 +51,7 @@ export function AuditIntegritySection() {
   }
 
   const limited = check.error?.status === 429;
+  const failed = check.error !== null && !limited;
   return (
     <Section
       id="audit-integrity-heading"
@@ -62,19 +63,26 @@ export function AuditIntegritySection() {
         </Button>
       }
     >
-      <div role="status">
-        {check.pending && <p className="m-0">Verifying the chain…</p>}
-        {limited && (
-          <Notice tone="warn">
-            <p>{RATE_LIMITED}</p>
-          </Notice>
-        )}
+      {/* Mounted from the start, so each outcome is announced politely. */}
+      <div role="status" className="sr-only">
+        {announcement(check.pending, limited, failed, checked)}
       </div>
+      {check.pending && (
+        <p aria-hidden="true" className="m-0">
+          Verifying the chain…
+        </p>
+      )}
+      {limited && (
+        <Notice tone="warn">
+          <p>{RATE_LIMITED}</p>
+        </Notice>
+      )}
       {check.error && !limited && <ErrorNotice error={check.error} />}
       {checked ? (
         <>
           <p className="m-0 text-sm text-console-muted">
-            Last verified <DateTime value={checked.at} />
+            {failed || limited ? "Previous result, checked " : "Last checked "}
+            <DateTime value={checked.at} precise />
           </p>
           <IntegrityResult report={checked.report} />
         </>
@@ -85,11 +93,31 @@ export function AuditIntegritySection() {
   );
 }
 
+/** What the live region says; the check's time makes a repeated outcome a new message. */
+function announcement(
+  pending: boolean,
+  limited: boolean,
+  failed: boolean,
+  checked: Checked | null,
+): string {
+  if (pending) return "Verifying the chain…";
+  if (limited) return RATE_LIMITED;
+  if (failed) return "The chain could not be verified.";
+  if (!checked) return "";
+  const at = new Date(checked.at).toLocaleTimeString();
+  if (!checked.report.ok) {
+    const seq = checked.report.problem?.seq;
+    return `Chain verification failed at ${at}: the chain is broken${seq ? ` at event #${seq}` : ""}.`;
+  }
+  return `Chain verified at ${at}: ${count(checked.report.checked)}.`;
+}
+
 function IntegrityResult({ report }: { readonly report: AuditIntegrity }) {
   if (!report.ok) {
     const problem = report.problem;
     return (
-      <Notice tone="error" title="The chain is broken">
+      // A note, not an alert: the status region above already announces the outcome.
+      <Notice tone="error" role="note" title="The chain is broken">
         <p>
           {problem
             ? `Event #${problem.seq}: ${CHAIN_PROBLEM_LABEL[problem.kind] ?? problem.kind}.`

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { listTeamAgents } from "../../../lib/admin/api/team/agents";
 import { agentStatusLabel } from "../../../lib/admin/api/agents";
+import { consoleHref } from "../../../lib/admin/nav/registry";
 import {
   Button,
   EmptyState,
@@ -37,7 +38,7 @@ export function TeamAgentsPage() {
             {canSuspend ? (
               <>
                 ; team admins suspend them, and see their usage, schedules and Orbit scores, in the{" "}
-                <Link href="/admin/team/inventory">Inventory</Link>
+                <Link href={`${consoleHref("team")}/inventory`}>Inventory</Link>
               </>
             ) : null}
             . Archived agents were deleted after publishing: conversations pinned to them keep

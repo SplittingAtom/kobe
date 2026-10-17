@@ -2,9 +2,19 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { canSee, findSection } from "../../lib/admin/nav/registry";
+import type { TeamAccess } from "../../lib/admin/nav/types";
 import { must } from "../../lib/testing/must";
 import { TeamInventoryPage } from "./team/inventory-page";
-import { forbidNativeConfirm, TEAM, answerConfirm, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  ME,
+  TEAM,
+  answerConfirm,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 beforeEach(forbidNativeConfirm);
 afterEach(() => {
@@ -353,5 +363,40 @@ describe("Inventory: skills and connectors (KOBE-291)", () => {
     expect(href("Skill review")).toBe("/admin/team/skill-review");
     expect(href("Connectors")).toBe("/admin/team/connectors");
     await waitFor(() => expect(screen.queryByRole("status", { name: /Loading/ })).toBeNull());
+  });
+});
+
+describe("who may open the Inventory (KOBE-291 review)", () => {
+  const access = (role: TeamAccess["role"], permissions: string[]): TeamAccess => ({
+    console: "team",
+    user: ME,
+    team: TEAM,
+    role,
+    permissions,
+  });
+  const inventory = () => must(findSection("team", "inventory"));
+
+  it("is a ready section for holders of team.agents.suspend (team admins) only", () => {
+    expect(inventory().status.kind).toBe("ready");
+    expect(canSee(inventory(), access("team_admin", ["team.agents.suspend"]))).toBe(true);
+    expect(
+      canSee(inventory(), access("builder", ["team.agents.build", "team.agents.publish"])),
+    ).toBe(false);
+    expect(canSee(inventory(), access("member", ["team.read", "team.agents.use"]))).toBe(false);
+    expect(canSee(inventory(), access("team_admin", ["team.members.manage"]))).toBe(false);
+    expect(canSee(inventory(), { console: "site", user: ME, siteRole: "owner" })).toBe(false);
+  });
+
+  it("shows the server's refusal when someone without the permission opens it anyway", async () => {
+    stubInventory({
+      "GET /v1/agents/inventory": [
+        403,
+        { code: "forbidden", message: "You don't have permission to do that." },
+      ],
+    });
+    renderTeam(<TeamInventoryPage />, { role: "builder", permissions: ["team.agents.build"] });
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect((await within(agents).findByRole("alert")).textContent).toMatch(/permission/);
+    expect(screen.queryByRole("button", { name: /Suspend/ })).toBeNull();
   });
 });

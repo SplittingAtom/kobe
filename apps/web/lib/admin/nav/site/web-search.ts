@@ -7,6 +7,6 @@ export default defineSiteSection({
   group: "Models and connectors",
   order: 30,
   minRole: "admin",
-  // Chris put the provider choice on hold (KOBE-291): keep the placeholder, say why.
+  // The provider choice is on hold (product owner; KOBE-291): keep the placeholder, say why.
   status: onHold("KOBE-63", "Web search is on hold while the provider is chosen."),
 });

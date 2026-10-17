@@ -20,14 +20,26 @@ export function ResourceView<T>({
   return <>{children(state.data)}</>;
 }
 
-/** A timestamp people can read, with the exact value for machines. */
-export function DateTime({ value }: { readonly value: string | null | undefined }) {
+/**
+ * A timestamp people can read, with the exact value for machines. `precise` shows seconds and
+ * the time zone (the audit log, where times are compared with exports and other logs).
+ */
+export function DateTime({
+  value,
+  precise = false,
+}: {
+  readonly value: string | null | undefined;
+  readonly precise?: boolean;
+}) {
   if (!value) return <>—</>;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return <>—</>;
   return (
     <time dateTime={value} title={date.toISOString()}>
-      {date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+      {date.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: precise ? "long" : "short",
+      })}
     </time>
   );
 }

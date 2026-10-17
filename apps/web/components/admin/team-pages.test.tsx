@@ -361,6 +361,17 @@ describe("Agent inventory moved to its own page (KOBE-291)", () => {
     renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
     expect(await screen.findByText("v2")).toBeTruthy();
     expect(summary(calls).some((c) => c.includes("inventory"))).toBe(false);
+    // Builders get no link to a page they can't open (KOBE-291).
+    expect(screen.queryByRole("link", { name: "Inventory" })).toBeNull();
+  });
+
+  it("gives a team admin without the suspend permission no Inventory link either", async () => {
+    stubApi({ [GALLERY_LIST]: NO_GALLERY, [LIST]: [200, AGENTS] });
+    renderTeam(<TeamAgentsPage />, {
+      permissions: ["team.members.manage", "team.agents.build", "team.audit.read"],
+    });
+    expect(await screen.findByText("v2")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Inventory" })).toBeNull();
   });
 
   it("links team admins to the Inventory", async () => {

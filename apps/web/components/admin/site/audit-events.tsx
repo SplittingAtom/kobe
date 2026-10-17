@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   listSiteAudit,
   type AuditFilters,
@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "../../ui/console";
-import { MutationStatus } from "../error-notice";
+import { ErrorNotice } from "../error-notice";
 import { DateTime } from "../parts";
 import { useMutation } from "../use-resource";
 
@@ -81,41 +81,67 @@ function Client({ event, visible }: { readonly event: SiteAuditEvent; readonly v
   );
 }
 
+/** "50 events", "1 event". */
+export const eventCount = (n: number) =>
+  `${n.toLocaleString("en-US")} ${n === 1 ? "event" : "events"}`;
+
 /**
  * One filtered view of the log: the first page plus the ones "Load more" fetched with the same
- * filters. A new first page (filters applied or cleared) starts the list again.
+ * filters. The page mounts a new one (keyed by its view) for every filter change, and a page that
+ * answers after this one is gone is dropped. Each page loaded is reported through `announce`;
+ * when the last page arrives the button goes and focus moves to the Events heading.
  */
 export function AuditEventsTable({
   first,
   filters,
   teamNames,
   piiHours,
+  headingId,
+  announce,
 }: {
   readonly first: SiteAuditPage;
   readonly filters: AuditFilters;
   readonly teamNames: ReadonlyMap<string, string>;
   /** The site's IP and user agent erasure period; null when it could not be read. */
   readonly piiHours: number | null;
+  /** The Events heading, which takes focus when "Load more" goes away. */
+  readonly headingId: string;
+  readonly announce: (message: string) => void;
 }) {
-  const [shown, setShown] = useState(first);
   const [events, setEvents] = useState<readonly SiteAuditEvent[]>(first.events);
   const [cursor, setCursor] = useState<string | null>(first.nextCursor);
-  // Filters applied (or cleared): a new first page replaces the list and its cursor.
-  if (shown !== first) {
-    setShown(first);
-    setEvents(first.events);
-    setCursor(first.nextCursor);
-  }
+  const [focusHeading, setFocusHeading] = useState(false);
+  const alive = useRef(true);
   const paging = useMutation();
   const now = Date.now();
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!focusHeading) return;
+    setFocusHeading(false);
+    document.getElementById(headingId)?.focus();
+  }, [focusHeading, headingId]);
 
   async function loadMore() {
     if (cursor === null) return;
     await paging.run(
       () => listSiteAudit(filters, cursor),
       (page: SiteAuditPage) => {
+        if (!alive.current) return null;
+        const total = events.length + page.events.length;
         setEvents((current) => [...current, ...page.events]);
         setCursor(page.nextCursor);
+        announce(
+          `Loaded ${eventCount(page.events.length)} more: ${eventCount(total)} shown` +
+            (page.nextCursor === null ? ", the whole log for these filters." : "."),
+        );
+        if (page.nextCursor === null) setFocusHeading(true);
         return null;
       },
     );
@@ -141,7 +167,7 @@ export function AuditEventsTable({
             <TableRow key={e.id}>
               <TableCell numeric>{e.seq}</TableCell>
               <TableCell className="whitespace-nowrap">
-                <DateTime value={e.at} />
+                <DateTime value={e.at} precise />
               </TableCell>
               <TableCell>
                 {actorLabel(e)}
@@ -165,7 +191,7 @@ export function AuditEventsTable({
           ))}
         </TableBody>
       </Table>
-      <MutationStatus error={paging.error} notice={null} />
+      {paging.error && <ErrorNotice error={paging.error} />}
       {cursor !== null && (
         <p>
           <Button loading={paging.pending} onClick={() => void loadMore()}>

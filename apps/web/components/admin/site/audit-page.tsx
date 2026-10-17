@@ -3,21 +3,17 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { ApiResult } from "../../../lib/api/client";
-import {
-  listSiteAudit,
-  type AuditFilters,
-  type SiteAuditPage,
-} from "../../../lib/admin/api/site/audit";
 import { AUDIT_PII_RETENTION_HOURS, getSiteSettings } from "../../../lib/admin/api/site/settings";
 import { listSiteTeams } from "../../../lib/admin/api/site/teams";
 import { listUsers } from "../../../lib/admin/api/site/users";
 import { consoleHref } from "../../../lib/admin/nav/registry";
 import { Notice, PageHeader, Section } from "../../ui/console";
-import { ResourceView } from "../parts";
+import { ErrorNotice } from "../error-notice";
 import { useResource } from "../use-resource";
-import { AuditEventsTable } from "./audit-events";
+import { AuditEventsTable, eventCount } from "./audit-events";
 import { AuditFilterForm, type FilterOption } from "./audit-filters";
 import { AuditIntegritySection } from "./audit-integrity";
+import { useAuditView, type AuditView } from "./use-audit-view";
 
 /** What the filters and the table need besides the events; each part may be missing. */
 interface AuditContext {
@@ -49,29 +45,46 @@ async function loadContext(): Promise<ApiResult<AuditContext>> {
   };
 }
 
-async function loadEvents(
-  filters: AuditFilters,
-): Promise<ApiResult<{ page: SiteAuditPage; filters: AuditFilters }>> {
-  const res = await listSiteAudit(filters);
-  return res.ok ? { ...res, data: { page: res.data, filters } } : res;
+const EVENTS_HEADING = "audit-events-heading";
+
+/** What the live region says when a view has loaded. */
+function viewMessage(view: AuditView): string {
+  if (view.status === "loading") return "Loading audit events…";
+  if (view.status === "error") return "The audit events could not be loaded.";
+  const n = view.page.events.length;
+  if (n === 0) return "No events match these filters.";
+  return `Showing ${eventCount(n)}${view.page.nextCursor === null ? "." : "; more can be loaded."}`;
+}
+
+/** A filter the server refused: an unknown action name is the likely cause, so say that. */
+function ViewError({ view }: { readonly view: Extract<AuditView, { status: "error" }> }) {
+  if (view.error.status === 400 && view.filters.action) {
+    return (
+      <Notice tone="error">
+        <p>
+          No action is called <code>{view.filters.action}</code>, or another filter is out of range.
+          Check the name: the actions are listed in docs/audit-log.md.
+        </p>
+      </Notice>
+    );
+  }
+  return <ErrorNotice error={view.error} />;
 }
 
 /**
  * The site-wide audit log (spec D6, D8; `GET /v1/site/audit`, site Owner and Admins): read-only,
- * newest first, filtered by the server and paged with "Load more", with the hash chain's
- * verification status. Event fields are shown as plain text, and the IP address and user agent
+ * newest first, filtered by the server and paged with "Load more" (a polite live region says what
+ * each load brought), with the hash chain's verification on request. Event fields are shown as plain text, and the IP address and user agent
  * only until the site's erasure period has passed (KOBE-17).
  */
 export function SiteAuditPage() {
   const context = useResource(loadContext);
-  const [filters, setFilters] = useState<AuditFilters>({});
-  // Each result carries the filters it was read with, so "Load more" pages the same view.
-  const events = useResource(() => loadEvents(filters));
-
-  function apply(next: AuditFilters) {
-    setFilters(next);
-    events.reload();
-  }
+  const { view, load } = useAuditView();
+  const [paged, setPaged] = useState<{ readonly view: number; readonly message: string } | null>(
+    null,
+  );
+  // The live region speaks for the latest view, or for its latest "Load more".
+  const message = paged !== null && paged.view === view.id ? paged.message : viewMessage(view);
 
   const ctx = context.state.status === "ready" ? context.state.data : null;
   const teamNames = new Map((ctx?.teams ?? []).map((t) => [t.id, t.label]));
@@ -84,12 +97,12 @@ export function SiteAuditPage() {
         description="Every recorded event on the site, newest first. The log is append-only: nothing here can change it."
       />
       <AuditIntegritySection />
-      <Section id="audit-events-heading" title="Events">
+      <Section id={EVENTS_HEADING} title="Events">
         <AuditFilterForm
           users={ctx?.users ?? []}
           teams={ctx?.teams ?? []}
-          busy={events.state.status === "loading"}
-          onApply={apply}
+          busy={view.status === "loading"}
+          onApply={load}
         />
         {ctx && (ctx.users === null || ctx.teams === null) && (
           <Notice tone="warn" role="status">
@@ -103,22 +116,28 @@ export function SiteAuditPage() {
             ) : (
               <>
                 IP addresses and user agents are shown for {ctx.piiHours}{" "}
-                {ctx.piiHours === 1 ? "hour" : "hours"} after each event, then erased (
-                <Link href={settingsHref}>Settings</Link>).
+                {ctx.piiHours === 1 ? "hour" : "hours"} after each event and hidden here after that
+                (<Link href={settingsHref}>Settings</Link>).
               </>
             )}
           </p>
         )}
-        <ResourceView state={events.state} label="audit events">
-          {(first) => (
-            <AuditEventsTable
-              first={first.page}
-              filters={first.filters}
-              teamNames={teamNames}
-              piiHours={ctx ? ctx.piiHours : null}
-            />
-          )}
-        </ResourceView>
+        <div role="status" aria-live="polite" className="sr-only">
+          {message}
+        </div>
+        {view.status === "loading" && <p aria-hidden="true">Loading audit events…</p>}
+        {view.status === "error" && <ViewError view={view} />}
+        {view.status === "ready" && (
+          <AuditEventsTable
+            key={view.id}
+            first={view.page}
+            filters={view.filters}
+            teamNames={teamNames}
+            piiHours={ctx ? ctx.piiHours : null}
+            headingId={EVENTS_HEADING}
+            announce={(text) => setPaged({ view: view.id, message: text })}
+          />
+        )}
       </Section>
     </>
   );

@@ -181,9 +181,15 @@ function RestoreSection() {
       description={`Into a fresh install of the same Kobe version, never over a running site. Full details: ${DOCS}.`}
     >
       <Steps>
-        <li>Recreate the auth and envelope key Secrets from your secret store.</li>
         <li>
-          Install the same Kobe version with those Secrets, the same S3 bucket and the same public
+          Recreate the auth and envelope key Secrets from your secret store under new names (for
+          example <code>&lt;release&gt;-auth-restored</code> and{" "}
+          <code>&lt;release&gt;-envelope-key-restored</code>), so Helm doesn&apos;t have to adopt
+          them. The envelope key must be the backed-up value.
+        </li>
+        <li>
+          Install the same Kobe version with <code>auth.existingSecret</code> and{" "}
+          <code>envelope.keySecret</code> set to those names, the same S3 bucket and the same public
           URL. Don&apos;t run first-run setup.
         </li>
         <li>Scale the server and the scheduler to zero.</li>
@@ -194,6 +200,8 @@ function RestoreSection() {
             {[
               "export KOBE_BACKUP_KEY_FILE=<path to kobe-backup.key>",
               "export KOBE_DB_MIGRATE_URL=<postgres URL of the owner role>",
+              "export KOBE_S3_ENDPOINT=<url> KOBE_S3_BUCKET=<bucket> KOBE_S3_REGION=<region>",
+              "export KOBE_S3_ACCESS_KEY_ID=<id> KOBE_S3_SECRET_ACCESS_KEY=<secret>",
               "export KOBE_TMPDIR=/dev/shm",
               "kobe restore --from <backup dir>",
             ].join("\n")}

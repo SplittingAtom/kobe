@@ -25,11 +25,28 @@ interface Draft {
 
 const EMPTY: Draft = { action: "", category: "", actorId: "", teamId: "", since: "", until: "" };
 
-/** A `datetime-local` value (the viewer's time zone) as an ISO date-time, or undefined. */
-export function localToIso(value: string): string | undefined {
+const MINUTE_MS = 60_000;
+
+/**
+ * A `datetime-local` value (the viewer's time zone) as an ISO date-time, or undefined. With
+ * `endOfMinute`, a value without seconds means the last millisecond of that minute, so "To 10:30"
+ * includes an event at 10:30:45 (the server's bound is inclusive).
+ */
+export function localToIso(value: string, { endOfMinute = false } = {}): string | undefined {
   if (value === "") return undefined;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  if (Number.isNaN(date.getTime())) return undefined;
+  const wholeMinute = endOfMinute && /T\d{2}:\d{2}$/.test(value);
+  return new Date(date.getTime() + (wholeMinute ? MINUTE_MS - 1 : 0)).toISOString();
+}
+
+/** The viewer's time zone, for the From/To hint. */
+export function viewerTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "your time zone";
+  } catch {
+    return "your time zone";
+  }
 }
 
 type Errors = Partial<Record<"action" | "until", string>>;
@@ -41,14 +58,14 @@ function validate(draft: Draft): Errors {
     errors.action = "Enter an action name such as sandbox.runtime_tampered.";
   }
   const since = localToIso(draft.since);
-  const until = localToIso(draft.until);
+  const until = localToIso(draft.until, { endOfMinute: true });
   if (since && until && since > until) errors.until = "Choose a time after the start.";
   return errors;
 }
 
 function toFilters(draft: Draft): AuditFilters {
   const since = localToIso(draft.since);
-  const until = localToIso(draft.until);
+  const until = localToIso(draft.until, { endOfMinute: true });
   const action = draft.action.trim();
   return {
     ...(action ? { action } : {}),
@@ -136,7 +153,7 @@ export function AuditFilterForm({
         </Field>
       </FormRow>
       <FormRow>
-        <Field label="From" className="w-56">
+        <Field label="From" hint={`In ${viewerTimeZone()}.`} className="w-56">
           <TextInput
             type="datetime-local"
             name="since"
@@ -144,7 +161,7 @@ export function AuditFilterForm({
             onChange={set("since")}
           />
         </Field>
-        <Field label="To" error={errors.until} className="w-56">
+        <Field label="To" hint="Includes the whole minute." error={errors.until} className="w-56">
           <TextInput
             type="datetime-local"
             name="until"

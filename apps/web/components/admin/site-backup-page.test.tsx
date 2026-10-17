@@ -82,7 +82,22 @@ describe("Site backup and restore (KOBE-291)", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only site admins/);
     const backup = screen.getByLabelText("Take a backup").textContent ?? "";
     expect(backup).toMatch(/kobe backup --out/);
-    expect(screen.getByLabelText("Restore a backup").textContent).toMatch(/kobe restore --from/);
+    const restore = screen.getByLabelText("Restore a backup").textContent ?? "";
+    expect(restore).toMatch(/kobe restore --from/);
+    // The restore compares the bucket with the backup's object listing, so it needs S3 too.
+    for (const name of [
+      "KOBE_BACKUP_KEY_FILE",
+      "KOBE_DB_MIGRATE_URL",
+      "KOBE_S3_ENDPOINT",
+      "KOBE_S3_BUCKET",
+      "KOBE_S3_ACCESS_KEY_ID",
+      "KOBE_S3_SECRET_ACCESS_KEY",
+    ]) {
+      expect(restore).toContain(`${name}=<`);
+    }
+    expect(screen.getByRole("region", { name: "Restore" }).textContent).toMatch(
+      /under new names.*auth\.existingSecret.*envelope\.keySecret/,
+    );
     for (const region of ["Back up", "Restore"]) {
       expect(screen.getByRole("region", { name: region }).textContent).toContain(
         "docs/backup-restore.md",
