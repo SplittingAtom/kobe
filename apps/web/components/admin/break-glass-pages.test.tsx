@@ -7,7 +7,16 @@ import { BreakGlassPage } from "./site/break-glass-page";
 import { entryText } from "./site/break-glass-reader";
 import { TeamAuditPage } from "./team/audit-page";
 import { TeamBreakGlassPage } from "./team/break-glass-page";
-import { ME, TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  ME,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -49,12 +58,8 @@ const ACTIVE_OWN = grant({
   actions: { approve: false, deny: false, revoke: true, read: true },
 });
 
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  );
-});
+// The console asks in its own dialog (useConfirm); the native one must never be used.
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -108,7 +113,14 @@ describe("site break-glass page", () => {
     renderSite(<BreakGlassPage />);
     const row = (await screen.findByText("Incident 42")).closest("tr") as HTMLElement;
     expect(within(row).getByText("Waiting for approval")).toBeTruthy();
+    await userEvent.click(within(row).getByRole("button", { name: "Deny" }));
+    await answerConfirm(/^Deny break-glass access to /, "Cancel");
+    expect(summary(calls)).not.toContain("POST /v1/site/break-glass/g-1/deny");
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    await answerConfirm(/^Approve break-glass access to /, "Cancel");
+    expect(summary(calls)).not.toContain("POST /v1/site/break-glass/g-1/approve");
+    await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    await answerConfirm(/^Approve break-glass access to /, "Approve");
     expect((await screen.findByRole("alert")).textContent).toContain(
       "A second site admin must approve",
     );
@@ -121,8 +133,6 @@ describe("site break-glass page", () => {
       scope: "user",
       subject: { id: "u-bob", name: "Bob", email: "b@x.io" },
     });
-    const confirm = vi.fn((_message?: string) => true);
-    vi.stubGlobal("confirm", confirm);
     stubApi({
       "GET /v1/site/break-glass": [200, { grants: [held], selfApprovalAllowed: false }],
       "GET /v1/site/teams": [200, TEAMS],
@@ -144,7 +154,9 @@ describe("site break-glass page", () => {
     const row = (await screen.findByText("Incident 42")).closest("tr") as HTMLElement;
     expect(row.textContent).toContain("Legal hold: the subject is not notified");
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
-    expect(String(confirm.mock.calls[0]?.[0])).toContain("legal hold");
+    expect(await answerConfirm(/^Approve break-glass access to /, "Approve")).toContain(
+      "legal hold",
+    );
     await screen.findByText(/No active team admin of this team could be notified/);
   });
 

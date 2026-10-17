@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { projectPermissions } from "@kobe/protocol";
 import { worded, type Project, type ProjectInput } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
-import { ResourceView, confirmed } from "../admin/parts";
+import { ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import { Button, Notice, PageHeader, Section, eventTrigger, useConfirm } from "../ui/console";
 import { inputOf, ProjectForm } from "./project-form";
 import { ProjectFiles } from "./project-files";
 import { ProjectMembers } from "./project-members";
@@ -18,29 +19,28 @@ import { useProjectAgents, useProjectsApi } from "./use-projects";
 export function ProjectDetailPage({ projectId }: { readonly projectId: string }) {
   const api = useProjectsApi();
   const { state, reload } = useResource(() => api.get(projectId));
+  const back = <Link href="/me/projects">All projects</Link>;
   return (
-    <>
-      <p>
-        <Link href="/me/projects">All projects</Link>
-      </p>
-      <ResourceView state={state} label="the project">
-        {(project) => <ProjectView project={project} onChanged={reload} />}
-      </ResourceView>
-    </>
+    <ResourceView state={state} label="the project">
+      {(project) => <ProjectView project={project} back={back} onChanged={reload} />}
+    </ResourceView>
   );
 }
 
 function ProjectView({
   project,
+  back,
   onChanged,
 }: {
   readonly project: Project;
+  readonly back: ReactNode;
   readonly onChanged: () => void;
 }) {
   const access = useTeamAccess();
   const api = useProjectsApi();
   const agents = useProjectAgents(api);
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const can = projectPermissions(access.role, project.myRole ?? undefined);
   const archived = project.archivedAt !== null;
   const canEdit = can.manage && !archived;
@@ -56,12 +56,17 @@ function ProjectView({
     }
   }
 
-  async function archive(value: boolean) {
+  async function archive(value: boolean, trigger: HTMLElement | null) {
     if (
       value &&
-      !confirmed(
-        `Archive ${project.name}? It becomes read-only; shared conversations stay readable.`,
-      )
+      !(await confirm(
+        {
+          title: `Archive ${project.name}?`,
+          description: "It becomes read-only; shared conversations stay readable.",
+          confirmLabel: "Archive project",
+        },
+        trigger,
+      ))
     ) {
       return;
     }
@@ -72,10 +77,16 @@ function ProjectView({
     if (done) onChanged();
   }
 
-  async function remove() {
-    if (!confirmed(`Delete ${project.name} for good? Archive it instead to keep its history.`)) {
-      return;
-    }
+  async function remove(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Delete ${project.name} for good?`,
+        description: "Archive it instead to keep its history.",
+        confirmLabel: "Delete project",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       async () => worded(await api.remove(project.id)),
       () => "Deleted.",
@@ -85,28 +96,43 @@ function ProjectView({
 
   return (
     <>
-      <h1>
-        {project.name}
-        {archived && " (archived)"}
-      </h1>
+      <PageHeader
+        back={back}
+        title={
+          <>
+            {project.name}
+            {archived && " (archived)"}
+          </>
+        }
+        actions={
+          (can.use && !archived) || project.myRole !== null ? (
+            <>
+              {can.use && !archived && (
+                <Button asChild variant="primary">
+                  <Link href={`/?project=${project.id}`}>New conversation in this project</Link>
+                </Button>
+              )}
+              {project.myRole !== null && (
+                <Button asChild>
+                  <Link href={`/me/memory?project=${project.id}`}>Project memory</Link>
+                </Button>
+              )}
+            </>
+          ) : undefined
+        }
+      />
       {archived && (
-        <p role="note" className={styles.hint}>
-          This project is archived and read-only. Its files and shared conversations stay readable.
-        </p>
+        <Notice tone="warn" role="note">
+          <p>
+            This project is archived and read-only. Its files and shared conversations stay
+            readable.
+          </p>
+        </Notice>
       )}
-      <p className={styles.actions}>
-        {can.use && !archived && (
-          <Link href={`/?project=${project.id}`}>New conversation in this project</Link>
-        )}
-        {project.myRole !== null && (
-          <Link href={`/me/memory?project=${project.id}`}>Project memory</Link>
-        )}
-      </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <section aria-label="Settings">
-        <h2>Settings</h2>
+      <Section title="Settings">
         {!can.manage && (
-          <p className={styles.hint}>
+          <p className="m-0 text-sm text-console-muted">
             Only the project&apos;s owners and team admins can change these.
           </p>
         )}
@@ -120,23 +146,27 @@ function ProjectView({
           onSubmit={(input) => void save(input)}
         />
         {can.manage && (
-          <p className={styles.actions}>
-            <button
-              type="button"
+          <div className="flex flex-wrap gap-2">
+            <Button
               disabled={mutation.pending}
-              onClick={() => void archive(!archived)}
+              onClick={(e) => void archive(!archived, eventTrigger(e))}
             >
               {archived ? "Restore project" : "Archive project"}
-            </button>
-            <button type="button" disabled={mutation.pending} onClick={() => void remove()}>
+            </Button>
+            <Button
+              variant="danger"
+              disabled={mutation.pending}
+              onClick={(e) => void remove(eventTrigger(e))}
+            >
               Delete project
-            </button>
-          </p>
+            </Button>
+          </div>
         )}
-      </section>
+      </Section>
       <ProjectMembers project={project} canManage={can.manage_members} />
       <ProjectFiles project={project} canManage={can.manage} />
       <ProjectThreads project={project} />
+      {confirmDialog}
     </>
   );
 }

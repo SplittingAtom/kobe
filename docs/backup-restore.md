@@ -4,6 +4,11 @@
 with a manifest of the objects in the external S3 bucket. Sandbox volumes are not backed up because
 they are rebuildable working copies (spec D15).
 
+The Site console's **Backup and restore** page shows what the site itself knows: the last
+restore (from `platform.restore.completed` in the audit log) and whether the deleting jobs are
+paused. It cannot show the last backup, because a backup never writes to the site; record each
+backup's fingerprint and time yourself (see [Back up](#back-up)).
+
 ## What a backup contains
 
 A backup is a new directory (mode `0700`, files `0600`). Every backup is **encrypted and signed**

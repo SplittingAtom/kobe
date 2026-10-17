@@ -17,11 +17,34 @@ import {
   type SiteTeam,
   type RosterMember,
 } from "../../../lib/admin/api/site/teams";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  ChoiceGroup,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Radio,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TextInput,
+  Textarea,
+  eventTrigger,
+  useConfirm,
+  type BadgeTone,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { BreakGlassReader } from "./break-glass-reader";
-import styles from "../admin.module.css";
 
 interface PageData extends GrantList {
   readonly teams: readonly SiteTeam[];
@@ -50,6 +73,14 @@ const STATUS_LABELS = {
   expired: "Ended",
 } as const;
 
+const STATUS_TONES: Readonly<Record<BreakGlassGrant["status"], BadgeTone>> = {
+  pending: "attention",
+  active: "running",
+  denied: "neutral",
+  revoked: "neutral",
+  expired: "neutral",
+};
+
 export function scopeLabel(grant: Pick<BreakGlassGrant, "scope" | "subject" | "threadId">): string {
   if (grant.scope === "user") return `Threads of ${grant.subject?.name ?? "one user"}`;
   if (grant.scope === "thread") return `Thread ${grant.threadId ?? ""}`;
@@ -66,15 +97,30 @@ export function BreakGlassPage() {
   const { state, reload } = useResource(loadPage);
   const mutation = useMutation();
   const [reading, setReading] = useState<BreakGlassGrant | null>(null);
+  const [confirm, confirmDialog] = useConfirm();
 
-  async function decide(grant: BreakGlassGrant, decision: GrantDecision) {
+  async function decide(
+    grant: BreakGlassGrant,
+    decision: GrantDecision,
+    trigger: HTMLElement | null,
+  ) {
     const verbs = {
       approve: "Approve",
       deny: "Deny",
       revoke: grant.status === "pending" ? "Withdraw" : "Revoke",
     };
-    const hold = grant.legalHold ? " This is a legal hold: the subject is not notified." : "";
-    if (!confirmed(`${verbs[decision]} break-glass access to ${grant.team.name}?${hold}`)) return;
+    const yes = await confirm(
+      {
+        title: `${verbs[decision]} break-glass access to ${grant.team.name}?`,
+        ...(grant.legalHold
+          ? { description: "This is a legal hold: the subject is not notified." }
+          : {}),
+        confirmLabel: verbs[decision],
+        tone: decision === "approve" ? "primary" : "danger",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => decideGrant(grant.id, decision),
       ({ grant: g, warnings }) =>
@@ -102,12 +148,10 @@ export function BreakGlassPage() {
 
   return (
     <>
-      <h1>Break-glass</h1>
-      <p className={styles.hint}>
-        Site admins can&apos;t read team content. Break-glass gives one site admin read-only access
-        to one team for a limited time, after a second site admin approves. The team&apos;s admins
-        are notified, and every read is recorded in the team&apos;s audit log.
-      </p>
+      <PageHeader
+        title="Break-glass"
+        description="Site admins can't read team content. Break-glass gives one site admin read-only access to one team for a limited time, after a second site admin approves. The team's admins are notified, and every read is recorded in the team's audit log."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="break-glass grants">
         {(data) => (
@@ -118,15 +162,18 @@ export function BreakGlassPage() {
               mutation={mutation}
               onRequested={reload}
             />
-            <GrantTable
-              grants={data.grants}
-              onDecide={decide}
-              onRead={setReading}
-              pending={mutation.pending}
-            />
+            <Section title="Requests and grants">
+              <GrantTable
+                grants={data.grants}
+                onDecide={(g, decision, trigger) => void decide(g, decision, trigger)}
+                onRead={setReading}
+                pending={mutation.pending}
+              />
+            </Section>
           </>
         )}
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }
@@ -190,67 +237,62 @@ function RequestForm({
   }
 
   return (
-    <>
-      <h2>Request access</h2>
-      <form onSubmit={onSubmit} className={styles.form} aria-label="Request break-glass access">
-        <label>
-          Team
-          <select required value={teamId} onChange={(e) => void chooseTeam(e.target.value)}>
-            <option value="">Choose a team…</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <fieldset>
-          <legend>Scope</legend>
-          {(["team", "user", "thread"] as const).map((s) => (
-            <label key={s}>
-              <input
-                type="radio"
+    <Section title="Request access">
+      <form onSubmit={onSubmit} aria-label="Request break-glass access">
+        <FormRow className="mt-0">
+          <Field label="Team">
+            <Select required value={teamId} onChange={(e) => void chooseTeam(e.target.value)}>
+              <option value="">Choose a team…</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <ChoiceGroup legend="Scope">
+            {(["team", "user", "thread"] as const).map((s) => (
+              <Radio
+                key={s}
                 name="scope"
                 value={s}
+                label={
+                  s === "team" ? "Whole team" : s === "user" ? "One user's threads" : "One thread"
+                }
                 checked={scope === s}
                 onChange={() => setScope(s)}
               />
-              {s === "team" ? "Whole team" : s === "user" ? "One user's threads" : "One thread"}
-            </label>
-          ))}
-        </fieldset>
-        {scope === "user" && (
-          <label>
-            User
-            <select required value={userId} onChange={(e) => setUserId(e.target.value)}>
-              <option value="">Choose a member…</option>
-              {roster.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name} ({m.email})
+            ))}
+          </ChoiceGroup>
+          {scope === "user" && (
+            <Field label="User">
+              <Select required value={userId} onChange={(e) => setUserId(e.target.value)}>
+                <option value="">Choose a member…</option>
+                {roster.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name} ({m.email})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          {scope === "thread" && (
+            <Field label="Thread id">
+              <TextInput required value={threadId} onChange={(e) => setThreadId(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Duration">
+            <Select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+              {DURATIONS.map((d) => (
+                <option key={d} value={d}>
+                  {durationLabel(d)}
                 </option>
               ))}
-            </select>
-          </label>
-        )}
-        {scope === "thread" && (
-          <label>
-            Thread id
-            <input required value={threadId} onChange={(e) => setThreadId(e.target.value)} />
-          </label>
-        )}
-        <label>
-          Duration
-          <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-            {DURATIONS.map((d) => (
-              <option key={d} value={d}>
-                {durationLabel(d)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Reason
-          <textarea
+            </Select>
+          </Field>
+        </FormRow>
+        <Field label="Reason" className="mb-3 max-w-2xl">
+          <Textarea
             required
             minLength={10}
             maxLength={2000}
@@ -258,26 +300,26 @@ function RequestForm({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={legalHold}
-            onChange={(e) => setLegalHold(e.target.checked)}
-          />
-          Legal hold (don&apos;t notify the user being investigated)
-        </label>
-        <button type="submit" disabled={mutation.pending}>
-          Request access
-        </button>
+        </Field>
+        <Checkbox
+          className="mb-3"
+          label="Legal hold (don't notify the user being investigated)"
+          checked={legalHold}
+          onChange={(e) => setLegalHold(e.target.checked)}
+        />
+        <div>
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            Request access
+          </Button>
+        </div>
       </form>
       {soleAdmin && (
-        <p className={styles.hint}>
+        <p className="text-sm text-console-muted">
           You are this site&apos;s only active admin, so you can approve your own request. The grant
           is flagged as self-approved everywhere it appears.
         </p>
       )}
-    </>
+    </Section>
   );
 }
 
@@ -288,95 +330,114 @@ function GrantTable({
   pending,
 }: {
   readonly grants: readonly BreakGlassGrant[];
-  readonly onDecide: (grant: BreakGlassGrant, decision: GrantDecision) => void;
+  readonly onDecide: (
+    grant: BreakGlassGrant,
+    decision: GrantDecision,
+    trigger: HTMLElement | null,
+  ) => void;
   readonly onRead: (grant: BreakGlassGrant) => void;
   readonly pending: boolean;
 }) {
-  if (grants.length === 0) return <p>No break-glass requests yet.</p>;
+  if (grants.length === 0) return <EmptyState title="No break-glass requests yet." />;
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <caption>Requests and grants</caption>
-        <thead>
-          <tr>
-            <th scope="col">Team</th>
-            <th scope="col">Requested by</th>
-            <th scope="col">Scope</th>
-            <th scope="col">Reason</th>
-            <th scope="col">Status</th>
-            <th scope="col">Window</th>
-            <th scope="col">
-              <span className={styles.visuallyHidden}>Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {grants.map((g) => (
-            <tr key={g.id}>
-              <td>{g.team.name}</td>
-              <td>
-                {g.requestedBy.name}
-                <br />
+    <Table caption="Requests and grants" hideCaption>
+      <TableHead>
+        <TableRow>
+          <TableHeader>Team</TableHeader>
+          <TableHeader>Requested by</TableHeader>
+          <TableHeader>Scope</TableHeader>
+          <TableHeader>Reason</TableHeader>
+          <TableHeader>Status</TableHeader>
+          <TableHeader>Window</TableHeader>
+          <TableHeader>
+            <span className="sr-only">Actions</span>
+          </TableHeader>
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {grants.map((g) => (
+          <TableRow key={g.id}>
+            <TableCell>{g.team.name}</TableCell>
+            <TableCell>
+              {g.requestedBy.name}
+              <br />
+              <span className="text-sm text-console-muted">
                 <DateTime value={g.requestedAt} />
-              </td>
-              <td>
-                {scopeLabel(g)}
-                {g.legalHold && (
-                  <>
-                    <br />
-                    <strong>Legal hold:</strong> the subject is not notified
-                  </>
-                )}
-              </td>
-              <td>{g.reason}</td>
-              <td>
-                {STATUS_LABELS[g.status]}
-                {g.approvedBy && (
-                  <>
-                    <br />
+              </span>
+            </TableCell>
+            <TableCell>
+              {scopeLabel(g)}
+              {g.legalHold && (
+                <>
+                  <br />
+                  <strong>Legal hold:</strong> the subject is not notified
+                </>
+              )}
+            </TableCell>
+            <TableCell>{g.reason}</TableCell>
+            <TableCell>
+              <Badge tone={STATUS_TONES[g.status]}>{STATUS_LABELS[g.status]}</Badge>
+              {g.approvedBy && (
+                <>
+                  <br />
+                  <span className="text-sm text-console-muted">
                     {g.selfApproved
                       ? `Self-approved by ${g.approvedBy.name} (flagged)`
                       : `Approved by ${g.approvedBy.name}`}
-                  </>
+                  </span>
+                </>
+              )}
+            </TableCell>
+            <TableCell>
+              {g.startsAt ? (
+                <>
+                  <DateTime value={g.startsAt} /> – <DateTime value={g.endedAt ?? g.expiresAt} />
+                </>
+              ) : (
+                durationLabel(g.durationMinutes)
+              )}
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-wrap gap-1.5">
+                {g.actions.read && (
+                  <Button size="sm" variant="primary" onClick={() => onRead(g)}>
+                    Read
+                  </Button>
                 )}
-              </td>
-              <td>
-                {g.startsAt ? (
-                  <>
-                    <DateTime value={g.startsAt} /> – <DateTime value={g.endedAt ?? g.expiresAt} />
-                  </>
-                ) : (
-                  durationLabel(g.durationMinutes)
+                {g.actions.approve && (
+                  <Button
+                    size="sm"
+                    disabled={pending}
+                    onClick={(e) => onDecide(g, "approve", eventTrigger(e))}
+                  >
+                    Approve
+                  </Button>
                 )}
-              </td>
-              <td>
-                <div className={styles.actions}>
-                  {g.actions.read && (
-                    <button type="button" onClick={() => onRead(g)}>
-                      Read
-                    </button>
-                  )}
-                  {g.actions.approve && (
-                    <button type="button" disabled={pending} onClick={() => onDecide(g, "approve")}>
-                      Approve
-                    </button>
-                  )}
-                  {g.actions.deny && (
-                    <button type="button" disabled={pending} onClick={() => onDecide(g, "deny")}>
-                      Deny
-                    </button>
-                  )}
-                  {g.actions.revoke && (
-                    <button type="button" disabled={pending} onClick={() => onDecide(g, "revoke")}>
-                      {g.status === "pending" ? "Withdraw" : "Revoke"}
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                {g.actions.deny && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={pending}
+                    onClick={(e) => onDecide(g, "deny", eventTrigger(e))}
+                  >
+                    Deny
+                  </Button>
+                )}
+                {g.actions.revoke && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={pending}
+                    onClick={(e) => onDecide(g, "revoke", eventTrigger(e))}
+                  >
+                    {g.status === "pending" ? "Withdraw" : "Revoke"}
+                  </Button>
+                )}
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

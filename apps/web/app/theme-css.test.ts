@@ -112,7 +112,7 @@ describe("theme tokens (KOBE-282)", () => {
   });
 
   it("Tailwind's dark variant follows the same rule", () => {
-    const variant = block(read("app/chat-global.css"), "@custom-variant dark");
+    const variant = block(read("app/tailwind.css"), "@custom-variant dark");
     expect(variant).toContain('&:where([data-theme="dark"] *)');
     const media = block(variant, "@media (prefers-color-scheme: dark)");
     expect(media).toContain('&:where(:root:not([data-theme="light"]) *)');
@@ -181,6 +181,18 @@ describe("status tokens (KOBE-301)", () => {
       expect(
         contrast(resolve(theme, "--kobe-status-accent-fg"), resolve(theme, "--kobe-status-accent")),
       ).toBeGreaterThan(4.5);
+    });
+  }
+
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`console form-control borders keep 3:1 on the page and the panel (${name}, KOBE-294)`, () => {
+      const border = resolve(theme, "--kobe-console-control-border");
+      for (const surface of ["--kobe-console-bg", "--kobe-console-panel"]) {
+        expect(contrast(border, resolve(theme, surface)), surface).toBeGreaterThanOrEqual(3);
+      }
     });
   }
 

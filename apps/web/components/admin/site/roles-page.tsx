@@ -10,11 +10,28 @@ import {
 } from "../../../lib/admin/api/site/roles";
 import { listUsers, type SiteUser } from "../../../lib/admin/api/site/users";
 import { canManageSiteRoles } from "../../../lib/admin/rules";
+import {
+  Badge,
+  Button,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { useSiteAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { ResourceView, confirmed } from "../parts";
+import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 interface RolesData {
   readonly holders: readonly SiteRoleHolder[];
@@ -34,11 +51,20 @@ export function RolesPage() {
   const isOwner = canManageSiteRoles(access.siteRole);
   const { state, reload } = useResource(loadRoles);
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const [grantTo, setGrantTo] = useState("");
   const [transferTo, setTransferTo] = useState("");
 
-  async function revoke(holder: SiteRoleHolder) {
-    if (!confirmed(`Revoke Admin from ${holder.name}? They become a User.`)) return;
+  async function revoke(holder: SiteRoleHolder, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Revoke Admin from ${holder.name}?`,
+        description: "They become a User.",
+        confirmLabel: "Revoke Admin",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => setSiteRole(holder.userId, "user"),
       () => `${holder.name} is now a User.`,
@@ -62,23 +88,34 @@ export function RolesPage() {
 
   async function transfer(e: FormEvent<HTMLFormElement>, users: readonly SiteUser[]) {
     e.preventDefault();
+    const trigger = eventTrigger(e);
     const user = users.find((u) => u.id === transferTo);
     if (!user) return;
-    if (!confirmed(`Make ${user.name} the Owner? You become an Admin. Only they can undo this.`)) {
-      return;
-    }
+    const yes = await confirm(
+      {
+        title: `Make ${user.name} the Owner?`,
+        description: "You become an Admin. Only they can undo this.",
+        confirmLabel: "Transfer ownership",
+      },
+      trigger,
+    );
+    if (!yes) return;
     // Your own role changes: reload so the console reflects it.
     if (await mutation.run(() => transferOwnership(user.id))) window.location.reload();
   }
 
   return (
     <>
-      <h1>Site roles</h1>
-      <p className={styles.hint}>
-        One Owner, any number of Admins; everyone else is a User. Site roles give no access to team
-        content.
-        {!isOwner && " Only the Owner grants or revokes Admin and transfers ownership."}
-      </p>
+      <PageHeader
+        title="Site roles"
+        description={
+          <>
+            One Owner, any number of Admins; everyone else is a User. Site roles give no access to
+            team content.
+            {!isOwner && " Only the Owner grants or revokes Admin and transfers ownership."}
+          </>
+        }
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="site roles">
         {({ holders, users }) => {
@@ -87,100 +124,101 @@ export function RolesPage() {
           const successors = active.filter((u) => u.id !== access.user.id);
           return (
             <>
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <caption>Owner and Admins</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Email</th>
-                      <th scope="col">Role</th>
+              <Table caption="Owner and Admins">
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Name</TableHeader>
+                    <TableHeader>Email</TableHeader>
+                    <TableHeader>Role</TableHeader>
+                    {isOwner && (
+                      <TableHeader>
+                        <span className="sr-only">Actions</span>
+                      </TableHeader>
+                    )}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {holders.map((h) => (
+                    <TableRow key={h.userId}>
+                      <TableRowHeader>{h.name}</TableRowHeader>
+                      <TableCell>{h.email}</TableCell>
+                      <TableCell>
+                        {h.role === "owner" ? <Badge tone="accent">Owner</Badge> : "Admin"}
+                      </TableCell>
                       {isOwner && (
-                        <th scope="col">
-                          <span className={styles.visuallyHidden}>Actions</span>
-                        </th>
+                        <TableCell>
+                          {h.role === "admin" && (
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={mutation.pending}
+                              onClick={(e) => void revoke(h, eventTrigger(e))}
+                            >
+                              Revoke Admin
+                              <span className="sr-only"> from {h.name}</span>
+                            </Button>
+                          )}
+                        </TableCell>
                       )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {holders.map((h) => (
-                      <tr key={h.userId}>
-                        <th scope="row">{h.name}</th>
-                        <td>{h.email}</td>
-                        <td>{h.role === "owner" ? "Owner" : "Admin"}</td>
-                        {isOwner && (
-                          <td>
-                            {h.role === "admin" && (
-                              <button
-                                type="button"
-                                disabled={mutation.pending}
-                                onClick={() => void revoke(h)}
-                              >
-                                Revoke Admin
-                                <span className={styles.visuallyHidden}> from {h.name}</span>
-                              </button>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
               {isOwner && (
                 <>
-                  <h2>Grant Admin</h2>
-                  <form
-                    onSubmit={(e) => void grant(e, users)}
-                    className={styles.form}
-                    aria-label="Grant Admin"
-                  >
-                    <label>
-                      User
-                      <select required value={grantTo} onChange={(e) => setGrantTo(e.target.value)}>
-                        <option value="">Choose a user…</option>
-                        {candidates.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name} ({u.email})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button type="submit" disabled={mutation.pending}>
-                      Make Admin
-                    </button>
-                  </form>
-                  <h2>Transfer ownership</h2>
-                  <form
-                    onSubmit={(e) => void transfer(e, users)}
-                    className={styles.form}
-                    aria-label="Transfer ownership"
-                  >
-                    <label>
-                      New Owner
-                      <select
-                        required
-                        value={transferTo}
-                        onChange={(e) => setTransferTo(e.target.value)}
-                      >
-                        <option value="">Choose a user…</option>
-                        {successors.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name} ({u.email})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button type="submit" disabled={mutation.pending}>
-                      Transfer ownership
-                    </button>
-                  </form>
+                  <Section title="Grant Admin">
+                    <form onSubmit={(e) => void grant(e, users)} aria-label="Grant Admin">
+                      <FormRow className="mt-0">
+                        <Field label="User">
+                          <Select
+                            required
+                            value={grantTo}
+                            onChange={(e) => setGrantTo(e.target.value)}
+                          >
+                            <option value="">Choose a user…</option>
+                            {candidates.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} ({u.email})
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Button type="submit" variant="primary" disabled={mutation.pending}>
+                          Make Admin
+                        </Button>
+                      </FormRow>
+                    </form>
+                  </Section>
+                  <Section title="Transfer ownership">
+                    <form onSubmit={(e) => void transfer(e, users)} aria-label="Transfer ownership">
+                      <FormRow className="mt-0">
+                        <Field label="New Owner">
+                          <Select
+                            required
+                            value={transferTo}
+                            onChange={(e) => setTransferTo(e.target.value)}
+                          >
+                            <option value="">Choose a user…</option>
+                            {successors.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} ({u.email})
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Button type="submit" variant="danger" disabled={mutation.pending}>
+                          Transfer ownership
+                        </Button>
+                      </FormRow>
+                    </form>
+                  </Section>
                 </>
               )}
             </>
           );
         }}
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }

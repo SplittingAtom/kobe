@@ -6,11 +6,11 @@ import {
   putTeamSettings,
   type TeamChatSettings,
 } from "../../../lib/admin/api/team/settings";
+import { Button, Checkbox, PageHeader } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * The team's follow-up suggestions switch (`/v1/team/settings`, KOBE-222, CE21). Off by default.
@@ -23,7 +23,7 @@ export function TeamFollowupsPage() {
   const { state, reload } = useResource(() => getTeamSettings(teamId));
   return (
     <>
-      <h1>Follow-ups</h1>
+      <PageHeader title="Follow-ups" />
       <ResourceView state={state} label="follow-up settings">
         {(settings) => <FollowupsForm teamId={teamId} settings={settings} onSaved={reload} />}
       </ResourceView>
@@ -57,19 +57,21 @@ function FollowupsForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Follow-ups">
-      <label>
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />{" "}
-        Suggest follow-up messages after each answer
-      </label>
-      <p className={styles.hint}>
-        After each answer the conversation&apos;s model is asked for three short follow-ups, shown
-        above the message box until the next message. Each one is a small model call charged to the
-        member as follow-ups usage; it is skipped once any of their budgets is at 80 %, and never
-        for scheduled runs. Off by default.
-      </p>
-      <button type="submit" disabled={mutation.pending || enabled === settings.followupsEnabled}>
-        Save
-      </button>
+      <Checkbox
+        label="Suggest follow-up messages after each answer"
+        hint="After each answer the conversation's model is asked for three short follow-ups, shown above the message box until the next message. Each one is a small model call charged to the member as follow-ups usage; it is skipped once any of their budgets is at 80 %, and never for scheduled runs. Off by default."
+        checked={enabled}
+        onChange={(e) => setEnabled(e.target.checked)}
+      />
+      <div className="my-4">
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={mutation.pending || enabled === settings.followupsEnabled}
+        >
+          Save
+        </Button>
+      </div>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );

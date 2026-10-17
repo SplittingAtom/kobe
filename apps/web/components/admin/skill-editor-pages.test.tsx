@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { SkillEditorPage } from "./team/skill-editor/skill-editor-page";
 import { SkillsPage } from "./team/skill-editor/skills-page";
-import { renderTeam, stubApi, type RecordedCall } from "./testing";
+import { forbidNativeConfirm, renderTeam, stubApi, type RecordedCall } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const SKILL = {
   id: "s-1",
@@ -110,7 +112,8 @@ describe("Skill editor: create", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add file" }));
     await userEvent.type(screen.getByLabelText("Path of file 1"), "../x");
     await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/fix 3 problems/i);
+    // The summary first, then each field's own error (KOBE-295: console Field errors).
+    expect(must((await screen.findAllByRole("alert"))[0]).textContent).toMatch(/fix 3 problems/i);
     expect(screen.getByLabelText("Name").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByLabelText("Description").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByLabelText("Path of file 1").getAttribute("aria-invalid")).toBe("true");

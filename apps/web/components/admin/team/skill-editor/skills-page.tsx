@@ -2,11 +2,22 @@
 
 import Link from "next/link";
 import { listSkills } from "../../../../lib/admin/api/team/skills";
+import {
+  Button,
+  EmptyState,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { skillPaths, type SkillArea } from "./area";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
-import styles from "../../admin.module.css";
 
 /**
  * Skills the caller can see; each one opens in the editor (KOBE-83). In the member's own area
@@ -18,49 +29,51 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
   const { state } = useResource(() => listSkills(teamId, paths.listScope));
   return (
     <>
-      <h1>{paths.listTitle}</h1>
-      <p className={styles.hint}>
-        Saving a skill creates a new immutable version.{" "}
-        {area === "my"
-          ? "Personal skills are only yours."
-          : "Team skills are shared with the team; personal skills are only yours."}
-      </p>
-      <p>
-        <Link href={`${paths.base}/new`}>New skill</Link>
-      </p>
+      <PageHeader
+        title={paths.listTitle}
+        description={`Saving a skill creates a new immutable version. ${
+          area === "my"
+            ? "Personal skills are only yours."
+            : "Team skills are shared with the team; personal skills are only yours."
+        }`}
+        actions={
+          <Button asChild variant="primary">
+            <Link href={`${paths.base}/new`}>New skill</Link>
+          </Button>
+        }
+      />
       <ResourceView state={state} label="skills">
         {(skills) =>
           skills.length === 0 ? (
-            <p>No skills yet.</p>
+            <EmptyState title="No skills yet." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>{paths.listTitle}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Skill</th>
-                    {area === "team" && <th scope="col">Scope</th>}
-                    <th scope="col">Latest version</th>
-                    <th scope="col">Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {skills.map((s) => (
-                    <tr key={s.id}>
-                      <th scope="row">
-                        <Link href={`${paths.base}/${s.id}`}>{s.slug}</Link>
-                        <div className={styles.hint}>{s.description}</div>
-                      </th>
-                      {area === "team" && <td>{s.scope === "team" ? "Team" : "Personal"}</td>}
-                      <td>v{s.latestVersion}</td>
-                      <td>
-                        <DateTime value={s.updatedAt} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table caption={paths.listTitle}>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Skill</TableHeader>
+                  {area === "team" && <TableHeader>Scope</TableHeader>}
+                  <TableHeader>Latest version</TableHeader>
+                  <TableHeader>Updated</TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {skills.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableRowHeader>
+                      <Link href={`${paths.base}/${s.id}`}>{s.slug}</Link>
+                      <div className="text-sm font-normal text-console-muted">{s.description}</div>
+                    </TableRowHeader>
+                    {area === "team" && (
+                      <TableCell>{s.scope === "team" ? "Team" : "Personal"}</TableCell>
+                    )}
+                    <TableCell>v{s.latestVersion}</TableCell>
+                    <TableCell>
+                      <DateTime value={s.updatedAt} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>

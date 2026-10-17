@@ -80,10 +80,10 @@ describe("checkboxes and radios sit inline before their text (KOBE-283)", () => 
         /^label\b/.test(subject(r.selector)) &&
         /(display\s*:\s*(block|flex|grid)|flex-direction\s*:\s*column)/.test(r.body),
     );
-    // The console forms and the usage controls stack their field captions.
-    expect(stacking.map(where)).toEqual(
-      expect.arrayContaining([expect.stringContaining(".form label")]),
-    );
+    // Since KOBE-296 no console stylesheet lays labels out: fields are the primitives' `Field`
+    // (label above the control) and choices their `Checkbox`/`Radio`, whose inline box is pinned
+    // by a rendered test (components/ui/console/field.test.tsx). This keeps the global sheets
+    // from bringing a stacking rule back.
     expect(stacking.filter((r) => !LEAVES_CHOICES_OUT.test(r.selector)).map(where)).toEqual([]);
   });
 
@@ -97,12 +97,9 @@ describe("checkboxes and radios sit inline before their text (KOBE-283)", () => 
   });
 
   it("the connector tool list has no bullets", () => {
-    const list = CONSOLE_CSS.find(
-      (r) => r.file.endsWith("admin.module.css") && r.selector === ".choiceList",
-    );
-    expect(list?.body).toMatch(/list-style\s*:\s*none/);
+    // On Tailwind since KOBE-295: the list's own utilities, so its checkboxes lead each row.
     expect(read("components/admin/team/connectors-page.tsx")).toMatch(
-      /<ul aria-label="Tools" className=\{styles\.choiceList\}>/,
+      /<ul aria-label="Tools" className="[^"]*\blist-none\b[^"]*">/,
     );
   });
 });

@@ -9,11 +9,24 @@ import {
   type TeamMember,
 } from "../../../lib/admin/api/team/members";
 import { roleLabel, type TeamRole } from "../../../lib/teams";
+import {
+  Button,
+  PageHeader,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "builder", "member"];
 
@@ -23,15 +36,23 @@ export function MembersPage() {
   const teamId = access.team.id;
   const { state, reload } = useResource(() => listTeamMembers(teamId));
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   // Bumped after every role change so a refused change resets the row's select.
   const [generationKey, setGenerationKey] = useState(0);
 
-  async function changeRole(member: TeamMember, role: TeamRole) {
+  async function changeRole(member: TeamMember, role: TeamRole, trigger: HTMLElement | null) {
     const self = member.userId === access.user.id;
     if (
       self &&
       role !== "team_admin" &&
-      !confirmed("Change your own role? You'll lose the team console.")
+      !(await confirm(
+        {
+          title: "Change your own role?",
+          description: "You'll lose the team console.",
+          confirmLabel: "Change my role",
+        },
+        trigger,
+      ))
     ) {
       reload();
       return;
@@ -48,12 +69,23 @@ export function MembersPage() {
     }
   }
 
-  async function remove(member: TeamMember) {
+  async function remove(member: TeamMember, trigger: HTMLElement | null) {
     const self = member.userId === access.user.id;
-    const question = self
-      ? `Leave ${access.team.name}? You lose access to its threads and agents.`
-      : `Remove ${member.name} from ${access.team.name}? They lose access at once.`;
-    if (!confirmed(question)) return;
+    const yes = await confirm(
+      self
+        ? {
+            title: `Leave ${access.team.name}?`,
+            description: "You lose access to its threads and agents.",
+            confirmLabel: "Leave team",
+          }
+        : {
+            title: `Remove ${member.name} from ${access.team.name}?`,
+            description: "They lose access at once.",
+            confirmLabel: `Remove ${member.name}`,
+          },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => removeMember(teamId, member.userId),
       () => `${member.name} was removed from the team.`,
@@ -64,64 +96,68 @@ export function MembersPage() {
 
   return (
     <>
-      <h1>Members and roles</h1>
-      <p className={styles.hint}>
-        Team admins run the team, builders publish agents and skills, members chat. A team always
-        keeps at least one team admin. <Link href="/admin/team/invites">Invite someone</Link>.
-      </p>
+      <PageHeader
+        title="Members and roles"
+        description={
+          <>
+            Team admins run the team, builders publish agents and skills, members chat. A team
+            always keeps at least one team admin.{" "}
+            <Link href="/admin/team/invites">Invite someone</Link>.
+          </>
+        }
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="members">
         {(members) => (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <caption>Members of {access.team.name}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Name</th>
-                  <th scope="col">Email</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">Joined</th>
-                  <th scope="col">
-                    <span className={styles.visuallyHidden}>Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((m) => (
-                  <tr key={m.userId}>
-                    <th scope="row">
-                      {m.name}
-                      {m.userId === access.user.id && " (you)"}
-                    </th>
-                    <td>{m.email}</td>
-                    <td>
-                      <RoleCell
-                        key={`${m.userId}:${m.role}:${generationKey}`}
-                        member={m}
-                        pending={mutation.pending}
-                        onSave={(role) => changeRole(m, role)}
-                      />
-                    </td>
-                    <td>
-                      <DateTime value={m.joinedAt} />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        disabled={mutation.pending}
-                        onClick={() => void remove(m)}
-                      >
-                        {m.userId === access.user.id ? "Leave team" : "Remove"}
-                        <span className={styles.visuallyHidden}> {m.name}</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table caption={`Members of ${access.team.name}`}>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Name</TableHeader>
+                <TableHeader>Email</TableHeader>
+                <TableHeader>Role</TableHeader>
+                <TableHeader>Joined</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {members.map((m) => (
+                <TableRow key={m.userId}>
+                  <TableRowHeader>
+                    {m.name}
+                    {m.userId === access.user.id && " (you)"}
+                  </TableRowHeader>
+                  <TableCell>{m.email}</TableCell>
+                  <TableCell>
+                    <RoleCell
+                      key={`${m.userId}:${m.role}:${generationKey}`}
+                      member={m}
+                      pending={mutation.pending}
+                      onSave={(role, trigger) => changeRole(m, role, trigger)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <DateTime value={m.joinedAt} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={mutation.pending}
+                      onClick={(e) => void remove(m, eventTrigger(e))}
+                    >
+                      {m.userId === access.user.id ? "Leave team" : "Remove"}
+                      <span className="sr-only"> {m.name}</span>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }
@@ -134,32 +170,32 @@ function RoleCell({
 }: {
   readonly member: TeamMember;
   readonly pending: boolean;
-  readonly onSave: (role: TeamRole) => Promise<void>;
+  readonly onSave: (role: TeamRole, trigger: HTMLElement | null) => Promise<void>;
 }) {
   const [role, setRole] = useState<TeamRole>(member.role);
   const id = `role-${member.userId}`;
   return (
     <form
-      className={styles.actions}
+      className="flex flex-wrap items-center gap-1.5"
       aria-label={`Change the role of ${member.name}`}
       onSubmit={(e) => {
         e.preventDefault();
-        void onSave(role);
+        void onSave(role, eventTrigger(e));
       }}
     >
-      <label htmlFor={id} className={styles.visuallyHidden}>
+      <label htmlFor={id} className="sr-only">
         Role of {member.name}
       </label>
-      <select id={id} value={role} onChange={(e) => setRole(e.target.value as TeamRole)}>
+      <Select id={id} value={role} onChange={(e) => setRole(e.target.value as TeamRole)}>
         {TEAM_ROLES.map((r) => (
           <option key={r} value={r}>
             {roleLabel(r)}
           </option>
         ))}
-      </select>
-      <button type="submit" disabled={pending || role === member.role}>
-        Save<span className={styles.visuallyHidden}> role of {member.name}</span>
-      </button>
+      </Select>
+      <Button type="submit" size="sm" disabled={pending || role === member.role}>
+        Save<span className="sr-only"> role of {member.name}</span>
+      </Button>
     </form>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   inviteToTeam,
   listTeamInvites,
@@ -8,24 +8,63 @@ import {
   type TeamInvite,
 } from "../../../lib/admin/api/team/invites";
 import { roleLabel, type TeamRole } from "../../../lib/teams";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { TEAM_ROLES } from "./members-page";
-import styles from "../admin.module.css";
+
+/** The list's heading: focus lands here when a revoke empties the list. */
+const HEADING = "open-invitations";
 
 /**
  * Team invitations (KOBE-13; `/v1/team/invites`). The answer is the same whether or not the
- * address has a Kobe account, so the page never says which.
+ * address has a Kobe account, so the page never says which. The reference page for the console
+ * primitives (KOBE-294): KOBE-295 and KOBE-296 move the other pages the same way.
  */
 export function TeamInvitesPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const { state, reload } = useResource(() => listTeamInvites(teamId));
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<TeamRole>("member");
+  const table = useRef<HTMLDivElement>(null);
+  // After a revoke, where focus goes once the list no longer holds that invitation.
+  const focusAfter = useRef<{ readonly id: string; readonly index: number } | null>(null);
+
+  useEffect(() => {
+    const after = focusAfter.current;
+    if (after === null || state.status === "loading") return;
+    if (state.status === "ready" && state.data.some((i) => i.id === after.id)) return;
+    focusAfter.current = null;
+    // The next row's Revoke (or the last one's), else the list's heading.
+    const buttons = [...(table.current?.querySelectorAll<HTMLElement>("[data-revoke]") ?? [])];
+    (
+      buttons[Math.min(after.index, buttons.length - 1)] ?? document.getElementById(HEADING)
+    )?.focus();
+  }, [state]);
 
   async function onInvite(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -41,97 +80,118 @@ export function TeamInvitesPage() {
     }
   }
 
-  async function revoke(invite: TeamInvite) {
-    if (!confirmed(`Revoke the invitation to ${invite.email}?`)) return;
+  async function revoke(invite: TeamInvite, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Revoke the invitation to ${invite.email}?`,
+        description: "The link in their email stops working. You can invite them again later.",
+        confirmLabel: "Revoke",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => revokeTeamInvite(teamId, invite.id),
       () => `Revoked the invitation to ${invite.email}.`,
     );
-    if (done) reload();
+    if (done) {
+      focusAfter.current = { id: invite.id, index };
+      reload();
+    }
   }
 
   return (
     <>
-      <h1>Invitations</h1>
-      <p className={styles.hint}>
-        Invitations last 14 days. Someone without a Kobe account also needs a site invitation from a
-        site admin; they see yours after they sign up.
-      </p>
-      <form onSubmit={onInvite} className={styles.form} aria-label="Invite to the team">
-        <label>
-          Email address
-          <input
-            type="email"
-            required
-            maxLength={254}
-            autoComplete="off"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </label>
-        <label>
-          Role
-          <select value={role} onChange={(e) => setRole(e.target.value as TeamRole)}>
-            {TEAM_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {roleLabel(r)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" disabled={mutation.pending}>
-          Invite
-        </button>
+      <PageHeader
+        title="Invitations"
+        description="Invitations last 14 days. Someone without a Kobe account also needs a site invitation from a site admin; they see yours after they sign up."
+      />
+      <form onSubmit={onInvite} aria-label="Invite to the team">
+        <FormRow>
+          <Field label="Email address" required>
+            <TextInput
+              type="email"
+              maxLength={254}
+              autoComplete="off"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </Field>
+          <Field label="Role">
+            <Select value={role} onChange={(e) => setRole(e.target.value as TeamRole)}>
+              {TEAM_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {roleLabel(r)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            Invite
+          </Button>
+        </FormRow>
       </form>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="invitations">
-        {(invites) =>
-          invites.length === 0 ? (
-            <p>No open invitations.</p>
-          ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Open invitations to {access.team.name}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Email</th>
-                    <th scope="col">Role</th>
-                    <th scope="col">Invited by</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invites.map((i) => (
-                    <tr key={i.id}>
-                      <th scope="row">{i.email}</th>
-                      <td>{roleLabel(i.role)}</td>
-                      <td>{i.invitedBy.name}</td>
-                      <td>
-                        <DateTime value={i.expiresAt} />
-                      </td>
-                      <td>{i.status === "expired" ? "Expired" : "Pending"}</td>
-                      <td>
-                        <button
-                          type="button"
-                          disabled={mutation.pending}
-                          onClick={() => void revoke(i)}
-                        >
-                          Revoke
-                          <span className={styles.visuallyHidden}> invitation to {i.email}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </ResourceView>
+      <Section id={HEADING} title="Open invitations">
+        <ResourceView state={state} label="invitations">
+          {(invites) =>
+            invites.length === 0 ? (
+              <EmptyState title="No open invitations.">
+                Invite someone with the form above.
+              </EmptyState>
+            ) : (
+              <div ref={table}>
+                <Table caption={`Open invitations to ${access.team.name}`} hideCaption>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeader>Email</TableHeader>
+                      <TableHeader>Role</TableHeader>
+                      <TableHeader>Invited by</TableHeader>
+                      <TableHeader>Expires</TableHeader>
+                      <TableHeader>Status</TableHeader>
+                      <TableHeader>
+                        <span className="sr-only">Actions</span>
+                      </TableHeader>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {invites.map((i, index) => (
+                      <TableRow key={i.id}>
+                        <TableRowHeader>{i.email}</TableRowHeader>
+                        <TableCell>{roleLabel(i.role)}</TableCell>
+                        <TableCell>{i.invitedBy.name}</TableCell>
+                        <TableCell>
+                          <DateTime value={i.expiresAt} />
+                        </TableCell>
+                        <TableCell>
+                          {i.status === "expired" ? (
+                            <Badge tone="attention">Expired</Badge>
+                          ) : (
+                            <Badge>Pending</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            data-revoke=""
+                            disabled={mutation.pending}
+                            onClick={(e) => void revoke(i, index, eventTrigger(e))}
+                          >
+                            Revoke
+                            <span className="sr-only"> invitation to {i.email}</span>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )
+          }
+        </ResourceView>
+      </Section>
+      {confirmDialog}
     </>
   );
 }

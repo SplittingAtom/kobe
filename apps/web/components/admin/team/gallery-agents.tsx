@@ -8,11 +8,22 @@ import {
   listGalleryAgents,
   listGalleryScores,
 } from "../../../lib/admin/api/team/agents";
+import {
+  Button,
+  EmptyState,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 import { GalleryScoreCell } from "../gallery-score";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * The gallery (KOBE-87, D19): agents every team can use, read-only. Builders fork one into an
@@ -47,12 +58,11 @@ export function GalleryAgents({
   }
 
   return (
-    <section aria-labelledby="gallery-heading">
-      <h2 id="gallery-heading">Gallery</h2>
-      <p className={styles.hint}>
-        Gallery agents are available to every team and can&apos;t be edited. Fork one to get a team
-        agent you can change and publish.
-      </p>
+    <Section
+      id="gallery-heading"
+      title="Gallery"
+      description="Gallery agents are available to every team and can't be edited. Fork one to get a team agent you can change and publish."
+    >
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       {forked && (
         <p>
@@ -62,52 +72,51 @@ export function GalleryAgents({
       <ResourceView state={state} label="the gallery">
         {(agents) =>
           agents.length === 0 ? (
-            <p>The gallery is empty.</p>
+            <EmptyState title="The gallery is empty." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Gallery agents</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Agent</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">Orbit score</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.map((a) => (
-                    <tr key={a.id}>
-                      <th scope="row">
-                        {a.name}
-                        {a.description && <div className={styles.hint}>{a.description}</div>}
-                      </th>
-                      <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
-                      <td>
-                        <GalleryScoreCell agentId={a.id} state={scores} />
-                      </td>
-                      <td>
-                        {canFork && (
-                          <button
-                            type="button"
-                            disabled={mutation.pending}
-                            onClick={() => void fork(a)}
-                          >
-                            Fork to team
-                            <span className={styles.visuallyHidden}> {a.name}</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table caption="Gallery agents">
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Agent</TableHeader>
+                  <TableHeader>Version</TableHeader>
+                  <TableHeader>Orbit score</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {agents.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableRowHeader>
+                      {a.name}
+                      {a.description && (
+                        <div className="text-sm font-normal text-console-muted">
+                          {a.description}
+                        </div>
+                      )}
+                    </TableRowHeader>
+                    <TableCell>
+                      {a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}
+                    </TableCell>
+                    <TableCell>
+                      <GalleryScoreCell agentId={a.id} state={scores} />
+                    </TableCell>
+                    <TableCell>
+                      {canFork && (
+                        <Button size="sm" disabled={mutation.pending} onClick={() => void fork(a)}>
+                          Fork to team
+                          <span className="sr-only"> {a.name}</span>
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>
-    </section>
+    </Section>
   );
 }

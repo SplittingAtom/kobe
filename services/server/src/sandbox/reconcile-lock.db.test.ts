@@ -1,14 +1,20 @@
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
+import { waitForAppSessionsToClose } from "../testing/app-sessions.js";
 import { createPgReconcileLock } from "./reconcile-lock.js";
 
 /** The team-namespace reconcile lock against real Postgres (KOBE-115). */
+let database: TestDatabase;
 let pool: pg.Pool;
-beforeAll(() => {
-  pool = new pg.Pool({ connectionString: inject("appUrl"), max: 4 });
+beforeAll(async () => {
+  database = await createTestDatabase(testServerUrl());
+  pool = new pg.Pool({ connectionString: database.appUrl, max: 4 });
 });
 afterAll(async () => {
   await pool.end();
+  await waitForAppSessionsToClose(database.appRole);
+  await database.drop();
 });
 
 describe("createPgReconcileLock", () => {

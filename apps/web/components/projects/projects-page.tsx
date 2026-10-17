@@ -8,7 +8,20 @@ import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import {
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../ui/console";
 import { EMPTY_PROJECT, ProjectForm } from "./project-form";
 import { useProjectAgents, useProjectsApi } from "./use-projects";
 
@@ -38,30 +51,21 @@ export function ProjectsPage() {
 
   return (
     <>
-      <h1>Projects</h1>
-      <p className={styles.hint}>
-        A project gathers instructions, files, memory and shared conversations for the people
-        working on something together.
-      </p>
+      <PageHeader
+        title="Projects"
+        description="A project gathers instructions, files, memory and shared conversations for the people working on something together."
+        actions={
+          canCreate &&
+          !creating && (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              New project
+            </Button>
+          )
+        }
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <p className={styles.actions}>
-        {canCreate && !creating && (
-          <button type="button" onClick={() => setCreating(true)}>
-            New project
-          </button>
-        )}
-        <label>
-          <input
-            type="checkbox"
-            checked={archived}
-            onChange={(e) => setArchived(e.target.checked)}
-          />{" "}
-          Show archived projects
-        </label>
-      </p>
       {creating && (
-        <section aria-label="New project">
-          <h2>New project</h2>
+        <Card role="region" aria-label="New project" title="New project" level={2} className="my-4">
           <ProjectForm
             initial={EMPTY_PROJECT}
             agents={agents}
@@ -70,11 +74,15 @@ export function ProjectsPage() {
             pending={mutation.pending}
             onSubmit={(input) => void create(input)}
           />
-          <button type="button" onClick={() => setCreating(false)}>
-            Cancel
-          </button>
-        </section>
+          <Button onClick={() => setCreating(false)}>Cancel</Button>
+        </Card>
       )}
+      <Checkbox
+        className="my-3"
+        label="Show archived projects"
+        checked={archived}
+        onChange={(e) => setArchived(e.target.checked)}
+      />
       <ProjectList key={`${archived}:${listKey}`} archived={archived} canCreate={canCreate} />
     </>
   );
@@ -93,42 +101,40 @@ function ProjectList({
     <ResourceView state={state} label="projects">
       {(projects) =>
         projects.length === 0 ? (
-          <p>
-            No projects yet.
-            {canCreate ? " Create one to share instructions and files." : ""}
-          </p>
+          <EmptyState title="No projects yet.">
+            {canCreate ? "Create one to share instructions and files." : null}
+          </EmptyState>
         ) : (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <caption>Projects you can see</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Project</th>
-                  <th scope="col">Your role</th>
-                  <th scope="col">People</th>
-                  <th scope="col">Files</th>
-                  <th scope="col">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projects.map((p) => (
-                  <tr key={p.id}>
-                    <th scope="row">
-                      <Link href={`/me/projects/${p.id}`}>{p.name}</Link>
-                      {p.archivedAt !== null && " (archived)"}
-                      {p.description && <div className={styles.hint}>{p.description}</div>}
-                    </th>
-                    <td>{p.myRole ?? "Team admin"}</td>
-                    <td>{MODE_LABEL[p.membersMode]}</td>
-                    <td>{p.fileCount}</td>
-                    <td>
-                      <DateTime value={p.updatedAt} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table caption="Projects you can see">
+            <TableHead>
+              <TableRow>
+                <TableHeader>Project</TableHeader>
+                <TableHeader>Your role</TableHeader>
+                <TableHeader>People</TableHeader>
+                <TableHeader numeric>Files</TableHeader>
+                <TableHeader>Updated</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {projects.map((p) => (
+                <TableRow key={p.id}>
+                  <TableRowHeader>
+                    <Link href={`/me/projects/${p.id}`}>{p.name}</Link>
+                    {p.archivedAt !== null && " (archived)"}
+                    {p.description && (
+                      <div className="text-sm font-normal text-console-muted">{p.description}</div>
+                    )}
+                  </TableRowHeader>
+                  <TableCell>{p.myRole ?? "Team admin"}</TableCell>
+                  <TableCell>{MODE_LABEL[p.membersMode]}</TableCell>
+                  <TableCell numeric>{p.fileCount}</TableCell>
+                  <TableCell>
+                    <DateTime value={p.updatedAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )
       }
     </ResourceView>

@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { RetentionMaximumPage } from "./site/retention-page";
 import { TeamRetentionPage } from "./team/retention-page";
-import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+} from "./testing";
 
 const view = (
   period: string,
@@ -24,12 +31,8 @@ const view = (
 
 const AT = "2026-10-11T03:00:00.000Z";
 
-let confirm: ReturnType<typeof vi.fn>;
-
-beforeEach(() => {
-  confirm = vi.fn(() => true);
-  vi.stubGlobal("confirm", confirm);
-});
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -54,7 +57,9 @@ describe("Team retention (KOBE-18)", () => {
     expect(screen.getByRole("radio", { name: "1 year" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "90 days" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    const asked = await answerConfirm("Keep conversations for 90 days only?", "Keep for 90 days");
+    expect(asked).toMatch(/deleted for good/);
     await screen.findByText(/Scheduled: from .* keeps conversations for 90 days/);
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ period: "90d" });
@@ -62,7 +67,6 @@ describe("Team retention (KOBE-18)", () => {
   });
 
   it("sends nothing when the confirmation is cancelled, and shows the server's refusal", async () => {
-    confirm.mockReturnValue(false);
     const calls = stubApi({
       "GET /v1/team/retention": [200, view("1y", "forever", "1y", ["30d", "90d", "1y", "forever"])],
       "PUT /v1/team/retention": [
@@ -73,6 +77,7 @@ describe("Team retention (KOBE-18)", () => {
     renderTeam(<TeamRetentionPage />);
     await userEvent.click(await screen.findByRole("radio", { name: "30 days" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await answerConfirm("Keep conversations for 30 days only?", "Cancel");
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
     // Longer than what applies: no confirmation needed; the server refuses it.
     await userEvent.click(screen.getByRole("radio", { name: "Forever" }));
@@ -101,13 +106,27 @@ describe("Site retention maximum (KOBE-18)", () => {
     expect(await screen.findByRole("radio", { name: "Forever" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "1 year" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(await answerConfirm("Cap every team at 1 year?", "Cap at 1 year")).toMatch(
+      /deleted for good every night/,
+    );
     await screen.findByText(/Scheduled: from .* the maximum is 1 year/);
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ maximum: "1y" });
     await userEvent.click(await screen.findByRole("button", { name: "Cancel change" }));
     await screen.findByText("Cancelled: the maximum stays forever.");
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+  });
+
+  it("sends nothing when lowering the maximum is cancelled", async () => {
+    const calls = stubApi({
+      "GET /v1/site/retention": [200, { maximum: "forever", applied: "forever", pending: null }],
+    });
+    renderSite(<RetentionMaximumPage />);
+    await userEvent.click(await screen.findByRole("radio", { name: "30 days" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await answerConfirm("Cap every team at 30 days?", "Cancel");
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
   });
 });
 

@@ -2,7 +2,9 @@
 
 import type { SeriesPoint } from "../../../lib/admin/api/usage";
 import { bucketLabel, formatTokens, formatUsd } from "../../../lib/admin/usage-format";
-import styles from "./usage.module.css";
+
+/** The axis labels: small, muted, equal-width digits. */
+const TICK = "fill-console-muted text-[10px] tabular-nums";
 
 export type ChartMetric = "cost" | "tokens";
 
@@ -40,10 +42,10 @@ export function UsageChart({
   const title = metric === "cost" ? "Spend" : "Tokens";
 
   return (
-    <figure className={styles.figure}>
+    <figure className="mx-0 my-4">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className={styles.chart}
+        className="block h-auto w-full"
         role="img"
         aria-label={`${title} per ${bucket}: highest ${format(max, metric)}`}
       >
@@ -52,12 +54,12 @@ export function UsageChart({
           x2={W - PAD.right}
           y1={PAD.top + innerH}
           y2={PAD.top + innerH}
-          className={styles.axis}
+          className="stroke-console-border stroke-1"
         />
-        <text x={PAD.left - 6} y={PAD.top + 10} textAnchor="end" className={styles.tick}>
+        <text x={PAD.left - 6} y={PAD.top + 10} textAnchor="end" className={TICK}>
           {format(max, metric)}
         </text>
-        <text x={PAD.left - 6} y={PAD.top + innerH} textAnchor="end" className={styles.tick}>
+        <text x={PAD.left - 6} y={PAD.top + innerH} textAnchor="end" className={TICK}>
           {format(0, metric)}
         </text>
         {points.map((p, i) => {
@@ -72,7 +74,7 @@ export function UsageChart({
                 y={PAD.top}
                 width={Math.max(barW, 4)}
                 height={innerH}
-                className={styles.hit}
+                className="peer fill-transparent"
               >
                 <title>{`${bucketLabel(p.t, bucket)}: ${format(v, metric)} · ${p.calls} calls`}</title>
               </rect>
@@ -83,12 +85,12 @@ export function UsageChart({
                   width={barW}
                   height={height}
                   rx={Math.min(2, barW / 2)}
-                  className={styles.bar}
+                  className="fill-console-accent peer-hover:opacity-80"
                   pointerEvents="none"
                 />
               )}
               {i % labelEvery === 0 && (
-                <text x={x + barW / 2} y={H - 6} textAnchor="middle" className={styles.tick}>
+                <text x={x + barW / 2} y={H - 6} textAnchor="middle" className={TICK}>
                   {bucketLabel(p.t, bucket)}
                 </text>
               )}
@@ -96,7 +98,7 @@ export function UsageChart({
           );
         })}
       </svg>
-      <figcaption className={styles.caption}>
+      <figcaption className="text-sm text-console-muted">
         {title} per {bucket} (UTC)
       </figcaption>
     </figure>

@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { AgentBuilderPage } from "./team/agent-builder/agent-builder-page";
 import { SkillEditorPage } from "./team/skill-editor/skill-editor-page";
-import { renderTeam, stubApi } from "./testing";
+import { forbidNativeConfirm, renderTeam, stubApi } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 /**
  * KOBE-297 ac-2: a team skill's page lists the agents that use it (named, or by "Offer to all

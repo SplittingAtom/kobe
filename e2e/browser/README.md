@@ -43,6 +43,31 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Console sections (KOBE-291)
+
+`console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
+Site backup and restore, and the Team inventory, and checks none of them is a "coming soon"
+placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
+of the active team: `npx playwright test console-sections`.
+
+## Console screenshots (KOBE-294)
+
+`consoles.spec.ts` screenshots every Site console, Team console and My-area page in light and dark
+(full page, times masked) for the move of the consoles to Tailwind. It spends no tokens and changes
+nothing. `KOBE_USER` must be the site Owner and a team admin of the active team; the pages come
+from the consoles' navigation, and detail pages (an agent, a skill, a project) from the first item
+of their lists.
+
+```bash
+npx playwright test consoles --update-snapshots=all   # baseline, before a page's styling changes
+npx playwright test consoles                          # compare later; diffs in test-results/
+```
+
+Baselines land in `console-shots/<platform>/<theme|mobile>/<page>.png` (gitignored: they show
+deployment data); take and compare them on the same platform (the Playwright container, or the
+Mac). Besides light and dark at 1280 px, a phone-width pass (390 px) covers the folded nav, a
+table and a form. A page that fails to load is reported at the end without stopping the rest.
+
 ## What you get
 
 - `test-results/`: per-test traces and screenshots of failures, and `results.json`.

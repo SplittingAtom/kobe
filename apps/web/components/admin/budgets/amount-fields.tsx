@@ -7,6 +7,7 @@ import {
   type BudgetAmounts,
   type BudgetAmountsInput,
 } from "../../../lib/admin/api/budgets";
+import { Field, TextInput } from "../../ui/console";
 
 /** The four budget inputs as typed text. */
 export interface AmountTexts {
@@ -65,15 +66,14 @@ export function AmountFields({
   readonly prefix?: string;
 }) {
   const field = (key: keyof AmountTexts, label: string, mode: "decimal" | "numeric") => (
-    <label>
-      {prefix}
-      {label}
-      <input
+    <Field label={`${prefix}${label}`}>
+      <TextInput
         inputMode={mode}
+        className="w-36"
         value={value[key]}
         onChange={(e) => onChange({ ...value, [key]: e.target.value })}
       />
-    </label>
+    </Field>
   );
   return (
     <>

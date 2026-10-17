@@ -12,11 +12,34 @@ import {
   type ConnectorAuthKind,
   type ConnectorInput,
 } from "../../../lib/admin/api/site/connectors";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
+import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import { ToolReviewPanel } from "./connector-tool-review";
-import styles from "../admin.module.css";
+
+/** The list's heading: focus lands here when a removal empties the list. */
+const HEADING = "registered-connectors";
 
 const NAME_HINT = "Use lowercase letters and digits joined by - or _ (up to 64 characters).";
 const EMPTY: ConnectorInput = { name: "", url: "", iconUrl: null, authKind: "none" };
@@ -33,12 +56,10 @@ export function ConnectorsPage() {
 
   return (
     <>
-      <h1>Connector registry</h1>
-      <p className={styles.hint}>
-        Register remote MCP servers (Streamable HTTP over https). Addresses that are private,
-        link-local or cloud metadata are refused. Teams enable a connector themselves; removing one
-        that teams already enabled keeps it disabled instead of deleting it.
-      </p>
+      <PageHeader
+        title="Connector registry"
+        description="Register remote MCP servers (Streamable HTTP over https). Addresses that are private, link-local or cloud metadata are refused. Teams enable a connector themselves; removing one that teams already enabled keeps it disabled instead of deleting it."
+      />
       <ConnectorForm
         key={editing?.id ?? "new"}
         editing={editing}
@@ -50,17 +71,19 @@ export function ConnectorsPage() {
         onCancel={() => setEditing(null)}
       />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="connectors">
-        {(connectors) => (
-          <ConnectorTable
-            connectors={connectors}
-            mutation={mutation}
-            onEdit={setEditing}
-            onReview={setReviewing}
-            onChanged={reload}
-          />
-        )}
-      </ResourceView>
+      <Section id={HEADING} title="Registered connectors">
+        <ResourceView state={state} label="connectors">
+          {(connectors) => (
+            <ConnectorTable
+              connectors={connectors}
+              mutation={mutation}
+              onEdit={setEditing}
+              onReview={setReviewing}
+              onChanged={reload}
+            />
+          )}
+        </ResourceView>
+      </Section>
       {reviewing ? (
         <ToolReviewPanel
           key={reviewing.id}
@@ -115,61 +138,53 @@ function ConnectorForm({
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className={styles.form}
-      aria-label={editing ? "Edit connector" : "Register a connector"}
-    >
-      <label>
-        Name
-        <input
-          required
-          maxLength={64}
-          spellCheck={false}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-      <label>
-        Server URL
-        <input
-          required
-          type="url"
-          maxLength={2048}
-          spellCheck={false}
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-      </label>
-      <label>
-        Icon URL (optional)
-        <input
-          type="url"
-          maxLength={2048}
-          spellCheck={false}
-          value={iconUrl}
-          onChange={(e) => setIconUrl(e.target.value)}
-        />
-      </label>
-      <label>
-        Authentication
-        <select value={authKind} onChange={(e) => setAuthKind(e.target.value as ConnectorAuthKind)}>
-          {(Object.keys(AUTH_LABELS) as ConnectorAuthKind[]).map((k) => (
-            <option key={k} value={k}>
-              {AUTH_LABELS[k]}
-            </option>
-          ))}
-        </select>
-      </label>
-      {problem ? <p role="alert">{problem}</p> : null}
-      <button type="submit" disabled={mutation.pending}>
-        {editing ? "Save changes" : "Register connector"}
-      </button>
-      {editing ? (
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-      ) : null}
+    <form onSubmit={onSubmit} aria-label={editing ? "Edit connector" : "Register a connector"}>
+      <FormRow>
+        <Field label="Name" error={problem}>
+          <TextInput
+            required
+            maxLength={64}
+            spellCheck={false}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field label="Server URL">
+          <TextInput
+            required
+            type="url"
+            maxLength={2048}
+            spellCheck={false}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </Field>
+        <Field label="Icon URL (optional)">
+          <TextInput
+            type="url"
+            maxLength={2048}
+            spellCheck={false}
+            value={iconUrl}
+            onChange={(e) => setIconUrl(e.target.value)}
+          />
+        </Field>
+        <Field label="Authentication">
+          <Select
+            value={authKind}
+            onChange={(e) => setAuthKind(e.target.value as ConnectorAuthKind)}
+          >
+            {(Object.keys(AUTH_LABELS) as ConnectorAuthKind[]).map((k) => (
+              <option key={k} value={k}>
+                {AUTH_LABELS[k]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Button type="submit" variant="primary" disabled={mutation.pending}>
+          {editing ? "Save changes" : "Register connector"}
+        </Button>
+        {editing ? <Button onClick={onCancel}>Cancel</Button> : null}
+      </FormRow>
     </form>
   );
 }
@@ -206,78 +221,125 @@ function ConnectorTable({
     if (done) onChanged();
   }
 
-  async function remove(c: Connector) {
-    if (!confirmed(`Remove the connector ${c.name} from the registry?`)) return;
+  const [confirm, confirmDialog] = useConfirm();
+  const focus = useFocusAfterRemoval(
+    connectors.map((c) => c.id),
+    HEADING,
+  );
+
+  async function remove(c: Connector, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove the connector ${c.name} from the registry?`,
+        confirmLabel: `Remove ${c.name}`,
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => removeConnector(c.id),
       (r) => r.message,
     );
-    if (done) onChanged();
+    if (done) {
+      focus.removed(c.id, index);
+      onChanged();
+    }
   }
 
-  if (connectors.length === 0) return <p>No connectors are registered.</p>;
+  if (connectors.length === 0) {
+    return (
+      <>
+        <EmptyState title="No connectors are registered." />
+        {confirmDialog}
+      </>
+    );
+  }
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <caption>Registered connectors</caption>
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Server URL</th>
-            <th scope="col">Authentication</th>
-            <th scope="col">Tools</th>
-            <th scope="col">Status</th>
-            <th scope="col">Updated</th>
-            <th scope="col">
-              <span className={styles.visuallyHidden}>Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {connectors.map((c) => (
-            <tr key={c.id}>
-              <th scope="row">
-                {c.iconUrl ? (
-                  <img src={c.iconUrl} alt="" width={20} height={20} referrerPolicy="no-referrer" />
-                ) : null}{" "}
-                {c.name}
-              </th>
-              <td>
-                <code>{c.url}</code>
-              </td>
-              <td>{AUTH_LABELS[c.authKind]}</td>
-              <td>
+    <div ref={focus.container}>
+      <Table caption="Registered connectors" hideCaption>
+        <TableHead>
+          <TableRow>
+            <TableHeader>Name</TableHeader>
+            <TableHeader>Server URL</TableHeader>
+            <TableHeader>Authentication</TableHeader>
+            <TableHeader>Tools</TableHeader>
+            <TableHeader>Status</TableHeader>
+            <TableHeader>Updated</TableHeader>
+            <TableHeader>
+              <span className="sr-only">Actions</span>
+            </TableHeader>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {connectors.map((c, index) => (
+            <TableRow key={c.id}>
+              <TableRowHeader>
+                <span className="inline-flex items-center gap-1.5">
+                  {c.iconUrl ? (
+                    <img
+                      src={c.iconUrl}
+                      alt=""
+                      width={20}
+                      height={20}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : null}
+                  {c.name}
+                </span>
+              </TableRowHeader>
+              <TableCell>
+                <code className="break-all">{c.url}</code>
+              </TableCell>
+              <TableCell>{AUTH_LABELS[c.authKind]}</TableCell>
+              <TableCell>
                 {c.toolCount}
                 {c.driftedCount > 0 ? (
-                  <>
-                    {" "}
-                    ({c.driftedCount} awaiting approval){" "}
-                    <button type="button" onClick={() => onReview(c)}>
-                      Review<span className={styles.visuallyHidden}> tools of {c.name}</span>
-                    </button>
-                  </>
+                  <span className="ms-1 inline-flex flex-wrap items-center gap-1.5">
+                    <Badge tone="attention">{c.driftedCount} awaiting approval</Badge>
+                    <Button size="sm" onClick={() => onReview(c)}>
+                      Review<span className="sr-only"> tools of {c.name}</span>
+                    </Button>
+                  </span>
                 ) : null}
-              </td>
-              <td>{c.status === "active" ? "Active" : "Disabled"}</td>
-              <td>
+              </TableCell>
+              <TableCell>
+                <Badge tone={c.status === "active" ? "running" : "neutral"}>
+                  {c.status === "active" ? "Active" : "Disabled"}
+                </Badge>
+              </TableCell>
+              <TableCell>
                 <DateTime value={c.updatedAt} />
-              </td>
-              <td>
-                <button type="button" disabled={mutation.pending} onClick={() => onEdit(c)}>
-                  Edit<span className={styles.visuallyHidden}> {c.name}</span>
-                </button>{" "}
-                <button type="button" disabled={mutation.pending} onClick={() => void toggle(c)}>
-                  {c.status === "active" ? "Disable" : "Enable"}
-                  <span className={styles.visuallyHidden}> {c.name}</span>
-                </button>{" "}
-                <button type="button" disabled={mutation.pending} onClick={() => void remove(c)}>
-                  Remove<span className={styles.visuallyHidden}> {c.name}</span>
-                </button>
-              </td>
-            </tr>
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button size="sm" disabled={mutation.pending} onClick={() => onEdit(c)}>
+                    Edit<span className="sr-only"> {c.name}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={c.status === "active" ? "danger" : "secondary"}
+                    disabled={mutation.pending}
+                    onClick={() => void toggle(c)}
+                  >
+                    {c.status === "active" ? "Disable" : "Enable"}
+                    <span className="sr-only"> {c.name}</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    data-remove=""
+                    disabled={mutation.pending}
+                    onClick={(e) => void remove(c, index, eventTrigger(e))}
+                  >
+                    Remove<span className="sr-only"> {c.name}</span>
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
+      {confirmDialog}
     </div>
   );
 }

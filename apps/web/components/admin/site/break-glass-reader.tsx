@@ -11,7 +11,18 @@ import {
 } from "../../../lib/admin/api/site/break-glass";
 import { ErrorNotice } from "../error-notice";
 import { DateTime } from "../parts";
-import styles from "../admin.module.css";
+import {
+  Button,
+  EmptyState,
+  Notice,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../ui/console";
 
 /** The text of a Pi message entry, when it has one; otherwise the entry as JSON. */
 export function entryText(entry: GrantEntry): string {
@@ -87,84 +98,103 @@ export function BreakGlassReader({
 
   return (
     <>
-      <h1 ref={heading} tabIndex={-1}>
-        Break-glass: {grant.team.name}
-      </h1>
-      <div className={styles.banner} role="note">
-        Read-only access, recorded in the team&apos;s audit log with every page you open. Access
-        ends <DateTime value={grant.expiresAt} />.
-      </div>
-      <p>
-        <button type="button" onClick={onClose}>
-          Back to break-glass
-        </button>
-      </p>
+      <header className="mb-4">
+        <p className="m-0 mb-1 text-sm">
+          <Button size="sm" onClick={onClose}>
+            Back to break-glass
+          </Button>
+        </p>
+        <h1
+          ref={heading}
+          tabIndex={-1}
+          className="m-0 text-3xl leading-tight font-bold focus:outline-none"
+        >
+          Break-glass: {grant.team.name}
+        </h1>
+      </header>
+      <Notice tone="warn" role="note">
+        <p>
+          Read-only access, recorded in the team&apos;s audit log with every page you open. Access
+          ends <DateTime value={grant.expiresAt} />.
+        </p>
+      </Notice>
       {error && <ErrorNotice error={error} />}
       {loading && <p role="status">Loading…</p>}
       {open ? (
-        <section aria-label={`Thread ${open.title ?? open.threadId}`}>
-          <h2>{open.title ?? "Untitled thread"}</h2>
-          <p>
-            <button type="button" onClick={() => setOpen(null)}>
+        <Section
+          title={open.title ?? "Untitled thread"}
+          actions={
+            <Button size="sm" onClick={() => setOpen(null)}>
               All threads
-            </button>
-          </p>
-          <ol>
+            </Button>
+          }
+        >
+          <ol
+            aria-label={`Thread ${open.title ?? open.threadId}`}
+            className="m-0 flex list-none flex-col gap-3 p-0"
+          >
             {entries.map((e) => (
-              <li key={e.entryId}>
-                <strong>{roleOf(e)}</strong> · <DateTime value={e.createdAt} />
-                <pre style={{ whiteSpace: "pre-wrap" }}>{entryText(e)}</pre>
+              <li key={e.entryId} className="rounded-lg border border-console-border p-3">
+                <p className="m-0 text-sm">
+                  <strong>{roleOf(e)}</strong> · <DateTime value={e.createdAt} />
+                </p>
+                <pre className="m-0 mt-2 font-[inherit] break-words whitespace-pre-wrap">
+                  {entryText(e)}
+                </pre>
               </li>
             ))}
           </ol>
-          {entries.length === 0 && !loading && <p>No entries.</p>}
+          {entries.length === 0 && !loading && <EmptyState title="No entries." />}
           {after !== null && (
-            <button type="button" onClick={() => void loadEntries(open, after)}>
+            <Button className="mt-3" onClick={() => void loadEntries(open, after)}>
               Load more
-            </button>
+            </Button>
           )}
-        </section>
+        </Section>
       ) : (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <caption>Threads in scope</caption>
-            <thead>
-              <tr>
-                <th scope="col">Title</th>
-                <th scope="col">Owner</th>
-                <th scope="col">Last activity</th>
-                <th scope="col">
-                  <span className={styles.visuallyHidden}>Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+        <Section title="Threads in scope">
+          <Table caption="Threads in scope" hideCaption>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Title</TableHeader>
+                <TableHeader>Owner</TableHeader>
+                <TableHeader>Last activity</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {threads.map((t) => (
-                <tr key={t.threadId}>
-                  <td>
+                <TableRow key={t.threadId}>
+                  <TableCell>
                     {t.title ?? "Untitled thread"}
                     {t.deletedAt && <> · in Trash</>}
-                  </td>
-                  <td>{t.ownerUserId}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
+                    <code className="break-all">{t.ownerUserId}</code>
+                  </TableCell>
+                  <TableCell>
                     <DateTime value={t.lastActivityAt} />
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => void loadEntries(t, 0)}>
+                  </TableCell>
+                  <TableCell>
+                    <Button size="sm" onClick={() => void loadEntries(t, 0)}>
                       Open
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-          {threads.length === 0 && !loading && !error && <p>No threads in scope.</p>}
-          {cursor && (
-            <button type="button" onClick={() => void loadThreads(cursor)}>
-              Load more
-            </button>
+            </TableBody>
+          </Table>
+          {threads.length === 0 && !loading && !error && (
+            <EmptyState title="No threads in scope." className="mt-3" />
           )}
-        </div>
+          {cursor && (
+            <Button className="mt-3" onClick={() => void loadThreads(cursor)}>
+              Load more
+            </Button>
+          )}
+        </Section>
       )}
     </>
   );

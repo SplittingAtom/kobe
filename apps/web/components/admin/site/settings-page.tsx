@@ -8,11 +8,11 @@ import {
   type SiteSettings,
 } from "../../../lib/admin/api/site/settings";
 import { canTurnOffRequiredTwoFactor } from "../../../lib/admin/rules";
+import { Button, Checkbox, ChoiceGroup, Field, PageHeader, TextInput } from "../../ui/console";
 import { useSiteAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 import { MemorySwitchesSection } from "./memory-switches";
 import { WebSearchSection } from "./web-search-form";
 
@@ -24,7 +24,7 @@ export function SettingsPage() {
   const { state, reload } = useResource(getSiteSettings);
   return (
     <>
-      <h1>Settings</h1>
+      <PageHeader title="Settings" />
       <ResourceView state={state} label="settings">
         {(settings) => (
           <>
@@ -65,30 +65,26 @@ function SettingsForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Site settings">
-      <fieldset>
-        <legend>Sign-in</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={requireTwoFactor}
-            disabled={locked}
-            aria-describedby="require-2fa-hint"
-            onChange={(e) => setRequireTwoFactor(e.target.checked)}
-          />{" "}
-          Require two-factor authentication for everyone
-        </label>
-        <p id="require-2fa-hint" className={styles.hint}>
-          {locked
-            ? "Only the Owner can turn this off."
-            : "Everyone must enrol an authenticator app before they can use Kobe."}
-        </p>
-      </fieldset>
-      <button
+      <ChoiceGroup legend="Sign-in" stacked className="my-4">
+        <Checkbox
+          label="Require two-factor authentication for everyone"
+          hint={
+            locked
+              ? "Only the Owner can turn this off."
+              : "Everyone must enrol an authenticator app before they can use Kobe."
+          }
+          checked={requireTwoFactor}
+          disabled={locked}
+          onChange={(e) => setRequireTwoFactor(e.target.checked)}
+        />
+      </ChoiceGroup>
+      <Button
         type="submit"
+        variant="primary"
         disabled={mutation.pending || requireTwoFactor === settings.requireTwoFactor}
       >
         Save
-      </button>
+      </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );
@@ -117,30 +113,30 @@ function AuditPrivacyForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Audit log privacy">
-      <fieldset>
-        <legend>Audit log privacy</legend>
-        <label>
-          Keep IP addresses and user agents for (hours){" "}
-          <input
+      <ChoiceGroup legend="Audit log privacy" stacked className="my-4">
+        <Field
+          label="Keep IP addresses and user agents for (hours)"
+          hint="After this, the client IP address and user agent are erased from audit events. The events themselves are kept, and the audit chain still verifies. Data under a legal hold is kept until the hold is released. 1 to 8760 hours; the default is 12."
+        >
+          <TextInput
             type="number"
             required
+            className="w-28"
             min={AUDIT_PII_RETENTION_HOURS.min}
             max={AUDIT_PII_RETENTION_HOURS.max}
             step={1}
             value={hours}
-            aria-describedby="audit-pii-hint"
             onChange={(e) => setHours(e.target.value)}
           />
-        </label>
-        <p id="audit-pii-hint" className={styles.hint}>
-          After this, the client IP address and user agent are erased from audit events. The events
-          themselves are kept, and the audit chain still verifies. Data under a legal hold is kept
-          until the hold is released. 1 to 8760 hours; the default is 12.
-        </p>
-      </fieldset>
-      <button type="submit" disabled={mutation.pending || Number(hours) === saved}>
+        </Field>
+      </ChoiceGroup>
+      <Button
+        type="submit"
+        variant="primary"
+        disabled={mutation.pending || Number(hours) === saved}
+      >
         Save retention
-      </button>
+      </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );

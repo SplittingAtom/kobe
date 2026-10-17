@@ -9,7 +9,20 @@ import {
 } from "../../../lib/admin/api/site/audit-forwarding";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
-import styles from "../admin.module.css";
+import {
+  Badge,
+  Button,
+  Notice,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  type BadgeTone,
+} from "../../ui/console";
 
 const DESTINATION_LABEL = { syslog: "Syslog", otlp: "OTLP" } as const;
 
@@ -26,6 +39,13 @@ function statusLabel(d: DestinationHealth): string {
   return labels[d.status];
 }
 
+const STATUS_TONE: Readonly<Record<ForwardStatus, BadgeTone>> = {
+  ok: "running",
+  retrying: "attention",
+  failing: "failed",
+  pending: "neutral",
+};
+
 /**
  * Audit forwarding health (KOBE-182): per SIEM destination, whether events are delivered, how far
  * behind it is and the last error, from `GET /v1/site/audit/forwarding` (KOBE-19). Destinations are
@@ -35,19 +55,18 @@ export function AuditForwardingPage() {
   const { state, reload } = useResource(getAuditForwarding);
   return (
     <>
-      <h1>Audit forwarding</h1>
-      <p className={styles.hint}>
-        Kobe sends every audit event to your SIEM over syslog or OTLP. A destination that fails is
-        retried with a growing wait (up to 15 minutes) and never skips an event.
-      </p>
+      <PageHeader
+        title="Audit forwarding"
+        description="Kobe sends every audit event to your SIEM over syslog or OTLP. A destination that fails is retried with a growing wait (up to 15 minutes) and never skips an event."
+        actions={
+          <Button onClick={reload} disabled={state.status === "loading"}>
+            Refresh
+          </Button>
+        }
+      />
       <ResourceView state={state} label="forwarding status">
         {(health) => <ForwardingDetails health={health} />}
       </ResourceView>
-      <p>
-        <button type="button" onClick={reload} disabled={state.status === "loading"}>
-          Refresh
-        </button>
-      </p>
     </>
   );
 }
@@ -55,43 +74,47 @@ export function AuditForwardingPage() {
 function ForwardingDetails({ health }: { readonly health: ForwardingHealth }) {
   if (!health.enabled) {
     return (
-      <p>
-        Forwarding is off. To send audit events to a SIEM, set <code>auditForwarding</code> (syslog
-        or OTLP) in the Helm values and upgrade. Until then, download history with the audit export.
-      </p>
+      <Notice>
+        <p>
+          Forwarding is off. To send audit events to a SIEM, set <code>auditForwarding</code>{" "}
+          (syslog or OTLP) in the Helm values and upgrade. Until then, download history with the
+          audit export.
+        </p>
+      </Notice>
     );
   }
   return (
     <>
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <caption>Forwarding destinations</caption>
-          <thead>
-            <tr>
-              <th scope="col">Destination</th>
-              <th scope="col">Status</th>
-              <th scope="col">Events behind</th>
-              <th scope="col">Delivered</th>
-              <th scope="col">Last delivery</th>
-              <th scope="col">Next attempt</th>
-            </tr>
-          </thead>
-          <tbody>
-            {health.destinations.map((d) => (
-              <tr key={d.destination}>
-                <th scope="row">{DESTINATION_LABEL[d.destination]}</th>
-                <td>{statusLabel(d)}</td>
-                <td>{d.behind ?? "—"}</td>
-                <td>{d.delivered ?? "—"}</td>
-                <td>
-                  <DateTime value={d.lastSuccessAt} />
-                </td>
-                <td>{d.status === "ok" ? "—" : <DateTime value={d.nextAttemptAt} />}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Table caption="Forwarding destinations">
+        <TableHead>
+          <TableRow>
+            <TableHeader>Destination</TableHeader>
+            <TableHeader>Status</TableHeader>
+            <TableHeader numeric>Events behind</TableHeader>
+            <TableHeader numeric>Delivered</TableHeader>
+            <TableHeader>Last delivery</TableHeader>
+            <TableHeader>Next attempt</TableHeader>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {health.destinations.map((d) => (
+            <TableRow key={d.destination}>
+              <TableRowHeader>{DESTINATION_LABEL[d.destination]}</TableRowHeader>
+              <TableCell>
+                <Badge tone={STATUS_TONE[d.status]}>{statusLabel(d)}</Badge>
+              </TableCell>
+              <TableCell numeric>{d.behind ?? "—"}</TableCell>
+              <TableCell numeric>{d.delivered ?? "—"}</TableCell>
+              <TableCell>
+                <DateTime value={d.lastSuccessAt} />
+              </TableCell>
+              <TableCell>
+                {d.status === "ok" ? "—" : <DateTime value={d.nextAttemptAt} />}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
       {health.destinations.map((d) => (
         <LastError key={d.destination} destination={d} />
       ))}
@@ -107,11 +130,11 @@ function LastError({ destination: d }: { readonly destination: DestinationHealth
   const behind = d.behind ? ` ${count(d.behind, "event waits", "events wait")} for delivery.` : "";
   const body = (
     <>
-      <h2>{name}</h2>
+      <h2 className="m-0 text-lg font-semibold">{name}</h2>
       <p>
-        <code>{message}</code>
+        <code className="break-all">{message}</code>
       </p>
-      <p className={styles.hint}>
+      <p className="text-sm text-console-muted">
         At <DateTime value={d.lastErrorAt} />.
         {d.status === "ok" ? " Resolved: delivery has worked since." : behind}
       </p>
@@ -119,20 +142,20 @@ function LastError({ destination: d }: { readonly destination: DestinationHealth
   );
   if (d.status === "failing") {
     return (
-      <section role="alert" aria-label={name} className={styles.error}>
+      <Notice tone="error" role="alert" aria-label={name} className="mt-4">
         {body}
-      </section>
+      </Notice>
     );
   }
   if (d.status === "retrying") {
     return (
-      <section role="status" aria-label={name} className={styles.banner}>
+      <Notice tone="warn" role="status" aria-label={name} className="mt-4">
         {body}
-      </section>
+      </Notice>
     );
   }
   return (
-    <section role="note" aria-label={name}>
+    <section role="note" aria-label={name} className="mt-4">
       {body}
     </section>
   );

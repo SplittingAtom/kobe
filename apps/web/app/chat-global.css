@@ -1,56 +1,9 @@
-/* Chat styling (assistant-ui's shadcn components, Tailwind CSS v4, shadcn "neutral" tokens).
-   Only the theme and utilities layers are imported, not Tailwind's preflight, so the admin consoles'
-   CSS-module styles are untouched; the few preflight rules the components need are scoped to the
-   chat root below. The tokens and both themes live in app/theme.css (KOBE-282): a saved choice
-   (`<html data-theme>`) or, without one, the OS setting. */
-@layer theme, base, components, utilities;
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
-@import "tw-animate-css";
-
-/* `dark:` follows the same rule as app/theme.css: a saved dark choice, or no choice on a dark OS. */
-@custom-variant dark {
-  &:where([data-theme="dark"] *) {
-    @slot;
-  }
-  @media (prefers-color-scheme: dark) {
-    &:where(:root:not([data-theme="light"]) *) {
-      @slot;
-    }
-  }
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  /* Status colours (KOBE-301, app/theme.css): text-status-running, bg-status-running-bg, … */
-  --color-status-running: var(--kobe-status-running);
-  --color-status-running-bg: var(--kobe-status-running-bg);
-  --color-status-attention: var(--kobe-status-attention);
-  --color-status-attention-bg: var(--kobe-status-attention-bg);
-  --color-status-failed: var(--kobe-status-failed);
-  --color-status-failed-bg: var(--kobe-status-failed-bg);
-  --color-status-done: var(--kobe-status-done);
-  --color-status-idle: var(--kobe-status-idle);
-  --color-status-accent: var(--kobe-status-accent);
-  --color-status-accent-fg: var(--kobe-status-accent-fg);
-}
+/* Chat styling (assistant-ui's shadcn components). Tailwind itself (theme and utilities, no
+   preflight, the dark variant and the token mapping) is app/tailwind.css, shared with the consoles
+   (KOBE-294); this file adds the chat's own rules: the few preflight rules the components need,
+   scoped to the chat root, and the arrival fade. The tokens and both themes live in app/theme.css
+   (KOBE-282). The chat's compiled rules are pinned by app/console-css-guard.test.ts. */
+@import "./tailwind.css";
 
 /* Only for pages that render the chat (KOBE-32): the app paints edge to edge. */
 body:has([data-kobe-chat]) {

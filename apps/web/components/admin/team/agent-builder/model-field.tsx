@@ -1,8 +1,9 @@
 import { listTeamModels, modelName } from "../../../../lib/admin/api/team/models";
 import type { FieldErrors, FormState } from "../../../../lib/admin/agent-builder/form-model";
+import { Field, Select, TextInput } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { useResource } from "../../use-resource";
-import { Field } from "./field";
+import { fieldError } from "./field-errors";
 
 /**
  * The agent's model: one of the team's enabled aliases (`/v1/team/models`, KOBE-44), or the team
@@ -33,34 +34,32 @@ export function ModelField({
           ? "The team's models couldn't be loaded; type an alias or model id."
           : "Models the team has enabled."
       }
-      errors={errors.model}
+      error={fieldError(errors.model)}
     >
-      {(control) =>
-        failed ? (
-          <input
-            {...control}
-            type="text"
-            value={form.model}
-            readOnly={readOnly}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        ) : (
-          <select
-            {...control}
-            value={form.model}
-            disabled={readOnly || state.status === "loading"}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            <option value="">None (use team default)</option>
-            {unlisted && <option value={form.model}>{form.model} (not enabled)</option>}
-            {enabled.map((m) => (
-              <option key={m.alias} value={m.alias}>
-                {modelName(m)}
-              </option>
-            ))}
-          </select>
-        )
-      }
+      {failed ? (
+        <TextInput
+          type="text"
+          className="w-full read-only:bg-console-panel"
+          value={form.model}
+          readOnly={readOnly}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <Select
+          className="w-full"
+          value={form.model}
+          disabled={readOnly || state.status === "loading"}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">None (use team default)</option>
+          {unlisted && <option value={form.model}>{form.model} (not enabled)</option>}
+          {enabled.map((m) => (
+            <option key={m.alias} value={m.alias}>
+              {modelName(m)}
+            </option>
+          ))}
+        </Select>
+      )}
     </Field>
   );
 }

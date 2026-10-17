@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { MyMemoryPage } from "./my-memory-page";
 
 const DOC = "00000000-0000-4000-8000-0000000d0c01";
@@ -30,12 +30,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
 const LIST = "/v1/memory?scope=user";
 const ONE = `/v1/memory/${DOC}`;
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -116,16 +111,20 @@ describe("Memory panel (KOBE-158, ac-2)", () => {
     renderTeam(<MyMemoryPage />, MEMBER);
     await userEvent.click(await screen.findByRole("button", { name: "Open MEMORY.md" }));
     await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(await answerConfirm("Delete MEMORY.md?", "Delete")).toMatch(
+      /restore it from the history/,
+    );
     await screen.findByText(/No memory files yet/);
     expect(calls.some((c) => c.method === "DELETE" && c.url === ONE)).toBe(true);
     expect(screen.queryByLabelText("Memory content")).toBeNull();
+    // The file's view is gone: focus moves to the list's heading.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Files" })),
+    );
   });
 
   it("does not delete when the person cancels", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false),
-    );
     const calls = stubApi({
       [`GET ${LIST}`]: [200, { docs: [summary()] }],
       [`GET ${ONE}`]: [200, detail()],
@@ -133,6 +132,7 @@ describe("Memory panel (KOBE-158, ac-2)", () => {
     renderTeam(<MyMemoryPage />, MEMBER);
     await userEvent.click(await screen.findByRole("button", { name: "Open MEMORY.md" }));
     await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await answerConfirm("Delete MEMORY.md?", "Cancel");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 

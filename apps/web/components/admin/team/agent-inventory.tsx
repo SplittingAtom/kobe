@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   listAgentInventory,
@@ -8,12 +9,26 @@ import {
   type InventoryPage,
   type InventorySchedule,
 } from "../../../lib/admin/api/team/agents";
+import { consoleHref } from "../../../lib/admin/nav/registry";
 import { scoreLabel } from "../../../lib/admin/orbit-score";
+import {
+  Button,
+  EmptyState,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  useConfirm,
+  eventTrigger,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { OrbitExportButton } from "./agent-builder/orbit-export-button";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 const SCOPE_LABEL = { team: "Team", personal: "Personal", gallery: "Gallery" } as const;
 const PLACEHOLDER = "—";
@@ -27,31 +42,28 @@ const PLACEHOLDER = "—";
 export function AgentInventory({
   teamId,
   canSuspend,
-  onChanged,
 }: {
   readonly teamId: string;
   readonly canSuspend: boolean;
-  readonly onChanged: () => void;
 }) {
   const { state } = useResource(() => listAgentInventory(teamId));
   return (
-    <section aria-labelledby="inventory-heading">
-      <h2 id="inventory-heading">Inventory</h2>
-      <p className={styles.hint}>
-        Team agents and members&apos; personal agents used in this team. Suspending a personal agent
-        only stops it in this team.
-      </p>
+    <Section
+      id="inventory-heading"
+      title="Agents"
+      description={
+        <>
+          Team agents and members&apos; personal agents used in this team, with their schedules.
+          Suspending a personal agent only stops it in this team; a suspended agent&apos;s schedules
+          don&apos;t fire. Pause schedules in{" "}
+          <Link href={`${consoleHref("team")}/schedules`}>Schedules</Link>.
+        </>
+      }
+    >
       <ResourceView state={state} label="the agent inventory">
-        {(first) => (
-          <InventoryTable
-            teamId={teamId}
-            first={first}
-            canSuspend={canSuspend}
-            onChanged={onChanged}
-          />
-        )}
+        {(first) => <InventoryTable teamId={teamId} first={first} canSuspend={canSuspend} />}
       </ResourceView>
-    </section>
+    </Section>
   );
 }
 
@@ -59,17 +71,16 @@ function InventoryTable({
   teamId,
   first,
   canSuspend,
-  onChanged,
 }: {
   readonly teamId: string;
   readonly first: InventoryPage;
   readonly canSuspend: boolean;
-  readonly onChanged: () => void;
 }) {
   const [agents, setAgents] = useState<readonly InventoryAgent[]>(first.agents);
   const [cursor, setCursor] = useState<string | null>(first.nextCursor);
   const mutation = useMutation();
   const paging = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
 
   async function loadMore() {
     if (cursor === null) return;
@@ -83,11 +94,18 @@ function InventoryTable({
     );
   }
 
-  async function toggle(agent: InventoryAgent) {
+  async function toggle(agent: InventoryAgent, trigger: HTMLElement | null) {
     const next = agent.status === "active" ? "suspended" : "active";
     if (
       next === "suspended" &&
-      !confirmed(`Suspend ${agent.name}? It can't start new runs in this team.`)
+      !(await confirm(
+        {
+          title: `Suspend ${agent.name}?`,
+          description: "It can't start new runs in this team.",
+          confirmLabel: `Suspend ${agent.name}`,
+        },
+        trigger,
+      ))
     ) {
       return;
     }
@@ -97,69 +115,71 @@ function InventoryTable({
     );
     if (done) {
       setAgents((current) => current.map((a) => (a.id === agent.id ? { ...a, status: next } : a)));
-      onChanged();
     }
   }
 
-  if (agents.length === 0) return <p>No agents yet.</p>;
+  if (agents.length === 0) return <EmptyState title="No agents yet." />;
   return (
     <>
       <MutationStatus error={mutation.error ?? paging.error} notice={mutation.notice} />
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <caption>Agent inventory</caption>
-          <thead>
-            <tr>
-              <th scope="col">Agent</th>
-              <th scope="col">Owner</th>
-              <th scope="col">Scope</th>
-              <th scope="col">Status</th>
-              <th scope="col">Versions</th>
-              <th scope="col">Runs</th>
-              <th scope="col">Last run</th>
-              <th scope="col">Tokens</th>
-              <th scope="col">Schedules</th>
-              <th scope="col">Orbit score</th>
-              <th scope="col">
-                <span className={styles.visuallyHidden}>Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map((a) => (
-              <tr key={a.id}>
-                <th scope="row">{a.name}</th>
-                <td>{a.scope === "gallery" ? "Gallery" : (a.ownerName ?? PLACEHOLDER)}</td>
-                <td>{SCOPE_LABEL[a.scope]}</td>
-                <td>
-                  {a.archivedAt !== null
-                    ? "Archived"
-                    : a.status === "active"
-                      ? "Active"
-                      : "Suspended"}
-                </td>
-                <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
-                <td>{a.runCount.toLocaleString("en-US")}</td>
-                <td>{a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} />}</td>
-                <td>{a.tokens.toLocaleString("en-US")}</td>
-                <td>
-                  <ScheduleList schedules={a.schedules} />
-                </td>
-                <td>
-                  {a.orbitScore.status === "none" ? (
-                    PLACEHOLDER
-                  ) : (
-                    <>
-                      {scoreLabel(a.orbitScore)}
-                      {a.orbitScore.at !== null && a.orbitScore.status !== "evaluating" && (
-                        <div className={styles.hint}>
-                          <DateTime value={a.orbitScore.at} />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </td>
-                <td>
+      <Table caption="Agent inventory">
+        <TableHead>
+          <TableRow>
+            <TableHeader>Agent</TableHeader>
+            <TableHeader>Owner</TableHeader>
+            <TableHeader>Scope</TableHeader>
+            <TableHeader>Status</TableHeader>
+            <TableHeader>Versions</TableHeader>
+            <TableHeader numeric>Runs</TableHeader>
+            <TableHeader>Last run</TableHeader>
+            <TableHeader numeric>Tokens</TableHeader>
+            <TableHeader>Schedules</TableHeader>
+            <TableHeader>Orbit score</TableHeader>
+            <TableHeader>
+              <span className="sr-only">Actions</span>
+            </TableHeader>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {agents.map((a) => (
+            <TableRow key={a.id}>
+              <TableRowHeader>{a.name}</TableRowHeader>
+              <TableCell>
+                {a.scope === "gallery" ? "Gallery" : (a.ownerName ?? PLACEHOLDER)}
+              </TableCell>
+              <TableCell>{SCOPE_LABEL[a.scope]}</TableCell>
+              <TableCell>
+                {a.archivedAt !== null
+                  ? "Archived"
+                  : a.status === "active"
+                    ? "Active"
+                    : "Suspended"}
+              </TableCell>
+              <TableCell>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</TableCell>
+              <TableCell numeric>{a.runCount.toLocaleString("en-US")}</TableCell>
+              <TableCell>
+                {a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} />}
+              </TableCell>
+              <TableCell numeric>{a.tokens.toLocaleString("en-US")}</TableCell>
+              <TableCell>
+                <ScheduleList schedules={a.schedules} />
+              </TableCell>
+              <TableCell>
+                {a.orbitScore.status === "none" ? (
+                  PLACEHOLDER
+                ) : (
+                  <>
+                    {scoreLabel(a.orbitScore)}
+                    {a.orbitScore.at !== null && a.orbitScore.status !== "evaluating" && (
+                      <div className="text-sm text-console-muted">
+                        <DateTime value={a.orbitScore.at} />
+                      </div>
+                    )}
+                  </>
+                )}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-1.5">
                   {a.canExport === true && a.currentVersion !== null && (
                     <OrbitExportButton
                       teamId={teamId}
@@ -167,31 +187,34 @@ function InventoryTable({
                       agentSlug={a.slug}
                       version={a.currentVersion}
                       label={`Export ${a.name} to Orbit`}
+                      size="sm"
                     />
                   )}
                   {canSuspend && (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant={a.status === "active" ? "danger" : "secondary"}
                       disabled={mutation.pending}
-                      onClick={() => void toggle(a)}
+                      onClick={(e) => void toggle(a, eventTrigger(e))}
                     >
                       {a.status === "active" ? "Suspend" : "Reactivate"}
-                      <span className={styles.visuallyHidden}> {a.name}</span>
-                    </button>
+                      <span className="sr-only"> {a.name}</span>
+                    </Button>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
       {cursor !== null && (
         <p>
-          <button type="button" disabled={paging.pending} onClick={() => void loadMore()}>
+          <Button loading={paging.pending} onClick={() => void loadMore()}>
             Load more
-          </button>
+          </Button>
         </p>
       )}
+      {confirmDialog}
     </>
   );
 }
@@ -210,7 +233,7 @@ function scheduleLabel(s: InventorySchedule): string {
 function ScheduleList({ schedules }: { readonly schedules: readonly InventorySchedule[] }) {
   if (schedules.length === 0) return <>{PLACEHOLDER}</>;
   return (
-    <ul>
+    <ul className="m-0 list-none p-0">
       {schedules.map((s) => (
         <li key={s.scheduleId}>
           {s.ownerName}: {scheduleLabel(s)}

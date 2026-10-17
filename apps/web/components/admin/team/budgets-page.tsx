@@ -15,11 +15,30 @@ import {
 import { listTeamMembers, type TeamMember } from "../../../lib/admin/api/team/members";
 import { formatTokens, formatUsd } from "../../../lib/admin/usage-format";
 import { AmountFields, parseAmounts, useAmountTexts } from "../budgets/amount-fields";
+import {
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  Notice,
+  PageHeader,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { ResourceView, confirmed } from "../parts";
+import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 interface PageData {
   readonly budgets: TeamBudgets;
@@ -66,11 +85,15 @@ export function budgetLevel(percent: number | null): BudgetLevel {
 export const percentOf = (spent: number, limit: number | null): number | null =>
   limit === null ? null : limit > 0 ? (spent / limit) * 100 : 100;
 
-const LEVEL_CLASS: Record<BudgetLevel, string | undefined> = {
+/** The status colours (KOBE-301, app/theme.css): amber, then red and bold. */
+export const BUDGET_LEVEL_CLASS: Readonly<Record<BudgetLevel, string | undefined>> = {
   ok: undefined,
-  warn: styles.budgetWarn,
-  full: styles.budgetFull,
+  warn: "text-status-attention",
+  full: "font-semibold text-status-failed",
 };
+
+/** A definition list of label and value pairs, side by side. */
+const DL = "m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 [&_dd]:m-0 [&_dt]:font-medium";
 
 /**
  * One usage line: amber from 80 % of the budget and red from 100 % (status colours, KOBE-301),
@@ -79,8 +102,10 @@ const LEVEL_CLASS: Record<BudgetLevel, string | undefined> = {
 function BudgetLine({ text, percent }: { readonly text: string; readonly percent: number | null }) {
   const level = budgetLevel(percent);
   return (
-    <span className={LEVEL_CLASS[level]} data-budget-level={level}>
-      {level !== "ok" && <TriangleAlertIcon aria-hidden className={styles.budgetIcon} />}
+    <span className={BUDGET_LEVEL_CLASS[level]} data-budget-level={level}>
+      {level !== "ok" && (
+        <TriangleAlertIcon aria-hidden className="me-1 inline-block size-3.5 align-[-0.125rem]" />
+      )}
       {text}
       {level === "full" && " · used up"}
     </span>
@@ -95,7 +120,7 @@ export function usedOf(percent: number | null): string {
 function Usage({ amounts, spent }: { readonly amounts: BudgetAmounts; readonly spent: Spend }) {
   return (
     <>
-      <td>
+      <TableCell>
         <BudgetLine
           text={spentOf(spent.monthUsd, amounts.monthlyUsd)}
           percent={percentOf(spent.monthUsd, amounts.monthlyUsd)}
@@ -105,8 +130,8 @@ function Usage({ amounts, spent }: { readonly amounts: BudgetAmounts; readonly s
           text={tokensOf(spent.monthTokens, amounts.monthlyTokens)}
           percent={percentOf(spent.monthTokens, amounts.monthlyTokens)}
         />
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <BudgetLine
           text={spentOf(spent.dayUsd, amounts.dailyUsd)}
           percent={percentOf(spent.dayUsd, amounts.dailyUsd)}
@@ -116,7 +141,7 @@ function Usage({ amounts, spent }: { readonly amounts: BudgetAmounts; readonly s
           text={tokensOf(spent.dayTokens, amounts.dailyTokens)}
           percent={percentOf(spent.dayTokens, amounts.dailyTokens)}
         />
-      </td>
+      </TableCell>
     </>
   );
 }
@@ -136,13 +161,10 @@ export function TeamBudgetsPage() {
 
   return (
     <>
-      <h1>Budgets</h1>
-      <p className={styles.hint}>
-        Budgets in dollars (at the catalog's prices: models without a price cost nothing in dollars)
-        and in tokens (input, output and cached tokens, for every model). Months and days are
-        calendar periods in UTC. At 80 % team admins are warned; at 100 % new model calls and runs
-        are refused, and running ones stop after their current step.
-      </p>
+      <PageHeader
+        title="Budgets"
+        description="Budgets in dollars (at the catalog's prices: models without a price cost nothing in dollars) and in tokens (input, output and cached tokens, for every model). Months and days are calendar periods in UTC. At 80 % team admins are warned; at 100 % new model calls and runs are refused, and running ones stop after their current step."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="budgets">
         {({ budgets, members }) => (
@@ -181,6 +203,19 @@ function Body({
   const [who, setWho] = useState("");
   const [invalid, setInvalid] = useState<string | null>(null);
   const siteRpm = budgets.site.userRequestsPerMinute;
+  const [confirm, confirmDialog] = useConfirm();
+
+  async function removeBudget(m: TeamBudgets["members"][number], trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove ${m.name ?? "this member"}'s budget?`,
+        description: "The default member budget applies to them again.",
+        confirmLabel: "Remove budget",
+      },
+      trigger,
+    );
+    if (yes) await run(() => removeMemberBudget(teamId, m.userId), "Budget removed.");
+  }
 
   function saveTeam(e: FormEvent) {
     e.preventDefault();
@@ -222,13 +257,12 @@ function Body({
   return (
     <>
       {invalid && (
-        <p role="alert" className={styles.error}>
-          {invalid}
-        </p>
+        <Notice tone="error">
+          <p>{invalid}</p>
+        </Notice>
       )}
-      <section aria-labelledby="team-budget">
-        <h2 id="team-budget">Team</h2>
-        <dl className={styles.dl}>
+      <Section id="team-budget" title="Team">
+        <dl className={DL}>
           <dt>This month ({budgets.period.month.slice(0, 7)}, UTC)</dt>
           <dd>
             <BudgetLine
@@ -256,93 +290,100 @@ function Body({
           <dt>Requests per minute per member</dt>
           <dd>{budgets.effectiveRequestsPerMinute}</dd>
         </dl>
-        <form className={styles.form} onSubmit={saveTeam} aria-label="Team budget">
-          <AmountFields value={team} onChange={setTeam} prefix="Team " />
-          <label>
-            Requests per minute (max {siteRpm})
-            <input
-              inputMode="numeric"
-              value={rpm}
-              placeholder={String(siteRpm)}
-              onChange={(e) => setRpm(e.target.value)}
-            />
-          </label>
-          <button type="submit">Save team budget</button>
+        <form onSubmit={saveTeam} aria-label="Team budget">
+          <FormRow>
+            <AmountFields value={team} onChange={setTeam} prefix="Team " />
+            <Field label={`Requests per minute (max ${siteRpm})`}>
+              <TextInput
+                inputMode="numeric"
+                className="w-36"
+                value={rpm}
+                placeholder={String(siteRpm)}
+                onChange={(e) => setRpm(e.target.value)}
+              />
+            </Field>
+            <Button type="submit" variant="primary">
+              Save team budget
+            </Button>
+          </FormRow>
         </form>
-      </section>
+      </Section>
 
-      <section aria-labelledby="default-budget">
-        <h2 id="default-budget">Default member budget</h2>
-        <p className={styles.hint}>
-          Applies to every member without a budget of their own, so one member cannot use up the
-          whole team's budget. Empty means none.
-        </p>
-        <form className={styles.form} onSubmit={saveDefaults} aria-label="Default member budget">
-          <AmountFields value={defaults} onChange={setDefaults} prefix="Default " />
-          <button type="submit">Save default member budget</button>
+      <Section
+        id="default-budget"
+        title="Default member budget"
+        description="Applies to every member without a budget of their own, so one member cannot use up the whole team's budget. Empty means none."
+      >
+        <form onSubmit={saveDefaults} aria-label="Default member budget">
+          <FormRow>
+            <AmountFields value={defaults} onChange={setDefaults} prefix="Default " />
+            <Button type="submit" variant="primary">
+              Save default member budget
+            </Button>
+          </FormRow>
         </form>
-      </section>
+      </Section>
 
-      <section aria-labelledby="member-budgets">
-        <h2 id="member-budgets">Members</h2>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <caption>Member budgets</caption>
-            <thead>
-              <tr>
-                <th scope="col">Member</th>
-                <th scope="col">This month</th>
-                <th scope="col">Today</th>
-                <th scope="col">
-                  <span className={styles.visuallyHidden}>Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+      <Section id="member-budgets" title="Members">
+        {budgets.members.length === 0 ? (
+          <EmptyState title="No member has a budget of their own." />
+        ) : (
+          <Table caption="Member budgets">
+            <TableHead>
+              <TableRow>
+                <TableHeader>Member</TableHeader>
+                <TableHeader>This month</TableHeader>
+                <TableHeader>Today</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {budgets.members.map((m) => (
-                <tr key={m.userId}>
-                  <td>{m.name ?? m.email ?? m.userId}</td>
+                <TableRow key={m.userId}>
+                  <TableRowHeader>{m.name ?? m.email ?? m.userId}</TableRowHeader>
                   <Usage amounts={m} spent={m.spent} />
-                  <td>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!confirmed(`Remove ${m.name ?? "this member"}'s budget?`)) return;
-                        void run(() => removeMemberBudget(teamId, m.userId), "Budget removed.");
-                      }}
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={(e) => void removeBudget(m, eventTrigger(e))}
                     >
                       Remove budget of {m.name ?? m.email ?? "member"}
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-        {budgets.members.length === 0 && <p>No member has a budget of their own.</p>}
-        <form className={styles.form} onSubmit={saveMember} aria-label="Member budget">
-          <label>
-            Member
-            <select value={who} onChange={(e) => setWho(e.target.value)}>
-              <option value="">Choose…</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <AmountFields value={member} onChange={setMember} prefix="Member " />
-          <button type="submit">Set member budget</button>
+            </TableBody>
+          </Table>
+        )}
+        <form onSubmit={saveMember} aria-label="Member budget">
+          <FormRow>
+            <Field label="Member">
+              <Select value={who} onChange={(e) => setWho(e.target.value)}>
+                <option value="">Choose…</option>
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <AmountFields value={member} onChange={setMember} prefix="Member " />
+            <Button type="submit" variant="primary">
+              Set member budget
+            </Button>
+          </FormRow>
         </form>
-      </section>
+      </Section>
 
-      <section aria-labelledby="site-budget">
-        <h2 id="site-budget">Site</h2>
-        <p className={styles.hint}>
-          Set by site admins; every team's spend counts against it (shown in percent).
-        </p>
-        <dl className={styles.dl}>
+      <Section
+        id="site-budget"
+        title="Site"
+        description="Set by site admins; every team's spend counts against it (shown in percent)."
+      >
+        <dl className={DL}>
           <dt>This month</dt>
           <dd>
             Dollars:{" "}
@@ -370,7 +411,8 @@ function Body({
             />
           </dd>
         </dl>
-      </section>
+      </Section>
+      {confirmDialog}
     </>
   );
 }

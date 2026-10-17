@@ -13,11 +13,32 @@ import {
   type ProviderModels,
   type TokenDefaults,
 } from "../../../lib/admin/api/site/models";
-import { confirmed } from "../parts";
+import {
+  Button,
+  Checkbox,
+  EmptyState,
+  Field,
+  FormRow,
+  Notice,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../../ui/console";
+import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import type { Mutation } from "../use-resource";
 import { ALIAS_PATTERN } from "./model-kinds";
 import { LimitsFields, limitsChange, limitsText, useLimitsChoice } from "./model-limits";
-import styles from "../admin.module.css";
+
+const HEADING = "catalog-heading";
 
 /**
  * The model catalog (D30 "ceiling"): aliases such as `fast` or `kimi`, each mapped to a provider and
@@ -38,52 +59,60 @@ export function CatalogSection({
   readonly onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [confirm, confirmDialog] = useConfirm();
+  const focus = useFocusAfterRemoval(
+    catalog.map((m) => m.alias),
+    HEADING,
+  );
   const providerName = (id: string) => providers.find((p) => p.id === id)?.name ?? id;
 
-  async function remove(m: CatalogModel) {
-    if (
-      !confirmed(
-        `Remove ${m.alias} from the catalog? Every team that enabled it loses it, and conversations that chose it stop until they pick another model.`,
-      )
-    ) {
-      return;
-    }
+  async function remove(m: CatalogModel, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove ${m.alias} from the catalog?`,
+        description:
+          "Every team that enabled it loses it, and conversations that chose it stop until they pick another model.",
+        confirmLabel: `Remove ${m.alias}`,
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => deleteCatalogModel(m.alias),
       () => `Removed ${m.alias} from the catalog.`,
     );
-    if (done) onChanged();
+    if (done) {
+      focus.removed(m.alias, index);
+      onChanged();
+    }
   }
 
   return (
-    <section aria-labelledby="catalog-heading">
-      <h2 id="catalog-heading">Catalog</h2>
-      <p className={styles.hint}>
-        The catalog is the ceiling for teams: team admins enable a subset and pick their default,
-        and people choose among those per conversation. An alias is what agents and threads name, so
-        re-pointing it to another model changes it everywhere at once.
-      </p>
+    <Section
+      id={HEADING}
+      title="Catalog"
+      description="The catalog is the ceiling for teams: team admins enable a subset and pick their default, and people choose among those per conversation. An alias is what agents and threads name, so re-pointing it to another model changes it everywhere at once."
+    >
       {catalog.length === 0 ? (
-        <p>The catalog is empty: no team can use a model yet.</p>
+        <EmptyState title="The catalog is empty: no team can use a model yet." />
       ) : (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <caption>Catalog models ({catalog.length})</caption>
-            <thead>
-              <tr>
-                <th scope="col">Alias</th>
-                <th scope="col">Shown as</th>
-                <th scope="col">Provider</th>
-                <th scope="col">Model</th>
-                <th scope="col">Input</th>
-                <th scope="col">Limits</th>
-                <th scope="col">
-                  <span className={styles.visuallyHidden}>Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {catalog.map((m) => (
+        <div ref={focus.container}>
+          <Table caption={`Catalog models (${catalog.length})`}>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Alias</TableHeader>
+                <TableHeader>Shown as</TableHeader>
+                <TableHeader>Provider</TableHeader>
+                <TableHeader>Model</TableHeader>
+                <TableHeader>Input</TableHeader>
+                <TableHeader>Limits</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {catalog.map((m, index) => (
                 <CatalogRow
                   key={m.alias}
                   model={m}
@@ -96,19 +125,21 @@ export function CatalogSection({
                     mutation.clear();
                     setEditing(editing === m.alias ? null : m.alias);
                   }}
-                  onRemove={() => void remove(m)}
+                  onRemove={(trigger) => void remove(m, index, trigger)}
                   onSaved={() => {
                     setEditing(null);
                     onChanged();
                   }}
                 />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
       {providers.length === 0 ? (
-        <p>Add a provider first.</p>
+        <Notice>
+          <p>Add a provider first.</p>
+        </Notice>
       ) : (
         <AddCatalogForm
           providers={providers}
@@ -117,7 +148,8 @@ export function CatalogSection({
           onAdded={onChanged}
         />
       )}
-    </section>
+      {confirmDialog}
+    </Section>
   );
 }
 
@@ -139,46 +171,47 @@ function CatalogRow({
   readonly editing: boolean;
   readonly mutation: Mutation;
   readonly onEdit: () => void;
-  readonly onRemove: () => void;
+  readonly onRemove: (trigger: HTMLElement | null) => void;
   readonly onSaved: () => void;
 }) {
   return (
     <>
-      <tr>
-        <th scope="row">
+      <TableRow>
+        <TableRowHeader>
           <code>{m.alias}</code>
-        </th>
-        <td>{m.label ?? "—"}</td>
-        <td>{providerName}</td>
-        <td>
-          <code>{m.model}</code>
+        </TableRowHeader>
+        <TableCell>{m.label ?? "—"}</TableCell>
+        <TableCell>{providerName}</TableCell>
+        <TableCell>
+          <code className="break-all">{m.model}</code>
           <br />
-          <span className={styles.hint}>
-            Gateway id <code>{m.gatewayModel}</code>
+          <span className="text-sm text-console-muted">
+            Gateway id <code className="break-all">{m.gatewayModel}</code>
           </span>
-        </td>
-        <td>{m.inputModalities.includes("image") ? "Text, images" : "Text"}</td>
-        <td>{limitsText(m, tokenDefaults)}</td>
-        <td>
-          <div className={styles.actions}>
-            <button
-              type="button"
-              aria-expanded={editing}
-              disabled={mutation.pending}
-              onClick={onEdit}
-            >
+        </TableCell>
+        <TableCell>{m.inputModalities.includes("image") ? "Text, images" : "Text"}</TableCell>
+        <TableCell>{limitsText(m, tokenDefaults)}</TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" aria-expanded={editing} disabled={mutation.pending} onClick={onEdit}>
               {editing ? "Cancel" : "Edit"}
-              <span className={styles.visuallyHidden}> {m.alias}</span>
-            </button>
-            <button type="button" disabled={mutation.pending} onClick={onRemove}>
-              Remove<span className={styles.visuallyHidden}> {m.alias}</span>
-            </button>
+              <span className="sr-only"> {m.alias}</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              data-remove=""
+              disabled={mutation.pending}
+              onClick={(e) => onRemove(eventTrigger(e))}
+            >
+              Remove<span className="sr-only"> {m.alias}</span>
+            </Button>
           </div>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {editing && (
-        <tr>
-          <td colSpan={7}>
+        <TableRow>
+          <TableCell colSpan={7}>
             <EditCatalogForm
               model={m}
               providers={providers}
@@ -186,8 +219,8 @@ function CatalogRow({
               mutation={mutation}
               onSaved={onSaved}
             />
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -236,20 +269,22 @@ function EditCatalogForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={styles.form} aria-label={`Edit ${m.alias}`}>
-      <LabelField value={label} onChange={setLabel} />
-      <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
-      <ModelIdField
-        providerId={providerId}
-        value={model}
-        onChange={setModel}
-        onReportsImages={images.suggest}
-      />
+    <form onSubmit={onSubmit} aria-label={`Edit ${m.alias}`}>
+      <FormRow className="mt-1">
+        <LabelField value={label} onChange={setLabel} />
+        <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
+        <ModelIdField
+          providerId={providerId}
+          value={model}
+          onChange={setModel}
+          onReportsImages={images.suggest}
+        />
+      </FormRow>
       <ImagesField choice={images} />
       <LimitsFields choice={limits} defaults={tokenDefaults} />
-      <button type="submit" disabled={mutation.pending}>
+      <Button type="submit" variant="primary" disabled={mutation.pending}>
         Save {m.alias}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -298,40 +333,40 @@ function AddCatalogForm({
   }
 
   return (
-    <>
-      <h3>Add a model to the catalog</h3>
-      <form onSubmit={onSubmit} className={styles.form} aria-label="Add a catalog model">
-        <label>
-          Alias
-          <input
-            required
-            maxLength={64}
-            pattern={ALIAS_PATTERN}
-            placeholder="kimi"
-            aria-describedby={`${id}-alias`}
-            value={alias}
-            onChange={(e) => setAlias(e.target.value)}
+    <Section title="Add a model to the catalog" level={3}>
+      <form onSubmit={onSubmit} aria-label="Add a catalog model">
+        <FormRow className="mt-0">
+          <Field label="Alias">
+            <TextInput
+              required
+              maxLength={64}
+              pattern={ALIAS_PATTERN}
+              placeholder="kimi"
+              aria-describedby={`${id}-alias`}
+              value={alias}
+              onChange={(e) => setAlias(e.target.value)}
+            />
+          </Field>
+          <LabelField value={label} onChange={setLabel} />
+          <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
+          <ModelIdField
+            providerId={providerId}
+            value={model}
+            onChange={setModel}
+            onReportsImages={images.suggest}
           />
-        </label>
-        <LabelField value={label} onChange={setLabel} />
-        <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
-        <ModelIdField
-          providerId={providerId}
-          value={model}
-          onChange={setModel}
-          onReportsImages={images.suggest}
-        />
-        <ImagesField choice={images} />
-        <LimitsFields choice={limits} defaults={tokenDefaults} />
-        <button type="submit" disabled={mutation.pending || providerId === ""}>
-          Add to catalog
-        </button>
-        <p id={`${id}-alias`} className={styles.hint}>
+        </FormRow>
+        <p id={`${id}-alias`} className="m-0 mb-3 text-sm text-console-muted">
           Alias: lowercase letters, digits, dots, dashes and underscores, such as <code>fast</code>,{" "}
           <code>smart</code> or <code>kimi-k2.7-code</code>. It can&apos;t be renamed later.
         </p>
+        <ImagesField choice={images} />
+        <LimitsFields choice={limits} defaults={tokenDefaults} />
+        <Button type="submit" variant="primary" disabled={mutation.pending || providerId === ""}>
+          Add to catalog
+        </Button>
       </form>
-    </>
+    </Section>
   );
 }
 
@@ -367,14 +402,13 @@ function useImageChoice(initial: boolean): ImageChoice {
 
 function ImagesField({ choice }: { readonly choice: ImageChoice }) {
   return (
-    <label>
-      <input
-        type="checkbox"
-        checked={choice.checked}
-        onChange={(e) => choice.set(e.target.checked)}
-      />{" "}
-      Accepts images (vision). Image attachments are shown to the model only when this is on.
-    </label>
+    <Checkbox
+      className="mb-3"
+      label="Accepts images (vision)."
+      hint="Image attachments are shown to the model only when this is on."
+      checked={choice.checked}
+      onChange={(e) => choice.set(e.target.checked)}
+    />
   );
 }
 
@@ -386,15 +420,14 @@ function LabelField({
   readonly onChange: (v: string) => void;
 }) {
   return (
-    <label>
-      Shown as (optional)
-      <input
+    <Field label="Shown as (optional)">
+      <TextInput
         maxLength={200}
         placeholder="Kimi K2.7 Code"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+    </Field>
   );
 }
 
@@ -408,16 +441,15 @@ function ProviderField({
   readonly onChange: (v: string) => void;
 }) {
   return (
-    <label>
-      Provider
-      <select required value={value} onChange={(e) => onChange(e.target.value)}>
+    <Field label="Provider">
+      <Select required value={value} onChange={(e) => onChange(e.target.value)}>
         {providers.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>
         ))}
-      </select>
-    </label>
+      </Select>
+    </Field>
   );
 }
 
@@ -473,9 +505,8 @@ export function ModelIdField({
   const models = listing.status === "ready" ? listing.data.models : [];
   return (
     <>
-      <label>
-        Model
-        <input
+      <Field label="Model">
+        <TextInput
           required
           maxLength={200}
           list={`${id}-models`}
@@ -496,15 +527,14 @@ export function ModelIdField({
             <option key={m} value={m} />
           ))}
         </datalist>
-      </label>
-      <button
-        type="button"
+      </Field>
+      <Button
         disabled={providerId === "" || listing.status === "loading"}
         onClick={() => void refresh()}
       >
         Ask the provider for its models
-      </button>
-      <p id={`${id}-status`} role="status" className={styles.hint}>
+      </Button>
+      <p id={`${id}-status`} role="status" className="m-0 basis-full text-sm text-console-muted">
         {listingText(listing)}
       </p>
     </>

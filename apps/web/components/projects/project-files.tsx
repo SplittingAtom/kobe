@@ -3,10 +3,31 @@
 import { useRef, useState, type FormEvent } from "react";
 import { worded, type Project, type ProjectFile } from "../../lib/projects/api";
 import { MutationStatus } from "../admin/error-notice";
-import { DateTime, ResourceView, confirmed } from "../admin/parts";
+import { DateTime, ResourceView } from "../admin/parts";
+import { useFocusAfterRemoval } from "../admin/use-focus-after-removal";
 import { useMutation, useResource } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import {
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../ui/console";
+
 import { useProjectsApi, useRoster } from "./use-projects";
+
+/** The list's heading: focus lands here when a delete empties the list. */
+const HEADING = "project-files";
 
 function size(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;
@@ -29,6 +50,11 @@ export function ProjectFiles({
   const editable = canManage && project.archivedAt === null;
   const picker = useRef<HTMLInputElement>(null);
   const [folder, setFolder] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+  const focus = useFocusAfterRemoval(
+    state.status === "ready" ? state.data.map((f) => f.id) : null,
+    HEADING,
+  );
 
   async function upload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -44,93 +70,108 @@ export function ProjectFiles({
     }
   }
 
-  async function remove(file: ProjectFile) {
-    if (!confirmed(`Delete ${file.path} from this project? Members lose it at their next sync.`)) {
-      return;
-    }
+  async function remove(file: ProjectFile, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Delete ${file.path} from this project?`,
+        description: "Members lose it at their next sync.",
+        confirmLabel: "Delete file",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       async () => worded(await api.removeFile(project.id, file.id)),
       () => `Deleted ${file.path}.`,
     );
-    if (done) reload();
+    if (done) {
+      focus.removed(file.id, index);
+      reload();
+    }
   }
 
   return (
-    <section aria-label="Files">
-      <h2>Files</h2>
-      <p className={styles.hint}>
-        Members see these files read-only in their workspace under projects/{project.slug}. An agent
-        can propose a file from a conversation, but it is added only after the person in that
-        conversation approves it; approved proposals are marked below.
-      </p>
+    <Section
+      id={HEADING}
+      title="Files"
+      description={`Members see these files read-only in their workspace under projects/${project.slug}. An agent can propose a file from a conversation, but it is added only after the person in that conversation approves it; approved proposals are marked below.`}
+    >
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="files">
         {(files) =>
           files.length === 0 ? (
-            <p>No files yet.</p>
+            <EmptyState title="No files yet." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Project files</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">File</th>
-                    <th scope="col">Size</th>
-                    <th scope="col">Added by</th>
-                    <th scope="col">Added</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {files.map((f) => (
-                    <tr key={f.id}>
-                      <th scope="row">
+            <div ref={focus.container}>
+              <Table caption="Project files" hideCaption>
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>File</TableHeader>
+                    <TableHeader numeric>Size</TableHeader>
+                    <TableHeader>Added by</TableHeader>
+                    <TableHeader>Added</TableHeader>
+                    <TableHeader>
+                      <span className="sr-only">Actions</span>
+                    </TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {files.map((f, index) => (
+                    <TableRow key={f.id}>
+                      <TableRowHeader className="break-all">
                         {f.path}
                         {f.source === "proposal" && (
-                          <div className={styles.hint}>Proposed by an agent, approved</div>
+                          <div className="text-sm font-normal text-console-muted">
+                            Proposed by an agent, approved
+                          </div>
                         )}
-                      </th>
-                      <td>{size(f.sizeBytes)}</td>
-                      <td>{roster.nameOf(f.addedBy)}</td>
-                      <td>
+                      </TableRowHeader>
+                      <TableCell numeric>{size(f.sizeBytes)}</TableCell>
+                      <TableCell>{roster.nameOf(f.addedBy)}</TableCell>
+                      <TableCell>
                         <DateTime value={f.addedAt} />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         {editable && (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            data-remove=""
                             disabled={mutation.pending}
-                            onClick={() => void remove(f)}
+                            onClick={(e) => void remove(f, index, eventTrigger(e))}
                           >
-                            Delete<span className={styles.visuallyHidden}> {f.path}</span>
-                          </button>
+                            Delete<span className="sr-only"> {f.path}</span>
+                          </Button>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )
         }
       </ResourceView>
       {editable && (
-        <form className={styles.form} aria-label="Add a file" onSubmit={(e) => void upload(e)}>
-          <label>
-            File
-            <input ref={picker} type="file" required />
-          </label>
-          <label>
-            Folder (optional)
-            <input value={folder} maxLength={200} onChange={(e) => setFolder(e.target.value)} />
-          </label>
-          <button type="submit" disabled={mutation.pending}>
-            Upload file
-          </button>
+        <form aria-label="Add a file" onSubmit={(e) => void upload(e)}>
+          <FormRow>
+            <Field label="File">
+              <TextInput ref={picker} type="file" required className="py-0.5" />
+            </Field>
+            <Field label="Folder (optional)">
+              <TextInput
+                value={folder}
+                maxLength={200}
+                onChange={(e) => setFolder(e.target.value)}
+              />
+            </Field>
+            <Button type="submit" variant="primary" disabled={mutation.pending}>
+              Upload file
+            </Button>
+          </FormRow>
         </form>
       )}
-    </section>
+      {confirmDialog}
+    </Section>
   );
 }

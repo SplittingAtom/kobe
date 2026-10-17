@@ -5,7 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { SiteModelsPage } from "./site/models-page";
 import { TeamModelsPage } from "./team/models-page";
-import { TEAM, renderSite, renderTeam, stubApi, summary, type RecordedCall } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+  type RecordedCall,
+} from "./testing";
 
 /** KOBE-44: site Models and providers, team Models (over KOBE-40's API, snake_case wire). */
 const T = "2026-10-03T10:00:00Z";
@@ -67,12 +76,7 @@ const LISTED = {
 const bodyOf = (call: RecordedCall | undefined) =>
   JSON.parse(String(must(call).body)) as Record<string, unknown>;
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -466,8 +470,30 @@ describe("site: models and providers", () => {
     await screen.findByText(/Saved kimi/);
     expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({ label: "Kimi" });
     await user.click(screen.getByRole("button", { name: "Remove kimi" }));
+    await answerConfirm("Remove kimi from the catalog?", "Cancel");
+    expect(summary(calls)).not.toContain("DELETE /v1/site/models/catalog/kimi");
+    await user.click(screen.getByRole("button", { name: "Remove kimi" }));
+    expect(await answerConfirm("Remove kimi from the catalog?", "Remove kimi")).toMatch(
+      /Every team that enabled it loses it/,
+    );
     await screen.findByText(/Removed kimi from the catalog/);
     expect(summary(calls)).toContain("DELETE /v1/site/models/catalog/kimi");
+  });
+
+  it("asks before removing a provider, and says when catalog models still use it", async () => {
+    const calls = stubApi({
+      "GET /v1/site/models": [200, MODELS],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+    });
+    renderSite(<SiteModelsPage />);
+    const user = userEvent.setup();
+    const remove = await screen.findByRole("button", { name: "Remove Ollama Cloud" });
+    await user.click(remove);
+    expect(await answerConfirm("Ollama Cloud still serves 1 catalog model.", "Cancel")).toMatch(
+      /server will refuse/,
+    );
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(remove));
   });
 
   it("says so when the model gateway is not configured", async () => {
@@ -523,8 +549,6 @@ describe("team: models", () => {
   });
 
   it("warns before disabling the default, and when the team has none", async () => {
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
     const calls = stubApi({
       "GET /v1/team/models": [
         200,
@@ -533,9 +557,12 @@ describe("team: models", () => {
     });
     renderTeam(<TeamModelsPage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByLabelText("Kimi K2.7 Code enabled"));
-    expect(String(confirm.mock.calls[0])).toMatch(/team's default/);
+    const box = await screen.findByLabelText("Kimi K2.7 Code enabled");
+    await user.click(box);
+    const asked = await answerConfirm("Disable Kimi K2.7 Code?", "Cancel");
+    expect(asked).toMatch(/team's default/);
     expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+    expect((box as HTMLInputElement).checked).toBe(true);
     cleanup();
     stubApi({
       "GET /v1/team/models": [200, { models: [teamModel("glm", true, false)], default: null }],

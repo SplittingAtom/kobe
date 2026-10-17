@@ -1,4 +1,4 @@
-/* Chat (KOBE-32). Same tokens, fonts and breakpoint as the admin consoles (admin.module.css) so the
+/* Chat (KOBE-32). Same tokens, fonts and breakpoint as the admin consoles (app/theme.css) so the
    app reads as one; the `--admin-*` names are kept so shared notices (ErrorNotice) match. */
 
 .app {

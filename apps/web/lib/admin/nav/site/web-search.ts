@@ -1,4 +1,4 @@
-import { comingIn, defineSiteSection } from "../types";
+import { defineSiteSection, onHold } from "../types";
 
 export default defineSiteSection({
   id: "web-search",
@@ -7,5 +7,6 @@ export default defineSiteSection({
   group: "Models and connectors",
   order: 30,
   minRole: "admin",
-  status: comingIn("KOBE-63"),
+  // The provider choice is on hold (product owner; KOBE-291): keep the placeholder, say why.
+  status: onHold("KOBE-63", "Web search is on hold while the provider is chosen."),
 });

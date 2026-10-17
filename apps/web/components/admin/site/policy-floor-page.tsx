@@ -13,17 +13,16 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { RulesEditor } from "../policy-rules";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
+import { Button, Checkbox, PageHeader, Section } from "../../ui/console";
 
 /** The site policy floor (spec D6/D29; `/v1/site/policy`, KOBE-35). */
 export function PolicyFloorPage() {
   return (
     <>
-      <h1>Policy floor</h1>
-      <p className={styles.hint}>
-        Site rules bind every team. The floor only restricts: deny rules always win, ask rules
-        always prompt, and teams can tighten but never loosen them.
-      </p>
+      <PageHeader
+        title="Policy floor"
+        description="Site rules bind every team. The floor only restricts: deny rules always win, ask rules always prompt, and teams can tighten but never loosen them."
+      />
       <RulesEditor
         caption="Site rules"
         effects={["deny", "ask"]}
@@ -33,8 +32,9 @@ export function PolicyFloorPage() {
         }
         remove={deleteSiteRule}
       />
-      <h2>Approval defaults</h2>
-      <PolicySettingsForm />
+      <Section title="Approval defaults">
+        <PolicySettingsForm />
+      </Section>
     </>
   );
 }
@@ -72,21 +72,21 @@ function SettingsForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Approval defaults">
-      <label>
-        <input
-          type="checkbox"
-          checked={prompt}
-          aria-describedby="sandbox-writes-hint"
-          onChange={(e) => setPrompt(e.target.checked)}
-        />{" "}
-        Ask before shell and file writes inside the sandbox
-      </label>
-      <p id="sandbox-writes-hint" className={styles.hint}>
-        Applies to the ask-on-write mode. Deny and ask rules and the ask-all mode apply either way.
-      </p>
-      <button type="submit" disabled={mutation.pending || prompt === settings.promptSandboxWrites}>
-        Save setting
-      </button>
+      <Checkbox
+        label="Ask before shell and file writes inside the sandbox"
+        hint="Applies to the ask-on-write mode. Deny and ask rules and the ask-all mode apply either way."
+        checked={prompt}
+        onChange={(e) => setPrompt(e.target.checked)}
+      />
+      <div className="my-4">
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={mutation.pending || prompt === settings.promptSandboxWrites}
+        >
+          Save setting
+        </Button>
+      </div>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );

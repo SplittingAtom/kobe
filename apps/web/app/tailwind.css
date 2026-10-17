@@ -1,0 +1,70 @@
+/* The one Tailwind CSS v4 build, for the chat (app/chat-global.css) and the consoles and My area
+   (app/admin/admin-global.css, KOBE-294). Only the theme and utilities layers are imported, never
+   Tailwind's preflight: the console primitives carry their own resets (KOBE-294..296), plain
+   content (lists, headings, code) keeps the browser defaults the pages were designed and
+   screenshot-baselined with, and the chat scopes the preflight slice it needs to its own root. Utilities
+   only style elements that carry them, so loading this file on a page changes nothing by itself.
+   Both stylesheets import this file, so a page that has both (after client navigation) gets two
+   identical copies: keep every theme token here, never in one of them, or the copies differ.
+   The tokens and both themes live in app/theme.css (KOBE-282). */
+@layer theme, base, kobe-legacy, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+/* `dark:` follows the same rule as app/theme.css: a saved dark choice, or no choice on a dark OS. */
+@custom-variant dark {
+  &:where([data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Status colours (KOBE-301, app/theme.css): text-status-running, bg-status-running-bg, … */
+  --color-status-running: var(--kobe-status-running);
+  --color-status-running-bg: var(--kobe-status-running-bg);
+  --color-status-attention: var(--kobe-status-attention);
+  --color-status-attention-bg: var(--kobe-status-attention-bg);
+  --color-status-failed: var(--kobe-status-failed);
+  --color-status-failed-bg: var(--kobe-status-failed-bg);
+  --color-status-done: var(--kobe-status-done);
+  --color-status-idle: var(--kobe-status-idle);
+  --color-status-accent: var(--kobe-status-accent);
+  --color-status-accent-fg: var(--kobe-status-accent-fg);
+  /* The consoles' and My area's palette (KOBE-294, app/theme.css): text-console-fg,
+     bg-console-panel, border-console-border, text-console-accent, bg-console-danger-bg, … */
+  --color-console-fg: var(--kobe-console-fg);
+  --color-console-muted: var(--kobe-console-muted);
+  --color-console-bg: var(--kobe-console-bg);
+  --color-console-panel: var(--kobe-console-panel);
+  --color-console-border: var(--kobe-console-border);
+  --color-console-control: var(--kobe-console-control-border);
+  --color-console-overlay: var(--kobe-console-overlay);
+  --color-console-accent: var(--admin-accent);
+  --color-console-danger: var(--admin-danger);
+  --color-console-danger-bg: var(--admin-danger-bg);
+  --color-console-warn-bg: var(--admin-warn-bg);
+}

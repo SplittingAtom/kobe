@@ -13,10 +13,26 @@ import {
 import { listUsers, type SiteUser } from "../../../lib/admin/api/site/users";
 import { slugFromTeamName } from "../../../lib/admin/rules";
 import { roleLabel } from "../../../lib/teams";
+import {
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  Section,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+} from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 interface TeamsData {
   readonly teams: readonly SiteTeam[];
@@ -40,39 +56,38 @@ export function TeamsPage() {
 
   return (
     <>
-      <h1>Teams</h1>
-      <p className={styles.hint}>
-        Teams are walls: each has its own members, agents and data. Site admins create teams and
-        name the first team admin; the team&apos;s admins manage its members from then on.
-      </p>
+      <PageHeader
+        title="Teams"
+        description="Teams are walls: each has its own members, agents and data. Site admins create teams and name the first team admin; the team's admins manage its members from then on."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="teams">
         {({ teams, users }) => (
           <>
             <CreateTeam users={users} mutation={mutation} onCreated={reload} />
             {teams.length === 0 ? (
-              <p>No teams yet.</p>
+              <EmptyState title="No teams yet." className="mt-6" />
             ) : (
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <caption>{teams.length === 1 ? "1 team" : `${teams.length} teams`}</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Slug</th>
-                      <th scope="col">Created</th>
-                      <th scope="col">
-                        <span className={styles.visuallyHidden}>Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teams.map((t) => (
-                      <TeamRow key={t.id} team={t} mutation={mutation} onRenamed={reload} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                className="mt-6"
+                caption={teams.length === 1 ? "1 team" : `${teams.length} teams`}
+              >
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Name</TableHeader>
+                    <TableHeader>Slug</TableHeader>
+                    <TableHeader>Created</TableHeader>
+                    <TableHeader>
+                      <span className="sr-only">Actions</span>
+                    </TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {teams.map((t) => (
+                    <TeamRow key={t.id} team={t} mutation={mutation} onRenamed={reload} />
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </>
         )}
@@ -116,48 +131,51 @@ function CreateTeam({
   }
 
   return (
-    <>
-      <h2>Create a team</h2>
-      <form onSubmit={onSubmit} className={styles.form} aria-label="Create a team">
-        <label>
-          Name
-          <input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
-          Slug
-          <input
-            required
-            maxLength={32}
-            pattern={TEAM_SLUG_PATTERN}
-            aria-describedby="team-slug-hint"
-            value={effectiveSlug}
-            onChange={(e) => {
-              setSlugEdited(true);
-              setSlug(e.target.value);
-            }}
-          />
-        </label>
-        <label>
-          First team admin
-          <select required value={adminUserId} onChange={(e) => setAdminUserId(e.target.value)}>
-            <option value="">Choose a user…</option>
-            {active.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.email})
-              </option>
-            ))}
-          </select>
-        </label>
-        {/* The slug's pattern is checked by the browser on submit, with its own message. */}
-        <button type="submit" disabled={mutation.pending}>
-          Create team
-        </button>
+    <Section title="Create a team">
+      <form onSubmit={onSubmit} aria-label="Create a team">
+        <FormRow className="mt-0">
+          <Field label="Name">
+            <TextInput
+              required
+              maxLength={100}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Field>
+          <Field label="Slug">
+            <TextInput
+              required
+              maxLength={32}
+              pattern={TEAM_SLUG_PATTERN}
+              aria-describedby="team-slug-hint"
+              value={effectiveSlug}
+              onChange={(e) => {
+                setSlugEdited(true);
+                setSlug(e.target.value);
+              }}
+            />
+          </Field>
+          <Field label="First team admin">
+            <Select required value={adminUserId} onChange={(e) => setAdminUserId(e.target.value)}>
+              <option value="">Choose a user…</option>
+              {active.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.email})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {/* The slug's pattern is checked by the browser on submit, with its own message. */}
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            Create team
+          </Button>
+        </FormRow>
       </form>
-      <p id="team-slug-hint" className={styles.hint}>
+      <p id="team-slug-hint" className="m-0 text-sm text-console-muted">
         Lowercase letters, digits and hyphens. The slug names the team&apos;s sandbox namespace
         (kobe-team-{effectiveSlug || "slug"}) and can&apos;t be changed later.
       </p>
-    </>
+    </Section>
   );
 }
 
@@ -201,62 +219,67 @@ function TeamRow({
 
   return (
     <>
-      <tr>
-        <th scope="row">
+      <TableRow>
+        <TableRowHeader>
           {renaming ? (
-            <form onSubmit={onRename} className={styles.actions} aria-label={`Rename ${team.name}`}>
+            <form
+              onSubmit={onRename}
+              className="flex flex-wrap items-center gap-1.5"
+              aria-label={`Rename ${team.name}`}
+            >
               <label>
-                <span className={styles.visuallyHidden}>New name for {team.name}</span>
-                <input
+                <span className="sr-only">New name for {team.name}</span>
+                <TextInput
                   required
                   maxLength={100}
+                  className="font-normal"
                   autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
               </label>
-              <button type="submit" disabled={mutation.pending}>
+              <Button type="submit" size="sm" variant="primary" disabled={mutation.pending}>
                 Save
-              </button>
-              <button type="button" onClick={stopRenaming}>
+              </Button>
+              <Button size="sm" onClick={stopRenaming}>
                 Cancel
-              </button>
+              </Button>
             </form>
           ) : (
             team.name
           )}
-        </th>
-        <td>
+        </TableRowHeader>
+        <TableCell>
           <code>{team.slug}</code>
-        </td>
-        <td>
+        </TableCell>
+        <TableCell>
           <DateTime value={team.createdAt} />
-        </td>
-        <td>
-          <div className={styles.actions}>
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1.5">
             {!renaming && (
-              <button type="button" ref={renameButton} onClick={() => setRenaming(true)}>
-                Rename<span className={styles.visuallyHidden}> {team.name}</span>
-              </button>
+              <Button size="sm" ref={renameButton} onClick={() => setRenaming(true)}>
+                Rename<span className="sr-only"> {team.name}</span>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              size="sm"
               aria-expanded={showRoster}
               aria-controls={`roster-${team.id}`}
               onClick={() => setShowRoster((v) => !v)}
             >
               {showRoster ? "Hide members" : "Members"}
-              <span className={styles.visuallyHidden}> of {team.name}</span>
-            </button>
+              <span className="sr-only"> of {team.name}</span>
+            </Button>
           </div>
-        </td>
-      </tr>
+        </TableCell>
+      </TableRow>
       {showRoster && (
-        <tr id={`roster-${team.id}`}>
-          <td colSpan={4}>
+        <TableRow id={`roster-${team.id}`}>
+          <TableCell colSpan={4}>
             <Roster team={team} />
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -268,9 +291,9 @@ function Roster({ team }: { readonly team: SiteTeam }) {
     <ResourceView state={state} label={`members of ${team.name}`}>
       {(members) =>
         members.length === 0 ? (
-          <p>No members.</p>
+          <p className="m-0 text-console-muted">No members.</p>
         ) : (
-          <ul aria-label={`Members of ${team.name}`}>
+          <ul aria-label={`Members of ${team.name}`} className="m-0 ps-5">
             {members.map((m) => (
               <li key={m.userId}>
                 {m.name} ({m.email}) · {roleLabel(m.role)}

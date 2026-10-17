@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import type { MemorySwitches } from "../../../lib/admin/api/team/memory";
 import type { ApiResult } from "../../../lib/api/client";
+import { Button, Checkbox, ChoiceGroup } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { useMutation } from "../use-resource";
-import styles from "../admin.module.css";
 
 /** The two memory switches of one level (team or site) with one Save. */
 export function MemorySwitchesForm({
@@ -45,37 +45,25 @@ export function MemorySwitchesForm({
 
   return (
     <form onSubmit={onSubmit} aria-label={legend}>
-      <fieldset>
-        <legend>{legend}</legend>
-        <p>
-          <label>
-            <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Allow
-            memory {where}
-          </label>
-        </p>
-        <p className={styles.hint}>
-          Agents can remember notes about a person and recall them in later chats. Off removes the
-          tools and the memory index from the next runs; stored files are kept.
-        </p>
-        <p>
-          <label>
-            <input
-              type="checkbox"
-              checked={project}
-              disabled={!all}
-              onChange={(e) => setProject(e.target.checked)}
-            />{" "}
-            Allow project memory {where}
-          </label>
-        </p>
-        <p className={styles.hint}>
-          Project memory is shared with the project&apos;s members, so an agent&apos;s write to it
-          needs a member&apos;s approval. It needs memory to be on.
-        </p>
-      </fieldset>
-      <button type="submit" disabled={mutation.pending || !dirty}>
+      <ChoiceGroup legend={legend} stacked className="my-4">
+        <Checkbox
+          label={`Allow memory ${where}`}
+          hint="Agents can remember notes about a person and recall them in later chats. Off removes the tools and the memory index from the next runs; stored files are kept."
+          checked={all}
+          onChange={(e) => setAll(e.target.checked)}
+        />
+        <Checkbox
+          className="mt-2"
+          label={`Allow project memory ${where}`}
+          hint="Project memory is shared with the project's members, so an agent's write to it needs a member's approval. It needs memory to be on."
+          checked={project}
+          disabled={!all}
+          onChange={(e) => setProject(e.target.checked)}
+        />
+      </ChoiceGroup>
+      <Button type="submit" variant="primary" disabled={mutation.pending || !dirty}>
         {saveLabel}
-      </button>
+      </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );

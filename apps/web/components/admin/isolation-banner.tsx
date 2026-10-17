@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getIsolation } from "../../lib/admin/api/site/isolation";
 import { consoleHref } from "../../lib/admin/nav/registry";
-import styles from "./admin.module.css";
+import { Notice } from "../ui/console";
 
 /** Fired by the Isolation page after a re-check, with `detail` = the new state. */
 export const ISOLATION_EVENT = "kobe:isolation";
@@ -37,9 +37,9 @@ export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {
 
   if (!missing || hidden) return null;
   return (
-    <div role="alert" className={styles.banner}>
+    <Notice tone="warn" role="alert" className="mt-0 mb-4">
       <strong>Agents are disabled:</strong> the isolation runtime is missing.{" "}
       <Link href={`${consoleHref("site")}/isolation`}>See how to fix it</Link>.
-    </div>
+    </Notice>
   );
 }

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillBlocklistPage } from "./site/skill-blocklist-page";
-import { renderSite, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/skill-blocklist";
 const H1 = "a".repeat(64);
@@ -15,12 +15,7 @@ const entry = (contentHash: string, reason: string) => ({
   addedAt: "2026-10-04T10:00:00.000Z",
 });
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -68,8 +63,17 @@ describe("Skill blocklist (KOBE-81)", () => {
     });
     renderSite(<SkillBlocklistPage />);
     await userEvent.click(await screen.findByRole("button", { name: `Remove ${H1}` }));
+    await answerConfirm(`Remove ${H1.slice(0, 12)}… from the blocklist?`, "Cancel");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: `Remove ${H1}` }));
+    await answerConfirm(`Remove ${H1.slice(0, 12)}… from the blocklist?`, "Remove from blocklist");
     expect(await screen.findByText("No hashes are blocked.")).toBeTruthy();
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Blocked skill hashes" }),
+      ),
+    );
   });
 
   it("shows the server's error for a duplicate", async () => {

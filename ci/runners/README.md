@@ -26,7 +26,7 @@ privileged. The repository also requires approval before workflows from outside 
 | Scratch volumes                                                 | StorageClass `longhorn-ci-scratch` (1 replica, deleted with the runner) |
 
 Runners are ephemeral (one job each), scale 0–6, and run Docker-in-Docker so jobs can build images,
-use service containers (the `db` job's Postgres) and create the k3d cluster for e2e. Docker's data
+use service containers (the `db-core` and `db-server` jobs' Postgres) and create the k3d cluster for e2e. Docker's data
 (60 Gi) and the job workspace (20 Gi) live on per-runner Longhorn volumes: the nodes' root disks
 have only ~10 GB free and must not fill up.
 

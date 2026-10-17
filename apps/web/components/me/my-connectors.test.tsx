@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { MyConnectorsPage } from "./my-connectors-page";
 
 const TEAM_CONNECTORS = "/v1/team/connectors";
@@ -28,12 +28,7 @@ const grant = {
   updated_at: "2026-10-05T10:00:00Z",
 };
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -104,8 +99,17 @@ describe("My connector keys (KOBE-105)", () => {
     await userEvent.click(card("jira").getByRole("button", { name: "Replace key" }));
     await screen.findByText("Key replaced.");
     await userEvent.click(card("jira").getByRole("button", { name: "Remove key" }));
+    await answerConfirm("Remove your key for jira?", "Cancel");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(card("jira").getByRole("button", { name: "Remove key" }));
+    expect(await answerConfirm("Remove your key for jira?", "Remove key")).toMatch(
+      /runs can't use it/,
+    );
     expect(await screen.findByText("No key added")).toBeTruthy();
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(card("jira").getByLabelText("API key")),
+    );
   });
 
   it("checks the key length before sending and never echoes it on error", async () => {

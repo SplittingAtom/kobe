@@ -4,7 +4,6 @@ import type { GalleryScore } from "../../lib/admin/api/agents";
 import { percent } from "../../lib/admin/orbit-score";
 import { DateTime } from "./parts";
 import type { ResourceState } from "./use-resource";
-import styles from "./admin.module.css";
 
 /** A gallery agent's published Orbit score and its date (KOBE-94); "Not evaluated" without one. */
 export function GalleryScoreCell({
@@ -21,7 +20,7 @@ export function GalleryScoreCell({
   return (
     <>
       {`${percent(score.attackSuccessRate)} attacks succeeded (${score.status})`}
-      <div className={styles.hint}>
+      <div className="text-sm text-console-muted">
         v{score.version}, <DateTime value={score.evaluatedAt} />
       </div>
     </>

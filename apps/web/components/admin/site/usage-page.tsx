@@ -1,6 +1,7 @@
 "use client";
 
 import { getSiteUsage } from "../../../lib/admin/api/usage";
+import { PageHeader, Section } from "../../ui/console";
 import { UsageDashboard } from "../usage/usage-dashboard";
 import { SiteBudget } from "./site-budget";
 
@@ -11,11 +12,14 @@ import { SiteBudget } from "./site-budget";
 export function SiteUsagePage() {
   return (
     <>
-      <h1>Usage and spend</h1>
-      <p>Model calls across every team, by team, user, model and agent.</p>
+      <PageHeader
+        title="Usage and spend"
+        description="Model calls across every team, by team, user, model and agent."
+      />
       <SiteBudget />
-      <h2>Usage</h2>
-      <UsageDashboard load={getSiteUsage} />
+      <Section title="Usage">
+        <UsageDashboard load={getSiteUsage} />
+      </Section>
     </>
   );
 }

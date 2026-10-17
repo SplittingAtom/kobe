@@ -1,4 +1,35 @@
-/* Only for pages that render an admin console: the shell paints edge to edge. */
+/* The consoles and My area (app/admin/layout.tsx and app/me/layout.tsx import this). Tailwind's
+   theme and utilities, the same build as the chat's (app/tailwind.css, KOBE-294), without
+   preflight: every page is on the console primitives (components/ui/console, KOBE-296), which
+   carry their own resets, and plain content keeps the browser defaults the pages were
+   baselined with (a preflight would restyle every page at once). Every rule here is scoped to
+   the console root (`data-kobe-console`, the console and My-area shells), so nothing reaches the
+   chat (app/console-css-guard.test.ts). */
+@import "../tailwind.css";
+
+/* The shell paints edge to edge. */
 body:has([data-kobe-console]) {
   margin: 0;
+}
+
+@layer base {
+  /* Permanent: links in running text (notices, hints, descriptions) and any focusable element
+     without its own ring. Primitives carry their own ring and colours (components/ui/console),
+     so nothing depends on these for them; app/console-css-guard.test.ts pins them. In the base
+     layer, so any utility overrides them. */
+  [data-kobe-console] a {
+    color: var(--admin-accent);
+  }
+
+  [data-kobe-console] :focus-visible {
+    outline: 3px solid var(--admin-accent);
+    outline-offset: 2px;
+  }
+
+  /* The header's theme toggle shows a tooltip, which the chat's preflight slice sizes in the chat;
+     on these pages it mounts in the console root (components/ui/chat-portal.ts). */
+  [data-kobe-console] [data-slot="tooltip-content"],
+  [data-kobe-console] [data-slot="tooltip-content"] * {
+    box-sizing: border-box;
+  }
 }

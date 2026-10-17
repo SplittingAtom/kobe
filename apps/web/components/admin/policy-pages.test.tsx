@@ -5,7 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { PolicyFloorPage } from "./site/policy-floor-page";
 import { TeamPolicyPage } from "./team/policy-page";
-import { TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const rule = (
   id: string,
@@ -26,12 +34,7 @@ const rule = (
   ...extra,
 });
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -77,7 +80,7 @@ describe("Site policy floor", () => {
     renderSite(<PolicyFloorPage />);
     const form = await screen.findByRole("form", { name: "Add a rule" });
     await userEvent.selectOptions(within(form).getByLabelText("Effect"), "ask");
-    await userEvent.type(within(form).getByLabelText("Tool pattern"), "bash");
+    await userEvent.type(within(form).getByLabelText(/^Tool pattern/), "bash");
     await userEvent.type(within(form).getByLabelText("Note (optional)"), "Shell asks");
     await userEvent.click(within(form).getByRole("button", { name: "Add rule" }));
     await screen.findByText("Added: Ask for bash.");
@@ -89,6 +92,7 @@ describe("Site policy floor", () => {
       expires_at: null,
     });
     await userEvent.click(screen.getByRole("button", { name: "Remove rule Deny mcp__github__*" }));
+    await answerConfirm('Remove the rule "Deny mcp__github__*"?', "Remove rule");
     await screen.findByText("Removed: Deny for mcp__github__*.");
     expect(summary(calls)).toContain("DELETE /v1/site/policy/rules/r-1");
   });
@@ -106,7 +110,7 @@ describe("Site policy floor", () => {
     });
     renderSite(<PolicyFloorPage />);
     const form = await screen.findByRole("form", { name: "Add a rule" });
-    await userEvent.type(within(form).getByLabelText("Tool pattern"), "x");
+    await userEvent.type(within(form).getByLabelText(/^Tool pattern/), "x");
     await userEvent.click(within(form).getByRole("button", { name: "Add rule" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/rule limit/);
   });
@@ -166,7 +170,7 @@ describe("Team policy", () => {
         .map((o) => o.textContent),
     ).toEqual(["Deny", "Ask", "Allow"]);
     await userEvent.selectOptions(within(form).getByLabelText("Effect"), "allow");
-    await userEvent.type(within(form).getByLabelText("Tool pattern"), "*");
+    await userEvent.type(within(form).getByLabelText(/^Tool pattern/), "*");
     await userEvent.click(within(form).getByRole("button", { name: "Add rule" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/allow rule must name one/);
     expect(calls.every((c) => c.headers.get("x-kobe-team") === TEAM.id)).toBe(true);

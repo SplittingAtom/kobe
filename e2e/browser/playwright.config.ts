@@ -27,6 +27,9 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: true,
+  // Screenshot baselines (consoles.spec.ts, KOBE-294): deployment data, so outside git. Per
+  // platform: fonts render differently on macOS and in the Linux container.
+  snapshotPathTemplate: "{testDir}/../console-shots/{platform}/{arg}{ext}",
   reporter: [
     ["list"],
     ["html", { open: "never" }],

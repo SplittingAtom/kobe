@@ -11,11 +11,13 @@ import {
   type SkillUsage,
 } from "../../../../lib/admin/api/team/skills";
 import { addSkillHref, TEAM_SKILL_RULE } from "../../../../lib/admin/skills/reach";
+import { Button, Checkbox, Field, FormRow, Section, Select } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
 import { DateTime } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
-import adminStyles from "../../admin.module.css";
+
+const HINT = "m-0 my-1 text-sm text-console-muted";
 
 /**
  * Where a skill is used (KOBE-297), under its editor: for a team skill, the agents whose runs get
@@ -46,38 +48,33 @@ function TeamReach({ skill }: { readonly skill: SkillSummary }) {
   const isAdmin = access.permissions.includes("team.skills.review");
 
   return (
-    <section aria-labelledby="skill-reach-heading">
-      <h2 id="skill-reach-heading">Agents using this skill</h2>
-      <p className={adminStyles.hint}>{TEAM_SKILL_RULE}</p>
+    <Section id="skill-reach-heading" title="Agents using this skill" description={TEAM_SKILL_RULE}>
       {state.status === "loading" && <p role="status">Loading agents…</p>}
       {state.status === "error" && (
-        <p className={adminStyles.hint}>The agents using this skill could not be read.</p>
+        <p className={HINT}>The agents using this skill could not be read.</p>
       )}
       {state.status === "ready" && (
         <>
-          <label>
-            <input
-              type="checkbox"
-              checked={state.data.offerToAll}
-              disabled={!isAdmin || mutation.pending}
-              onChange={async (e) => {
-                const next = e.target.checked;
-                const done = await mutation.run(
-                  () => setSkillOffer(teamId, skill.id, next),
-                  (v) =>
-                    v.offerToAll
-                      ? "Offered to all agents that aren't exclusive."
-                      : "No longer offered to all agents.",
-                );
-                if (done) reload();
-              }}
-            />{" "}
-            Offer to all agents
-          </label>
-          {!isAdmin && <p className={adminStyles.hint}>Only team admins can change this.</p>}
+          <Checkbox
+            label="Offer to all agents"
+            checked={state.data.offerToAll}
+            disabled={!isAdmin || mutation.pending}
+            onChange={async (e) => {
+              const next = e.target.checked;
+              const done = await mutation.run(
+                () => setSkillOffer(teamId, skill.id, next),
+                (v) =>
+                  v.offerToAll
+                    ? "Offered to all agents that aren't exclusive."
+                    : "No longer offered to all agents.",
+              );
+              if (done) reload();
+            }}
+          />
+          {!isAdmin && <p className={HINT}>Only team admins can change this.</p>}
           <MutationStatus error={mutation.error} notice={mutation.notice} />
           {!state.data.approved && (
-            <p className={adminStyles.hint}>
+            <p className={HINT}>
               No version is approved yet: no agent gets this skill until a team admin approves one.
             </p>
           )}
@@ -85,7 +82,7 @@ function TeamReach({ skill }: { readonly skill: SkillSummary }) {
           <AddToAgent slug={skill.slug} agents={state.data.agents} />
         </>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -122,21 +119,22 @@ function AddToAgent({
         if (chosen !== "") window.location.assign(addSkillHref(chosen, slug));
       }}
     >
-      <label>
-        Add to agent…{" "}
-        <select value={chosen} onChange={(e) => setChosen(e.target.value)}>
-          <option value="">Choose an agent</option>
-          {choices.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </label>{" "}
-      <button type="submit" disabled={chosen === ""}>
-        Open in builder
-      </button>
-      <p className={adminStyles.hint}>
+      <FormRow className="mb-1">
+        <Field label="Add to agent…">
+          <Select value={chosen} onChange={(e) => setChosen(e.target.value)}>
+            <option value="">Choose an agent</option>
+            {choices.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Button type="submit" disabled={chosen === ""}>
+          Open in builder
+        </Button>
+      </FormRow>
+      <p className={HINT}>
         The builder opens with the skill added to the agent&apos;s draft; save and publish it there.
       </p>
     </form>
@@ -149,10 +147,9 @@ function Usage({ skill }: { readonly skill: SkillSummary }) {
   const { state } = useResource(() => getSkillUsage(teamId, skill.id));
   if (state.status !== "ready") return null;
   return (
-    <section aria-labelledby="skill-usage-heading">
-      <h2 id="skill-usage-heading">Usage in this team (last 90 days)</h2>
+    <Section id="skill-usage-heading" title="Usage in this team (last 90 days)">
       <UsageText usage={state.data} />
-    </section>
+    </Section>
   );
 }
 

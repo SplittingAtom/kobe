@@ -23,7 +23,13 @@ export type SiteRole = "owner" | "admin" | "user";
 export type TicketId = `KOBE-${number}`;
 
 export type SectionStatus =
-  { readonly kind: "ready" } | { readonly kind: "placeholder"; readonly ticket: TicketId };
+  | { readonly kind: "ready" }
+  | {
+      readonly kind: "placeholder";
+      readonly ticket: TicketId;
+      /** Why the ticket is paused on purpose; absent while it is simply still to come. */
+      readonly onHold?: string;
+    };
 
 export const SITE_GROUPS = [
   "People",
@@ -80,9 +86,27 @@ export function defineTeamSection(section: Omit<TeamSection, "console">): TeamSe
   return { console: "team", ...section };
 }
 
-/** `{ kind: "placeholder", ticket }` for a section whose API another ticket builds. */
-export function comingIn(ticket: TicketId): SectionStatus {
+/**
+ * The only tickets a placeholder may name, each with why it is still open (KOBE-291). Finished
+ * work must never stay "coming soon": the ticket that builds a section adds its page, marks it
+ * READY and removes its line here. `comingIn`/`onHold` accept only these ids (a type error
+ * otherwise), and registry.test.ts fails when a listed ticket has a ledger in docs/ledger or is
+ * recorded as done or merged in docs/RUN-LEDGER.md, or when no placeholder names it any more.
+ */
+export const OPEN_PLACEHOLDER_TICKETS = {
+  "KOBE-63": "the web search provider choice is on hold (product owner)",
+} as const satisfies Readonly<Record<TicketId, string>>;
+
+export type OpenTicket = keyof typeof OPEN_PLACEHOLDER_TICKETS;
+
+/** `{ kind: "placeholder", ticket }` for a section whose API an open ticket builds. */
+export function comingIn(ticket: OpenTicket): SectionStatus {
   return { kind: "placeholder", ticket };
+}
+
+/** A placeholder whose ticket is paused on purpose; `reason` is shown with it ("on hold"). */
+export function onHold(ticket: OpenTicket, reason: string): SectionStatus {
+  return { kind: "placeholder", ticket, onHold: reason };
 }
 
 export const READY: SectionStatus = { kind: "ready" };

@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { SiteUsagePage } from "./site/usage-page";
 import { TeamUsagePage } from "./team/usage-page";
-import { TEAM, renderSite, renderTeam } from "./testing";
+import { forbidNativeConfirm, TEAM, renderSite, renderTeam } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const totals = (cost: number, calls: number) => ({
   calls,

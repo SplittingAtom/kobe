@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectorsPage } from "./site/connectors-page";
-import { renderSite, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/connectors";
 const connector = (over: Record<string, unknown> = {}) => ({
@@ -20,12 +20,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -147,18 +142,22 @@ describe("Connector registry (KOBE-100)", () => {
     });
     renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Remove github" }));
+    await answerConfirm("Remove the connector github from the registry?", "Remove github");
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.getByText("No connectors are registered.")).toBeTruthy();
+    // The row is gone: focus lands on the list's heading, not the top of the page.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Registered connectors" }),
+      ),
+    );
   });
 
   it("does not remove when the confirmation is declined", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false),
-    );
     const calls = stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
     renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Remove github" }));
+    await answerConfirm("Remove the connector github from the registry?", "Cancel");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 });
