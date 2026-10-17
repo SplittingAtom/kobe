@@ -53,3 +53,31 @@ describe("agentFeedbackTotalsSchema", () => {
     }
   });
 });
+
+describe("threadFeedbackSchema", () => {
+  it("lists answers with the caller's rating or null", async () => {
+    const { threadFeedbackSchema } = await import("./feedback.js");
+    const run = "0b6f0d4e-5a3c-4d8e-9a43-5f7b0f2d1c11";
+    const thread = "1b6f0d4e-5a3c-4d8e-9a43-5f7b0f2d1c11";
+    const parsed = threadFeedbackSchema.parse({
+      thread_id: thread,
+      answers: [
+        { run_id: run, user_entry_id: "u1", feedback: null },
+        {
+          run_id: run,
+          user_entry_id: null,
+          feedback: {
+            run_id: run,
+            thread_id: thread,
+            entry_id: null,
+            rating: "up",
+            reasons: [],
+            comment: null,
+            updated_at: "2026-10-16T10:00:00.000Z",
+          },
+        },
+      ],
+    });
+    expect(parsed.answers).toHaveLength(2);
+  });
+});

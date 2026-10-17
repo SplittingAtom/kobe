@@ -16,7 +16,7 @@ import { idSchema, timestampSchema, uuidSchema } from "./common.js";
  * Routes (server):
  * - `PUT /v1/runs/{run_id}/feedback` ({@link putFeedbackBodySchema}) → {@link AnswerFeedback}
  * - `DELETE /v1/runs/{run_id}/feedback` → 204 (also when there was none)
- * - `GET /v1/threads/{thread_id}/feedback` → {@link ThreadFeedback} (the caller's own ratings)
+ * - `GET /v1/threads/{thread_id}/feedback` → {@link ThreadFeedback} (rateable answers, own ratings)
  * - `GET /v1/agents/{agent_id}/feedback?from&to&bucket` → {@link AgentFeedbackTotals}
  */
 
@@ -83,10 +83,21 @@ export const answerFeedbackSchema = z.strictObject({
 });
 export type AnswerFeedback = z.infer<typeof answerFeedbackSchema>;
 
-/** `GET /v1/threads/{thread_id}/feedback`: the caller's ratings in the thread, newest first. */
+/**
+ * `GET /v1/threads/{thread_id}/feedback`: every answer of the thread that can be rated (its ended
+ * message runs, oldest first) with the caller's own rating or null. `user_entry_id` is the prompt
+ * the run answered (`runs.user_entry_id`; null until Pi committed it), which is how the chat finds
+ * the run behind an answer: each run sends its own prompt.
+ */
 export const threadFeedbackSchema = z.strictObject({
   thread_id: uuidSchema,
-  feedback: z.array(answerFeedbackSchema),
+  answers: z.array(
+    z.strictObject({
+      run_id: uuidSchema,
+      user_entry_id: idSchema.nullable(),
+      feedback: answerFeedbackSchema.nullable(),
+    }),
+  ),
 });
 export type ThreadFeedback = z.infer<typeof threadFeedbackSchema>;
 
