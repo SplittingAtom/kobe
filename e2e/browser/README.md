@@ -78,6 +78,14 @@ Site backup and restore, and the Team inventory, and checks none of them is a "c
 placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
 of the active team: `npx playwright test console-sections`.
 
+## Thinking level (KOBE-260)
+
+`thinking.spec.ts` looks in the model picker for an enabled model that offers a thinking level
+(Site → Models: a reasoning model with a thinking control and thinking allowed; the team must not
+have turned it off), picks **Thinking off**, asks for one word and checks that the answer has no
+reasoning block and that the thread and its run record `off`. It skips itself when no model
+offers a level. On kobe-gate1, give glm-5.3 the `reasoning_effort` control first.
+
 ## Console screenshots (KOBE-294)
 
 `consoles.spec.ts` screenshots every Site console, Team console and My-area page in light and dark
