@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, users, withTeam, teams, type KobeDatabase } from "@kobe/db";
+import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import {
   createAgent,
   findAgent,
@@ -21,12 +22,14 @@ import {
   unarchiveAgent,
 } from "./versions.js";
 import { runWithAuditContext } from "../audit/context.js";
+import { waitForAppSessionsToClose } from "../testing/app-sessions.js";
 
 /**
  * site_agents has no RLS backstop (site-wide, D6), so the owner filter in the store is the
  * only wall between users' personal agents. Every store function, given a personal location, must
  * apply it, and must refuse a location without an owner.
  */
+let database: TestDatabase;
 let db: KobeDatabase;
 const alice = randomUUID();
 const bob = randomUUID();
@@ -36,7 +39,8 @@ const asBob: AgentLocation = { scope: "personal", ownerUserId: bob };
 const team = randomUUID();
 
 beforeAll(async () => {
-  db = createDb(inject("appUrl"));
+  database = await createTestDatabase(testServerUrl());
+  db = createDb(database.appUrl);
   await db.db.insert(users).values([
     { id: alice, name: "Alice", email: `${alice}@store.test` },
     { id: bob, name: "Bob", email: `${bob}@store.test` },
@@ -60,7 +64,11 @@ beforeAll(async () => {
   await db.db.insert(teams).values({ id: team, slug: `st-${team.slice(0, 8)}`, name: "Store" });
 });
 
-afterAll(() => db.close());
+afterAll(async () => {
+  await db.close();
+  await waitForAppSessionsToClose(database.appRole);
+  await database.drop();
+});
 
 /** Store writes are audited with the request's actor (KOBE-15). */
 const as = <T>(userId: string, fn: () => Promise<T>) =>

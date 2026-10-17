@@ -1,7 +1,9 @@
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { MemoryMailer } from "./testing/mailer.js";
 import { SoftwareAuthenticator } from "./testing/webauthn.js";
 import { totpFromUri } from "./testing/totp.js";
@@ -13,7 +15,9 @@ const OWNER = { email: "owner@kobe.test", name: "Owner", password: "correct hors
 
 let deps: ServerDeps;
 let app: ReturnType<typeof createApp>;
-const admin = new pg.Pool({ connectionString: inject("adminUrl") });
+// Its own database: the setup flow expects a site with no users yet (KOBE-300: files run in parallel).
+let database: TestDatabase;
+let admin: pg.Pool;
 
 /** Minimal browser: keeps cookies and sends the Origin header Better Auth's CSRF check expects. */
 class Browser {
@@ -93,9 +97,11 @@ async function signedIn(email: string, password: string): Promise<Browser> {
   return b;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  database = await createTestDatabase(testServerUrl());
+  admin = new pg.Pool({ connectionString: database.adminUrl });
   deps = createServerDeps({
-    databaseUrl: inject("appUrl"),
+    databaseUrl: database.appUrl,
     publicUrl: PUBLIC_URL,
     authSecret: "s".repeat(48),
     setupToken: SETUP_TOKEN,
@@ -108,6 +114,8 @@ beforeAll(() => {
 afterAll(async () => {
   await deps.close();
   await admin.end();
+  await waitForAppSessionsToClose(database.appRole);
+  await database.drop();
 });
 
 describe("first-run setup (ac-1)", () => {

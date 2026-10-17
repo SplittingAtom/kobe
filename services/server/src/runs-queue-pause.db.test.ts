@@ -197,13 +197,19 @@ describe("Stop pauses the queue", () => {
     const ws = await f.connect(w, 0);
     const answer = ws.sb.respond;
     ws.sb.respond = (frame) => (frame.type === "run.stop" ? null : answer?.(frame));
-    const { threadId, active, waiting } = await busyThread(w, ws, 1);
-    const [q1] = waiting as [string];
-    const stoppedAt = Date.now();
-    await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
-    await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
-    await ws.started(q1, STOP_GRACE_MS + 10_000);
-    expect(Date.now() - stoppedAt).toBeGreaterThanOrEqual(STOP_GRACE_MS - 100);
+    try {
+      const { threadId, active, waiting } = await busyThread(w, ws, 1);
+      const [q1] = waiting as [string];
+      const stoppedAt = Date.now();
+      await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
+      await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
+      await ws.started(q1, STOP_GRACE_MS + 10_000);
+      expect(Date.now() - stoppedAt).toBeGreaterThanOrEqual(STOP_GRACE_MS - 100);
+    } finally {
+      // The sweep re-sends the unanswered stop (stopResendMs 0); a sandbox that still never
+      // answers would make every later test's settle() wait out run.stop's 5 s timeout (KOBE-300).
+      ws.sb.respond = answer;
+    }
   });
 
   it("a scheduled message queues behind a paused queue without releasing it", async () => {
