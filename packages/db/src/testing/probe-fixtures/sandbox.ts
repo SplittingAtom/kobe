@@ -11,6 +11,7 @@ import {
   workspaceBlobs,
   workspaceFileHoldHistory,
   workspaceFiles,
+  workspaceMoves,
   workspaceSync,
 } from "../../schema/index.js";
 import type { sandbox } from "../../tenancy/sandbox.js";
@@ -115,6 +116,19 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
       size: 3,
       mtimeMs: 0,
       fileRev: 1,
+    });
+  },
+  workspace_moves: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx.insert(workspaceMoves).values({
+      teamId,
+      userId,
+      rev: 1,
+      fromPath: "probe-old",
+      toPath: "probe-new",
+      type: "dir",
+      files: 1,
+      bytes: 3,
     });
   },
 };
