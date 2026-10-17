@@ -1,0 +1,223 @@
+// @vitest-environment node
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/postcss";
+import postcss, { type ChildNode, type Root } from "postcss";
+import { beforeAll, describe, expect, it } from "vitest";
+
+/**
+ * KOBE-294: the consoles and My area move from CSS modules to Tailwind (295 and 296 finish it).
+ * These guards keep the chat's styling where it was and let each migration step tighten what the
+ * consoles may still use:
+ *
+ * - The chat and the consoles load the same Tailwind build (app/tailwind.css: theme and utilities,
+ *   never preflight); the console stylesheet's own rules are scoped to the console root; the
+ *   chat's own compiled rules match a committed snapshot. Changing the chat's styling on purpose
+ *   means updating that snapshot (`vitest run app/console-css-guard.test.ts -u`) in the same PR.
+ * - Console code imports only the CSS modules still listed in `CSS_MODULES`, and only classes they
+ *   still define. When a page moves to the primitives (components/ui/console), add it to
+ *   `ON_TAILWIND`; when the last user of a module (or of a class) is gone, delete it and drop it
+ *   from `CSS_MODULES`.
+ */
+const WEB = fileURLToPath(new URL("../", import.meta.url));
+const read = (path: string) => readFileSync(join(WEB, path), "utf8");
+const withoutComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+
+// ---------------------------------------------------------------------------------------------
+// Tailwind on the consoles, without touching the chat (ac-1)
+
+async function compile(path: string): Promise<Root> {
+  const from = join(WEB, path);
+  const out = await postcss([tailwindcss({ base: WEB })]).process(read(path), { from });
+  return out.root;
+}
+
+/** Tailwind's generated part, which grows with every class used anywhere in the app. */
+function generated(node: ChildNode): boolean {
+  if (node.type === "comment") return true;
+  if (node.type !== "atrule") return false;
+  if (node.name === "layer") return ["theme", "utilities", "properties"].includes(node.params);
+  if (node.name === "property") return node.params.startsWith("--tw-");
+  // Tailwind's and tw-animate's keyframes (spin, pulse, enter, exit, …); Kobe's start with kobe-.
+  if (node.name === "keyframes") return !node.params.startsWith("kobe-");
+  return false;
+}
+
+const own = (root: Root) => root.nodes.filter((n) => !generated(n));
+const layer = (root: Root, name: string) =>
+  root.nodes.find((n) => n.type === "atrule" && n.name === "layer" && n.params === name);
+
+/** Every selector of every style rule in `nodes` (inside @layer and @media too). */
+function selectors(nodes: readonly ChildNode[]): string[] {
+  const out: string[] = [];
+  for (const node of nodes) {
+    if (node.type === "rule") out.push(...node.selectors);
+    if (node.type === "rule" || node.type === "atrule") {
+      node.walkRules((rule) => {
+        out.push(...rule.selectors);
+      });
+    }
+  }
+  return [...new Set(out)];
+}
+
+describe("Tailwind on the consoles (KOBE-294)", () => {
+  let chat: Root;
+  let consoles: Root;
+  beforeAll(async () => {
+    [chat, consoles] = await Promise.all([
+      compile("app/chat-global.css"),
+      compile("app/admin/admin-global.css"),
+    ]);
+  });
+
+  it("one Tailwind entry: theme and utilities only, never preflight", () => {
+    const entry = withoutComments(read("app/tailwind.css"));
+    expect(entry).toContain('@import "tailwindcss/theme.css" layer(theme);');
+    expect(entry).toContain('@import "tailwindcss/utilities.css" layer(utilities);');
+    expect(entry).not.toMatch(/preflight|@import\s+"tailwindcss"\s*;/);
+    // At-rules only (layers, imports, the dark variant, the token mapping): no style rule of its own.
+    expect(entry.replace(/@custom-variant[\s\S]*?\n}\n|@theme inline \{[^}]*\}/g, "")).not.toMatch(
+      /[{}]/,
+    );
+  });
+
+  it("the chat and every console and My-area route load it", () => {
+    expect(withoutComments(read("app/chat-global.css")).trimStart()).toMatch(
+      /^@import "\.\/tailwind\.css";/,
+    );
+    expect(withoutComments(read("app/admin/admin-global.css")).trimStart()).toMatch(
+      /^@import "\.\.\/tailwind\.css";/,
+    );
+    expect(read("app/page.tsx")).toContain('import "./chat-global.css";');
+    // Layouts: /admin (landing, Site and Team consoles) and /me.
+    expect(read("app/admin/layout.tsx")).toContain('import "./admin-global.css";');
+    expect(read("app/me/layout.tsx")).toContain('import "../admin/admin-global.css";');
+  });
+
+  it("both pages get the same build, so a page holding both stylesheets gets identical copies", () => {
+    for (const name of ["theme", "utilities"]) {
+      expect(layer(consoles, name)?.toString(), `@layer ${name}`).toBe(
+        layer(chat, name)?.toString(),
+      );
+    }
+  });
+
+  it("every rule of the console stylesheet is scoped to the console root", () => {
+    const sels = selectors(own(consoles));
+    expect(sels.length).toBeGreaterThan(0);
+    expect(sels.filter((s) => !s.includes("[data-kobe-console]"))).toEqual([]);
+  });
+
+  it("the chat stylesheet never names the console root", () => {
+    expect(selectors(own(chat)).filter((s) => s.includes("data-kobe-console"))).toEqual([]);
+  });
+
+  it("the chat's own compiled rules are unchanged", async () => {
+    const css = own(chat)
+      .map((n) => n.toString())
+      .join("\n");
+    await expect(`${css}\n`).toMatchFileSnapshot("__snapshots__/chat-global.own.css.snap");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// CSS modules the consoles may still use (ac-2; tightened by KOBE-295 and KOBE-296)
+
+/** Console and My-area code (components/memory and components/files are shared with the chat). */
+const CONSOLE_DIRS = [
+  "app/admin",
+  "app/me",
+  "components/admin",
+  "components/me",
+  "components/projects",
+  "components/ui/console",
+] as const;
+
+/** The CSS modules console code may still import. Drop one when its last user moves. */
+const CSS_MODULES = [
+  "components/admin/admin.module.css",
+  "components/admin/usage/usage.module.css",
+  "components/admin/team/agent-builder/agent-builder.module.css",
+  "components/admin/team/skill-editor/skill-editor.module.css",
+] as const;
+
+/** Files on Tailwind and the console primitives: no CSS module. Add each page as it moves. */
+const ON_TAILWIND = [
+  "app/admin/layout.tsx",
+  "components/admin/console-nav.tsx",
+  "components/admin/console-shell.tsx",
+  "components/admin/console-theme-toggle.tsx",
+  "components/admin/error-notice.tsx",
+  "components/admin/isolation-banner.tsx",
+  "components/admin/team/invites-page.tsx",
+  "components/me/my-agents-shell.tsx",
+] as const;
+
+function sources(dir: string): string[] {
+  return readdirSync(join(WEB, dir), { withFileTypes: true }).flatMap((e) => {
+    const path = join(dir, e.name);
+    if (e.isDirectory()) return sources(path);
+    return /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [path] : [];
+  });
+}
+
+interface ModuleImport {
+  readonly file: string;
+  readonly binding: string;
+  /** Relative to apps/web. */
+  readonly module: string;
+}
+
+function moduleImports(file: string): ModuleImport[] {
+  return [...read(file).matchAll(/import\s+(\w+)\s+from\s+"([^"]+\.module\.css)"/g)].map((m) => ({
+    file,
+    binding: m[1] ?? "",
+    module: relative(WEB, join(WEB, dirname(file), m[2] ?? "")),
+  }));
+}
+
+/** The class names a CSS module defines. */
+function classes(module: string): Set<string> {
+  return new Set(
+    [...withoutComments(read(module)).matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1] ?? ""),
+  );
+}
+
+describe("console CSS modules (KOBE-294, KOBE-295, KOBE-296)", () => {
+  const files = CONSOLE_DIRS.flatMap(sources);
+  const imports = files.flatMap(moduleImports);
+
+  it("console code imports only the CSS modules still allowed, and they exist", () => {
+    const allowed = new Set<string>(CSS_MODULES);
+    expect(
+      imports
+        .filter((i) => !allowed.has(i.module) || !existsSync(join(WEB, i.module)))
+        .map((i) => `${i.file}: ${i.module}`),
+    ).toEqual([]);
+  });
+
+  it("files on Tailwind import no CSS module", () => {
+    for (const file of ON_TAILWIND) expect(existsSync(join(WEB, file)), file).toBe(true);
+    expect(ON_TAILWIND.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
+    // The primitives themselves never use one.
+    expect(sources("components/ui/console").flatMap(moduleImports)).toEqual([]);
+  });
+
+  it("every class console code takes from a CSS module is still defined there", () => {
+    const missing = imports.flatMap(({ file, binding, module }) => {
+      const defined = classes(module);
+      const used = [
+        ...read(file).matchAll(new RegExp(`\\b${binding}(?:\\.(\\w+)|\\["([\\w-]+)"\\])`, "g")),
+      ].map((m) => m[1] ?? m[2] ?? "");
+      return used.filter((c) => !defined.has(c)).map((c) => `${file}: ${binding}.${c}`);
+    });
+    expect([...new Set(missing)]).toEqual([]);
+  });
+
+  it("each allowed module is still used: drop it from CSS_MODULES once its last user moves", () => {
+    const used = new Set(imports.map((i) => i.module));
+    expect(CSS_MODULES.filter((m) => !used.has(m))).toEqual([]);
+  });
+});
