@@ -255,7 +255,11 @@ export interface RememberOptions {
   }[];
   readonly timeZone: string;
   /** The exact-action pattern (JSON pointer → literal glob), kept verbatim. */
-  readonly exact: { readonly argPattern: Readonly<Record<string, string>> } | null;
+  readonly exact: {
+    readonly argPattern: Readonly<Record<string, string>>;
+    /** Every argument pinned (true), or only a file tool's path (false: the content may differ). */
+    readonly pinsAll: boolean;
+  } | null;
   readonly exactOnly: boolean;
   readonly approveAll: { readonly approvalIds: readonly string[] } | null;
   readonly approveAllReason: string | null;

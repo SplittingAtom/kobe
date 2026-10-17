@@ -212,6 +212,10 @@ describe("Members' remembered approvals and remember limits (KOBE-289)", () => {
     created_at: "2026-10-16T10:00:00Z",
     expires_at: "2026-10-17T10:00:00Z",
     last_used_at: null,
+    arg_pointers: ["/project"],
+    masked: false,
+    applies: true,
+    ended_reason: null,
   };
 
   it("team admins see members' rules and revoke them in their team", async () => {
@@ -233,6 +237,34 @@ describe("Members' remembered approvals and remember limits (KOBE-289)", () => {
     await screen.findByText(/Revoked: mcp__jira__create_issue/);
     const del = must(calls.find((c) => c.method === "DELETE"));
     expect(del.headers.get("x-kobe-team")).toBe(TEAM.id);
+  });
+
+  it("never shows a member's private thread or argument values to an admin (D18)", async () => {
+    stubApi({
+      "GET /v1/team/policy/rules": [200, { rules: [] }],
+      ...TEAM_REMEMBER,
+      "GET /v1/team/policy/member-rules": [
+        200,
+        {
+          rules: [
+            {
+              ...memberRule,
+              remember_scope: "thread",
+              arg_pattern: null,
+              arg_pointers: ["/project", "/summary"],
+              thread_id: null,
+              thread_title: null,
+              masked: true,
+            },
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamPolicyPage />);
+    const table = await screen.findByRole("table", { name: /Remembered approvals \(1\)/ });
+    expect(table.textContent).toMatch(/this conversation: a conversation/);
+    expect(table.textContent).toMatch(/Exact values \(private\) of \/project, \/summary/);
+    expect(within(table).queryByRole("link")).toBeNull();
   });
 
   it("team limits: what the site floor forbids can't be picked, and the save is clamped to it", async () => {

@@ -2,6 +2,7 @@ import { rememberScopeSchema, type PolicyDecision, type PolicyReason } from "@ko
 import { sql, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
+import { liveUserRule } from "./live-rule.js";
 
 /** The member's remembered approval that allowed this decision, if one did. */
 export function appliedUserRule(decision: PolicyDecision): PolicyReason | undefined {
@@ -29,7 +30,8 @@ export interface RuleApplication {
  * call runs: the rule's `last_used_at`, an audit row naming the rule (`policy.rule.applied`), and
  * for the tool card `policy.rule_applied` ("Allowed by your rule (<scope>)"). One transaction.
  *
- * Returns false when the rule is gone (revoked or ended since it was read): the caller denies the
+ * Returns false when the rule is gone or no longer live (revoked, its thread archived or its run
+ * ended since it was read; review N1): the caller denies the
  * call, so a revocation takes effect even for a decision already in flight. Throws on a failed
  * write: the caller denies then too (no audit row, no call).
  */
@@ -38,7 +40,7 @@ export async function recordRuleApplied(db: KobeDb, a: RuleApplication): Promise
     const res = await tx.execute<{ remember_scope: string }>(sql`
       UPDATE tool_rules SET last_used_at = now()
        WHERE team_id = ${a.teamId} AND id = ${a.ruleId}::uuid AND scope = 'user'
-         AND user_id = ${a.userId}::uuid
+         AND user_id = ${a.userId}::uuid AND ${liveUserRule(new Date())}
        RETURNING remember_scope`);
     const scope = rememberScopeSchema.safeParse(res.rows[0]?.remember_scope);
     if (!scope.success) return false;

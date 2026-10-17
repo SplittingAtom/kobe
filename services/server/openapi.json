@@ -8579,9 +8579,12 @@
                       "minLength": 1,
                       "maxLength": 256
                     }
+                  },
+                  "pins_all": {
+                    "type": "boolean"
                   }
                 },
-                "required": ["arg_pattern"],
+                "required": ["arg_pattern", "pins_all"],
                 "additionalProperties": false
               },
               {

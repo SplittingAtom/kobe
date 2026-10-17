@@ -9,21 +9,25 @@ import { withAppendTx } from "../event-stream/append.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
-import { allowRowInTx, askerConnected } from "./decide.js";
+import { allowRowInTx, askerConnected, isProjectWrite } from "./decide.js";
 import { resumeIfNoneWaiting } from "./expiry.js";
+import { auditExpiredApprovals, expireRunApprovalsInTx } from "./run-end.js";
 import { loadApproval, type ApprovalRow } from "./store.js";
 import { viewOf, type ApprovalView } from "./view.js";
 
 /**
  * Whether a waiting call may be allowed together with others ("Approve all waiting", KOBE-289
  * ac-3): never a destructive or open-world tool (by the server's own descriptor and the stored
- * risk), never one the registry no longer knows. Those are approved one by one.
+ * risk), never one the registry no longer knows, never a write to a project's shared state (D24;
+ * review N4). Those are approved one by one.
  */
 export function batchable(
-  row: Pick<ApprovalRow, "risk" | "tool">,
+  row: Pick<ApprovalRow, "risk" | "tool" | "inputCanonical">,
   tool: ToolDescriptor | undefined,
 ) {
   return (
+    !isProjectWrite(row.tool, JSON.parse(row.inputCanonical) as unknown) &&
+    tool !== undefined &&
     tool !== undefined &&
     tool.name === row.tool &&
     row.risk !== "destructive" &&
@@ -104,6 +108,10 @@ export async function approveAll(
         );
       }
       if (!(await askerConnected(tx, teamId, row.userId, row.connectionId))) {
+        // As for one decision (review N3): nobody waits for it, so it expires (committed).
+        const expired = await expireRunApprovalsInTx(tx, teamId, run.id, "run_interrupted", row.id);
+        await resumeIfNoneWaiting(tx, thread, run, row.id, expired);
+        await auditExpiredApprovals(tx, teamId, expired);
         return { unavailable: true as const };
       }
       rows.push(row);
@@ -125,7 +133,7 @@ export async function approveAll(
     throw new ApprovalError(
       "approval_unavailable",
       409,
-      "The workspace that asked is no longer connected. Nothing was approved.",
+      "The workspace that asked for one of them is no longer connected, so it expired. Nothing was approved.",
     );
   }
   return result;

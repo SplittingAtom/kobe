@@ -67,7 +67,7 @@ export function teamPolicyRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.get("/my-rules", requireTeamPermission("team.read"), async (c) =>
-    c.json({ rules: await listUserRules(db, c.get("team").id, c.get("user").id) }),
+    c.json({ rules: await listUserRules(db, c.get("team").id, c.get("user").id, deps.approvals) }),
   );
 
   app.delete("/my-rules/:id", requireTeamPermission("team.read"), async (c) => {
@@ -78,7 +78,7 @@ export function teamPolicyRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   app.get("/member-rules", requireTeamPermission("team.policy.manage"), async (c) =>
-    c.json({ rules: await listMemberRules(db, c.get("team").id) }),
+    c.json({ rules: await listMemberRules(db, c.get("team").id, deps.approvals) }),
   );
 
   app.delete("/member-rules/:id", requireTeamPermission("team.policy.manage"), async (c) => {

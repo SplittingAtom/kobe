@@ -14,8 +14,10 @@ export interface MemberRule {
   readonly userId: string;
   readonly userName: string;
   readonly toolGlob: string;
-  /** JSON pointer → literal glob ("only this exact action"); null = any input. */
+  /** JSON pointer → literal glob ("only this exact action"); null = any input, or masked. */
   readonly argPattern: Readonly<Record<string, string>> | null;
+  /** The pattern's pointers: its shape, shown even when the values are masked. */
+  readonly argPointers: readonly string[];
   readonly rememberScope: RememberScope;
   readonly threadId: string | null;
   readonly threadTitle: string | null;
@@ -23,6 +25,11 @@ export interface MemberRule {
   readonly createdAt: string;
   readonly expiresAt: string | null;
   readonly lastUsedAt: string | null;
+  /** Team Policy page: the member's thread and argument values are private (D18). */
+  readonly masked: boolean;
+  /** False when the server ignores the rule; `endedReason` says why. */
+  readonly applies: boolean;
+  readonly endedReason: string | null;
 }
 
 export interface RememberLimits {

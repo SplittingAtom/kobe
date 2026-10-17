@@ -22,7 +22,11 @@ const rule = (id: string, over: Record<string, unknown> = {}) => ({
   created_at: "2026-10-16T10:00:00Z",
   expires_at: null,
   last_used_at: null,
+  masked: false,
+  applies: true,
+  ended_reason: null,
   ...over,
+  arg_pointers: Object.keys((over.arg_pattern as Record<string, string> | null) ?? {}),
 });
 
 const routes = {
@@ -72,6 +76,33 @@ describe("My area, Approvals (KOBE-289 ac-4)", () => {
       /write.*until end of today.*\/path is exactly \/workspace\/q3\*\.md/,
     );
     expect(rows[2]?.textContent).toMatch(/Not yet/);
+  });
+
+  it("shows a rule the server ignores as no longer applying, with the reason, and only Remove", async () => {
+    const calls = stubApi({
+      "GET /v1/team/policy/my-rules": [
+        200,
+        {
+          rules: [
+            rule("r-9", {
+              tool_glob: "bash",
+              applies: false,
+              ended_reason: "This tool can delete data, so approvals of it are never remembered.",
+            }),
+          ],
+        },
+      ],
+      "GET /v1/me/time-zone": [200, { time_zone: null }],
+      "DELETE /v1/team/policy/my-rules/r-9": [204],
+    });
+    renderTeam(<MyApprovalsPage />, MEMBER);
+    const table = await screen.findByRole("table", { name: /Your remembered approvals/ });
+    expect(table.textContent).toMatch(/No longer applies.*never remembered/);
+    expect(within(table).queryByRole("button", { name: /^Revoke/ })).toBeNull();
+    await userEvent.click(within(table).getByRole("button", { name: "Remove rule for bash" }));
+    await answerConfirm(/Remove the remembered approval for bash/, "Remove");
+    await screen.findByText("Removed: bash (until revoked).");
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 
   it("revokes one after confirming, in the active team", async () => {

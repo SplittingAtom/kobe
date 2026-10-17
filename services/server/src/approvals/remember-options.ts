@@ -13,7 +13,12 @@ import {
 import { eq, users, withTeam } from "@kobe/db";
 import { rememberRefusal } from "../policy/remember.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
-import { exactArgPattern, rememberExpiry, usableTimeZone } from "../policy/remember-scope.js";
+import {
+  exactArgPattern,
+  exactPinsAllArguments,
+  rememberExpiry,
+  usableTimeZone,
+} from "../policy/remember-scope.js";
 import { batchable } from "./approve-all.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { listApprovals, loadApproval } from "./store.js";
@@ -43,7 +48,13 @@ export const rememberOptionsViewSchema = z.strictObject({
   /** The time zone "until end of today" uses (the member's stored one, else UTC). */
   time_zone: z.string(),
   /** "Only this exact action": the pattern the rule would hold, or null if none fits. */
-  exact: z.strictObject({ arg_pattern: argPatternSchema }).nullable(),
+  exact: z
+    .strictObject({
+      arg_pattern: argPatternSchema,
+      /** True: every argument is pinned (no other may be added); false: only the path is. */
+      pins_all: z.boolean(),
+    })
+    .nullable(),
   /** The team allows only exact actions to be remembered. */
   exact_only: z.boolean(),
   /** Every waiting approval of this run "Approve all waiting" would allow; null = not offered. */
@@ -134,7 +145,10 @@ export async function rememberOptions(
           : "Your team allows only exact actions to be remembered, and this one can't be pinned.")),
     choices: canRemember ? choices : [],
     time_zone: usableTimeZone(timeZone),
-    exact: pattern === undefined ? null : { arg_pattern: pattern },
+    exact:
+      pattern === undefined || tool === undefined
+        ? null
+        : { arg_pattern: pattern, pins_all: exactPinsAllArguments(tool) },
     exact_only: limits.exact_only,
     approve_all:
       approveAllReason === null ? { approval_ids: others.map((w) => w.id).sort() } : null,

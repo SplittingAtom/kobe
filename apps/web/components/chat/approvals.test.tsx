@@ -169,6 +169,18 @@ describe("approval card", () => {
     ]);
   });
 
+  it("a file tool's exact choice says only the path is pinned", async () => {
+    const base = fake.rememberOptions;
+    fake.rememberOptions = (id) => {
+      const o = base(id);
+      return { ...o, exact: { arg_pattern: { "/path": "/workspace/a.md" }, pins_all: false } };
+    };
+    const { user } = await waitingRun();
+    await user.click(await screen.findByRole("checkbox", { name: /Remember: allow/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Only this path/ }));
+    expect(screen.getByText(/other arguments, such as the content, may differ/i)).toBeTruthy();
+  });
+
   it("exact-only teams: the exact choice is ticked and can't be unticked", async () => {
     const base = fake.rememberOptions;
     fake.rememberOptions = (id) => ({ ...base(id), exact_only: true });

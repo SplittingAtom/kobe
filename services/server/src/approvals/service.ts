@@ -80,6 +80,11 @@ export class ApprovalService {
     }
   }
 
+  /** The server's tool registry (the Approvals pages judge rules by it). */
+  get registry(): ToolRegistry {
+    return this.#ctx.registry;
+  }
+
   get configured(): boolean {
     return this.#ctx.keys !== undefined;
   }

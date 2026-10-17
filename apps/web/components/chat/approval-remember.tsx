@@ -102,17 +102,24 @@ export function RememberControls({
             onChange={(e) => set({ exact: e.target.checked })}
             disabled={disabled || !value.remember || exactForced}
           />{" "}
-          Only this exact action{exactForced ? " (your team allows only this)" : ""}
+          {options.exact.pinsAll ? "Only this exact action" : "Only this path"}
+          {exactForced ? " (your team allows only this)" : ""}
         </label>
       )}
       {value.remember && exact && options.exact !== null && (
-        <ul className={styles.approvalReasons} aria-label="Exact action to remember">
-          {Object.entries(options.exact.argPattern).map(([pointer, glob]) => (
-            <li key={pointer}>
-              <code>{visible(pointer)}</code> is exactly <code>{visible(unescapeGlob(glob))}</code>
-            </li>
-          ))}
-        </ul>
+        <>
+          {!options.exact.pinsAll && (
+            <p className={styles.hint}>The other arguments, such as the content, may differ.</p>
+          )}
+          <ul className={styles.approvalReasons} aria-label="Exact action to remember">
+            {Object.entries(options.exact.argPattern).map(([pointer, glob]) => (
+              <li key={pointer}>
+                <code>{visible(pointer)}</code> is exactly{" "}
+                <code>{visible(unescapeGlob(glob))}</code>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

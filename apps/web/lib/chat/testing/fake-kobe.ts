@@ -1127,7 +1127,10 @@ export class FakeKobe {
       exact:
         strings.length === 0
           ? null
-          : { arg_pattern: Object.fromEntries(strings.map(([k, v]) => [`/${k}`, v as string])) },
+          : {
+              arg_pattern: Object.fromEntries(strings.map(([k, v]) => [`/${k}`, v as string])),
+              pins_all: true,
+            },
       exact_only: false,
       approve_all: batchable ? { approval_ids: waiting.map(([id]) => id).sort() } : null,
       approve_all_reason: batchable ? null : "Only one approval is waiting in this run.",

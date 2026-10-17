@@ -255,18 +255,53 @@ describe("thread scope (this conversation)", () => {
     await endRun(w, w);
     const again = await newRun(w, w.threadId);
     expect(await outcome(w, again, "share_file", share("d.md"))).toBe("allow");
-    await fx.admin.query(`UPDATE threads SET archived_at = now() WHERE id = $1`, [w.threadId]);
+    expect((await w.owner.browser.post(`/v1/threads/${w.threadId}/archive`)).status).toBe(200);
     expect(await outcome(w, again, "share_file", share("e.md"))).toBe("ask");
     expect((await w.owner.browser.get("/v1/team/policy/my-rules")).json.rules).toEqual([]);
   });
 
-  it("ends when the thread is deleted or moved to a project the member can't open", async () => {
+  it.each([
+    ["archived, then unarchived", "archive"],
+    ["moved to Trash, then restored", "trash"],
+    ["moved to a project, then back", "move"],
+  ] as const)("ends for good when the thread is %s (review S2)", async (_name, how) => {
     const w = await world();
     await approve(w, w, "share_file", share("a.md"), {
       decision: "allow",
       remember: { tool_glob: "share_file", scope: "thread" },
     });
     expect(await outcome(w, w, "share_file", share("b.md"))).toBe("allow");
+    const [rule] = await rules(w.team);
+    await endRun(w, w);
+    const t = `/v1/threads/${w.threadId}`;
+    const ok = (res: { status: number; json: unknown }) =>
+      expect(res.status, JSON.stringify(res.json)).toBe(200);
+    if (how === "archive") {
+      ok(await w.owner.browser.post(`${t}/archive`));
+      ok(await w.owner.browser.post(`${t}/unarchive`));
+    } else if (how === "trash") {
+      ok(await w.owner.browser.delete(t));
+      ok(await w.owner.browser.post(`${t}/restore`));
+    } else {
+      const project = await w.owner.browser.post("/v1/projects", { name: "Elsewhere" });
+      expect(project.status, JSON.stringify(project.json)).toBe(201);
+      ok(await w.owner.browser.post(`${t}/move`, { project_id: project.json.id }));
+      ok(await w.owner.browser.post(`${t}/move`, { project_id: null }));
+    }
+    expect(await rules(w.team)).toEqual([]);
+    expect(await audits(w.team, "policy.rule.deleted")).toEqual([
+      expect.objectContaining({ ruleId: rule?.id, rememberScope: "thread" }),
+    ]);
+    const again = await newRun(w, w.threadId);
+    expect(await outcome(w, again, "share_file", share("c.md"))).toBe("ask");
+  });
+
+  it("does not hold while the thread is in a project the member can't open", async () => {
+    const w = await world();
+    await approve(w, w, "share_file", share("a.md"), {
+      decision: "allow",
+      remember: { tool_glob: "share_file", scope: "thread" },
+    });
     const project = randomUUID();
     await fx.admin.query(
       `INSERT INTO projects (team_id, id, slug, name, members_mode, created_by)
@@ -280,10 +315,6 @@ describe("thread scope (this conversation)", () => {
     );
     await fx.admin.query(`UPDATE threads SET project_id = $2 WHERE id = $1`, [w.threadId, project]);
     expect(await outcome(w, w, "share_file", share("c.md"))).toBe("ask");
-    await fx.admin.query(`UPDATE threads SET project_id = NULL WHERE id = $1`, [w.threadId]);
-    expect(await outcome(w, w, "share_file", share("d.md"))).toBe("allow");
-    await fx.admin.query(`UPDATE threads SET deleted_at = now() WHERE id = $1`, [w.threadId]);
-    expect(await outcome(w, w, "share_file", share("e.md"))).toBe("ask");
   });
 });
 
@@ -299,6 +330,7 @@ describe("run scope (this run only)", () => {
     ]);
     expect(await outcome(w, w, "share_file", share("b.md"))).toBe("allow");
     await endRun(w, w);
+    // A new run in the same thread (as Regenerate or the next message makes) asks again.
     const later = await newRun(w, w.threadId);
     expect(await outcome(w, later, "share_file", share("c.md"))).toBe("ask");
     // The ended run's rule is pruned (audited, by the system) when the member makes a new one.
@@ -354,7 +386,11 @@ describe("only this exact action", () => {
     const call = check(w, w, "share_file", { path: "reports/../q3*.md" });
     const pending = await call.pending();
     const options = await w.owner.browser.get(`/v1/approvals/${pending.approval_id}/remember`);
-    expect(options.json.exact).toEqual({ arg_pattern: { "/path": "/workspace/q3\\*.md" } });
+    // A path tool pins only the path (the card says the content may differ).
+    expect(options.json.exact).toEqual({
+      arg_pattern: { "/path": "/workspace/q3\\*.md" },
+      pins_all: false,
+    });
     const res = await w.owner.browser.post(`/v1/approvals/${pending.approval_id}`, {
       decision: "allow",
       remember: { tool_glob: "share_file", scope: "forever", exact: true },
@@ -551,6 +587,99 @@ describe("approve all waiting", () => {
         approval_ids: more,
       }),
     ).toMatchObject({ status: 403, json: { code: "approve_all_not_allowed" } });
+  });
+});
+
+describe("approve all waiting: only what the member saw, only one run (review S7)", () => {
+  it("refuses an id from another run of the same member, and leaves a later arrival waiting", async () => {
+    const w = await world();
+    const other = await newRun(w);
+    const a = check(w, w, "share_file", share("a.md"));
+    const b = check(w, w, "share_file", share("b.md"));
+    const elsewhere = check(w, other, "share_file", share("x.md"));
+    const [pa, pb, px] = [await a.pending(), await b.pending(), await elsewhere.pending()];
+    const options = await w.owner.browser.get(`/v1/approvals/${pa.approval_id}/remember`);
+    const listed = options.json.approve_all.approval_ids as string[];
+    expect(listed).toEqual([pa.approval_id, pb.approval_id].sort());
+    expect(
+      (
+        await w.owner.browser.post("/v1/approvals/approve-all", {
+          run_id: w.runId,
+          approval_ids: [pa.approval_id, px.approval_id],
+        })
+      ).status,
+    ).toBe(404);
+    // A call that arrives after the options were read is not in the list: it keeps waiting.
+    const late = check(w, w, "share_file", share("c.md"));
+    const pl = await late.pending();
+    const res = await w.owner.browser.post("/v1/approvals/approve-all", {
+      run_id: w.runId,
+      approval_ids: listed,
+    });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    const { rows } = await fx.admin.query<{ id: string; status: string }>(
+      `SELECT id, status FROM approvals WHERE id = ANY($1)`,
+      [[pa.approval_id, pb.approval_id, pl.approval_id, px.approval_id]],
+    );
+    const status = Object.fromEntries(rows.map((r) => [r.id, r.status]));
+    expect(status).toEqual({
+      [pa.approval_id]: "allowed",
+      [pb.approval_id]: "allowed",
+      [pl.approval_id]: "pending",
+      [px.approval_id]: "pending",
+    });
+    for (const id of [pl.approval_id, px.approval_id]) {
+      await w.owner.browser.post(`/v1/approvals/${id}`, { decision: "deny" });
+    }
+  });
+});
+
+describe("what the Approvals pages show (review S5, S6)", () => {
+  it("a backfilled destructive rule shows as no longer applying; an admin never sees private values", async () => {
+    const w = await world();
+    // A KOBE-37 rule for bash (the API used to accept it), backfilled "until revoked".
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope)
+       VALUES ($1, 'user', $2, 'allow', 'bash', $2, 'forever')`,
+      [w.team, w.owner.id],
+    );
+    await fx.admin.query(`UPDATE threads SET title = 'Secret merger' WHERE id = $1`, [w.threadId]);
+    await approve(w, w, "share_file", share("deal.md"), {
+      decision: "allow",
+      remember: { tool_glob: "share_file", scope: "thread", exact: true },
+    });
+    const mine = (await w.owner.browser.get("/v1/team/policy/my-rules")).json.rules;
+    const bash = mine.find((r: { tool_glob: string }) => r.tool_glob === "bash");
+    expect(bash).toMatchObject({
+      applies: false,
+      ended_reason: expect.stringMatching(/never remembered/),
+    });
+    const own = mine.find((r: { tool_glob: string }) => r.tool_glob === "share_file");
+    expect(own).toMatchObject({
+      applies: true,
+      masked: false,
+      thread_title: "Secret merger",
+      arg_pattern: { "/path": "/workspace/deal.md" },
+    });
+    // The team admin's view of a private thread: tool, scope, shape and expiry only.
+    const admin = (await w.owner.browser.get("/v1/team/policy/member-rules")).json.rules;
+    const masked = admin.find((r: { tool_glob: string }) => r.tool_glob === "share_file");
+    expect(masked).toMatchObject({
+      masked: true,
+      thread_id: null,
+      thread_title: null,
+      arg_pattern: null,
+      arg_pointers: ["/path"],
+      remember_scope: "thread",
+    });
+    expect(JSON.stringify(admin)).not.toMatch(/Secret merger|deal\.md/);
+    // Shared with the team, the admin may read it anyway.
+    await fx.admin.query(`UPDATE threads SET shared_to_team = true WHERE id = $1`, [w.threadId]);
+    const shared = (await w.owner.browser.get("/v1/team/policy/member-rules")).json.rules;
+    expect(shared.find((r: { tool_glob: string }) => r.tool_glob === "share_file")).toMatchObject({
+      masked: false,
+      thread_title: "Secret merger",
+    });
   });
 });
 

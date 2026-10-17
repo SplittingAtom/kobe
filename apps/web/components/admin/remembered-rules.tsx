@@ -6,6 +6,7 @@ import type { ApiResult } from "../../lib/api/client";
 import type { MemberRule } from "../../lib/admin/api/remember";
 import { visible } from "../../lib/security/visible";
 import {
+  Badge,
   Button,
   EmptyState,
   Table,
@@ -30,6 +31,8 @@ function literal(glob: string): string {
 
 function Scope({ rule }: { readonly rule: MemberRule }) {
   const label = REMEMBER_SCOPE_LABELS[rule.rememberScope];
+  // A member's private thread is never named to an admin (D18): "a conversation".
+  if (rule.rememberScope === "thread" && rule.masked) return <>{label}: a conversation</>;
   if (rule.rememberScope === "thread" && rule.threadId !== null) {
     return (
       <>
@@ -44,7 +47,20 @@ function Scope({ rule }: { readonly rule: MemberRule }) {
 }
 
 function Pattern({ rule }: { readonly rule: MemberRule }) {
-  if (rule.argPattern === null) return <>Any input</>;
+  if (rule.argPointers.length === 0) return <>Any input</>;
+  if (rule.argPattern === null) {
+    return (
+      <>
+        Exact values (private) of{" "}
+        {rule.argPointers.map((p, i) => (
+          <span key={p}>
+            {i > 0 && ", "}
+            <code>{visible(p)}</code>
+          </span>
+        ))}
+      </>
+    );
+  }
   return (
     <>
       {Object.entries(rule.argPattern).map(([pointer, glob]) => (
@@ -88,18 +104,22 @@ export function RememberedRules({
 
   async function onRevoke(rule: MemberRule, index: number, trigger: HTMLElement | null) {
     const who = showMember ? ` of ${rule.userName}` : "";
+    const verb = rule.applies ? "Revoke" : "Remove";
     const yes = await confirm(
       {
-        title: `Revoke the remembered approval${who} for ${rule.toolGlob}?`,
-        description: "Kobe asks again the next time this tool needs approval.",
-        confirmLabel: "Revoke",
+        title: `${verb} the remembered approval${who} for ${rule.toolGlob}?`,
+        description: rule.applies
+          ? "Kobe asks again the next time this tool needs approval."
+          : "It no longer applies; this removes it from the list.",
+        confirmLabel: verb,
       },
       trigger,
     );
     if (!yes) return;
     const done = await mutation.run(
       () => revoke(rule.id),
-      () => `Revoked: ${rule.toolGlob} (${REMEMBER_SCOPE_LABELS[rule.rememberScope]}).`,
+      () =>
+        `${rule.applies ? "Revoked" : "Removed"}: ${rule.toolGlob} (${REMEMBER_SCOPE_LABELS[rule.rememberScope]}).`,
     );
     if (done) {
       focus.removed(rule.id, index);
@@ -125,6 +145,7 @@ export function RememberedRules({
                     <TableHeader>Only this action</TableHeader>
                     <TableHeader>Expires</TableHeader>
                     <TableHeader>Last used</TableHeader>
+                    <TableHeader>Status</TableHeader>
                     <TableHeader>
                       <span className="sr-only">Actions</span>
                     </TableHeader>
@@ -158,6 +179,16 @@ export function RememberedRules({
                         {r.lastUsedAt ? <DateTime value={r.lastUsedAt} compact /> : "Not yet"}
                       </TableCell>
                       <TableCell>
+                        {r.applies ? (
+                          <Badge tone="running">Applies</Badge>
+                        ) : (
+                          <>
+                            <Badge tone="neutral">No longer applies</Badge>
+                            <div className="text-sm text-console-muted">{r.endedReason}</div>
+                          </>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <Button
                           size="sm"
                           variant="danger"
@@ -165,7 +196,7 @@ export function RememberedRules({
                           disabled={mutation.pending}
                           onClick={(e) => void onRevoke(r, index, eventTrigger(e))}
                         >
-                          Revoke
+                          {r.applies ? "Revoke" : "Remove"}
                           <span className="sr-only">
                             {" "}
                             {showMember ? `${r.userName}'s ` : ""}rule for {r.toolGlob}
