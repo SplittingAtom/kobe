@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { KobeTx } from "./client.js";
+import type { ThinkingLevelValue } from "./schema/models.js";
 import type { ThreadStatus } from "./schema/threads.js";
 import { TEAM_ID_SETTING } from "./settings.js";
 import {
@@ -59,6 +60,8 @@ export interface ThreadSearchHit {
   readonly sharedToTeam: boolean;
   /** The thread's chosen model alias (KOBE-44); null = the team's default. */
   readonly modelAlias: string | null;
+  /** The conversation's thinking level (KOBE-260); null = the model's default. */
+  readonly thinkingLevel: ThinkingLevelValue | null;
   readonly lastActivityAt: Date;
   readonly createdAt: Date;
   /** The active branch's leaf entry. */
@@ -97,6 +100,7 @@ interface HitRow extends Record<string, unknown> {
   shared_to_project: boolean;
   shared_to_team: boolean;
   model_alias: string | null;
+  thinking_level: ThinkingLevelValue | null;
   activity_micros: string;
   created_micros: string;
   leaf_entry_id: string | null;
@@ -215,6 +219,7 @@ function toHit(row: HitRow): ThreadSearchHit {
     sharedToProject: row.shared_to_project,
     sharedToTeam: row.shared_to_team,
     modelAlias: row.model_alias,
+    thinkingLevel: row.thinking_level,
     // Raw execute returns timestamps as text; µs → ms (a Date's precision), as drizzle does.
     lastActivityAt: fromMicros(row.activity_micros),
     createdAt: fromMicros(row.created_micros),
@@ -259,7 +264,7 @@ function searchQuery(
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
              t.agent_version, t.status, t.shared_to_project, t.shared_to_team, t.model_alias,
-             t.last_activity_at,
+             t.thinking_level, t.last_activity_at,
              t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id,
              t.pinned_at, t.archived_at
       FROM threads t
@@ -319,7 +324,7 @@ function searchQuery(
     -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
     SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
            r.agent_version, r.status, r.shared_to_project, r.shared_to_team, r.model_alias,
-           r.activity_micros::text AS activity_micros, r.leaf_entry_id,
+           r.thinking_level, r.activity_micros::text AS activity_micros, r.leaf_entry_id,
            r.forked_from_thread_id, r.forked_at_entry_id,
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
            (extract(epoch FROM r.pinned_at) * 1000000)::bigint::text AS pinned_micros,
