@@ -16,7 +16,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { agentScope, siteAgentVersions, teamAgentVersions } from "./agents.js";
-import { MODEL_ALIAS_PATTERN } from "./models.js";
+import { MODEL_ALIAS_PATTERN, type ThinkingLevelValue } from "./models.js";
 import { users } from "./auth.js";
 import { projects } from "./projects.js";
 import { teams } from "./teams.js";
@@ -113,6 +113,12 @@ export const threads = pgTable(
      * `agent_model_not_enabled` instead of silently switching models.
      */
     modelAlias: text(),
+    /**
+     * The thinking level the owner chose for this conversation (KOBE-260). Null = the model's
+     * default. Clamped to the site and team settings when each run starts, so a choice made for
+     * one model stays valid for another.
+     */
+    thinkingLevel: text().$type<ThinkingLevelValue>(),
     /**
      * Builder test pane thread (KOBE-85): chats with the agent's unpublished draft, so
      * `agent_version` stays null while `agent_id` is set (see `threads_agent_pin`). Kept out of
@@ -235,6 +241,8 @@ export const threads = pgTable(
       "threads_forked_at_entry_id_length",
       sql`${t.forkedAtEntryId} IS NULL OR char_length(${t.forkedAtEntryId}) BETWEEN 1 AND 128`,
     ),
+    // KOBE-260's `threads_thinking_level` (a level or null): SQL-only and NOT VALID
+    // (`0126_thinking_level_checks.sql`), as threads is large and locked by the column add.
     check(
       "threads_model_alias",
       sql`${t.modelAlias} IS NULL OR ${t.modelAlias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`,

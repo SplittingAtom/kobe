@@ -15,6 +15,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
+import type { ThinkingLevelValue } from "./models.js";
 import { threads } from "./threads.js";
 
 export const runTrigger = pgEnum("run_trigger", ["user", "schedule"]);
@@ -197,6 +198,12 @@ export const runs = pgTable(
      * chat's "Used skill" badge and the per-skill usage outlive the event stream.
      */
     skillsUsed: jsonb().$type<readonly RunSkillUse[]>().notNull().default([]),
+    /**
+     * The run's effective thinking level (KOBE-260), fixed when it starts: the conversation's
+     * choice (or the model's default) clamped to the site and team settings. The model gateway
+     * reads it for every call the run makes. Null: the model has no thinking control.
+     */
+    thinkingLevel: text().$type<ThinkingLevelValue>(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -253,6 +260,8 @@ export const runs = pgTable(
     ),
     check("runs_queue_pos", sql`${t.queuePos} IS NULL OR ${t.status} = 'queued'`),
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
+    // KOBE-260's `runs_thinking_level` (a level or null): SQL-only and NOT VALID
+    // (`0126_thinking_level_checks.sql`), like the threads one.
     check("runs_sandbox_seq", sql`${t.sandboxSeq} >= 0`),
     check("runs_sandbox_bytes", sql`${t.sandboxBytes} >= 0`),
     check("runs_kind", sql`${t.kind} IN (${textList(RUN_KINDS)})`),

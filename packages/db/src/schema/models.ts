@@ -67,6 +67,31 @@ export type InputModality = (typeof INPUT_MODALITIES)[number];
 export const MODEL_OUTPUT_TOKENS_RANGE = [256, 131_072] as const;
 export const MODEL_CONTEXT_WINDOW_RANGE = [1_024, 10_000_000] as const;
 
+/**
+ * Thinking levels and controls (KOBE-260; the same lists as `@kobe/protocol` thinking.ts, which
+ * holds the rules: a server test checks they agree). Levels are ordered.
+ */
+export const THINKING_LEVELS = ["off", "low", "medium", "high"] as const;
+export type ThinkingLevelValue = (typeof THINKING_LEVELS)[number];
+export const THINKING_CONTROLS = [
+  "none",
+  "reasoning_effort",
+  "anthropic_adaptive",
+  "anthropic_effort",
+  "anthropic_budget",
+  "gemini_budget",
+] as const;
+export type ThinkingControlValue = (typeof THINKING_CONTROLS)[number];
+/** Controls that cannot turn thinking off (their lowest level is `low`). */
+export const THINKING_CONTROLS_WITHOUT_OFF = ["anthropic_effort"] as const;
+
+const sqlList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
+/** `column IS NULL OR column IN (levels)`, for the level columns of several tables. */
+export const thinkingLevelCheck = (column: unknown) =>
+  sql`${column} IS NULL OR ${column} IN (${sqlList(THINKING_LEVELS)})`;
+const levelRank = (column: unknown) =>
+  sql`array_position(ARRAY[${sqlList(THINKING_LEVELS)}]::text[], ${column})`;
+
 const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 
 /**
@@ -166,6 +191,17 @@ export const modelCatalog = pgTable(
      * the higher default output limit, as its hidden reasoning spends the same allowance.
      */
     reasoning: boolean().notNull().default(false),
+    /**
+     * How the gateway sets this model's thinking (KOBE-260; `THINKING_CONTROLS`), chosen by an
+     * admin for the provider, never guessed from the model name. `none`: Kobe sends nothing.
+     */
+    thinkingControl: text().$type<ThinkingControlValue>().notNull().default("none"),
+    /** Thinking may be on (false: every run thinks `off`; needs a control that can turn it off). */
+    thinkingAllowed: boolean().notNull().default(false),
+    /** The level runs use when the conversation chose none (set only when thinking is allowed). */
+    thinkingDefault: text().$type<ThinkingLevelValue>(),
+    /** The highest level members may pick (set only when thinking is allowed; above `off`). */
+    thinkingMax: text().$type<ThinkingLevelValue>(),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -206,6 +242,29 @@ export const modelCatalog = pgTable(
       "model_catalog_output_within_context",
       sql`${t.maxOutputTokens} IS NULL OR ${t.contextWindow} IS NULL OR ${t.maxOutputTokens} < ${t.contextWindow}`,
     ),
+    check(
+      "model_catalog_thinking_values",
+      sql`${t.thinkingControl} IN (${sqlList(THINKING_CONTROLS)})
+        AND (${thinkingLevelCheck(t.thinkingDefault)}) AND (${thinkingLevelCheck(t.thinkingMax)})`,
+    ),
+    // KOBE-260: no control, no levels; a control only on a reasoning model; levels exactly when
+    // thinking is allowed, default <= max, max above off; a control that can't turn thinking off
+    // is always allowed and never defaults to off.
+    check(
+      "model_catalog_thinking_shape",
+      sql`CASE WHEN ${t.thinkingControl} = 'none'
+          THEN NOT ${t.thinkingAllowed} AND ${t.thinkingDefault} IS NULL AND ${t.thinkingMax} IS NULL
+        WHEN NOT ${t.reasoning} THEN false
+        WHEN NOT ${t.thinkingAllowed}
+          THEN ${t.thinkingControl} NOT IN (${sqlList(THINKING_CONTROLS_WITHOUT_OFF)})
+            AND ${t.thinkingDefault} IS NULL AND ${t.thinkingMax} IS NULL
+        ELSE ${t.thinkingDefault} IS NOT NULL AND ${t.thinkingMax} IS NOT NULL
+          AND ${t.thinkingMax} <> 'off'
+          AND ${levelRank(t.thinkingDefault)} <= ${levelRank(t.thinkingMax)}
+          AND (${t.thinkingDefault} <> 'off'
+            OR ${t.thinkingControl} NOT IN (${sqlList(THINKING_CONTROLS_WITHOUT_OFF)}))
+        END`,
+    ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),
     check("model_catalog_model", sql`${t.model} ~ ${sql.raw(`'${PROVIDER_MODEL_PATTERN}'`)}`),
     check(
@@ -226,6 +285,11 @@ export const teamModels = pgTable(
       .notNull()
       .references(() => modelCatalog.alias, { onDelete: "cascade" }),
     isDefault: boolean().notNull().default(false),
+    /**
+     * The team's highest thinking level for this model (KOBE-260): it can only narrow the site's
+     * (`off` turns thinking off for the team). Null: the site's settings.
+     */
+    thinkingMax: text().$type<ThinkingLevelValue>(),
     enabledBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -236,6 +300,7 @@ export const teamModels = pgTable(
     uniqueIndex("team_models_default_idx")
       .on(t.teamId)
       .where(sql`${t.isDefault}`),
+    check("team_models_thinking_max", thinkingLevelCheck(t.thinkingMax)),
   ],
 );
 
