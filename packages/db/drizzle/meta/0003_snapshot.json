@@ -112,8 +112,12 @@
           "name": "accounts_user_id_users_id_fk",
           "tableFrom": "accounts",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -172,8 +176,12 @@
           "name": "install_roles_user_id_users_id_fk",
           "tableFrom": "install_roles",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -181,7 +189,9 @@
       "compositePrimaryKeys": {
         "install_roles_user_id_pk": {
           "name": "install_roles_user_id_pk",
-          "columns": ["user_id"]
+          "columns": [
+            "user_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -373,8 +383,12 @@
           "name": "passkeys_user_id_users_id_fk",
           "tableFrom": "passkeys",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -384,7 +398,9 @@
         "passkeys_credential_id_unique": {
           "name": "passkeys_credential_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["credential_id"]
+          "columns": [
+            "credential_id"
+          ]
         }
       },
       "policies": {},
@@ -428,7 +444,9 @@
         "rate_limits_key_unique": {
           "name": "rate_limits_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["key"]
+          "columns": [
+            "key"
+          ]
         }
       },
       "policies": {},
@@ -513,8 +531,12 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -524,7 +546,9 @@
         "sessions_token_unique": {
           "name": "sessions_token_unique",
           "nullsNotDistinct": false,
-          "columns": ["token"]
+          "columns": [
+            "token"
+          ]
         }
       },
       "policies": {},
@@ -568,8 +592,12 @@
           "name": "team_members_team_id_teams_id_fk",
           "tableFrom": "team_members",
           "tableTo": "teams",
-          "columnsFrom": ["team_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -577,8 +605,12 @@
           "name": "team_members_user_id_users_id_fk",
           "tableFrom": "team_members",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -586,7 +618,10 @@
       "compositePrimaryKeys": {
         "team_members_team_id_user_id_pk": {
           "name": "team_members_team_id_user_id_pk",
-          "columns": ["team_id", "user_id"]
+          "columns": [
+            "team_id",
+            "user_id"
+          ]
         }
       },
       "uniqueConstraints": {},
@@ -639,7 +674,9 @@
         "teams_slug_unique": {
           "name": "teams_slug_unique",
           "nullsNotDistinct": false,
-          "columns": ["slug"]
+          "columns": [
+            "slug"
+          ]
         }
       },
       "policies": {},
@@ -723,8 +760,12 @@
           "name": "two_factors_user_id_users_id_fk",
           "tableFrom": "two_factors",
           "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -800,7 +841,9 @@
         "users_email_unique": {
           "name": "users_email_unique",
           "nullsNotDistinct": false,
-          "columns": ["email"]
+          "columns": [
+            "email"
+          ]
         }
       },
       "policies": {},
@@ -880,12 +923,19 @@
     "public.install_role": {
       "name": "install_role",
       "schema": "public",
-      "values": ["owner", "admin"]
+      "values": [
+        "owner",
+        "admin"
+      ]
     },
     "public.team_role": {
       "name": "team_role",
       "schema": "public",
-      "values": ["team_admin", "builder", "member"]
+      "values": [
+        "team_admin",
+        "builder",
+        "member"
+      ]
     }
   },
   "schemas": {},
