@@ -1151,6 +1151,11 @@ export const AUDIT_EVENTS = {
   }),
   /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
   "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
+  /**
+   * The user moved or renamed a file or folder of their own workspace in the file browser
+   * (KOBE-304): counts only, never a name or path.
+   */
+  "workspace.file_moved": event("team", { userId: id, files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
