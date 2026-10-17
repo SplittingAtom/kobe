@@ -488,6 +488,11 @@ Secret). Both carry the same fields as the site export, including the chain hash
 Pages are newest first: pass `nextCursor` back as `before`. Pass `after` (for example `after=0`)
 to page oldest first, as an export does. Unknown parameters return 400.
 
+In the web app, site admins read the log in the Site console under **Audit log** (filters by
+action, category, actor, team and time; the chain check runs when the page opens, and the IP and
+user agent are shown only until the erasure period has passed), and team admins under the Team
+console's **Audit view** (KOBE-291).
+
 Sandbox security events are team rows, so both views show them: for example a tampered Pi
 runtime is `GET /v1/site/audit?action=sandbox.runtime_tampered` (or `category=sandbox`), and the
 same filter on `/v1/team/audit` for the team's admins (KOBE-271).
