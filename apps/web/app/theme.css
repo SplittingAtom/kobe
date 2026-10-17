@@ -10,8 +10,9 @@
    must stay identical (app/theme-css.test.ts); other stylesheets only read these tokens. */
 
 /* Cascade layers, declared once before any other stylesheet (the root layout loads this file
-   first): Tailwind's (app/tailwind.css), with the consoles' remaining CSS modules in `kobe-legacy`
-   between the base rules and the utilities, so a utility always beats a module rule (KOBE-294). */
+   first): Tailwind's (app/tailwind.css). `kobe-legacy` held the consoles' CSS modules between the
+   base rules and the utilities (KOBE-294); it is empty since KOBE-296 and stays declared so the
+   order every page compiles to does not change. */
 @layer properties, theme, base, kobe-legacy, components, utilities;
 
 :root {
@@ -38,13 +39,14 @@
   --ring: oklch(0.708 0 0);
 
   /* Shared accents: links, focus rings, errors, warnings. The chat (chat.module.css) and the
-     consoles (admin.module.css) read them under these names; only the neutrals differ. */
+     consoles (the console-* colours in app/tailwind.css) read them under these names; only the
+     neutrals differ. */
   --admin-accent: #2449c7;
   --admin-danger: #a4161a;
   --admin-danger-bg: #fdecec;
   --admin-warn-bg: #fff4d6;
 
-  /* The admin consoles' and My area's neutrals (components/admin/admin.module.css). */
+  /* The admin consoles' and My area's neutrals (the console-* colours in app/tailwind.css). */
   --kobe-console-fg: #1b1b1f;
   --kobe-console-muted: #5b5b66;
   --kobe-console-bg: #ffffff;

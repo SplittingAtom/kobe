@@ -1,7 +1,7 @@
 /* The consoles and My area (app/admin/layout.tsx and app/me/layout.tsx import this). Tailwind's
    theme and utilities, the same build as the chat's (app/tailwind.css, KOBE-294), without
-   preflight: pages still on CSS modules keep the browser defaults they were built on, and the
-   console primitives (components/ui/console) carry their own resets. Every rule here is scoped to
+   preflight: every page is on the console primitives (components/ui/console, KOBE-296), which
+   carry their own resets. Every rule here is scoped to
    the console root (`data-kobe-console`, the console and My-area shells), so nothing reaches the
    chat (app/console-css-guard.test.ts). */
 @import "../tailwind.css";
@@ -12,26 +12,6 @@ body:has([data-kobe-console]) {
 }
 
 @layer base {
-  /* Legacy, for the pages still on CSS modules (KOBE-295 and KOBE-296 move them; delete these
-     with the last module): the shell's variables. */
-  [data-kobe-console] {
-    /* Both themes: app/theme.css (KOBE-282), which also sets the shared --admin-accent,
-       --admin-danger, --admin-danger-bg and --admin-warn-bg. */
-    --admin-fg: var(--kobe-console-fg);
-    --admin-muted: var(--kobe-console-muted);
-    --admin-bg: var(--kobe-console-bg);
-    --admin-panel: var(--kobe-console-panel);
-    --admin-border: var(--kobe-console-border);
-  }
-
-  /* Legacy: choices side by side in a module page's fieldset (exposure, retention period) keep
-     apart (KOBE-283). Primitive choices (`data-slot`) are spaced by their ChoiceGroup. */
-  [data-kobe-console]
-    fieldset
-    label:not([data-slot]):has(input:is([type="checkbox"], [type="radio"])) {
-    margin-inline-end: 1rem;
-  }
-
   /* Permanent: links in running text (notices, hints, descriptions) and any focusable element
      without its own ring. Primitives carry their own ring and colours (components/ui/console),
      so nothing depends on these for them; app/console-css-guard.test.ts pins them. In the base

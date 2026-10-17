@@ -1,14 +1,13 @@
 /**
  * Console primitives (KOBE-294): Tailwind and the theme tokens (app/tailwind.css, app/theme.css),
- * shared by the Site console, the Team console and the My area. Pages move to them in KOBE-295
- * and KOBE-296; the guard in app/console-css-guard.test.ts tracks which have.
+ * shared by the Site console, the Team console and the My area. Every page there is built on
+ * them (KOBE-294..296): no CSS modules, which app/console-css-guard.test.ts enforces.
  *
- * Rules for moving a page:
- * - Move a file whole: a file that imports these primitives imports no CSS module (guarded).
- * - The consoles' CSS modules sit in the `kobe-legacy` cascade layer (app/theme.css), below the
- *   utilities, so a module rule that still reaches a primitive (a container's `.form label`)
- *   loses to the primitive's classes. Modules shared with the chat (components/memory,
- *   components/files) are unlayered and still win: don't nest primitives inside them.
+ * Rules for a page:
+ * - Layout and spacing with utilities on the console palette (`console-*`, `status-*`); no CSS
+ *   module, no inline styles. A new shared pattern becomes a primitive here, with a test.
+ * - Confirmations through `useConfirm()` with the asking control as the trigger; after a row is
+ *   removed, keep focus on the list (components/admin/use-focus-after-removal.ts).
  * - Focus rings, colours and borders come from the primitives and the tokens, never from the
  *   console base rules in app/admin/admin-global.css (those serve plain content links only).
  */
