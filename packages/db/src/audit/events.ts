@@ -768,6 +768,11 @@ export const AUDIT_EVENTS = {
    */
   "retention.feedback_history_purged": event("team", { rows: count }),
   /**
+   * Moved workspace files' old paths kept for a legal hold, purged once the hold was released
+   * (system; KOBE-304; count only).
+   */
+  "retention.workspace_hold_history_purged": event("team", { rows: count }),
+  /**
    * Shared eval cases purged (system; KOBE-276): past the team's retention window (`retention`),
    * a departed member's (`offboarding`, `userId`), or copies kept for a released hold
    * (`hold_released`). Counts only; held members' cases are never in a batch.

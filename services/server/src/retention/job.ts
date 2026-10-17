@@ -19,6 +19,10 @@ import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
 import { purgeReleasedFeedbackHistory, type FeedbackHistoryCounts } from "./feedback-history.js";
 import { NO_EVAL_CASE_PURGE, purgeEvalCases, type EvalCasePurgeCounts } from "./eval-cases.js";
+import {
+  purgeReleasedWorkspaceHoldHistory,
+  type WorkspaceHoldHistoryCounts,
+} from "./workspace-hold-history.js";
 import { PERIOD_DAYS, effectiveAt } from "./periods.js";
 import { readMaximumLayer, readTeamLayer } from "./settings.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
@@ -78,6 +82,8 @@ export interface TeamPassResult {
   readonly feedbackHistory: FeedbackHistoryCounts;
   /** Shared eval cases past the window and released hold copies, deleted (KOBE-276). */
   readonly evalCases: EvalCasePurgeCounts;
+  /** Moved workspace files' old paths kept for a released hold, deleted (KOBE-304). */
+  readonly workspaceHoldHistory: WorkspaceHoldHistoryCounts;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -278,6 +284,11 @@ async function teamPass(
         const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
         return purgeEvalCases(db, teamId, cutoff, { stop });
       });
+  const workspaceHoldHistory = stop()
+    ? { rows: 0 }
+    : await step("workspace_hold_history", { rows: 0 }, () =>
+        purgeReleasedWorkspaceHoldHistory(db, teamId, { stop }),
+      );
   return {
     teamId,
     trash,
@@ -289,6 +300,7 @@ async function teamPass(
     orphans,
     feedbackHistory,
     evalCases,
+    workspaceHoldHistory,
     failed,
   };
 }
