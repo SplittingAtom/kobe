@@ -105,3 +105,58 @@ describe("whole-composer focus (ac-2)", () => {
     expect(document.querySelector("[data-kobe-composer-panel]")).toBeNull();
   });
 });
+
+describe("pulse while running (ac-3)", () => {
+  /** The body of the first `@keyframes name` block. */
+  const keyframes = (name: string) => {
+    const at = CSS.indexOf(`@keyframes ${name}`);
+    if (at < 0) throw new Error(`no keyframes ${name}`);
+    let depth = 0;
+    for (let i = CSS.indexOf("{", at); i < CSS.length; i += 1) {
+      if (CSS[i] === "{") depth += 1;
+      if (CSS[i] === "}" && --depth === 0) return CSS.slice(at, i);
+    }
+    throw new Error("unclosed keyframes");
+  };
+
+  it("pulses in the running colour while a run holds the thread, and stops when it ends", async () => {
+    const { runId } = await running();
+    await waitFor(() => expect(panel().getAttribute("data-running")).toBe("true"));
+    fake.agent.complete(runId);
+    await waitFor(() => expect(panel().hasAttribute("data-running")).toBe(false));
+  });
+
+  it("stops when the member stops the run", async () => {
+    const { runId } = await running();
+    await waitFor(() => expect(panel().hasAttribute("data-running")).toBe(true));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(fake.run(runId).status).toBe("cancelled"));
+    await waitFor(() => expect(panel().hasAttribute("data-running")).toBe(false));
+  });
+
+  it("an idle thread has no pulse", async () => {
+    openApp(fake, fake.addThread("Idle"));
+    await composer();
+    expect(panel().hasAttribute("data-running")).toBe(false);
+  });
+
+  it("uses the running token and moves only the shadow, so nothing shifts", () => {
+    const on = rule(CSS, ".panel[data-running]");
+    expect(on).toMatch(/border-color:\s*var\(--kobe-status-running\)/);
+    expect(on).toMatch(/animation:\s*kobe-composer-pulse /);
+    expect(rule(CSS, ".panel[data-running]:focus-within")).toMatch(
+      /outline-color:\s*var\(--kobe-status-running\)/,
+    );
+    const frames = keyframes("kobe-composer-pulse");
+    expect(frames).toContain("var(--kobe-status-running)");
+    const animated = [...frames.matchAll(/([a-z-]+)\s*:/g)].map((m) => m[1]);
+    expect(new Set(animated)).toEqual(new Set(["box-shadow"]));
+  });
+
+  it("has no motion under prefers-reduced-motion", () => {
+    const at = CSS.indexOf("@media (prefers-reduced-motion: reduce)");
+    expect(at).toBeGreaterThan(CSS.indexOf("@keyframes kobe-composer-pulse"));
+    const reduced = rule(CSS.slice(at), ".panel[data-running]");
+    expect(reduced).toMatch(/animation:\s*none/);
+  });
+});

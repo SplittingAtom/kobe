@@ -23,3 +23,34 @@
   outline: none;
   box-shadow: none;
 }
+
+/* While a run holds the thread (queue and steer mode) the panel's edge is the running colour and a
+   soft halo pulses around it (KOBE-374, the KOBE-301 running token). Only the shadow moves; the
+   border and outline stay solid, so focus stays visible at every frame. */
+.panel[data-running] {
+  border-color: var(--kobe-status-running);
+  animation: kobe-composer-pulse 2s ease-in-out infinite;
+}
+
+.panel[data-running]:focus-within {
+  outline-color: var(--kobe-status-running);
+}
+
+@keyframes kobe-composer-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--kobe-status-running) 45%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--kobe-status-running) 0%, transparent);
+  }
+}
+
+/* No motion for people who asked for less: a still halo says the same. */
+@media (prefers-reduced-motion: reduce) {
+  .panel[data-running] {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--kobe-status-running) 45%, transparent);
+  }
+}

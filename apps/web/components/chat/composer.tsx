@@ -200,6 +200,7 @@ export function Composer({
       >
         <div
           data-kobe-composer-panel
+          data-running={running || undefined}
           data-dragging={dragging || undefined}
           onDragOver={onDragOver}
           onDragLeave={() => setDragging(false)}
