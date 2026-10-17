@@ -56,7 +56,10 @@ npx playwright test consoles --update-snapshots=all   # baseline, before a page'
 npx playwright test consoles                          # compare later; diffs in test-results/
 ```
 
-Baselines land in `console-shots/<theme>/<page>.png` (gitignored: they show deployment data).
+Baselines land in `console-shots/<platform>/<theme|mobile>/<page>.png` (gitignored: they show
+deployment data); take and compare them on the same platform (the Playwright container, or the
+Mac). Besides light and dark at 1280 px, a phone-width pass (390 px) covers the folded nav, a
+table and a form. A page that fails to load is reported at the end without stopping the rest.
 
 ## What you get
 
