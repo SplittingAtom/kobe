@@ -43,6 +43,13 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Console sections (KOBE-291)
+
+`console-sections.spec.ts` opens the Site audit log (chain status, a category filter and Clear),
+Site backup and restore, and the Team inventory, and checks none of them is a "coming soon"
+placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
+of the active team: `npx playwright test console-sections`.
+
 ## Console screenshots (KOBE-294)
 
 `consoles.spec.ts` screenshots every Site console, Team console and My-area page in light and dark

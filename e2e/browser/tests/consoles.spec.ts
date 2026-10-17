@@ -20,8 +20,14 @@ const THEMES = ["light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
 const THEME_COOKIE = "kobe-theme";
 
-/** Pages outside the consoles' navigation. */
+/**
+ * Pages outside the consoles' navigation, and sections shot by name so a change to the nav can't
+ * drop them: the three KOBE-291 built (no baseline yet: take one with --update-snapshots).
+ */
 const FIXED_PAGES = [
+  "/admin/site/audit",
+  "/admin/site/backup",
+  "/admin/team/inventory",
   "/admin",
   "/admin/site",
   "/admin/team",
@@ -74,6 +80,9 @@ const MOBILE_PAGES = [
   "/admin/team",
   "/admin/team/invites",
   "/admin/team/members",
+  // Wide tables and the audit filters (KOBE-291).
+  "/admin/site/audit",
+  "/admin/team/inventory",
   "/me/agents",
 ] as const;
 
