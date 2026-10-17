@@ -75,6 +75,20 @@ const toolRule = {
   /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
+  /** User rules (KOBE-289): the remember scope, and the thread or run a bound rule holds in. */
+  rememberScope: z.enum(["thread", "today", "run", "day", "month", "forever"]).optional(),
+  threadId: id.optional(),
+  runId: id.optional(),
+};
+
+/** Admin limits on remembered approvals (KOBE-289): the site floor's or a team's. */
+const rememberLimits = {
+  scope: z.enum(["site", "team"]),
+  scopes: z.array(z.enum(["thread", "today", "run", "day", "month", "forever"])).max(6),
+  maxDurationSeconds: z.number().int().positive().nullable(),
+  mcpTools: z.boolean(),
+  exactOnly: z.boolean(),
+  approveAll: z.boolean(),
 };
 
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
@@ -340,6 +354,20 @@ export const AUDIT_EVENTS = {
   "policy.rule.updated": event("any", toolRule),
   /** Includes a member revoking their own remember-rule (scope `user`). */
   "policy.rule.deleted": event("any", toolRule),
+  /**
+   * A member's remembered approval let a call run without asking (KOBE-289), at the sandbox's
+   * policy check or the MCP proxy's: one row per call, naming the rule. Never the input.
+   */
+  "policy.rule.applied": event("team", {
+    ruleId: id,
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    rememberScope: z.enum(["thread", "today", "run", "day", "month", "forever"]),
+    enforcementPoint: z.enum(["sandbox", "mcp_proxy"]),
+  }),
+  /** The site floor's or a team's limits on remembered approvals were saved (KOBE-289). */
+  "policy.remember_limits.updated": event("any", rememberLimits),
   "policy.settings.updated": event("site", {
     setting: z.enum(["prompt_sandbox_writes"]),
     value: z.boolean(),
@@ -599,6 +627,8 @@ export const AUDIT_EVENTS = {
     risk: z.enum(["read", "write", "destructive"]).optional(),
     approvalId: id.optional(),
     approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
+    /** The member's remembered approval that allowed it (KOBE-289). */
+    ruleId: id.optional(),
   }),
 
   /**
@@ -936,6 +966,8 @@ export const AUDIT_EVENTS = {
     decision: z.enum(["allow", "deny"]),
     remember: z.boolean(),
     ruleId: id.optional(),
+    /** Allowed with "Approve all waiting" (KOBE-289): one row per approval all the same. */
+    approveAll: z.boolean().optional(),
   }),
   /** A pending approval ended without a decision: TTL (D29, 1 h) or its run ended (system). */
   "approval.expired": event("team", {

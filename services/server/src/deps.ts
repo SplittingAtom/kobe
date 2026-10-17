@@ -299,7 +299,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  // One policy engine for both enforcement points (D29): the sandbox's policy.check and the MCP
+  // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
+  // Approvals judge remember choices by the same registry (KOBE-289).
+  const mcpCatalog = createDbMcpCatalog(database.db);
+  const toolRegistry = createToolRegistry(mcpCatalog);
   const approvals = new ApprovalService({
+    registry: toolRegistry,
     ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
       ? {}
       : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
@@ -311,10 +317,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // orchestrator through this late binding.
   const late: { runs?: ServerRunOrchestrator } = {};
   const extraHooks = options.sandboxWire?.hooks;
-  // One policy engine for both enforcement points (D29): the sandbox's policy.check and the MCP
-  // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
-  const mcpCatalog = createDbMcpCatalog(database.db);
-  const toolRegistry = createToolRegistry(mcpCatalog);
   const policySources = {
     rules: createDbRuleSource(database.db),
     settings: createDbSettingsSource(database.db),

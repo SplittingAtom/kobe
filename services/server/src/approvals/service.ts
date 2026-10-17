@@ -1,11 +1,20 @@
-import { APPROVAL_TTL_MS, type ActorContext, type ApprovalResolutionBody } from "@kobe/protocol";
+import {
+  APPROVAL_TTL_MS,
+  type ActorContext,
+  type ApprovalResolutionBody,
+  type ApproveAllBody,
+  type ToolRegistry,
+} from "@kobe/protocol";
 import type { KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import { logger as rootLogger } from "../logger.js";
+import { createToolRegistry } from "../policy/registry.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { ApprovalBrokerImpl } from "./broker.js";
 import type { ApprovalContext, ApprovalRunHooks } from "./context.js";
+import { approveAll } from "./approve-all.js";
 import { decideApproval, getApproval, listMyApprovals } from "./decide.js";
+import { rememberOptions, type RememberOptionsView } from "./remember-options.js";
 import { sweepExpired } from "./expiry.js";
 import { expireAborted } from "./expiry.js";
 import type { ApprovalKeyring } from "./keys.js";
@@ -28,6 +37,8 @@ export interface ApprovalServiceOptions {
   readonly runMaxEvents?: number;
   /** Where approvals log (default: the server logger's `approvals` child; tests read it). */
   readonly log?: Logger;
+  /** The server's tool registry (default: built-in tools only; the server passes its own). */
+  readonly registry?: ToolRegistry;
 }
 
 /**
@@ -54,6 +65,7 @@ export class ApprovalService {
       hooks: this.#hooks,
       runMaxEvents: options.runMaxEvents ?? WIRE_DEFAULTS.runMaxEvents,
       throttle: new AuditThrottle(),
+      registry: options.registry ?? createToolRegistry(),
     };
     this.#sweepMs = options.sweepMs ?? 30_000;
     this.broker = new ApprovalBrokerImpl(this.#ctx, { pollMs: options.pollMs ?? 2_000 });
@@ -82,6 +94,16 @@ export class ApprovalService {
     body: ApprovalResolutionBody,
   ): Promise<ApprovalView> {
     return decideApproval(this.#ctx, actor, approvalId, body);
+  }
+
+  /** "Approve all waiting" (KOBE-289): every listed pending approval of one run, each signed. */
+  approveAll(actor: ActorContext, body: ApproveAllBody): Promise<ApprovalView[]> {
+    return approveAll(this.#ctx, actor, body);
+  }
+
+  /** What the card may offer for one pending approval (KOBE-289): the server's own judgement. */
+  rememberOptions(actor: ActorContext, approvalId: string): Promise<RememberOptionsView> {
+    return rememberOptions(this.#ctx, actor, approvalId);
   }
 
   get(actor: ActorContext, approvalId: string): Promise<ApprovalView> {

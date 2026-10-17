@@ -63,7 +63,10 @@ describe("remember limits", () => {
   });
 
   it("tightening takes the stricter value of every field", () => {
-    const site = limits({ scopes: ["thread", "run", "day", "forever"], max_duration_seconds: 7200 });
+    const site = limits({
+      scopes: ["thread", "run", "day", "forever"],
+      max_duration_seconds: 7200,
+    });
     const team = limits({
       scopes: ["thread", "today", "day"],
       max_duration_seconds: null,

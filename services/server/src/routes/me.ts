@@ -1,7 +1,13 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { eq, sql, users } from "@kobe/db";
-import { readUiPreferences, uiPreferencesSchema, UI_PREFERENCES_MAX_BODY } from "@kobe/protocol";
+import {
+  readUiPreferences,
+  scheduleTimezoneSchema,
+  uiPreferencesSchema,
+  UI_PREFERENCES_MAX_BODY,
+} from "@kobe/protocol";
+import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -64,5 +70,29 @@ export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
       }
     },
   );
+  /**
+   * `GET/PUT /v1/me/time-zone` (KOBE-289): the member's IANA time zone, kept on their own `users`
+   * row. The server ends "until end of today" approvals at midnight there; it never takes a time
+   * zone from an approval request. Null = UTC. Only ever `WHERE id = <session user>`.
+   */
+  app.get("/time-zone", async (c) => {
+    const [row] = await db
+      .select({ timeZone: users.timeZone })
+      .from(users)
+      .where(eq(users.id, c.get("user").id));
+    return c.json({ time_zone: row?.timeZone ?? null });
+  });
+
+  app.put("/time-zone", async (c) => {
+    const body = await parseBody(c, timeZoneBodySchema);
+    if (!body) return invalidRequest(c, "Send time_zone: an IANA zone name such as Europe/Berlin.");
+    await db
+      .update(users)
+      .set({ timeZone: body.time_zone })
+      .where(eq(users.id, c.get("user").id));
+    return c.json({ time_zone: body.time_zone });
+  });
   return app;
 }
+
+const timeZoneBodySchema = z.strictObject({ time_zone: scheduleTimezoneSchema.nullable() });

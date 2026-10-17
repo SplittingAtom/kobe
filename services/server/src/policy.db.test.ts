@@ -5,6 +5,7 @@ import { withTeam } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import {
   builtinToolDescriptor,
+  DEFAULT_REMEMBER_LIMITS,
   policyDecisionSchema,
   type PolicyDecision,
   type PolicyEngine,
@@ -22,7 +23,12 @@ import {
 import { TestBrowser, type TestResponse } from "./testing/browser.js";
 import { MemoryMailer } from "./testing/mailer.js";
 import { runWithAuditContext } from "./audit/context.js";
-import { SAMPLE_INPUTS, policyInput, type InputOptions } from "./testing/policy-fixtures.js";
+import {
+  SAMPLE_INPUTS,
+  mcpTool,
+  policyInput,
+  type InputOptions,
+} from "./testing/policy-fixtures.js";
 
 const PUBLIC_URL = "http://kobe.test";
 const PASSWORD = "a long enough password";
@@ -401,13 +407,30 @@ describe("D29 order end to end (rules from Postgres)", () => {
     for (const r of created.splice(0)) await as[r.by].delete(`${r.path}/${r.id}`);
   }
 
-  async function remember(who: Person, teamId: string, tool: string, rememberRule: object) {
+  async function remember(
+    who: Person,
+    teamId: string,
+    tool: string,
+    rememberRule: object,
+    input: Record<string, unknown> = {},
+  ) {
+    const descriptor =
+      builtinToolDescriptor(tool) ??
+      mcpTool(tool, tool.includes("delete") ? "destructive" : "write");
     return withTeam(deps.database.db, teamId, (tx) =>
       insertUserAllowRule(tx, {
         teamId,
         userId: ids[who],
-        approvedTool: tool,
-        remember: rememberRule,
+        // Not stored for these scopes (no thread or run binding).
+        call: {
+          tool: descriptor,
+          input: input as never,
+          threadId: randomUUID(),
+          runId: randomUUID(),
+        },
+        remember: { scope: "forever", ...rememberRule },
+        limits: DEFAULT_REMEMBER_LIMITS,
+        timeZone: null,
         now: new Date(),
         actor: { kind: "user", id: ids[who] },
       }),
@@ -460,10 +483,10 @@ describe("D29 order end to end (rules from Postgres)", () => {
     const mine = await as.erin.get("/v1/team/policy/my-rules");
     expect(mine.status).toBe(200);
     const rule = mine.json.rules.find((r: { tool_glob: string }) => r.tool_glob === "share_file");
-    expect(rule).toMatchObject({ scope: "user", scope_ref: ids.erin, effect: "allow" });
+    expect(rule).toMatchObject({ user_id: ids.erin, remember_scope: "forever" });
     expect(
       (await as.bob.get("/v1/team/policy/my-rules")).json.rules.map(
-        (r: { scope_ref: string }) => r.scope_ref,
+        (r: { user_id: string }) => r.user_id,
       ),
     ).not.toContain(ids.erin);
     expect(status(await as.bob.delete(`/v1/team/policy/my-rules/${rule.id}`))).toBe(404);
@@ -488,14 +511,22 @@ describe("D29 order end to end (rules from Postgres)", () => {
       ok: false,
       error: "invalid_rule",
     });
-    const timed = await remember("bob", finance, "edit", {
-      tool_glob: "edit",
-      arg_pattern: { "/path": "/workspace/*" },
-      expires_in: 3600,
+    // KOBE-289: destructive tools are never remembered, whatever the client asks.
+    expect(await remember("bob", finance, "bash", { tool_glob: "bash" })).toEqual({
+      ok: false,
+      error: "remember_not_allowed",
     });
-    expect(timed.ok && timed.rule.expires_at).toBeTruthy();
+    const edits = [{ oldText: "a", newText: "b" }];
+    const timed = await remember(
+      "bob",
+      finance,
+      "edit",
+      { tool_glob: "edit", scope: "day", exact: true },
+      { path: "x", edits },
+    );
+    expect(timed.ok && timed.rule.arg_pattern).toEqual({ "/path": "/workspace/x" });
     expect(timed.ok && Date.parse(timed.rule.expires_at ?? "") - Date.now()).toBeGreaterThan(
-      3500_000,
+      86_000_000,
     );
   });
 
@@ -509,7 +540,7 @@ describe("D29 order end to end (rules from Postgres)", () => {
   });
 
   it("refuses a remember-rule for someone outside the team", async () => {
-    await expect(remember("dave", finance, "bash", { tool_glob: "bash" })).rejects.toThrow();
+    await expect(remember("dave", finance, "edit", { tool_glob: "edit" })).rejects.toThrow();
   });
 
   it("ignores expired rules from Postgres", async () => {

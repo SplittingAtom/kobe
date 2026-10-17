@@ -112,7 +112,9 @@ describe("policy contract", () => {
         remember: { tool_glob: "bash", scope: "day", arg_pattern: { "/command": "git status*" } },
       }),
     ).toBe(false);
-    expect(ok({ decision: "allow", remember: { tool_glob: "bash", expires_in: 3600 } })).toBe(false);
+    expect(ok({ decision: "allow", remember: { tool_glob: "bash", expires_in: 3600 } })).toBe(
+      false,
+    );
     expect(ok({ decision: "approve" })).toBe(false);
     expect(ok({ decision: "allow", remember: { tool_glob: "trailing\\", scope: "day" } })).toBe(
       false,

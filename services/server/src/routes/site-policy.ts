@@ -11,12 +11,18 @@ import {
   updateSiteRule,
   writePromptSandboxWrites,
 } from "../policy/rule-store.js";
+import { rememberLimitsSchema } from "@kobe/protocol";
+import {
+  readSiteRememberLimits,
+  writeSiteRememberLimits,
+} from "../policy/remember-limits-store.js";
 import { siteRuleBodySchema, SCOPE_LIMITS, policySettingsBodySchema } from "../policy/schemas.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 /**
  * The site policy floor (`/v1/site/policy`, spec D6, D8, D29): deny and ask rules that bind
- * every team, and the site's policy switches. Site Owner/Admins only.
+ * every team, and the site's policy switches. Site Owner/Admins only. KOBE-289: the floor's limits
+ * on remembered approvals (`/remember-limits`), which bind every team (teams can only tighten).
  */
 export function sitePolicyRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -56,6 +62,20 @@ export function sitePolicyRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     if (!body) return invalidRequest(c, "Send { promptSandboxWrites: boolean }.");
     await writePromptSandboxWrites(db, body.promptSandboxWrites);
     return c.json({ promptSandboxWrites: body.promptSandboxWrites });
+  });
+
+  app.get("/remember-limits", async (c) => c.json({ limits: await readSiteRememberLimits(db) }));
+
+  app.put("/remember-limits", async (c) => {
+    const body = await parseBody(c, rememberLimitsSchema);
+    if (!body) {
+      return invalidRequest(
+        c,
+        "Send scopes, max_duration_seconds, mcp_tools, exact_only and approve_all.",
+      );
+    }
+    await writeSiteRememberLimits(db, body);
+    return c.json({ limits: body });
   });
 
   return app;

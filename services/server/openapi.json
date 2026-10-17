@@ -3660,6 +3660,187 @@
         }
       }
     },
+    "/v1/approvals/approve-all": {
+      "post": {
+        "operationId": "approveAllWaiting",
+        "summary": "Allow every listed pending approval of one run (only the run's user)",
+        "description": "Each approval is signed over its own (run, tool call, tool, canonical input) and audited on its own. Refused as a whole when the team's limits forbid it, or any is destructive or open-world, not pending, or not of this run.",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAllBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The approvals, now allowed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`approve_all_not_allowed`: the team's limits or a tool's risk.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, another run, user or team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`approval_resolved`, `approval_expired`, `run_not_active` or `approval_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`approvals_unavailable`: no approval key is configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/remember": {
+      "get": {
+        "operationId": "getApprovalRememberOptions",
+        "summary": "What the approval card may offer for a pending approval",
+        "description": "The remember scopes the team's limits allow for this tool with the expiry the server would set now, the exact-action pattern derived from the stored canonical input, and whether Approve all waiting is offered for its run. The decisions check all of it again.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The options.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RememberOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the id is not a uuid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/approvals/{id}": {
       "get": {
         "operationId": "getApproval",
@@ -3741,7 +3922,7 @@
       "post": {
         "operationId": "decideApproval",
         "summary": "Allow or deny a pending approval (only the run's user)",
-        "description": "Allow signs HMAC(team, run, tool_call_id, tool, token expiry, canonical input) so exactly the approved input runs, once. `remember` (allow only) writes a user allow rule for exactly this tool (optional arg pattern and expiry); it never lifts an ask or deny rule. Pending approvals expire after 1 hour; the run then ends.",
+        "description": "Allow signs HMAC(team, run, tool_call_id, tool, token expiry, canonical input) so exactly the approved input runs, once. `remember` (allow only) writes a user allow rule for exactly this tool with a scope (this conversation, until end of today, this run, 1 day, 30 days, until revoked) and optionally only this exact action; the server computes the expiry and the pattern and applies the team's remember limits. It never lifts an ask or deny rule, nor applies to scheduled or auto runs. Pending approvals expire after 1 hour; the run then ends.",
         "parameters": [
           {
             "name": "id",
@@ -3785,7 +3966,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`, `invalid_remember` (remember with deny, bad rule) or `glob_too_broad`.",
+            "description": "`invalid_request`, `invalid_remember` (remember with deny, bad rule), `glob_too_broad` or `exact_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3805,7 +3986,7 @@
             }
           },
           "403": {
-            "description": "`not_a_team_member` or `forbidden`.",
+            "description": "`not_a_team_member`, `forbidden` or `remember_not_allowed` (destructive tool, or the team's limits).",
             "content": {
               "application/json": {
                 "schema": {
@@ -8268,30 +8449,193 @@
                 "minLength": 1,
                 "maxLength": 256
               },
-              "arg_pattern": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string",
-                  "maxLength": 512,
-                  "pattern": "^(\\/([^~/]|~[01])*)+$"
-                },
-                "additionalProperties": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
+              "scope": {
+                "type": "string",
+                "enum": ["thread", "today", "run", "day", "month", "forever"]
               },
-              "expires_in": {
-                "type": "integer",
-                "exclusiveMinimum": 0,
-                "maximum": 31622400
+              "exact": {
+                "default": false,
+                "type": "boolean"
               }
             },
-            "required": ["tool_glob"],
+            "required": ["tool_glob", "scope"],
             "additionalProperties": false
           }
         },
         "required": ["decision"],
+        "additionalProperties": false
+      },
+      "ApproveAllBody": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "approval_ids": {
+            "minItems": 2,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f-]+$"
+                }
+              ]
+            }
+          }
+        },
+        "required": ["run_id", "approval_ids"],
+        "additionalProperties": false
+      },
+      "RememberOptions": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "can_remember": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": ["string", "null"]
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": ["thread", "today", "run", "day", "month", "forever"]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["scope", "label", "expires_at"],
+              "additionalProperties": false
+            }
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "exact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "arg_pattern": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "pattern": "^(\\/([^~/]|~[01])*)+$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                },
+                "required": ["arg_pattern"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exact_only": {
+            "type": "boolean"
+          },
+          "approve_all": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "approval_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": ["approval_ids"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approve_all_reason": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "approval_id",
+          "run_id",
+          "can_remember",
+          "reason",
+          "choices",
+          "time_zone",
+          "exact",
+          "exact_only",
+          "approve_all",
+          "approve_all_reason"
+        ],
         "additionalProperties": false
       },
       "ThreadUsage": {
