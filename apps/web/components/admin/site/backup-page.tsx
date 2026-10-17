@@ -178,7 +178,7 @@ function RestoreSection() {
     <Section
       id="backup-restore-heading"
       title="Restore"
-      description={`Into a fresh install of the same Kobe version, never over a running site. Full details: ${DOCS}.`}
+      description={`Into a newly installed site on the same Kobe version, never over a running site. Full details: ${DOCS}.`}
     >
       <Steps>
         <li>
