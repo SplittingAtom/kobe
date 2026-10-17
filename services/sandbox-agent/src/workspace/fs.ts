@@ -6,6 +6,7 @@ import {
   mkdir,
   open,
   opendir,
+  realpath,
   rename,
   rm,
   rmdir,
@@ -374,7 +375,7 @@ export async function writeFileAtomic(
   }
 }
 
-/** Removes a file (never a directory); missing is fine. Empty parents are left in place. */
+/** Removes a file (never a directory); missing is fine. Its caller prunes emptied parents. */
 export async function removeFile(root: string, rel: string): Promise<void> {
   if (!(await parentsAreDirs(root, rel))) return;
   const abs = path.join(root, rel);
@@ -399,6 +400,10 @@ export async function pruneEmptyParents(root: string, rel: string): Promise<numb
     if (isServerOwnedPath(`${dir}/`) || isExcludedPath(`${dir}/`)) return removed;
     if (!(await parentsAreDirs(root, `${dir}/x`))) return removed;
     try {
+      // Right before the rmdir: the folder is really where it should be (a swapped link in
+      // between would make it name a folder elsewhere, review N1).
+      const real = await realpath(path.join(root, dir));
+      if (real !== path.join(await realpath(root), dir)) return removed;
       await rmdir(path.join(root, dir));
       removed += 1;
     } catch {

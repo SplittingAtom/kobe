@@ -129,7 +129,8 @@ describe("workspace sync (agent)", () => {
     expect(
       Math.abs((await stat(path.join(second, "report.md"))).mtimeMs - mtime),
     ).toBeLessThanOrEqual(1);
-    expect(await exists(second, ".kobe")).toBe(false);
+    // Session files are never restored (only the agent's own sync state lives there, KOBE-304).
+    expect(await exists(second, ".kobe/sessions")).toBe(false);
     expect(server.reports.at(-1)).toMatchObject({ mode: "full", files: 3 });
     // Nothing to push afterwards: restored files match their copy without being read again.
     expect((await restored.push()).changes).toBe(0);
@@ -308,7 +309,7 @@ describe("workspace sync (agent)", () => {
     expect(server.livePaths()).toEqual(["edited.txt", "kept.txt", "new.txt"]);
   });
 
-  it("follows a server move: new paths arrive, old files and their empty folders go, edits stay (KOBE-304)", async () => {
+  it("without a journalled move (an older server) the pull alone converges: download, drop, edits stay (KOBE-304)", async () => {
     const root = await volume();
     await put(root, "reports/2026/q1.csv", "q1");
     await put(root, "reports/2026/q2.csv", "q2");
@@ -337,6 +338,86 @@ describe("workspace sync (agent)", () => {
       "keep/empty-on-purpose/.gitkeep",
       "reports/notes.md",
     ]);
+  });
+
+  const downloads = () => server.requests.filter((r) => r.startsWith("GET /file")).length;
+
+  it("replays a server move as a local rename of the whole tree: nothing downloaded, nothing left behind (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "app/src/main.py", "print(1)");
+    await put(root, "app/README.md", "# App");
+    const sync = await started(root);
+    await sync.push();
+    // Never synced: caches, a virtualenv, a new file, and an unsynced edit of a synced one.
+    await put(root, "app/node_modules/dep/index.js", "dep");
+    await put(root, "app/.venv/bin/python", "py");
+    await put(root, "app/src/new.py", "new, not pushed yet");
+    await put(root, "app/README.md", "# App, edited before the move");
+    server.serverMove("app", "old/app");
+    const before = downloads();
+    await sync.pull();
+    expect(downloads()).toBe(before); // a rename, not a download
+    expect(await exists(root, "app")).toBe(false);
+    expect(await text(root, "old/app/src/main.py")).toBe("print(1)");
+    expect(await text(root, "old/app/node_modules/dep/index.js")).toBe("dep");
+    expect(await text(root, "old/app/.venv/bin/python")).toBe("py");
+    expect(await text(root, "old/app/src/new.py")).toBe("new, not pushed yet");
+    expect(await text(root, "old/app/README.md")).toBe("# App, edited before the move");
+    // The edit and the new file are pushed under the new path, onto the moved rows.
+    await sync.push();
+    expect(server.livePaths()).toEqual([
+      "old/app/README.md",
+      "old/app/src/main.py",
+      "old/app/src/new.py",
+    ]);
+    expect(server.content("old/app/README.md")).toBe("# App, edited before the move");
+    // A replay of the same move (the next pull, a restart) is a no-op.
+    await sync.pull();
+    expect(await text(root, "old/app/src/main.py")).toBe("print(1)");
+    expect(downloads()).toBe(before);
+  });
+
+  it("renames a single file, and leaves no emptied folder behind", async () => {
+    const root = await volume();
+    await put(root, "a/b/report.md", "r");
+    const sync = await started(root);
+    await sync.push();
+    server.serverMove("a/b/report.md", "report-final.md");
+    await sync.pull();
+    expect(await text(root, "report-final.md")).toBe("r");
+    expect(await exists(root, "a")).toBe(false);
+  });
+
+  it("refuses to rename onto a local file at the destination: the pull converges and keeps both", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "server copy");
+    const sync = await started(root);
+    await sync.push();
+    await put(root, "b.txt", "local, never pushed");
+    server.serverMove("a.txt", "b.txt");
+    await sync.pull();
+    expect(await text(root, "b.txt")).toBe("server copy");
+    const names = await readdir(root);
+    const copy = names.find((n) => n.startsWith("b.conflict-"));
+    expect(copy).toBeDefined();
+    expect(await text(root, copy ?? "")).toBe("local, never pushed");
+    expect(await exists(root, "a.txt")).toBe(false);
+  });
+
+  it("a hibernated sandbox replays the moves made while it slept before its restore (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "data/big.csv", "x,y\n".repeat(1000));
+    const first = await started(root);
+    await first.push();
+    await put(root, "data/node_modules/cache.bin", "cache");
+    await first.flush(5_000);
+    server.serverMove("data", "archive/data");
+    const before = downloads();
+    const woken = await started(root);
+    expect(downloads()).toBe(before);
+    expect(await exists(root, "data")).toBe(false);
+    expect(await text(root, "archive/data/node_modules/cache.bin")).toBe("cache");
+    expect(await woken.push()).toMatchObject({ changes: 0 });
   });
 
   it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {

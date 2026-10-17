@@ -10,6 +10,7 @@ import {
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_TRACE_SPANS,
+  CAPABILITY_WORKSPACE_MOVES,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -102,6 +103,11 @@ export interface WorkspaceHooks {
    */
   pushPath?(rel: string): Promise<PushedFile>;
   flush(deadlineMs: number): Promise<unknown>;
+  /**
+   * The member moved files (`workspace.moved`, KOBE-304): replay the server's moves as local
+   * renames now. Present: the agent announces `workspace_moves`.
+   */
+  movedOnServer?(): void;
 }
 
 /** The final workspace push before the process exits (inside the pod's 30 s grace period). */
@@ -361,6 +367,8 @@ export class Agent {
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
       // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.
       CAPABILITY_TRACE_SPANS,
+      // Server moves replayed as local renames (KOBE-304).
+      ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
     ];
     return {
       v: 1,
@@ -459,6 +467,9 @@ export class Agent {
         for (const text of this.#outbox.resend(frame.run_id, frame.from_seq)) {
           this.#wire.sendText(text);
         }
+        return;
+      case "workspace.moved":
+        this.#deps.workspace?.movedOnServer?.();
         return;
       case "shutdown":
         this.#deps.logger.info({ reason: frame.reason }, "server requested shutdown");
