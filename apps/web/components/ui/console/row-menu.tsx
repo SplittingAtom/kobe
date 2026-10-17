@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { cn } from "../../../lib/utils";
 import { consolePortalContainer } from "../chat-portal";
 import { Button } from "./button";
+import { consoleMain, focusWhenEnabled } from "./focus-return";
 
 export interface RowMenuItem {
   /** Stable key and `data-action` of the item. */
@@ -13,7 +14,8 @@ export interface RowMenuItem {
   readonly label: string;
   /**
    * Runs once the menu has closed, with the ⋯ button (focused again) as the asking control: pass
-   * it to `useConfirm()` so the dialog gives focus back to it.
+   * it to `useConfirm()` so the dialog gives focus back to it. While `busy` disables the button,
+   * focus waits and returns to it when it is enabled again.
    */
   readonly onSelect: (trigger: HTMLElement | null) => void;
   /** Suspending, removing, revoking: shown in the danger colour. */
@@ -49,7 +51,14 @@ export function RowMenu({
   const [open, setOpen] = useState(false);
   if (items.length === 0) return null;
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+    <DropdownMenu.Root
+      open={open}
+      onOpenChange={(next) => {
+        // A choice from an earlier opening (its row re-rendered before the menu closed) never runs.
+        if (next) pending.current = null;
+        setOpen(next);
+      }}
+    >
       <DropdownMenu.Trigger asChild>
         <Button
           ref={trigger}
@@ -73,8 +82,12 @@ export function RowMenu({
             if (!item) return;
             pending.current = null;
             e.preventDefault();
-            trigger.current?.focus();
-            item.onSelect(trigger.current);
+            const button = trigger.current;
+            button?.focus();
+            item.onSelect(button);
+            // The action may disable the button while it runs (busy), which drops focus: back to
+            // it once it is enabled again (KOBE-296 S4).
+            if (button) focusWhenEnabled(button, consoleMain());
           }}
         >
           {items.map((item) => (

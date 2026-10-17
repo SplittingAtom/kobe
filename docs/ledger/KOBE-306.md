@@ -70,8 +70,28 @@
   compact dates (no year or seconds, one line, full tooltip), compact tokens, one named ⋯ button
   per row and no inline action buttons, the 10 headers and the owner/scope cell,
   `compactDateTime` year rule; suspend through the menu returns focus to the ⋯ button.
-- Checks (2026-10-17): `format:check`, `lint`, web `typecheck`, web tests 172 files / 1728 tests
+- Checks (2026-10-17): `format:check`, `lint`, web `typecheck`, web tests 172 files / 1728 tests (1729 after the review fixes)
   green, `next build` ok, e2e `tsc -p e2e/browser` ok. No new dependencies, no server change.
+
+## Review fixes (coordinator review, 2026-10-17)
+
+- **Focus after Export** (M1): the ⋯ button is disabled while its row exports, which drops focus.
+  `RowMenu` now hands the button to `focusWhenEnabled` (KOBE-296 S4) after running an item, so
+  focus returns to it once it is enabled again (unless the person moved on; 15 s at most). The S4
+  helpers moved from `confirm-dialog.tsx` to `components/ui/console/focus-return.ts`, shared.
+  Test: `row-menu.test.tsx` (fails without the fix).
+- **Full values for assistive tech** (M2): compact dates render the compact text `aria-hidden`
+  plus the full date, time and zone as visually hidden text; tokens likewise ("12.3M" shown,
+  "12,345,678 tokens" read). The `title` stays as a mouse hint. No focusable tooltip: it would
+  add two tab stops per row; sighted keyboard users see the compact value, screen readers get the
+  full one.
+- **Spec independent of data** (L6): the inventory browser test asserts layout at 1280 and 390 px
+  (page never scrolls sideways; the table fits or is its named scroll region; every ⋯ button can be
+  scrolled fully into view; dates one line with hidden full text; no inline action buttons), not
+  that the team's rows fit.
+- L4/L5: the export resets its busy row in `finally`; a menu choice left from an earlier opening
+  is cleared when the menu opens again. L3 (export refusal shown above the table, without the
+  agent's name) left as is: it is the table's single status line, as for Suspend.
 
 ## Acceptance criteria
 

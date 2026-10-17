@@ -124,8 +124,11 @@ function InventoryTable({
 
   async function exportToOrbit(agent: InventoryAgent, version: number) {
     setExportingId(agent.id);
-    await exporting.run(() => downloadOrbitExport(teamId, agent.id, agent.slug, version));
-    setExportingId(null);
+    try {
+      await exporting.run(() => downloadOrbitExport(teamId, agent.id, agent.slug, version));
+    } finally {
+      setExportingId(null);
+    }
   }
 
   /** The row's ⋯ menu: Export to Orbit (published, exportable), then Suspend or Reactivate. */
@@ -207,9 +210,7 @@ function InventoryTable({
                 {a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} compact />}
               </TableCell>
               <TableCell numeric>
-                <span title={`${a.tokens.toLocaleString("en-US")} tokens`}>
-                  {formatTokens(a.tokens)}
-                </span>
+                <TokenCount tokens={a.tokens} />
               </TableCell>
               <TableCell>
                 <ScheduleList schedules={a.schedules} />
@@ -248,6 +249,17 @@ function InventoryTable({
       )}
       {confirmDialog}
     </>
+  );
+}
+
+/** "12.3M" on screen; the exact count for screen readers and, as the tooltip, for a mouse. */
+function TokenCount({ tokens }: { readonly tokens: number }) {
+  const exact = `${tokens.toLocaleString("en-US")} tokens`;
+  return (
+    <span title={exact}>
+      <span aria-hidden>{formatTokens(tokens)}</span>
+      <span className="sr-only">{exact}</span>
+    </span>
   );
 }
 

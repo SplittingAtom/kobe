@@ -38,8 +38,8 @@ export function compactDateTime(date: Date, now: Date = new Date()): string {
 /**
  * A timestamp people can read, with the exact value for machines. `precise` shows seconds and
  * the time zone (the audit log, where times are compared with exports and other logs). `compact`
- * is for dense tables (KOBE-306): "Oct 17, 05:26" on one line, the full date, time and zone in
- * its tooltip.
+ * is for dense tables (KOBE-306): "Oct 17, 05:26" on one line; screen readers get the full date,
+ * time and zone instead (visually hidden text), and a mouse gets it as the tooltip.
  */
 export function DateTime({
   value,
@@ -54,13 +54,11 @@ export function DateTime({
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return <>—</>;
   if (compact) {
+    const full = date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" });
     return (
-      <time
-        dateTime={value}
-        title={date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" })}
-        className="whitespace-nowrap"
-      >
-        {compactDateTime(date)}
+      <time dateTime={value} title={full} className="whitespace-nowrap">
+        <span aria-hidden>{compactDateTime(date)}</span>
+        <span className="sr-only">{full}</span>
       </time>
     );
   }

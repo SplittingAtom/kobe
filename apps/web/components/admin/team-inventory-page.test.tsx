@@ -211,6 +211,10 @@ describe("Inventory: agents (KOBE-86, moved here by KOBE-291)", () => {
     renderTeam(<TeamInventoryPage />);
     await rowAction("Triage", "Export to Orbit");
     await waitFor(() => expect(downloads).toHaveBeenCalledOnce());
+    // The ⋯ button was busy (disabled) during the export: focus is back on it afterwards.
+    const menuButton = screen.getByRole("button", { name: "Actions for Triage" });
+    await waitFor(() => expect((menuButton as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(menuButton));
     expect(await rowActions("Draft")).toEqual(["Suspend"]);
     expect(await rowActions("Mine")).toEqual(["Suspend"]);
     expect(await rowActions("Old")).toEqual(["Export to Orbit", "Suspend"]);
@@ -272,17 +276,21 @@ describe("Inventory: a compact agent table (KOBE-306)", () => {
     for (const time of times) {
       const value = must(time.getAttribute("datetime"));
       const date = new Date(value);
-      expect(time.textContent).toBe(compactDateTime(date));
-      expect(time.textContent).not.toContain("2026");
-      expect(time.textContent).not.toContain(":37");
+      const full = date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" });
+      // On screen: compact, hidden from screen readers, which read the full value instead.
+      const shown = must(time.querySelector('[aria-hidden="true"]'));
+      expect(shown.textContent).toBe(compactDateTime(date));
+      expect(shown.textContent).not.toContain("2026");
+      expect(shown.textContent).not.toContain(":37");
+      expect(must(time.querySelector(".sr-only")).textContent).toBe(full);
+      expect(full).toContain("2026");
       expect(time.className).toContain("whitespace-nowrap");
-      expect(time.title).toBe(
-        date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" }),
-      );
-      expect(time.title).toContain("2026");
+      expect(time.title).toBe(full);
     }
-    // Tokens are compact too, the exact count in the tooltip.
-    expect(within(row).getByTitle("12,345,678 tokens").textContent).toBe("12.3M");
+    // Tokens are compact too; the exact count for screen readers and in the tooltip.
+    const tokens = within(row).getByTitle("12,345,678 tokens");
+    expect(must(tokens.querySelector('[aria-hidden="true"]')).textContent).toBe("12.3M");
+    expect(must(tokens.querySelector(".sr-only")).textContent).toBe("12,345,678 tokens");
   });
 
   it("puts each row's actions behind one named ⋯ button, with no inline action buttons", async () => {
