@@ -70,8 +70,10 @@ export const agentEvalCases = pgTable(
     unique("agent_eval_cases_feedback_unique").on(t.teamId, t.feedbackId),
     // The owner's review list and the eval gate's accepted set.
     index("agent_eval_cases_agent_idx").on(t.teamId, t.agentId, t.status, t.createdAt),
-    // The member's own cases (list, export, offboarding) and retention by age.
+    // The member's own cases (list, export, offboarding).
     index("agent_eval_cases_user_idx").on(t.teamId, t.userId, t.createdAt),
+    // Retention by age (KOBE-276 review N2).
+    index("agent_eval_cases_created_idx").on(t.teamId, t.createdAt),
     check("agent_eval_cases_scope", sql`${t.agentScope} IN ('team', 'personal')`),
     check("agent_eval_cases_status", sql`${t.status} IN (${textList(AGENT_EVAL_CASE_STATUSES)})`),
     check("agent_eval_cases_version", sql`${t.agentVersion} IS NULL OR ${t.agentVersion} > 0`),
