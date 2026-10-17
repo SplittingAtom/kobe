@@ -10,9 +10,9 @@ import {
   type MemoryVersionSource,
 } from "../../lib/memory/api";
 import { visible } from "../../lib/security/visible";
-import { DateTime, ResourceView, confirmed } from "../admin/parts";
+import { DateTime, ResourceView } from "../admin/parts";
 import { useResource, type Mutation } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import { Button, Card, Textarea, eventTrigger, useConfirm } from "../ui/console";
 
 /** Provenance of a version, from the API's `source`. */
 const WRITTEN_BY: Record<MemoryVersionSource, string> = {
@@ -42,7 +42,7 @@ export function MemoryDocView({
 }) {
   const { state, reload } = useResource(() => api.get(id));
   return (
-    <section aria-label="Memory file" className={styles.form}>
+    <section aria-label="Memory file" className="mt-6">
       <ResourceView state={state} label="file">
         {(doc) => (
           <Loaded
@@ -79,6 +79,7 @@ function Loaded({
   readonly onGone: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [confirm, confirmDialog] = useConfirm();
   const current = doc.versions.find((v) => v.version === doc.currentVersion);
   const shown = visible(doc.path);
 
@@ -90,8 +91,16 @@ function Loaded({
     );
     if (done) onChanged();
   }
-  async function remove() {
-    if (!confirmed(`Delete ${shown}? You can restore it from the history of a new write.`)) return;
+  async function remove(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Delete ${shown}?`,
+        description: "You can restore it from the history of a new write.",
+        confirmLabel: "Delete",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       async () => explain(await api.remove(doc.id)),
       () => "Deleted.",
@@ -107,9 +116,9 @@ function Loaded({
   }
 
   return (
-    <>
-      <h2>{shown}</h2>
-      <p className={styles.hint}>
+    <Card>
+      <h2 className="m-0 font-mono text-lg font-semibold break-all">{shown}</h2>
+      <p className="m-0 mt-1 text-sm text-console-muted">
         Current version {doc.currentVersion}
         {current ? `, ${WRITTEN_BY[current.source]}` : ""}. Updated{" "}
         <DateTime value={doc.updatedAt} />.
@@ -118,53 +127,62 @@ function Loaded({
         <>
           <pre
             aria-label="Memory content"
-            style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+            className="my-3 rounded-md border border-console-border bg-console-panel p-3 text-sm [overflow-wrap:anywhere] whitespace-pre-wrap"
           >
             {visible(doc.content)}
           </pre>
           {hasHidden(doc.content) && (
-            <p className={styles.hint}>
+            <p className="text-sm text-console-muted">
               This file contains hidden characters, shown above as \uXXXX escapes.
             </p>
           )}
-          <p>
-            <button type="button" disabled={mutation.pending} onClick={() => setDraft(doc.content)}>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={mutation.pending} onClick={() => setDraft(doc.content)}>
               Edit
-            </button>{" "}
-            <button type="button" disabled={mutation.pending} onClick={() => void remove()}>
+            </Button>
+            <Button
+              variant="danger"
+              disabled={mutation.pending}
+              onClick={(e) => void remove(eventTrigger(e))}
+            >
               Delete
-            </button>
-          </p>
+            </Button>
+          </div>
         </>
       ) : (
         <form
           aria-label={`Editing ${shown}`}
+          className="my-3"
           onSubmit={(e) => {
             e.preventDefault();
             void save();
           }}
         >
-          <label>
-            <textarea
-              aria-label={`Edit ${shown}`}
-              rows={12}
-              spellCheck={false}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              style={{ width: "100%", fontFamily: "monospace" }}
-            />
-          </label>
+          <Textarea
+            aria-label={`Edit ${shown}`}
+            rows={12}
+            spellCheck={false}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="w-full font-mono"
+          />
           {hasHidden(draft) && (
-            <p className={styles.hint}>
+            <p className="text-sm text-console-muted">
               This text contains hidden characters. They are kept when you save.
             </p>
           )}
-          <button type="submit" disabled={mutation.pending || draft === doc.content}>
-            Save
-          </button>{" "}
-          <button type="button" disabled={mutation.pending} onClick={() => setDraft(null)}>
-            Cancel
-          </button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={mutation.pending || draft === doc.content}
+            >
+              Save
+            </Button>
+            <Button disabled={mutation.pending} onClick={() => setDraft(null)}>
+              Cancel
+            </Button>
+          </div>
         </form>
       )}
       <History
@@ -173,7 +191,8 @@ function Loaded({
         pending={mutation.pending}
         onRestore={(v) => void restore(v)}
       />
-    </>
+      {confirmDialog}
+    </Card>
   );
 }
 
@@ -201,23 +220,23 @@ function History({
 }) {
   return (
     <>
-      <h3>History</h3>
-      <ul aria-label="Version history">
+      <h3 className="m-0 mt-4 mb-2 text-base font-semibold">History</h3>
+      <ul aria-label="Version history" className="m-0 flex list-none flex-col gap-1 p-0">
         {versions.map((v) => (
-          <li key={v.version}>
+          <li key={v.version} className="flex flex-wrap items-center gap-x-2 text-sm">
             Version {v.version}, {WRITTEN_BY[v.source]}, <DateTime value={v.createdAt} />,{" "}
             {v.sizeBytes} bytes{" "}
             {v.version === current ? (
               "(current)"
             ) : (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 disabled={pending}
                 aria-label={`Restore version ${v.version}`}
                 onClick={() => onRestore(v.version)}
               >
                 Restore
-              </button>
+              </Button>
             )}
           </li>
         ))}

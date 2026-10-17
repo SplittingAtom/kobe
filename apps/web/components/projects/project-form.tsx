@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import type { MembersMode, Project, ProjectAgent, ProjectInput } from "../../lib/projects/api";
-import styles from "../admin/admin.module.css";
+import { Button, Field, FormRow, Select, TextInput, Textarea } from "../ui/console";
 
 /** Mirrors `PROJECT_*` in `@kobe/protocol` (the server checks again). */
 export const NAME_MAX = 100;
@@ -62,82 +62,88 @@ export function ProjectForm({
   }
 
   return (
-    <form className={styles.form} aria-label="Project settings" onSubmit={submit}>
-      <label>
-        Name
-        <input
-          value={draft.name}
-          maxLength={NAME_MAX}
-          required
-          readOnly={disabled}
-          onChange={(e) => set({ name: e.target.value })}
-        />
-      </label>
-      <label>
-        Description
-        <input
-          value={draft.description}
-          maxLength={DESCRIPTION_MAX}
-          readOnly={disabled}
-          onChange={(e) => set({ description: e.target.value })}
-        />
-      </label>
-      <label style={{ flexBasis: "100%" }}>
-        Instructions
-        <textarea
+    <form aria-label="Project settings" onSubmit={submit} className="my-4">
+      <FormRow className="mt-0">
+        <Field label="Name">
+          <TextInput
+            value={draft.name}
+            maxLength={NAME_MAX}
+            required
+            readOnly={disabled}
+            className="read-only:bg-console-panel"
+            onChange={(e) => set({ name: e.target.value })}
+          />
+        </Field>
+        <Field label="Description" className="min-w-64 flex-1">
+          <TextInput
+            value={draft.description}
+            maxLength={DESCRIPTION_MAX}
+            readOnly={disabled}
+            className="read-only:bg-console-panel"
+            onChange={(e) => set({ description: e.target.value })}
+          />
+        </Field>
+      </FormRow>
+      <Field label="Instructions" className="mb-4">
+        <Textarea
           rows={6}
           value={draft.instructions}
           readOnly={disabled}
+          className="read-only:bg-console-panel"
           aria-describedby="project-instructions-hint"
           onChange={(e) => set({ instructions: e.target.value })}
         />
-      </label>
-      <p
-        id="project-instructions-hint"
-        className={styles.hint}
-        style={{ flexBasis: "100%", margin: 0 }}
-      >
-        Added to the context of every conversation in this project, as plain text. {used} /{" "}
-        {INSTRUCTIONS_MAX_BYTES} bytes
-        {tooLong && <strong role="alert"> Too long: shorten them to save.</strong>}
-      </p>
-      <label>
-        Default agent
-        <select
-          value={draft.defaultAgentId ?? ""}
-          disabled={disabled}
-          onChange={(e) => set({ defaultAgentId: e.target.value === "" ? null : e.target.value })}
-        >
-          <option value="">The team&apos;s default</option>
-          {!known && (
-            <option value={draft.defaultAgentId ?? ""}>Current agent (not available to you)</option>
+        <p id="project-instructions-hint" className="m-0 text-sm text-console-muted">
+          Added to the context of every conversation in this project, as plain text. {used} /{" "}
+          {INSTRUCTIONS_MAX_BYTES} bytes
+          {tooLong && (
+            <strong role="alert" className="text-console-danger">
+              {" "}
+              Too long: shorten them to save.
+            </strong>
           )}
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Members
-        <select
-          value={draft.membersMode}
-          disabled={disabled}
-          onChange={(e) => set({ membersMode: e.target.value as MembersMode })}
-        >
-          <option value="team">Everyone in the team</option>
-          <option value="selected">Selected people only</option>
-        </select>
-      </label>
-      {!disabled && (
-        <button
-          type="submit"
-          disabled={pending || tooLong || unchanged || draft.name.trim() === ""}
-        >
-          {submitLabel}
-        </button>
-      )}
+        </p>
+      </Field>
+      <FormRow>
+        <Field label="Default agent">
+          <Select
+            value={draft.defaultAgentId ?? ""}
+            disabled={disabled}
+            onChange={(e) => set({ defaultAgentId: e.target.value === "" ? null : e.target.value })}
+          >
+            <option value="">The team&apos;s default</option>
+            {!known && (
+              <option value={draft.defaultAgentId ?? ""}>
+                Current agent (not available to you)
+              </option>
+            )}
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Members">
+          <Select
+            value={draft.membersMode}
+            disabled={disabled}
+            onChange={(e) => set({ membersMode: e.target.value as MembersMode })}
+          >
+            <option value="team">Everyone in the team</option>
+            <option value="selected">Selected people only</option>
+          </Select>
+        </Field>
+        {!disabled && (
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={pending || tooLong || unchanged || draft.name.trim() === ""}
+          >
+            {submitLabel}
+          </Button>
+        )}
+      </FormRow>
     </form>
   );
 }

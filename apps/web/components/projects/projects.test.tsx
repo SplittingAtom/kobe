@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { renderTeam, stubApi } from "../admin/testing";
+import { answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { ProjectDetailPage } from "./project-detail-page";
 import { ProjectsPage } from "./projects-page";
 
@@ -89,10 +89,13 @@ const base = (over: Record<string, unknown> = {}) => ({
 const memberRow = async (name: string) =>
   (await screen.findByRole("rowheader", { name })).closest("tr") as HTMLElement;
 
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
 beforeEach(() =>
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   ),
 );
 afterEach(() => {
@@ -220,6 +223,8 @@ describe("project detail (KOBE-164, ac-1)", () => {
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
     await userEvent.setup().click(await screen.findByRole("button", { name: "Archive project" }));
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    expect(await answerConfirm("Archive Launch?", "Archive project")).toMatch(/read-only/);
     await waitFor(() =>
       expect(JSON.parse(String(calls.find((c) => c.method === "PATCH")?.body))).toEqual({
         archived: true,
@@ -312,6 +317,8 @@ describe("project members (KOBE-164, ac-1)", () => {
       role: "owner",
     });
     await user.click(within(await memberRow("Bob")).getByRole("button", { name: /Remove/ }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await answerConfirm("Remove Bob from this project?", "Remove");
     await screen.findByText("Removed Bob.");
     expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/members/u-bob"))).toBe(true);
   });
@@ -325,6 +332,7 @@ describe("project members (KOBE-164, ac-1)", () => {
     await userEvent
       .setup()
       .click(within(await memberRow("Ada (you)")).getByRole("button", { name: /Remove/ }));
+    await answerConfirm(/from this project\?$/, "Remove");
     expect(await screen.findByText("A project keeps at least one owner.")).toBeTruthy();
   });
 
@@ -399,6 +407,10 @@ describe("project files (KOBE-164, ac-1)", () => {
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
     await userEvent.setup().click(await screen.findByRole("button", { name: "Delete brief.md" }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(await answerConfirm("Delete brief.md from this project?", "Delete file")).toMatch(
+      /lose it at their next sync/,
+    );
     await screen.findByText("Deleted brief.md.");
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });

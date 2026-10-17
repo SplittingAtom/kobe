@@ -12,8 +12,22 @@ import { visible } from "../../lib/security/visible";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import {
+  Button,
+  EmptyState,
+  PageHeader,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/console";
 import { MemoryDocView } from "./memory-doc";
+
+/** The list's heading: focus lands here when the open file is deleted. */
+const FILES_HEADING = "memory-files";
 
 /** Errors for people: the API's own wording, except where memory has better words. */
 function friendly<T>(
@@ -44,23 +58,24 @@ export function MemoryPanel({
 
   return (
     <>
-      <h1>{title}</h1>
-      <p className={styles.hint}>
-        What your agents remembered{target.scope === "project" ? " for this project" : " about you"}
-        . Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.
-      </p>
+      <PageHeader
+        title={title}
+        description={`What your agents remembered${target.scope === "project" ? " for this project" : " about you"}. Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.`}
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="memory">
-        {(data) =>
-          data.docs.length === 0 ? (
-            <p>
-              No memory files yet. Your agents add some when you ask them to remember something.
-            </p>
-          ) : (
-            <DocList docs={data.docs} openId={openId} onOpen={setOpenId} />
-          )
-        }
-      </ResourceView>
+      <Section id={FILES_HEADING} title="Files">
+        <ResourceView state={state} label="memory">
+          {(data) =>
+            data.docs.length === 0 ? (
+              <EmptyState title="No memory files yet.">
+                Your agents add some when you ask them to remember something.
+              </EmptyState>
+            ) : (
+              <DocList docs={data.docs} openId={openId} onOpen={setOpenId} />
+            )
+          }
+        </ResourceView>
+      </Section>
       {openId !== null && (
         <MemoryDocView
           key={openId}
@@ -72,6 +87,7 @@ export function MemoryPanel({
           onGone={() => {
             setOpenId(null);
             reload();
+            document.getElementById(FILES_HEADING)?.focus();
           }}
         />
       )}
@@ -89,35 +105,39 @@ function DocList({
   readonly onOpen: (id: string) => void;
 }) {
   return (
-    <div className={styles.tableWrap}>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th scope="col">File</th>
-            <th scope="col">Size</th>
-            <th scope="col">Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.map((d) => (
-            <tr key={d.id} aria-current={d.id === openId ? "true" : undefined}>
-              <td>
-                <button
-                  type="button"
-                  aria-label={`Open ${visible(d.path)}`}
-                  onClick={() => onOpen(d.id)}
-                >
-                  {visible(d.path)}
-                </button>
-              </td>
-              <td>{d.sizeBytes} bytes</td>
-              <td>
-                <DateTime value={d.updatedAt} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table caption="Memory files" hideCaption>
+      <TableHead>
+        <TableRow>
+          <TableHeader>File</TableHeader>
+          <TableHeader numeric>Size</TableHeader>
+          <TableHeader>Updated</TableHeader>
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {docs.map((d) => (
+          <TableRow
+            key={d.id}
+            aria-current={d.id === openId ? "true" : undefined}
+            className="aria-[current=true]:bg-console-panel"
+          >
+            <TableCell>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="font-mono"
+                aria-label={`Open ${visible(d.path)}`}
+                onClick={() => onOpen(d.id)}
+              >
+                {visible(d.path)}
+              </Button>
+            </TableCell>
+            <TableCell numeric>{d.sizeBytes} bytes</TableCell>
+            <TableCell>
+              <DateTime value={d.updatedAt} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

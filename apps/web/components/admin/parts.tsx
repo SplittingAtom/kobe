@@ -31,8 +31,3 @@ export function DateTime({ value }: { readonly value: string | null | undefined 
     </time>
   );
 }
-
-/** Asks before a change that can't be undone from here (native dialog: keyboard accessible). */
-export function confirmed(message: string): boolean {
-  return typeof window !== "undefined" && window.confirm(message);
-}

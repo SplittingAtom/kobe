@@ -12,7 +12,17 @@ import {
   type PresetKind,
 } from "../../lib/schedules/format";
 import { ErrorNotice } from "../admin/error-notice";
-import styles from "../admin/admin.module.css";
+import {
+  Button,
+  Card,
+  Checkbox,
+  ChoiceGroup,
+  Field,
+  FormRow,
+  Select,
+  TextInput,
+  Textarea,
+} from "../ui/console";
 
 const DEFAULT_TIME = "09:00";
 const DEFAULT_CRON = "0 9 * * 1-5";
@@ -80,102 +90,89 @@ export function ScheduleForm({
     setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
 
   return (
-    <form
-      className={styles.form}
-      onSubmit={submit}
-      aria-label={editing ? "Edit schedule" : "New schedule"}
-    >
-      <label>
-        Agent
-        <select value={agentId} required onChange={(e) => setAgentId(e.target.value)}>
-          <option value="" disabled>
-            Choose an agent
-          </option>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Prompt
-        <textarea
-          value={prompt}
-          required
-          rows={4}
-          maxLength={SCHEDULE_PROMPT_MAX}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-      </label>
-      <label>
-        Repeats
-        <select value={kind} onChange={(e) => setKind(e.target.value as PresetKind)}>
-          {PRESETS.map((p) => (
-            <option key={p} value={p}>
-              {PRESET_LABELS[p]}
-            </option>
-          ))}
-        </select>
-      </label>
-      {kind === "weekly" && (
-        <fieldset>
-          <legend>On</legend>
-          {SCHEDULE_WEEKDAYS.map((d) => (
-            <label key={d}>
-              <input type="checkbox" checked={days.includes(d)} onChange={() => toggleDay(d)} />
-              {WEEKDAY_LABELS[d]}
-            </label>
-          ))}
-        </fieldset>
-      )}
-      {kind === "cron" ? (
-        <>
-          <label>
-            Cron expression
-            <input value={expr} required onChange={(e) => setExpr(e.target.value)} />
-          </label>
-          <p className={styles.hint}>
-            Five fields: minute hour day month weekday, in the time zone below.
-          </p>
-        </>
-      ) : (
-        <label>
-          At
-          <input type="time" value={at} required onChange={(e) => setAt(e.target.value)} />
-        </label>
-      )}
-      <label>
-        Time zone
-        <select value={tz} onChange={(e) => setTz(e.target.value)}>
-          {timeZoneOptions(tz).map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <input
-          type="checkbox"
+    <Card className="my-4">
+      <form onSubmit={submit} aria-label={editing ? "Edit schedule" : "New schedule"}>
+        <FormRow className="mt-0">
+          <Field label="Agent">
+            <Select value={agentId} required onChange={(e) => setAgentId(e.target.value)}>
+              <option value="" disabled>
+                Choose an agent
+              </option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </FormRow>
+        <Field label="Prompt" className="mb-4 max-w-2xl">
+          <Textarea
+            value={prompt}
+            required
+            rows={4}
+            maxLength={SCHEDULE_PROMPT_MAX}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+        </Field>
+        <FormRow>
+          <Field label="Repeats">
+            <Select value={kind} onChange={(e) => setKind(e.target.value as PresetKind)}>
+              {PRESETS.map((p) => (
+                <option key={p} value={p}>
+                  {PRESET_LABELS[p]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {kind === "cron" ? (
+            <Field
+              label="Cron expression"
+              hint="Five fields: minute hour day month weekday, in the time zone below."
+            >
+              <TextInput value={expr} required onChange={(e) => setExpr(e.target.value)} />
+            </Field>
+          ) : (
+            <Field label="At">
+              <TextInput type="time" value={at} required onChange={(e) => setAt(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Time zone">
+            <Select value={tz} onChange={(e) => setTz(e.target.value)}>
+              {timeZoneOptions(tz).map((z) => (
+                <option key={z} value={z}>
+                  {z}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </FormRow>
+        {kind === "weekly" && (
+          <ChoiceGroup legend="On" className="mb-4">
+            {SCHEDULE_WEEKDAYS.map((d) => (
+              <Checkbox
+                key={d}
+                label={WEEKDAY_LABELS[d]}
+                checked={days.includes(d)}
+                onChange={() => toggleDay(d)}
+              />
+            ))}
+          </ChoiceGroup>
+        )}
+        <Checkbox
+          label="Email me when a run ends"
+          hint="Every run also shows up under the bell in the chat. The email says how the run ended and links to its conversation; it never includes the prompt or the answer."
           checked={notifyEmail}
           onChange={(e) => setNotifyEmail(e.target.checked)}
-        />{" "}
-        Email me when a run ends
-      </label>
-      <p className={styles.hint}>
-        Every run also shows up under the bell in the chat. The email says how the run ended and
-        links to its conversation; it never includes the prompt or the answer.
-      </p>
-      {error && <ErrorNotice error={error} />}
-      <p className={styles.actions}>
-        <button type="submit" disabled={pending}>
-          Save schedule
-        </button>{" "}
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-      </p>
-    </form>
+        />
+        {error && <ErrorNotice error={error} />}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={pending}>
+            Save schedule
+          </Button>
+          <Button onClick={onCancel}>Cancel</Button>
+        </div>
+      </form>
+    </Card>
   );
 }

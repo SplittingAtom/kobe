@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { Project } from "../../lib/projects/api";
 import { useResource } from "../admin/use-resource";
+import { Field, Select } from "../ui/console";
 import { useProjectsApi } from "./use-projects";
 
 /**
@@ -25,22 +26,19 @@ export function ProjectPicker({
   );
   if (state.status !== "ready" || (projects.length === 0 && value === null)) return null;
   return (
-    <p>
-      <label>
-        Memory of{" "}
-        <select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
-          <option value="">Me</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-              {p.archivedAt !== null ? " (archived)" : ""}
-            </option>
-          ))}
-          {value !== null && !projects.some((p) => p.id === value) && (
-            <option value={value}>This project</option>
-          )}
-        </select>
-      </label>
-    </p>
+    <Field label="Memory of" className="mb-4 w-fit">
+      <Select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Me</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.archivedAt !== null ? " (archived)" : ""}
+          </option>
+        ))}
+        {value !== null && !projects.some((p) => p.id === value) && (
+          <option value={value}>This project</option>
+        )}
+      </Select>
+    </Field>
   );
 }

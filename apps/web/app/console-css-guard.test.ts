@@ -7,18 +7,16 @@ import postcss, { type ChildNode, type Root } from "postcss";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /**
- * KOBE-294: the consoles and My area move from CSS modules to Tailwind (295 and 296 finish it).
- * These guards keep the chat's styling where it was and let each migration step tighten what the
- * consoles may still use:
+ * KOBE-294: the consoles and My area move from CSS modules to Tailwind (KOBE-295 and KOBE-296
+ * finished it). These guards keep the chat's styling where it was and the consoles on Tailwind:
  *
  * - The chat and the consoles load the same Tailwind build (app/tailwind.css: theme and utilities,
  *   never preflight); the console stylesheet's own rules are scoped to the console root; the
  *   chat's own compiled rules match a committed snapshot. Changing the chat's styling on purpose
  *   means updating that snapshot (`vitest run app/console-css-guard.test.ts -u`) in the same PR.
- * - Console code imports only the CSS modules still listed in `CSS_MODULES`, and only classes they
- *   still define. When a page moves to the primitives (components/ui/console), add it to
- *   `ON_TAILWIND`; when the last user of a module (or of a class) is gone, delete it and drop it
- *   from `CSS_MODULES`.
+ * - Since KOBE-296 no file in the Site console, the Team console or the My area imports a CSS
+ *   module, and none lives there: their pages use the console primitives (components/ui/console)
+ *   and utilities only. A new page there that adds a module fails here.
  */
 const WEB = fileURLToPath(new URL("../", import.meta.url));
 const read = (path: string) => readFileSync(join(WEB, path), "utf8");
@@ -141,136 +139,47 @@ describe("cascade layers (KOBE-294)", () => {
   const ORDER = "@layer properties, theme, base, kobe-legacy, components, utilities;";
 
   it("the root layout's stylesheet declares the order first, so it never depends on load order", () => {
+    // `kobe-legacy` held the consoles' CSS modules until KOBE-296 and is empty now; it stays
+    // declared so the chat's compiled layer order (pinned above) does not change.
     expect(withoutComments(read("app/theme.css")).trimStart().startsWith(ORDER)).toBe(true);
     expect(withoutComments(read("app/tailwind.css"))).toContain(
       "@layer theme, base, kobe-legacy, components, utilities;",
     );
   });
-
-  it("every console CSS module sits in kobe-legacy, below the utilities", () => {
-    for (const module of CSS_MODULES) {
-      const css = withoutComments(read(module)).trim();
-      expect(css.startsWith("@layer kobe-legacy {"), module).toBe(true);
-      expect(postcss.parse(css).nodes.length, module).toBe(1);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------------------------
-// CSS modules the consoles may still use (ac-2; tightened by KOBE-295 and KOBE-296)
+// No CSS modules in the consoles or the My area (KOBE-294, KOBE-295, KOBE-296)
 
-/** Console and My-area code (components/memory and components/files are shared with the chat). */
+/**
+ * Console and My-area code: the Site and Team consoles, the My area (agents, skills, projects,
+ * memory, schedules, connector keys) and the primitives. components/files is shared with the chat
+ * and keeps its own module.
+ */
 const CONSOLE_DIRS = [
   "app/admin",
   "app/me",
   "components/admin",
   "components/me",
+  "components/memory",
   "components/projects",
   "components/ui/console",
 ] as const;
 
-/** The CSS modules console code may still import. Drop one when its last user moves. */
-const CSS_MODULES = ["components/admin/admin.module.css"] as const;
-
-/** Files on Tailwind and the console primitives: no CSS module. Add each page as it moves. */
-const ON_TAILWIND = [
-  "app/admin/layout.tsx",
-  "components/admin/budgets/amount-fields.tsx",
-  "components/admin/console-nav.tsx",
-  "components/admin/console-shell.tsx",
-  "components/admin/console-theme-toggle.tsx",
-  "components/admin/error-notice.tsx",
-  "components/admin/gallery-score.tsx",
-  "components/admin/isolation-banner.tsx",
-  "components/admin/overview.tsx",
-  "components/admin/placeholder.tsx",
-  "components/admin/policy-rules.tsx",
-  "components/admin/shared-hosting-note.tsx",
-  "components/admin/site/audit-forwarding-page.tsx",
-  "components/admin/site/break-glass-page.tsx",
-  "components/admin/site/break-glass-reader.tsx",
-  "components/admin/site/connector-tool-review.tsx",
-  "components/admin/site/connectors-page.tsx",
-  "components/admin/site/egress-ceiling-page.tsx",
-  "components/admin/site/gallery-page.tsx",
-  "components/admin/site/invites-page.tsx",
-  "components/admin/site/isolation-page.tsx",
-  "components/admin/site/legal-hold-page.tsx",
-  "components/admin/site/memory-switches.tsx",
-  "components/admin/site/model-catalog.tsx",
-  "components/admin/site/model-limits.tsx",
-  "components/admin/site/model-providers.tsx",
-  "components/admin/site/models-page.tsx",
-  "components/admin/site/policy-floor-page.tsx",
-  "components/admin/site/retention-page.tsx",
-  "components/admin/site/roles-page.tsx",
-  "components/admin/site/settings-page.tsx",
-  "components/admin/site/site-budget.tsx",
-  "components/admin/site/skill-blocklist-page.tsx",
-  "components/admin/site/teams-page.tsx",
-  "components/admin/site/usage-page.tsx",
-  "components/admin/site/users-page.tsx",
-  "components/admin/site/web-search-form.tsx",
-  "components/admin/team/agent-builder/agent-builder-page.tsx",
-  "components/admin/team/agent-builder/eval-report.tsx",
-  "components/admin/team/agent-builder/eval-status.tsx",
-  "components/admin/team/agent-builder/frontmatter-form.tsx",
-  "components/admin/team/agent-builder/model-field.tsx",
-  "components/admin/team/agent-builder/orbit-export-button.tsx",
-  "components/admin/team/agent-builder/publish-dialog.tsx",
-  "components/admin/team/agent-builder/test-pane.tsx",
-  "components/admin/team/agent-builder/version-history.tsx",
-  "components/admin/team/agent-inventory.tsx",
-  "components/admin/team/agents-page.tsx",
-  "components/admin/team/audit-page.tsx",
-  "components/admin/team/break-glass-page.tsx",
-  "components/admin/team/budgets-page.tsx",
-  "components/admin/team/connectors-page.tsx",
-  "components/admin/team/egress-headers.tsx",
-  "components/admin/team/egress-page.tsx",
-  "components/admin/team/egress-requests.tsx",
-  "components/admin/team/eval-settings-page.tsx",
-  "components/admin/team/followups-page.tsx",
-  "components/admin/team/gallery-agents.tsx",
-  "components/admin/team/invites-page.tsx",
-  "components/admin/team/members-page.tsx",
-  "components/admin/team/memory-page.tsx",
-  "components/admin/team/memory-switches-form.tsx",
-  "components/admin/team/models-page.tsx",
-  "components/admin/team/policy-page.tsx",
-  "components/admin/team/retention-page.tsx",
-  "components/admin/team/schedules-page.tsx",
-  "components/admin/team/skill-editor/files-editor.tsx",
-  "components/admin/team/skill-editor/skill-editor-page.tsx",
-  "components/admin/team/skill-editor/skill-reach.tsx",
-  "components/admin/team/skill-editor/skills-page.tsx",
-  "components/admin/team/skill-review-page.tsx",
-  "components/admin/team/usage-page.tsx",
-  "components/admin/team/web-search-page.tsx",
-  "components/admin/usage/usage-chart.tsx",
-  "components/admin/usage/usage-dashboard.tsx",
-  "components/me/my-agents-shell.tsx",
+/** The consoles' former CSS modules (KOBE-20, KOBE-43, the agent builder and skill editor). */
+const REMOVED_MODULES = [
+  "components/admin/admin.module.css",
+  "components/admin/usage/usage.module.css",
+  "components/admin/team/agent-builder/agent-builder.module.css",
+  "components/admin/team/skill-editor/skill-editor.module.css",
 ] as const;
 
-/**
- * Whole directories on Tailwind (KOBE-295: the Team console, and the usage and budget parts it
- * shares with the Site console; KOBE-296: the Site console): no file in them may import a CSS
- * module, new files included.
- */
-const TAILWIND_DIRS = [
-  "app/admin/site",
-  "app/admin/team",
-  "components/admin/site",
-  "components/admin/team",
-  "components/admin/usage",
-  "components/admin/budgets",
-] as const;
-
+/** Source files under `dir`, tests included (a test's fixture must not bring a module back). */
 function sources(dir: string): string[] {
   return readdirSync(join(WEB, dir), { withFileTypes: true }).flatMap((e) => {
     const path = join(dir, e.name);
     if (e.isDirectory()) return sources(path);
-    return /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [path] : [];
+    return /\.tsx?$/.test(e.name) ? [path] : [];
   });
 }
 
@@ -283,81 +192,86 @@ function cssModulesIn(dir: string): string[] {
   });
 }
 
-interface ModuleImport {
-  readonly file: string;
-  readonly binding: string;
-  /** Relative to apps/web. */
-  readonly module: string;
-}
-
-/** `import x from`, `import * as x from` and bare `import "…module.css"` (binding ""). */
-function moduleImports(file: string): ModuleImport[] {
-  const re = /import\s+(?:(?:\*\s+as\s+)?(\w+)\s+from\s+)?["']([^"']+\.module\.css)["']/g;
-  return [...read(file).matchAll(re)].map((m) => ({
-    file,
-    binding: m[1] ?? "",
-    module: relative(WEB, join(WEB, dirname(file), m[2] ?? "")),
-  }));
-}
-
-/** The class names a CSS module defines. */
-function classes(module: string): Set<string> {
-  return new Set(
-    [...withoutComments(read(module)).matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1] ?? ""),
+/**
+ * Every CSS module a file imports, relative to apps/web: `import x from`, `import * as x from`,
+ * a bare `import "…module.css"`, and `require`/dynamic `import()` of one.
+ */
+function moduleImports(file: string): string[] {
+  const re =
+    /(?:import\s+(?:(?:\*\s+as\s+)?\w+\s+from\s+)?|(?:require|import)\s*\(\s*)["']([^"']+\.module\.css)["']/g;
+  return [...read(file).matchAll(re)].map((m) =>
+    relative(WEB, join(WEB, dirname(file), m[1] ?? "")),
   );
 }
 
-describe("console CSS modules (KOBE-294, KOBE-295, KOBE-296)", () => {
+/**
+ * The global stylesheets console code may import: the two layouts load the console sheet, and the
+ * agent builder's test pane the chat's (it renders the chat).
+ */
+const CSS_IMPORTS: Readonly<Record<string, string>> = {
+  [join("app", "admin", "layout.tsx")]: "./admin-global.css",
+  [join("app", "me", "layout.tsx")]: "../admin/admin-global.css",
+  [join("components", "admin", "team", "agent-builder", "test-pane.tsx")]:
+    "../../../../app/chat-global.css",
+};
+
+/** Pages that render a component built on the primitives and add no markup of their own. */
+const DELEGATING_PAGES = [join("components", "me", "my-memory-page.tsx")];
+
+describe("no CSS modules in the consoles or the My area (KOBE-296)", () => {
   const files = CONSOLE_DIRS.flatMap(sources);
-  const imports = files.flatMap(moduleImports);
 
-  it("console code imports only the CSS modules still allowed, and they exist", () => {
-    const allowed = new Set<string>(CSS_MODULES);
-    expect(
-      imports
-        .filter((i) => !allowed.has(i.module) || !existsSync(join(WEB, i.module)))
-        .map((i) => `${i.file}: ${i.module}`),
-    ).toEqual([]);
+  it("covers the whole Site console, Team console and My area", () => {
+    expect(files.length).toBeGreaterThan(150);
+    for (const dir of ["components/admin/site", "components/admin/team", "components/me"]) {
+      expect(
+        files.filter((f) => f.startsWith(join(...dir.split("/")))).length,
+        dir,
+      ).toBeGreaterThan(10);
+    }
   });
 
-  it("files on Tailwind import no CSS module", () => {
-    for (const file of ON_TAILWIND) expect(existsSync(join(WEB, file)), file).toBe(true);
-    expect(ON_TAILWIND.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
-    // The primitives themselves never use one.
-    expect(sources("components/ui/console").flatMap(moduleImports)).toEqual([]);
+  it("no console or My-area file imports a CSS module", () => {
+    expect(files.flatMap((f) => moduleImports(f).map((m) => `${f}: ${m}`))).toEqual([]);
   });
 
-  it("the Site and Team consoles and their shared parts import no CSS module, and none lives there", () => {
-    const files = TAILWIND_DIRS.flatMap(sources);
-    expect(files.length).toBeGreaterThan(40);
-    expect(files.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
-    expect(TAILWIND_DIRS.flatMap(cssModulesIn)).toEqual([]);
+  it("no CSS module lives in those trees, and the old console modules are gone", () => {
+    expect(CONSOLE_DIRS.flatMap(cssModulesIn)).toEqual([]);
+    for (const module of REMOVED_MODULES) expect(existsSync(join(WEB, module)), module).toBe(false);
   });
 
-  it("a file that uses the console primitives imports no CSS module (pages move whole)", () => {
+  it("only the console layouts import a stylesheet, and only the console one", () => {
+    const cssImports = files.flatMap((f) =>
+      [...read(f).matchAll(/import\s+(?:[\w*{}\s,]+\s+from\s+)?["']([^"']+\.css)["']/g)].map(
+        (m) => `${f}: ${m[1] ?? ""}`,
+      ),
+    );
+    expect(cssImports.sort()).toEqual(
+      Object.entries(CSS_IMPORTS)
+        .map(([file, css]) => `${file}: ${css}`)
+        .sort(),
+    );
+  });
+
+  it("the guard's matcher sees every way of importing a module", () => {
+    // A self-check: if the regex stopped matching, the tests above would pass vacuously.
+    const samples = [
+      'import styles from "./a.module.css";',
+      'import * as styles from "../b.module.css";',
+      'import "./c.module.css";',
+      'const s = require("./d.module.css");',
+      'const s = await import("./e.module.css");',
+    ];
+    const re =
+      /(?:import\s+(?:(?:\*\s+as\s+)?\w+\s+from\s+)?|(?:require|import)\s*\(\s*)["']([^"']+\.module\.css)["']/g;
+    expect(samples.map((line) => [...line.matchAll(re)].length)).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  it("pages use the console primitives", () => {
     const usesPrimitives = (f: string) =>
       /from\s+"(?:\.\.?\/)+(?:components\/)?ui\/console(?:\/[\w-]+)?"/.test(read(f));
-    const mixed = files.filter(
-      (f) => usesPrimitives(f) || f.startsWith(join("components", "ui", "console")),
-    );
-    expect(mixed.length).toBeGreaterThan(ON_TAILWIND.length / 2);
-    expect(mixed.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
-  });
-
-  it("every class console code takes from a CSS module is still defined there", () => {
-    const missing = imports.flatMap(({ file, binding, module }) => {
-      if (binding === "") return [];
-      const defined = classes(module);
-      const used = [
-        ...read(file).matchAll(new RegExp(`\\b${binding}(?:\\.(\\w+)|\\["([\\w-]+)"\\])`, "g")),
-      ].map((m) => m[1] ?? m[2] ?? "");
-      return used.filter((c) => !defined.has(c)).map((c) => `${file}: ${binding}.${c}`);
-    });
-    expect([...new Set(missing)]).toEqual([]);
-  });
-
-  it("each allowed module is still used: drop it from CSS_MODULES once its last user moves", () => {
-    const used = new Set(imports.map((i) => i.module));
-    expect(CSS_MODULES.filter((m) => !used.has(m))).toEqual([]);
+    const pages = files.filter((f) => /-page\.tsx$/.test(f) && !/\.test\.tsx$/.test(f));
+    expect(pages.length).toBeGreaterThan(40);
+    expect(pages.filter((f) => !usesPrimitives(f) && !DELEGATING_PAGES.includes(f))).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   KEY_HINT,
   KEY_PATTERN,
@@ -12,9 +12,19 @@ import {
 import { listTeamConnectors, type TeamConnector } from "../../lib/admin/api/team/connectors";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
-import { DateTime, ResourceView, confirmed } from "../admin/parts";
+import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource, type Mutation } from "../admin/use-resource";
-import styles from "../admin/admin.module.css";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  FormRow,
+  PageHeader,
+  TextInput,
+  eventTrigger,
+  useConfirm,
+} from "../ui/console";
 
 interface Loaded {
   readonly connectors: readonly TeamConnector[];
@@ -41,11 +51,10 @@ export function MyConnectorsPage() {
 
   return (
     <>
-      <h1>My connector keys</h1>
-      <p className={styles.hint}>
-        Some connectors need your own API key. It is stored encrypted, used only for your runs, and
-        never shown again after you save it.
-      </p>
+      <PageHeader
+        title="My connector keys"
+        description="Some connectors need your own API key. It is stored encrypted, used only for your runs, and never shown again after you save it."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="connectors">
         {(data: Loaded) => {
@@ -53,18 +62,22 @@ export function MyConnectorsPage() {
             (c) => c.enabled && c.status === "active" && c.authKind === "api_key",
           );
           if (needKey.length === 0) {
-            return <p>No connector in this team needs your own key.</p>;
+            return <EmptyState title="No connector in this team needs your own key." />;
           }
-          return needKey.map((c) => (
-            <KeyCard
-              key={c.id}
-              teamId={teamId}
-              connector={c}
-              grant={data.grants.find((g) => g.connectorId === c.id) ?? null}
-              mutation={mutation}
-              onChanged={reload}
-            />
-          ));
+          return (
+            <div className="flex flex-col gap-3">
+              {needKey.map((c) => (
+                <KeyCard
+                  key={c.id}
+                  teamId={teamId}
+                  connector={c}
+                  grant={data.grants.find((g) => g.connectorId === c.id) ?? null}
+                  mutation={mutation}
+                  onChanged={reload}
+                />
+              ))}
+            </div>
+          );
         }}
       </ResourceView>
     </>
@@ -86,6 +99,16 @@ function KeyCard({
 }) {
   const [key, setKey] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const [confirm, confirmDialog] = useConfirm();
+  const input = useRef<HTMLInputElement>(null);
+  // The Remove button goes with the key: once the list shows it gone, focus moves to the field.
+  const removed = useRef(false);
+  useEffect(() => {
+    if (removed.current && grant === null) {
+      removed.current = false;
+      input.current?.focus();
+    }
+  }, [grant]);
 
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -103,21 +126,29 @@ function KeyCard({
     if (done) onChanged();
   }
 
-  async function remove() {
-    if (!confirmed(`Remove your key for ${c.name}? Your runs can't use it until you add one.`)) {
-      return;
-    }
+  async function remove(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove your key for ${c.name}?`,
+        description: "Your runs can't use it until you add one.",
+        confirmLabel: "Remove key",
+      },
+      trigger,
+    );
+    if (!yes) return;
     const done = await mutation.run(
       () => removeGrant(teamId, c.id),
       () => "Key removed.",
     );
-    if (done) onChanged();
+    if (done) {
+      removed.current = true;
+      onChanged();
+    }
   }
 
   return (
-    <article aria-label={c.name} className={styles.form}>
-      <h2>{c.name}</h2>
-      <p>
+    <Card role="article" aria-label={c.name} title={c.name} level={2}>
+      <p className="m-0 text-sm text-console-muted">
         {grant ? (
           <>
             Key ending {grant.hint} (updated <DateTime value={grant.updatedAt} />)
@@ -127,27 +158,33 @@ function KeyCard({
         )}
       </p>
       <form onSubmit={save} aria-label={`Key for ${c.name}`}>
-        <label>
-          API key
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={2048}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-        </label>
-        {problem ? <p role="alert">{problem}</p> : null}
-        <button type="submit" disabled={mutation.pending}>
-          {grant ? "Replace key" : "Add key"}
-        </button>{" "}
-        {grant ? (
-          <button type="button" disabled={mutation.pending} onClick={() => void remove()}>
-            Remove key
-          </button>
-        ) : null}
+        <FormRow className="mb-0">
+          <Field label="API key" error={problem}>
+            <TextInput
+              ref={input}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={2048}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            {grant ? "Replace key" : "Add key"}
+          </Button>
+          {grant ? (
+            <Button
+              variant="danger"
+              disabled={mutation.pending}
+              onClick={(e) => void remove(eventTrigger(e))}
+            >
+              Remove key
+            </Button>
+          ) : null}
+        </FormRow>
       </form>
-    </article>
+      {confirmDialog}
+    </Card>
   );
 }
