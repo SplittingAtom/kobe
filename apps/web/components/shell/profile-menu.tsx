@@ -47,6 +47,9 @@ export function ProfileMenu() {
           <MenuLink href="/me/approvals">My approvals</MenuLink>
         </li>
         <li>
+          <MenuLink href="/me/shared-cases">My shared cases</MenuLink>
+        </li>
+        <li>
           <button type="button" onClick={() => void signOut()}>
             Sign out
           </button>

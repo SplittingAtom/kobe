@@ -73,6 +73,9 @@ describe("utility bar", () => {
     expect(menu.getByRole("link", { name: "My approvals" }).getAttribute("href")).toBe(
       "/me/approvals",
     );
+    expect(menu.getByRole("link", { name: "My shared cases" }).getAttribute("href")).toBe(
+      "/me/shared-cases",
+    );
     expect(menu.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 
