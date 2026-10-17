@@ -109,6 +109,20 @@ export interface MoveRefusal {
 export function moveRefusal(from: string, to: string): MoveRefusal | undefined {
   if (isInternalPath(from))
     return { status: 404, code: "not_found", message: "No such file or folder." };
+  if (
+    !isInternalPath(to) &&
+    mentionPathIssue(to) !== undefined &&
+    baseName(from) === baseName(to)
+  ) {
+    // A plain move of a file whose existing name the rules refuse (review N6).
+    return {
+      status: 400,
+      code: "invalid_path",
+      message:
+        "Its name holds characters a moved file can't keep (invisible, control or format " +
+        "characters, `, $ or ;, or unusual spaces). Rename it first.",
+    };
+  }
   if (isInternalPath(to) || mentionPathIssue(to) !== undefined) {
     return {
       status: 400,

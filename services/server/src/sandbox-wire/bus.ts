@@ -23,9 +23,11 @@ export type BusHint =
   /** This connection's sandbox was hibernated (KOBE-25): its holder closes it `hibernating`. */
   | { readonly kind: "hib"; readonly id: string }
   /** This approval left `pending` (KOBE-37): the broker waiting on it re-reads the row. */
-  | { readonly kind: "apr"; readonly id: string };
+  | { readonly kind: "apr"; readonly id: string }
+  /** The member moved files (KOBE-304): this connection's holder sends `workspace.moved`. */
+  | { readonly kind: "mv"; readonly id: string };
 
-const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr"]);
+const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr", "mv"]);
 const uuid = z.uuid();
 
 export function encodeBusHint(hint: BusHint): string {

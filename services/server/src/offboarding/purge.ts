@@ -90,6 +90,9 @@ async function deleteFiles(
       await tx.execute(sql`
         DELETE FROM workspace_file_hold_history
          WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
+      await tx.execute(sql`
+        DELETE FROM workspace_moves
+         WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
       const rows = await tx.execute<{ path: string; blob_key: string | null; size: string }>(sql`
         SELECT path, blob_key, size FROM workspace_files
          WHERE team_id = ${target.teamId} AND user_id = ${target.userId} LIMIT ${BATCH}`);

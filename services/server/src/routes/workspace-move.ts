@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { isLockConflict, sql, withTeam } from "@kobe/db";
+import { isLockConflict, sql, withTeam, type KobeTx } from "@kobe/db";
 import {
   isMemberDropPath,
   WORKSPACE_MOVE_MAX_FILES,
@@ -16,6 +16,7 @@ import { retargetScheduleMentions } from "../schedules/mention-moves.js";
 import { baseName, moveRefusal } from "../workspace-files/paths.js";
 import { moveFiles, type MoveOutcome } from "../workspace-sync/move.js";
 import { resolveLimits } from "../workspace-sync/quota.js";
+import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
@@ -23,10 +24,16 @@ type Status = 400 | 403 | 404 | 409 | 422 | 429 | 503 | 507;
 
 /** Moves and renames per member per minute (a drag is one; a folder is one however big). */
 export const MOVE_RATE_LIMIT = { windowMs: 60_000, max: 60 };
+/**
+ * What a member's moves may carry per minute besides their count (review S1): a move starts only
+ * while the minute's moves are under both caps, so a script dragging a large folder back and forth
+ * is held to about one folder a minute.
+ */
+export const MOVE_BUDGET = { windowMs: 60_000, files: 20_000, bytes: 20 * 1024 ** 3 };
 /** Two paths of at most 1024 bytes each, JSON-escaped, with room to spare. */
 const MOVE_MAX_BODY = 16 * 1024;
 /** How long a move waits for the workspace's lock (a sandbox's commit, a collection). */
-const LOCK_TIMEOUT = "5s";
+const LOCK_TIMEOUT_MS = 5_000;
 
 const fail = (
   c: Ctx,
@@ -57,6 +64,13 @@ function refused(c: Ctx, outcome: Exclude<MoveOutcome, { kind: "moved" }>, to: s
       );
     case "too_long":
       return fail(c, 422, "invalid_path", "A path in that folder would be too long there.");
+    case "over_budget":
+      return fail(
+        c,
+        429,
+        "rate_limited",
+        "You moved a lot of files just now. Wait a minute and try again.",
+      );
     case "no_room":
       return fail(
         c,
@@ -65,6 +79,14 @@ function refused(c: Ctx, outcome: Exclude<MoveOutcome, { kind: "moved" }>, to: s
         "Your workspace holds too many files to move this now.",
       );
   }
+}
+
+/** Hints the replica holding the member's sandbox socket (if any) to send `workspace.moved`. */
+async function nudgeSandbox(tx: KobeTx, owner: { teamId: string; userId: string }) {
+  const open = await tx.execute<{ connection_id: string }>(sql`
+    SELECT connection_id FROM sandbox_connections
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND closed_at IS NULL`);
+  for (const row of open.rows) await notifyHintInTx(tx, { kind: "mv", id: row.connection_id });
 }
 
 /**
@@ -79,6 +101,8 @@ export function registerWorkspaceMove(
   app: Hono<{ Variables: TeamVariables }>,
   deps: ServerDeps,
   sync: WorkspaceSync,
+  /** Tests shorten the wait for the workspace lock. */
+  lockTimeoutMs = LOCK_TIMEOUT_MS,
 ): void {
   const db = deps.database.db;
   const maxRows = resolveLimits(sync.limits).maxRows;
@@ -101,21 +125,24 @@ export function registerWorkspaceMove(
       let outcome: MoveOutcome;
       try {
         outcome = await withTeam(db, owner.teamId, async (tx) => {
-          await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
+          await tx.execute(sql`SELECT set_config('lock_timeout', ${`${lockTimeoutMs}ms`}, true)`);
           const moved = await moveFiles(tx, owner, {
             from,
             to,
             fileOnly: isMemberDropPath(to),
             maxFiles: WORKSPACE_MOVE_MAX_FILES,
             maxRows,
+            budget: MOVE_BUDGET,
           });
-          if (moved.kind !== "moved") return moved;
+          if (moved.kind !== "moved" || moved.repeat) return moved;
           await retargetScheduleMentions(tx, owner, from, to);
           await recordAudit(tx, {
             action: "workspace.file_moved",
             teamId: owner.teamId,
             target: { userId: owner.userId, files: moved.files, bytes: moved.bytes },
           });
+          // An awake sandbox replays the move now (on commit); a hibernated one on wake.
+          await nudgeSandbox(tx, owner);
           return moved;
         });
       } catch (err) {

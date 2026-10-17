@@ -11,6 +11,11 @@ import type { WorkspaceOwner } from "../workspace-sync/keys.js";
  * path in `mentions` and in its prompt's markers. A new path the mention rules refuse, or a prompt
  * that would outgrow its limit, leaves that schedule as it was (the old marker then stays literal
  * at the next run, as for a deleted file).
+ *
+ * Not under `withUserScheduleLock` and not audited as a schedule change (review N7): it is a
+ * consequence of the member's own move (audited as `workspace.file_moved`). A concurrent PATCH of
+ * the same schedule may overwrite it; the mention then degrades to literal text, and the
+ * scheduler's stale check covers a fire that races it.
  */
 
 /** `schedules_prompt`: 1–10000 characters. */

@@ -60,6 +60,8 @@ export interface WorkspaceFilesOptions {
   readonly waker: SandboxWaker;
   /** Entries per listing page (default {@link LIST_MAX_ENTRIES}; tests use small pages). */
   readonly listPageSize?: number;
+  /** How long a move waits for the workspace lock (default 5 s; tests). */
+  readonly moveLockTimeoutMs?: number;
 }
 
 const fail = (c: Ctx, status: ErrStatus, code: WorkspaceFileError["code"], message: string) =>
@@ -269,7 +271,7 @@ export function workspaceFileRoutes(
   });
 
   registerWorkspaceFrame(app, deps, sync);
-  registerWorkspaceMove(app, deps, sync);
+  registerWorkspaceMove(app, deps, sync, options.moveLockTimeoutMs);
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {

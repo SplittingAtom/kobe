@@ -9,6 +9,7 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam } from "@kobe/db";
 import { createSandboxApp } from "./routes/sandbox.js";
+import { moveFiles } from "./workspace-sync/move.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandboxAuth } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -575,5 +576,40 @@ describe("collection, sharing and restore reports", () => {
       [b.teamId],
     );
     expect(state.rows[0]?.last_restore_ms).toBe(789);
+  });
+});
+
+describe("GET moves (KOBE-304)", () => {
+  it("lists the caller's journalled moves after a revision, validates its query", async () => {
+    const b = await box();
+    const first = await push(b, "d/x.txt", "x");
+    expect(first.status).toBe("applied");
+    const owner = { teamId: b.teamId, userId: b.person.id };
+    await withTeam(fx.db, b.teamId, (tx) =>
+      moveFiles(tx, owner, {
+        from: "d",
+        to: "e",
+        fileOnly: false,
+        maxFiles: 100,
+        maxRows: 100,
+        budget: { windowMs: 60_000, files: 1000, bytes: 1e9 },
+      }),
+    );
+    const res = await call(b, "GET", "/moves?since=0");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      moves: [{ rev: 2, from: "d", to: "e", type: "dir" }],
+      more: false,
+    });
+    const later = await call(b, "GET", "/moves?since=3");
+    expect(((await later.json()) as { moves: unknown[] }).moves).toEqual([]);
+    expect((await call(b, "GET", "/moves?since=-1")).status).toBe(400);
+    expect((await call(b, "GET", "/moves?since=0&after=x")).status).toBe(400);
+    // Another user's sandbox sees none of them (refused, or an empty journal of its own).
+    const other = await box(undefined, b.teamId);
+    const theirs = await call(other, "GET", "/moves?since=0");
+    const body = (await theirs.json()) as { moves?: unknown[] };
+    expect(theirs.status === 200 ? body.moves : []).toEqual([]);
+    expect((await call(undefined, "GET", "/moves?since=0")).status).toBe(401);
   });
 });

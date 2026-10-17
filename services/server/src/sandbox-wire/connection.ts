@@ -6,6 +6,7 @@ import {
   CAPABILITY_PROJECTS,
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_WEB_SEARCH,
+  CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
@@ -216,6 +217,11 @@ export class SandboxConnection implements RegisteredConnection {
 
   pokeCommands(): void {
     this.#delivery.poke();
+  }
+
+  workspaceMoved(): void {
+    if (this.#state !== "ready" || !this.hasCapability(CAPABILITY_WORKSPACE_MOVES)) return;
+    this.send({ v: 1, type: "workspace.moved" });
   }
 
   replaced(): void {

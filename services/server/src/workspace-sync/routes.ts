@@ -16,6 +16,7 @@ import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { SandboxAuthenticator, SandboxCaller } from "./auth.js";
 import { workspaceBlobKey } from "./keys.js";
+import { movesSince } from "./move-journal.js";
 import { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
 import { resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
 import {
@@ -331,6 +332,20 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       entries: page.entries.map(publicEntry),
       more: page.more,
     });
+  });
+
+  /** Moves to replay as local renames before the next pull (KOBE-304; contract `moves`). */
+  app.get("/moves", async (c) => {
+    const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
+    const since = Number(c.req.query("since") ?? "0");
+    const after = Number(c.req.query("after") ?? "0");
+    if (!Number.isSafeInteger(since) || since < 0 || !Number.isSafeInteger(after) || after < 0) {
+      return error(c, 400, "invalid_request", "since and after must be non-negative integers.");
+    }
+    const page = await tx(caller, "other", (t) => movesSince(t, caller, since, after));
+    return c.json(page);
   });
 
   app.post("/blobs/missing", async (c) => {

@@ -185,6 +185,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       case "apr":
         approvals.onHint?.(hint.id);
         return;
+      case "mv":
+        registry.get(hint.id)?.workspaceMoved();
+        return;
     }
   };
   const bus = createSandboxBus({
