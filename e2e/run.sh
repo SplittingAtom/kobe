@@ -3183,6 +3183,10 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
   # Allow exactly that Service IP (proxy check), plain http on port 80 (CI only), and its pods
   # (proxy NetworkPolicy, which matches the pod port after Service translation).
   mcp_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]},%s]' "$MCP_NS" "$OTEL_RULE")
+  # The e2e sandbox's last run was in the KOBE-26/37 sections, 12-16 minutes ago: the 15-minute
+  # idle hibernation (sandbox.hibernation.idleMinutes) would put it to sleep during the upgrade below,
+  # and a sleeping sandbox never reconnects. Waking it (a no-op when awake) records fresh activity.
+  contains "the e2e sandbox is awake with fresh activity before the upgrade" '"woken":true' "$(lifecycle wake)"
   mcp_upgrade_at=$(psql_kobe "SELECT clock_timestamp()")
   server_gen_before=$($KUBECTL -n "$NS" get deploy/kobe-server -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
@@ -3215,7 +3219,9 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
       fi
       sleep 1
     done
-    contains "the e2e sandbox reconnected to the rolled server before the MCP run is leased" '^reconnected=1$' "reconnected=$reconnected"
+    contains "the e2e sandbox reconnected to the rolled server before the MCP run is leased" '^reconnected=1$' \
+      "reconnected=$reconnected $(psql_kobe "SELECT 'state=' || state || ' idle_s=' || round(extract(epoch FROM now() - last_active_at))
+        FROM sandboxes WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$E2E_USER_ID'")"
   fi
   psql_kobe "INSERT INTO connectors (id, name, url, tools_snapshot) VALUES ('$MCP_CONNECTOR', 'e2e-fake', 'http://$fake_mcp_ip/mcp', '$snapshot'::jsonb)
       ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, tools_snapshot = EXCLUDED.tools_snapshot;
