@@ -3,7 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mentionMarker } from "@kobe/protocol";
-import { MENTION_FOLDER_REFUSED, MENTION_NO_COMPOSER } from "../../lib/chat/mention-insert";
+import {
+  MENTION_FOLDER_REFUSED,
+  MENTION_NAME_REFUSED,
+  MENTION_NO_COMPOSER,
+} from "../../lib/chat/mention-insert";
 import type { UploadTransport } from "../../lib/chat/uploads";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
@@ -28,11 +32,17 @@ const entry = (name: string, path: string, type: "file" | "dir", area = "workspa
   area,
 });
 const PROJECT = "0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d";
+/** A name that is markup: it must show as text, never as an element. */
+const MARKUP = '<img src=x onerror="alert(1)">.csv';
+/** A zero-width space: the KOBE-223 rules refuse it. */
+const INVISIBLE = "a\u200bb.txt";
 const TREE: Record<string, Entry[]> = {
   "": [
     entry("notes", "notes", "dir"),
     entry("projects", "projects", "dir", "projects"),
     entry("report.csv", "report.csv", "file"),
+    entry(MARKUP, MARKUP, "file"),
+    entry(INVISIBLE, INVISIBLE, "file"),
   ],
   notes: [entry("todo.md", "notes/todo.md", "file")],
   projects: [entry(PROJECT, `projects/${PROJECT}`, "dir", "projects")],
@@ -234,5 +244,35 @@ describe("Mention in message, the keyboard way (KOBE-374 ac-4)", () => {
     const menu = await openRowMenu("Actions for report.csv");
     await user.click(within(menu).getByRole("menuitem", { name: "Mention in message" }));
     expect(await within(files).findByText(MENTION_NO_COMPOSER)).toBeTruthy();
+  });
+});
+
+describe("names (KOBE-374 review)", () => {
+  const byPath = (path: string) =>
+    must(
+      [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(
+        (el) => el.dataset.path === path,
+      ),
+    );
+
+  it("a name that is markup shows as text in the chip, never as an element", async () => {
+    const t = fake.addThread("Work");
+    await openFiles(t);
+    await composer();
+    dragToComposer(byPath(MARKUP));
+    await waitFor(() => expect(chips()).toEqual([`@${MARKUP}`]));
+    expect(panel().querySelector("img")).toBeNull();
+  });
+
+  it("Mention in message refuses a name the rules refuse, and says why", async () => {
+    const t = fake.addThread("Work");
+    const { user, files } = await openFiles(t);
+    const input = await composer();
+    await user.click(within(byPath(INVISIBLE)).getByRole("button", { name: /^Actions for / }));
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByRole("menuitem", { name: "Mention in message" }));
+    expect(await within(files).findByText(MENTION_NAME_REFUSED)).toBeTruthy();
+    expect(input.value).toBe("");
+    expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
   });
 });

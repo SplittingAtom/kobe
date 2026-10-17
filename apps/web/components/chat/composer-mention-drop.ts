@@ -62,9 +62,14 @@ export function useComposerMentionDrop({
     [aui, session, draft, text, input],
   );
 
+  // One subscription per writable composer; it calls the latest `mention` (which reads the text).
+  const latest = useRef(mention);
+  useEffect(() => {
+    latest.current = mention;
+  }, [mention]);
   useEffect(
-    () => (writable ? session.composerMentions.listen(mention) : undefined),
-    [session, writable, mention],
+    () => (writable ? session.composerMentions.listen((path) => latest.current(path)) : undefined),
+    [session, writable],
   );
 
   // Once the text holds the mention: the input takes the focus with the caret after it. A frame
@@ -100,6 +105,8 @@ export function useComposerMentionDrop({
       e.preventDefault();
       setRowDrop(null);
       const path = droppedRowPath(e.dataTransfer);
+      // Browsers fire no drop after a folder's `dropEffect = "none"` (the hover hint says why);
+      // kept for any that do.
       if (carriesWorkspaceFolder(e.dataTransfer)) setNotice(MENTION_FOLDER_REFUSED);
       else if (path !== "") setNotice(mention(path) ?? "");
       return true;

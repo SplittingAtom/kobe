@@ -65,8 +65,9 @@ describe("whole-composer focus (ac-2)", () => {
     expect(rule(CSS, ".panel:focus-within")).toMatch(
       /outline-color:\s*var\(--kobe-composer-focus\)/,
     );
-    // 2px, never taking layout space: the resting outline is transparent, not absent.
-    expect(rule(CSS, ".panel")).toMatch(/outline:\s*2px solid transparent/);
+    // 2px, never taking layout space; none at rest (a transparent one would show in forced colours).
+    expect(rule(CSS, ".panel")).toMatch(/outline:\s*2px none /);
+    expect(rule(CSS, ".panel:focus-within")).toMatch(/outline-style:\s*solid/);
 
     // The panel holds the focus (what :focus-within matches; happy-dom has no such selector).
     await userEvent.setup().click(input);
@@ -158,5 +159,53 @@ describe("pulse while running (ac-3)", () => {
     expect(at).toBeGreaterThan(CSS.indexOf("@keyframes kobe-composer-pulse"));
     const reduced = rule(CSS.slice(at), ".panel[data-running]");
     expect(reduced).toMatch(/animation:\s*none/);
+  });
+});
+
+/** [ids, classes + attributes + pseudo-classes, types] of one compound selector chain. */
+function specificity(selector: string): [number, number, number] {
+  const ids = (selector.match(/#[\w-]+/g) ?? []).length;
+  const classes = (selector.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+/g) ?? []).length;
+  const types = (selector.replace(/\[[^\]]+\]/g, "").match(/(^|[\s>+~])[a-z][\w-]*/g) ?? []).length;
+  return [ids, classes, types];
+}
+const beats = (a: [number, number, number], b: [number, number, number]) =>
+  a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2];
+
+describe("drop target over focus and run (KOBE-374 review)", () => {
+  it("the mention drop outline wins over the running and focus outlines", () => {
+    // Outside the forced-colours block, where the cascade of the normal themes is decided.
+    const main = CSS.slice(0, CSS.indexOf("@media (forced-colors: active)"));
+    const running = ".panel[data-running]:focus-within";
+    const runningAt = main.indexOf(`${running} {`);
+    expect(runningAt).toBeGreaterThan(0);
+    for (const kind of ["file", "folder"]) {
+      const drop = `.panel[data-mention-drop="${kind}"]:focus-within`;
+      const at = main.indexOf(`${drop} {`);
+      expect(at, drop).toBeGreaterThan(runningAt); // later, so it wins a tie
+      expect(beats(specificity(drop), specificity(running)), drop).toBe(true);
+      expect(beats(specificity(drop), specificity(".panel:focus-within")), drop).toBe(true);
+      expect(rule(main, drop)).toMatch(/outline-color:/);
+      expect(rule(main, drop)).toMatch(/outline-style:\s*(solid|dashed)/);
+    }
+    // Files from the computer during a run: the drop border wins over the running one.
+    expect(rule(main, ".panel[data-running][data-dragging]")).toMatch(/border-color:/);
+  });
+});
+
+describe("forced colours (KOBE-374 review)", () => {
+  it("the focus, running and drop cues use system colours, never a transparent outline", () => {
+    const at = CSS.indexOf("@media (forced-colors: active)");
+    expect(at).toBeGreaterThan(0);
+    const forced = CSS.slice(at);
+    expect(rule(forced, ".panel[data-running]:focus-within")).toMatch(
+      /outline:\s*3px solid Highlight/,
+    );
+    expect(forced).toMatch(/\.panel:focus-within,\s*\.panel\[data-running\]:focus-within \{/);
+    expect(rule(forced, '.panel[data-mention-drop="file"]:focus-within')).toMatch(/Highlight/);
+    expect(rule(forced, '.panel[data-mention-drop="folder"]:focus-within')).toMatch(
+      /dashed CanvasText/,
+    );
+    expect(CSS).not.toMatch(/outline:[^;]*transparent/);
   });
 });

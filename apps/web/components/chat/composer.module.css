@@ -4,7 +4,9 @@
 /* Focus anywhere in the composer (text, chips, buttons) outlines the whole panel: darker and
    thicker than its border, 3:1 or more on the page in both themes (app/theme-css.test.ts). */
 .panel {
-  outline: 2px solid transparent;
+  /* No outline at rest (not a transparent one: forced colours would paint it, so focus would
+     change nothing there). */
+  outline: 2px none var(--kobe-composer-focus);
   outline-offset: 0;
   transition:
     outline-color 120ms ease-out,
@@ -12,6 +14,7 @@
 }
 
 .panel:focus-within {
+  outline-style: solid;
   outline-color: var(--kobe-composer-focus);
 }
 
@@ -55,14 +58,47 @@
   }
 }
 
+/* Files from the computer during a run: the drop border wins over the running one. */
+.panel[data-running][data-dragging] {
+  border-color: var(--primary);
+}
+
 /* A file row from the Files tree over the composer (KOBE-374): the panel lights up as the drop
-   target for a mention; a folder, which can't be mentioned, gets a dashed red outline instead. */
-.panel[data-mention-drop="file"] {
+   target for a mention; a folder, which can't be mentioned, gets a dashed red outline instead.
+   The `:focus-within` forms match `.panel[data-running]:focus-within` and come later, so the drop
+   cue wins over the focus and running outlines. */
+.panel[data-mention-drop="file"],
+.panel[data-mention-drop="file"]:focus-within {
+  outline-style: solid;
   outline-color: var(--admin-accent);
   background-color: color-mix(in srgb, var(--admin-accent) 6%, transparent);
 }
 
-.panel[data-mention-drop="folder"] {
+.panel[data-mention-drop="folder"],
+.panel[data-mention-drop="folder"]:focus-within {
   outline-style: dashed;
   outline-color: var(--kobe-status-failed);
+}
+
+/* Forced colours (Windows High Contrast): tokens and shadows are overridden there, so the focus,
+   running and drop cues use system colours and outline styles that survive. */
+@media (forced-colors: active) {
+  .panel:focus-within,
+  .panel[data-running]:focus-within {
+    outline: 3px solid Highlight;
+  }
+
+  .panel[data-running] {
+    border-color: Highlight;
+  }
+
+  .panel[data-mention-drop="file"],
+  .panel[data-mention-drop="file"]:focus-within {
+    outline: 3px solid Highlight;
+  }
+
+  .panel[data-mention-drop="folder"],
+  .panel[data-mention-drop="folder"]:focus-within {
+    outline: 3px dashed CanvasText;
+  }
 }

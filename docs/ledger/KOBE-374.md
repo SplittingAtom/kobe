@@ -59,8 +59,25 @@
   and **not yet run on gate1**: badge colour and shots, focus outline 2px solid and the field's
   none, pulse animation name and shots, reduced motion none, drag to composer gives a chip.
 - Runs (2026-10-17): format:check, lint, web typecheck, hygiene, wording OK; web vitest 177 files
-  / 1780 tests green; `next build` OK. The e2e package has no local deps, so the spec is not
-  typechecked here.
+  / 1780 tests green; `next build` OK.
+
+## Review follow-up (2026-10-17)
+
+- **Forced colours:** the resting outline is `none`, not transparent, so Windows High Contrast
+  paints no permanent outline. Under `@media (forced-colors: active)`, focus and running-focus
+  get a 3px `Highlight` outline, the running border is `Highlight`, a file drop is `Highlight` and
+  a folder drop is `dashed CanvasText`.
+- **Drop wins:** the drop rules have `:focus-within` forms that tie `.panel[data-running]:focus-within`
+  in specificity and come later, so the accent and dashed red outlines show during a run with focus.
+  A computer file over a running composer turns the border primary.
+- Nits: the composer subscribes to `composerMentions` once (a ref to the latest `mention`); the
+  folder drop branch is commented as a fallback. New tests cover a markup file name (text only)
+  and the menu refusing an invisible character.
+- The browser spec now typechecks (`e2e/browser`: `npm ci`, `tsc -p .` clean). It still runs
+  on gate1 after the deploy. The halo's overlap with the steering panel and pausing the pulse in
+  hidden tabs stay as they are (cosmetic; browsers throttle hidden tabs).
+- Tests: `composer-outline.test.tsx` (specificity, forced colours) and
+  `composer-mention-drop.test.tsx` (names).
 
 ## Open questions
 
