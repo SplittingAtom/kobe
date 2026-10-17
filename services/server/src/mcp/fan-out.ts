@@ -12,7 +12,9 @@ import type { ActiveRunContext } from "./run-context.js";
  * active run of the sandbox, which must not cost one full policy evaluation per run against a small
  * connection pool:
  * - runs with the same policy context (mode, trigger, agent allow/deny lists, project) are decided
- *   once: the engine's answer depends on nothing else of the run;
+ *   once: the engine's answer depends on nothing else of the run, except for a member's
+ *   remembered approval bound to a thread or run (KOBE-289): when one decided the named run, the
+ *   caller decides every sibling instead (mcp/decide.ts, review S1);
  * - the rules, settings, tool resolution and connector state are loaded once per call (memoised
  *   sources behind a per-call engine), so each extra context is evaluation, not queries;
  * - at most `DECISION_CONCURRENCY` decisions run at a time.

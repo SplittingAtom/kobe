@@ -743,6 +743,31 @@ describe("remembered approvals at the proxy (KOBE-289)", () => {
     });
   });
 
+  it("a thread rule never allows a call while another thread of the sandbox runs (review S1)", async () => {
+    const w = await world();
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope, thread_id)
+       VALUES ($1, 'user', $2, 'allow', $3, $2, 'thread', $4)`,
+      [w.team, w.owner.id, piName(w.connector.name, "create_issue"), w.threadId],
+    );
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "allow",
+      reason: "user_allow_rule",
+    });
+    // Thread B, same agent, project and mode, now runs in the same sandbox: a call naming thread
+    // A could come from B, so A's rule can't decide it alone.
+    const sibling = await fx.run(w.team, w.owner);
+    await leaseRun(fx.admin, w.team, sibling, w.owner.id, w.sandboxId);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+    await fx.complete(w.team, sibling);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "allow",
+    });
+  });
+
   it("a scheduled run ignores it (D32): denied, recorded as skipped", async () => {
     const w = await world();
     await remembered(w);

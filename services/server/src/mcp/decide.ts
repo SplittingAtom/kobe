@@ -366,11 +366,14 @@ export async function decideMcpCall(
     // The sandbox's claim picks the named run, but cannot pick its policy: the call is decided
     // under every distinct policy context of its active runs (review M1), bounded (fan-out.ts).
     const namedDecision = await decide(named);
-    const siblings = await mapLimited(
-      distinctSiblings(named, loaded.runs),
-      DECISION_CONCURRENCY,
-      decide,
-    );
+    // A remembered approval can be bound to a thread or a run (KOBE-289): then the answer depends
+    // on the run itself, not only on its policy context, so every other active run is decided on
+    // its own (review S1). A rule of thread A never allows a call while thread B also runs.
+    const others =
+      appliedUserRule(namedDecision) === undefined
+        ? distinctSiblings(named, loaded.runs)
+        : loaded.runs.filter((r) => r.runId !== named.runId);
+    const siblings = await mapLimited(others, DECISION_CONCURRENCY, decide);
     const combined = combineDecisions(namedDecision, siblings);
     // A scheduled run (D32) is never asked and has no approvals: a deny, or an ask (a stricter
     // sibling run), both end the call, and it is recorded as a skipped action of the run.
