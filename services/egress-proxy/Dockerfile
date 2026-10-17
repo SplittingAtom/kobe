@@ -20,6 +20,8 @@ FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /out ./
+# Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).
+COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /usr/share/doc/kobe/
 # Files stay root-owned (read-only to the app); numeric non-root user so runAsNonRoot can verify it.
 USER 1000:1000
 EXPOSE 8080

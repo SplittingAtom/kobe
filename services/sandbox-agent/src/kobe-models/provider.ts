@@ -100,7 +100,8 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
     baseUrl: gatewayBaseUrl(gatewayUrl, api),
     // Thinking is opted into per run (`thinking_level`); OpenAI-compatible endpoints (vLLM,
     // Ollama, chat completions) reject reasoning parameters they do not know, so only the
-    // native vendor APIs advertise it. Catalog capability flags are a KOBE-44 follow-up.
+    // native vendor APIs advertise it. Either way the model gateway writes the run's level in
+    // the form the site admin chose for the model, replacing what Pi sends (KOBE-260).
     reasoning: api !== "openai-completions",
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -111,18 +112,31 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
   };
 }
 
+const TRACEPARENT_HEADER = "traceparent";
+
+/**
+ * The run's headers: its id, its token and (KOBE-274) the run's current span as `traceparent`, so
+ * the gateway's span joins the run trace (the gateway trusts it only for the run it attributed).
+ */
 function withRunHeader(
   headers: ProviderHeaders | undefined,
-  runId: string | null,
+  state: ModelFileState,
   runToken: string | undefined,
 ): ProviderHeaders {
   const base: ProviderHeaders = Object.fromEntries(
     Object.entries(headers ?? {}).filter(
-      ([name]) => ![RUN_ID_HEADER, RUN_TOKEN_HEADER].includes(name.toLowerCase()),
+      ([name]) =>
+        ![RUN_ID_HEADER, RUN_TOKEN_HEADER, TRACEPARENT_HEADER].includes(name.toLowerCase()),
     ),
   );
+  const runId = state.run_id;
   const withId = runId === null ? base : { ...base, [RUN_ID_HEADER]: runId };
-  return runToken === undefined ? withId : { ...withId, [RUN_TOKEN_HEADER]: runToken };
+  const traceparent = state.traceparent ?? null;
+  const traced =
+    runId === null || traceparent === null
+      ? withId
+      : { ...withId, [TRACEPARENT_HEADER]: traceparent };
+  return runToken === undefined ? traced : { ...traced, [RUN_TOKEN_HEADER]: runToken };
 }
 
 function errorResult(
@@ -151,7 +165,7 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
           return {
             auth: {
               apiKey: state.token,
-              headers: withRunHeader(undefined, state.run_id, runTokenOf(state)),
+              headers: withRunHeader(undefined, state, runTokenOf(state)),
             },
             source: "kobe-sandbox-agent",
           };
@@ -219,7 +233,7 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
         // The adapters' own SDK retries would hide the status this loop decides on.
         maxRetries: 0,
         apiKey: state.token,
-        headers: withRunHeader(options?.headers, state.run_id, runTokenOf(state)),
+        headers: withRunHeader(options?.headers, state, runTokenOf(state)),
         onResponse: async (r, m) => {
           response = r;
           await options?.onResponse?.(r, m);

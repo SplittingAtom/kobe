@@ -26,6 +26,11 @@ const threadBound = (table: string) =>
   `AND ((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM threads t WHERE ((t.team_id = ${table}.team_id) ` +
   `AND (t.id = ${table}.thread_id) AND (t.owner_user_id = ${g("user_id")}))))))`;
 
+/** Team grants read all, user grants the member's own rows, thread grants none. */
+const sharerBound = () =>
+  `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+  `((${g("user_id")} IS NULL) OR (user_id = ${g("user_id")})))`;
+
 /** The exact `break_glass_read` USING clause per readable table (D10, KOBE-16). */
 const BREAK_GLASS_QUALS: Record<string, string> = {
   threads:
@@ -38,6 +43,12 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   artifacts: threadBound("artifacts"),
   artifact_versions: threadBound("artifact_versions"),
   files: threadBound("files"),
+  // A rating's comment is thread content (KOBE-275).
+  answer_feedback: threadBound("answer_feedback"),
+  answer_feedback_history: threadBound("answer_feedback_history"),
+  // A shared eval case is a member's copy, not thread content (KOBE-276): user grants by sharer.
+  agent_eval_cases: sharerBound(),
+  agent_eval_case_history: sharerBound(),
   // Memory is not thread content (KOBE-154): team grants only, user grants by owner.
   memory_docs:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +

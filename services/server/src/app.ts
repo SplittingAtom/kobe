@@ -68,6 +68,8 @@ import { threadCompactRoutes } from "./routes/thread-compact.js";
 import { threadMarkerRoutes } from "./routes/thread-markers.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
+import { runFeedbackRoutes, threadFeedbackRoutes } from "./routes/feedback.js";
+import { evalCaseRoutes, runEvalCaseRoutes } from "./eval-cases/routes.js";
 import {
   siteUsageRoutes,
   runUsageRoutes,
@@ -90,7 +92,9 @@ export interface AppOptions {
 export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   const { isolation } = options;
   const app = new Hono();
-  app.use("*", honoTracing());
+  // Never the caller's trace (KOBE-274): run trace ids are predictable, so joining would let anyone
+  // who knows a run id write into that run's trace. Every request starts its own trace.
+  app.use("*", honoTracing({ joinCallerTrace: false }));
   // An audited action that couldn't get the audit chain lock in time rolled back: retryable.
   app.onError((err, c) => {
     if (err instanceof AuditBusyError) {
@@ -167,12 +171,16 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
   api.route("/runs", runUsageRoutes(deps));
+  api.route("/runs", runFeedbackRoutes(deps));
+  api.route("/runs", runEvalCaseRoutes(deps));
+  api.route("/eval-cases", evalCaseRoutes(deps));
   api.route("/projects", projectRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));
   api.route("/threads", threadMarkerRoutes(deps));
   api.route("/threads", threadUsageRoutes(deps));
+  api.route("/threads", threadFeedbackRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps));

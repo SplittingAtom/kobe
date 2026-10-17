@@ -11,8 +11,11 @@ import {
   SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
   SERVER_CALL_TOKEN_HEADER,
+  runRootSpanId,
+  runTraceId,
   serverCallRequestSchema,
 } from "@kobe/protocol";
+import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
 import {
   createServerCallClient,
@@ -254,5 +257,36 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     expect(serverCallKeyFromEnv({})).toBeUndefined();
     expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: "short" })).toBeUndefined();
     expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: MASTER })).toEqual(KEY);
+  });
+});
+
+describe("tracing (KOBE-274 ac-6)", () => {
+  it("records the call in the triggering run's trace with the thread's session", async () => {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      reply = ok("A title");
+      const call = input();
+      await createServerCallClient({ url: base, key: KEY }).complete(call);
+      const span = exporter.getFinishedSpans().find((s) => s.name === "server_call.title");
+      expect(span?.spanContext().traceId).toBe(runTraceId(call.runId));
+      expect(span?.parentSpanContext?.spanId).toBe(runRootSpanId(call.runId));
+      expect(span?.attributes).toMatchObject({
+        "session.id": call.threadId,
+        "user.id": call.userId,
+      });
+      expect(String(seen[0]?.headers.traceparent)).toContain(runTraceId(call.runId));
+    } finally {
+      await telemetry.shutdown();
+    }
   });
 });

@@ -22,6 +22,7 @@
     "license:check": {
       "dependsOn": ["build"],
       "inputs": ["$TURBO_DEFAULT$", "../../pnpm-lock.yaml"],
+      "passThroughEnv": ["LICENSE_GATE", "GITHUB_ACTIONS"],
       "cache": false
     },
     "test:db": {

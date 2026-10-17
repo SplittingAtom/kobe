@@ -39,3 +39,7 @@ export * from "./web-search.js";
 export * from "./budget-reservations.js";
 export * from "./schedules.js";
 export * from "./schedule-notifications.js";
+export * from "./answer-feedback.js";
+export * from "./agent-eval-cases.js";
+export * from "./workspace-hold-history.js";
+export * from "./workspace-moves.js";

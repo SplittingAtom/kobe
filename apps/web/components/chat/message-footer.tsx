@@ -78,6 +78,8 @@ function usageParts(run: RunUsage | undefined): string[] {
   if (!run) return [];
   return [
     ...(run.models.length > 0 ? [run.models.join(", ")] : []),
+    // KOBE-260: the level the run was clamped to.
+    ...(run.thinkingLevel != null ? [`thinking ${run.thinkingLevel}`] : []),
     `${formatTokens(run.inputTokens)} in`,
     `${formatTokens(run.outputTokens)} out`,
     ...(run.unpricedCalls < run.calls ? [formatUsd(run.costUsd)] : []),

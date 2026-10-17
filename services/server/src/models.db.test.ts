@@ -464,6 +464,189 @@ describe("catalog and team enablement", () => {
     expect((await as.siteAdmin.delete(`${MODELS}/catalog/thinker`)).status).toBe(204);
   });
 
+  it("site admins set a model's thinking control, allowance, default and maximum (KOBE-260 ac-1)", async () => {
+    const THINK = { control: "reasoning_effort", allowed: true, default: "low", max: "medium" };
+    // Only for a reasoning model, and only a control that fits the provider.
+    const notReasoning = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "glm",
+      provider_id: "ollama",
+      model: "glm-5.3",
+      thinking: THINK,
+    });
+    expect(notReasoning.status).toBe(400);
+    expect(notReasoning.json).toMatchObject({ code: "thinking_invalid" });
+    expect(notReasoning.json.message).toContain("reasoning");
+    const add = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "glm",
+      provider_id: "ollama",
+      model: "glm-5.3",
+      reasoning: true,
+      thinking: THINK,
+    });
+    expect(add.status, JSON.stringify(add.json)).toBe(201);
+    expect(add.json.model.thinking).toEqual({ ...THINK, lowest: "off" });
+    const wrongKind = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
+      thinking: { ...THINK, control: "anthropic_adaptive" },
+    });
+    expect(wrongKind.status).toBe(400);
+    expect(wrongKind.json.message).toContain("ollama");
+    for (const bad of [
+      { ...THINK, default: "high" }, // above the maximum
+      { ...THINK, max: "off", default: "off" },
+      { ...THINK, allowed: false }, // levels without thinking
+      { ...THINK, max: null },
+      { control: "none", allowed: true, default: null, max: null },
+    ]) {
+      const r = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, { thinking: bad });
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+      expect(r.json).toMatchObject({ code: "thinking_invalid" });
+    }
+    for (const bad of [
+      { ...THINK, control: "think" },
+      { ...THINK, default: "max" },
+      { ...THINK, extra: true },
+      "on",
+    ]) {
+      const r = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, { thinking: bad });
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+    }
+    // Unmarking the reasoning flag needs the thinking control removed too.
+    const unflag = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, { reasoning: false });
+    expect(unflag.json).toMatchObject({ code: "thinking_invalid" });
+    // Thinking off for every run (the KOBE-258 case): persisted, audited, shown to teams.
+    const off = { control: "reasoning_effort", allowed: false, default: null, max: null };
+    const set = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, { thinking: off });
+    expect(set.status, JSON.stringify(set.json)).toBe(200);
+    const stored = { ...off, lowest: "off" };
+    expect((await as.siteAdmin.get(MODELS)).json.catalog).toEqual(
+      expect.arrayContaining([expect.objectContaining({ alias: "glm", thinking: stored })]),
+    );
+    expect((await audit("models.catalog")).at(-1)?.target).toMatchObject({
+      alias: "glm",
+      thinking: stored,
+    });
+    // Models that cannot turn thinking off (review S2): known families default to low, an
+    // explicit off for them is refused, and anthropic budgets are refused where Claude rejects them.
+    const o3 = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "o3",
+      provider_id: "openai",
+      model: "o3",
+      reasoning: true,
+      thinking: THINK,
+    });
+    expect(o3.status, JSON.stringify(o3.json)).toBe(201);
+    expect(o3.json.model.thinking).toMatchObject({ lowest: "low" });
+    const o3Off = await as.siteAdmin.patch(`${MODELS}/catalog/o3`, {
+      thinking: { ...THINK, lowest: "off" },
+    });
+    expect(o3Off.json).toMatchObject({ code: "thinking_invalid" });
+    expect(o3Off.json.message).toContain("cannot turn thinking off");
+    expect((await as.siteAdmin.delete(`${MODELS}/catalog/o3`)).status).toBe(204);
+    // An admin's own "can't turn off" survives a PATCH that leaves `lowest` out (re-review R2).
+    const lowSet = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
+      thinking: { ...THINK, lowest: "low" },
+    });
+    expect(lowSet.json.model?.thinking).toMatchObject({ lowest: "low" });
+    const partial = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
+      thinking: { ...THINK, max: "high" },
+    });
+    expect(partial.status, JSON.stringify(partial.json)).toBe(200);
+    expect(partial.json.model.thinking).toMatchObject({ max: "high", lowest: "low" });
+    const budget = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "opus48",
+      provider_id: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: true,
+      thinking: { ...THINK, control: "anthropic_budget" },
+    });
+    expect(budget.json).toMatchObject({ code: "thinking_invalid" });
+    expect(budget.json.message).toContain("refuses thinking budgets");
+    // Anthropic models that cannot turn thinking off: always allowed, never off by default.
+    const alwaysOn = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "opus",
+      provider_id: "anthropic",
+      model: "claude-opus-5-5",
+      reasoning: true,
+      thinking: { control: "anthropic_effort", allowed: false, default: null, max: null },
+    });
+    expect(alwaysOn.json).toMatchObject({ code: "thinking_invalid" });
+    expect((await as.bob.patch(`${MODELS}/catalog/glm`, { thinking: off })).status).toBe(403);
+    expect((await as.siteAdmin.delete(`${MODELS}/catalog/glm`)).status).toBe(204);
+  });
+
+  it("team admins can only narrow a model's thinking (KOBE-260 ac-4)", async () => {
+    const add = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "deep",
+      provider_id: "openai",
+      model: "gpt-deep",
+      reasoning: true,
+      thinking: { control: "reasoning_effort", allowed: true, default: "medium", max: "medium" },
+    });
+    expect(add.status, JSON.stringify(add.json)).toBe(201);
+    const deep = (r: { json: Record<string, unknown> }) =>
+      (r.json.models as Record<string, unknown>[]).find((m) => m.alias === "deep");
+    try {
+      // Wider than the site: refused; equal or lower: kept.
+      const wider = await as.alice.put("/v1/team/models/deep", {
+        enabled: true,
+        thinking_max: "high",
+      });
+      expect(wider.status).toBe(400);
+      expect(wider.json).toMatchObject({ code: "thinking_invalid" });
+      expect(deep(await as.alice.get("/v1/team/models"))).toMatchObject({ enabled: false });
+      const lower = await as.alice.put("/v1/team/models/deep", {
+        enabled: true,
+        thinking_max: "low",
+      });
+      expect(lower.status, JSON.stringify(lower.json)).toBe(200);
+      expect(teamModelsResponseSchema.safeParse(lower.json).error).toBeUndefined();
+      expect(deep(lower)).toMatchObject({
+        thinking_max: "low",
+        // The site's default comes down to the team's maximum.
+        thinking_in_team: { default: "low", levels: ["off", "low"] },
+      });
+      // Members read it; only team admins change it.
+      expect(deep(await as.bob.get("/v1/team/models"))).toMatchObject({ thinking_max: "low" });
+      expect(
+        (await as.bob.put("/v1/team/models/deep", { enabled: true, thinking_max: "off" })).status,
+      ).toBe(403);
+      // Re-enabling without thinking_max keeps it; off turns thinking off for the team.
+      const kept = await as.alice.put("/v1/team/models/deep", { enabled: true, is_default: false });
+      expect(deep(kept)).toMatchObject({ thinking_max: "low" });
+      const off = await as.alice.put("/v1/team/models/deep", {
+        enabled: true,
+        thinking_max: "off",
+      });
+      expect(deep(off)).toMatchObject({ thinking_in_team: { default: "off", levels: [] } });
+      expect((await audit("models.team")).at(-1)?.target).toMatchObject({
+        alias: "deep",
+        thinkingMax: "off",
+      });
+      // Another team keeps the site's settings.
+      expect(deep(await as.dave.get("/v1/team/models"))).toMatchObject({
+        thinking_max: null,
+        thinking_in_team: { default: "medium", levels: ["off", "low", "medium"] },
+      });
+      // When the site lowers its maximum later, the team's stays a ceiling, never a raise.
+      await as.siteAdmin.patch(`${MODELS}/catalog/deep`, {
+        thinking: { control: "reasoning_effort", allowed: true, default: "low", max: "low" },
+      });
+      const cleared = await as.alice.put("/v1/team/models/deep", {
+        enabled: true,
+        thinking_max: null,
+      });
+      expect(deep(cleared)).toMatchObject({
+        thinking_max: null,
+        thinking_in_team: { default: "low", levels: ["off", "low"] },
+      });
+      expect(
+        (await as.alice.put("/v1/team/models/deep", { enabled: true, thinking_max: "max" })).status,
+      ).toBe(400);
+    } finally {
+      expect((await as.siteAdmin.delete(`${MODELS}/catalog/deep`)).status).toBe(204);
+    }
+  });
+
   it("members see the catalog; only team admins enable models and pick the default", async () => {
     const seen = await as.bob.get("/v1/team/models");
     expect(seen.status).toBe(200);
@@ -485,7 +668,12 @@ describe("catalog and team enablement", () => {
     expect(other.json.default).toBeNull();
     const events = await audit("models.team");
     expect(events.every((e) => e.team_id === finance)).toBe(true);
-    expect(events.at(-1)?.target).toEqual({ alias: "smart", enabled: true, isDefault: true });
+    expect(events.at(-1)?.target).toEqual({
+      alias: "smart",
+      enabled: true,
+      isDefault: true,
+      thinkingMax: null,
+    });
   });
 });
 

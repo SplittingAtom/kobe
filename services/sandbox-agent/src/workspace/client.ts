@@ -6,6 +6,7 @@ import {
   workspaceBlobsMissingResponseSchema,
   workspaceCommitResponseSchema,
   workspaceManifestPageSchema,
+  workspaceMovesPageSchema,
   type WorkspaceChange,
   type WorkspaceEntry,
   type WorkspaceRestoreReport,
@@ -77,6 +78,11 @@ export class SyncClient {
       "GET",
       `/manifest?since=${since}&limit=${limit}`,
     );
+  }
+
+  /** Journalled server moves with rows newer than `since` (KOBE-304), after move `after`. */
+  moves(since: number, after = 0) {
+    return this.#json(workspaceMovesPageSchema, "GET", `/moves?since=${since}&after=${after}`);
   }
 
   async missing(sha256: readonly string[]): Promise<string[]> {

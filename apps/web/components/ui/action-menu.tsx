@@ -2,7 +2,7 @@
 
 import { ChevronRightIcon } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CommandId } from "../../lib/shell/commands";
 import { menuItems, type MenuBindings, type MenuItem, type MenuScope } from "../../lib/shell/menu";
 import { cn } from "../../lib/utils";
@@ -114,6 +114,8 @@ export function ActionMenu({
   onOpenChange,
   className,
   size = "sm",
+  tabIndex,
+  openSignal = 0,
 }: {
   /** The registry's button command (its icon); `label` names the row's object. */
   readonly trigger: CommandId;
@@ -124,6 +126,10 @@ export function ActionMenu({
   readonly className?: string | undefined;
   /** The button's size: `md` is the standard 32 px target (the file rows, KOBE-269). */
   readonly size?: "sm" | "md" | undefined;
+  /** -1 inside a composite widget (the Files tree) whose rows own the tab stop. */
+  readonly tabIndex?: number | undefined;
+  /** Each new value above 0 opens the menu (the tree's Shift+F10 / Menu key, KOBE-304). */
+  readonly openSignal?: number | undefined;
 }) {
   const items = menuItems(scope, bindings);
   // Controlled, so opening renders this again and the portal finds the chat root even when the
@@ -134,10 +140,19 @@ export function ActionMenu({
     setOpen(next);
     onOpenChange?.(next);
   };
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
   return (
     <DropdownMenu.Root open={open} onOpenChange={change}>
       <DropdownMenu.Trigger asChild>
-        <IconAction command={trigger} label={label} size={size} className={className} />
+        <IconAction
+          command={trigger}
+          label={label}
+          size={size}
+          className={className}
+          {...(tabIndex === undefined ? {} : { tabIndex })}
+        />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal container={chatPortalContainer()}>
         <DropdownMenu.Content

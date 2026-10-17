@@ -76,3 +76,23 @@ describe("tracing values (KOBE-10)", () => {
     ]);
   });
 });
+
+describe("sandboxes hold no collector URL or credential (KOBE-274 ac-3)", () => {
+  it("renders the endpoint and the headers Secret into the five services only", () => {
+    const ms = render({
+      "telemetry.endpoint": "http://otel-collector.example:4318",
+      "telemetry.headersSecret": "otel-auth",
+    });
+    const holders = ms
+      .filter((m) => /otel-collector\.example|otel-auth/.test(JSON.stringify(m)))
+      .map((m) => `${m.kind}/${m.metadata.name}`)
+      .sort();
+    expect(holders).toEqual(SERVICES.map((d) => `Deployment/${d}`).sort());
+    // Nothing the server hands to sandboxes (its sandbox config) names the collector.
+    const server = ms.find((m) => m.kind === "Deployment" && m.metadata.name === "kobe-server");
+    const sandboxConfig = (server?.spec.template.spec.containers[0].env as any[]).filter((e) =>
+      /^KOBE_SANDBOX_/.test(e.name),
+    );
+    expect(JSON.stringify(sandboxConfig)).not.toMatch(/otel|4318/i);
+  });
+});

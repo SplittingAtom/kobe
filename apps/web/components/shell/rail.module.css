@@ -261,6 +261,8 @@
   position: absolute;
   inset: 0;
   z-index: 10;
+  /* The Files tree's folders under it take drops into themselves (KOBE-304). */
+  pointer-events: none;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;

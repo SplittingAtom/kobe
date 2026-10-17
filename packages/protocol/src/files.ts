@@ -164,6 +164,35 @@ export const workspaceUploadFieldsSchema = z.strictObject({ path: dirPath.option
 /** `DELETE .../workspace/files?path=` -> 204. Files and directories; never the root. */
 export const workspaceDeleteQuerySchema = z.strictObject({ path: workspacePathSchema });
 
+/**
+ * `POST .../workspace/files/move` (KOBE-304) with {@link workspaceMoveRequestSchema}: moves or
+ * renames one file or folder of the caller's own workspace to the full path `to` (a folder moves
+ * with everything in it). The server decides: both paths follow the workspace path rules, `to`
+ * also the mention rules (`mentionPathIssue`: no invisible, format or shell characters), neither
+ * is agent-internal (`.kobe/`) nor read-only (project mounts, thread uploads; a member's drop in
+ * `uploads/` may move, and a file may move into `uploads/` as a drop), `to` is not `from` nor
+ * inside it, and nothing exists at `to` or in its way (`already_exists`: never overwritten).
+ * 200 body: {@link workspaceMoveResponseSchema}. Rate-limited per member (429 `rate_limited`).
+ * The synced copy moves at once (one transaction); the sandbox follows on its next sync.
+ */
+export const workspaceMoveRequestSchema = z.strictObject({
+  from: workspacePathSchema,
+  to: workspacePathSchema,
+});
+export type WorkspaceMoveRequest = z.infer<typeof workspaceMoveRequestSchema>;
+
+export const workspaceMoveResponseSchema = z.strictObject({
+  from: workspacePathSchema,
+  to: workspacePathSchema,
+  type: z.enum(["file", "dir"]),
+  /** Files moved (a folder's, or 1). */
+  files: z.number().int().positive(),
+});
+export type WorkspaceMoveResponse = z.infer<typeof workspaceMoveResponseSchema>;
+
+/** Most files one move takes (a bigger folder moves in parts: its subfolders first). */
+export const WORKSPACE_MOVE_MAX_FILES = 10_000;
+
 export const WORKSPACE_FILE_ERROR_CODES = [
   "not_found",
   "invalid_path",

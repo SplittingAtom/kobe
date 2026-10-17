@@ -159,3 +159,68 @@ describe("model picker", () => {
     expect(screen.queryByRole("combobox", { name: "Model for this conversation" })).toBeNull();
   });
 });
+
+describe("thinking level per conversation (KOBE-260)", () => {
+  const thinkingPicker = () =>
+    screen.findByRole("combobox", {
+      name: "Thinking level for this conversation",
+    }) as Promise<HTMLSelectElement>;
+  beforeEach(() => {
+    // glm lets members choose up to medium in this team; kimi (the default) has no control.
+    Object.assign(must(fake.teamModels[1]), {
+      thinking_in_team: { default: "low", levels: ["off", "low", "medium"] },
+    });
+  });
+
+  it("is offered only for a model that allows a choice", async () => {
+    const t = fake.addThread("Budget");
+    openApp(fake, t);
+    await picker();
+    expect(
+      screen.queryByRole("combobox", { name: "Thinking level for this conversation" }),
+    ).toBeNull();
+    await userEvent.setup().selectOptions(await picker(), "glm");
+    expect(optionNames(await thinkingPicker())).toEqual([
+      "Thinking low (default)",
+      "Thinking off",
+      "Thinking low",
+      "Thinking medium",
+    ]);
+  });
+
+  it("is saved on the thread, and back to the model's default", async () => {
+    const t = fake.addThread("Think");
+    must(fake.threads.get(t)).model = "glm";
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.selectOptions(await thinkingPicker(), "off");
+    await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBe("off"));
+    expect(chatRequests(fake, "PATCH").at(-1)).toMatchObject({
+      path: `/v1/threads/${t}`,
+      body: { thinking_level: "off" },
+      team: fake.teamId,
+    });
+    await user.selectOptions(await thinkingPicker(), "");
+    await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBeNull());
+  });
+
+  it("a new conversation is created with the chosen level", async () => {
+    openApp(fake);
+    const user = userEvent.setup();
+    await user.selectOptions(await picker(), "glm");
+    await user.selectOptions(await thinkingPicker(), "medium");
+    await user.type(await composer(), "Think hard{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(1));
+    expect(chatRequests(fake, "POST")[0]).toMatchObject({
+      path: "/v1/threads",
+      body: { model: "glm", thinking_level: "medium" },
+    });
+  });
+
+  it("shows a level the team has since lowered as what runs get", async () => {
+    const t = fake.addThread("Lowered");
+    Object.assign(must(fake.threads.get(t)), { model: "glm", thinking_level: "high" });
+    openApp(fake, t);
+    await waitFor(async () => expect((await thinkingPicker()).value).toBe("medium"));
+  });
+});

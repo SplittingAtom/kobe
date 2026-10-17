@@ -26,6 +26,8 @@ export interface ToolActivity {
   readonly call?: Payload<"tool.call"> | undefined;
   readonly result?: Payload<"tool.result"> | undefined;
   readonly denied?: Payload<"policy.denied"> | undefined;
+  /** One of the member's remembered approvals let it run without asking (KOBE-289). */
+  readonly ruleApplied?: Payload<"policy.rule_applied"> | undefined;
   readonly egressBlocked: readonly Payload<"egress.blocked">[];
   readonly approvalRequested?: Payload<"approval.requested"> | undefined;
   readonly approvalResolved?: Payload<"approval.resolved"> | undefined;
@@ -246,6 +248,11 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
       return withTool(next, event.payload.tool_call_id, (t) => ({ ...t, result: event.payload }));
     case "policy.denied":
       return withTool(next, event.payload.tool_call_id, (t) => ({ ...t, denied: event.payload }));
+    case "policy.rule_applied":
+      return withTool(next, event.payload.tool_call_id, (t) => ({
+        ...t,
+        ruleApplied: event.payload,
+      }));
     case "approval.requested":
       return withTool(next, event.payload.tool_call_id, (t) => ({
         ...t,

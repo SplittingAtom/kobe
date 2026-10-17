@@ -85,7 +85,7 @@ function formatter(tz: string): Intl.DateTimeFormat {
 }
 
 /** The wall clock in `tz` at `instant`, as if it were UTC (ms): comparable with `Date.UTC(...)`. */
-function wallMs(tz: string, instantMs: number): number {
+export function wallMs(tz: string, instantMs: number): number {
   const parts: Record<string, number> = {};
   for (const p of formatter(tz).formatToParts(new Date(instantMs))) {
     if (p.type !== "literal") parts[p.type] = Number(p.value);
@@ -107,7 +107,7 @@ const offsetMs = (tz: string, instantMs: number): number =>
  * The instant a local wall time (given as UTC-style ms) happens: the first occurrence if it
  * repeats; if it does not exist, the first instant after the gap.
  */
-function wallToInstant(tz: string, wall: number): number {
+export function wallToInstant(tz: string, wall: number): number {
   const before = offsetMs(tz, wall - DAY_MS);
   const after = offsetMs(tz, wall + DAY_MS);
   const valid = [before, after]

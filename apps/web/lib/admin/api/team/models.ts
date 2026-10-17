@@ -3,6 +3,7 @@
  * team.models.manage; KOBE-40 API, KOBE-44 UI). The whole site catalog, each with whether the
  * team enabled it and which one is the team's default.
  */
+import type { ThinkingLevel } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { CatalogModel, ProviderKind } from "../site/models";
 
@@ -12,6 +13,16 @@ const BASE = "/v1/team/models";
 export interface TeamModel extends CatalogModel {
   readonly enabled: boolean;
   readonly isDefault: boolean;
+  /** KOBE-260: the team's thinking maximum (it only narrows the site's); null: the site's. */
+  readonly thinkingMax?: ThinkingLevel | null;
+  /**
+   * KOBE-260: what members get in this team: the default level (null: no control) and the
+   * levels a conversation may pick (empty: no choice). Absent from an older server.
+   */
+  readonly thinkingInTeam?: {
+    readonly default: ThinkingLevel | null;
+    readonly levels: readonly ThinkingLevel[];
+  };
 }
 
 export interface TeamModels {
@@ -33,13 +44,19 @@ export function listTeamModels(
 export function setTeamModel(
   teamId: string,
   alias: string,
-  change: { readonly enabled: boolean; readonly isDefault?: boolean },
+  change: {
+    readonly enabled: boolean;
+    readonly isDefault?: boolean;
+    /** KOBE-260: the team's thinking maximum; null goes back to the site's. */
+    readonly thinkingMax?: ThinkingLevel | null;
+  },
 ): Promise<ApiResult<TeamModels>> {
   return apiRequest(`${BASE}/${enc(alias)}`, {
     method: "PUT",
     json: {
       enabled: change.enabled,
       ...(change.isDefault === undefined ? {} : { is_default: change.isDefault }),
+      ...(change.thinkingMax === undefined ? {} : { thinking_max: change.thinkingMax }),
     },
     teamId,
   });

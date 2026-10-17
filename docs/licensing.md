@@ -1,28 +1,93 @@
 # Licensing
 
-Kobe is Apache-2.0. Dependencies are limited to MIT/Apache/BSD/MPL-family licenses (spec D3);
-anything else needs a documented, version-pinned exception that Chris signs off.
+Kobe is Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). This page is the policy; the
+inventory of every third-party component (npm and Python packages, images, chart and cluster
+components, dev and test tools, assets) is [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md).
 
-| Scope                                | Checked by                                                                   | Exceptions                                    |
-| ------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------- |
-| pnpm workspace (prod + dev)          | `pnpm license:check` (CI `checks`)                                           | `tools/license-check/license-exceptions.json` |
-| Sandbox image: Python + npm packages | `images/sandbox/collect-licenses.sh` + the same checker (CI `sandbox-image`) | `images/sandbox/license-exceptions.json`      |
-| Orbit eval image: Python packages    | the same script and checker (CI `orbit-eval-image`)                          | `images/orbit-eval/license-exceptions.json`   |
+## Policy
 
-Not covered by the automated check, and why that is acceptable:
+Dependencies are limited to MIT/Apache/BSD/MPL-family licenses (spec D3; permissive equivalents
+such as ISC, 0BSD, BlueOak-1.0.0, Zlib, CC0-1.0 and Unlicense count as part of the family; AGPL
+and source-available licenses are excluded). Anything else needs a documented, version-pinned
+entry that Chris decides on, recording **who approved it and when**:
 
-- **Debian packages in the sandbox image** (`git`, `curl`, `less`, `procps`, `zip`/`unzip`, …) are
-  separate, unmodified programs that agents invoke; Kobe does not link against them. Several are
-  GPL (git, procps, less); `zip`/`unzip` use the Info-ZIP license.
-- **Native libraries inside Python wheels**: numpy and pyarrow wheels bundle runtime libraries such
-  as `libgfortran` (GPL with the GCC Runtime Library Exception, which permits redistribution in
-  non-GPL programs) and OpenBLAS (BSD-3-Clause).
-- **Base images** (`node`, `python` official images) and third-party service images (CloudNativePG:
-  Apache-2.0; ClamAV, optional and off by default: GPL-2.0, run as a separate service).
-- **Orbit and Inspect AI** (Orbit eval image, KOBE-92): Orbit v1.0.3 is Apache-2.0 (`LICENSE` at the
-  repository root and in the wheel), Inspect AI is MIT; their 88 Python distributions pass the checker
-  with seven documented, version-pinned exceptions for PSF/CNRI-style or mislabelled permissive
-  licenses. Debian packages in the `python:slim` base are not linked into the runner.
+- a package: an entry in the scope's exceptions file with `license`, `versions`, `reason`, and
+  either `approvedBy` + `approvedOn` (YYYY-MM-DD) or `pending: "gate review"`;
+- a component in the hand-maintained inventory (an image, a separate program, a data file):
+  `reason` and either `approval: {by, on, ref}` or `pending: gate review` on its row in
+  `tools/license-check/inventory.yaml`.
+
+Copyleft programs are acceptable only as **separate, unmodified programs** that Kobe runs or talks
+to without linking (the Debian GPL tools in the sandbox image, the optional ClamAV service); each
+is listed in the inventory with that reason.
+
+### License decisions never block work (Chris, 2026-10-17)
+
+A new component outside the family is added at once with `pending: gate review` and a reason; the
+agent carries on and never stops to ask. Pending items do not fail `pnpm license:check`: they are
+printed as warnings (GitHub annotations in CI) and listed under "Pending gate review" at the top
+of `THIRD_PARTY_LICENSES.md`, so PRs and the merge queue still pass. **Every gate review clears
+that list with Chris**: gate tickets run `pnpm license:gate` (the same check in strict mode,
+`LICENSE_GATE=1`, also `--gate` on the CLIs), which fails while anything is pending, and record
+his decisions as approvals (or replace the component).
+
+What still fails every push, because it is breakage rather than a license decision: a stale
+`THIRD_PARTY_LICENSES.md`, `NOTICE` or image report; an image, chart value or package outside
+the family with no entry at all (the entry must exist, even if pending); malformed data.
+
+## Checks
+
+| Scope                                              | Checked by                                                                      | Exceptions                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------- |
+| pnpm workspace (prod + dev)                        | `pnpm license:check` (CI `checks`)                                              | `tools/license-check/license-exceptions.json` |
+| Sandbox image: Python + npm packages               | `images/sandbox/collect-licenses.sh` + the same checker (CI `sandbox-image`)    | `images/sandbox/license-exceptions.json`      |
+| Orbit eval image: Python packages                  | the same script and checker (CI `orbit-eval-image`)                             | `images/orbit-eval/license-exceptions.json`   |
+| Playwright suite (`e2e/browser/package-lock.json`) | `pnpm license:check` (inventory step)                                           | none                                          |
+| Images, chart and cluster components, assets       | `pnpm license:check` (inventory step: rows outside the family need an approval) | `tools/license-check/inventory.yaml`          |
+
+## The inventory and NOTICE
+
+`THIRD_PARTY_LICENSES.md` and `NOTICE` are generated by `pnpm licenses:update`
+(`tools/license-check/src/inventory-cli.ts`) and never edited by hand. `pnpm license:check`
+regenerates both in memory and fails when either differs from the committed file, so they cannot
+drift. The sources:
+
+- **npm (generated):** every package in `pnpm-lock.yaml`, classified from the lockfile's graph as
+  shipped (production closure of `apps/*` and `services/*`, with the image it lands in) or dev-only,
+  with the license from `pnpm licenses list`. Platform-specific builds (esbuild, SWC, ...) take the
+  license of their family in `inventory.yaml`, so the file is the same on macOS and Linux.
+- **Image packages (generated):** `images/<image>/third-party-licenses.json`, the sorted output of
+  `collect-licenses.sh` for the built image. The image workflows compare it with a fresh run and
+  fail on a difference (and upload the fresh report); to update it:
+
+  ```bash
+  images/sandbox/collect-licenses.sh <image> > raw.json
+  node tools/license-check/dist/inventory-cli.js image-report sandbox raw.json   # or orbit-eval
+  pnpm licenses:update
+  ```
+
+- **Hand-maintained:** `tools/license-check/inventory.yaml` holds base and service images, the
+  Debian packages and wheel-bundled native libraries, chart and cluster components (Pi,
+  agent-sandbox, gVisor/Kata, CloudNativePG, PostgreSQL, Bifrost, ClamAV, Langfuse, ...), dev and
+  test tools and assets. The check fails when a Dockerfile `FROM`, an image in the chart, `dev/`,
+  `ci/`, a workflow or a script has no row (`images:` on a row covers a repository), and when a
+  top-level key of `charts/kobe/values.yaml` is not classified in `chartValues` (first-party,
+  site-provided, or the rows it brings in).
+- **NOTICE:** Kobe's own notice, then the NOTICE file of every bundled component that ships one
+  (npm packages shipped in an image, and the `notice` texts in the image reports), as Apache-2.0
+  section 4(d) requires when redistributing them.
+
+Every Kobe image ships `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` under
+`/usr/share/doc/kobe/`; `scripts/assert-image-licenses.sh` checks that they match the repository
+(CI `e2e` images job, `sandbox-image`, `orbit-eval-image`, `pnpm images:check`).
+
+**Adding a dependency, image or service:** run `pnpm licenses:update` and commit the result; for a
+new image, chart component or external service add a row (or a `chartValues` entry) to
+`tools/license-check/inventory.yaml` first, marked `pending: gate review` when it is outside the
+family. `pnpm license:check` names anything missing.
+
+## Notes on specific components
+
 - **Bifrost** (`docker.io/maximhq/bifrost`, pinned by tag and digest in the chart and tracked by
   Dependabot through `images/bifrost/Dockerfile`): Apache-2.0. Checked at v2.2.5
   (`github.com/maximhq/bifrost`, tag `transports/v2.2.5`): the repository has a single `LICENSE`
@@ -32,3 +97,17 @@ Not covered by the automated check, and why that is acceptable:
   Bifrost's enterprise features are separate (an enterprise build and license key; in the open
   code they show up as `is_enterprise` flags, user-level governance, clustering, SCIM and UI
   fallbacks), and Kobe uses none of them. Re-check on every Bifrost bump.
+- **Pi** (`@earendil-works/pi-coding-agent`, pinned 1.0.0): MIT. Checked at `v1.0.0`
+  (`github.com/earendil-works/pi`): one `LICENSE` (MIT) at the root, the npm package declares MIT,
+  and `packages/mcp/LICENSES` holds the MIT license of the MCP TypeScript SDK it includes.
+- **agent-sandbox** (`kubernetes-sigs/agent-sandbox`, v1.0.4): Apache-2.0, a single `LICENSE` at
+  the root of the v1.0.4 tag and no NOTICE. Installed by the site, not shipped by Kobe.
+- **Orbit and Inspect AI** (Orbit eval image, KOBE-92): Orbit v1.0.3 is Apache-2.0 (`LICENSE` at
+  the repository root and in the wheel, NOTICE carried into Kobe's NOTICE), Inspect AI is MIT.
+- **Native libraries inside Python wheels**: numpy bundles OpenBLAS (BSD-3-Clause) and
+  libgfortran (GPL with the GCC Runtime Library Exception, which permits redistribution in non-GPL
+  programs); pillow and pyarrow bundle further permissive libraries (inventory, "Container and base
+  images").
+- **kobe-runas** is linked statically (`-static-pie`) against musl (MIT) with musl's own start
+  files only: no glibc and no GCC runtime objects in the binary (Chris chose musl over glibc's
+  LGPL on 2026-10-17, KOBE-375).

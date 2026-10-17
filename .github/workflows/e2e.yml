@@ -120,6 +120,11 @@ jobs:
         run: |
           docker load --input "${RUNNER_TEMP}/e2e-image-${{ matrix.name }}.tar"
           scripts/assert-image-nonroot.sh "ghcr.io/splittingatom/kobe-${{ matrix.name }}:${KOBE_IMAGE_TAG}"
+      # KOBE-375: every image ships LICENSE, NOTICE and THIRD_PARTY_LICENSES.md (the sandbox image
+      # is checked in sandbox-image.yml).
+      - name: Assert ${{ matrix.name }} ships the license files
+        if: matrix.name != 'sandbox'
+        run: scripts/assert-image-licenses.sh "ghcr.io/splittingatom/kobe-${{ matrix.name }}:${KOBE_IMAGE_TAG}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # archive: false uploads the file as is (its layers are compressed already); the

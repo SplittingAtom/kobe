@@ -9,8 +9,10 @@ import type {
   ApprovalStatus,
   JsonObject,
   PolicyReason,
+  RememberScope,
   RiskClass,
   RunStatus,
+  ThinkingLevel,
   ThreadStatus,
 } from "@kobe/protocol";
 
@@ -71,6 +73,8 @@ export interface ThreadSummary {
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   readonly model?: string | null;
+  /** The thinking level chosen for the thread (KOBE-260); null or absent = the model's default. */
+  readonly thinkingLevel?: ThinkingLevel | null;
   /** Set when a schedule started the thread (KOBE-173); drives the Scheduled folder. */
   readonly scheduleId?: string | null;
   /**
@@ -229,8 +233,39 @@ export interface ApprovalView {
 
 export interface ApprovalDecisionBody {
   readonly decision: "allow" | "deny";
-  /** "Always allow this tool": a remember-rule for exactly this tool, optionally expiring. */
-  readonly remember?: { readonly toolGlob: string; readonly expiresIn?: number | undefined };
+  /**
+   * "Remember": a rule for exactly this tool with a scope (KOBE-289). `exact` pins this action;
+   * the server derives the pattern and the expiry itself and refuses what the team's limits don't
+   * allow.
+   */
+  readonly remember?: {
+    readonly toolGlob: string;
+    readonly scope: RememberScope;
+    readonly exact?: boolean | undefined;
+  };
+}
+
+/** `GET /v1/approvals/{id}/remember` (KOBE-289): what the card may offer, as the server decided. */
+export interface RememberOptions {
+  readonly approvalId: string;
+  readonly runId: string;
+  readonly canRemember: boolean;
+  readonly reason: string | null;
+  readonly choices: readonly {
+    readonly scope: RememberScope;
+    readonly label: string;
+    readonly expiresAt: string | null;
+  }[];
+  readonly timeZone: string;
+  /** The exact-action pattern (JSON pointer → literal glob), kept verbatim. */
+  readonly exact: {
+    readonly argPattern: Readonly<Record<string, string>>;
+    /** Every argument pinned (true), or only a file tool's path (false: the content may differ). */
+    readonly pinsAll: boolean;
+  } | null;
+  readonly exactOnly: boolean;
+  readonly approveAll: { readonly approvalIds: readonly string[] } | null;
+  readonly approveAllReason: string | null;
 }
 
 /** A member's request to enable a blocked egress domain (KOBE-39, `/v1/egress/requests`). */

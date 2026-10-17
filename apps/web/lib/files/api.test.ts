@@ -52,6 +52,19 @@ describe("files api", () => {
     expect(new Headers(call.init.headers).has("content-type")).toBe(false);
   });
 
+  it("moves with a JSON body of both paths, naming the team (KOBE-304)", async () => {
+    const { calls, fetchFn } = stub(200, { from: "a", to: "b/a", type: "dir", files: 2 });
+    const api = createFilesApi("t1", fetchFn);
+    expect(api.teamId).toBe("t1");
+    const res = await api.move("a", "b/a");
+    expect(res.ok && res.data).toEqual({ from: "a", to: "b/a", type: "dir", files: 2 });
+    const call = must(calls[0]);
+    expect(call.url).toBe("/v1/workspace/files/move");
+    expect(call.init.method).toBe("POST");
+    expect(JSON.parse(String(call.init.body))).toEqual({ from: "a", to: "b/a" });
+    expect(new Headers(call.init.headers).get("x-kobe-team")).toBe("t1");
+  });
+
   it("deletes by path and wakes", async () => {
     const del = stub(204, undefined);
     await createFilesApi("t1", del.fetchFn).remove("d/n.txt");

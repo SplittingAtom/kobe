@@ -20,6 +20,8 @@ export interface ModelFileContent {
   readonly model: RunModel | null;
   readonly token: string;
   readonly runId: string | null;
+  /** The run's current span (KOBE-274), for the gateway; absent or null: none. */
+  readonly traceparent?: string | null;
 }
 
 export function modelFileState(content: ModelFileContent): ModelFileState {
@@ -29,6 +31,7 @@ export function modelFileState(content: ModelFileContent): ModelFileState {
     model: content.model === null ? null : modelFileModel(content.model),
     token: content.token,
     run_id: content.runId,
+    traceparent: content.runId === null ? null : (content.traceparent ?? null),
   };
 }
 
@@ -47,6 +50,7 @@ function sameContent(a: ModelFileContent, b: ModelFileContent): boolean {
   return (
     a.token === b.token &&
     a.runId === b.runId &&
+    (a.traceparent ?? null) === (b.traceparent ?? null) &&
     a.model?.gatewayModel === b.model?.gatewayModel &&
     a.model?.api === b.model?.api &&
     a.model?.limits?.maxOutputTokens === b.model?.limits?.maxOutputTokens &&

@@ -16,7 +16,10 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "license:check": "node dist/cli.js"
+    "license:check": "node dist/cli.js && node dist/inventory-cli.js check",
+    "licenses:update": "node dist/inventory-cli.js update"
   },
-  "dependencies": {}
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
 }

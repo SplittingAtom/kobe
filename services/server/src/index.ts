@@ -9,7 +9,7 @@ import { destinationsOf, sinksFor } from "./audit/forward/index.js";
 import { forwardingSecrets } from "./audit/forward/redact.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
-import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
+import { createLangfuseScoreSink, initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
@@ -40,7 +40,7 @@ import { schedulerAuthStandIn } from "./scheduler/process-deps.js";
 import { onScheduledRunEnded } from "./scheduler/run-hook.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
-import { runTokenKeyFromEnv } from "./sandbox-wire/run-token.js";
+import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-token.js";
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
@@ -67,7 +67,11 @@ const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
-const telemetry = initTelemetry(loadTelemetryConfig(process.env, config.process));
+const telemetryConfig = loadTelemetryConfig(process.env, config.process);
+const telemetry = initTelemetry(telemetryConfig);
+// Answer ratings as Langfuse scores (KOBE-275): only with a Langfuse tracing endpoint, server only.
+const scoreSink =
+  config.process === "server" ? createLangfuseScoreSink(telemetryConfig) : undefined;
 // Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
 const s3 = loadS3Settings(process.env);
 const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
@@ -91,6 +95,8 @@ const bifrostAdmin = modelsConfig
   : undefined;
 // Run-bound model-gateway tokens (KOBE-118): keyed from the gateway session key; unset: off.
 const runTokenKey = runTokenKeyFromEnv(process.env);
+// Relayed sandbox spans (KOBE-274): `k_trace` from the same session key; unset: no span relay.
+const traceSpanKey = traceSpanKeyFromEnv(process.env);
 // The server's own model calls (KOBE-219 auto-titles): the gateway's address and a token key from
 // the same session key. Either unset: no titles (logged once below).
 const serverCallKey = serverCallKeyFromEnv(process.env);
@@ -118,7 +124,11 @@ if (config.process === "scheduler") {
     ...auth,
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
-    sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
+    sandboxWire: {
+      waker,
+      ...(runTokenKey ? { runTokenKey } : {}),
+      ...(traceSpanKey ? { traceSpanKey } : {}),
+    },
     ...(config.modelGatewayUrl && serverCallKey
       ? { serverCalls: { gatewayUrl: config.modelGatewayUrl, key: serverCallKey } }
       : {}),
@@ -138,6 +148,11 @@ if (config.process === "scheduler") {
     modelTokenDefaults: config.modelTokenDefaults,
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
+    ...(scoreSink
+      ? {
+          feedbackScores: { sink: scoreSink, captureContent: telemetryConfig.captureContent },
+        }
+      : {}),
     ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),
     uploads: uploadSettings,
     ...(modelsConfig

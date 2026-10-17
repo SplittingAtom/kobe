@@ -26,6 +26,11 @@ export type BodyModel =
       readonly maxOutputTokens: number | undefined;
       /** How many answers the request asks for (`n`, Gemini's `candidateCount`); at least 1. */
       readonly choices: number;
+      /**
+       * A top-level `fallbacks` (any case): Bifrost would retry the call on other models, past
+       * the shim's per-model checks (KOBE-260 review S5), so sandbox calls with it are refused.
+       */
+      readonly fallbacks: boolean;
     }
   | { readonly ok: false; readonly reason: "not_json_object" | "duplicate_model" | "bad_model" };
 
@@ -173,6 +178,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     let seen = false;
     let stream = false;
     let background = false;
+    let fallbacks = false;
     if (body[i] === 0x7d) {
       i++;
     } else {
@@ -205,6 +211,9 @@ export function topLevelModel(body: Buffer): BodyModel {
           noteMax(raw());
         } else if (name === "n") {
           noteChoices(raw());
+        } else if (name === "fallbacks") {
+          fallbacks = true;
+          value();
         } else if (CONFIG_KEYS.has(name)) {
           generationConfig();
         } else {
@@ -221,7 +230,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     }
     ws();
     if (i !== n) throw new Malformed();
-    return { ok: true, model, stream, background, maxOutputTokens: maxOutput, choices };
+    return { ok: true, model, stream, background, maxOutputTokens: maxOutput, choices, fallbacks };
   } catch (err) {
     if (err instanceof Malformed || err instanceof SyntaxError) {
       return { ok: false, reason: "not_json_object" };

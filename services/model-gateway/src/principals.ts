@@ -1,5 +1,7 @@
 import { virtualKeyContext, type GatewayPrincipal, type SecretBox } from "@kobe/db";
+import type { ThinkingPolicy } from "@kobe/protocol";
 import { TtlCache } from "./cache.js";
+import { thinkingPolicies } from "./thinking.js";
 
 /**
  * Who may call a model (KOBE-40): a verified `kobe.model-gateway` token is not enough on its own.
@@ -24,6 +26,10 @@ export type Resolution =
       readonly enabledModels: ReadonlySet<string>;
       /** Those the catalog marks as reasoning (server calls' headroom, KOBE-219). */
       readonly reasoningModels: ReadonlySet<string>;
+      /** Thinking settings of the enabled models with a control, team narrowing applied. */
+      readonly thinking: ReadonlyMap<string, ThinkingPolicy>;
+      /** An Orbit eval Job's token: its calls have no run (default thinking level, S4). */
+      readonly eval: boolean;
     }
   | {
       readonly ok: false;
@@ -98,6 +104,8 @@ export class PrincipalCache {
         virtualKey: this.box.open(p.virtualKey.valueEnc, virtualKeyContext(teamId, userId)),
         enabledModels: new Set(p.enabledModels),
         reasoningModels: new Set(p.reasoningModels ?? []),
+        thinking: thinkingPolicies(p.thinking ?? []),
+        eval: p.eval === true,
       };
     } catch {
       return { ok: false, reason: "key_unreadable" };

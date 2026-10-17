@@ -1,3 +1,4 @@
+import { endThreadRules } from "../policy/user-rules.js";
 import { and, eq, sql, threads, type KobeTx, type ThreadProjectMove } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
@@ -96,6 +97,8 @@ export async function setArchived(
   if (!locked.ok) return locked;
   const thread = locked.thread;
   if (archived === (thread.archivedAt != null)) return unchanged(tx, viewer, thread);
+  // Archiving ends the thread's remembered approvals for good (KOBE-289 review S2).
+  if (archived) await endThreadRules(tx, viewer.teamId, [id]);
   return save(
     tx,
     viewer,
@@ -120,6 +123,8 @@ export async function moveThread(
   if (await hasRunIn(tx, viewer, id, PENDING_RUN_STATUSES)) {
     return { ok: false, error: "thread_busy" };
   }
+  // A move ends the thread's remembered approvals for good (KOBE-289 review S2).
+  await endThreadRules(tx, viewer.teamId, [id]);
   const { moves, now, started } = await movesOf(tx, viewer.teamId, id);
   const result = await save(tx, viewer, id, {
     projectId,

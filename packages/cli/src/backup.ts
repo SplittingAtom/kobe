@@ -4,6 +4,7 @@ import { BLOB_REF_COLUMNS, MIGRATION_LOCK_KEY, quoteIdent, type BlobRefColumn } 
 import pg from "pg";
 import {
   assertCoverage,
+  existingColumns,
   listTables,
   readJournal,
   referencedObjectKeys,
@@ -71,7 +72,25 @@ interface Snapshot {
   readonly auditHead: { readonly seq: number; readonly hash: string } | null;
   readonly objects: readonly StoredObject[] | null;
   readonly referencedObjects: number;
+  /** The blob-ref columns checked: those of this release that exist in the snapshot's schema. */
+  readonly blobRefColumns: BlobRefColumn[];
   readonly database: Manifest["files"]["database"];
+}
+
+/** This release's blob-ref columns that the database has; the rest are logged as not there yet. */
+async function checkedBlobRefColumns(
+  client: pg.ClientBase,
+  columns: readonly BlobRefColumn[],
+  log: (line: string) => void,
+): Promise<BlobRefColumn[]> {
+  const present = await existingColumns(client, columns);
+  const absent = columns.filter((c) => !present.includes(c));
+  if (absent.length > 0) {
+    log(
+      `blob references not in this schema yet (an older migration level), nothing to check: ${absent.map((c) => `${c.table}.${c.column}`).join(", ")}`,
+    );
+  }
+  return present;
 }
 
 /** pg_dump's custom-format output, encrypted on the fly: no plaintext dump ever touches disk. */
@@ -173,10 +192,12 @@ async function snapshotAndDump(
         ? await readAuditHead(client)
         : null;
 
-      const referenced = await referencedObjectKeys(
+      const blobRefColumns = await checkedBlobRefColumns(
         client,
         options.blobRefColumns ?? BLOB_REF_COLUMNS,
+        log,
       );
+      const referenced = await referencedObjectKeys(client, blobRefColumns);
       if (objects) {
         const unlisted = unlistedReferences(referenced, objects);
         if (unlisted.length > 0) {
@@ -205,6 +226,7 @@ async function snapshotAndDump(
         auditHead,
         objects,
         referencedObjects: referenced.length,
+        blobRefColumns,
         database,
       };
     } finally {
@@ -258,7 +280,7 @@ export async function runBackup(
         objects: snap.objects.length,
         bytes: snap.objects.reduce((sum, o) => sum + o.size, 0),
         referencedObjects: snap.referencedObjects,
-        blobRefColumns: [...(options.blobRefColumns ?? BLOB_REF_COLUMNS)],
+        blobRefColumns: snap.blobRefColumns,
       };
     }
 

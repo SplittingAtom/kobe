@@ -197,6 +197,7 @@ export class EvalRunner {
         gatewayAddress: address,
         model: record.model,
         token,
+        withCases: record.caseIds.length > 0,
       }),
     );
     // The Job owns its ConfigMap: both go when the Job's TTL expires.
@@ -268,7 +269,12 @@ export class EvalRunner {
   private async conclude(run: EvalRun, outcome: JobOutcome): Promise<void> {
     const { record, team } = run;
     const log = await this.readLog(team, record.id);
-    const verdict: Verdict = judge({ outcome, log, threshold: record.threshold });
+    const verdict: Verdict = judge({
+      outcome,
+      log,
+      threshold: record.threshold,
+      caseIds: record.caseIds,
+    });
     const finished = await finishEval(this.options.db, team.id, record.id, verdict);
     // A gallery eval publishes nothing: `finishEval` stored its score in the same transaction.
     if (finished?.agentScope === "gallery") return;

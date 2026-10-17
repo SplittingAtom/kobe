@@ -1,3 +1,4 @@
+import type { ToolRegistry } from "@kobe/protocol";
 import type { KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { SandboxRouter } from "../sandbox-wire/types.js";
@@ -27,6 +28,11 @@ export interface ApprovalContext {
   readonly runMaxEvents: number;
   /** Throttles server-side `approval.rejected` rows. */
   readonly throttle: AuditThrottle;
+  /**
+   * The server's tool registry (KOBE-289): remember choices and "Approve all waiting" judge a
+   * tool by the server's own descriptor (risk, open world, source), never by the stored row alone.
+   */
+  readonly registry: ToolRegistry;
 }
 
 /** An API-facing failure with its HTTP status and stable code. */
@@ -41,8 +47,11 @@ export class ApprovalError extends Error {
       | "glob_too_broad"
       | "too_many_rules"
       | "approvals_unavailable"
-      | "approval_unavailable",
-    readonly status: 400 | 404 | 409 | 503,
+      | "approval_unavailable"
+      | "remember_not_allowed"
+      | "exact_unavailable"
+      | "approve_all_not_allowed",
+    readonly status: 400 | 403 | 404 | 409 | 503,
     message: string,
   ) {
     super(message);

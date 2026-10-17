@@ -59,7 +59,13 @@ describe("toPolicyRule (stored rows fail closed)", () => {
   it("keeps valid rows as they are", () => {
     expect(
       toPolicyRule(
-        { ...base, effect: "allow", toolGlob: "read", argPattern: { "/path": "/workspace/*" } },
+        {
+          ...base,
+          effect: "allow",
+          toolGlob: "read",
+          argPattern: { "/path": "/workspace/*" },
+          rememberScope: "forever",
+        },
         "user",
       ),
     ).toEqual({
@@ -68,7 +74,40 @@ describe("toPolicyRule (stored rows fail closed)", () => {
       effect: "allow",
       tool_glob: "read",
       arg_pattern: { "/path": "/workspace/*" },
+      remember_scope: "forever",
     });
+  });
+
+  it("carries a user rule's scope, thread, run and creation time (KOBE-289)", () => {
+    const threadId = "00000000-0000-4000-8000-0000000000aa";
+    const createdAt = new Date("2026-10-02T11:00:00Z");
+    expect(
+      toPolicyRule(
+        {
+          ...base,
+          effect: "allow",
+          toolGlob: "bash",
+          rememberScope: "thread",
+          threadId,
+          createdAt,
+        },
+        "user",
+      ),
+    ).toMatchObject({
+      remember_scope: "thread",
+      thread_id: threadId,
+      created_at: "2026-10-02T11:00:00.000Z",
+    });
+  });
+
+  it("drops a user rule without a readable scope (it only allows)", () => {
+    expect(toPolicyRule({ ...base, effect: "allow", toolGlob: "bash" }, "user")).toBeUndefined();
+    expect(
+      toPolicyRule(
+        { ...base, effect: "allow", toolGlob: "bash", rememberScope: "week" as never },
+        "user",
+      ),
+    ).toBeUndefined();
   });
 
   it("drops an allow rule that isn't scoped to one tool or connector", () => {

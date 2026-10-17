@@ -1,0 +1,1 @@
+CREATE INDEX "agent_eval_cases_created_idx" ON "agent_eval_cases" USING btree ("team_id","created_at");

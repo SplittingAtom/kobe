@@ -12,6 +12,8 @@ export interface RegisteredConnection {
   revalidate(): void;
   /** Deliver pending commands now (a hint or a resync arrived). */
   pokeCommands(): void;
+  /** The member moved files (KOBE-304): tell an agent that replays moves to do it now. */
+  workspaceMoved(): void;
 }
 
 const key = (t: SandboxTarget) => `${t.teamId}:${t.userId}`;

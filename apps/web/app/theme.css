@@ -76,6 +76,18 @@
   --kobe-status-accent: #2449c7;
   --kobe-status-accent-fg: #ffffff;
 
+  /* Tool identity (KOBE-374): the gold name chip on tool-call steps (components/chat/tool-call.tsx),
+     apart from the outcome colours above, which stay on the step's status. The text keeps WCAG AA
+     (4.5:1) on its tint and on cards in both themes (app/theme-css.test.ts); the border is
+     decoration. */
+  --kobe-tool-badge: #6b4e00;
+  --kobe-tool-badge-bg: #fbf0c4;
+  --kobe-tool-badge-border: #b8860b;
+
+  /* The composer panel's focus outline (KOBE-374, components/chat/composer.module.css): 3:1 or more
+     (WCAG 1.4.11) on the page, the muted panel and cards in both themes. */
+  --kobe-composer-focus: #52525b;
+
   /* The context gauge (components/shell/context-gauge.module.css), from the status colours. */
   --kobe-gauge-ok: var(--kobe-status-done);
   --kobe-gauge-warn: var(--kobe-status-attention);
@@ -131,6 +143,10 @@
   --kobe-status-idle: #a3a3a3;
   --kobe-status-accent: #8fa8ff;
   --kobe-status-accent-fg: #0a0a0a;
+  --kobe-tool-badge: #f5cd5b;
+  --kobe-tool-badge-bg: #3b2f08;
+  --kobe-tool-badge-border: #c9a227;
+  --kobe-composer-focus: #a1a1aa;
   --kobe-when-light: none;
   --kobe-when-dark: block;
 }
@@ -177,6 +193,10 @@
     --kobe-status-idle: #a3a3a3;
     --kobe-status-accent: #8fa8ff;
     --kobe-status-accent-fg: #0a0a0a;
+    --kobe-tool-badge: #f5cd5b;
+    --kobe-tool-badge-bg: #3b2f08;
+    --kobe-tool-badge-border: #c9a227;
+    --kobe-composer-focus: #a1a1aa;
     --kobe-when-light: none;
     --kobe-when-dark: block;
   }

@@ -3,7 +3,7 @@
  * the active tab are remembered per thread in this browser (localStorage, CE6: transient state);
  * missing, blocked or garbled storage reads as no tabs. Every function returns a new value.
  */
-import { filePathOfTab } from "../files/preview";
+import { filePathOfTab, fileTabId } from "../files/preview";
 
 export interface ArtifactTabs {
   /** Artifact ids and file tab ids (`lib/files/preview.ts`) in order of opening. */
@@ -50,6 +50,22 @@ export function retainTabs(tabs: ArtifactTabs, existing: ReadonlySet<string>): A
   const open = tabs.open.filter((id) => existing.has(id) || filePathOfTab(id) !== null);
   if (open.length === tabs.open.length) return tabs;
   return normalise(open, tabs.active);
+}
+
+/**
+ * A workspace file or folder moved from `from` to `to` (KOBE-304): its file tabs follow, keeping
+ * their place and whether they are active. A tab that would duplicate one already open merges.
+ */
+export function retargetFileTabs(tabs: ArtifactTabs, from: string, to: string): ArtifactTabs {
+  const map = (id: string) => {
+    const path = filePathOfTab(id);
+    if (path === null || (path !== from && !path.startsWith(`${from}/`))) return id;
+    return fileTabId(`${to}${path.slice(from.length)}`);
+  };
+  const open = [...new Set(tabs.open.map(map))];
+  const active = tabs.active === null ? null : map(tabs.active);
+  if (open.every((id, i) => id === tabs.open[i]) && open.length === tabs.open.length) return tabs;
+  return normalise(open, active);
 }
 
 function normalise(open: readonly string[], active: unknown): ArtifactTabs {

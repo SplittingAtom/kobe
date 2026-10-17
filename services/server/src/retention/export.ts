@@ -3,6 +3,7 @@ import { Zip, ZipDeflate, strToU8 } from "fflate";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { threadKey, type BlobStore } from "./blobs.js";
+import { evalCasesForExport } from "./export-eval-cases.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
@@ -18,6 +19,9 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
  *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
+ *  - `feedback.json`: the user's own answer ratings in this team (KOBE-275), with their comments,
+ *    on their threads and on threads shared with them (ids and the rating only, no thread content);
+ *  - `eval-cases.json`: the eval cases the user shared in this team (KOBE-276), with their copies;
  *  - `threads.json` (index) and `README.md`.
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
@@ -258,6 +262,34 @@ async function filePage(db: KobeDb, viewer: ExportViewer, threadId: string, afte
   });
 }
 
+const FEEDBACK_PAGE = 200;
+
+type FeedbackExportRow = {
+  readonly id: string;
+  readonly thread_id: string;
+  readonly run_id: string;
+  readonly entry_id: string | null;
+  readonly rating: string;
+  readonly reasons: readonly string[];
+  readonly comment: string | null;
+  readonly created_at: Timestamp;
+  readonly updated_at: Timestamp;
+};
+
+/** One page of the viewer's own ratings in the team (KOBE-275), by id: their rows only. */
+async function feedbackPage(db: KobeDb, viewer: ExportViewer, after: string | null) {
+  return withTeam(db, viewer.teamId, async (tx) => {
+    const res = await tx.execute<FeedbackExportRow>(sql`
+      SELECT f.id, f.thread_id, f.run_id, f.entry_id, f.rating, f.reasons, f.comment,
+             f.created_at, f.updated_at
+        FROM answer_feedback f
+       WHERE f.team_id = ${viewer.teamId} AND f.user_id = ${viewer.userId}
+         ${after === null ? sql.raw("") : sql`AND f.id > ${after}::uuid`}
+       ORDER BY f.id LIMIT ${FEEDBACK_PAGE}`);
+    return res.rows;
+  });
+}
+
 const README = `# Your Kobe conversations
 
 This archive holds the conversations you own in one Kobe team.
@@ -268,6 +300,9 @@ This archive holds the conversations you own in one Kobe team.
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`memory/<path>\`: your personal memory files (current versions).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
+- \`feedback.json\`: your thumbs up and down on answers in this team, with your reasons and
+  comments (on your conversations and on ones shared with you).
+- \`eval-cases.json\`: the answers you shared with agents' owners as eval cases, as shared.
 - \`threads.json\`: an index (id, title, dates, file names).
 
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
@@ -418,6 +453,42 @@ export async function* exportZip(
       yield* drain();
     }
   }
+  const feedback = file("feedback.json");
+  feedback.push(strToU8('{\n  "feedback": ['));
+  let afterFeedback: string | null = null;
+  let first = true;
+  for (;;) {
+    const page = await feedbackPage(db, viewer, afterFeedback);
+    for (const f of page) {
+      const row = {
+        thread_id: f.thread_id,
+        run_id: f.run_id,
+        entry_id: f.entry_id,
+        rating: f.rating,
+        reasons: f.reasons,
+        comment: f.comment,
+        created_at: iso(f.created_at),
+        updated_at: iso(f.updated_at),
+      };
+      feedback.push(strToU8(`${first ? "" : ","}\n    ${JSON.stringify(row)}`));
+      first = false;
+    }
+    yield* drain();
+    afterFeedback = page.at(-1)?.id ?? null;
+    if (page.length < FEEDBACK_PAGE || afterFeedback === null) break;
+  }
+  feedback.push(strToU8(`${first ? "" : "\n  "}]\n}\n`), true);
+  const cases = file("eval-cases.json");
+  cases.push(strToU8('{\n  "cases": ['));
+  let firstCase = true;
+  for await (const page of evalCasesForExport(db, viewer)) {
+    for (const c of page) {
+      cases.push(strToU8(`${firstCase ? "" : ","}\n    ${JSON.stringify(c)}`));
+      firstCase = false;
+    }
+    yield* drain();
+  }
+  cases.push(strToU8(`${firstCase ? "" : "\n  "}]\n}\n`), true);
   text("threads.json", `${JSON.stringify({ threads: index }, null, 2)}\n`);
   zip.end();
   yield* drain();

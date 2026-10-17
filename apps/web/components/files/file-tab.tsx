@@ -255,7 +255,7 @@ export function FileGoneNotice() {
   if (!panel || gone === null) return null;
   return (
     <div className={styles.dismissibleBanner} role="status">
-      <p>{`${fileName(gone)} is no longer in your workspace, so its tab was closed.`}</p>
+      <p>{`${fileName(gone)} is no longer in your workspace (moved, renamed or deleted), so its tab was closed.`}</p>
       <IconAction
         command="dismiss-notice"
         label="Dismiss file notice"

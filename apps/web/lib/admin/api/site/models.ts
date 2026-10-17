@@ -2,6 +2,7 @@
  * Site console: model providers and the catalog (`/v1/site/models`, site.models.manage;
  * KOBE-40 API, KOBE-44 UI). Provider keys are write-only: the API says only whether one is set.
  */
+import type { ThinkingPolicy } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const enc = encodeURIComponent;
@@ -44,6 +45,11 @@ export interface CatalogModel {
   readonly contextWindow: number | null;
   /** The model reasons before answering: it gets the higher default output limit. */
   readonly reasoning: boolean;
+  /**
+   * KOBE-260: how the gateway sets its thinking (control), whether thinking may be on, the
+   * default and the maximum level. Absent from an older server.
+   */
+  readonly thinking?: ThinkingPolicy;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -104,6 +110,8 @@ export interface CatalogEntryInput {
   readonly maxOutputTokens?: number | null | undefined;
   readonly contextWindow?: number | null | undefined;
   readonly reasoning?: boolean | undefined;
+  /** KOBE-260: the whole thinking policy; absent: unchanged (update) or none (add). */
+  readonly thinking?: ThinkingPolicy | undefined;
 }
 
 export type ModelDiscovery = "ok" | "failed" | "unknown";
@@ -174,6 +182,7 @@ export async function addCatalogModel(input: CatalogEntryInput): Promise<ApiResu
       label: input.label ?? undefined,
       input_modalities: input.inputModalities,
       reasoning: input.reasoning,
+      thinking: input.thinking,
       max_output_tokens: input.maxOutputTokens ?? undefined,
       context_window: input.contextWindow ?? undefined,
     }),
@@ -193,6 +202,7 @@ export async function updateCatalogModel(
       label: change.label,
       input_modalities: change.inputModalities,
       reasoning: change.reasoning,
+      thinking: change.thinking,
       max_output_tokens: change.maxOutputTokens,
       context_window: change.contextWindow,
     }),

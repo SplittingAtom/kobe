@@ -1,4 +1,5 @@
 import { addCosts, costForDisplay, costToUnits } from "./usage-cost.js";
+import { thinkingLevelSchema, type ThinkingLevel } from "@kobe/protocol";
 import { scanTeams, sql, withTeam, type KobeDb, type KobeTx, type UsageKind } from "@kobe/db";
 
 /**
@@ -298,6 +299,8 @@ export interface RunUsage extends UsageTotals {
   /** The run's prompt entry (`runs.user_entry_id`): the chat shows usage under its answer. */
   readonly user_entry_id: string | null;
   readonly models: readonly string[];
+  /** The run's effective thinking level (KOBE-260); null: its model has no thinking control. */
+  readonly thinking_level: ThinkingLevel | null;
 }
 
 type UsageOf = { readonly runId: string } | { readonly threadId: string };
@@ -306,16 +309,17 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
   const filter =
     "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
   const res = await tx.execute<Row>(sql`
-    SELECT u.run_id, r.user_entry_id,
+    SELECT u.run_id, r.user_entry_id, r.thinking_level,
            array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
       FROM run_usage u
       LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
      WHERE u.team_id = ${teamId}::uuid AND ${filter} AND u.kind = 'run'
-     GROUP BY u.run_id, r.user_entry_id ORDER BY min(u.at)`);
+     GROUP BY u.run_id, r.user_entry_id, r.thinking_level ORDER BY min(u.at)`);
   return res.rows.map((r) => ({
     run_id: String(r.run_id),
     user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
     models: (r.models as string[] | null) ?? [],
+    thinking_level: thinkingLevelSchema.safeParse(r.thinking_level).data ?? null,
     ...totalsOf(r),
   }));
 }

@@ -14,7 +14,7 @@ import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.
 import { createDbRunContextSource } from "./sandbox-wire/index.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createRateLimiter } from "./sandbox/rate-limit.js";
-import { EventStreamFixture, type Person } from "./testing/event-stream-fixture.js";
+import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
   MCP_SESSION_KEY,
@@ -706,6 +706,76 @@ describe("scheduled runs never wait for approval at the proxy (KOBE-178, D32)", 
       approval_failure: "no_approval",
     });
     expect(await skipped(w)).toEqual([]);
+  });
+});
+
+describe("remembered approvals at the proxy (KOBE-289)", () => {
+  const input = { q: "create the ticket" };
+  const remembered = async (w: World) => {
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope)
+       VALUES ($1, 'user', $2, 'allow', $3, $2, 'forever') RETURNING id`,
+      [w.team, w.owner.id, piName(w.connector.name, "create_issue")],
+    );
+    return must(rows[0], "rule").id;
+  };
+  const audited = async (w: World) =>
+    (
+      await fx.admin.query<{ action: string; target: Record<string, unknown> }>(
+        `SELECT action, target FROM audit_log WHERE team_id = $1
+            AND action IN ('policy.rule.applied', 'mcp.tool_call') ORDER BY seq`,
+        [w.team],
+      )
+    ).rows;
+
+  it("allows the write without an approval, audited naming the rule; revoking it denies at once", async () => {
+    const w = await world();
+    const ruleId = await remembered(w);
+    const res = await callTool(w, { tool: "create_issue", arguments: input });
+    expect(res.json).toMatchObject({ decision: "allow", reason: "user_allow_rule" });
+    const rows = await audited(w);
+    expect(rows.map((r) => r.action)).toEqual(["policy.rule.applied", "mcp.tool_call"]);
+    expect(rows[0]?.target).toMatchObject({ ruleId, enforcementPoint: "mcp_proxy" });
+    expect(rows[1]?.target).toMatchObject({ decision: "allowed", ruleId });
+    await fx.admin.query(`DELETE FROM tool_rules WHERE id = $1`, [ruleId]);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "deny",
+    });
+  });
+
+  it("a thread rule never allows a call while another thread of the sandbox runs (review S1)", async () => {
+    const w = await world();
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope, thread_id)
+       VALUES ($1, 'user', $2, 'allow', $3, $2, 'thread', $4)`,
+      [w.team, w.owner.id, piName(w.connector.name, "create_issue"), w.threadId],
+    );
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "allow",
+      reason: "user_allow_rule",
+    });
+    // Thread B, same agent, project and mode, now runs in the same sandbox: a call naming thread
+    // A could come from B, so A's rule can't decide it alone.
+    const sibling = await fx.run(w.team, w.owner);
+    await leaseRun(fx.admin, w.team, sibling, w.owner.id, w.sandboxId);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+    await fx.complete(w.team, sibling);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "allow",
+    });
+  });
+
+  it("a scheduled run ignores it (D32): denied, recorded as skipped", async () => {
+    const w = await world();
+    await remembered(w);
+    await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [w.runId]);
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "deny",
+      code: "scheduled_run_no_prompt",
+    });
   });
 });
 

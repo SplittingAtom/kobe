@@ -1,5 +1,6 @@
 import {
   isMemberDropPath,
+  mentionPathIssue,
   WORKSPACE_EXCLUDED_PREFIXES,
   WORKSPACE_SEGMENT_MAX_BYTES,
   WORKSPACE_SERVER_OWNED_PREFIXES,
@@ -90,4 +91,59 @@ export function copyPath(path: string, n: number): string {
     stem.pop();
   }
   return `${dir}${stem.join("")}${suffix}${ext}`;
+}
+
+export interface MoveRefusal {
+  readonly status: 400 | 403 | 404;
+  readonly code: "invalid_path" | "read_only" | "not_found";
+  readonly message: string;
+}
+
+/**
+ * Why `from` may not move to `to` (KOBE-304), or undefined: the path rules both already passed
+ * (`workspacePathSchema`) plus the mention rules for the new path (KOBE-223: no invisible,
+ * format, default-ignorable or shell characters), never agent-internal (`.kobe/` stays hidden:
+ * not found), never read-only on either side (project mounts, thread uploads; a member's drop
+ * may move, and a file may become one), and never onto itself or into itself.
+ */
+export function moveRefusal(from: string, to: string): MoveRefusal | undefined {
+  if (isInternalPath(from))
+    return { status: 404, code: "not_found", message: "No such file or folder." };
+  if (
+    !isInternalPath(to) &&
+    mentionPathIssue(to) !== undefined &&
+    baseName(from) === baseName(to)
+  ) {
+    // A plain move of a file whose existing name the rules refuse (review N6).
+    return {
+      status: 400,
+      code: "invalid_path",
+      message:
+        "Its name holds characters a moved file can't keep (invisible, control or format " +
+        "characters, `, $ or ;, or unusual spaces). Rename it first.",
+    };
+  }
+  if (isInternalPath(to) || mentionPathIssue(to) !== undefined) {
+    return {
+      status: 400,
+      code: "invalid_path",
+      message:
+        "That name can't be used: names may not hold invisible, control or format characters, " +
+        "`, $ or ;, or spaces other than the plain space.",
+    };
+  }
+  if (from === to) {
+    return { status: 400, code: "invalid_path", message: "It is already there." };
+  }
+  if (to.startsWith(`${from}/`)) {
+    return { status: 400, code: "invalid_path", message: "A folder can't move into itself." };
+  }
+  if (isReadOnlyPath(from) || isReadOnlyPath(to)) {
+    return {
+      status: 403,
+      code: "read_only",
+      message: "Project files and thread uploads are read-only here.",
+    };
+  }
+  return undefined;
 }

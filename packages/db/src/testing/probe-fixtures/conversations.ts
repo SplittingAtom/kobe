@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import type { KobeTx } from "../../client.js";
-import { events, runEvents, runs, threadEntries, threads, users } from "../../schema/index.js";
+import {
+  answerFeedback,
+  answerFeedbackHistory,
+  events,
+  runEvents,
+  runs,
+  threadEntries,
+  threads,
+  users,
+} from "../../schema/index.js";
 import type { conversations } from "../../tenancy/conversations.js";
 import type { ProbeFixture } from "./types.js";
 
@@ -19,11 +29,11 @@ async function insertThread(
   return row.id;
 }
 
-async function insertRun(tx: KobeTx, teamId: string): Promise<string> {
-  const threadId = await insertThread(tx, teamId);
+async function insertRun(tx: KobeTx, teamId: string, threadId?: string): Promise<string> {
+  const thread = threadId ?? (await insertThread(tx, teamId));
   const [row] = await tx
     .insert(runs)
-    .values({ teamId, threadId, trigger: "user", status: "running", startedAt: new Date() })
+    .values({ teamId, threadId: thread, trigger: "user", status: "running", startedAt: new Date() })
     .returning({ id: runs.id });
   if (!row) throw new Error("probe: run insert returned nothing");
   return row.id;
@@ -59,5 +69,52 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
   },
   events: async (tx, teamId) => {
     await tx.insert(events).values({ teamId, kind: "probe", ref: { probe: true } });
+  },
+  answer_feedback: async (tx, teamId) => {
+    // A thumbs down with a comment on an entry of a team-shared thread (KOBE-275), by its owner.
+    const threadId = await insertThread(tx, teamId, { sharedToTeam: true });
+    const [thread] = await tx
+      .select({ ownerUserId: threads.ownerUserId })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    if (!thread) throw new Error("probe: thread vanished");
+    const runId = await insertRun(tx, teamId, threadId);
+    await tx
+      .insert(threadEntries)
+      .values({ teamId, threadId, entryId: "answer", type: "message", payload: { probe: true } });
+    await tx.insert(answerFeedback).values({
+      teamId,
+      threadId,
+      runId,
+      entryId: "answer",
+      userId: thread.ownerUserId,
+      rating: "down",
+      reasons: ["wrong"],
+      comment: "probe comment",
+    });
+  },
+  answer_feedback_history: async (tx, teamId) => {
+    // A held rating's kept copy (KOBE-275 review B1); written here directly, as the trigger would.
+    const threadId = await insertThread(tx, teamId);
+    const [thread] = await tx
+      .select({ ownerUserId: threads.ownerUserId })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    if (!thread) throw new Error("probe: thread vanished");
+    const runId = await insertRun(tx, teamId, threadId);
+    const now = new Date();
+    await tx.insert(answerFeedbackHistory).values({
+      teamId,
+      feedbackId: randomUUID(),
+      threadId,
+      runId,
+      userId: thread.ownerUserId,
+      rating: "down",
+      reasons: ["other"],
+      comment: "probe kept comment",
+      ratedAt: now,
+      ratedUpdatedAt: now,
+      change: "cleared",
+    });
   },
 };

@@ -209,3 +209,34 @@ describe("fake LLM slow start (KOBE-290 e2e)", () => {
     expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
   });
 });
+
+describe("fake LLM reasoning (KOBE-260)", () => {
+  const think = [{ role: "user", content: "think?" }];
+
+  it("reasons by default and at the asked effort", async () => {
+    const plain = await chat(think);
+    expect(plain.choices[0]?.message).toMatchObject({
+      content: "fake-openai: thought at default",
+      reasoning_content: "fake reasoning at default",
+    });
+    const low = await chat(think, { reasoning_effort: "low" });
+    expect(low.choices[0]?.message.reasoning_content).toBe("fake reasoning at low");
+  });
+
+  it("returns no reasoning when it is turned off", async () => {
+    const off = await chat(think, { reasoning_effort: "none" });
+    expect(off.choices[0]?.message.content).toBe("fake-openai: thought at none");
+    expect(off.choices[0]?.message).not.toHaveProperty("reasoning_content");
+  });
+
+  it("streams the reasoning before the text", async () => {
+    const r = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-fake", messages: think, stream: true }),
+    });
+    const text = await r.text();
+    expect(text.indexOf("reasoning_content")).toBeGreaterThan(0);
+    expect(text.indexOf("reasoning_content")).toBeLessThan(text.indexOf("thought"));
+  });
+});

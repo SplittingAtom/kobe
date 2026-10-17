@@ -11,12 +11,21 @@ import {
   createDb,
   isActiveRunLeasedTo,
   isRunTokenActive,
+  loadEvalCaseFile,
   loadGatewayPrincipal,
   notifyModels,
+  runSessionOf,
+  runThinkingLevelOf,
   serverCallRunMatches,
+  type RunSession,
   recordModelUsage,
 } from "@kobe/db";
-import { deriveRunTokenKey, deriveServerCallTokenKey } from "@kobe/protocol/node";
+import {
+  deriveRunTokenKey,
+  deriveServerCallTokenKey,
+  deriveTraceSpanKey,
+} from "@kobe/protocol/node";
+import type { ThinkingLevel } from "@kobe/protocol";
 import { verifySessionToken } from "@kobe/session-token";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
@@ -91,6 +100,20 @@ const tokenRecords = new TtlCache<boolean>({
   ttlMs: Math.min(Math.max(config.cacheTtlMs, 1_000), 2_000),
 });
 
+/** A run's thread and owner never change: cached long, bounded (KOBE-274 sessions). */
+const runSessions = new TtlCache<RunSession | undefined>({
+  ttlMs: 10 * 60_000,
+  maxEntries: 10_000,
+  keep: (value) => value !== undefined,
+});
+
+/** A run's thinking level is fixed when it starts (KOBE-260): cached long, bounded. */
+// `null`: the run has no level (cached too, review N2: the record never changes).
+const runThinking = new TtlCache<ThinkingLevel | null>({
+  ttlMs: 10 * 60_000,
+  maxEntries: 10_000,
+});
+
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
 const usage = new DbUsageSink({
   write: (records) => recordModelUsage(db, records),
@@ -111,6 +134,8 @@ let draining = false;
 const server = createModelGateway({
   verify: (token) => verifySessionToken(token, "kobe.model-gateway", config.sessionKey),
   principals,
+  // Shared eval cases for a running Orbit eval Job (KOBE-276): read from Postgres on request.
+  evalCases: { load: (teamId, userId, evalId) => loadEvalCaseFile(db, teamId, userId, evalId) },
   isRunLeased: (teamId, runId, sandboxId) =>
     leases.get(`${teamId}:${runId}:${sandboxId}`, () =>
       isActiveRunLeasedTo(db, teamId, runId, sandboxId),
@@ -120,6 +145,18 @@ const server = createModelGateway({
     key: deriveRunTokenKey(new TextEncoder().encode(config.sessionKey)),
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
+  },
+  // KOBE-260: the level the server recorded when the run started.
+  runThinking: (teamId, runId) =>
+    runThinking.get(
+      `${teamId}:${runId}`,
+      async () => (await runThinkingLevelOf(db, teamId, runId)) ?? null,
+    ),
+  // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
+  tracing: {
+    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.sessionKey)),
+    runSession: (teamId, runId) =>
+      runSessions.get(`${teamId}:${runId}`, () => runSessionOf(db, teamId, runId)),
   },
   // Server-originated calls (KOBE-234): the server derives the same key from the same secret.
   serverCalls: {

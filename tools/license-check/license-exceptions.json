@@ -2,16 +2,22 @@
   "caniuse-lite": {
     "license": "CC-BY-4.0",
     "versions": ["1.0.30001814"],
-    "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available. Pending Chris's sign-off (KOBE-5 review)."
+    "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available (KOBE-5 review).",
+    "approvedBy": "Chris",
+    "approvedOn": "2026-10-17"
   },
   "argparse": {
     "license": "Python-2.0",
     "versions": ["2.0.1"],
-    "reason": "Pulled in by js-yaml (via @kubernetes/client-node). PSF-2.0 is a permissive BSD-style license, not copyleft or source-available. Pending Chris's sign-off (KOBE-6)."
+    "reason": "Pulled in by js-yaml (via @kubernetes/client-node). PSF-2.0 is a permissive BSD-style license, not copyleft or source-available (KOBE-6).",
+    "approvedBy": "Chris",
+    "approvedOn": "2026-10-17"
   },
   "khroma": {
     "license": "Unknown",
     "versions": ["2.1.0"],
-    "reason": "CSS colour helpers pulled in by mermaid (KOBE-130). The MIT license is in the repository and its npm metadata, but package.json has no license field, so a fresh pnpm store reports Unknown."
+    "reason": "CSS colour helpers pulled in by mermaid (KOBE-130). The MIT license is in the repository and its npm metadata, but package.json has no license field, so a fresh pnpm store reports Unknown.",
+    "approvedBy": "Chris",
+    "approvedOn": "2026-10-17"
   }
 }

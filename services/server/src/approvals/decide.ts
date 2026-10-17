@@ -4,19 +4,22 @@ import {
   parseMcpToolName,
   type ActorContext,
   type ApprovalResolutionBody,
+  type JsonObject,
+  type ToolDescriptor,
 } from "@kobe/protocol";
 import { signApproval } from "@kobe/protocol/node";
-import { sql, withTeam } from "@kobe/db";
+import { eq, sql, users, withTeam, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
-import { insertUserAllowRule } from "../policy/remember.js";
+import { insertUserAllowRule, type ApprovedCall } from "../policy/remember.js";
+import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { resumeIfNoneWaiting } from "./expiry.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "./run-end.js";
-import { listApprovals, loadApproval } from "./store.js";
+import { listApprovals, loadApproval, type ApprovalRow } from "./store.js";
 import { viewOf, type ApprovalView } from "./view.js";
 
 /** A connection not touched for this long has lost its replica (the wire's `staleConnectionMs`). */
@@ -34,8 +37,9 @@ const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
  *   no downstream verifier (the `policy.result` is the authorisation), so their approval is marked
  *   used at once; MCP approvals stay consumable once, by the MCP proxy (KOBE-58).
  * - **Remember** (allow only) writes a user allow rule for exactly this tool (`insertUserAllowRule`,
- *   KOBE-35) in the same transaction; it lifts future risk-class and mode prompts, never an ask or
- *   deny rule.
+ *   KOBE-35; scopes KOBE-289) in the same transaction, from the approval's own tool, input, thread
+ *   and run, under the team's remember limits; it lifts future risk-class and mode prompts in
+ *   interactive runs, never an ask or deny rule.
  * - One transaction: thread → run → approval locks, decision, `approval.resolved`, run back to
  *   `running` when nothing else waits, bus hint, audit last.
  */
@@ -43,7 +47,7 @@ const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
  * A write into the project's shared state: a `remember` into project memory (KOBE-156) or a
  * `propose_project_file` (KOBE-162). The server does it only against its approval.
  */
-function isProjectWrite(tool: string, input: unknown): boolean {
+export function isProjectWrite(tool: string, input: unknown): boolean {
   if (tool === "propose_project_file") return true;
   return (
     tool === "remember" &&
@@ -75,6 +79,10 @@ export async function decideApproval(
     new ApprovalError("approval_not_found", 404, "No pending approval with that id.");
   const head = await withTeam(ctx.db, teamId, (tx) => loadApproval(tx, teamId, approvalId));
   if (head?.userId !== actor.user_id) throw notFound();
+  // The server's own descriptor of the approved tool (KOBE-289): risk and source decide which
+  // remember choices are allowed. Resolved outside the transaction (the registry reads on its own).
+  const rememberTool =
+    body.remember === undefined ? undefined : await ctx.registry.resolve(teamId, head.tool);
   const result = await withAppendTx(ctx.db, teamId, async (tx) => {
     const thread = await lockThreadRow(tx, teamId, head.threadId);
     const run = await lockRunRow(tx, teamId, head.runId);
@@ -101,69 +109,20 @@ export async function decideApproval(
     }
     let ruleId: string | undefined;
     if (body.decision === "allow") {
-      const input = JSON.parse(row.inputCanonical) as unknown;
-      // The stored text is canonical by construction; never sign anything else.
-      if (canonicalJson(input) !== row.inputCanonical) {
-        throw new Error(`approval ${row.id}: stored input is not canonical`);
+      if (body.remember !== undefined) {
+        const call = approvedCall(row, rememberTool);
+        ruleId = await remember(tx, actor, call, body, now);
       }
-      const token = signApproval({
-        key: keys.current,
-        approval_id: row.id,
-        team_id: teamId,
-        run_id: row.runId,
-        tool_call_id: row.toolCallId,
-        tool: row.tool,
-        input,
-        now,
-      });
-      if (body.remember !== undefined) ruleId = await remember(tx, actor, row.tool, body, now);
-      // Sandbox-enforced tools are spent by the decision itself. Two are enforced again by the
-      // server and verified-and-consumed there: MCP calls (the proxy) and project writes (project
-      // `remember`, the memory handler, KOBE-156; `propose_project_file`, KOBE-162).
-      const usedNow = parseMcpToolName(row.tool) === undefined && !isProjectWrite(row.tool, input);
-      await tx.execute(sql`
-        UPDATE approvals
-           SET status = 'allowed', cause = 'user', decided_by = ${actor.user_id},
-               decided_at = ${now.toISOString()}, token_kid = ${token.kid},
-               token_expires_at = ${token.expires_at}, input_hmac = ${token.mac},
-               consumed_at = ${usedNow ? now.toISOString() : null},
-               remembered = ${ruleId !== undefined}
-         WHERE team_id = ${teamId} AND id = ${row.id}`);
+      await allowRowInTx(tx, keys, actor, row, now, { ruleId });
     } else {
       await tx.execute(sql`
         UPDATE approvals
            SET status = 'denied', cause = 'user', decided_by = ${actor.user_id},
                decided_at = ${now.toISOString()}
          WHERE team_id = ${teamId} AND id = ${row.id}`);
+      await resolvedInTx(tx, actor, row, "deny", {});
     }
-    await appendRunEventsInTx(tx, teamId, run.id, [
-      {
-        type: "approval.resolved",
-        payload: {
-          approval_id: row.id,
-          tool_call_id: row.toolCallId,
-          decision: body.decision === "allow" ? "allowed" : "denied",
-          cause: "user",
-          decided_by: actor.user_id,
-          remembered: ruleId !== undefined,
-        },
-      },
-    ]);
     await resumeIfNoneWaiting(tx, thread, run, row.id, true);
-    await notifyHintInTx(tx, { kind: "apr", id: row.id });
-    await recordAudit(tx, {
-      action: "approval.decided",
-      teamId,
-      target: {
-        approvalId: row.id,
-        runId: row.runId,
-        toolCallId: row.toolCallId,
-        tool: row.tool,
-        decision: body.decision,
-        remember: ruleId !== undefined,
-        ...(ruleId === undefined ? {} : { ruleId }),
-      },
-    });
     const decided = await loadApproval(tx, teamId, row.id);
     if (!decided) throw notFound();
     return viewOf(decided);
@@ -179,8 +138,8 @@ export async function decideApproval(
 }
 
 /** The asking connection is still the sandbox's open, live one (`sandbox_connections`). */
-async function askerConnected(
-  tx: Parameters<typeof insertUserAllowRule>[0],
+export async function askerConnected(
+  tx: KobeTx,
   teamId: string,
   userId: string,
   connectionId: string,
@@ -192,18 +151,47 @@ async function askerConnected(
   return res.rows.length === 1;
 }
 
+/** The approved call as the server stored it (tool from the registry, input from the row). */
+function approvedCall(row: ApprovalRow, tool: ToolDescriptor | undefined): ApprovedCall {
+  if (tool === undefined || tool.name !== row.tool) {
+    throw new ApprovalError(
+      "remember_not_allowed",
+      403,
+      "This tool can't be remembered; allow it without remembering.",
+    );
+  }
+  return {
+    tool,
+    input: JSON.parse(row.inputCanonical) as JsonObject,
+    threadId: row.threadId,
+    runId: row.runId,
+  };
+}
+
+/** The member's stored time zone (KOBE-289), for "until end of today"; null = UTC. */
+async function storedTimeZone(tx: KobeTx, userId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ timeZone: users.timeZone })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row?.timeZone ?? null;
+}
+
 async function remember(
-  tx: Parameters<typeof insertUserAllowRule>[0],
+  tx: KobeTx,
   actor: ActorContext,
-  tool: string,
+  call: ApprovedCall,
   body: ApprovalResolutionBody,
   now: Date,
 ): Promise<string> {
+  const limits = (await readTeamRememberLimits(tx, actor.team_id)).effective;
   const result = await insertUserAllowRule(tx, {
     teamId: actor.team_id,
     userId: actor.user_id,
-    approvedTool: tool,
+    call,
     remember: body.remember,
+    limits,
+    timeZone: await storedTimeZone(tx, actor.user_id),
     now,
     actor: { kind: "user", id: actor.user_id },
   });
@@ -213,13 +201,115 @@ async function remember(
       throw new ApprovalError(
         "glob_too_broad",
         400,
-        `A remembered approval names exactly this tool (${tool}).`,
+        `A remembered approval names exactly this tool (${call.tool.name}).`,
       );
     case "too_many_rules":
       throw new ApprovalError("too_many_rules", 409, "You have too many remembered approvals.");
+    case "remember_not_allowed":
+      throw new ApprovalError(
+        "remember_not_allowed",
+        403,
+        "Your team doesn't allow remembering this approval that way. Allow it without remembering.",
+      );
+    case "thread_not_live":
+      throw new ApprovalError(
+        "remember_not_allowed",
+        403,
+        "This conversation is archived or no longer open to you, so it can't be remembered for it. Allow it without remembering.",
+      );
+    case "exact_unavailable":
+      throw new ApprovalError(
+        "exact_unavailable",
+        400,
+        "This action can't be pinned exactly (its input is too long or has no arguments).",
+      );
     default:
       throw new ApprovalError("invalid_remember", 400, "Check the remember rule.");
   }
+}
+
+/**
+ * Allows one pending approval inside the deciding transaction (shared with "Approve all
+ * waiting"): signs `HMAC(team, run, tool_call_id, tool, token expiry, canonical input)` over the
+ * stored canonical input, marks it allowed (spent at once for sandbox-enforced tools), appends
+ * `approval.resolved`, wakes the waiting broker and audits `approval.decided`. The caller has
+ * locked thread, run and approval and checked it is pending, live and the caller's own.
+ */
+export async function allowRowInTx(
+  tx: KobeTx,
+  keys: NonNullable<ApprovalContext["keys"]>,
+  actor: ActorContext,
+  row: ApprovalRow,
+  now: Date,
+  options: { readonly ruleId?: string | undefined; readonly approveAll?: boolean },
+): Promise<void> {
+  const input = JSON.parse(row.inputCanonical) as unknown;
+  // The stored text is canonical by construction; never sign anything else.
+  if (canonicalJson(input) !== row.inputCanonical) {
+    throw new Error(`approval ${row.id}: stored input is not canonical`);
+  }
+  const token = signApproval({
+    key: keys.current,
+    approval_id: row.id,
+    team_id: actor.team_id,
+    run_id: row.runId,
+    tool_call_id: row.toolCallId,
+    tool: row.tool,
+    input,
+    now,
+  });
+  // Sandbox-enforced tools are spent by the decision itself. Two are enforced again by the
+  // server and verified-and-consumed there: MCP calls (the proxy) and project writes (project
+  // `remember`, the memory handler, KOBE-156; `propose_project_file`, KOBE-162).
+  const usedNow = parseMcpToolName(row.tool) === undefined && !isProjectWrite(row.tool, input);
+  await tx.execute(sql`
+    UPDATE approvals
+       SET status = 'allowed', cause = 'user', decided_by = ${actor.user_id},
+           decided_at = ${now.toISOString()}, token_kid = ${token.kid},
+           token_expires_at = ${token.expires_at}, input_hmac = ${token.mac},
+           consumed_at = ${usedNow ? now.toISOString() : null},
+           remembered = ${options.ruleId !== undefined}
+     WHERE team_id = ${actor.team_id} AND id = ${row.id}`);
+  await resolvedInTx(tx, actor, row, "allow", options);
+}
+
+/** `approval.resolved`, the broker's wake-up hint and `approval.decided`, for one decision. */
+async function resolvedInTx(
+  tx: KobeTx,
+  actor: ActorContext,
+  row: ApprovalRow,
+  decision: "allow" | "deny",
+  options: { readonly ruleId?: string | undefined; readonly approveAll?: boolean },
+): Promise<void> {
+  const ruleId = options.ruleId;
+  await appendRunEventsInTx(tx, actor.team_id, row.runId, [
+    {
+      type: "approval.resolved",
+      payload: {
+        approval_id: row.id,
+        tool_call_id: row.toolCallId,
+        decision: decision === "allow" ? "allowed" : "denied",
+        cause: "user",
+        decided_by: actor.user_id,
+        remembered: ruleId !== undefined,
+      },
+    },
+  ]);
+  await notifyHintInTx(tx, { kind: "apr", id: row.id });
+  await recordAudit(tx, {
+    action: "approval.decided",
+    teamId: actor.team_id,
+    target: {
+      approvalId: row.id,
+      runId: row.runId,
+      toolCallId: row.toolCallId,
+      tool: row.tool,
+      decision,
+      remember: ruleId !== undefined,
+      ...(ruleId === undefined ? {} : { ruleId }),
+      ...(options.approveAll ? { approveAll: true } : {}),
+    },
+  });
 }
 
 export async function getApproval(

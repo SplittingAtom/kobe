@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { evaluateLicense, findStaleExceptions, findViolations } from "./policy.js";
+import {
+  evaluateLicense,
+  findMalformedExceptions,
+  findPendingExceptions,
+  findStaleExceptions,
+  findViolations,
+} from "./policy.js";
 
 describe("evaluateLicense", () => {
   it.each(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MPL-2.0", "ISC", "0BSD", "Zlib"])(
@@ -111,5 +117,39 @@ describe("findStaleExceptions", () => {
     const report = { MIT: [{ name: "khroma", versions: ["2.1.0"] }] };
     const exceptions = { khroma: { license: "Unknown", versions: ["2.1.0"], reason: "no field" } };
     expect(findStaleExceptions(report, exceptions)).toEqual([]);
+  });
+});
+
+describe("exception approvals", () => {
+  const approved = {
+    license: "CC-BY-4.0",
+    versions: ["1.0.0"],
+    reason: "data",
+    approvedBy: "Chris",
+    approvedOn: "2026-10-17",
+  };
+  const { approvedBy: _by, approvedOn: _on, ...bare } = approved;
+  const pending = { ...bare, pending: "gate review" };
+
+  it("accepts an approved exception and lists none as pending", () => {
+    expect(findMalformedExceptions({ data: approved })).toEqual([]);
+    expect(findPendingExceptions({ data: approved })).toEqual([]);
+  });
+
+  it("accepts a pending exception and lists it for the gate review", () => {
+    expect(findMalformedExceptions({ data: pending })).toEqual([]);
+    expect(findPendingExceptions({ data: pending })).toEqual(["data"]);
+  });
+
+  it.each([
+    ["neither an approval nor pending", bare],
+    ["no approver", { ...approved, approvedBy: "" }],
+    ["a date that is not YYYY-MM-DD", { ...approved, approvedOn: "17 Oct 2026" }],
+    ["no reason", { ...approved, reason: " " }],
+    ["no pinned versions", { ...approved, versions: [] }],
+    ["a pending value other than gate review", { ...bare, pending: "ask Chris" }],
+    ["both an approval and pending", { ...approved, pending: "gate review" }],
+  ])("rejects an exception with %s as malformed", (_label, exception) => {
+    expect(findMalformedExceptions({ x: exception })).toEqual(["x"]);
   });
 });

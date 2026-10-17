@@ -68,6 +68,8 @@ import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import type { UploadSettings } from "./uploads/settings.js";
+import type { ScoreSink } from "@kobe/telemetry";
+import { FeedbackScores } from "./feedback/scores.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -148,6 +150,12 @@ export interface ServerDepsOptions {
     readonly key: Uint8Array;
     readonly fetch?: typeof fetch;
   };
+  /**
+   * Answer ratings as trace scores (KOBE-275): the tracing backend's score sink (Langfuse only,
+   * `@kobe/telemetry` createLangfuseScoreSink) and whether scores may carry the comment
+   * (`telemetry.captureContent`). Unset: ratings are not exported.
+   */
+  readonly feedbackScores?: { readonly sink: ScoreSink; readonly captureContent: boolean };
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -251,6 +259,8 @@ export interface ServerDeps {
   readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
   readonly projectMounts: ProjectMounts;
+  /** Exports answer ratings as Langfuse scores (KOBE-275); undefined when tracing has no scores. */
+  readonly feedbackScores: FeedbackScores | undefined;
   /** Creates an email+password user (and optional site role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -289,7 +299,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  // One policy engine for both enforcement points (D29): the sandbox's policy.check and the MCP
+  // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
+  // Approvals judge remember choices by the same registry (KOBE-289).
+  const mcpCatalog = createDbMcpCatalog(database.db);
+  const toolRegistry = createToolRegistry(mcpCatalog);
   const approvals = new ApprovalService({
+    registry: toolRegistry,
     ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
       ? {}
       : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
@@ -301,10 +317,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // orchestrator through this late binding.
   const late: { runs?: ServerRunOrchestrator } = {};
   const extraHooks = options.sandboxWire?.hooks;
-  // One policy engine for both enforcement points (D29): the sandbox's policy.check and the MCP
-  // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
-  const mcpCatalog = createDbMcpCatalog(database.db);
-  const toolRegistry = createToolRegistry(mcpCatalog);
   const policySources = {
     rules: createDbRuleSource(database.db),
     settings: createDbSettingsSource(database.db),
@@ -427,6 +439,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     run: (userId) => offboarding.offboardUser(userId, "deactivated"),
   });
 
+  const feedbackScores = options.feedbackScores
+    ? new FeedbackScores({ db: database.db, ...options.feedbackScores })
+    : undefined;
   return {
     database,
     models: options.models
@@ -463,6 +478,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     uploads: options.uploads,
     modelTokenDefaults,
     projectMounts,
+    feedbackScores,
     async createUserWithPassword({ email, name, password }, { siteRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -505,6 +521,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       await approvals.broker.close();
       // In-flight emails and audit writes finish before the mailer and database go away.
       await background.idle();
+      await feedbackScores?.idle();
       await hub.close();
       await reader.close();
       options.mailer.close();

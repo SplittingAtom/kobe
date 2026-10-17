@@ -104,6 +104,9 @@ const outputLimitTooLarge = (c: Context, contextWindow: number) =>
     },
     400,
   );
+/** KOBE-260: the thinking settings do not fit the model (the message says how). */
+const thinkingInvalid = (c: Context, message: string) =>
+  c.json({ code: "thinking_invalid", message }, 400);
 const aliasNotFound = (c: Context) =>
   err(c, 404, "model_not_found", "That model is not in the catalog.");
 
@@ -249,6 +252,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     }
     if (result.error === "provider_not_found") return providerNotFound(c);
     if (result.error === "partial_prices") return partialPrices(c);
+    if (result.error === "thinking_invalid") return thinkingInvalid(c, result.message);
     return result.error === "exists"
       ? err(c, 409, "model_exists", "That alias is already in the catalog.")
       : err(c, 409, "too_many_models", "The catalog has reached its size limit.");
@@ -265,6 +269,7 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
       return outputLimitTooLarge(c, result.contextWindow);
     }
     if (result.error === "partial_prices") return partialPrices(c);
+    if (result.error === "thinking_invalid") return thinkingInvalid(c, result.message);
     return result.error === "not_found" ? aliasNotFound(c) : providerNotFound(c);
   });
 

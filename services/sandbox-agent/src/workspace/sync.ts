@@ -14,12 +14,14 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import type { WireLogger } from "../wire/client.js";
 import { SyncHttpError, type SyncClient } from "./client.js";
+import { MoveReplay, type AppliedMove } from "./moves.js";
 import {
   conflictCopyName,
   ensureParents,
   hashFile,
   lockServerOwned,
   openForUpload,
+  pruneEmptyParents,
   removeFile,
   renameWithin,
   scanWorkspace,
@@ -72,6 +74,11 @@ interface Known {
   readonly executable: boolean;
   readonly origin: "sandbox" | "server";
   readonly updatedMs: number;
+  /**
+   * Carried here by a local rename (KOBE-304): `rev` is the old path's, so it must not shadow the
+   * new path's rows (review R2); the next row of this path replaces it.
+   */
+  readonly moved?: true;
 }
 
 export interface RestoreStats {
@@ -193,6 +200,8 @@ export class WorkspaceSync {
   #restoreStarted = 0;
   /** Downloads that failed for this file only (missing object, something local in the way). */
   readonly #retry = new Map<string, WorkspaceEntry>();
+  /** Server moves replayed as local renames (KOBE-304). */
+  readonly #moves: MoveReplay;
 
   constructor(options: WorkspaceSyncOptions) {
     this.#o = {
@@ -204,6 +213,42 @@ export class WorkspaceSync {
       ...options,
       skipDirs: new Set(options.skipDirs ?? DEFAULT_SKIP_DIRS),
     };
+    this.#moves = new MoveReplay(this.#o.root, this.#o.client, this.#o.logger);
+  }
+
+  /**
+   * The member moved or renamed files (`workspace.moved`, KOBE-304): replay the moves as local
+   * renames and pull now rather than at the next interval.
+   */
+  movedOnServer(): void {
+    if (!this.enabled || !this.#restored || this.#stopped) return;
+    void this.#serial(() => this.#pull()).catch((error: unknown) =>
+      this.#warn("workspace pull after a server move failed", error),
+    );
+  }
+
+  /** Journalled moves since `since` applied locally; a failure leaves them to the pull alone. */
+  async #replayMoves(since: number): Promise<AppliedMove[]> {
+    try {
+      return await this.#moves.replay(since);
+    } catch (error) {
+      this.#warn("workspace moves could not be replayed; the pull applies them", error);
+      return [];
+    }
+  }
+
+  /**
+   * Known states follow a local rename made now: the moved files keep their content base, marked
+   * `moved` so the new path's rows are always evaluated against them (review R2).
+   */
+  #rekey(moves: readonly AppliedMove[]): void {
+    for (const { from, to } of moves) {
+      for (const [path, k] of [...this.#known]) {
+        if (path !== from && !path.startsWith(`${from}/`)) continue;
+        this.#known.delete(path);
+        this.#known.set(`${to}${path.slice(from.length)}`, { ...k, moved: true });
+      }
+    }
   }
 
   get enabled(): boolean {
@@ -270,16 +315,26 @@ export class WorkspaceSync {
     this.#soon.unref();
   }
 
-  /** Final push before the sandbox stops (hibernation, shutdown), bounded by `deadlineMs`. */
+  /**
+   * Final push before the sandbox stops (hibernation, shutdown), bounded by `deadlineMs`. A restore
+   * or pull in flight finishes first (within the deadline): nothing of this sync writes into the
+   * workspace after the flush, its saved revision (KOBE-304) included.
+   */
   async flush(deadlineMs: number): Promise<PushStats | undefined> {
     this.#stopped = true;
     clearInterval(this.#timer);
     clearTimeout(this.#soon);
-    if (!this.enabled || !this.#restored) return undefined;
-    const push = this.#push();
+    if (!this.enabled) return undefined;
     const timeout = new Promise<undefined>((r) =>
       setTimeout(() => r(undefined), deadlineMs).unref(),
     );
+    const settled = await Promise.race([this.#chain.then(() => true), timeout]);
+    if (settled === undefined) {
+      this.#o.logger.warn({ deadlineMs }, "workspace flush timed out");
+      return undefined;
+    }
+    if (!this.#restored) return undefined;
+    const push = this.#push();
     try {
       const stats = await Promise.race([push, timeout]);
       if (stats === undefined) this.#o.logger.warn({ deadlineMs }, "workspace flush timed out");
@@ -492,6 +547,11 @@ export class WorkspaceSync {
 
   async #restore(): Promise<RestoreStats> {
     if (this.#restoreStarted === 0) this.#restoreStarted = Date.now();
+    // A woken sandbox replays the moves made while it slept before comparing anything (KOBE-304).
+    // Without a saved revision (a new or rebuilt volume) there is nothing local to move.
+    const saved = await this.#moves.savedRev();
+    const moved = saved > 0 ? await this.#replayMoves(saved) : [];
+    const movedHere = (p: string) => moved.some(({ to }) => p === to || p.startsWith(`${to}/`));
     const local = await scanWorkspace(this.#o.root, {
       skipDirs: this.#o.skipDirs,
       maxFiles: this.#o.maxFiles,
@@ -526,6 +586,18 @@ export class WorkspaceSync {
         downloads.push(e);
         continue;
       }
+      if (movedHere(e.path)) {
+        // Renamed here from its old path (by this attempt or an earlier one, review R1). Moved
+        // rows keep the source's mtime: a local file newer than the row is an edit made since the
+        // last sync, kept and pushed onto this row; an older one lost to a newer server version
+        // (an upload made while the sandbox slept) and is kept beside it as a conflict copy.
+        this.#known.set(e.path, known(e));
+        if (file.mtimeMs > e.mtime_ms) continue;
+        if ((await hashFile(this.#o.root, e.path))?.sha256 === e.sha256) continue;
+        await this.#conflictCopy(e.path);
+        downloads.push(e);
+        continue;
+      }
       // The volume and the copy differ. A sandbox-written row: the volume is newer work, keep it
       // (pushed next, based on this row). A server-written row (uploads, file browser): the
       // server's version wins unless the local file changed after it — then keep both.
@@ -548,6 +620,7 @@ export class WorkspaceSync {
     }
     await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
     this.#seenRev = head;
+    await this.#moves.save(head);
     const files = this.#restoredFiles;
     return {
       mode: empty && files > 0 ? "full" : "incremental",
@@ -618,6 +691,8 @@ export class WorkspaceSync {
   }
 
   async #pull(): Promise<number> {
+    // Moves first, as local renames of whole trees (KOBE-304): their rows then find the files.
+    this.#rekey((await this.#replayMoves(this.#seenRev)).filter((m) => m.now));
     const { head, entries, full } = await this.#manifestSince(this.#seenRev);
     let applied = 0;
     if (full && this.#seenRev > 0) applied += await this.#dropUnlisted(entries, head);
@@ -628,7 +703,7 @@ export class WorkspaceSync {
     const touchedOwned = entries.some((e) => isServerOwnedPath(e.path));
     for (const e of entries) {
       const k = this.#known.get(e.path);
-      if (k && k.rev >= e.rev) continue; // our own write, or already applied
+      if (k && !k.moved && k.rev >= e.rev) continue; // our own write, or already applied
       const file = await statLocal(this.#o.root, e.path);
       const unchanged =
         file === undefined
@@ -636,9 +711,26 @@ export class WorkspaceSync {
           : k !== undefined && !k.deleted && sameAs(file, k);
       const owned = isServerOwnedPath(e.path);
       if (e.deleted) {
-        if (file && (unchanged || owned)) await removeFile(this.#o.root, e.path);
+        if (file && (unchanged || owned)) {
+          await removeFile(this.#o.root, e.path);
+          // A server move or delete leaves no empty folders behind (KOBE-304).
+          if (e.origin === "server" && !owned) await pruneEmptyParents(this.#o.root, e.path);
+        }
         this.#known.set(e.path, known(e));
         applied += 1;
+        continue;
+      }
+      if (file && !owned && k?.moved && !k.deleted && k.rev > e.rev) {
+        // A commit to the old path landed after the move (a push that raced it, review R2): the
+        // renamed local file is newer than the moved row. Keep it; it is pushed onto this row.
+        this.#known.set(e.path, known(e));
+        continue;
+      }
+      if (file && !owned && k && !k.deleted && k.sha256 !== undefined && k.sha256 === e.sha256) {
+        // The server's content is what this file was synced from (a moved file renamed here, or
+        // a row that changed only in revision): nothing to download. A local edit stays newer
+        // work, pushed onto this revision.
+        this.#known.set(e.path, known(unchanged ? { ...e, mtime_ms: file.mtimeMs } : e));
         continue;
       }
       if (file && !unchanged && !owned) {
@@ -653,6 +745,7 @@ export class WorkspaceSync {
     }
     if (touchedOwned) await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
     this.#seenRev = Math.max(this.#seenRev, head);
+    await this.#moves.save(this.#seenRev);
     return applied;
   }
 

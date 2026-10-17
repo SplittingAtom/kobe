@@ -147,6 +147,28 @@ export async function assertCoverage(client: pg.ClientBase): Promise<void> {
   }
 }
 
+/**
+ * The blob-ref columns that exist in `public` (in the current snapshot). A database on an older
+ * schema than this release (a backup taken before the upgrade migrates it) lacks the tables and
+ * columns added since: those hold no keys yet, so there is nothing to check in them.
+ */
+export async function existingColumns<
+  C extends { readonly table: string; readonly column: string },
+>(client: pg.ClientBase, columns: readonly C[]): Promise<C[]> {
+  const { rows } = await client.query<{ t: string; c: string }>(
+    `SELECT c.relname AS t, a.attname AS c
+     FROM pg_attribute a
+     JOIN pg_class c ON c.oid = a.attrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+       AND a.attnum > 0 AND NOT a.attisdropped
+       AND (c.relname, a.attname) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
+    [columns.map((r) => r.table), columns.map((r) => r.column)],
+  );
+  const present = new Set(rows.map((r) => `${r.t}.${r.c}`));
+  return columns.filter((r) => present.has(`${r.table}.${r.column}`));
+}
+
 /** Distinct non-null object keys stored in the given blob-ref columns (in the current snapshot). */
 export async function referencedObjectKeys(
   client: pg.ClientBase,

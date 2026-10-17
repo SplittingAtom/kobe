@@ -37,6 +37,7 @@ import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import type { Mutation } from "../use-resource";
 import { ALIAS_PATTERN } from "./model-kinds";
 import { LimitsFields, limitsChange, limitsText, useLimitsChoice } from "./model-limits";
+import { ThinkingFields, thinkingChange, thinkingText, useThinkingChoice } from "./model-thinking";
 
 const HEADING = "catalog-heading";
 
@@ -190,7 +191,15 @@ function CatalogRow({
           </span>
         </TableCell>
         <TableCell>{m.inputModalities.includes("image") ? "Text, images" : "Text"}</TableCell>
-        <TableCell>{limitsText(m, tokenDefaults)}</TableCell>
+        <TableCell>
+          {limitsText(m, tokenDefaults)}
+          {thinkingText(m) !== "" && (
+            <>
+              <br />
+              <span className="text-sm text-console-muted">{thinkingText(m)}</span>
+            </>
+          )}
+        </TableCell>
         <TableCell>
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" aria-expanded={editing} disabled={mutation.pending} onClick={onEdit}>
@@ -244,6 +253,8 @@ function EditCatalogForm({
   const [model, setModel] = useState(m.model);
   const images = useImageChoice(m.inputModalities.includes("image"));
   const limits = useLimitsChoice(m);
+  const thinking = useThinkingChoice(m);
+  const kind = providers.find((p) => p.id === providerId)?.kind;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -256,6 +267,7 @@ function EditCatalogForm({
         ? { inputModalities: modalitiesOf(images.checked) }
         : {}),
       ...limitsChange(limits, m),
+      ...thinkingChange(thinking, limits.reasoning, kind, m, model.trim()),
     };
     if (Object.keys(change).length === 0) {
       onSaved();
@@ -282,6 +294,12 @@ function EditCatalogForm({
       </FormRow>
       <ImagesField choice={images} />
       <LimitsFields choice={limits} defaults={tokenDefaults} />
+      <ThinkingFields
+        choice={thinking}
+        reasoning={limits.reasoning}
+        kind={kind}
+        model={model.trim()}
+      />
       <Button type="submit" variant="primary" disabled={mutation.pending}>
         Save {m.alias}
       </Button>
@@ -307,6 +325,8 @@ function AddCatalogForm({
   const [model, setModel] = useState("");
   const images = useImageChoice(false);
   const limits = useLimitsChoice();
+  const thinking = useThinkingChoice();
+  const kind = providers.find((p) => p.id === providerId)?.kind;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -319,6 +339,7 @@ function AddCatalogForm({
           label: label.trim() === "" ? null : label.trim(),
           ...(images.checked ? { inputModalities: modalitiesOf(true) } : {}),
           ...limitsChange(limits),
+          ...thinkingChange(thinking, limits.reasoning, kind, undefined, model.trim()),
         }),
       (added) => `Published ${added.alias} (${added.gatewayModel}). Team admins can enable it now.`,
     );
@@ -328,6 +349,7 @@ function AddCatalogForm({
       setModel("");
       images.reset();
       limits.reset();
+      thinking.reset();
       onAdded();
     }
   }
@@ -362,6 +384,12 @@ function AddCatalogForm({
         </p>
         <ImagesField choice={images} />
         <LimitsFields choice={limits} defaults={tokenDefaults} />
+        <ThinkingFields
+          choice={thinking}
+          reasoning={limits.reasoning}
+          kind={kind}
+          model={model.trim()}
+        />
         <Button type="submit" variant="primary" disabled={mutation.pending || providerId === ""}>
           Add to catalog
         </Button>

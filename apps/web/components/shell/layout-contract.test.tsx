@@ -180,6 +180,54 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
       expect(all.length).toBeGreaterThan(0);
       expect((motion.match(/animation:/g) ?? []).length).toBe(all.length);
     }
+    // The rail handle's highlight fades only then too (KOBE-305).
+    const motion = media(SHELL, "(prefers-reduced-motion: no-preference)");
+    const transitions = SHELL.match(/transition:/g) ?? [];
+    expect(transitions.length).toBeGreaterThan(0);
+    expect((motion.match(/transition:/g) ?? []).length).toBe(transitions.length);
+  });
+
+  it("the rail's dragged width yields to the columns' floors; its handle is wide-only (KOBE-305)", () => {
+    const flat = (s: string) => s.replace(/\s+/g, " ");
+    // 280 px unless dragged, never leaving the conversation (and an open artifact column) less
+    // than its floor.
+    expect(declares(SHELL, ".grid", "--kobe-rail-room: 400px;")).toBe(true);
+    expect(
+      declares(
+        SHELL,
+        ".grid",
+        "--kobe-rail-width: min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room));",
+      ),
+    ).toBe(true);
+    const column = flat(media(SHELL, from(BREAKPOINTS.medium)));
+    expect(
+      declares(
+        column,
+        ".grid:has(> .artifact:not(:empty):not([data-hidden]))",
+        "--kobe-rail-room: 760px;",
+      ),
+    ).toBe(true);
+    // Collapsed and narrower bands keep 48 px whatever was dragged.
+    expect(
+      declares(SHELL, ".grid:has(> .rail > [data-collapsed])", "--kobe-rail-width: 48px;"),
+    ).toBe(true);
+    expect(declares(SHELL, ".railHandle", "display: none;")).toBe(true);
+    const wide = media(SHELL, from(BREAKPOINTS.wide));
+    expect(declares(wide, ".railHandle", "display: block;")).toBe(true);
+    expect(declares(wide, ".railHandle", "cursor: col-resize;")).toBe(true);
+    expect(
+      declares(wide, ".railHandle", "inset-inline-start: calc(var(--kobe-rail-width) - 2px);"),
+    ).toBe(true);
+    expect(declares(wide, ".railHandle:focus-visible", "background: var(--admin-accent);")).toBe(
+      true,
+    );
+    // A visible focus in forced colours too (no `outline: none`), and a 24 px touch target.
+    expect(declares(wide, ".railHandle:focus-visible", "outline: 2px solid transparent;")).toBe(
+      true,
+    );
+    expect(declares(wide, ".railHandle::before", "inset-inline: -2px -4px;")).toBe(true);
+    const touch = media(SHELL, "(width >= 1100px) and (pointer: coarse)");
+    expect(declares(touch, ".railHandle::before", "inset-inline: -4px -14px;")).toBe(true); // 4 + 6 + 14
   });
 });
 

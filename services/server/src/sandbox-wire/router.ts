@@ -1,5 +1,14 @@
 import { withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
-import { idAttributes, withSpan } from "@kobe/telemetry";
+import { formatTraceparent, runTraceId } from "@kobe/protocol";
+import {
+  idAttributes,
+  runParentContext,
+  sessionAttributes,
+  telemetryState,
+  trace,
+  withSpan,
+  type Span,
+} from "@kobe/telemetry";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import {
@@ -40,6 +49,8 @@ export class CommandRouter implements SandboxRouter {
   readonly #waker: SandboxWaker;
   readonly #log: Logger;
   readonly #waiters = new Map<string, Waiter>();
+  /** Add a run trace context to start commands (KOBE-274): tracing is on. */
+  readonly #traceRuns: boolean;
   #closed = false;
 
   constructor(options: {
@@ -50,6 +61,7 @@ export class CommandRouter implements SandboxRouter {
     registry: ConnectionRegistry;
     waker: SandboxWaker;
     log: Logger;
+    traceRuns?: boolean;
   }) {
     this.#db = options.db;
     this.#bus = options.bus;
@@ -58,6 +70,7 @@ export class CommandRouter implements SandboxRouter {
     this.#registry = options.registry;
     this.#waker = options.waker;
     this.#log = options.log;
+    this.#traceRuns = options.traceRuns ?? false;
   }
 
   get waiting(): number {
@@ -163,9 +176,19 @@ export class CommandRouter implements SandboxRouter {
     if (this.#closed) {
       return { ok: false, error: { code: "unavailable", message: "the server is shutting down" } };
     }
+    // A run's commands are spans of the run's trace (KOBE-274), linked to whatever caused them.
+    const cause = trace.getActiveSpan()?.spanContext();
+    const runScoped =
+      runId === undefined
+        ? {}
+        : {
+            parent: runParentContext(runId),
+            ...(cause && trace.isSpanContextValid(cause) ? { links: [{ context: cause }] } : {}),
+          };
     return withSpan(
       "sandbox.command",
       {
+        ...runScoped,
         attributes: {
           ...idAttributes({
             teamId: target.teamId,
@@ -173,15 +196,38 @@ export class CommandRouter implements SandboxRouter {
             threadId,
             runId,
           }),
+          ...(runId === undefined ? {} : sessionAttributes({ threadId, userId: target.userId })),
           "kobe.command.kind": kind,
         },
       },
       async (span) => {
-        const outcome = await this.#sendQueued(target, kind, threadId, runId, options, frame);
+        const sent = this.#withTraceContext(kind, runId, span, frame);
+        const outcome = await this.#sendQueued(target, kind, threadId, runId, options, sent);
         span.setAttribute("kobe.outcome", outcome.ok ? "ok" : outcome.error.code);
         return outcome;
       },
     );
+  }
+
+  /**
+   * `run.start` / `thread.compact` carry the run's trace context (traceparent = this command span)
+   * when the run is traced; the delivering replica strips it for agents without `trace_spans`.
+   */
+  #withTraceContext(
+    kind: SandboxCommandKind,
+    runId: string | undefined,
+    span: Span,
+    frame: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (runId === undefined || !this.#traceRuns || !span.isRecording()) return frame;
+    if (kind !== "run.start" && kind !== "thread.compact") return frame;
+    return {
+      ...frame,
+      trace: {
+        traceparent: formatTraceparent(runTraceId(runId), span.spanContext().spanId),
+        capture_content: telemetryState().captureContent,
+      },
+    };
   }
 
   async #sendQueued(

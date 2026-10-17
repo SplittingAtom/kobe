@@ -12,6 +12,8 @@ import {
 } from "./common.js";
 import { skippedActionsSchema } from "./notifications.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
+import { rememberScopeSchema } from "./remember.js";
+import { thinkingLevelSchema } from "./thinking.js";
 import {
   SERVER_CALL_PURPOSES,
   generatedTitleSchema,
@@ -32,6 +34,7 @@ export const KOBE_EVENT_TYPES = [
   "approval.requested",
   "approval.resolved",
   "policy.denied",
+  "policy.rule_applied",
   "egress.blocked",
   "steer.applied",
   "memory.updated",
@@ -136,6 +139,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
      * default. The agent's pin wins over the conversation's choice (user decision).
      */
     model_source: z.enum(["agent", "thread", "default"]).optional(),
+    /**
+     * The run's thinking level (KOBE-260): the conversation's choice or the model's default,
+     * clamped to the site and team settings. Absent: the model has no thinking control.
+     */
+    thinking_level: thinkingLevelSchema.optional(),
     retry_of_run_id: uuidSchema.optional(),
   }),
   "sandbox.waking": z.strictObject({
@@ -192,6 +200,16 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     tool_call_id: idSchema,
     tool: z.string().min(1).max(256),
     reasons: z.array(policyReasonSchema).min(1),
+  }),
+  /**
+   * A call ran without asking because one of the member's remembered approvals allowed it
+   * (KOBE-289): the tool card says "Allowed by your rule (<scope>)". Never the input.
+   */
+  "policy.rule_applied": z.strictObject({
+    tool_call_id: idSchema,
+    tool: z.string().min(1).max(256),
+    rule_id: uuidSchema,
+    scope: rememberScopeSchema,
   }),
   "context.omitted": z.strictObject({
     /**

@@ -5,6 +5,7 @@ import {
   getTeamAgentEval,
   type AgentEvalDetail,
 } from "../../../../lib/admin/api/team/agent-builder";
+import { caseOutcome, caseSkips } from "../../../../lib/admin/eval-case-counts";
 import { percent } from "../../../../lib/admin/orbit-score";
 import {
   EmptyState,
@@ -91,6 +92,15 @@ function Report({ result }: { readonly result: AgentEvalDetail }) {
           {result.attackSuccessRate === null
             ? "—"
             : `${percent(result.attackSuccessRate)} (${result.attackSuccesses ?? 0} of ${result.attempts ?? 0}); limit ${percent(result.threshold)}`}
+        </dd>
+        <dt>Shared cases</dt>
+        <dd>
+          {caseOutcome(result.cases, result.threshold) ?? "None in this evaluation."}
+          {caseSkips(result.cases).map((line) => (
+            <span key={line} className="block text-sm text-console-muted">
+              {line}
+            </span>
+          ))}
         </dd>
         {result.version !== null && (
           <>

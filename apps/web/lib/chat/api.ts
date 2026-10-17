@@ -3,16 +3,30 @@
  * sends `X-Kobe-Team`, reads included, so a tab left on another team gets `team_mismatch` instead of
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
+import type { ThinkingLevel } from "@kobe/protocol";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage, ThreadUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import { createMemoryApi } from "../memory/api";
+import {
+  feedbackBody,
+  type AnswerFeedback,
+  type FeedbackChange,
+  type ThreadFeedback,
+} from "./feedback";
+import {
+  evalCaseOptionsBody,
+  type EvalCaseOptions,
+  type EvalCasePreview,
+  type MyEvalCase,
+} from "./eval-cases";
 import type { ThreadMarkers } from "./markers";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
+  RememberOptions,
   EgressRequest,
   EntryPage,
   PendingMessages,
@@ -108,6 +122,8 @@ export interface ChatApi {
     model?: string | null,
     agent?: { readonly agentId: string; readonly test: boolean },
     projectId?: string | null,
+    /** The conversation's thinking level (KOBE-260); null/absent = the model's default. */
+    thinkingLevel?: ThinkingLevel | null,
   ): Promise<ApiResult<ThreadSummary>>;
   /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
   shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
@@ -125,6 +141,11 @@ export interface ChatApi {
   clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
   setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** Sets the thread's thinking level for its next runs (KOBE-260; null = the model's default). */
+  setThreadThinking(
+    threadId: string,
+    level: ThinkingLevel | null,
+  ): Promise<ApiResult<ThreadSummary>>;
   /** The site catalog with the team's enabled models and default (`GET /v1/team/models`). */
   listModels(): Promise<ApiResult<TeamModels>>;
   /** The thread with its entries after `after` (0 = from the start). */
@@ -182,6 +203,22 @@ export interface ChatApi {
   threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
   /** Interrupted and budget-stopped runs and decided approvals (inline markers, KOBE-209). */
   threadMarkers(threadId: string): Promise<ApiResult<ThreadMarkers>>;
+  /** The thread's rateable answers with the caller's own ratings (KOBE-275). */
+  threadFeedback(threadId: string): Promise<ApiResult<ThreadFeedback>>;
+  /** Rates an answer, or changes the caller's rating of it (KOBE-275). */
+  rateAnswer(runId: string, change: FeedbackChange): Promise<ApiResult<AnswerFeedback>>;
+  /** Clears the caller's rating of an answer (KOBE-275); 204 also when there was none. */
+  clearRating(runId: string): Promise<ApiResult<undefined>>;
+  /** What sharing a rated-down answer as an eval case would store (KOBE-276); shares nothing. */
+  previewEvalCase(runId: string, options: EvalCaseOptions): Promise<ApiResult<EvalCasePreview>>;
+  /** Shares it as previewed (the preview's digest), with the agent's owner (KOBE-276). */
+  shareEvalCase(
+    runId: string,
+    options: EvalCaseOptions,
+    digest: string,
+  ): Promise<ApiResult<MyEvalCase>>;
+  /** Withdraws the caller's case: the copy is deleted (KOBE-276); 204 also when there was none. */
+  withdrawEvalCase(caseId: string): Promise<ApiResult<undefined>>;
   /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
   toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
@@ -190,6 +227,13 @@ export interface ChatApi {
   getApproval(approvalId: string): Promise<ApiResult<ApprovalView>>;
   /** `POST /v1/approvals/{id}` (§6.1): allow or deny, optionally remembering an allow. */
   decideApproval(approvalId: string, body: ApprovalDecisionBody): Promise<ApiResult<ApprovalView>>;
+  /** What the card may offer for a pending approval (KOBE-289; the server decides it). */
+  rememberOptions(approvalId: string): Promise<ApiResult<RememberOptions>>;
+  /** "Approve all waiting" (KOBE-289): each listed approval of the run, signed on its own. */
+  approveAll(
+    runId: string,
+    approvalIds: readonly string[],
+  ): Promise<ApiResult<{ readonly approvals: readonly ApprovalView[] }>>;
   /**
    * Request access (KOBE-39): ask the team's admins to enable a blocked domain (`POST
    * /v1/egress/requests`); 201 new, 200 already pending, 409 `already_enabled`/`not_in_ceiling`.
@@ -233,7 +277,7 @@ export interface ForkOptions {
 export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
   const get = <T>(path: string) => apiRequest<T>(path, { teamId, fetchFn });
   const memory = createMemoryApi(teamId, fetchFn);
-  const send = <T>(method: "POST" | "PATCH" | "DELETE", path: string, json?: unknown) =>
+  const send = <T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, json?: unknown) =>
     apiRequest<T>(path, { method, json, teamId, fetchFn });
 
   return {
@@ -253,11 +297,14 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         ...(options.entryId === undefined ? {} : { entry_id: options.entryId }),
         ...(options.title === undefined ? {} : { title: options.title }),
       }),
-    createThread: (title, model, agent, projectId) =>
+    createThread: (title, model, agent, projectId, thinkingLevel) =>
       send("POST", "/v1/threads", {
         ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),
         ...(title === undefined ? {} : { title }),
         ...(model === undefined || model === null ? {} : { model }),
+        ...(thinkingLevel === undefined || thinkingLevel === null
+          ? {}
+          : { thinking_level: thinkingLevel }),
         ...(agent === undefined
           ? {}
           : { agent_id: agent.agentId, ...(agent.test ? { test: true } : {}) }),
@@ -279,6 +326,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     clearTestThreads: (agentId) =>
       send("DELETE", `/v1/threads/test${query({ agent_id: agentId })}`),
     setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
+    setThreadThinking: (id, level) =>
+      send("PATCH", `/v1/threads/${enc(id)}`, { thinking_level: level }),
     listModels: () => listTeamModels(teamId, fetchFn),
     getThread: (id, after = 0) =>
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),
@@ -331,6 +380,15 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
     threadMarkers: (id) => get(`/v1/threads/${enc(id)}/markers`),
+    threadFeedback: (id) => get(`/v1/threads/${enc(id)}/feedback`),
+    rateAnswer: (runId, change) =>
+      send("PUT", `/v1/runs/${enc(runId)}/feedback`, feedbackBody(change)),
+    clearRating: (runId) => send("DELETE", `/v1/runs/${enc(runId)}/feedback`),
+    previewEvalCase: (runId, options) =>
+      send("POST", `/v1/runs/${enc(runId)}/eval-case/preview`, evalCaseOptionsBody(options)),
+    shareEvalCase: (runId, options, digest) =>
+      send("POST", `/v1/runs/${enc(runId)}/eval-case`, { ...evalCaseOptionsBody(options), digest }),
+    withdrawEvalCase: (caseId) => send("DELETE", `/v1/eval-cases/${enc(caseId)}`),
     toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
@@ -355,11 +413,16 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           : {
               remember: {
                 tool_glob: body.remember.toolGlob,
-                ...(body.remember.expiresIn === undefined
-                  ? {}
-                  : { expires_in: body.remember.expiresIn }),
+                scope: body.remember.scope,
+                ...(body.remember.exact ? { exact: true } : {}),
               },
             }),
+      }),
+    rememberOptions: (id) => get(`/v1/approvals/${enc(id)}/remember`),
+    approveAll: (runId, approvalIds) =>
+      send("POST", "/v1/approvals/approve-all", {
+        run_id: runId,
+        approval_ids: [...approvalIds],
       }),
   };
 }

@@ -69,6 +69,16 @@ describe("kobe-models protocol", () => {
     expect(parseModelFile(JSON.stringify({ ...valid, model: null })).model).toBeNull();
   });
 
+  it("parses the run's traceparent when the agent wrote one (KOBE-274)", () => {
+    const traceparent = "00-3e4f5a6b7c8d4e9f8a1b2c3d4e5f6072-1111111111111111-01";
+    expect(parseModelFile(JSON.stringify({ ...valid, traceparent })).traceparent).toBe(traceparent);
+    expect(
+      parseModelFile(JSON.stringify({ ...valid, traceparent: null })).traceparent,
+    ).toBeUndefined();
+    expect(parses(JSON.stringify({ ...valid, traceparent: "00-x" }))).toBe(false);
+    expect(parses(JSON.stringify({ ...valid, traceparent: 1 }))).toBe(false);
+  });
+
   it("parses the model's output limit and context window when the agent wrote them (KOBE-259)", () => {
     const model = { ...valid.model, max_output_tokens: 32_768, context_window: 200_000 };
     expect(parseModelFile(JSON.stringify({ ...valid, model })).model).toEqual(model);

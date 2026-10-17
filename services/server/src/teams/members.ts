@@ -1,3 +1,4 @@
+import { endUnreachableThreadRules } from "../policy/user-rules.js";
 import {
   and,
   asc,
@@ -124,6 +125,8 @@ export async function setMemberRole(
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     // Below team admin they can no longer invite: their pending invitations go too.
     if (role !== "team_admin") await revokeInvitesSentBy(tx, teamId, userId);
+    // Projects they could open only as a team admin: their thread rules there end (KOBE-289 S2).
+    if (role !== "team_admin") await endUnreachableThreadRules(tx, teamId);
     if (lock.current !== role) {
       await recordAudit(tx, {
         action: "identity.member.role_changed",

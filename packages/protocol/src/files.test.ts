@@ -25,6 +25,9 @@ import {
   workspaceListQuerySchema,
   workspaceListResponseSchema,
   workspaceUploadFieldsSchema,
+  workspaceMoveRequestSchema,
+  workspaceMoveResponseSchema,
+  WORKSPACE_MOVE_MAX_FILES,
 } from "./index.js";
 import { EVENT_PAYLOAD_EXAMPLES, EXAMPLE_IDS } from "./testing/index.js";
 
@@ -254,5 +257,32 @@ describe("file.shared event", () => {
     expect(schema.safeParse(withDesc).success).toBe(true);
     expect(schema.safeParse({ ...withDesc, description: "" }).success).toBe(false);
     expect(schema.safeParse({ ...withDesc, other: 1 }).success).toBe(false);
+  });
+});
+
+describe("workspace move (KOBE-304)", () => {
+  it("takes two workspace paths and nothing else", () => {
+    const body = { from: "notes/a.md", to: "archive/a.md" };
+    expect(workspaceMoveRequestSchema.parse(body)).toEqual(body);
+    for (const bad of [
+      { from: "notes/a.md" },
+      { from: "notes/a.md", to: "" },
+      { from: "notes/a.md", to: "../a.md" },
+      { from: "/etc/passwd", to: "a" },
+      { from: "a", to: "b/./c" },
+      { from: "a", to: "b\\c" },
+      { from: "a", to: "b‮c" },
+      { from: "a", to: `${"x".repeat(256)}` },
+      { from: "a", to: "b", force: true },
+    ]) {
+      expect(workspaceMoveRequestSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it("answers what moved: the paths, the kind and how many files", () => {
+    const ok = { from: "a", to: "b/a", type: "dir", files: 3 };
+    expect(workspaceMoveResponseSchema.parse(ok)).toEqual(ok);
+    expect(workspaceMoveResponseSchema.safeParse({ ...ok, files: 0 }).success).toBe(false);
+    expect(workspaceMoveResponseSchema.safeParse({ ...ok, bytes: 1 }).success).toBe(false);
+    expect(WORKSPACE_MOVE_MAX_FILES).toBe(10_000);
   });
 });

@@ -6,6 +6,7 @@ import {
   copyPath,
   isInternalPath,
   isReadOnlyPath,
+  moveRefusal,
   underPattern,
 } from "./paths.js";
 
@@ -63,5 +64,44 @@ describe("workspace file browser paths", () => {
     expect(h.startsWith("attachment; filename=")).toBe(true);
     expect(h).not.toMatch(/[\r\n]/);
     expect(h).toContain("filename*=UTF-8''na%22me%3B%5C%20%C3%A9%0D%0A.txt");
+  });
+});
+
+describe("moveRefusal (KOBE-304)", () => {
+  it("allows moves and renames inside the member's own area", () => {
+    for (const [from, to] of [
+      ["a.txt", "b.txt"],
+      ["notes", "archive/notes"],
+      ["uploads/drop.pdf", "drop.pdf"],
+      ["drop.pdf", "uploads/drop.pdf"],
+      ["a/b", "b"],
+    ] as const) {
+      expect(moveRefusal(from, to), `${from} -> ${to}`).toBeUndefined();
+    }
+  });
+  it("hides agent-internal sources and refuses internal or unmentionable targets", () => {
+    expect(moveRefusal(".kobe/x", "x")?.code).toBe("not_found");
+    for (const to of [".kobe/x", ".kobe", "a​b", "a$b", "a;b", "a`b", "a b", "a\u{e0041}"]) {
+      expect(moveRefusal("a", to)?.code, JSON.stringify(to)).toBe("invalid_path");
+    }
+  });
+  it("refuses onto itself and into itself", () => {
+    expect(moveRefusal("a", "a")?.code).toBe("invalid_path");
+    expect(moveRefusal("a", "a/b")?.code).toBe("invalid_path");
+    expect(moveRefusal("a", "ab")).toBeUndefined();
+  });
+  it("keeps project mounts and thread uploads read-only both ways", () => {
+    const thread = "uploads/0b6f0d4e-5a3c-4d8e-9a43-5f7b0f2d1c11";
+    for (const [from, to] of [
+      ["projects/p/a", "a"],
+      ["a", "projects/p/a"],
+      ["projects", "p"],
+      [`${thread}/a`, "a"],
+      ["a", `${thread}/a`],
+      ["a", "uploads"],
+      ["a", "uploads/x/a"],
+    ] as const) {
+      expect(moveRefusal(from, to)?.code, `${from} -> ${to}`).toBe("read_only");
+    }
   });
 });

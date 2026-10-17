@@ -657,16 +657,31 @@ export class Thread {
   /**
    * Make `runId` the run Pi attributes its model calls to (`x-kobe-run-id`), with the run's
    * model, before the prompt is sent. The extension reads the file on Pi's `input` hook and per
-   * request. No-op without model wiring.
+   * request. `traceparent` is the run's span for those calls (KOBE-274; null: untraced), in the
+   * same write so the first call carries it. No-op without model wiring.
    */
   async attachRun(
     runId: string,
     model: RunModel | null,
     runToken?: string | undefined,
+    traceparent: string | null = null,
   ): Promise<void> {
     // Memory only (KOBE-118): handed to this Pi on request, never written anywhere.
     this.#runToken = runToken === undefined ? undefined : { runId, token: runToken };
-    await this.#modelFile?.update({ runId, model });
+    await this.#modelFile?.update({ runId, model, traceparent });
+  }
+
+  /**
+   * The run's current span for Pi's model calls (KOBE-274): written to the model file while `runId`
+   * is this thread's run. Never fails the run.
+   */
+  setTraceparent(runId: string, traceparent: string | null): void {
+    if (this.#run?.runId !== runId) return;
+    this.#modelFile
+      ?.update({ traceparent })
+      .catch((error: unknown) =>
+        this.#warn(`model file not updated with the trace context: ${(error as Error).message}`),
+      );
   }
 
   /**
@@ -759,7 +774,7 @@ export class Thread {
     this.#runToken = undefined;
     this.lastUsed = Date.now();
     this.#modelFile
-      ?.update({ runId: null })
+      ?.update({ runId: null, traceparent: null })
       .catch((error: unknown) =>
         this.#warn(`model file not updated at run end: ${(error as Error).message}`),
       );

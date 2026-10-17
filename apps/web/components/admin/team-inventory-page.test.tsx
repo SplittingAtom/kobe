@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canSee, findSection } from "../../lib/admin/nav/registry";
 import type { TeamAccess } from "../../lib/admin/nav/types";
 import { must } from "../../lib/testing/must";
+import { compactDateTime } from "./parts";
 import { TeamInventoryPage } from "./team/inventory-page";
 import {
   forbidNativeConfirm,
@@ -53,6 +54,24 @@ const item = (over: Record<string, unknown>) => ({
   canExport: true,
   ...over,
 });
+/** Opens the row's ⋯ menu ("Actions for <agent>") and chooses `action` (KOBE-306). */
+async function rowAction(agent: string, action: string) {
+  await userEvent.click(await screen.findByRole("button", { name: `Actions for ${agent}` }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: action }));
+}
+
+/** The labels in the row's ⋯ menu, closing it again with Escape. */
+async function rowActions(agent: string): Promise<string[]> {
+  await userEvent.click(screen.getByRole("button", { name: `Actions for ${agent}` }));
+  const menu = await screen.findByRole("menu");
+  const labels = within(menu)
+    .getAllByRole("menuitem")
+    .map((i) => i.textContent ?? "");
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  return labels;
+}
+
 const INVENTORY_1 = {
   agents: [item({}), item({ id: "p-1", scope: "personal", slug: "mine", name: "Mine" })],
   nextCursor: "mine:00000000-0000-0000-0000-000000000001",
@@ -78,7 +97,8 @@ describe("Inventory: agents (KOBE-86, moved here by KOBE-291)", () => {
     expect(row.textContent).toMatch(/Active/);
     expect(row.textContent).toMatch(/v2/);
     expect(row.textContent).toMatch(/7/);
-    expect(row.textContent).toMatch(/1,234/);
+    expect(row.textContent).toMatch(/1\.2k/);
+    expect(within(row).getByTitle("1,234 tokens")).toBeTruthy();
     expect(row.textContent?.match(/—/g)?.length).toBe(2);
     expect(row.textContent).not.toMatch(/\$/);
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
@@ -149,13 +169,16 @@ describe("Inventory: agents (KOBE-86, moved here by KOBE-291)", () => {
       ],
     });
     renderTeam(<TeamInventoryPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Suspend Mine" }));
+    await rowAction("Mine", "Suspend");
     await answerConfirm("Suspend Mine?", "Suspend Mine");
     await screen.findByText("Mine is suspended.");
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
     expect(put.headers.get("x-kobe-team")).toBe(TEAM.id);
-    expect(screen.getByRole("button", { name: "Reactivate Mine" })).toBeTruthy();
+    // The confirm gives focus back to the row's ⋯ button.
+    const menuButton = screen.getByRole("button", { name: "Actions for Mine" });
+    await waitFor(() => expect(document.activeElement).toBe(menuButton));
+    expect(await rowActions("Mine")).toEqual(["Export to Orbit", "Reactivate"]);
   });
 
   it("offers Export to Orbit only for published agents the caller may export", async () => {
@@ -186,11 +209,15 @@ describe("Inventory: agents (KOBE-86, moved here by KOBE-291)", () => {
       ),
     );
     renderTeam(<TeamInventoryPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Export Triage to Orbit" }));
+    await rowAction("Triage", "Export to Orbit");
     await waitFor(() => expect(downloads).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("button", { name: "Export Draft to Orbit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Export Mine to Orbit" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Export Old to Orbit" })).toBeTruthy();
+    // The ⋯ button was busy (disabled) during the export: focus is back on it afterwards.
+    const menuButton = screen.getByRole("button", { name: "Actions for Triage" });
+    await waitFor(() => expect((menuButton as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(menuButton));
+    expect(await rowActions("Draft")).toEqual(["Suspend"]);
+    expect(await rowActions("Mine")).toEqual(["Suspend"]);
+    expect(await rowActions("Old")).toEqual(["Export to Orbit", "Suspend"]);
     expect(summary(calls)).not.toContain("GET /v1/agents/d-1/versions/null/orbit");
   });
 
@@ -203,9 +230,116 @@ describe("Inventory: agents (KOBE-86, moved here by KOBE-291)", () => {
       ],
     });
     renderTeam(<TeamInventoryPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
+    await rowAction("Triage", "Suspend");
     await answerConfirm("Suspend Triage?", "Suspend Triage");
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
+  });
+});
+
+describe("Inventory: a compact agent table (KOBE-306)", () => {
+  const LAST_RUN = "2026-10-02T10:00:37Z";
+  const SCORED_AT = "2026-10-03T08:15:00Z";
+
+  function renderCompact() {
+    stubInventory({
+      "GET /v1/agents/inventory": [
+        200,
+        {
+          nextCursor: null,
+          agents: [
+            item({
+              lastRunAt: LAST_RUN,
+              tokens: 12_345_678,
+              orbitScore: { status: "passed", attackSuccessRate: 0.1, at: SCORED_AT },
+            }),
+            item({
+              id: "g-1",
+              scope: "gallery",
+              slug: "res",
+              name: "Researcher",
+              canExport: false,
+            }),
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamInventoryPage />);
+  }
+
+  it("shows dates on one line without year or seconds, the full timestamp in the tooltip", async () => {
+    renderCompact();
+    const row = (await screen.findByRole("rowheader", { name: "Triage" })).closest(
+      "tr",
+    ) as HTMLElement;
+    const times = row.querySelectorAll("time");
+    expect([...times].map((t) => t.getAttribute("datetime"))).toEqual([LAST_RUN, SCORED_AT]);
+    for (const time of times) {
+      const value = must(time.getAttribute("datetime"));
+      const date = new Date(value);
+      const full = date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" });
+      // On screen: compact, hidden from screen readers, which read the full value instead.
+      const shown = must(time.querySelector('[aria-hidden="true"]'));
+      expect(shown.textContent).toBe(compactDateTime(date));
+      expect(shown.textContent).not.toContain("2026");
+      expect(shown.textContent).not.toContain(":37");
+      expect(must(time.querySelector(".sr-only")).textContent).toBe(full);
+      expect(full).toContain("2026");
+      expect(time.className).toContain("whitespace-nowrap");
+      expect(time.title).toBe(full);
+    }
+    // Tokens are compact too; the exact count for screen readers and in the tooltip.
+    const tokens = within(row).getByTitle("12,345,678 tokens");
+    expect(must(tokens.querySelector('[aria-hidden="true"]')).textContent).toBe("12.3M");
+    expect(must(tokens.querySelector(".sr-only")).textContent).toBe("12,345,678 tokens");
+  });
+
+  it("puts each row's actions behind one named ⋯ button, with no inline action buttons", async () => {
+    renderCompact();
+    const table = await screen.findByRole("table", { name: "Agent inventory" });
+    await within(table).findByRole("rowheader", { name: "Triage" });
+    const buttons = within(table).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Actions for Triage",
+      "Actions for Researcher",
+    ]);
+    expect(buttons.every((b) => b.getAttribute("aria-haspopup") === "menu")).toBe(true);
+  });
+
+  it("folds the scope under the owner: ten columns, one of them the actions", async () => {
+    renderCompact();
+    const table = await screen.findByRole("table", { name: "Agent inventory" });
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent);
+    expect(headers).toEqual([
+      "Agent",
+      "Owner and scope",
+      "Status",
+      "Version",
+      "Runs",
+      "Last run",
+      "Tokens",
+      "Schedules",
+      "Orbit score",
+      "Actions",
+    ]);
+    const cells = (name: string) =>
+      within(must(within(table).getByRole("rowheader", { name }).closest("tr")))
+        .getAllByRole("cell")
+        .map((c) => c.textContent);
+    expect(cells("Triage")[0]).toBe("BobTeam");
+    expect(cells("Researcher")[0]).toBe("Gallery");
+  });
+});
+
+describe("compactDateTime (KOBE-306)", () => {
+  it("leaves out the year in the current year and shows it otherwise", () => {
+    const now = new Date("2026-10-17T12:00:00Z");
+    const thisYear = compactDateTime(new Date("2026-03-04T12:34:56Z"), now);
+    const lastYear = compactDateTime(new Date("2025-03-04T12:34:56Z"), now);
+    expect(thisYear).not.toContain("2026");
+    expect(thisYear).not.toContain(":56");
+    expect(lastYear).toContain("2025");
   });
 });
 
@@ -397,6 +531,6 @@ describe("who may open the Inventory (KOBE-291 review)", () => {
     renderTeam(<TeamInventoryPage />, { role: "builder", permissions: ["team.agents.build"] });
     const agents = screen.getByRole("region", { name: "Agents" });
     expect((await within(agents).findByRole("alert")).textContent).toMatch(/permission/);
-    expect(screen.queryByRole("button", { name: /Suspend/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Actions for/ })).toBeNull();
   });
 });

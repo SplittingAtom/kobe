@@ -5,20 +5,15 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
+import type { RememberOptions } from "../../lib/chat/types";
 import { visible } from "../../lib/security/visible";
 import { cn } from "../../lib/utils";
 import { toneClass } from "../ui/status";
+import { RememberControls, type RememberChoice } from "./approval-remember";
 import styles from "./chat.module.css";
 
 type Requested = KobeEventPayload<"approval.requested">;
 type Resolved = KobeEventPayload<"approval.resolved">;
-
-/** "Always allow" durations offered with an approval (seconds; undefined = until revoked). */
-export const REMEMBER_CHOICES = [
-  { label: "for 1 day", seconds: 24 * 3600 },
-  { label: "for 30 days", seconds: 30 * 24 * 3600 },
-  { label: "until I revoke it", seconds: undefined },
-] as const;
 
 const RISK_LABEL: Record<Requested["risk"], string> = {
   read: "Reads data",
@@ -38,7 +33,7 @@ const EXPIRED_TEXT: Record<Exclude<Resolved["cause"], "user">, string> = {
 export function resolvedText(resolved: Resolved): string {
   if (resolved.decision === "allowed") {
     return resolved.remembered
-      ? "Approved. Kobe will not ask again for this tool (revocable in settings)."
+      ? "Approved and remembered. You can revoke it in My area, Approvals."
       : "Approved.";
   }
   if (resolved.decision === "denied") return "Denied. The tool did not run.";
@@ -132,9 +127,11 @@ function timeOf(iso: string): string {
 
 /**
  * The approval card (spec U6, D29): tool, the exact input that will run, risk, why it needs
- * approval, when it expires; Allow / Deny, and "always allow this tool" (a remember-rule for
- * exactly this tool, with an expiry). The server decides who may answer and signs the approval;
- * this card only asks (`POST /v1/approvals/{id}`) and then waits for `approval.resolved`.
+ * approval, when it expires; Allow / Deny, "remember" (a rule for exactly this tool with a scope,
+ * optionally only this exact action; KOBE-289) and "Approve all waiting" when several calls of the
+ * run wait. The choices come from the server (`GET /v1/approvals/{id}/remember`), which applies the
+ * team's limits; the server decides who may answer and signs every approval. This card only asks
+ * and then waits for `approval.resolved`.
  */
 export function ApprovalCard({
   requested,
@@ -145,7 +142,10 @@ export function ApprovalCard({
 }: {
   readonly requested: Requested;
   readonly resolved: Resolved | undefined;
-  readonly api: Pick<ChatApi, "decideApproval" | "getApproval"> | undefined;
+  readonly api:
+    | (Pick<ChatApi, "decideApproval" | "getApproval"> &
+        Partial<Pick<ChatApi, "rememberOptions" | "approveAll">>)
+    | undefined;
   readonly now?: () => number;
   /** The viewer reads a thread shared with them: the run's user decides, not them. */
   readonly readOnly?: boolean;
@@ -154,8 +154,13 @@ export function ApprovalCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [sent, setSent] = useState<"allow" | "deny" | null>(null);
-  const [remember, setRemember] = useState(false);
-  const [choice, setChoice] = useState(0);
+  const [choice, setChoice] = useState<RememberChoice>({
+    remember: false,
+    scope: undefined,
+    exact: false,
+  });
+  const [options, setOptions] = useState<RememberOptions | undefined>(undefined);
+  const [confirmAll, setConfirmAll] = useState(false);
   const approvalId = requested.approval_id;
   // A resumed run keeps no inputs in its resume point: read the exact input back. Until it is
   // here, Allow stays off — the card must never approve an input it isn't showing.
@@ -177,6 +182,20 @@ export function ApprovalCard({
       el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
     }
   }, [approvalId, askable]);
+  // What may be remembered, and whether "Approve all waiting" is offered: the server's answer.
+  useEffect(() => {
+    const load = api?.rememberOptions;
+    if (!askable || !load) return;
+    let live = true;
+    load(approvalId)
+      .then((res) => {
+        if (live && res.ok) setOptions(res.data);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [api, approvalId, askable]);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
@@ -210,21 +229,40 @@ export function ApprovalCard({
     /[^\x20-\x7e]/gu,
     (ch) => `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
   );
-  // A remember-rule allows every future input of the tool: not offered for destructive ones.
-  const canRemember = requested.risk !== "destructive";
+  // Destructive tools are never remembered (the server refuses it as well).
+  const canRemember =
+    requested.risk !== "destructive" && options?.canRemember === true && options.choices.length > 0;
+  const scope = choice.scope ?? options?.choices[0]?.scope;
+  const exact = options?.exactOnly === true || choice.exact;
   const decide = async (decision: "allow" | "deny") => {
     if (!api) return;
     setBusy(true);
     setError(null);
-    const pick = REMEMBER_CHOICES[choice] ?? REMEMBER_CHOICES[0];
     const res = await api.decideApproval(approvalId, {
       decision,
-      ...(decision === "allow" && remember && canRemember
-        ? { remember: { toolGlob: requested.tool, expiresIn: pick.seconds } }
+      ...(decision === "allow" && choice.remember && canRemember && scope !== undefined
+        ? {
+            remember: {
+              toolGlob: requested.tool,
+              scope,
+              ...(exact && options.exact !== null ? { exact: true } : {}),
+            },
+          }
         : {}),
     });
     setBusy(false);
     if (res.ok) setSent(decision);
+    else setError(res.error);
+  };
+  const waiting = options?.approveAll?.approvalIds ?? [];
+  const approveAll = async () => {
+    if (!api?.approveAll || options === undefined || waiting.length < 2) return;
+    setBusy(true);
+    setError(null);
+    const res = await api.approveAll(options.runId, waiting);
+    setBusy(false);
+    setConfirmAll(false);
+    if (res.ok) setSent("allow");
     else setError(res.error);
   };
 
@@ -278,30 +316,14 @@ export function ApprovalCard({
         </p>
       ) : (
         <>
-          {canRemember && (
-            <div className={styles.approvalRemember}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                  disabled={busy}
-                />{" "}
-                Always allow <span className={styles.toolName}>{toolShown}</span>
-              </label>{" "}
-              <select
-                aria-label="Remember for"
-                value={choice}
-                onChange={(e) => setChoice(Number(e.target.value))}
-                disabled={busy || !remember}
-              >
-                {REMEMBER_CHOICES.map((c, i) => (
-                  <option key={c.label} value={i}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {options !== undefined && requested.risk !== "destructive" && (
+            <RememberControls
+              options={options}
+              toolShown={toolShown}
+              value={{ ...choice, scope }}
+              onChange={setChoice}
+              disabled={busy}
+            />
           )}
           <div className={styles.approvalActions}>
             <button
@@ -314,8 +336,27 @@ export function ApprovalCard({
             <button type="button" onClick={() => void decide("deny")} disabled={busy || !api}>
               Deny
             </button>
+            {waiting.length >= 2 && api?.approveAll && !confirmAll && (
+              <button type="button" onClick={() => setConfirmAll(true)} disabled={busy}>
+                Approve all waiting ({waiting.length})
+              </button>
+            )}
             <span className={styles.hint}>Expires at {timeOf(requested.expires_at)}</span>
           </div>
+          {confirmAll && (
+            <div className={styles.approvalRemember} role="group" aria-label="Approve all waiting">
+              <p className={styles.who}>
+                Allow all {waiting.length} calls waiting in this run? Each runs exactly as shown on
+                its own card, and each is signed and recorded separately.
+              </p>
+              <button type="button" onClick={() => void approveAll()} disabled={busy}>
+                Allow all {waiting.length}
+              </button>{" "}
+              <button type="button" onClick={() => setConfirmAll(false)} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          )}
           {error && (
             <p className={styles.errorText} role="alert">
               {error.message}

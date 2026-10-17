@@ -9,6 +9,8 @@ import {
   bumpModelsConfig,
   isActiveRunLeasedTo,
   loadGatewayPrincipal,
+  runSessionOf,
+  runThinkingLevelOf,
 } from "./models/index.js";
 import {
   MODEL_CONTEXT_WINDOW_RANGE,
@@ -155,6 +157,161 @@ describe("providers and catalog", () => {
   });
 });
 
+describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
+  const set = (values: Partial<typeof modelCatalog.$inferInsert>) =>
+    app.db.update(modelCatalog).set(values).where(eq(modelCatalog.alias, alias));
+  const NONE = {
+    thinkingControl: "none",
+    thinkingAllowed: false,
+    thinkingDefault: null,
+    thinkingMax: null,
+    thinkingLowest: "off",
+  } as const;
+
+  it("persists a model's control, allowance and levels; nothing by default", async () => {
+    const [row] = await app.db.select().from(modelCatalog).where(eq(modelCatalog.alias, alias));
+    expect(row).toMatchObject(NONE);
+    try {
+      await set({ reasoning: true, thinkingControl: "reasoning_effort" });
+      await set({ thinkingAllowed: true, thinkingDefault: "off", thinkingMax: "high" });
+      const [on] = await app.db.select().from(modelCatalog).where(eq(modelCatalog.alias, alias));
+      expect(on).toMatchObject({
+        thinkingControl: "reasoning_effort",
+        thinkingAllowed: true,
+        thinkingDefault: "off",
+        thinkingMax: "high",
+      });
+      // A model that cannot turn thinking off (review S2): its lowest level is low.
+      await set({ thinkingLowest: "low", thinkingDefault: "low" });
+      await set({ thinkingControl: "anthropic_effort" });
+    } finally {
+      await set({ ...NONE, reasoning: false });
+    }
+  });
+
+  it("refuses settings that do not fit together", async () => {
+    try {
+      for (const bad of [
+        { thinkingControl: "think_harder" },
+        { thinkingAllowed: true }, // no control
+        { thinkingControl: "reasoning_effort" }, // not a reasoning model
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingMax: "low" }, // not allowed
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingAllowed: true },
+        {
+          reasoning: true,
+          thinkingControl: "reasoning_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "high",
+          thinkingMax: "low",
+        },
+        {
+          reasoning: true,
+          thinkingControl: "reasoning_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "off",
+          thinkingMax: "off",
+        },
+        {
+          reasoning: true,
+          thinkingControl: "reasoning_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "max",
+          thinkingMax: "high",
+        },
+        // A control that cannot turn thinking off: always allowed, never defaulting to off.
+        { reasoning: true, thinkingControl: "anthropic_effort" },
+        {
+          reasoning: true,
+          thinkingControl: "anthropic_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "off",
+          thinkingMax: "high",
+        },
+        // Lowest level: off or low; a model that cannot turn off is always allowed, never off.
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingLowest: "minimal" },
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingLowest: "low" },
+        {
+          reasoning: true,
+          thinkingControl: "reasoning_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "off",
+          thinkingMax: "high",
+          thinkingLowest: "low",
+        },
+        { thinkingLowest: "low" }, // no control
+        {
+          reasoning: true,
+          thinkingControl: "anthropic_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "low",
+          thinkingMax: "high",
+        }, // effort-only control: lowest must be low
+      ] as Partial<typeof modelCatalog.$inferInsert>[]) {
+        expect(pgCode(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
+      }
+    } finally {
+      await set({ ...NONE, reasoning: false });
+    }
+  });
+
+  it("a team's maximum, a conversation's choice and a run's level are levels or null", async () => {
+    const thread = `t-${teamA.slice(0, 8)}`;
+    await app.db
+      .insert(modelCatalog)
+      .values({ alias: thread, providerId, model: "m-think", createdBy: userId });
+    await withTeam(app.db, teamA, (tx) =>
+      tx.insert(teamModels).values({ teamId: teamA, alias: thread, enabledBy: userId }),
+    );
+    const teamRow = (thinkingMax: string | null) =>
+      withTeam(app.db, teamA, (tx) =>
+        tx
+          .update(teamModels)
+          .set({ thinkingMax: thinkingMax as "low" | null })
+          .where(eq(teamModels.alias, thread)),
+      );
+    await teamRow("low");
+    await teamRow(null);
+    expect(pgCode(await failure(teamRow("huge")))).toBe("23514");
+    const seenByB = await withTeam(app.db, teamB, (tx) =>
+      tx.select().from(teamModels).where(eq(teamModels.alias, thread)),
+    );
+    expect(seenByB).toEqual([]);
+
+    const ids = await withTeam(app.db, teamA, async (tx) => {
+      const [t] = await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: userId, thinkingLevel: "high" })
+        .returning({ id: threads.id, level: threads.thinkingLevel });
+      if (!t) throw new Error("no thread");
+      const [r] = await tx
+        .insert(runs)
+        .values({ teamId: teamA, threadId: t.id, trigger: "user", thinkingLevel: "low" })
+        .returning({ id: runs.id });
+      if (!r) throw new Error("no run");
+      return { threadId: t.id, runId: r.id, level: t.level };
+    });
+    expect(ids.level).toBe("high");
+    // The NOT VALID checks (0126) hold for every row written.
+    const badThread = failure(
+      withTeam(app.db, teamA, (tx) =>
+        tx.execute(sql`UPDATE threads SET thinking_level = 'max' WHERE id = ${ids.threadId}`),
+      ),
+    );
+    expect(pgCode(await badThread)).toBe("23514");
+    const badRun = failure(
+      withTeam(app.db, teamA, (tx) =>
+        tx.execute(sql`UPDATE runs SET thinking_level = 'max' WHERE id = ${ids.runId}`),
+      ),
+    );
+    expect(pgCode(await badRun)).toBe("23514");
+    // The gateway's read of a run's level: only inside the run's team.
+    expect(await runThinkingLevelOf(app.db, teamA, ids.runId)).toBe("low");
+    expect(await runThinkingLevelOf(app.db, teamB, ids.runId)).toBeUndefined();
+    expect(await runThinkingLevelOf(app.db, teamA, randomUUID())).toBeUndefined();
+    await app.db.delete(modelCatalog).where(eq(modelCatalog.alias, thread));
+  });
+});
+
 describe("team enablement", () => {
   it("is confined to the team (RLS), references the catalog, and has one default", async () => {
     await withTeam(app.db, teamA, (tx) =>
@@ -244,6 +401,7 @@ describe("gateway principal", () => {
       virtualKey: { id: "vk-1", valueEnc: "v1.sealed" },
       // The team's enabled models as the gateway names them (custom provider kobe-<id>).
       enabledModels: [`kobe-${providerId}/qwen/qwen3-8b`],
+      thinking: [],
     });
   });
 
@@ -257,6 +415,39 @@ describe("gateway principal", () => {
       expect(reasoning.enabledModels).toEqual(plain.enabledModels);
     } finally {
       await app.db.execute(sql`UPDATE model_catalog SET reasoning = false WHERE alias = ${alias}`);
+    }
+  });
+
+  it("names the thinking settings of enabled models with a control, with the team's maximum (KOBE-260)", async () => {
+    await app.db.execute(sql`UPDATE model_catalog SET reasoning = true,
+      thinking_control = 'reasoning_effort', thinking_allowed = true, thinking_default = 'low',
+      thinking_max = 'high' WHERE alias = ${alias}`);
+    try {
+      await withTeam(app.db, teamA, (tx) =>
+        tx.update(teamModels).set({ thinkingMax: "medium" }).where(eq(teamModels.alias, alias)),
+      );
+      const p = await loadGatewayPrincipal(app.db, teamA, userId, sandboxId);
+      expect(p.thinking).toEqual([
+        {
+          model: `kobe-${providerId}/qwen/qwen3-8b`,
+          control: "reasoning_effort",
+          allowed: true,
+          default: "low",
+          max: "high",
+          lowest: "off",
+          teamMax: "medium",
+        },
+      ]);
+      expect((await loadGatewayPrincipal(app.db, teamA, userId, undefined)).thinking).toEqual(
+        p.thinking,
+      );
+    } finally {
+      await withTeam(app.db, teamA, (tx) =>
+        tx.update(teamModels).set({ thinkingMax: null }).where(eq(teamModels.alias, alias)),
+      );
+      await app.db.execute(sql`UPDATE model_catalog SET thinking_control = 'none',
+        thinking_allowed = false, thinking_default = NULL, thinking_max = NULL, reasoning = false
+        WHERE alias = ${alias}`);
     }
   });
 
@@ -283,6 +474,7 @@ describe("gateway principal", () => {
       sandbox: "unrecorded",
       virtualKey: undefined,
       enabledModels: [],
+      thinking: [],
     });
   });
 
@@ -329,5 +521,31 @@ describe("gateway principal", () => {
       ),
     );
     expect(await isActiveRunLeasedTo(app.db, teamA, runId, sandboxId)).toBe(false);
+  });
+
+  it("run session (KOBE-274): the run's thread and its owner, only inside the run's team", async () => {
+    const { runId, threadId } = await withTeam(app.db, teamA, async (tx) => {
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: teamA, ownerUserId: userId })
+        .returning({ id: threads.id });
+      if (!thread) throw new Error("no thread");
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: teamA,
+          threadId: thread.id,
+          trigger: "user",
+          status: "completed",
+          startedAt: new Date(),
+          endedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      if (!run) throw new Error("no run");
+      return { runId: run.id, threadId: thread.id };
+    });
+    expect(await runSessionOf(app.db, teamA, runId)).toEqual({ threadId, userId });
+    expect(await runSessionOf(app.db, teamB, runId)).toBeUndefined();
+    expect(await runSessionOf(app.db, teamA, randomUUID())).toBeUndefined();
   });
 });

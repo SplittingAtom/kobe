@@ -3,6 +3,7 @@ import { pino } from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { canonicalJson } from "@kobe/protocol";
 import { signSessionToken } from "@kobe/session-token";
+import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { createApp } from "./app.js";
 import { DEFAULT_LIMITS, type Limits } from "./config.js";
 import {
@@ -678,5 +679,57 @@ describe("tools/call", () => {
       rpc("tools/call", { name: "get_issue", arguments: {} }, { app: limited }),
     ]);
     expect([a.status, b.status].sort()).toEqual([200, 429]);
+  });
+});
+
+describe("tracing (KOBE-274)", () => {
+  async function traced<T>(fn: (exporter: InMemorySpanExporter) => Promise<T>): Promise<T> {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      return await fn(exporter);
+    } finally {
+      await telemetry.shutdown();
+    }
+  }
+  const callSpan = (exporter: InMemorySpanExporter) =>
+    exporter.getFinishedSpans().find((s) => s.name === "mcp.tools/call");
+
+  it("names the tool from the server's decision, never from the sandbox, and drops the thread header", async () => {
+    await traced(async (exporter) => {
+      await rpc("tools/call", { name: "get_issue", arguments: { a: "x" } });
+      expect(callSpan(exporter)?.attributes["kobe.tool.name"]).toBe("get_issue");
+      expect(callSpan(exporter)?.attributes).not.toHaveProperty("kobe.thread_id");
+    });
+    await traced(async (exporter) => {
+      server.next = () => ({
+        ok: true,
+        value: { decision: "deny", code: "unknown_tool", message: "No such tool." },
+      });
+      await rpc("tools/call", { name: "leak the quarterly numbers", arguments: {} });
+      expect(callSpan(exporter)?.attributes["kobe.tool.name"]).toBe("unknown");
+      expect(JSON.stringify(callSpan(exporter)?.attributes)).not.toContain("quarterly");
+    });
+  });
+
+  it("never joins a sandbox's trace (the listener starts a fresh one)", async () => {
+    await traced(async (exporter) => {
+      const caller = "0af7651916cd43dd8448eb211c80319c";
+      await rpc("tools/list", undefined, {
+        headers: { traceparent: `00-${caller}-b7ad6b7169203331-01` },
+      });
+      const spans = exporter.getFinishedSpans();
+      expect(spans.length).toBeGreaterThan(0);
+      expect(spans.every((s) => s.spanContext().traceId !== caller)).toBe(true);
+    });
   });
 });

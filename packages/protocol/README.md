@@ -16,6 +16,7 @@ settle it in its contract PR.
 | Session tokens        | `src/session-token.ts`                                                                                | `SESSION_TOKEN_AUDIENCES`, `sessionTokenClaimsSchema`, `acceptsAudience`                                                                                      | KOBE-22, KOBE-24, KOBE-38, KOBE-40, KOBE-58 |
 | Run tokens            | `src/run-token.ts`, `src/node/run-token.ts`                                                           | `CAPABILITY_RUN_TOKEN`, `RUN_TOKEN_HEADER`, `runTokenClaimsSchema`, `runTokenGrantSchema`, `deriveRunTokenKey`, `signRunToken`, `verifyRunToken`              | KOBE-117, KOBE-118                          |
 | Server model calls    | `src/server-call.ts`, `src/node/server-call-token.ts`                                                 | `SERVER_CALL_TOKEN_HEADER`, `serverCallClaimsSchema`, `serverCallRequestSchema`, `SERVER_CALL_LIMITS`, `signServerCallToken`, `verifyServerCallToken`         | KOBE-234, KOBE-219, KOBE-222                |
+| Run traces            | `src/tracing.ts`, `src/sandbox-wire/trace-frames.ts`                                                  | `runTraceId`, `runRootSpanId`, `traceparentSchema`, `CAPABILITY_TRACE_SPANS`, `traceSpansFrameSchema`, `wireTraceContextSchema`, `SANDBOX_SPAN_ATTRIBUTES`    | KOBE-274                                    |
 | Kobe Event Stream     | `src/events.ts`, `src/sse.ts`                                                                         | `KOBE_EVENT_TYPES`, `EVENT_PAYLOAD_SCHEMAS`, `kobeEventSchema`, `formatSseEvent`, `resolveResumeCursor`, `decideStreamOpen`                                   | KOBE-31, KOBE-32, KOBE-55, KOBE-30          |
 | Run orchestrator      | `src/runs.ts`, `src/run-orchestrator.ts`                                                              | `RUN_STATUSES`, `RUN_TRANSITIONS`, `canTransition`, `ThreadStatus`, `nextThreadStatus`, `queueMayAdvance`, `checkRetry`, `RunOrchestrator`                    | KOBE-30, KOBE-26, KOBE-42, KOBE-64, KOBE-10 |
 | Policy decision       | `src/policy.ts`, `src/tools.ts`, `src/glob.ts`                                                        | `policyInputSchema`, `policyDecisionSchema`, `PolicyEngine`, `BUILTIN_TOOLS`, `ToolRegistry`, `matchGlob`, `argPatternSchema`, `matchesArgPattern`            | KOBE-35, KOBE-36, KOBE-37, KOBE-58, KOBE-65 |
@@ -108,3 +109,19 @@ Format `krt1.<base64url claims>.<base64url HMAC-SHA256>`, key derived by HKDF wi
 `kobe/run-token/v1`; claims `run_id`, `team_id`, `sandbox_id`, `iat`, `exp`, `jti`. Gateway rollout:
 header present must verify (no fallback); absent keeps the legacy advisory `x-kobe-run-id` until
 enforcement is switched on (KOBE-118). Details in `src/run-token.ts`.
+
+## Run traces (KOBE-274)
+
+One run is one trace: trace id = the run id's hex digits (`runTraceId`), root span `kobe.run` with
+id `runRootSpanId`, so the server, the model gateway and the sandbox agree without a lookup. These
+ids are predictable, so **no listener a sandbox can reach joins a caller's trace by propagation**:
+the model gateway starts `model_gateway.request` only after it attributed the call to a run, in that
+run's trace. Agents that list hello capability `trace_spans` get `run.start.trace` /
+`thread.compact.trace` (`{ traceparent, capture_content }`, decoded loosely) when the server traces
+the run, and send their spans as `trace.spans` frames: a strict envelope with up to 64 spans that
+the server parses one by one (closed span names, a strict attribute allow-list each, closed codes,
+content only with `capture_content`). No trace context, no frames. The server checks the lease,
+remaps every sandbox span id with `mapSandboxSpanId` (HMAC under `k_trace`, HKDF info
+`kobe/trace-span/v1`), clamps times to the run window, stamps identity, `session.id` (thread),
+`user.id` (thread owner) and the tool name from its own decisions, and exports through a separate
+bounded queue. Details in `src/tracing.ts` and `src/sandbox-wire/trace-frames.ts`.

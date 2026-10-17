@@ -24,6 +24,8 @@ interface FakeThread {
   created_at: string;
   /** The thread's chosen model alias (KOBE-44); null = the team default. */
   model: string | null;
+  /** The thread's chosen thinking level (KOBE-260); absent or null = the model's default. */
+  thinking_level?: string | null;
   /** The model the thread's agent pins (KOBE-44/47 seam); it wins over `model`. */
   agent_model?: string | null;
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
@@ -58,6 +60,8 @@ export interface FakeTeamModel {
   is_default: boolean;
   /** Tokens; absent or null: unknown (KOBE-210). */
   context_window?: number | null;
+  /** KOBE-260: what members may pick for it in the team; absent: no thinking control. */
+  thinking_in_team?: { readonly default: string | null; readonly levels: readonly string[] };
 }
 
 /** An agent as `GET /v1/agents/runnable` lists it (KOBE-122). */
@@ -99,6 +103,8 @@ interface FakeRun {
   client_key?: string;
   /** The model alias the server ran it with (the agent's pin, else the thread's; null = default). */
   model?: string | null;
+  /** The prompt entry the run committed (`runs.user_entry_id`; KOBE-275 feedback lists it). */
+  user_entry_id?: string;
 }
 
 export interface RecordedRequest {
@@ -185,6 +191,13 @@ export class FakeKobe {
     string,
     { runId: string; payload: KobeEventPayload<"approval.requested">; status: string }
   >();
+
+  /**
+   * `GET /v1/approvals/{id}/remember` (KOBE-289): what the server would offer. Tests replace it to
+   * model the team's limits; the default offers every scope (none for destructive tools), an
+   * exact pattern over the input's top-level strings, and Approve all when ≥ 2 wait in the run.
+   */
+  rememberOptions: (approvalId: string) => Json = (approvalId) => this.#defaultRemember(approvalId);
 
   /** Request-access requests (KOBE-39), newest last; `enabled`: domains already enabled. */
   readonly egressRequests: Json[] = [];
@@ -346,6 +359,14 @@ export class FakeKobe {
     { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[] }
   >();
 
+  /** The caller's answer ratings (KOBE-275), wire casing, by run id. */
+  readonly feedback = new Map<string, Json>();
+
+  /** The caller's shared eval cases (KOBE-276), wire casing, by run id. */
+  readonly evalCases = new Map<string, Json>();
+  /** What a run's eval case preview offers to add (KOBE-276), wire casing, by run id. */
+  readonly evalCaseAvailable = new Map<string, Json>();
+
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
@@ -386,6 +407,25 @@ export class FakeKobe {
       events: [],
       compacted: false,
       tip: null,
+    };
+    this.runs.set(run.run_id, run);
+    return run.run_id;
+  }
+
+  /** A run that answered `userEntryId` long ago (KOBE-275: a rateable answer of a seeded thread). */
+  addEndedRun(threadId: string, userEntryId: string, status = "completed"): string {
+    this.#runN += 1;
+    const run: FakeRun = {
+      run_id: uuid(4, this.#runN),
+      thread_id: threadId,
+      status,
+      input: "",
+      parent_entry_id: null,
+      queue_pos: 0,
+      events: [],
+      compacted: true,
+      tip: null,
+      user_entry_id: userEntryId,
     };
     this.runs.set(run.run_id, run);
     return run.run_id;
@@ -501,8 +541,11 @@ export class FakeKobe {
           { leaf: false },
         ),
       ),
-    commitPrompt: (runId: string) =>
-      this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
+    commitPrompt: (runId: string) => {
+      const entryId = this.agent.commit(runId, { role: "user", content: this.run(runId).input });
+      this.run(runId).user_entry_id = entryId;
+      return entryId;
+    },
     /** `epilogue`: the server will title the thread / suggest follow-ups after the run. */
     complete: (
       runId: string,
@@ -873,6 +916,7 @@ export class FakeKobe {
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
+      url.pathname.startsWith("/v1/eval-cases") ||
       url.pathname.startsWith("/v1/approvals") ||
       url.pathname === "/v1/team/retention" ||
       url.pathname === "/v1/projects" ||
@@ -989,7 +1033,20 @@ export class FakeKobe {
     if (area === "projects" && id === undefined && method === "GET") {
       return json(200, { projects: this.projects });
     }
+    if (area === "runs" && id && action === "eval-case")
+      return this.#evalCase(method, id, sub, body);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
+    if (area === "eval-cases" && id && method === "DELETE") {
+      for (const [runId, c] of this.evalCases) if (c.id === id) this.evalCases.delete(runId);
+      return new Response(null, { status: 204 });
+    }
+    if (area === "approvals" && id === "approve-all" && method === "POST") {
+      return this.#approveAll(body);
+    }
+    if (area === "approvals" && id && action === "remember" && method === "GET") {
+      if (!this.approvals.has(id)) return error(404, "approval_not_found", "No approval.");
+      return json(200, this.rememberOptions(id));
+    }
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
     if (area === "egress" && id === "requests") return this.#egressRoute(method, url, body);
     if (area === "team" && id === "retention" && method === "GET") {
@@ -1038,6 +1095,77 @@ export class FakeKobe {
     };
     this.egressRequests.push(request);
     return json(201, { request });
+  }
+
+  #defaultRemember(approvalId: string): Json {
+    const approval = this.approvals.get(approvalId);
+    const payload = approval?.payload;
+    const destructive = payload?.risk === "destructive";
+    const scopes = [
+      ["thread", "this conversation"],
+      ["today", "until end of today"],
+      ["run", "this run only"],
+      ["day", "for 1 day"],
+      ["month", "for 30 days"],
+      ["forever", "until revoked"],
+    ] as const;
+    const strings = Object.entries(payload?.input ?? {}).filter(([, v]) => typeof v === "string");
+    const waiting = [...this.approvals.entries()].filter(
+      ([, a]) => a.runId === approval?.runId && a.status === "pending",
+    );
+    const batchable =
+      waiting.length >= 2 && waiting.every(([, a]) => a.payload.risk !== "destructive");
+    return {
+      approval_id: approvalId,
+      run_id: approval?.runId ?? "",
+      can_remember: !destructive,
+      reason: destructive ? "Tools that can delete data are never remembered." : null,
+      choices: destructive
+        ? []
+        : scopes.map(([scope, label]) => ({
+            scope,
+            label,
+            expires_at: scope === "day" ? new Date(Date.now() + 86_400_000).toISOString() : null,
+          })),
+      time_zone: "UTC",
+      exact:
+        strings.length === 0
+          ? null
+          : {
+              arg_pattern: Object.fromEntries(strings.map(([k, v]) => [`/${k}`, v as string])),
+              pins_all: true,
+            },
+      exact_only: false,
+      approve_all: batchable ? { approval_ids: waiting.map(([id]) => id).sort() } : null,
+      approve_all_reason: batchable ? null : "Only one approval is waiting in this run.",
+    };
+  }
+
+  /** `POST /v1/approvals/approve-all`: every listed approval resolves allowed, one by one. */
+  #approveAll(body: Json | undefined): Response {
+    const ids = (body?.approval_ids ?? []) as string[];
+    const views: Json[] = [];
+    for (const id of ids) {
+      const approval = this.approvals.get(id);
+      if (!approval || approval.runId !== body?.run_id) {
+        return error(404, "approval_not_found", "No pending approval with that id.");
+      }
+    }
+    for (const id of ids) {
+      const approval = this.approvals.get(id);
+      if (!approval) continue;
+      approval.status = "allowed";
+      this.run(approval.runId).status = "running";
+      this.emit(approval.runId, "approval.resolved", {
+        approval_id: id,
+        tool_call_id: approval.payload.tool_call_id,
+        decision: "allowed",
+        cause: "user",
+        remembered: false,
+      });
+      views.push({ ...approval.payload, run_id: approval.runId, status: "allowed" });
+    }
+    return json(200, { approvals: views });
   }
 
   /** `GET`/`POST /v1/approvals/{id}`: a decision resolves the card through the stream. */
@@ -1145,6 +1273,9 @@ export class FakeKobe {
       if (model !== null && !this.#modelEnabled(model)) return this.#modelNotEnabled();
       const threadId = this.addThread((body?.title as string | undefined) ?? null);
       this.#thread(threadId).model = model;
+      if (typeof body?.thinking_level === "string") {
+        this.#thread(threadId).thinking_level = body.thinking_level;
+      }
       if (body?.test === true) {
         Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
       } else if (typeof body?.agent_id === "string") {
@@ -1176,6 +1307,18 @@ export class FakeKobe {
     }
     if (action === "markers" && method === "GET") {
       return json(200, this.threadMarkers.get(thread.thread_id) ?? { runs: [], approvals: [] });
+    }
+    if (action === "feedback" && method === "GET") {
+      // Like the server: the thread's ended runs with their prompt and the caller's rating.
+      const answers = [...this.runs.values()]
+        .filter((r) => r.thread_id === thread.thread_id && ENDED.has(r.status))
+        .map((r) => ({
+          run_id: r.run_id,
+          user_entry_id: r.user_entry_id ?? null,
+          feedback: this.feedback.get(r.run_id) ?? null,
+          eval_case_id: (this.evalCases.get(r.run_id)?.id as string | undefined) ?? null,
+        }));
+      return json(200, { thread_id: thread.thread_id, answers });
     }
     if (action === "share" && method === "POST") {
       if (thread.read_only)
@@ -1338,6 +1481,9 @@ export class FakeKobe {
         }
         thread.model = model;
       }
+      if (body && "thinking_level" in body) {
+        thread.thinking_level = (body.thinking_level as string | null) ?? null;
+      }
       if (body && "title" in body) thread.title = (body.title as string | null) ?? null;
       return json(200, this.#summary(thread));
     }
@@ -1461,6 +1607,114 @@ export class FakeKobe {
     return json(201, { run_id: run.run_id, queued: waits });
   }
 
+  /**
+   * `POST /v1/runs/{id}/eval-case[/preview]` (KOBE-276): the owner's thumbs down only; the copy
+   * adds a tool output or file name only when its id is ticked; the share needs the preview's
+   * digest (a stand-in hash of the content, like the server's).
+   */
+  #evalCase(
+    method: string,
+    runId: string,
+    sub: string | undefined,
+    body: Json | undefined,
+  ): Response {
+    const run = this.runs.get(runId);
+    if (!run || method !== "POST") return error(404, "run_not_found", "No answer with that id.");
+    const rating = this.feedback.get(runId);
+    const thread = this.threads.get(run.thread_id);
+    if (rating?.rating !== "down" || thread?.read_only === true) {
+      return error(409, "not_shareable", "Only your own thumbs down can be shared.");
+    }
+    const available = (this.evalCaseAvailable.get(runId) ?? {
+      earlier_exchanges: 0,
+      tool_outputs: [],
+      attachments: [],
+    }) as { earlier_exchanges: number; tool_outputs: Json[]; attachments: Json[] };
+    const ticked = (key: string) => (Array.isArray(body?.[key]) ? (body[key] as string[]) : []);
+    const tools = ticked("tool_output_ids");
+    const files = ticked("attachment_ids");
+    const known = (list: Json[], ids: string[]) => ids.every((i) => list.some((x) => x.id === i));
+    if (!known(available.tool_outputs, tools) || !known(available.attachments, files)) {
+      return error(400, "invalid_request");
+    }
+    const earlier = Math.min(Number(body?.earlier_exchanges ?? 0), available.earlier_exchanges);
+    const content = {
+      prompt: run.input || "The prompt",
+      answer: "Seven, it said.",
+      earlier: Array.from({ length: earlier }, (_, i) => [
+        { role: "user", text: `Earlier prompt ${i + 1}` },
+        { role: "assistant", text: `Earlier answer ${i + 1}` },
+      ]).flat(),
+      tool_outputs: available.tool_outputs
+        .filter((t) => tools.includes(t.id as string))
+        .map((t) => ({ tool: t.tool, text: `Output of ${t.id as string}`, is_error: false })),
+      attachments: available.attachments
+        .filter((a) => files.includes(a.id as string))
+        .map((a) => ({ name: a.name, mime_type: a.mime_type, size_bytes: a.size_bytes })),
+      reasons: rating.reasons ?? [],
+      comment: rating.comment ?? null,
+      truncated: false,
+    };
+    const digest = fakeDigest(JSON.stringify(content));
+    const shared = this.evalCases.get(runId);
+    if (sub === "preview") {
+      return json(200, {
+        run_id: runId,
+        agent: { scope: "team", id: uuid(7, 1), version: 1 },
+        content,
+        digest,
+        available,
+        shared_case_id: shared?.id ?? null,
+      });
+    }
+    if (shared) return error(409, "already_shared", "You already shared this answer.");
+    if (body?.digest !== digest) {
+      return error(409, "preview_stale", "What would be shared changed since the preview.");
+    }
+    this.#caseN += 1;
+    const stored = {
+      id: uuid(8, this.#caseN),
+      agent: { scope: "team", id: uuid(7, 1), version: 1 },
+      status: "open",
+      content,
+      shared_at: NOW,
+    };
+    this.evalCases.set(runId, stored);
+    return json(201, stored);
+  }
+
+  #caseN = 0;
+
+  /** `PUT` / `DELETE /v1/runs/{id}/feedback` (KOBE-275), checked like the server's schema. */
+  #feedback(method: string, run: FakeRun, body: Json | undefined): Response {
+    if (method === "DELETE") {
+      this.feedback.delete(run.run_id);
+      return new Response(null, { status: 204 });
+    }
+    if (method !== "PUT") return error(405, "method_not_allowed");
+    if (!ENDED.has(run.status)) return error(409, "run_not_ended", "Wait for the answer.");
+    const rating = body?.rating;
+    const reasons = Array.isArray(body?.reasons) ? (body.reasons as string[]) : [];
+    const comment = typeof body?.comment === "string" ? body.comment.trim() : null;
+    if (rating !== "up" && rating !== "down") return error(400, "invalid_request");
+    if (rating === "up" && (reasons.length > 0 || comment !== null))
+      return error(400, "invalid_request");
+    if (comment !== null && (comment === "" || comment.length > 500))
+      return error(400, "invalid_request");
+    const before = this.feedback.get(run.run_id);
+    const stored = {
+      run_id: run.run_id,
+      thread_id: run.thread_id,
+      entry_id: typeof body?.entry_id === "string" ? body.entry_id : (before?.entry_id ?? null),
+      rating,
+      reasons,
+      comment,
+      updated_at: NOW,
+    };
+    this.feedback.set(run.run_id, stored);
+    return json(200, stored);
+  }
+
   #runRoute(
     method: string,
     id: string,
@@ -1470,6 +1724,7 @@ export class FakeKobe {
     const run = this.runs.get(id);
     if (!run) return error(404, "run_not_found", "No run with that id.");
     if (action === undefined && method === "GET") return json(200, this.#snapshot(run));
+    if (action === "feedback") return this.#feedback(method, run, body);
     if (action === "usage" && method === "GET") {
       return json(
         200,
@@ -1671,4 +1926,18 @@ export class FakeEventSource implements EventSourceLike {
   rewind(to: number): void {
     this.#lastEventId = to;
   }
+}
+
+/** A deterministic 64-hex stand-in for the server's SHA-256 digest (tests only). */
+function fakeDigest(text: string): string {
+  let out = "";
+  for (let seed = 0; seed < 8; seed += 1) {
+    let h = 0x811c9dc5 ^ seed;
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    out += h.toString(16).padStart(8, "0");
+  }
+  return out;
 }

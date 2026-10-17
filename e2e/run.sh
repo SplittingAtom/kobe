@@ -17,6 +17,10 @@ TEAM2_NS=kobe-team-e2e2
 UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in for the internet
 MCP_NS=kobe-e2e-mcp # KOBE-58: a fake remote MCP server
 LLM_NS=kobe-e2e-llm # KOBE-40: a fake model provider
+OTEL_NS=kobe-e2e-otel # KOBE-274: a minimal OTLP sink (e2e/lib/otlp-sink.js); tracing is on for the suite
+OTEL_SINK="http://otlp.$OTEL_NS.svc.cluster.local:4318"
+# The proxies and the gateway restrict egress: each may reach the sink (merged into later overrides).
+OTEL_RULE=$(printf '{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}],"ports":[{"protocol":"TCP","port":4318}]}' "$OTEL_NS")
 # CI runs the suite as parallel shards, each on its own cluster (.github/workflows/e2e.yml).
 # KOBE_E2E_TOOL_EXECUTOR=1 installs with sandbox.toolExecutor.enabled=true (KOBE-168): every section
 # then runs with Pi's tools in the paired-uid executor, plus the isolation checks of e2e/executor/.
@@ -47,8 +51,13 @@ expect() { # name, regex, actual output: passes when every line of actual matche
   if [[ -n "$3" ]] && ! grep -Evq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 contains() { # name, regex, actual output: passes when some line matches regex
-  local got
+  local got key
   got=$(printf '%s\n' "$3" | tail -3)
+  # A `^key=value$` check reports that key's own line, not just the output's last lines.
+  if [[ $2 =~ ^\^([a-z_]+)= ]]; then
+    key=$(grep -E "^${BASH_REMATCH[1]}=" <<<"$3" | head -3 || true)
+    if [[ -n $key ]]; then got=$key; fi
+  fi
   if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 
@@ -68,7 +77,7 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$OTEL_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   # gate1-prep leaves the fake model provider to e2e/gate1.sh, which runs next.
   if [[ "$SHARD" != gate1-prep ]]; then
     $KUBECTL delete namespace "$LLM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -143,8 +152,8 @@ $KUBECTL -n kube-system wait --for=create service/traefik --timeout="$INFRA_TIME
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS" --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS"; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS" "$OTEL_NS" --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS" "$OTEL_NS"; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -155,8 +164,18 @@ $KUBECTL apply -f dev/mailpit.yaml >/dev/null
 $KUBECTL -n kobe-deps rollout status deploy/mailpit --timeout=180s >/dev/null
 $KUBECTL apply -f dev/s3.yaml >/dev/null # KOBE-27: S3-compatible test fixture (SeaweedFS, Apache-2.0)
 $KUBECTL -n kobe-deps rollout status deploy/s3 --timeout=300s >/dev/null
+# KOBE-274: the OTLP sink first, so every Kobe service exports to it from the start.
+$KUBECTL create namespace "$OTEL_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
+$KUBECTL -n "$OTEL_NS" run otlp --restart=Never --image="ghcr.io/splittingatom/kobe-model-gateway:$TAG" \
+  --image-pull-policy=IfNotPresent --labels=app=otlp --command -- node -e "$(cat e2e/lib/otlp-sink.js)" >/dev/null
+$KUBECTL -n "$OTEL_NS" expose pod otlp --port=4318 --target-port=4318 --name=otlp >/dev/null
+$KUBECTL -n "$OTEL_NS" wait --for=condition=Ready pod/otlp --timeout=180s >/dev/null 2>&1 || true
 $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
   --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent \
+  --set telemetry.endpoint="$OTEL_SINK" \
+  --set-json "mcpProxy.networkPolicy.extraEgress=[$OTEL_RULE]" \
+  --set-json "egressProxy.networkPolicy.extraEgress=[$OTEL_RULE]" \
+  --set-json "modelGateway.networkPolicy.extraEgress=[$OTEL_RULE]" \
   ${KOBE_E2E_TOOL_EXECUTOR:+--set sandbox.toolExecutor.enabled=true} --wait --timeout 10m
 
 echo "==> checks"
@@ -1215,7 +1234,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   up_ip=$($KUBECTL -n "$UPSTREAM_NS" get svc upstream -o jsonpath='{.spec.clusterIP}')
   # Allow exactly that Service IP as an internal target (proxy check) and its pods (proxy policy);
   # flush the connection audit every 5 s instead of 60.
-  up_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]}]' "$UPSTREAM_NS")
+  up_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]},%s]' "$UPSTREAM_NS" "$OTEL_RULE")
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
       --set-json "egressProxy.allowedInternalCidrs=[\"$up_ip/32\"]" --set-json "egressProxy.networkPolicy.extraEgress=$up_rule" \
       --set egressProxy.auditFlushSeconds=5 2>&1); then ok "egress proxy reconfigured with the test upstream"
@@ -1766,6 +1785,71 @@ JS
     contains "the model call is in the run_usage ledger with the provider's reported tokens" \
       '^200\|reported\|[1-9][0-9]*\|[1-9][0-9]*$' "$(wait_for 30 '^200\|' usage_row)"
     contains "the team usage dashboard counts it" '^200 .*"calls":[1-9]' "$(as_owner "GET /v1/team/usage")"
+    # KOBE-274: that run is one trace in the OTLP sink: the server's kobe.run root and run.start
+    # command span, the sandbox's spans relayed through the server (the sandbox has no collector),
+    # and the gateway's model call under a sandbox span; every span in the thread's session, no content.
+    echo "==> run traces (KOBE-274)"
+    read -r -d '' TRACE_JS <<'JS' || true
+const [sink, runId, threadId, userId, waitMs] = process.argv.slice(1);
+const hex = runId.replaceAll("-", ""), rootId = hex.slice(16);
+const out = (k, v) => console.log(k + "=" + v);
+const deadline = Date.now() + Number(waitMs);
+let spans = [];
+const have = (n) => spans.some((s) => s.name === n);
+for (;;) {
+  try { spans = await (await fetch(sink + "/spans?trace=" + hex)).json(); } catch { spans = []; }
+  if ((have("kobe.run") && have("sandbox.run") && have("model_gateway.request")) || Date.now() > deadline) break;
+  await new Promise((r) => setTimeout(r, 3000));
+}
+const by = (n) => spans.filter((s) => s.name === n);
+const root = by("kobe.run")[0];
+const command = by("sandbox.command").find((s) => s.attributes["kobe.command.kind"] === "run.start");
+const run = by("sandbox.run")[0];
+// The sandbox's model call; the server's title and follow-up calls (KOBE-234) hang under the root.
+const gateways = by("model_gateway.request");
+const sandboxIds = new Set(spans.filter((s) => s.service === "kobe-sandbox-agent").map((s) => s.spanId));
+const nameOf = new Map(spans.map((s) => [s.spanId, s.name]));
+out("spans", spans.length);
+out("span_names", spans.map((s) => s.name).sort().join(","));
+out("gateway_parents", gateways.map((g) => nameOf.get(g.parentSpanId) ?? (g.parentSpanId ? "unknown" : "none")).join(","));
+out("services", [...new Set(spans.map((s) => s.service))].sort().join(","));
+out("root", root ? (root.spanId === rootId && !root.parentSpanId ? "ok" : "bad") : "missing");
+out("command_under_root", command && command.parentSpanId === rootId ? "ok" : "no");
+out("sandbox_run_under_command", run && command && run.parentSpanId === command.spanId ? "ok" : "no");
+out("gateway_under_sandbox", gateways.some((g) => sandboxIds.has(g.parentSpanId)) ? "ok" : "no");
+const sessioned = spans.filter((s) => ["kobe.run", "sandbox.command", "sandbox.run", "sandbox.turn", "model_gateway.request"].includes(s.name));
+out("session", sessioned.length >= 4 && sessioned.every((s) => s.attributes["session.id"] === threadId && s.attributes["user.id"] === userId) ? "ok" : "no");
+out("content_keys", spans.flatMap((s) => Object.keys(s.attributes)).filter((k) => /^(gen_ai\.(prompt|completion)|kobe\.tool\.(input|output)|url\.query)/.test(k)).length);
+out("emails", JSON.stringify(spans).includes("@e2e.test") ? 1 : 0);
+out("names", /"(E2E owner|Owner)"/i.test(JSON.stringify(spans)) ? 1 : 0);
+JS
+    chat_thread=$(printf '%s\n' "$chat_out" | sed -n 's/^thread_id=//p')
+    traces=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$TRACE_JS" \
+      "$OTEL_SINK" "${chat_run:-00000000-0000-4000-8000-000000000000}" "${chat_thread:-none}" "${owner_id:-none}" 120000 2>&1 | tail -14)
+    printf '     traces: %s\n' "$(printf '%s' "$traces" | tr '\n' ' ')"
+    contains "the run is one trace across server, sandbox agent and model gateway" \
+      '^services=kobe-model-gateway,kobe-sandbox-agent,kobe-server$' "$traces"
+    contains "the trace has the run's kobe.run root with its fixed id" '^root=ok$' "$traces"
+    contains "the server's run.start command span hangs under the root" '^command_under_root=ok$' "$traces"
+    contains "the sandbox's run span (relayed through the server) hangs under the command span" \
+      '^sandbox_run_under_command=ok$' "$traces"
+    contains "the gateway's model call hangs under a sandbox span" '^gateway_under_sandbox=ok$' "$traces"
+    contains "every run span carries the thread as session.id and the owner as user.id" '^session=ok$' "$traces"
+    contains "no content attribute left the server with capture off" '^content_keys=0$' "$traces"
+    contains "no email in any span" '^emails=0$' "$traces"
+    contains "no display name in any span" '^names=0$' "$traces"
+    # ac-3 at the network level: the sandbox cannot reach the collector at all (NetworkPolicy; it
+    # has no DNS, so dial the sink's ClusterIP directly).
+    sink_ip=$($KUBECTL -n "$OTEL_NS" get svc otlp -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+    trace_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    trace_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=${trace_claim:-none}" -o name 2>/dev/null | head -1)
+    sink_probe=$($KUBECTL -n "$TEAM_NS" exec "${trace_pod:-pod/none}" -c agent -- node -e "
+      const s = require('net').connect({ host: '${sink_ip:-0.0.0.0}', port: 4318, timeout: 3000 });
+      s.on('connect', () => { console.log('sink=REACHED'); process.exit(0); });
+      s.on('timeout', () => { console.log('sink=BLOCKED'); process.exit(0); });
+      s.on('error', () => { console.log('sink=BLOCKED'); process.exit(0); });" 2>&1 || true)
+    contains "control: the OTLP sink has a ClusterIP (and took the server's spans above)" '^[0-9a-f.:]+$' "$sink_ip"
+    contains "the sandbox cannot reach the OTLP sink (NetworkPolicy)" '^sink=BLOCKED$' "$sink_probe"
     seen_now=$(probe "$NS" "$(answers "$LLM/_seen")")
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
@@ -3098,7 +3182,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
   fake_mcp_ip=$($KUBECTL -n "$MCP_NS" get svc fake-mcp -o jsonpath='{.spec.clusterIP}')
   # Allow exactly that Service IP (proxy check), plain http on port 80 (CI only), and its pods
   # (proxy NetworkPolicy, which matches the pod port after Service translation).
-  mcp_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]}]' "$MCP_NS")
+  mcp_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]},%s]' "$MCP_NS" "$OTEL_RULE")
   mcp_upgrade_at=$(psql_kobe "SELECT clock_timestamp()")
   server_gen_before=$($KUBECTL -n "$NS" get deploy/kobe-server -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \

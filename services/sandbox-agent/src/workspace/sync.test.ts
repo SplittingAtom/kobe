@@ -46,7 +46,9 @@ afterEach(async () => {
   server.blobs.clear();
   server.reports.length = 0;
   server.failWith = undefined;
+  server.failDownloads = 0;
   server.horizon = 0;
+  server.moves.length = 0;
 });
 
 /** Read-only areas are 0555/0444: make them removable. */
@@ -129,7 +131,8 @@ describe("workspace sync (agent)", () => {
     expect(
       Math.abs((await stat(path.join(second, "report.md"))).mtimeMs - mtime),
     ).toBeLessThanOrEqual(1);
-    expect(await exists(second, ".kobe")).toBe(false);
+    // Session files are never restored (only the agent's own sync state lives there, KOBE-304).
+    expect(await exists(second, ".kobe/sessions")).toBe(false);
     expect(server.reports.at(-1)).toMatchObject({ mode: "full", files: 3 });
     // Nothing to push afterwards: restored files match their copy without being read again.
     expect((await restored.push()).changes).toBe(0);
@@ -238,6 +241,40 @@ describe("workspace sync (agent)", () => {
     expect(server.content("late.txt")).toBe("written just before hibernation");
   });
 
+  it("lets a restore in flight finish before the flush returns: nothing is written after it", async () => {
+    const root = await volume();
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let asked = () => {};
+    const manifestAsked = new Promise<void>((r) => (asked = r));
+    class GatedClient extends SyncClient {
+      override async manifest(since: number, limit?: number) {
+        asked();
+        await gate;
+        return super.manifest(since, limit);
+      }
+    }
+    const sync = new WorkspaceSync({
+      root,
+      client: new GatedClient({ serverUrl, readToken: () => Promise.resolve(server.token) }),
+      logger: quiet,
+      intervalMs: 60_000,
+    });
+    syncs.push(sync);
+    sync.start();
+    await manifestAsked; // the restore is waiting on the server
+    let flushed = false;
+    const flush = sync.flush(5_000).then(() => (flushed = true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(flushed).toBe(false);
+    release();
+    await flush;
+    // The restore's last write (the saved revision, KOBE-304) happened before the flush returned.
+    const after = await readdir(root, { recursive: true });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await readdir(root, { recursive: true })).toEqual(after);
+  });
+
   it("never syncs symlinks and never writes through one", async () => {
     const root = await volume();
     const outside = await volume();
@@ -306,6 +343,175 @@ describe("workspace sync (agent)", () => {
     expect(await text(root, "new.txt")).toBe("after the compaction");
     await sync.push();
     expect(server.livePaths()).toEqual(["edited.txt", "kept.txt", "new.txt"]);
+  });
+
+  it("without a journalled move (an older server) the pull alone converges: download, drop, edits stay (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "reports/2026/q1.csv", "q1");
+    await put(root, "reports/2026/q2.csv", "q2");
+    await put(root, "reports/notes.md", "n");
+    await put(root, "keep/empty-on-purpose/.gitkeep", "");
+    const sync = await started(root);
+    await sync.push();
+    // The server's move (manifest-first): new rows, then tombstones of the old ones.
+    for (const p of ["reports/2026/q1.csv", "reports/2026/q2.csv", "reports/notes.md"]) {
+      server.serverWrite(`archive/${p}`, server.content(p) ?? "");
+    }
+    for (const p of ["reports/2026/q1.csv", "reports/2026/q2.csv", "reports/notes.md"]) {
+      server.serverDelete(p);
+    }
+    await put(root, "reports/notes.md", "edited before the pull");
+    await sync.pull();
+    expect(await text(root, "archive/reports/2026/q2.csv")).toBe("q2");
+    expect(await exists(root, "reports/2026")).toBe(false); // emptied by the move: gone
+    expect(await text(root, "reports/notes.md")).toBe("edited before the pull"); // an edit wins
+    expect(await exists(root, "keep/empty-on-purpose/.gitkeep")).toBe(true);
+    await sync.push();
+    expect(server.livePaths()).toEqual([
+      "archive/reports/2026/q1.csv",
+      "archive/reports/2026/q2.csv",
+      "archive/reports/notes.md",
+      "keep/empty-on-purpose/.gitkeep",
+      "reports/notes.md",
+    ]);
+  });
+
+  const downloads = () => server.requests.filter((r) => r.startsWith("GET /file")).length;
+
+  it("replays a server move as a local rename of the whole tree: nothing downloaded, nothing left behind (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "app/src/main.py", "print(1)");
+    await put(root, "app/README.md", "# App");
+    const sync = await started(root);
+    await sync.push();
+    // Never synced: caches, a virtualenv, a new file, and an unsynced edit of a synced one.
+    await put(root, "app/node_modules/dep/index.js", "dep");
+    await put(root, "app/.venv/bin/python", "py");
+    await put(root, "app/src/new.py", "new, not pushed yet");
+    await put(root, "app/README.md", "# App, edited before the move");
+    server.serverMove("app", "old/app");
+    const before = downloads();
+    await sync.pull();
+    expect(downloads()).toBe(before); // a rename, not a download
+    expect(await exists(root, "app")).toBe(false);
+    expect(await text(root, "old/app/src/main.py")).toBe("print(1)");
+    expect(await text(root, "old/app/node_modules/dep/index.js")).toBe("dep");
+    expect(await text(root, "old/app/.venv/bin/python")).toBe("py");
+    expect(await text(root, "old/app/src/new.py")).toBe("new, not pushed yet");
+    expect(await text(root, "old/app/README.md")).toBe("# App, edited before the move");
+    // The edit and the new file are pushed under the new path, onto the moved rows.
+    await sync.push();
+    expect(server.livePaths()).toEqual([
+      "old/app/README.md",
+      "old/app/src/main.py",
+      "old/app/src/new.py",
+    ]);
+    expect(server.content("old/app/README.md")).toBe("# App, edited before the move");
+    // A replay of the same move (the next pull, a restart) is a no-op.
+    await sync.pull();
+    expect(await text(root, "old/app/src/main.py")).toBe("print(1)");
+    expect(downloads()).toBe(before);
+  });
+
+  it("renames a single file, and leaves no emptied folder behind", async () => {
+    const root = await volume();
+    await put(root, "a/b/report.md", "r");
+    const sync = await started(root);
+    await sync.push();
+    server.serverMove("a/b/report.md", "report-final.md");
+    await sync.pull();
+    expect(await text(root, "report-final.md")).toBe("r");
+    expect(await exists(root, "a")).toBe(false);
+  });
+
+  it("refuses to rename onto a local file at the destination: the pull converges and keeps both", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "server copy");
+    const sync = await started(root);
+    await sync.push();
+    await put(root, "b.txt", "local, never pushed");
+    server.serverMove("a.txt", "b.txt");
+    await sync.pull();
+    expect(await text(root, "b.txt")).toBe("server copy");
+    const names = await readdir(root);
+    const copy = names.find((n) => n.startsWith("b.conflict-"));
+    expect(copy).toBeDefined();
+    expect(await text(root, copy ?? "")).toBe("local, never pushed");
+    expect(await exists(root, "a.txt")).toBe(false);
+  });
+
+  it("a hibernated sandbox replays the moves made while it slept before its restore (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "data/big.csv", "x,y\n".repeat(1000));
+    const first = await started(root);
+    await first.push();
+    await put(root, "data/node_modules/cache.bin", "cache");
+    await first.flush(5_000);
+    server.serverMove("data", "archive/data");
+    const before = downloads();
+    const woken = await started(root);
+    expect(downloads()).toBe(before);
+    expect(await exists(root, "data")).toBe(false);
+    expect(await text(root, "archive/data/node_modules/cache.bin")).toBe("cache");
+    expect(await woken.push()).toMatchObject({ changes: 0 });
+  });
+
+  it("a restore retried after a transient error keeps the unsynced edit a replayed rename moved (review R1)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O");
+    const first = await started(root);
+    await first.push();
+    await first.pull(); // remembers the revision for the replay on wake
+    await put(root, "reports/q3.md", "N, edited, never pushed");
+    // Asleep: the member moves the folder; something else needs a download on wake.
+    server.serverMove("reports", "archive/reports");
+    server.serverWrite("other.txt", "new while asleep");
+    server.failDownloads = 1; // the first restore attempt fails after its rename
+    const woken = await started(root);
+    expect(await text(root, "archive/reports/q3.md")).toBe("N, edited, never pushed");
+    expect(await text(root, "other.txt")).toBe("new while asleep");
+    await woken.push();
+    expect(server.content("archive/reports/q3.md")).toBe("N, edited, never pushed");
+  });
+
+  it("an upload made while asleep, then moved, wins over the stale renamed file, which is kept beside it (review R1)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O, stale");
+    const first = await started(root);
+    await first.push();
+    await first.pull();
+    await new Promise((r) => setTimeout(r, 5));
+    server.serverWrite("reports/q3.md", "X, the member's upload");
+    server.serverMove("reports", "archive/reports");
+    const woken = await started(root);
+    expect(await text(root, "archive/reports/q3.md")).toBe("X, the member's upload");
+    const copies = (await readdir(path.join(root, "archive/reports"))).filter((n) =>
+      n.startsWith("q3.conflict-"),
+    );
+    expect(copies).toHaveLength(1);
+    expect(await text(root, `archive/reports/${copies[0] ?? ""}`)).toBe("O, stale");
+    await woken.push();
+    expect(server.content("archive/reports/q3.md")).toBe("X, the member's upload");
+  });
+
+  it("a commit to the old path that lands after the move is not hidden by the rename (review R2)", async () => {
+    const root = await volume();
+    await put(root, "reports/q3.md", "O");
+    const sync = await started(root);
+    await sync.push();
+    await sync.pull();
+    await put(root, "reports/q3.md", "N, pushed after the move");
+    server.serverMove("reports", "archive/reports");
+    // The push was planned before the move and its commit lands after it: a put onto the
+    // tombstone, accepted at a revision newer than the moved rows.
+    await sync.push();
+    expect(server.content("reports/q3.md")).toBe("N, pushed after the move");
+    await sync.pull(); // the nudge: replay the rename, then the rows
+    expect(await text(root, "archive/reports/q3.md")).toBe("N, pushed after the move");
+    await sync.push();
+    // The new path is current on the server; the resurrected old path keeps the same content.
+    expect(server.content("archive/reports/q3.md")).toBe("N, pushed after the move");
+    expect(server.content("reports/q3.md")).toBe("N, pushed after the move");
   });
 
   it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {

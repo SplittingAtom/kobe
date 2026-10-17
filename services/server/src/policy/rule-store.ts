@@ -12,11 +12,19 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
-import { argPatternSchema, globSchema, type ArgPattern } from "@kobe/protocol";
+import {
+  argPatternSchema,
+  globSchema,
+  rememberScopeSchema,
+  type ArgPattern,
+  type RememberScope,
+} from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import type { PolicyRuleSource, PolicySettingsSource } from "./engine.js";
 import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
+import { readTeamRememberLimits } from "./remember-limits-store.js";
 import type { PolicyRule, RuleEffect, RuleScope } from "./rules.js";
+import { liveUserRule } from "./live-rule.js";
 import {
   DEFAULT_POLICY_SETTINGS,
   PROMPT_SANDBOX_WRITES_KEY,
@@ -35,6 +43,11 @@ export interface StoredRule {
   readonly created_by: string;
   readonly created_at: string;
   readonly expires_at: string | null;
+  /** User rules (KOBE-289): the remember scope and the thread or run a bound rule holds in. */
+  readonly remember_scope?: RememberScope;
+  readonly thread_id?: string;
+  readonly run_id?: string;
+  readonly last_used_at?: string | null;
 }
 
 export interface RuleFields {
@@ -54,7 +67,8 @@ type TeamRow = typeof toolRules.$inferSelect;
  * covers every call of its tool) and an unreadable tool glob covers every tool.
  */
 export function toPolicyRule(
-  row: Pick<SiteRow, "id" | "effect" | "toolGlob" | "argPattern" | "expiresAt">,
+  row: Pick<SiteRow, "id" | "effect" | "toolGlob" | "argPattern" | "expiresAt"> &
+    Partial<Pick<TeamRow, "rememberScope" | "threadId" | "runId" | "createdAt" | "exactKeys">>,
   scope: RuleScope,
 ): PolicyRule | undefined {
   const glob = globSchema.safeParse(row.toolGlob);
@@ -62,6 +76,9 @@ export function toPolicyRule(
   const valid = glob.success && (args === undefined || args.success);
   if (row.effect === "allow" && (!valid || !allowGlobScoped(row.toolGlob))) return undefined;
   if (row.effect === "allow" && scope === "user" && !isLiteralGlob(row.toolGlob)) return undefined;
+  // A user rule's scope (KOBE-289) must be readable: an unknown one is dropped (it only allows).
+  const remember = scope === "user" ? rememberScopeSchema.safeParse(row.rememberScope) : undefined;
+  if (remember && !remember.success) return undefined;
   return {
     id: row.id,
     scope,
@@ -69,6 +86,11 @@ export function toPolicyRule(
     tool_glob: glob.success ? glob.data : "*",
     ...(args?.success ? { arg_pattern: args.data } : {}),
     ...(row.expiresAt ? { expires_at: row.expiresAt.toISOString() } : {}),
+    ...(remember?.success ? { remember_scope: remember.data } : {}),
+    ...(row.threadId ? { thread_id: row.threadId } : {}),
+    ...(row.runId ? { run_id: row.runId } : {}),
+    ...(row.createdAt ? { created_at: row.createdAt.toISOString() } : {}),
+    ...(row.exactKeys ? { exact_keys: true } : {}),
   };
 }
 
@@ -83,7 +105,9 @@ const notExpired = (
 
 /**
  * Reads the rules for one decision: the site floor (site-wide) and, under the team's RLS,
- * the team's rules plus the acting user's own. Two indexed queries.
+ * the team's rules plus the acting user's own, and the team's remember limits. A user rule bound
+ * to a thread or run is read only while that thread or run is live (`liveUserRule`); the engine
+ * then checks it names the call's own thread or run.
  *
  * Call it (i.e. `PolicyEngine.decide`) outside any `withTeam` transaction: nested withTeam is
  * refused, which the engine turns into a fail-closed deny.
@@ -93,22 +117,25 @@ export function createDbRuleSource(db: KobeDb): PolicyRuleSource {
     async load(teamId, userId, now) {
       const [site, scoped] = await Promise.all([
         db.select().from(siteToolRules).where(notExpired(siteToolRules.expiresAt, now)),
-        withTeam(db, teamId, (tx) =>
-          tx
+        withTeam(db, teamId, async (tx) => {
+          const rows = await tx
             .select()
             .from(toolRules)
             .where(
               and(
-                sql`(${toolRules.scope} = 'team' OR (${toolRules.scope} = 'user' AND ${toolRules.userId} = ${userId}::uuid))`,
+                sql`(${toolRules.scope} = 'team' OR (${toolRules.scope} = 'user' AND ${toolRules.userId} = ${userId}::uuid AND ${liveUserRule(now)}))`,
                 notExpired(toolRules.expiresAt, now),
               ),
-            ),
-        ),
+            );
+          return { rows, limits: await readTeamRememberLimits(tx, teamId) };
+        }),
       ]);
+      const rows = scoped.rows;
       return {
         site: compact(site.map((r) => toPolicyRule(r, "site"))),
-        team: compact(scoped.filter((r) => r.scope === "team").map((r) => toPolicyRule(r, "team"))),
-        user: compact(scoped.filter((r) => r.scope === "user").map((r) => toPolicyRule(r, "user"))),
+        team: compact(rows.filter((r) => r.scope === "team").map((r) => toPolicyRule(r, "team"))),
+        user: compact(rows.filter((r) => r.scope === "user").map((r) => toPolicyRule(r, "user"))),
+        remember_limits: scoped.limits.effective,
       };
     },
   };
@@ -185,6 +212,9 @@ export function auditRule(
       toolGlob: rule.tool_glob,
       argPatternEntries: entryCount(rule.arg_pattern),
       expiresAt: rule.expires_at,
+      ...(rule.remember_scope === undefined ? {} : { rememberScope: rule.remember_scope }),
+      ...(rule.thread_id === undefined ? {} : { threadId: rule.thread_id }),
+      ...(rule.run_id === undefined ? {} : { runId: rule.run_id }),
     },
   });
 }
@@ -207,6 +237,7 @@ function storedSite(row: SiteRow): StoredRule {
 }
 
 function storedTeam(row: TeamRow): StoredRule {
+  const remember = rememberScopeSchema.safeParse(row.rememberScope);
   return {
     id: row.id,
     scope: row.scope,
@@ -218,6 +249,14 @@ function storedTeam(row: TeamRow): StoredRule {
     created_by: row.createdBy,
     created_at: row.createdAt.toISOString(),
     expires_at: row.expiresAt?.toISOString() ?? null,
+    ...(row.scope === "user"
+      ? {
+          ...(remember.success ? { remember_scope: remember.data } : {}),
+          ...(row.threadId ? { thread_id: row.threadId } : {}),
+          ...(row.runId ? { run_id: row.runId } : {}),
+          last_used_at: row.lastUsedAt?.toISOString() ?? null,
+        }
+      : {}),
   };
 }
 
@@ -413,39 +452,6 @@ export async function deleteTeamRule(db: KobeDb, teamId: string, id: string): Pr
     const [row] = await tx
       .delete(toolRules)
       .where(and(eq(toolRules.id, id), eq(toolRules.scope, "team")))
-      .returning();
-    if (!row) return false;
-    await auditRule(tx, "policy.rule.deleted", storedTeam(row), teamId);
-    return true;
-  });
-}
-
-export async function listUserRules(
-  db: KobeDb,
-  teamId: string,
-  userId: string,
-): Promise<StoredRule[]> {
-  const rows = await withTeam(db, teamId, (tx) =>
-    tx
-      .select()
-      .from(toolRules)
-      .where(and(eq(toolRules.scope, "user"), eq(toolRules.userId, userId)))
-      .orderBy(asc(toolRules.createdAt), asc(toolRules.id)),
-  );
-  return rows.map(storedTeam);
-}
-
-/** Revokes one of the caller's own remember-rules (D29: revocable in settings). */
-export async function deleteUserRule(
-  db: KobeDb,
-  teamId: string,
-  userId: string,
-  id: string,
-): Promise<boolean> {
-  return withTeam(db, teamId, async (tx) => {
-    const [row] = await tx
-      .delete(toolRules)
-      .where(and(eq(toolRules.id, id), eq(toolRules.scope, "user"), eq(toolRules.userId, userId)))
       .returning();
     if (!row) return false;
     await auditRule(tx, "policy.rule.deleted", storedTeam(row), teamId);

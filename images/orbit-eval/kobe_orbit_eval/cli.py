@@ -1,4 +1,4 @@
-"""Entry point: kobe-orbit-eval --orbit-yaml agent.yaml [--pack pack.yaml] [--output result.json]."""
+"""Entry point: kobe-orbit-eval --orbit-yaml agent.yaml [--pack pack.yaml] [--cases cases.json] [--output result.json]."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 # Before inspect_ai is imported: no dotenv credential loading, no telemetry-style surprises.
 os.environ.setdefault("PYTHON_DOTENV_DISABLED", "1")
 
+from .cases import fetch_cases, load_cases
 from .scenarios import DEFAULT_PACK, PackError, load_pack
 from .settings import Settings, SettingsError, load_settings
 
@@ -24,6 +25,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="kobe-orbit-eval", description=__doc__)
     p.add_argument("--orbit-yaml", type=Path, required=True, help="exported Orbit YAML (KOBE-90/91)")
     p.add_argument("--pack", type=Path, default=DEFAULT_PACK, help="scenario pack (default: built in)")
+    cases = p.add_mutually_exclusive_group()
+    cases.add_argument("--cases", type=Path, help="shared eval cases (KOBE-276) to run as an extra suite")
+    cases.add_argument(
+        "--gateway-cases", action="store_true",
+        help="fetch the eval's shared cases from the model gateway with the session token (KOBE-276)",
+    )
     p.add_argument("--output", type=Path, help="write the JSON result here (always also printed to stdout)")
     p.add_argument("--epochs", type=int, default=1, help="repeats per scenario (default 1)")
     p.add_argument("--validate-only", action="store_true", help="load and validate inputs, make no model calls")
@@ -61,22 +68,30 @@ def run(args: argparse.Namespace) -> dict | None:
 
     from inspect_ai import eval as inspect_eval
 
+    from .cases import build_case_report, build_case_task
     from .report import build_report
     from .task import build_task
     from .tools import alias_tool_names, reserved_tool_names
 
     pack = load_pack(args.pack)
+    cases = load_cases(args.cases) if args.cases else None
     config, agent = _load_agent(args.orbit_yaml)
     aliases = alias_tool_names(agent.tools, reserved_tool_names())
     if args.validate_only:
-        print(f"ok: {len(pack.scenarios)} scenarios, agent {agent.name!r} with {len(agent.tools)} tools", file=sys.stderr)
+        extra = f", {len(cases.cases)} shared cases" if cases else ""
+        print(f"ok: {len(pack.scenarios)} scenarios{extra}, agent {agent.name!r} with {len(agent.tools)} tools", file=sys.stderr)
         return None
     settings = load_settings()
+    if args.gateway_cases:
+        cases = fetch_cases(settings.gateway_url, settings.session_token)
     model_id = _model_id(settings, agent)
     os.environ.update(settings.inspect_env())
     with tempfile.TemporaryDirectory(prefix="kobe-orbit-logs-") as log_dir:
-        [log] = inspect_eval(
-            build_task(pack, agent, aliases, args.epochs),
+        tasks = [build_task(pack, agent, aliases, args.epochs)]
+        if cases:
+            tasks.append(build_case_task(cases, agent, aliases))
+        logs = inspect_eval(
+            tasks,
             model=settings.inspect_model(model_id),
             log_dir=log_dir,
             display="none",
@@ -85,13 +100,17 @@ def run(args: argparse.Namespace) -> dict | None:
             retry_on_error=0,
             fail_on_error=False,
         )
+        log = logs[0]
         if log.status == "error" and not log.samples:
             raise RuntimeError(f"evaluation failed: {log.error.message if log.error else 'unknown error'}")
-        return build_report(
+        report = build_report(
             log, pack,
             agent_name=agent.name, tools=list(agent.tools), aliases=aliases,
             model=model_id, orbit_version=version("orbit"), experiment=config.name,
         )
+        if cases:
+            report["cases"] = build_case_report(logs[1], cases)
+        return report
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -113,4 +132,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.output:
         _write_output(args.output, text)
     sys.stdout.write(text)
-    return 1 if report["errors"] else 0
+    case_errors = report.get("cases", {}).get("errors", 0)
+    return 1 if report["errors"] or case_errors else 0

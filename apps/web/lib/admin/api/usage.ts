@@ -67,6 +67,8 @@ export interface RunUsage extends UsageTotals {
   /** The run's prompt entry (KOBE-208); null before Pi committed it, absent on older servers. */
   readonly userEntryId?: string | null;
   readonly models: readonly string[];
+  /** The run's thinking level (KOBE-260); null: no thinking control; absent on older servers. */
+  readonly thinkingLevel?: "off" | "low" | "medium" | "high" | null;
 }
 
 /** The thread's newest model call that read input (KOBE-211: the context gauge). */

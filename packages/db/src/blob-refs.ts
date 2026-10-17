@@ -30,4 +30,5 @@ export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "memory_doc_versions", column: "blob_ref" }, // memory file content (KOBE-154); not a thread tree
   { table: "project_files", column: "blob_ref" }, // project file content (KOBE-160); not a thread tree
   { table: "workspace_files", column: "blob_key" }, // /workspace durable copy (KOBE-27)
+  { table: "workspace_file_hold_history", column: "blob_key" }, // a hold's copy of moved files (KOBE-304)
 ];

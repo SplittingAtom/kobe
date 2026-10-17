@@ -1,3 +1,4 @@
+import { endUnreachableThreadRules } from "../policy/user-rules.js";
 import {
   and,
   asc,
@@ -217,6 +218,7 @@ export async function updateProject(
     .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, access.project.id)))
     .returning();
   if (!row) throw new Error("project update returned no row");
+  if (body.members_mode !== undefined) await endUnreachableThreadRules(tx, viewer.teamId);
   // Field names only: instructions and descriptions are content, never audited.
   await recordAudit(tx, {
     action: "project.updated",
@@ -402,6 +404,8 @@ export async function removeMember(
         eq(projectMembers.userId, userId),
       ),
     );
+  // The removed member's remembered approvals in this project's threads end for good (S2).
+  await endUnreachableThreadRules(tx, viewer.teamId);
   await recordAudit(tx, {
     action: "project.member_removed",
     teamId: viewer.teamId,

@@ -98,28 +98,27 @@ describe("policy contract", () => {
     expect(ok({ effect: "bypass", risk: "read", reasons })).toBe(false);
   });
 
-  it("validates POST /v1/approvals/{id} with structured arg patterns", () => {
+  it("validates POST /v1/approvals/{id}: remember names a scope, never a client pattern", () => {
     const ok = (v: unknown) => approvalResolutionBodySchema.safeParse(v).success;
     expect(ok({ decision: "allow" })).toBe(true);
+    expect(ok({ decision: "allow", remember: { tool_glob: "bash", scope: "today" } })).toBe(true);
     expect(
-      ok({ decision: "allow", remember: { tool_glob: "mcp__jira__*", expires_in: 3600 } }),
+      ok({ decision: "allow", remember: { tool_glob: "bash", scope: "run", exact: true } }),
     ).toBe(true);
+    // KOBE-289: the server derives "only this exact action" itself; expiries are server-computed.
     expect(
       ok({
         decision: "allow",
-        remember: { tool_glob: "bash", arg_pattern: { "/command": "git status*" } },
+        remember: { tool_glob: "bash", scope: "day", arg_pattern: { "/command": "git status*" } },
       }),
-    ).toBe(true);
-    expect(ok({ decision: "allow", remember: { tool_glob: "bash", arg_pattern: "^git.*$" } })).toBe(
+    ).toBe(false);
+    expect(ok({ decision: "allow", remember: { tool_glob: "bash", expires_in: 3600 } })).toBe(
       false,
     );
-    expect(ok({ decision: "allow", remember: { tool_glob: "bash", arg_pattern: {} } })).toBe(false);
-    expect(
-      ok({ decision: "allow", remember: { tool_glob: "bash", arg_pattern: { command: "x" } } }),
-    ).toBe(false);
     expect(ok({ decision: "approve" })).toBe(false);
-    expect(ok({ decision: "allow", remember: { tool_glob: "x", expires_in: -1 } })).toBe(false);
-    expect(ok({ decision: "allow", remember: { tool_glob: "trailing\\" } })).toBe(false);
+    expect(ok({ decision: "allow", remember: { tool_glob: "trailing\\", scope: "day" } })).toBe(
+      false,
+    );
   });
 
   it("validates tool rules", () => {

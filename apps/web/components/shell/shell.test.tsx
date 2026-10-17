@@ -70,6 +70,12 @@ describe("utility bar", () => {
     const menu = within(must(profile));
     expect(menu.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/me/skills");
     expect(menu.getByRole("link", { name: "Projects" }).getAttribute("href")).toBe("/me/projects");
+    expect(menu.getByRole("link", { name: "My approvals" }).getAttribute("href")).toBe(
+      "/me/approvals",
+    );
+    expect(menu.getByRole("link", { name: "My shared cases" }).getAttribute("href")).toBe(
+      "/me/shared-cases",
+    );
     expect(menu.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 

@@ -757,6 +757,146 @@
       "when": 1792179315485,
       "tag": "0107_schedule_mentions",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792197693528,
+      "tag": "0108_answer_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1792197718654,
+      "tag": "0109_answer_feedback_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1792203585975,
+      "tag": "0110_answer_feedback_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792203586893,
+      "tag": "0111_answer_feedback_hold",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1792210527418,
+      "tag": "0112_agent_eval_cases",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1792210528554,
+      "tag": "0113_agent_eval_cases_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1792217375241,
+      "tag": "0114_workspace_file_hold_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1792217380112,
+      "tag": "0115_workspace_file_hold_history_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1792220999818,
+      "tag": "0116_workspace_moves",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1792221000715,
+      "tag": "0117_workspace_moves_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792225591893,
+      "tag": "0118_agent_eval_cases_created_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792225593110,
+      "tag": "0119_orbit_evals_cases_validate",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792227276094,
+      "tag": "0120_eval_case_hiding_and_fetch",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792227277269,
+      "tag": "0121_agent_eval_cases_hidden",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792254745938,
+      "tag": "0122_tool_rules_remember",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792254758302,
+      "tag": "0123_tool_rules_remember_scopes",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792257998576,
+      "tag": "0124_tool_rules_exact_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792260622952,
+      "tag": "0125_thinking_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1792260624223,
+      "tag": "0126_thinking_level_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1792263668424,
+      "tag": "0127_thinking_lowest",
+      "breakpoints": true
     }
   ]
 }

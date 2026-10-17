@@ -41,7 +41,15 @@ export interface LicenseException {
   /** Exact package versions covered; a new version must be re-justified. */
   readonly versions: readonly string[];
   readonly reason: string;
+  /** Who signed the exception off (Chris, spec D3) and when (YYYY-MM-DD). */
+  readonly approvedBy?: string;
+  readonly approvedOn?: string;
+  /** `"gate review"` while the exception waits for Chris; asked at the next gate review. */
+  readonly pending?: string;
 }
+
+/** The only accepted value of `pending`: decisions are queued for the next gate review. */
+export const PENDING = "gate review";
 
 export type LicenseExceptions = Readonly<Record<string, LicenseException>>;
 
@@ -113,5 +121,39 @@ export function findStaleExceptions(
             (pkg) => pkg.name === name && pkg.versions.some((v) => exception.versions.includes(v)),
           ),
     )
+    .map(([name]) => name);
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function approved(e: LicenseException): boolean {
+  return Boolean(e.approvedBy?.trim()) && ISO_DATE.test(e.approvedOn ?? "");
+}
+
+/**
+ * Exceptions that are malformed (a data error, never a license decision): each needs a reason,
+ * pinned versions, and either Chris's approval (approvedBy + approvedOn YYYY-MM-DD) or
+ * `pending: "gate review"`, not both.
+ */
+export function findMalformedExceptions(exceptions: LicenseExceptions): string[] {
+  return Object.entries(exceptions)
+    .filter(([, e]) => {
+      const pending = e.pending !== undefined;
+      const hasApproval = e.approvedBy !== undefined || e.approvedOn !== undefined;
+      return (
+        !e.reason?.trim() ||
+        !Array.isArray(e.versions) ||
+        e.versions.length === 0 ||
+        (pending && (e.pending !== PENDING || hasApproval)) ||
+        (!pending && !approved(e))
+      );
+    })
+    .map(([name]) => name);
+}
+
+/** Well-formed exceptions still waiting for Chris (listed for the next gate review). */
+export function findPendingExceptions(exceptions: LicenseExceptions): string[] {
+  return Object.entries(exceptions)
+    .filter(([, e]) => e.pending === PENDING && !approved(e))
     .map(([name]) => name);
 }
