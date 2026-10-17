@@ -149,9 +149,9 @@ describe("workspace moves (KOBE-304)", () => {
   });
 
   it("the agent is nudged with an empty workspace.moved frame", () => {
-    const frame = { v: 1, type: "workspace.moved" };
+    const frame = { v: 1, type: "workspace.moved" } as const;
     expect(decodeServerFrame(encodeFrame(frame))).toEqual({ ok: true, frame });
-    expect(decodeServerFrame(encodeFrame({ ...frame, path: "a" }))).toMatchObject({ ok: false });
+    expect(decodeServerFrame(JSON.stringify({ ...frame, path: "a" }))).toMatchObject({ ok: false });
     expect(CAPABILITY_WORKSPACE_MOVES).toBe("workspace_moves");
   });
 });
