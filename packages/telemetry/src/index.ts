@@ -39,3 +39,11 @@ export { traceNodeRequest, type RequestSpan } from "./node-http.js";
 export { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 export type { Attributes, Context, Span } from "@opentelemetry/api";
 export { ROOT_CONTEXT, trace } from "@opentelemetry/api";
+export {
+  ScoreExportError,
+  createLangfuseScoreSink,
+  langfuseScoresUrl,
+  type ScoreSink,
+  type ScoreSinkOptions,
+  type TraceScore,
+} from "./scores.js";
