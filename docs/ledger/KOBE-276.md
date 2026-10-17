@@ -3,7 +3,9 @@
 - **Status:** implemented on `group-2-quality` (not pushed); owner review page waits for G7
 - **Branch / worktree:** `group-2-quality` in `../Kobe-g2` (group branch with KOBE-274/275)
 - **Depends on:** KOBE-275 (answer_feedback), KOBE-93 (eval gate), KOBE-92 (eval image)
-- **Migrations:** `0112_agent_eval_cases` (generated), `0113_agent_eval_cases_rls` (custom)
+- **Migrations:** `0112_agent_eval_cases` (generated), `0113_agent_eval_cases_rls` (custom);
+  review fixes `0118_agent_eval_cases_created_idx` (generated), `0119_orbit_evals_cases_validate`
+  (custom)
 
 ## Plan
 
@@ -61,6 +63,34 @@
   Rollback of a version that already passed is still ungated (KOBE-93), so newer cases don't
   re-run then. Gallery evals take no cases.
 
+## Review fixes (Opus DB/security review, `review-276.md`)
+
+- **B1 fork:** earlier exchanges only from prompts that are a run's `user_entry_id` in this
+  thread (forks copy entries, not runs); the walk stops at the first inherited prompt or an
+  offloaded entry. Test: project-shared thread, reader refused, fork → 0 then 1 own exchange.
+- **S1:** the gate leaves out a team agent's cases when its owner is no longer an active member who
+  may build (`caseReviewerPresent`); they run again with such an owner. Owner routes 403 for a
+  demoted owner. No column records the skip (the eval's `cases.total` is 0). Tests.
+- **S2:** no case text in Kubernetes: the Job runs `--gateway-cases` and fetches `cases.json`
+  from the model gateway (`GET /kobe/eval-cases`, its eval token, rate-limited, principal must be
+  live) which reads it from Postgres (`@kobe/db` `loadEvalCaseFile`) only while that member's eval
+  runs, and only frozen cases still accepted. ConfigMap = agent YAML only. A Secret was not used:
+  the team-pod admission policy forbids Secret volumes, and relaxing it is worse. Tests: gateway
+  unit, orbit db (ConfigMap/Job carry no text; file only while running, only for the requester),
+  `test-image.sh` (42 checks; fetch with the token, failure exits 3 without echoing it).
+- **S3:** `visibility.ts`: every read (owner list/detail/review, gate, member list, thread
+  feedback's `eval_case_id`, export, the share's "already shared") treats a case past the team's
+  window or past its sharer's membership as purged; a new share replaces such a case. Test.
+- **S4:** `retention.eval_cases_purged` has no `userId` and offboarding writes no row of its own.
+- **S5:** the owner sees a case only after its UTC day ends; order day desc, then id. Residual
+  (small teams, text) documented.
+- **S6:** `GET /v1/eval-cases` lists cases whose rating was cleared; `DELETE` withdraws (test).
+  The chat keeps Withdraw for the session after a clear; the settings page waits for G7.
+- **Nits:** N1 validated (0119), N2 index (0118), N7 one grader retry, N8 and N10 in the docs.
+  N11: owner review edits under a hold are not kept (as agent drafts). Follow-ups: N3 (history
+  insert guard; the probe fixture inserts directly), N4 (open-case cap or pagination), N5 (no
+  break-glass read kind for cases), N6 (bound the answer walk by run time), N9 (bidi filter).
+
 ## Remaining console work (after G7 merges, on its primitives)
 
 API done and tested (`services/server/src/eval-cases.db.test.ts`):
@@ -102,6 +132,7 @@ API done and tested (`services/server/src/eval-cases.db.test.ts`):
   read-only, expiry); probe fixtures (`probe-fixtures/agents.ts`, cross-team probe green);
   catalog pins; `eval-cases.db.test.ts` "who reads cases" (member, reader, other builder, team
   admin 403; other team 404; site admin refused; personal agent hidden from team admin).
+- Review fixes (2026-10-17): see "Review fixes" above; runs below are before them.
 - Runs (2026-10-17): format, lint, typecheck green; `turbo test` 27/27; `@kobe/db test:db` 49 files,
   1206 tests; `@kobe/server test:db` 115 files, 1562 tests (after the two 275 test updates);
   `test-image.sh` 39/39 on the remote Docker host.
