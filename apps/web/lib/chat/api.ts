@@ -9,6 +9,12 @@ import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage, ThreadUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import { createMemoryApi } from "../memory/api";
+import {
+  feedbackBody,
+  type AnswerFeedback,
+  type FeedbackChange,
+  type ThreadFeedback,
+} from "./feedback";
 import type { ThreadMarkers } from "./markers";
 import type {
   ApprovalDecisionBody,
@@ -182,6 +188,12 @@ export interface ChatApi {
   threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
   /** Interrupted and budget-stopped runs and decided approvals (inline markers, KOBE-209). */
   threadMarkers(threadId: string): Promise<ApiResult<ThreadMarkers>>;
+  /** The thread's rateable answers with the caller's own ratings (KOBE-275). */
+  threadFeedback(threadId: string): Promise<ApiResult<ThreadFeedback>>;
+  /** Rates an answer, or changes the caller's rating of it (KOBE-275). */
+  rateAnswer(runId: string, change: FeedbackChange): Promise<ApiResult<AnswerFeedback>>;
+  /** Clears the caller's rating of an answer (KOBE-275); 204 also when there was none. */
+  clearRating(runId: string): Promise<ApiResult<undefined>>;
   /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
   toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
@@ -233,7 +245,7 @@ export interface ForkOptions {
 export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
   const get = <T>(path: string) => apiRequest<T>(path, { teamId, fetchFn });
   const memory = createMemoryApi(teamId, fetchFn);
-  const send = <T>(method: "POST" | "PATCH" | "DELETE", path: string, json?: unknown) =>
+  const send = <T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, json?: unknown) =>
     apiRequest<T>(path, { method, json, teamId, fetchFn });
 
   return {
@@ -331,6 +343,10 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
     threadMarkers: (id) => get(`/v1/threads/${enc(id)}/markers`),
+    threadFeedback: (id) => get(`/v1/threads/${enc(id)}/feedback`),
+    rateAnswer: (runId, change) =>
+      send("PUT", `/v1/runs/${enc(runId)}/feedback`, feedbackBody(change)),
+    clearRating: (runId) => send("DELETE", `/v1/runs/${enc(runId)}/feedback`),
     toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),

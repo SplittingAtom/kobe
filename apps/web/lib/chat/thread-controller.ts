@@ -36,6 +36,7 @@ import {
   type ThreadState,
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
+import type { FeedbackChange } from "./feedback";
 import { SHARED_ANNOUNCEMENT } from "./share";
 import type { ThreadEntry, ThreadRuns, ThreadSummary, ThreadVisibility } from "./types";
 
@@ -130,6 +131,19 @@ export class ThreadController {
     const id = this.#state.threadId;
     return id === null ? null : this.#api.threadMarkers(id);
   };
+
+  /** The thread's rateable answers and the member's own ratings (KOBE-275); null for a draft. */
+  readonly threadFeedback = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadFeedback(id);
+  };
+
+  /** Rates an answer of this thread for the member, or changes their rating (KOBE-275). */
+  readonly rateAnswer = (runId: string, change: FeedbackChange) =>
+    this.#api.rateAnswer(runId, change);
+
+  /** Clears the member's rating of an answer (KOBE-275). */
+  readonly clearRating = (runId: string) => this.#api.clearRating(runId);
 
   /** A tool output of this thread in full (KOBE-208: a large one, when its card opens). */
   readonly toolOutput = (entryId: string) => {

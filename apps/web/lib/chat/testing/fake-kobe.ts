@@ -99,6 +99,8 @@ interface FakeRun {
   client_key?: string;
   /** The model alias the server ran it with (the agent's pin, else the thread's; null = default). */
   model?: string | null;
+  /** The prompt entry the run committed (`runs.user_entry_id`; KOBE-275 feedback lists it). */
+  user_entry_id?: string;
 }
 
 export interface RecordedRequest {
@@ -346,6 +348,9 @@ export class FakeKobe {
     { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[] }
   >();
 
+  /** The caller's answer ratings (KOBE-275), wire casing, by run id. */
+  readonly feedback = new Map<string, Json>();
+
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
@@ -386,6 +391,25 @@ export class FakeKobe {
       events: [],
       compacted: false,
       tip: null,
+    };
+    this.runs.set(run.run_id, run);
+    return run.run_id;
+  }
+
+  /** A run that answered `userEntryId` long ago (KOBE-275: a rateable answer of a seeded thread). */
+  addEndedRun(threadId: string, userEntryId: string, status = "completed"): string {
+    this.#runN += 1;
+    const run: FakeRun = {
+      run_id: uuid(4, this.#runN),
+      thread_id: threadId,
+      status,
+      input: "",
+      parent_entry_id: null,
+      queue_pos: 0,
+      events: [],
+      compacted: true,
+      tip: null,
+      user_entry_id: userEntryId,
     };
     this.runs.set(run.run_id, run);
     return run.run_id;
@@ -501,8 +525,11 @@ export class FakeKobe {
           { leaf: false },
         ),
       ),
-    commitPrompt: (runId: string) =>
-      this.agent.commit(runId, { role: "user", content: this.run(runId).input }),
+    commitPrompt: (runId: string) => {
+      const entryId = this.agent.commit(runId, { role: "user", content: this.run(runId).input });
+      this.run(runId).user_entry_id = entryId;
+      return entryId;
+    },
     /** `epilogue`: the server will title the thread / suggest follow-ups after the run. */
     complete: (
       runId: string,
@@ -1177,6 +1204,17 @@ export class FakeKobe {
     if (action === "markers" && method === "GET") {
       return json(200, this.threadMarkers.get(thread.thread_id) ?? { runs: [], approvals: [] });
     }
+    if (action === "feedback" && method === "GET") {
+      // Like the server: the thread's ended runs with their prompt and the caller's rating.
+      const answers = [...this.runs.values()]
+        .filter((r) => r.thread_id === thread.thread_id && ENDED.has(r.status))
+        .map((r) => ({
+          run_id: r.run_id,
+          user_entry_id: r.user_entry_id ?? null,
+          feedback: this.feedback.get(r.run_id) ?? null,
+        }));
+      return json(200, { thread_id: thread.thread_id, answers });
+    }
     if (action === "share" && method === "POST") {
       if (thread.read_only)
         return error(403, "read_only", "This thread is shared with you read-only.");
@@ -1461,6 +1499,36 @@ export class FakeKobe {
     return json(201, { run_id: run.run_id, queued: waits });
   }
 
+  /** `PUT` / `DELETE /v1/runs/{id}/feedback` (KOBE-275), checked like the server's schema. */
+  #feedback(method: string, run: FakeRun, body: Json | undefined): Response {
+    if (method === "DELETE") {
+      this.feedback.delete(run.run_id);
+      return new Response(null, { status: 204 });
+    }
+    if (method !== "PUT") return error(405, "method_not_allowed");
+    if (!ENDED.has(run.status)) return error(409, "run_not_ended", "Wait for the answer.");
+    const rating = body?.rating;
+    const reasons = Array.isArray(body?.reasons) ? (body.reasons as string[]) : [];
+    const comment = typeof body?.comment === "string" ? body.comment.trim() : null;
+    if (rating !== "up" && rating !== "down") return error(400, "invalid_request");
+    if (rating === "up" && (reasons.length > 0 || comment !== null))
+      return error(400, "invalid_request");
+    if (comment !== null && (comment === "" || comment.length > 500))
+      return error(400, "invalid_request");
+    const before = this.feedback.get(run.run_id);
+    const stored = {
+      run_id: run.run_id,
+      thread_id: run.thread_id,
+      entry_id: typeof body?.entry_id === "string" ? body.entry_id : (before?.entry_id ?? null),
+      rating,
+      reasons,
+      comment,
+      updated_at: NOW,
+    };
+    this.feedback.set(run.run_id, stored);
+    return json(200, stored);
+  }
+
   #runRoute(
     method: string,
     id: string,
@@ -1470,6 +1538,7 @@ export class FakeKobe {
     const run = this.runs.get(id);
     if (!run) return error(404, "run_not_found", "No run with that id.");
     if (action === undefined && method === "GET") return json(200, this.#snapshot(run));
+    if (action === "feedback") return this.#feedback(method, run, body);
     if (action === "usage" && method === "GET") {
       return json(
         200,
