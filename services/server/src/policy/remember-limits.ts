@@ -6,6 +6,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { isLiteralGlob } from "./patterns.js";
+import { exactPinsAllArguments } from "./remember-scope.js";
 import type { PolicyRule } from "./rules.js";
 
 /**
@@ -22,7 +23,7 @@ import type { PolicyRule } from "./rules.js";
  */
 export function rememberedRuleAllowed(
   rule: PolicyRule,
-  tool: Pick<ToolDescriptor, "source" | "risk">,
+  tool: Pick<ToolDescriptor, "name" | "source" | "risk">,
   limits: RememberLimits = DEFAULT_REMEMBER_LIMITS,
   now: Date,
 ): boolean {
@@ -41,14 +42,25 @@ export const RULE_REFUSAL_TEXT: Readonly<Record<RuleRefusal, string>> = {
   too_old: "It is older than your team's longest allowed duration.",
 };
 
-export function exactPattern(rule: PolicyRule): boolean {
+/**
+ * Whether a rule is "only this exact action" as exact-only limits mean it: every glob literal
+ * (review S4), and for a tool without a primary argument (MCP, Kobe tools) also the key set
+ * pinned (`exact_keys`, review R2): an older literal rule without it still allows extra arguments.
+ */
+export function exactPattern(
+  rule: PolicyRule,
+  tool: Pick<ToolDescriptor, "name" | "source">,
+): boolean {
   const pattern = rule.arg_pattern;
-  return pattern !== undefined && Object.values(pattern).every((glob) => isLiteralGlob(glob));
+  if (pattern === undefined || !Object.values(pattern).every((glob) => isLiteralGlob(glob))) {
+    return false;
+  }
+  return !exactPinsAllArguments(tool) || rule.exact_keys === true;
 }
 
 export function rememberedRuleRefusal(
   rule: PolicyRule,
-  tool: Pick<ToolDescriptor, "source" | "risk">,
+  tool: Pick<ToolDescriptor, "name" | "source" | "risk">,
   limits: RememberLimits = DEFAULT_REMEMBER_LIMITS,
   now: Date,
 ): RuleRefusal | undefined {
@@ -56,7 +68,7 @@ export function rememberedRuleRefusal(
   const scope = scopeOf(rule);
   if (!limits.scopes.includes(scope)) return "scope_not_allowed";
   if (tool.source === "mcp" && !limits.mcp_tools) return "mcp_not_allowed";
-  if (limits.exact_only && !exactPattern(rule)) return "not_exact";
+  if (limits.exact_only && !exactPattern(rule, tool)) return "not_exact";
   const max = limits.max_duration_seconds;
   if (max === null) return undefined;
   const made = rule.created_at === undefined ? Number.NaN : Date.parse(rule.created_at);

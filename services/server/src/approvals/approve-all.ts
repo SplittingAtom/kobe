@@ -28,7 +28,6 @@ export function batchable(
   return (
     !isProjectWrite(row.tool, JSON.parse(row.inputCanonical) as unknown) &&
     tool !== undefined &&
-    tool !== undefined &&
     tool.name === row.tool &&
     row.risk !== "destructive" &&
     tool.risk !== "destructive" &&

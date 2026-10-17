@@ -8,6 +8,7 @@ import {
   type RememberLimits,
   type ToolDescriptor,
 } from "@kobe/protocol";
+import { threadLiveFor } from "./live-rule.js";
 import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
 import { exactArgPattern, exactPinsAllArguments, rememberExpiry } from "./remember-scope.js";
 import { auditRule, fitsScope, storedTeam, type StoredRule } from "./rule-store.js";
@@ -19,7 +20,8 @@ export type RememberError =
   | "glob_too_broad"
   | "too_many_rules"
   | "remember_not_allowed"
-  | "exact_unavailable";
+  | "exact_unavailable"
+  | "thread_not_live";
 export type RememberResult = { ok: true; rule: StoredRule } | { ok: false; error: RememberError };
 
 /**
@@ -110,6 +112,14 @@ export async function insertUserAllowRule(
   const argPattern = rule.exact ? exactArgPattern(call.tool, call.input) : undefined;
   if (rule.exact && argPattern === undefined) return { ok: false, error: "exact_unavailable" };
 
+  // A thread already archived, trashed or out of reach can't get a rule: unarchiving would
+  // otherwise bring it back (review R1).
+  if (
+    rule.scope === "thread" &&
+    !(await threadLiveFor(tx, params.teamId, call.threadId, params.userId))
+  ) {
+    return { ok: false, error: "thread_not_live" };
+  }
   await pruneEndedUserRules(tx, params.teamId, params.userId, params.now);
   const scope = { table: "user", teamId: params.teamId, userId: params.userId } as const;
   if (!(await fitsScope(tx, scope, argPattern ?? null, USER_LIMITS))) {

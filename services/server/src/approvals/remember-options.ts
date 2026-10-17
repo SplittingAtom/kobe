@@ -11,6 +11,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { eq, users, withTeam } from "@kobe/db";
+import { threadLiveFor } from "../policy/live-rule.js";
 import { rememberRefusal } from "../policy/remember.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
 import {
@@ -91,10 +92,11 @@ export async function rememberOptions(
       .from(users)
       .where(eq(users.id, actor.user_id));
     const limits = (await readTeamRememberLimits(tx, teamId)).effective;
-    return { row, waiting, timeZone: user?.timeZone ?? null, limits };
+    const threadLive = await threadLiveFor(tx, teamId, row.threadId, actor.user_id);
+    return { row, waiting, timeZone: user?.timeZone ?? null, limits, threadLive };
   });
   if (!loaded) throw new ApprovalError("approval_not_found", 404, "No approval with that id.");
-  const { row, waiting, timeZone, limits } = loaded;
+  const { row, waiting, timeZone, limits, threadLive } = loaded;
   const now = ctx.now();
   const tool = await ctx.registry.resolve(teamId, row.tool);
   const pending = row.status === "pending" && now < row.expiresAt;
@@ -104,7 +106,10 @@ export async function rememberOptions(
     blocked !== null || tool === undefined
       ? []
       : REMEMBER_SCOPES.filter(
-          (scope) => rememberRefusal(scope, true, { tool }, limits) === undefined,
+          (scope) =>
+            rememberRefusal(scope, true, { tool }, limits) === undefined &&
+            // An archived or unreachable conversation can't hold a rule (review R1).
+            (scope !== "thread" || threadLive),
         ).map((scope) => {
           const expires = rememberExpiry(scope, now, timeZone, limits.max_duration_seconds);
           return {

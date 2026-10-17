@@ -345,6 +345,25 @@ describe("review S3/S4: exact means exact", () => {
     expect(rememberedRuleRefusal(wildcard, write, only, NOW)).toBe("not_exact");
   });
 
+  it("under exact-only, an older literal MCP rule without the key set is not exact (review R2)", () => {
+    const only = limits({ exact_only: true });
+    const old = rule("user", "allow", "mcp__jira__create_issue", {
+      remember_scope: "forever",
+      arg_pattern: pattern,
+    });
+    const extra = { project: "KOBE", summary: "Fix", body: "leak" };
+    expect(decide(jira, [old], { limits: only, input: extra }).effect).toBe("require_approval");
+    expect(
+      decide(jira, [old], { limits: only, input: { project: "KOBE", summary: "Fix" } }).effect,
+    ).toBe("require_approval");
+    expect(rememberedRuleRefusal(old, jira, only, NOW)).toBe("not_exact");
+    // The same rule made by KOBE-289 (key set pinned) counts, and still refuses extra arguments.
+    expect(
+      decide(jira, [exact], { limits: only, input: { project: "KOBE", summary: "Fix" } }).effect,
+    ).toBe("allow");
+    expect(decide(jira, [exact], { limits: only, input: extra }).effect).toBe("require_approval");
+  });
+
   it("names why a rule no longer applies", () => {
     const r = rule("user", "allow", "bash", {
       remember_scope: "forever",

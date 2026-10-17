@@ -120,6 +120,14 @@ exact_keys`, migration `0124_tool_rules_exact_keys.sql`): an extra or missing ar
   N5/N6 above. N2 (zone choice makes "today" up to about 24 h; zone changes not audited) and N7
   (number vs string subjects) are left as they are.
 
+## Re-review fixes (2026-10-17)
+
+- **R1** A "this conversation" rule can't be made for a thread that is archived, in Trash or out
+  of the member's reach: the card doesn't offer it and the server refuses it
+  (`remember_not_allowed`, `threadLiveFor`), so unarchiving never brings one back.
+- **R2** Under exact-only, a rule for a tool without a primary argument (MCP, Kobe tools) counts
+  as exact only with its key set pinned (`exact_keys`); an older literal rule is ignored.
+
 ## Open questions (for Chris or the coordinator)
 
 - None blocking. The e2e browser spec runs on gate1 later (needs a team admin `KOBE_USER`).

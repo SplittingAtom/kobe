@@ -296,6 +296,26 @@ describe("thread scope (this conversation)", () => {
     expect(await outcome(w, again, "share_file", share("c.md"))).toBe("ask");
   });
 
+  it("can't be made for an archived thread, so unarchiving brings nothing back (review R1)", async () => {
+    const w = await world();
+    const call = check(w, w, "share_file", share("a.md"));
+    const pending = await call.pending();
+    // The member archives the thread while the call waits, then answers it.
+    expect((await w.owner.browser.post(`/v1/threads/${w.threadId}/archive`)).status).toBe(200);
+    const options = await w.owner.browser.get(`/v1/approvals/${pending.approval_id}/remember`);
+    expect(options.json.choices.map((c: { scope: string }) => c.scope)).not.toContain("thread");
+    const refused = await w.owner.browser.post(`/v1/approvals/${pending.approval_id}`, {
+      decision: "allow",
+      remember: { tool_glob: "share_file", scope: "thread" },
+    });
+    expect(refused).toMatchObject({ status: 403, json: { code: "remember_not_allowed" } });
+    expect(await rules(w.team)).toEqual([]);
+    await w.owner.browser.post(`/v1/approvals/${pending.approval_id}`, { decision: "allow" });
+    expect((await call.result()).decision).toBe("allow");
+    expect((await w.owner.browser.post(`/v1/threads/${w.threadId}/unarchive`)).status).toBe(200);
+    expect(await outcome(w, w, "share_file", share("b.md"))).toBe("ask");
+  });
+
   it("does not hold while the thread is in a project the member can't open", async () => {
     const w = await world();
     await approve(w, w, "share_file", share("a.md"), {

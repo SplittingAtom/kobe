@@ -70,7 +70,7 @@ function pointerToken(key: string): string {
   return key.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-function primaryArg(tool: ToolDescriptor): string | undefined {
+function primaryArg(tool: Pick<ToolDescriptor, "name" | "source">): string | undefined {
   const builtin =
     tool.source !== "mcp" && Object.hasOwn(BUILTIN_TOOLS, tool.name)
       ? BUILTIN_TOOLS[tool.name]
@@ -83,7 +83,7 @@ function primaryArg(tool: ToolDescriptor): string | undefined {
  * same top-level keys, review S3), or only a built-in's primary one (the exact path of a file
  * tool: the content may differ; the card says so).
  */
-export function exactPinsAllArguments(tool: ToolDescriptor): boolean {
+export function exactPinsAllArguments(tool: Pick<ToolDescriptor, "name" | "source">): boolean {
   return primaryArg(tool) === undefined;
 }
 

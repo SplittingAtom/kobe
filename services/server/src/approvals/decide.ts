@@ -211,6 +211,12 @@ async function remember(
         403,
         "Your team doesn't allow remembering this approval that way. Allow it without remembering.",
       );
+    case "thread_not_live":
+      throw new ApprovalError(
+        "remember_not_allowed",
+        403,
+        "This conversation is archived or no longer open to you, so it can't be remembered for it. Allow it without remembering.",
+      );
     case "exact_unavailable":
       throw new ApprovalError(
         "exact_unavailable",
