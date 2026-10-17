@@ -1,5 +1,6 @@
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
 import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
+import { feedbackOpenApiPaths, feedbackOpenApiSchemas } from "./feedback.js";
 import { markersOpenApiPaths, markersOpenApiSchemas } from "./markers.js";
 import { modelsOpenApiPaths, modelsOpenApiSchemas } from "./models.js";
 import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
@@ -30,6 +31,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...approvalsOpenApiPaths(),
       ...usageOpenApiPaths(),
       ...modelsOpenApiPaths(),
+      ...feedbackOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -41,6 +43,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...approvalsOpenApiSchemas(),
         ...usageOpenApiSchemas(),
         ...modelsOpenApiSchemas(),
+        ...feedbackOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

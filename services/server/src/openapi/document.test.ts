@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ServerDeps } from "../deps.js";
 import { approvalRoutes } from "../routes/approvals.js";
+import { runFeedbackRoutes, threadFeedbackRoutes } from "../routes/feedback.js";
 import { runRoutes, threadRunRoutes } from "../routes/runs.js";
 import { teamModelsRoutes } from "../routes/team-models.js";
 import { threadPendingRoutes } from "../routes/thread-pending.js";
@@ -64,6 +65,7 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
         ...mountedOperations("/v1/threads", threadMarkerRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadCompactRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadUsageRoutes(fakeDeps)),
+        ...mountedOperations("/v1/threads", threadFeedbackRoutes(fakeDeps)),
       ].sort(),
     );
   });
@@ -84,8 +86,13 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     expect(schemas.ThreadUsage?.required).toContain("latest_call");
   });
 
-  it("describes exactly the run routes the orchestrator mounts (KOBE-30)", () => {
-    expect(documented("/v1/runs")).toEqual(mountedOperations("/v1/runs", runRoutes(fakeDeps)));
+  it("describes exactly the run routes the orchestrator mounts (KOBE-30) and answer feedback (KOBE-275)", () => {
+    expect(documented("/v1/runs")).toEqual(
+      [
+        ...mountedOperations("/v1/runs", runRoutes(fakeDeps)),
+        ...mountedOperations("/v1/runs", runFeedbackRoutes(fakeDeps)),
+      ].sort(),
+    );
   });
 
   it("describes exactly the approval routes the server mounts (KOBE-37)", () => {

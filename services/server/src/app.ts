@@ -68,6 +68,7 @@ import { threadCompactRoutes } from "./routes/thread-compact.js";
 import { threadMarkerRoutes } from "./routes/thread-markers.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
+import { runFeedbackRoutes, threadFeedbackRoutes } from "./routes/feedback.js";
 import {
   siteUsageRoutes,
   runUsageRoutes,
@@ -169,12 +170,14 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
   api.route("/runs", runUsageRoutes(deps));
+  api.route("/runs", runFeedbackRoutes(deps));
   api.route("/projects", projectRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));
   api.route("/threads", threadMarkerRoutes(deps));
   api.route("/threads", threadUsageRoutes(deps));
+  api.route("/threads", threadFeedbackRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps));

@@ -9,7 +9,7 @@ import { destinationsOf, sinksFor } from "./audit/forward/index.js";
 import { forwardingSecrets } from "./audit/forward/redact.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
-import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
+import { createLangfuseScoreSink, initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
@@ -67,7 +67,11 @@ const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
-const telemetry = initTelemetry(loadTelemetryConfig(process.env, config.process));
+const telemetryConfig = loadTelemetryConfig(process.env, config.process);
+const telemetry = initTelemetry(telemetryConfig);
+// Answer ratings as Langfuse scores (KOBE-275): only with a Langfuse tracing endpoint, server only.
+const scoreSink =
+  config.process === "server" ? createLangfuseScoreSink(telemetryConfig) : undefined;
 // Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
 const s3 = loadS3Settings(process.env);
 const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
@@ -144,6 +148,11 @@ if (config.process === "scheduler") {
     modelTokenDefaults: config.modelTokenDefaults,
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
+    ...(scoreSink
+      ? {
+          feedbackScores: { sink: scoreSink, captureContent: telemetryConfig.captureContent },
+        }
+      : {}),
     ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),
     uploads: uploadSettings,
     ...(modelsConfig
