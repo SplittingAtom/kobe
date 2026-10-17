@@ -5,5 +5,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environmentOptions: { happyDOM: { width: 1280, height: 800 } },
+    // Longer waits for findBy*/waitFor under CI load (vitest.setup.ts); the test timeout must
+    // stay above them.
+    setupFiles: ["./vitest.setup.ts"],
+    testTimeout: 20_000,
   },
 });
