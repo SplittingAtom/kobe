@@ -45,6 +45,19 @@ export interface PublishedAgent extends AgentDetailSaved {
 
 export type EvalStatus = "pending" | "running" | "passed" | "blocked" | "errored";
 
+/**
+ * The shared eval cases an eval ran (KOBE-276): how many were frozen into it, how many got a
+ * verdict and failed, and the accepted cases left out by reason (camelized keys: `noReviewer`).
+ */
+export interface EvalCaseCounts {
+  readonly total: number;
+  readonly scored: number | null;
+  readonly failed: number | null;
+  /** failed / scored; null until there is a verdict. */
+  readonly failureRate: number | null;
+  readonly skipped: Readonly<Record<string, number>>;
+}
+
 /** One pre-publish Orbit eval of a draft (`/v1/agents/{id}/evals`, KOBE-93). */
 export interface AgentEval {
   readonly id: string;
@@ -55,6 +68,8 @@ export interface AgentEval {
   readonly attackSuccessRate: number | null;
   readonly attempts: number | null;
   readonly attackSuccesses: number | null;
+  /** Absent from servers before KOBE-276. */
+  readonly cases?: EvalCaseCounts;
   readonly error: string | null;
   /** The version published when it passed. */
   readonly version: number | null;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listTeamAgentEvals, type AgentEval } from "../../../../lib/admin/api/team/agent-builder";
+import { blockedByCases, caseOutcome, caseSkips } from "../../../../lib/admin/eval-case-counts";
 import { DateTime } from "../../parts";
 import { Button, Notice, Section } from "../../../ui/console";
 
@@ -89,6 +90,23 @@ export function EvalStatus({
   );
 }
 
+/** How the shared eval cases counted (KOBE-276): outcome and left-out cases, when there are any. */
+export function CaseLines({ result }: { readonly result: AgentEval }) {
+  const outcome = caseOutcome(result.cases, result.threshold);
+  const skips = caseSkips(result.cases);
+  if (outcome === null && skips.length === 0) return null;
+  return (
+    <>
+      {outcome && <p className="m-0 mt-1">Shared cases: {outcome}</p>}
+      {skips.map((line) => (
+        <p key={line} className="m-0 mt-1 text-sm text-console-muted">
+          {line}
+        </p>
+      ))}
+    </>
+  );
+}
+
 function EvalResult({
   result,
   canRetry,
@@ -107,39 +125,55 @@ function EvalResult({
     case "pending":
     case "running":
       return (
-        <p role="status">
-          Evaluating draft revision {result.draftRevision}
-          {result.startedAt && (
-            <>
-              , started <DateTime value={result.startedAt} />
-            </>
-          )}
-          . This can take several minutes. The agent is published when it passes; you can leave this
-          page.
-        </p>
+        <div role="status">
+          <p className="m-0">
+            Evaluating draft revision {result.draftRevision}
+            {result.startedAt && (
+              <>
+                , started <DateTime value={result.startedAt} />
+              </>
+            )}
+            . This can take several minutes. The agent is published when it passes; you can leave
+            this page.
+          </p>
+          <CaseLines result={result} />
+        </div>
       );
     case "passed":
       return (
-        <p role="status">
-          Passed: {detail}{" "}
-          {result.version !== null
-            ? `Published as v${result.version}.`
-            : (result.error ?? "Nothing was published.")}
-        </p>
+        <div role="status">
+          <p className="m-0">
+            Passed: {detail}{" "}
+            {result.version !== null
+              ? `Published as v${result.version}.`
+              : (result.error ?? "Nothing was published.")}
+          </p>
+          <CaseLines result={result} />
+        </div>
       );
     case "blocked":
       return (
         <Notice tone="error">
-          <p>
-            Blocked: {detail} Nothing was published. Change the agent to resist these attacks and
-            publish again.
-          </p>
+          {blockedByCases(result) ? (
+            <p>
+              Blocked by the shared cases: too many failed. {detail} Nothing was published. Change
+              the agent so it meets the cases&apos; expected behaviour, or review the cases, and
+              publish again.
+            </p>
+          ) : (
+            <p>
+              Blocked: {detail} Nothing was published. Change the agent to resist these attacks and
+              publish again.
+            </p>
+          )}
+          <CaseLines result={result} />
         </Notice>
       );
     case "errored":
       return (
         <Notice tone="error" actions={canRetry && <Button onClick={onRetry}>Retry publish</Button>}>
           <p>The evaluation could not complete, so nothing was published. {result.error}</p>
+          <CaseLines result={result} />
         </Notice>
       );
   }
