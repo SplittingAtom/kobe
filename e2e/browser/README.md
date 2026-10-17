@@ -61,6 +61,16 @@ Screenshots in light and dark (`test-results/.../rail-resize-*.png`). It uploads
 and deletes it at the end, and puts the member's stored rail width back as it found it; no
 tokens: `npx playwright test rail-resize`.
 
+## Remembered approvals (KOBE-289)
+
+`remember-approvals.spec.ts` makes the agent write and share a small file, remembers the
+share_file approval for "this conversation", checks the next share runs without a card and its
+tool card says "Allowed by your rule (this conversation)", finds the rule on My area, Approvals and
+on the team Policy page, revokes it there and checks the next share asks again (denied). It
+revokes any share_file rule it left at the end. `KOBE_USER` must be a team admin, with the team's
+remember limits allowing "this conversation"; a few short model turns:
+`npx playwright test remember-approvals`.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),

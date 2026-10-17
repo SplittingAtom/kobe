@@ -34,7 +34,7 @@ write. Kobe seeds no rules.
    `approval.requested` (the card: tool, the exact input, risk, reasons, `expires_at`), audits
    `approval.requested`, and answers the sandbox `policy.pending`.
 3. The run's user answers in the chat card, or with `POST /v1/approvals/{id}
-{decision, remember?}`. The decision can reach any replica; a Postgres `NOTIFY` hint
+{decision, remember?}` (or several at once: "Approve all waiting", below). The decision can reach any replica; a Postgres `NOTIFY` hint
    (`apr:<id>`) wakes the waiting broker, which also polls.
 4. On allow, the sandbox gets `policy.result` `allow`, and the run returns to `running`. On deny,
    the call fails with `policy.denied: … You denied this tool call`, and the run continues.
@@ -87,16 +87,69 @@ A compromised sandbox could loop `policy.check`s to grow rows, events and audit.
 
 ## Remember
 
-"Always allow" is not offered for destructive tools. A remember-rule names the tool and applies to
-every argument (unless an `arg_pattern` narrows it), and it survives a connector re-pin under the
-same tool name (KOBE-59 should tie it to the pinned tool hash).
+A remembered approval is a user allow rule (`tool_rules`, scope user) in the active team for
+exactly the approved tool (`tool_glob` must equal it, `glob_too_broad` otherwise). It lifts later
+risk-class and mode prompts for this member in **interactive** runs only. Site and team deny and
+ask rules and `ask-all`'s floor still win, it never applies to another member, and **scheduled and
+auto runs never use it** (D32: there a call that would ask is denied, not queued; only team allow
+rules allow-list). Destructive tools are never remembered: the server refuses it, and the engine
+ignores a stored rule for one.
 
-`remember: {tool_glob, arg_pattern?, expires_in?}` is accepted with `allow` only. It writes a user
-allow rule (`tool_rules`, scope user) in the active team. It is written in the same transaction as
-the decision and is audited as `policy.rule.created`. `tool_glob` must be exactly the approved tool
-(`glob_too_broad` otherwise). `arg_pattern` narrows it further, and `expires_in` is in seconds. The
-rule lifts future risk-class and mode prompts for this user in this team only. Members list and
-revoke their rules at `GET`/`DELETE /v1/team/policy/my-rules`.
+`remember: {tool_glob, scope, exact?}` is accepted with `allow` only (KOBE-289). The server works
+out everything else from its own state, never from the client:
+
+| Scope     | Card label         | Holds                                                                   |
+| --------- | ------------------ | ----------------------------------------------------------------------- |
+| `thread`  | this conversation  | calls of this thread; ends when it is deleted, archived or out of reach |
+| `today`   | until end of today | until midnight in the member's stored time zone (`/v1/me/time-zone`)    |
+| `run`     | this run only      | calls of this run; ends with the run                                    |
+| `day`     | for 1 day          | 24 hours                                                                |
+| `month`   | for 30 days        | 30 days                                                                 |
+| `forever` | until revoked      | until revoked                                                           |
+
+- **Enforcement.** The engine (`evaluate.ts`) checks a `thread` rule's thread id and a `run`
+  rule's run id against the call. The rule source reads a bound rule only while its thread exists,
+  is not deleted or archived, is still the member's and in a project they can open, and while its
+  run is active (`live-rule.ts`); the foreign keys delete it with the thread or run. Expiries are
+  computed on the server (`remember-scope.ts`).
+- **Only this exact action** (`exact: true`). The server derives `arg_pattern` from the approval's
+  stored canonical input as the engine sees it (validated, paths canonical): a built-in's primary
+  argument (the exact path; `bash` is destructive and never remembered), otherwise every top-level
+  argument, each a literal glob (`*`, `?` and `\` escaped; no regular expressions). The card shows
+  it before saving (`GET /v1/approvals/{id}/remember`). When no pattern fits (no arguments, over
+  16, or a value over 256 characters) it is not offered (`exact_unavailable`). A pattern sent by
+  the client is refused.
+- **Admin limits.** The site floor (`/v1/site/policy/remember-limits`) and each team
+  (`/v1/team/policy/remember-limits`) set which scopes members may use, a max duration, whether
+  MCP tools may be remembered, exact actions only, and whether "Approve all waiting" is offered.
+  A team's effective limits are both, tightened field by field; a team save looser than the floor
+  is refused (`limits_above_floor`). The card offers only allowed choices, the server refuses
+  others (`remember_not_allowed`), and the engine applies the limits at evaluation too: a rule a
+  tightened limit no longer allows stops applying at once (max duration counts from its creation).
+- **Visibility.** A call a remembered rule allowed is recorded before it runs: the rule's
+  `last_used_at`, an audit row `policy.rule.applied` naming the rule (at the sandbox's check and
+  again at the MCP proxy, whose `mcp.tool_call` row carries `ruleId`), and the run event
+  `policy.rule_applied`, shown on the tool card as "Allowed by your rule (<scope>)". A rule revoked
+  in between denies the call.
+- **Revoking.** Members list and revoke their own rules on My area, Approvals (`GET`/`DELETE
+/v1/team/policy/my-rules`); team admins see and revoke every member's in their own team on the
+  team Policy page (`/v1/team/policy/member-rules`, under the team's RLS). It takes effect at the
+  next call. Ended rules are pruned (audited as deleted by the system) when the member makes a new
+  one.
+
+Creating a rule is audited as `policy.rule.created` (with `rememberScope`, and the thread or run),
+in the same transaction as the decision.
+
+## Approve all waiting
+
+When several approvals of one run wait, `POST /v1/approvals/approve-all {run_id, approval_ids}`
+allows the listed ones in one action. Nothing is shared between them: each is checked as a single
+decision would be (the caller's, of this run, pending, unexpired, its asking connection live), then
+signed over its own canonical input, marked, announced (`approval.resolved`) and audited
+(`approval.decided` with `approveAll: true`) on its own, in one transaction that refuses the whole
+set if any one fails. It is not offered, and refused (`approve_all_not_allowed`), when any of them
+is destructive or open-world by the server's own descriptor, or when the team's limits turn it off.
+It never writes a remember-rule. Readers of a shared thread get 404, as for a single decision.
 
 ## Signing
 
