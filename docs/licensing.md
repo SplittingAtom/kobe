@@ -93,5 +93,6 @@ new image, chart component or external service add a row (or a `chartValues` ent
   libgfortran (GPL with the GCC Runtime Library Exception, which permits redistribution in non-GPL
   programs); pillow and pyarrow bundle further permissive libraries (inventory, "Container and base
   images").
-- **kobe-runas** is linked statically (`-static-pie`) against glibc (LGPL-2.1-or-later); its full
-  source and build are public, so recipients can relink it (LGPL-2.1 section 6).
+- **kobe-runas** is linked statically (`-static-pie`) against musl (MIT) with musl's own start
+  files only: no glibc and no GCC runtime objects in the binary (Chris chose musl over glibc's
+  LGPL on 2026-10-17, KOBE-375).

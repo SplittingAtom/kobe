@@ -16,6 +16,8 @@
   "khroma": {
     "license": "Unknown",
     "versions": ["2.1.0"],
-    "reason": "CSS colour helpers pulled in by mermaid (KOBE-130). The MIT license is in the repository and its npm metadata, but package.json has no license field, so a fresh pnpm store reports Unknown."
+    "reason": "CSS colour helpers pulled in by mermaid (KOBE-130). The MIT license is in the repository and its npm metadata, but package.json has no license field, so a fresh pnpm store reports Unknown.",
+    "approvedBy": "Chris",
+    "approvedOn": "2026-10-17"
   }
 }

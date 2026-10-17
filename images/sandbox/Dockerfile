@@ -25,13 +25,24 @@ RUN pnpm install --offline --frozen-lockfile \
 
 # kobe-runas (KOBE-71): the one privileged file in the image. Starts each Pi process (and so the
 # tools it runs) under its own uid; static, so the runtime image needs no compiler.
+# Linked statically against musl (MIT, KOBE-375) instead of glibc (LGPL): Debian's musl-gcc, the
+# kernel UAPI headers (linux/, asm/; libc-independent) and only musl's start files and libc.a,
+# without GCC's crtbegin/crtend or libgcc, so the binary holds Kobe's code and musl only. A
+# missing symbol fails the link rather than pulling in another runtime.
 FROM ${PYTHON_IMAGE} AS runas
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && apt-get install -y --no-install-recommends gcc musl-tools linux-libc-dev \
  && rm -rf /var/lib/apt/lists/*
 COPY images/sandbox/runas/kobe-runas.c /src/kobe-runas.c
-RUN mkdir /out && gcc -std=c11 -O2 -Wall -Wextra -Werror -static-pie -fPIE -D_FORTIFY_SOURCE=2 \
-      -fstack-protector-strong -Wl,-z,relro,-z,now -o /out/kobe-runas /src/kobe-runas.c
+RUN mkdir -p /out /uapi \
+ && ln -s /usr/include/linux /usr/include/asm-generic /uapi/ \
+ && triplet="$(gcc -dumpmachine)" \
+ && ln -s "/usr/include/${triplet}/asm" /uapi/asm \
+ && musl="/usr/lib/${triplet%-gnu}-musl" \
+ && musl-gcc -std=c11 -O2 -Wall -Wextra -Werror -isystem /uapi -static-pie -fPIE \
+      -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now \
+      -nostartfiles -nodefaultlibs -o /out/kobe-runas \
+      "$musl/rcrt1.o" "$musl/crti.o" /src/kobe-runas.c -lc "$musl/crtn.o"
 
 # Node runtime with a pinned npm, and Pi 1.0.x from its lockfile (spec D13). Dependency install
 # scripts are not run (Pi works without them; they would run as root at build time).

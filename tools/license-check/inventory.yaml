@@ -135,6 +135,7 @@ sections:
           Node.js is MIT; its LICENSE lists the licenses of the libraries it bundles. The slim
           images are Debian-based (see the Debian base system row).
       - id: python-image
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Python official image (`python`), CPython 3.12
         version: 3.12-slim-trixie, digest-pinned
         license: Python-2.0
@@ -146,6 +147,7 @@ sections:
           The Python interpreter is a separate program that runs agents' code and the Orbit
           runner; the PSF license is permissive (BSD-style), not copyleft.
       - id: debian-base
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Debian 13 (trixie) / 12 (bookworm) base system (libc6, bash, coreutils, perl-base, ...)
         version: as in the pinned base images
         license: GPL-2.0-or-later AND LGPL-2.1-or-later AND MIT AND BSD-3-Clause
@@ -158,6 +160,7 @@ sections:
           and use the C library through Node.js/Python, as every program on the system does.
           Per-package copyright files are in /usr/share/doc/<package>/copyright in each image.
       - id: debian-sandbox-tools
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: "Sandbox tools from Debian: git, less, procps"
         version: git 1:2.47.3-0+deb13u1, less 668-1, procps 2:4.0.4-9
         license: GPL-2.0-only AND (GPL-3.0-or-later OR BSD-2-Clause) AND GPL-2.0-or-later
@@ -169,6 +172,7 @@ sections:
           Separate, unmodified programs that agents invoke from the shell; Kobe does not link
           against them, so GPL obligations stay with those programs (source from Debian).
       - id: debian-sandbox-permissive
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: "Sandbox tools from Debian: curl, jq, ripgrep, file, zip, unzip, libcap2-bin, ca-certificates"
         version: curl 8.14.1-2+deb13u7, jq 1.7.1-6+deb13u4, ripgrep 14.1.1-1+b4, file 1:5.46-5, zip 3.0-15+deb13u1, unzip 6.0-29+deb13u1, libcap2-bin 1:2.75-10+deb13u1+b3, ca-certificates 20250419
         license: curl AND MIT AND (MIT OR Unlicense) AND BSD-2-Clause AND Info-ZIP AND (BSD-3-Clause OR GPL-2.0-only) AND MPL-2.0
@@ -187,19 +191,21 @@ sections:
         where: sandbox image
         link: https://github.com/krallin/tini/blob/master/LICENSE
         images: []
-      - id: glibc-static
-        component: GNU C Library (glibc), statically linked into kobe-runas
-        version: Debian trixie libc6-dev (build stage)
-        license: LGPL-2.1-or-later
+      - id: musl-static
+        component: musl libc, statically linked into kobe-runas
+        version: 1.2.5 (Debian trixie musl-dev, build stage)
+        license: MIT
         use: linked (static) into kobe-runas
         where: sandbox image (/opt/kobe/bin/kobe-runas)
-        link: https://sourceware.org/git/?p=glibc.git;a=blob;f=COPYING.LIB
+        link: https://git.musl-libc.org/cgit/musl/tree/COPYRIGHT
         images: []
         reason: >-
-          kobe-runas is built with -static-pie. LGPL-2.1 section 6 allows static linking when the
-          recipient can relink: kobe-runas's complete source (images/sandbox/runas) and build
-          (images/sandbox/Dockerfile) are public, and glibc's source is available from Debian.
+          kobe-runas is built -static-pie with musl-gcc against musl's start files and libc.a only
+          (no glibc, no GCC crtbegin/crtend or libgcc; images/sandbox/Dockerfile), so the binary
+          holds Kobe's code (Apache-2.0) and musl (MIT). Chose musl over glibc (LGPL-2.1):
+          Chris, 2026-10-17.
       - id: wheel-native-libs
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Native libraries bundled in Python wheels (numpy.libs, pillow.libs, pyarrow)
         version: as shipped in numpy 2.5.3, pillow 12.3.0, pyarrow 25.0.1
         license: BSD-3-Clause AND GPL-3.0-or-later WITH GCC-exception-3.1 AND FTL AND IJG AND libpng-2.0 AND libtiff AND MIT AND BSD-2-Clause AND Zlib AND Apache-2.0
@@ -301,6 +307,7 @@ sections:
         link: https://github.com/cloudnative-pg/cloudnative-pg/blob/main/LICENSE
         images: []
       - id: postgres
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: PostgreSQL (CloudNativePG image `ghcr.io/cloudnative-pg/postgresql`, or an external server)
         version: "17"
         license: PostgreSQL
@@ -324,6 +331,7 @@ sections:
           Checked at transports/v2.2.5: a single LICENSE (Apache-2.0); Kobe uses none of the
           enterprise features (docs/licensing.md). Re-check on every bump.
       - id: clamav
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: ClamAV (`clamav/clamav`)
         version: "1.4"
         license: GPL-2.0-only
@@ -351,6 +359,7 @@ sections:
         link: https://github.com/rancher/rancher/blob/main/LICENSE
         images: []
       - id: langfuse
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Langfuse (one possible OpenTelemetry tracing backend)
         version: chosen by the site
         license: MIT AND LicenseRef-Langfuse-Enterprise
@@ -402,6 +411,7 @@ sections:
         link: https://github.com/tilt-dev/tilt/blob/master/LICENSE
         images: []
       - id: postgres-dev
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: PostgreSQL official image (`postgres`)
         version: "17"
         license: PostgreSQL
@@ -419,6 +429,7 @@ sections:
         link: https://github.com/seaweedfs/seaweedfs/blob/master/LICENSE
         images: [chrislusf/seaweedfs]
       - id: busybox
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: BusyBox (`busybox`)
         version: "1.37"
         license: GPL-2.0-only
@@ -503,6 +514,7 @@ sections:
         images: []
         reason: Lucide is ISC; icons derived from Feather are MIT, as its LICENSE states.
       - id: matplotlib-fonts
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Fonts and font metrics in matplotlib (DejaVu, STIX, Computer Modern, PDF core-font metrics)
         version: matplotlib 3.11.2
         license: Bitstream-Vera AND OFL-1.1 AND LicenseRef-BaKoMa AND APAFML
@@ -515,6 +527,7 @@ sections:
           their license files (LICENSE_DEJAVU, LICENSE_STIX); font licenses cover the fonts, not
           the charts made with them.
       - id: reportlab-fonts
+        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Fonts in reportlab (Bitstream Vera, DarkGarden, Type 1 core-font substitutes)
         version: reportlab 5.0.1
         license: Bitstream-Vera AND GPL-2.0-or-later WITH Font-exception-2.0 AND BSD-3-Clause
