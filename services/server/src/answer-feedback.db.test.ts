@@ -162,7 +162,7 @@ describe("rating answers (ac-1)", () => {
     const x = await world();
     const listed = await mine(x.author, x.threadId);
     expect(listed.answers).toEqual([
-      { run_id: x.runId, user_entry_id: expect.any(String), feedback: null },
+      { run_id: x.runId, user_entry_id: expect.any(String), feedback: null, eval_case_id: null },
     ]);
 
     const up = await rate(x.author, x.runId, { rating: "up", entry_id: x.entries.assistant });
