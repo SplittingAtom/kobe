@@ -184,8 +184,16 @@ const ON_TAILWIND = [
   "components/admin/console-shell.tsx",
   "components/admin/console-theme-toggle.tsx",
   "components/admin/error-notice.tsx",
+  "components/admin/gallery-score.tsx",
   "components/admin/isolation-banner.tsx",
+  "components/admin/overview.tsx",
+  "components/admin/placeholder.tsx",
+  "components/admin/team/agent-builder/orbit-export-button.tsx",
+  "components/admin/team/agent-inventory.tsx",
+  "components/admin/team/agents-page.tsx",
+  "components/admin/team/gallery-agents.tsx",
   "components/admin/team/invites-page.tsx",
+  "components/admin/team/members-page.tsx",
   "components/me/my-agents-shell.tsx",
 ] as const;
 

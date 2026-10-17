@@ -6,7 +6,7 @@ import { must } from "../../lib/testing/must";
 import { TeamAgentsPage } from "./team/agents-page";
 import { TeamInvitesPage } from "./team/invites-page";
 import { MembersPage } from "./team/members-page";
-import { ME, TEAM, renderTeam, stubApi, summary } from "./testing";
+import { ME, TEAM, answerConfirm, renderTeam, stubApi, summary } from "./testing";
 
 const MEMBERS = {
   members: [
@@ -92,6 +92,7 @@ describe("Members and roles", () => {
     renderTeam(<MembersPage />);
     await userEvent.selectOptions(await screen.findByLabelText("Role of Ada"), "member");
     await userEvent.click(screen.getByRole("button", { name: "Save role of Ada" }));
+    await answerConfirm("Change your own role?", "Change my role");
     expect((await screen.findByRole("alert")).textContent).toMatch(/at least one team admin/);
     expect(assign).not.toHaveBeenCalled();
     await waitFor(() => expect(summary(calls).filter((c) => c.startsWith("GET"))).toHaveLength(2));
@@ -108,6 +109,8 @@ describe("Members and roles", () => {
     });
     renderTeam(<MembersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Remove Bob" }));
+    expect(summary(calls)).not.toContain("DELETE /v1/team/members/u-bob");
+    await answerConfirm("Remove Bob from Finance?", "Remove Bob");
     await screen.findByText("Bob was removed from the team.");
     expect(summary(calls)).toContain("DELETE /v1/team/members/u-bob");
   });
@@ -119,7 +122,21 @@ describe("Members and roles", () => {
     });
     renderTeam(<MembersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Leave team Ada" }));
+    await answerConfirm("Leave Finance?", "Leave team");
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/"));
+  });
+
+  it("keeps your role when you cancel changing it, and keeps a member when removal is cancelled", async () => {
+    const calls = stubApi({ "GET /v1/team/members": [200, MEMBERS] });
+    renderTeam(<MembersPage />);
+    await userEvent.selectOptions(await screen.findByLabelText("Role of Ada"), "member");
+    await userEvent.click(screen.getByRole("button", { name: "Save role of Ada" }));
+    await answerConfirm("Change your own role?", "Cancel");
+    await userEvent.click(screen.getByRole("button", { name: "Remove Bob" }));
+    await answerConfirm("Remove Bob from Finance?", "Cancel");
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
+    // Focus goes back to the control that asked.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove Bob" }));
   });
 
   it("offers a reload when another tab switched teams (409 team_mismatch)", async () => {
@@ -454,6 +471,7 @@ describe("Agent inventory", () => {
     });
     renderTeam(<TeamAgentsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Suspend Mine" }));
+    await answerConfirm("Suspend Mine?", "Suspend Mine");
     await screen.findByText("Mine is suspended.");
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
@@ -518,6 +536,7 @@ describe("Agent inventory", () => {
     });
     renderTeam(<TeamAgentsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
+    await answerConfirm("Suspend Triage?", "Suspend Triage");
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
   });
 });

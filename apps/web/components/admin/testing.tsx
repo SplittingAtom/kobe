@@ -1,4 +1,5 @@
-import { render } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { vi } from "vitest";
 import type { SiteAccess, TeamAccess } from "../../lib/admin/nav/types";
@@ -86,4 +87,18 @@ export function renderTeam(
 
 export function summary(of: RecordedCall[]): string[] {
   return of.map((c) => `${c.method} ${c.url}`);
+}
+
+/**
+ * Answers the console's confirm dialog (`useConfirm`, KOBE-294): waits for the question, then
+ * presses `button` (the action's own label, or "Cancel"). Returns the dialog's description text.
+ */
+export async function answerConfirm(
+  question: string | RegExp,
+  button: string | RegExp,
+): Promise<string> {
+  const dialog = await screen.findByRole("alertdialog", { name: question });
+  const text = dialog.textContent ?? "";
+  await userEvent.click(within(dialog).getByRole("button", { name: button }));
+  return text;
 }

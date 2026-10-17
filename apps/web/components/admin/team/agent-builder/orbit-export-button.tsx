@@ -1,6 +1,7 @@
 "use client";
 
 import { exportTeamAgentToOrbit } from "../../../../lib/admin/api/team/agent-builder";
+import { Button } from "../../../ui/console";
 import { ErrorNotice } from "../../error-notice";
 import { useMutation } from "../../use-resource";
 
@@ -24,19 +25,21 @@ export function OrbitExportButton({
   agentSlug,
   version,
   label = "Export to Orbit",
+  size,
 }: {
   readonly teamId: string;
   readonly agentId: string;
   readonly agentSlug: string;
   readonly version: number;
   readonly label?: string;
+  readonly size?: "sm" | "default";
 }) {
   const mutation = useMutation();
   return (
     <>
-      <button
-        type="button"
-        disabled={mutation.pending}
+      <Button
+        size={size}
+        loading={mutation.pending}
         onClick={() =>
           void mutation.run(async () => {
             const res = await exportTeamAgentToOrbit(teamId, agentId, version);
@@ -48,7 +51,7 @@ export function OrbitExportButton({
         }
       >
         {label}
-      </button>
+      </Button>
       {mutation.error && <ErrorNotice error={mutation.error} />}
     </>
   );

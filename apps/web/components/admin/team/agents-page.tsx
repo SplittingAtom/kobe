@@ -3,12 +3,23 @@
 import Link from "next/link";
 import { listTeamAgents } from "../../../lib/admin/api/team/agents";
 import { agentStatusLabel } from "../../../lib/admin/api/agents";
+import {
+  Button,
+  EmptyState,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
 import { AgentInventory } from "./agent-inventory";
 import { GalleryAgents } from "./gallery-agents";
-import styles from "../admin.module.css";
 
 /** Team agents (spec D19; `/v1/agents?scope=team`) and, for team admins, the inventory (KOBE-86). */
 export function TeamAgentsPage() {
@@ -19,61 +30,64 @@ export function TeamAgentsPage() {
   const { state, reload } = useResource(() => listTeamAgents(teamId));
   return (
     <>
-      <h1>Team agents</h1>
-      <p className={styles.hint}>
-        Builders create and publish team agents; team admins can suspend any of them in the
-        inventory below. Archived agents were deleted after publishing: conversations pinned to them
-        keep working.
-      </p>
-      <p>
-        <Link href="/admin/team/agents/new">New agent</Link>
-      </p>
+      <PageHeader
+        title="Team agents"
+        description="Builders create and publish team agents; team admins can suspend any of them in the inventory below. Archived agents were deleted after publishing: conversations pinned to them keep working."
+        actions={
+          <Button asChild variant="primary">
+            <Link href="/admin/team/agents/new">New agent</Link>
+          </Button>
+        }
+      />
       <ResourceView state={state} label="team agents">
         {(agents) =>
           agents.length === 0 ? (
-            <p>{access.team.name} has no team agents yet.</p>
+            <EmptyState title={`${access.team.name} has no team agents yet.`} />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Agents of {access.team.name}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Agent</th>
-                    <th scope="col">Slug</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">Updated</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.map((a) => (
-                    <tr key={a.id}>
-                      <th scope="row">
-                        {a.name}
-                        {a.description && <div className={styles.hint}>{a.description}</div>}
-                      </th>
-                      <td>
-                        <code>{a.slug}</code>
-                      </td>
-                      <td>{agentStatusLabel(a)}</td>
-                      <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
-                      <td>
-                        <DateTime value={a.updatedAt} />
-                      </td>
-                      <td>
-                        <Link href={`/admin/team/agents/${a.id}`}>
-                          Edit
-                          <span className={styles.visuallyHidden}> {a.name}</span>
-                        </Link>{" "}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table caption={`Agents of ${access.team.name}`}>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Agent</TableHeader>
+                  <TableHeader>Slug</TableHeader>
+                  <TableHeader>Status</TableHeader>
+                  <TableHeader>Version</TableHeader>
+                  <TableHeader>Updated</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {agents.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableRowHeader>
+                      {a.name}
+                      {a.description && (
+                        <div className="text-sm font-normal text-console-muted">
+                          {a.description}
+                        </div>
+                      )}
+                    </TableRowHeader>
+                    <TableCell>
+                      <code>{a.slug}</code>
+                    </TableCell>
+                    <TableCell>{agentStatusLabel(a)}</TableCell>
+                    <TableCell>
+                      {a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}
+                    </TableCell>
+                    <TableCell>
+                      <DateTime value={a.updatedAt} />
+                    </TableCell>
+                    <TableCell>
+                      <Link href={`/admin/team/agents/${a.id}`}>
+                        Edit
+                        <span className="sr-only"> {a.name}</span>
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>
