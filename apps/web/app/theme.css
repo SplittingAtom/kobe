@@ -52,7 +52,7 @@
      (4.5:1) on the page, the rail panel, cards and its own `-bg` tint in both themes
      (app/theme-css.test.ts); colour never carries meaning alone (a label or icon stays). CSS
      modules read them as var(--kobe-status-*), Tailwind as text-status-* / bg-status-*-bg
-     (app/chat-global.css). */
+     (app/tailwind.css). */
   --kobe-status-running: #166534;
   --kobe-status-running-bg: #dcfce7;
   --kobe-status-attention: #a14b05;

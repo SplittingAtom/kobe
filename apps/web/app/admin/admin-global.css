@@ -1,4 +1,47 @@
-/* Only for pages that render an admin console: the shell paints edge to edge. */
+/* The consoles and My area (app/admin/layout.tsx and app/me/layout.tsx import this). Tailwind's
+   theme and utilities, the same build as the chat's (app/tailwind.css, KOBE-294), without
+   preflight: pages still on CSS modules keep the browser defaults they were built on, and the
+   console primitives (components/ui/console) carry their own resets. Every rule here is scoped to
+   the console root (`data-kobe-console`, the console and My-area shells), so nothing reaches the
+   chat (app/console-css-guard.test.ts). */
+@import "../tailwind.css";
+
+/* The shell paints edge to edge. */
 body:has([data-kobe-console]) {
   margin: 0;
+}
+
+/* What the shell's CSS module gave every page inside it, kept for the pages still on CSS modules
+   (KOBE-295, KOBE-296 move them). In the base layer, so any utility overrides it. */
+@layer base {
+  [data-kobe-console] {
+    /* Both themes: app/theme.css (KOBE-282), which also sets the shared --admin-accent,
+       --admin-danger, --admin-danger-bg and --admin-warn-bg. */
+    --admin-fg: var(--kobe-console-fg);
+    --admin-muted: var(--kobe-console-muted);
+    --admin-bg: var(--kobe-console-bg);
+    --admin-panel: var(--kobe-console-panel);
+    --admin-border: var(--kobe-console-border);
+  }
+
+  [data-kobe-console] a {
+    color: var(--admin-accent);
+  }
+
+  [data-kobe-console] :focus-visible {
+    outline: 3px solid var(--admin-accent);
+    outline-offset: 2px;
+  }
+
+  /* Choices side by side in a fieldset (exposure, retention period) keep apart (KOBE-283). */
+  [data-kobe-console] fieldset label:has(input:is([type="checkbox"], [type="radio"])) {
+    margin-inline-end: 1rem;
+  }
+
+  /* The header's theme toggle shows a tooltip, which the chat's preflight slice sizes in the chat;
+     on these pages it mounts in the console root (components/ui/chat-portal.ts). */
+  [data-kobe-console] [data-slot="tooltip-content"],
+  [data-kobe-console] [data-slot="tooltip-content"] * {
+    box-sizing: border-box;
+  }
 }

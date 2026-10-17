@@ -112,7 +112,7 @@ describe("theme tokens (KOBE-282)", () => {
   });
 
   it("Tailwind's dark variant follows the same rule", () => {
-    const variant = block(read("app/chat-global.css"), "@custom-variant dark");
+    const variant = block(read("app/tailwind.css"), "@custom-variant dark");
     expect(variant).toContain('&:where([data-theme="dark"] *)');
     const media = block(variant, "@media (prefers-color-scheme: dark)");
     expect(media).toContain('&:where(:root:not([data-theme="light"]) *)');
