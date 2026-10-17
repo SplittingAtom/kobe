@@ -37,11 +37,17 @@ list`, the committed image reports and `e2e/browser/package-lock.json`; hand row
 
 ## Open questions (for Chris or the coordinator)
 
-- Approvals still missing (CI fails on them until recorded): khroma 2.1.0 exception; six sandbox
-  exceptions "pending since KOBE-21"; hand rows outside the family (Python-2.0 interpreter,
-  PostgreSQL, Debian base/GPL tools, curl/Info-ZIP, static glibc in kobe-runas, wheel-bundled
-  native libs, matplotlib/reportlab fonts incl. DarkGarden GPL+font exception, ClamAV, busybox,
-  Langfuse ee/). Asked the coordinator 2026-10-17.
+- None open. Chris approved every item outside the family on 2026-10-17 (recorded with approver
+  and date). kobe-runas now links musl (MIT) instead of glibc.
+- Policy (Chris, 2026-10-17): license decisions never block a push. Rows and exceptions can be
+  `pending: gate review` (a warning and the "Pending gate review" list at the top of
+  THIRD_PARTY_LICENSES.md); `pnpm license:gate` fails while anything is pending and is run by
+  gate tickets.
+- For the security review: musl in a static binary does not scrub the environment in
+  secure-execution mode the way glibc did (for example TMPDIR, LD_*). kobe-runas has no dynamic
+  loader, its only caller is the agent, it drops to a less privileged uid, and the agent passes
+  an allow-listed environment and sets TMPDIR itself, so nothing new can reach it. The CI
+  real-helper test (`test-identities.sh`) still builds with the host's gcc/glibc.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -53,5 +59,9 @@ list`, the committed image reports and `e2e/browser/package-lock.json`; hand row
   `image-report --check` matches the committed reports, `assert-image-licenses.sh` ok.
 - Coverage negative test: a chart `redis` image + key and a distroless FROM each fail the check.
 - `pnpm format:check`, `lint`, `typecheck`, `@kobe/license-check test` (77 tests) green;
-  `pnpm license:check` fails only on the missing approvals above (13 rows + khroma), and
-  sandbox-image would fail on its 6 pending exceptions, by design until Chris signs off.
+  `pnpm license:check` and `pnpm license:gate` pass (0 pending). Pending path tested: a row marked
+  pending warns (`::warning` annotation with GITHUB_ACTIONS=true) and passes; license:gate fails.
+- musl kobe-runas: sandbox image rebuilt; test-image.sh 73/73 ok (all kobe-runas identity
+  checks); `file`: static-pie; no glibc strings; the link uses only musl's rcrt1/crti/libc.a/crtn
+  (`-Wl,--trace`). Image licence check in gate mode passes, the report matches, and the license
+  files match.
