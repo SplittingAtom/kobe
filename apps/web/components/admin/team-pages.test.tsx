@@ -160,7 +160,7 @@ describe("Team invitations", () => {
     });
     renderTeam(<TeamInvitesPage />);
     await screen.findByText("No open invitations.");
-    await userEvent.type(screen.getByLabelText("Email address"), "c@x.io");
+    await userEvent.type(screen.getByLabelText(/Email address/), "c@x.io");
     await userEvent.selectOptions(screen.getByLabelText("Role"), "builder");
     await userEvent.click(screen.getByRole("button", { name: "Invite" }));
     const notice = await screen.findByText(/Invited c@x\.io as Builder/);
@@ -231,6 +231,83 @@ describe("Team invitations", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(summary(calls)).toEqual(["GET /v1/team/invites"]);
+  });
+});
+
+const invite = (id: string, email: string, status = "pending") => ({
+  id,
+  email,
+  role: "member",
+  invitedBy: { id: ME.id, name: ME.name },
+  createdAt: "",
+  expiresAt: "",
+  status,
+});
+
+describe("Team invitations: errors, badges and focus (KOBE-294 review)", () => {
+  it("shows the server's refusal of an invite and keeps the address", async () => {
+    stubApi({
+      "GET /v1/team/invites": [200, { invitations: [] }],
+      "POST /v1/team/invites": [
+        409,
+        { code: "already_member", message: "That person is already a member." },
+      ],
+    });
+    renderTeam(<TeamInvitesPage />);
+    await screen.findByText("No open invitations.");
+    await userEvent.type(screen.getByLabelText(/Email address/), "c@x.io");
+    await userEvent.click(screen.getByRole("button", { name: "Invite" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/already a member/);
+    expect((screen.getByLabelText(/Email address/) as HTMLInputElement).value).toBe("c@x.io");
+  });
+
+  it("shows a list that fails to load as an error", async () => {
+    stubApi({
+      "GET /v1/team/invites": [403, { code: "forbidden", message: "Not allowed." }],
+    });
+    renderTeam(<TeamInvitesPage />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Not allowed\./);
+  });
+
+  it("labels pending and expired invitations in words", async () => {
+    stubApi({
+      "GET /v1/team/invites": [
+        200,
+        { invitations: [invite("i-1", "a@x.io"), invite("i-2", "b@x.io", "expired")] },
+      ],
+    });
+    renderTeam(<TeamInvitesPage />);
+    const table = await screen.findByRole("table", { name: "Open invitations to Finance" });
+    const [first, second] = within(table).getAllByRole("row").slice(1);
+    expect(within(first as HTMLElement).getByText("Pending")).toBeTruthy();
+    expect(within(second as HTMLElement).getByText("Expired").dataset["tone"]).toBe("attention");
+  });
+
+  it("after a revoke, focus moves to the next row's Revoke, or to the list's heading", async () => {
+    stubApi({
+      "GET /v1/team/invites": [
+        [200, { invitations: [invite("i-1", "a@x.io"), invite("i-2", "b@x.io")] }],
+        [200, { invitations: [invite("i-2", "b@x.io")] }],
+        [200, { invitations: [] }],
+      ],
+      "DELETE /v1/team/invites/i-1": [204],
+      "DELETE /v1/team/invites/i-2": [204],
+    });
+    renderTeam(<TeamInvitesPage />);
+    const revoke = async (email: string) => {
+      await userEvent.click(
+        await screen.findByRole("button", { name: `Revoke invitation to ${email}` }),
+      );
+      const dialog = await screen.findByRole("alertdialog");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+    };
+    await revoke("a@x.io");
+    await waitFor(() =>
+      expect(document.activeElement?.textContent).toBe("Revoke invitation to b@x.io"),
+    );
+    await revoke("b@x.io");
+    await screen.findByText("No open invitations.");
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Open invitations"));
   });
 });
 

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -24,16 +24,35 @@ function sources(dir: string): string[] {
   });
 }
 
-/** Tags that portal, the prop that must name the chat root, and how its value must read. */
+/**
+ * Console and My-area code: its Radix portals mount in the console root (KOBE-294), never the
+ * chat's; everything else mounts in the chat root, never the console's (whose helper finds no
+ * console root in the chat and would drop the popup on <body>, outside the preflight slice).
+ */
+const CONSOLE_CODE = [
+  "app/admin/",
+  "app/me/",
+  "components/admin/",
+  "components/me/",
+  "components/projects/",
+  "components/ui/console/",
+].map((d) => d.split("/").join(sep));
+const isConsole = (file: string) => CONSOLE_CODE.some((d) => file.startsWith(d));
+
+/** Tags that portal, the prop that must name the root, and how its value must read. */
 const PORTALS = [
-  // Radix portals (Dialog, Tooltip, Popover, DropdownMenu, …); the consoles' own dialogs mount in
-  // the console root (KOBE-294).
-  { tag: /\.Portal$/, prop: "container", value: /^\{(chat|console)PortalContainer\(\)\}$/ },
+  // Radix portals (Dialog, Tooltip, Popover, DropdownMenu, …).
+  {
+    tag: /\.Portal$/,
+    prop: "container",
+    value: (file: string) =>
+      isConsole(file) ? /^\{consolePortalContainer\(\)\}$/ : /^\{chatPortalContainer\(\)\}$/,
+  },
   // assistant-ui's "more" menus (ActionBarMore, ThreadListItemMore) portal inside their Content.
   {
     tag: /MorePrimitive\.Content$/,
     prop: "portalProps",
-    value: /^\{\{\s*container:\s*chatPortalContainer\(\)\s*\}\}$/,
+    value: () => /^\{\{\s*container:\s*chatPortalContainer\(\)\s*\}\}$/,
   },
 ] as const;
 
@@ -48,7 +67,7 @@ function unrooted(file: string, code: string): string[] {
       const prop = node.attributes.properties.find(
         (a): a is ts.JsxAttribute => ts.isJsxAttribute(a) && a.name.getText(source) === rule?.prop,
       );
-      if (rule && !rule.value.test(prop?.initializer?.getText(source) ?? "")) {
+      if (rule && !rule.value(file).test(prop?.initializer?.getText(source) ?? "")) {
         out.push(`${file}: <${tag}>`);
       }
     }
@@ -70,6 +89,15 @@ describe("popup portals (KOBE-282)", () => {
       unrooted("x.tsx", `const x = <Dialog.Portal ${props}><div /></Dialog.Portal>;`);
     expect(tag("onMount={() => 1 > 0} container={chatPortalContainer()}")).toEqual([]);
     expect(tag("onMount={() => 1 > 0}")).toEqual(["x.tsx: <Dialog.Portal>"]);
+    // The wrong root for the file: a chat dialog on the console root, a console one on the chat's.
+    expect(tag("container={consolePortalContainer()}")).toEqual(["x.tsx: <Dialog.Portal>"]);
+    const consoleFile = join("components", "admin", "x.tsx");
+    const inConsole = (props: string) =>
+      unrooted(consoleFile, `const x = <Dialog.Portal ${props}><div /></Dialog.Portal>;`);
+    expect(inConsole("container={consolePortalContainer()}")).toEqual([]);
+    expect(inConsole("container={chatPortalContainer()}")).toEqual([
+      `${consoleFile}: <Dialog.Portal>`,
+    ]);
     expect(
       unrooted("y.tsx", "const y = <M.ActionBarMorePrimitive.Content onSelect={(e) => e} />;"),
     ).toEqual(["y.tsx: <M.ActionBarMorePrimitive.Content>"]);

@@ -55,9 +55,8 @@ export function MutationStatus({
   return (
     <>
       {error && <ErrorNotice error={error} />}
-      <p role="status" className="m-0 py-1 empty:hidden">
-        {notice ?? ""}
-      </p>
+      {/* On the page from the start, so screen readers announce the notice when it appears. */}
+      <div role="status">{notice && <Notice tone="success">{notice}</Notice>}</div>
     </>
   );
 }

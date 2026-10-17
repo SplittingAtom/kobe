@@ -21,7 +21,7 @@ import { ConsoleThemeToggle } from "./console-theme-toggle";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
 import { ChatReturnLink } from "../shell/chat-return-link";
-import { ConsoleLayout, ConsoleMain, ConsoleWho, Notice } from "../ui/console";
+import { ConsoleLayout, ConsoleMain, ConsoleWho, Notice, PageHeader } from "../ui/console";
 
 const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<ConsoleAccess>>>> = {
   site: () => fetchSiteAccess(),
@@ -97,7 +97,7 @@ export function ConsoleShell({
     return (
       <Frame title={title} switcher={kind === "team" && needsTeam}>
         <ConsoleMain>
-          <h1>{title}</h1>
+          <PageHeader title={title} />
           {state.status === "loading" ? (
             <p role="status">Checking your access…</p>
           ) : (
@@ -114,7 +114,7 @@ export function ConsoleShell({
     return (
       <Frame title={title} switcher={kind === "team"}>
         <ConsoleMain>
-          <h1>{title}</h1>
+          <PageHeader title={title} />
           <Notice tone="error">
             {DENIED[kind]} <ChatReturnLink>Back to Kobe</ChatReturnLink>
           </Notice>
@@ -168,7 +168,7 @@ function Console({
             </Fragment>
           ) : (
             <>
-              <h1>{section.label}</h1>
+              <PageHeader title={section.label} />
               <Notice tone="error">
                 Your role doesn&apos;t include this section.{" "}
                 <Link href={consoleHref(kind)}>Back to the {title.toLowerCase()}</Link>
