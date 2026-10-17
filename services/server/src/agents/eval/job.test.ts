@@ -162,6 +162,31 @@ describe("Orbit eval Job manifest (KOBE-93)", () => {
     expect(JSON.stringify(map)).not.toContain(TOKEN);
   });
 
+  it("adds the shared cases (KOBE-276) as a file and an argument, and changes nothing else", async () => {
+    const i = await input();
+    const plain = (evalJobManifest(i) as unknown as Job).spec.template.spec;
+    const cased = (evalJobManifest({ ...i, withCases: true }) as unknown as Job).spec.template.spec;
+    expect((plain.containers[0] as { args?: string[] }).args).toBeUndefined();
+    expect((cased.containers[0] as { args?: string[] }).args).toEqual([
+      "--orbit-yaml",
+      "/input/agent.yaml",
+      "--output",
+      "/output/result.json",
+      "--cases",
+      "/input/cases.json",
+    ]);
+    const { args: _args, ...rest } = cased.containers[0] as { args?: string[] };
+    expect({ ...cased, containers: [rest] }).toEqual(plain);
+    const map = evalConfigMapManifest({
+      namespace: i.namespace,
+      teamId: TEAM.id,
+      evalId: EVAL_ID,
+      orbitYaml: "name: x\n",
+      casesJson: '{"cases":[]}\n',
+    });
+    expect(map.data).toEqual({ "agent.yaml": "name: x\n", "cases.json": '{"cases":[]}\n' });
+  });
+
   it("uses the pull secrets by name and labels the pod for the eval's NetworkPolicy", async () => {
     const { spec, metadata } = evalJobManifest(await input()) as unknown as Job;
     expect(spec.template.spec).toMatchObject({ imagePullSecrets: [{ name: "ghcr-pull" }] });

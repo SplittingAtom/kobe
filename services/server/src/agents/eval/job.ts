@@ -11,6 +11,7 @@ import {
   SANDBOX_UID,
 } from "../../sandbox/constants.js";
 import { isUuid, type KubeObject } from "../../sandbox/manifests.js";
+import { EVAL_CASES_FILE } from "./cases.js";
 
 /**
  * Pure builders for an Orbit eval (KOBE-93): one ConfigMap (the exported Orbit YAML) and one Job in
@@ -45,12 +46,16 @@ const labels = (teamId: string, evalId: string): Record<string, string> => ({
   [LABEL_ORBIT_EVAL]: evalId,
 });
 
-/** The exported YAML as a ConfigMap (a plain input, not a credential). */
+/**
+ * The exported YAML as a ConfigMap (a plain input, not a credential), with the shared eval cases
+ * (KOBE-276) as `cases.json` when the eval runs any.
+ */
 export function evalConfigMapManifest(input: {
   readonly namespace: string;
   readonly teamId: string;
   readonly evalId: string;
   readonly orbitYaml: string;
+  readonly casesJson?: string | null;
 }): KubeObject {
   return {
     apiVersion: "v1",
@@ -60,7 +65,10 @@ export function evalConfigMapManifest(input: {
       namespace: input.namespace,
       labels: labels(input.teamId, input.evalId),
     },
-    data: { [EVAL_INPUT_FILE]: input.orbitYaml },
+    data: {
+      [EVAL_INPUT_FILE]: input.orbitYaml,
+      ...(input.casesJson ? { [EVAL_CASES_FILE]: input.casesJson } : {}),
+    },
   };
 }
 
@@ -78,6 +86,8 @@ export interface EvalJobInput {
   readonly model: string;
   /** Short-lived gateway token scoped to this team and eval. */
   readonly token: string;
+  /** The ConfigMap holds `cases.json` (KOBE-276): the image runs it as an extra suite. */
+  readonly withCases?: boolean;
 }
 
 const gatewayUrl = (s: SandboxSettings): string => {
@@ -119,6 +129,19 @@ export function evalPodSpec(input: EvalJobInput): Record<string, unknown> {
         name: EVAL_CONTAINER,
         image: e.image,
         imagePullPolicy: s.imagePullPolicy,
+        // The image's default command, plus the shared cases when there are any.
+        ...(input.withCases
+          ? {
+              args: [
+                "--orbit-yaml",
+                `${EVAL_INPUT_DIR}/${EVAL_INPUT_FILE}`,
+                "--output",
+                `${EVAL_OUTPUT_DIR}/result.json`,
+                "--cases",
+                `${EVAL_INPUT_DIR}/${EVAL_CASES_FILE}`,
+              ],
+            }
+          : {}),
         env: [
           { name: "KOBE_MODEL_GATEWAY_URL", value: gatewayUrl(s) },
           { name: "KOBE_MODEL_SESSION_TOKEN", value: input.token },

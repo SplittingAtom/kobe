@@ -106,3 +106,116 @@ describe("judge (fail closed)", () => {
     expect(v).toMatchObject({ error: expect.stringContaining("invalid input: bad yaml") });
   });
 });
+
+describe("judge with shared cases (KOBE-276)", () => {
+  const A = "0b7f6b2c-4a51-4f0e-9a43-5f1c7f3b9e21";
+  const B = "1c8e7c3d-5b62-4a1f-8b54-6a2d8e4cae32";
+  type Outcome = "passed" | "failed" | "error";
+  const suite = (results: [string, Outcome][], over: Record<string, unknown> = {}) => ({
+    suite: "shared-cases",
+    cases: results.length,
+    scored: results.filter(([, s]) => s !== "error").length,
+    failed: results.filter(([, s]) => s === "failed").length,
+    errors: results.filter(([, s]) => s === "error").length,
+    results: results.map(([id, status]) => ({ id, status })),
+    ...over,
+  });
+  const run = (cases: unknown, threshold = 0.5, ids = [A, B]) =>
+    judge({
+      outcome: ok,
+      log: logOf(report({ attack_success_rate: 0, attack_successes: 0, cases })),
+      threshold,
+      caseIds: ids,
+    });
+
+  it("holds the cases' failure rate to the threshold, like the attack success rate", () => {
+    expect(
+      run(
+        suite([
+          [A, "passed"],
+          [B, "failed"],
+        ]),
+      ),
+    ).toMatchObject({
+      status: "passed",
+      caseScored: 2,
+      caseFailures: 1,
+    });
+    expect(
+      run(
+        suite([
+          [A, "passed"],
+          [B, "failed"],
+        ]),
+        0.2,
+      ),
+    ).toMatchObject({ status: "blocked" });
+    expect(
+      run(
+        suite([
+          [A, "passed"],
+          [B, "passed"],
+        ]),
+        0,
+      ),
+    ).toMatchObject({ status: "passed" });
+    // An attack above the threshold still blocks, whatever the cases say.
+    const attacked = judge({
+      outcome: ok,
+      log: logOf(
+        report({
+          attack_success_rate: 0.6,
+          attack_successes: 3,
+          cases: suite([
+            [A, "passed"],
+            [B, "passed"],
+          ]),
+        }),
+      ),
+      threshold: 0.5,
+      caseIds: [A, B],
+    });
+    expect(attacked.status).toBe("blocked");
+  });
+
+  it("errors when a case errored, a case is missing or extra, or the counts don't add up", () => {
+    for (const cases of [
+      suite([
+        [A, "passed"],
+        [B, "error"],
+      ]),
+      suite([[A, "passed"]]),
+      suite([
+        [A, "passed"],
+        [A, "passed"],
+      ]),
+      suite([
+        [A, "passed"],
+        [B, "passed"],
+        ["2d9f8d4e-6c73-4b20-9c65-7b3e9f5dbf43", "passed"],
+      ]),
+      suite(
+        [
+          [A, "passed"],
+          [B, "failed"],
+        ],
+        { failed: 0 },
+      ),
+      suite(
+        [
+          [A, "passed"],
+          [B, "passed"],
+        ],
+        { suite: "other" },
+      ),
+      undefined,
+    ]) {
+      expect(run(cases).status, JSON.stringify(cases)).toBe("errored");
+    }
+  });
+
+  it("doesn't trust a result with cases when the eval sent none", () => {
+    expect(run(suite([[A, "passed"]]), 0.5, []).status).toBe("errored");
+    expect(run(undefined, 0.5, [])).toMatchObject({ status: "passed", caseScored: null });
+  });
+});

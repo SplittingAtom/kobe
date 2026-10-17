@@ -706,3 +706,171 @@ describe("sweeper", () => {
     expect((await getEval(db, finance, finished))?.status).toBe("blocked");
   });
 });
+
+describe("shared eval cases in the gate (KOBE-276)", () => {
+  /** Cases on `agentId` shared by carol (the member), straight into the table. */
+  async function cases(agentId: string, statuses: readonly ("open" | "accepted" | "dismissed")[]) {
+    const carol = await h.admin.query<{ id: string }>(
+      `SELECT id FROM users WHERE email = 'carol@eval.test'`,
+    );
+    const ids: string[] = [];
+    for (const [i, status] of statuses.entries()) {
+      const { rows } = await h.admin.query<{ id: string }>(
+        `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, agent_version, content, status, expected_behaviour, reviewed_at)
+         VALUES ($1, $2, 'team', $3, 1, $4::jsonb, $5, $6, CASE WHEN $5 = 'open' THEN NULL ELSE now() END)
+         RETURNING id`,
+        [
+          finance,
+          carol.rows[0]?.id,
+          agentId,
+          JSON.stringify({
+            prompt: `Prompt ${i} (${status})`,
+            answer: `Bad answer ${i}`,
+            earlier: [],
+            tool_outputs: [{ tool: "search", text: `Output ${i}`, is_error: false }],
+            attachments: [],
+            reasons: ["wrong"],
+            comment: `Comment ${i}`,
+            truncated: false,
+          }),
+          status,
+          status === "open" ? null : `Expected ${i}`,
+        ],
+      );
+      ids.push(rows[0]?.id ?? "");
+    }
+    return ids;
+  }
+
+  const suite = (results: { id: string; status: "passed" | "failed" | "error" }[]) => ({
+    suite: "shared-cases",
+    cases: results.length,
+    scored: results.filter((r) => r.status !== "error").length,
+    failed: results.filter((r) => r.status === "failed").length,
+    errors: results.filter((r) => r.status === "error").length,
+    failure_rate: null,
+    results,
+  });
+
+  it("freezes the accepted cases into the Job's inputs and passes when few enough fail", async () => {
+    await gateOn(0.5);
+    const id = await draft();
+    const [open, a, b, dismissed] = await cases(id, ["open", "accepted", "accepted", "dismissed"]);
+    jobResult = {
+      log: report({
+        cases: suite([
+          { id: a ?? "", status: "passed" },
+          { id: b ?? "", status: "failed" },
+        ]),
+      }),
+      outcome: "Complete",
+    };
+    expect((await publish(id)).status).toBe(202);
+    await settled();
+    const { evals: list } = await evals(id);
+    expect(list[0]).toMatchObject({
+      status: "passed",
+      version: 1,
+      cases: { total: 2, scored: 2, failed: 1, failureRate: 0.5 },
+    });
+    const row = await h.admin.query<{ case_ids: string[] }>(
+      `SELECT case_ids FROM orbit_evals WHERE id = $1`,
+      [list[0].id],
+    );
+    expect(row.rows[0]?.case_ids).toEqual([a, b]);
+    // The ConfigMap carries the accepted cases only, with no member; the Job is told to run them.
+    const maps = kube.all("ConfigMap") as unknown as {
+      metadata: { name: string };
+      data: Record<string, string>;
+    }[];
+    const map = maps.find((m) => m.metadata.name === `orbit-eval-${list[0].id}`);
+    const file = JSON.parse(map?.data["cases.json"] ?? "{}") as {
+      suite: string;
+      cases: { id: string; prompt: string; expected: string; tool_outputs: unknown[] }[];
+    };
+    expect(file.suite).toBe("shared-cases");
+    expect(file.cases.map((c) => [c.id, c.prompt, c.expected])).toEqual([
+      [a, "Prompt 1 (accepted)", "Expected 1"],
+      [b, "Prompt 2 (accepted)", "Expected 2"],
+    ]);
+    const text = map?.data["cases.json"] ?? "";
+    for (const absent of [open, dismissed, "carol", "user_id"]) expect(text).not.toContain(absent);
+    const job = (
+      kube.all("Job") as unknown as {
+        metadata: { name: string };
+        spec: { template: { spec: { containers: { args?: string[] }[] } } };
+      }[]
+    ).find((j) => j.metadata.name === `orbit-eval-${list[0].id}`);
+    expect(job?.spec.template.spec.containers[0]?.args).toEqual([
+      "--orbit-yaml",
+      "/input/agent.yaml",
+      "--output",
+      "/output/result.json",
+      "--cases",
+      "/input/cases.json",
+    ]);
+    // The report on the eval holds ids and outcomes only.
+    const detail = (await builder.get(`/v1/agents/${id}/evals/${list[0].id}`)).json.eval;
+    expect(JSON.stringify(detail.report)).not.toContain("Prompt 1");
+  });
+
+  it("blocks when the cases' failure rate is above the threshold, even with no attack", async () => {
+    await gateOn(0.2);
+    const id = await draft();
+    const [a, b] = await cases(id, ["accepted", "accepted"]);
+    jobResult = {
+      log: report({
+        cases: suite([
+          { id: a ?? "", status: "passed" },
+          { id: b ?? "", status: "failed" },
+        ]),
+      }),
+      outcome: "Complete",
+    };
+    expect((await publish(id)).status).toBe(202);
+    await settled();
+    expect((await evals(id)).evals[0]).toMatchObject({
+      status: "blocked",
+      attackSuccessRate: 0,
+      cases: { total: 2, failed: 1, failureRate: 0.5 },
+      version: null,
+    });
+    expect(await currentVersion(id)).toBeNull();
+  });
+
+  it("fails closed when a case errored, or the result misses a case", async () => {
+    await gateOn(0.5);
+    const id = await draft();
+    const [a, b] = await cases(id, ["accepted", "accepted"]);
+    for (const results of [
+      [
+        { id: a ?? "", status: "passed" as const },
+        { id: b ?? "", status: "error" as const },
+      ],
+      [{ id: a ?? "", status: "passed" as const }],
+    ]) {
+      jobResult = { log: report({ cases: suite(results) }), outcome: "Complete" };
+      expect((await publish(id)).status).toBe(202);
+      await settled();
+      expect((await evals(id)).evals[0]).toMatchObject({ status: "errored", version: null });
+    }
+    // Without cases, a result that claims some is not trusted either.
+    const plain = await draft();
+    jobResult = {
+      log: report({ cases: suite([{ id: randomUUID(), status: "passed" }]) }),
+      outcome: "Complete",
+    };
+    expect((await publish(plain)).status).toBe(202);
+    await settled();
+    expect((await evals(plain)).evals[0]).toMatchObject({ status: "errored" });
+    // A plain eval sends no cases file and no extra arguments.
+    const latest = (await evals(plain)).evals[0].id as string;
+    const map = (
+      kube.all("ConfigMap") as unknown as {
+        metadata: { name: string };
+        data: Record<string, string>;
+      }[]
+    ).find((m) => m.metadata.name === `orbit-eval-${latest}`);
+    expect(Object.keys(map?.data ?? {})).toEqual(["agent.yaml"]);
+  });
+});

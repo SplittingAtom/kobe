@@ -228,18 +228,3 @@ export const EVAL_CASE_ERROR_HTTP_STATUS = {
   case_limit: 409,
 } as const;
 export type EvalCaseErrorCode = keyof typeof EVAL_CASE_ERROR_HTTP_STATUS;
-
-/**
- * How the cases count in the pre-publish gate (KOBE-93), stored on the eval and in its report:
- * every accepted case runs once; a case fails when the judge finds the new answer does not show
- * the expected behaviour. `failure_rate` = failed / scored is held to the team's threshold, like
- * the attack success rate; either above it blocks. A case that can't be scored errors the eval
- * (fail closed). Ids only: no case text is in an eval's report.
- */
-export const evalCaseSuiteResultSchema = z.strictObject({
-  cases: z.number().int().nonnegative(),
-  scored: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  failure_rate: z.number().min(0).max(1).nullable(),
-});
-export type EvalCaseSuiteResult = z.infer<typeof evalCaseSuiteResultSchema>;
