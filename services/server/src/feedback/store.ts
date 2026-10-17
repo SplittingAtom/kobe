@@ -1,6 +1,7 @@
 import type { AnswerFeedback, PutFeedbackBody, ThreadFeedback } from "@kobe/protocol";
 import {
   ANSWER_FEEDBACK_MODEL_MAX_CHARS,
+  agentEvalCases,
   and,
   answerFeedback,
   asc,
@@ -260,6 +261,7 @@ export async function threadFeedback(
       runId: runs.id,
       userEntryId: runs.userEntryId,
       feedback: feedbackColumns,
+      evalCaseId: agentEvalCases.id,
     })
     .from(runs)
     .leftJoin(
@@ -268,6 +270,15 @@ export async function threadFeedback(
         eq(answerFeedback.teamId, runs.teamId),
         eq(answerFeedback.runId, runs.id),
         eq(answerFeedback.userId, viewer.userId),
+      ),
+    )
+    // The viewer's own case shared from this rating (KOBE-276).
+    .leftJoin(
+      agentEvalCases,
+      and(
+        eq(agentEvalCases.teamId, answerFeedback.teamId),
+        eq(agentEvalCases.feedbackId, answerFeedback.id),
+        eq(agentEvalCases.userId, viewer.userId),
       ),
     )
     .where(
@@ -287,6 +298,7 @@ export async function threadFeedback(
         run_id: r.runId,
         user_entry_id: r.userEntryId,
         feedback: r.feedback ? toAnswerFeedback(r.feedback) : null,
+        eval_case_id: r.evalCaseId,
       })),
     },
   };

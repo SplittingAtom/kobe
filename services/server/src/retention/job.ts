@@ -18,6 +18,7 @@ import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
 import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
 import { purgeReleasedFeedbackHistory, type FeedbackHistoryCounts } from "./feedback-history.js";
+import { NO_EVAL_CASE_PURGE, purgeEvalCases, type EvalCasePurgeCounts } from "./eval-cases.js";
 import { PERIOD_DAYS, effectiveAt } from "./periods.js";
 import { readMaximumLayer, readTeamLayer } from "./settings.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
@@ -40,7 +41,9 @@ import {
  *  4. compact the live events of runs that ended more than 7 days ago;
  *  5. delete the object-store keys purges released;
  *  6. sweep orphaned upload staging objects and fork-copied entry bodies (KOBE-189);
- *  7. purge answer feedback kept for a legal hold once it is released (KOBE-275).
+ *  7. purge answer feedback kept for a legal hold once it is released (KOBE-275);
+ *  8. purge shared eval cases past the team's window, and their copies kept for a released hold
+ *     (KOBE-276).
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
@@ -73,6 +76,8 @@ export interface TeamPassResult {
   readonly orphans: OrphanCounts;
   /** Answer feedback kept for a released hold, deleted (KOBE-275). */
   readonly feedbackHistory: FeedbackHistoryCounts;
+  /** Shared eval cases past the window and released hold copies, deleted (KOBE-276). */
+  readonly evalCases: EvalCasePurgeCounts;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -266,6 +271,13 @@ async function teamPass(
     : await step("feedback_history", { rows: 0 }, () =>
         purgeReleasedFeedbackHistory(db, teamId, { stop }),
       );
+  const evalCases = stop()
+    ? NO_EVAL_CASE_PURGE
+    : await step("eval_cases", NO_EVAL_CASE_PURGE, async () => {
+        const days = await windowDays(db, teamId);
+        const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
+        return purgeEvalCases(db, teamId, cutoff, { stop });
+      });
   return {
     teamId,
     trash,
@@ -276,6 +288,7 @@ async function teamPass(
     uploads,
     orphans,
     feedbackHistory,
+    evalCases,
     failed,
   };
 }

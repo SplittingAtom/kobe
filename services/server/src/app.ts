@@ -69,6 +69,7 @@ import { threadMarkerRoutes } from "./routes/thread-markers.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
 import { runFeedbackRoutes, threadFeedbackRoutes } from "./routes/feedback.js";
+import { evalCaseRoutes, runEvalCaseRoutes } from "./eval-cases/routes.js";
 import {
   siteUsageRoutes,
   runUsageRoutes,
@@ -171,6 +172,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runRoutes(deps));
   api.route("/runs", runUsageRoutes(deps));
   api.route("/runs", runFeedbackRoutes(deps));
+  api.route("/runs", runEvalCaseRoutes(deps));
+  api.route("/eval-cases", evalCaseRoutes(deps));
   api.route("/projects", projectRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));

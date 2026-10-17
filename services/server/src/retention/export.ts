@@ -3,6 +3,7 @@ import { Zip, ZipDeflate, strToU8 } from "fflate";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { threadKey, type BlobStore } from "./blobs.js";
+import { evalCasesForExport } from "./export-eval-cases.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
@@ -20,6 +21,7 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
  *  - `feedback.json`: the user's own answer ratings in this team (KOBE-275), with their comments,
  *    on their threads and on threads shared with them (ids and the rating only, no thread content);
+ *  - `eval-cases.json`: the eval cases the user shared in this team (KOBE-276), with their copies;
  *  - `threads.json` (index) and `README.md`.
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
@@ -300,6 +302,7 @@ This archive holds the conversations you own in one Kobe team.
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
 - \`feedback.json\`: your thumbs up and down on answers in this team, with your reasons and
   comments (on your conversations and on ones shared with you).
+- \`eval-cases.json\`: the answers you shared with agents' owners as eval cases, as shared.
 - \`threads.json\`: an index (id, title, dates, file names).
 
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
@@ -475,6 +478,17 @@ export async function* exportZip(
     if (page.length < FEEDBACK_PAGE || afterFeedback === null) break;
   }
   feedback.push(strToU8(`${first ? "" : "\n  "}]\n}\n`), true);
+  const cases = file("eval-cases.json");
+  cases.push(strToU8('{\n  "cases": ['));
+  let firstCase = true;
+  for await (const page of evalCasesForExport(db, viewer)) {
+    for (const c of page) {
+      cases.push(strToU8(`${firstCase ? "" : ","}\n    ${JSON.stringify(c)}`));
+      firstCase = false;
+    }
+    yield* drain();
+  }
+  cases.push(strToU8(`${firstCase ? "" : "\n  "}]\n}\n`), true);
   text("threads.json", `${JSON.stringify({ threads: index }, null, 2)}\n`);
   zip.end();
   yield* drain();

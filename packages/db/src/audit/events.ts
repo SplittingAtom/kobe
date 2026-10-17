@@ -768,6 +768,16 @@ export const AUDIT_EVENTS = {
    */
   "retention.feedback_history_purged": event("team", { rows: count }),
   /**
+   * Shared eval cases purged (system; KOBE-276): past the team's retention window (`retention`),
+   * a departed member's (`offboarding`, `userId`), or copies kept for a released hold
+   * (`hold_released`). Counts only; held members' cases are never in a batch.
+   */
+  "retention.eval_cases_purged": event("team", {
+    reason: z.enum(["retention", "offboarding", "hold_released"]),
+    rows: count,
+    userId: id.optional(),
+  }),
+  /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
    * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
    * Counts only, never paths or content; live files and held owners' memory are never in a batch.
@@ -1199,6 +1209,16 @@ export const AUDIT_EVENTS = {
     evalId: id,
     status: z.enum(["passed", "blocked", "errored"]),
     attackSuccessRate: z.number().min(0).max(1).nullable(),
+  }),
+  /**
+   * The agent's owner reviewed a shared eval case (KOBE-276): its id and new status only, never
+   * its text or who shared it.
+   */
+  "agent.eval_case.reviewed": event("team", {
+    agentId: id,
+    scope: z.enum(["team", "personal"]),
+    caseId: id,
+    status: z.enum(["open", "accepted", "dismissed"]),
   }),
   /** A team admin changed the eval gate switch or its attack-success-rate ceiling (KOBE-93). */
   "agent.eval.settings_changed": event("team", {
