@@ -301,6 +301,21 @@ describe("run scope (this run only)", () => {
     await endRun(w, w);
     const later = await newRun(w, w.threadId);
     expect(await outcome(w, later, "share_file", share("c.md"))).toBe("ask");
+    // The ended run's rule is pruned (audited, by the system) when the member makes a new one.
+    const [old] = await rules(w.team);
+    await approve(w, later, "share_file", share("d.md"), {
+      decision: "allow",
+      remember: { tool_glob: "share_file", scope: "run" },
+    });
+    expect((await rules(w.team)).map((r) => r.run_id)).toEqual([later.runId]);
+    const { rows } = await fx.admin.query<{ actor_kind: string; target: { ruleId: string } }>(
+      `SELECT actor_kind::text, target FROM audit_log
+        WHERE team_id = $1 AND action = 'policy.rule.deleted' ORDER BY seq`,
+      [w.team],
+    );
+    expect(rows).toEqual([
+      { actor_kind: "system", target: expect.objectContaining({ ruleId: old?.id }) },
+    ]);
   });
 });
 
