@@ -95,6 +95,9 @@
   withheld, windows, no links, reason order). Browser: `e2e/browser/tests/agent-ratings.spec.ts`
   (`KOBE_AGENT_ID`, gate1, pending).
 
+- **Pages review (2026-10-17, approved):** S2 fixed: while a new period loads the section shows
+  "Loading ratings for the last N days…", never the old numbers; late answers are dropped (tests).
+
 ## Open questions (for Chris or the coordinator)
 
 - Readers may rate (above): confirm or switch to owner-only.

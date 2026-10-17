@@ -133,6 +133,12 @@
   `e2e/browser/tests/shared-cases-review.spec.ts`, `eval-cases-gate.spec.ts` (`KOBE_AGENT_ID`),
   `my-shared-cases.spec.ts` (`KOBE_AGENT`, one model turn).
 
+- **Pages review (2026-10-17, approved):** S1 fixed: after Accept, Dismiss, Reopen or Save the
+  focus moves to the case's Review heading (tests). Nits: Withdraw refocuses its button after a
+  failure (N2), the agent-name lookup notes why it ignores errors (N3), a cases block with no
+  attack rate reads as a cases block (N6). The sharer's comment on the owner's detail stays (N1,
+  consented). N4, N5, N7 left as is.
+
 ## Open questions (for Chris or the coordinator)
 
 - Owner-only sharing (readers can't) and owner-only review (team admins can't): confirm.
