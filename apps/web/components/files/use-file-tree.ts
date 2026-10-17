@@ -141,7 +141,10 @@ export function useFileTree(api: FilesApi, storageKey: string): FileTree {
   );
 
   const reloadAll = useCallback(() => {
-    for (const folder of visibleFolders(latest.current.expanded)) load(folder);
+    const shown = visibleFolders(latest.current.expanded);
+    // Closed folders' listings are dropped: they are read again when next opened.
+    setFolders((prev) => new Map([...prev].filter(([p]) => shown.includes(p))));
+    for (const folder of shown) load(folder);
   }, [load, visibleFolders]);
 
   const reveal = useCallback(
