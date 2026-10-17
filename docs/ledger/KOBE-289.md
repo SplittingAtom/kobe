@@ -11,7 +11,7 @@
   `{tool_glob, scope, exact?}` (the client no longer sends `expires_in` or `arg_pattern`);
   `rememberLimitsSchema` + `tightenRememberLimits` / `looserThanFloor` / `scopeWithinLimits`;
   `approveAllBodySchema`; run event `policy.rule_applied` `{tool_call_id, tool, rule_id, scope}`.
-- **Migrations:** `0122_tool_rules_remember.sql` (generated: `tool_rules.remember_scope`,
+- **Migrations:** `0124_tool_rules_exact_keys.sql` (generated, review S3), `0122_tool_rules_remember.sql` (generated: `tool_rules.remember_scope`,
   `thread_id`, `run_id`, `last_used_at`, FKs `(team_id, thread_id) → threads` and
   `(team_id, run_id) → runs` ON DELETE CASCADE, partial indexes; `users.time_zone` with a length
   check) and `0123_tool_rules_remember_scopes.sql` (custom: backfills KOBE-37 rules by expiry,
@@ -78,6 +78,47 @@ remember-limits` (site admins), `/v1/me/time-zone` (GET/PUT). `my-rules` answers
 - Audit: `policy.rule.applied`, `policy.remember_limits.updated`; `toolRule` targets gained
   `rememberScope?`, `threadId?`, `runId?`; `approval.decided` `approveAll?`; `mcp.tool_call`
   `ruleId?` (docs/audit-log.md).
+
+## Release notes (behaviour changes members and admins will notice)
+
+- **Scheduled and auto runs no longer use remembered approvals** (Chris's ticket requirement,
+  D32). Before, a member's remembered rule also allow-listed that tool for their schedules and
+  auto-mode threads. **Existing schedules that relied on a remembered rule now skip those calls**
+  (each shows as a skipped action on the run). To let a tool run unattended, a team admin adds a
+  team allow rule.
+- **Destructive tools are never remembered** (Chris's ticket requirement). The server now refuses
+  it (only the card hid it before) and the engine ignores stored rules for them: older rules for
+  `bash` and for MCP tools without annotations (which count as destructive) stop applying. My
+  approvals and the team Policy page list them as "No longer applies" with the reason.
+- **API:** `POST /v1/approvals/{id}` `remember` is `{tool_glob, scope, exact?}`; the spec §6.1
+  shape `{tool_glob, arg_pattern?, expires_in?}` is refused (review N5). `my-rules` answers the
+  new rule view (scope, last used, applies).
+- Backfill labels (review N6): a KOBE-37 rule longer than 30 days is labelled "for 30 days" but
+  keeps its stored expiry.
+
+## Security review fixes (Opus review, 2026-10-17)
+
+- **S1** MCP proxy: when a remembered rule decided the named run, every other active run of the
+  sandbox is decided on its own (no context dedupe), so thread A's rule never allows a call while
+  thread B runs (`mcp/decide.ts`; test in `mcp.db.test.ts`).
+- **S2** Thread rules end for good: archive, Trash, project move and clearing test threads delete
+  them (audited, system actor); losing project access (member removed, selected mode, no longer
+  team admin) ends them too (`endThreadRules`, `endUnreachableThreadRules`). Tests: unarchive,
+  restore, move back.
+- **S3** Exact MCP/Kobe rules pin every top-level argument and the key set (`tool_rules.
+exact_keys`, migration `0124_tool_rules_exact_keys.sql`): an extra or missing argument doesn't
+  match. File tools pin only the path; the card says "Only this path" and that the content may
+  differ.
+- **S4** Exact-only counts only all-literal patterns; an older wildcard rule is ignored.
+- **S5** Rules the engine ignores show as "No longer applies" with the reason and offer only Remove.
+- **S6** (D18) The team Policy page masks a private thread ("a conversation") and argument values
+  (only their names); shown when the thread is shared.
+- **S7** Tests added for all of the above, approve-all with another run's id, a call arriving
+  after the options were read, and a new run (as Regenerate) asking again.
+- Nits: N1 the rule-applied record re-checks liveness; N3 approve-all expires an approval whose
+  connection is gone, as a single decision does; N4 approve-all never includes project writes;
+  N5/N6 above. N2 (zone choice makes "today" up to about 24 h; zone changes not audited) and N7
+  (number vs string subjects) are left as they are.
 
 ## Open questions (for Chris or the coordinator)
 
