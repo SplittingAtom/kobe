@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 
 /**
  * KOBE-282 (ac-1): every popup that portals (Radix portals, assistant-ui menus that portal
- * internally, React portals) mounts inside the chat root, where the preflight slice (box-sizing,
+ * internally, React portals) mounts inside the chat root (a console's dialog in the console root,
+ * KOBE-294), where the preflight slice (box-sizing,
  * border colour) applies, or into a slot of the shell. The tokens themselves are on `:root`
  * (app/theme.css), so colours resolve wherever a popup lands. A new portal fails here until it
  * names its container; the ledger (docs/ledger/KOBE-282.md) lists each popup and its theming.
@@ -25,8 +26,9 @@ function sources(dir: string): string[] {
 
 /** Tags that portal, the prop that must name the chat root, and how its value must read. */
 const PORTALS = [
-  // Radix portals (Dialog, Tooltip, Popover, DropdownMenu, …).
-  { tag: /\.Portal$/, prop: "container", value: /^\{chatPortalContainer\(\)\}$/ },
+  // Radix portals (Dialog, Tooltip, Popover, DropdownMenu, …); the consoles' own dialogs mount in
+  // the console root (KOBE-294).
+  { tag: /\.Portal$/, prop: "container", value: /^\{(chat|console)PortalContainer\(\)\}$/ },
   // assistant-ui's "more" menus (ActionBarMore, ThreadListItemMore) portal inside their Content.
   {
     tag: /MorePrimitive\.Content$/,
