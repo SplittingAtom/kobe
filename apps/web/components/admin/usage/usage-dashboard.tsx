@@ -16,11 +16,24 @@ import {
   rangeQuery,
   type UsageRangeId,
 } from "../../../lib/admin/usage-format";
+import {
+  EmptyState,
+  Field,
+  FormRow,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 import { ResourceView } from "../parts";
 import { useResource } from "../use-resource";
 import { UsageChart, type ChartMetric } from "./usage-chart";
-import adminStyles from "../admin.module.css";
-import styles from "./usage.module.css";
+
+const HINT = "m-0 my-1 text-sm text-console-muted";
 
 const ZERO: UsageTotals = {
   calls: 0,
@@ -42,11 +55,11 @@ function Tiles({ totals }: { readonly totals: UsageTotals }) {
     ["Model calls", formatTokens(totals.calls)],
   ];
   return (
-    <ul className={styles.tiles}>
+    <ul className="mx-0 my-4 grid list-none grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3 p-0">
       {tiles.map(([label, value]) => (
-        <li key={label} className={styles.tile}>
-          <span className={styles.tileValue}>{value}</span>
-          <span className={styles.tileLabel}>{label}</span>
+        <li key={label} className="box-border rounded-lg border border-console-border p-3">
+          <span className="block text-2xl font-semibold tabular-nums">{value}</span>
+          <span className="text-sm text-console-muted">{label}</span>
         </li>
       ))}
     </ul>
@@ -72,48 +85,35 @@ export function Breakdown<T extends UsageTotals>({
 }) {
   if (rows.length === 0) return null;
   return (
-    <div className={`${adminStyles.tableWrap} ${styles.section}`}>
-      <table className={adminStyles.table}>
-        <caption>{caption}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{name.label}</th>
-            <th scope="col" className={styles.num}>
-              Spend
-            </th>
-            <th scope="col" className={styles.num}>
-              Input
-            </th>
-            <th scope="col" className={styles.num}>
-              Cached
-            </th>
-            <th scope="col" className={styles.num}>
-              Output
-            </th>
-            <th scope="col" className={styles.num}>
-              Calls
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={rowKey(r)}>
-              <td>{name.render(r)}</td>
-              <td className={styles.num}>
-                {formatUsd(r.costUsd)}
-                {r.unpricedCalls > 0 && (
-                  <span title={`${r.unpricedCalls} calls to models without a price`}> *</span>
-                )}
-              </td>
-              <td className={styles.num}>{formatTokens(r.inputTokens)}</td>
-              <td className={styles.num}>{formatTokens(r.cacheReadTokens + r.cacheWriteTokens)}</td>
-              <td className={styles.num}>{formatTokens(r.outputTokens)}</td>
-              <td className={styles.num}>{formatTokens(r.calls)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table caption={caption} className="mt-6">
+      <TableHead>
+        <TableRow>
+          <TableHeader>{name.label}</TableHeader>
+          <TableHeader numeric>Spend</TableHeader>
+          <TableHeader numeric>Input</TableHeader>
+          <TableHeader numeric>Cached</TableHeader>
+          <TableHeader numeric>Output</TableHeader>
+          <TableHeader numeric>Calls</TableHeader>
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {rows.map((r) => (
+          <TableRow key={rowKey(r)}>
+            <TableRowHeader className="font-normal">{name.render(r)}</TableRowHeader>
+            <TableCell numeric>
+              {formatUsd(r.costUsd)}
+              {r.unpricedCalls > 0 && (
+                <span title={`${r.unpricedCalls} calls to models without a price`}> *</span>
+              )}
+            </TableCell>
+            <TableCell numeric>{formatTokens(r.inputTokens)}</TableCell>
+            <TableCell numeric>{formatTokens(r.cacheReadTokens + r.cacheWriteTokens)}</TableCell>
+            <TableCell numeric>{formatTokens(r.outputTokens)}</TableCell>
+            <TableCell numeric>{formatTokens(r.calls)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -143,10 +143,9 @@ export function UsageDashboard({
   const [generation, setGeneration] = useState(0);
   return (
     <>
-      <div className={styles.controls}>
-        <label>
-          Time range
-          <select
+      <FormRow>
+        <Field label="Time range">
+          <Select
             value={rangeId}
             onChange={(e) => {
               setRangeId(e.target.value as UsageRangeId);
@@ -158,16 +157,15 @@ export function UsageDashboard({
                 {r.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
-          Chart
-          <select value={metric} onChange={(e) => setMetric(e.target.value as ChartMetric)}>
+          </Select>
+        </Field>
+        <Field label="Chart">
+          <Select value={metric} onChange={(e) => setMetric(e.target.value as ChartMetric)}>
             <option value="cost">Spend</option>
             <option value="tokens">Tokens</option>
-          </select>
-        </label>
-      </div>
+          </Select>
+        </Field>
+      </FormRow>
       <Report key={generation} load={() => load(rangeQuery(rangeId))} metric={metric} />
     </>
   );
@@ -193,19 +191,19 @@ function Report({
           <>
             <Tiles totals={totals} />
             {totals.unpricedCalls > 0 && (
-              <p className={adminStyles.hint}>
+              <p className={HINT}>
                 * {totals.unpricedCalls} calls used models without a price in the catalog: their
                 tokens are counted, their cost is not. Site admins set prices per model.
               </p>
             )}
             {totals.estimatedCalls > 0 && (
-              <p className={adminStyles.hint}>
+              <p className={HINT}>
                 {totals.estimatedCalls} calls had no usage report from the provider (for example a
                 response cut short); their tokens are estimated generously.
               </p>
             )}
             {totals.calls === 0 ? (
-              <p>No model calls in this range.</p>
+              <EmptyState title="No model calls in this range." />
             ) : (
               <UsageChart points={points} bucket={report.range.bucket} metric={metric} />
             )}

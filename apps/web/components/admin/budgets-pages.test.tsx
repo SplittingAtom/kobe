@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { readFileSync } from "node:fs";
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,8 +6,15 @@ import { must } from "../../lib/testing/must";
 import type { BudgetStatusLine } from "../../lib/admin/api/budgets";
 import { budgetBannerText } from "../chat/run-notices";
 import { SiteBudget } from "./site/site-budget";
-import { TeamBudgetsPage, budgetLevel, percentOf, spentOf, tokensOf } from "./team/budgets-page";
-import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
+import {
+  BUDGET_LEVEL_CLASS,
+  TeamBudgetsPage,
+  budgetLevel,
+  percentOf,
+  spentOf,
+  tokensOf,
+} from "./team/budgets-page";
+import { TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
 
 const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
   month_usd: month,
@@ -16,8 +22,6 @@ const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
   month_tokens: monthTokens,
   day_tokens: dayTokens,
 });
-// A variable path: Vite rewrites `new URL("literal", import.meta.url)` into a served asset URL.
-const ADMIN_CSS = "./admin.module.css";
 const none = { monthly_usd: null, daily_usd: null, monthly_tokens: null, daily_tokens: null };
 const BUDGETS = {
   period: { month: "2026-10-01", day: "2026-10-04" },
@@ -85,13 +89,13 @@ describe("budget usage colours (KOBE-301)", () => {
       "[data-budget-level]",
     );
     expect(warn?.getAttribute("data-budget-level")).toBe("warn");
-    expect(warn?.className).toMatch(/budgetWarn/);
+    expect(warn?.className).toBe(BUDGET_LEVEL_CLASS.warn);
     expect(warn?.querySelector("svg[aria-hidden]")).not.toBeNull();
     const full = must(screen.getAllByText(/1M of 1M tokens \(100 %\)/)[0]).closest(
       "[data-budget-level]",
     );
     expect(full?.getAttribute("data-budget-level")).toBe("full");
-    expect(full?.className).toMatch(/budgetFull/);
+    expect(full?.className).toBe(BUDGET_LEVEL_CLASS.full);
     expect(full?.textContent).toContain("used up");
     // Below 80 %: plain.
     expect(
@@ -111,9 +115,10 @@ describe("budget usage colours (KOBE-301)", () => {
     expect(budgetLevel(percentOf(79.6, 100))).toBe("ok");
     expect(budgetLevel(percentOf(99.6, 100))).toBe("warn");
     expect(budgetLevel(percentOf(1, 0))).toBe("full");
-    const css = readFileSync(new URL(ADMIN_CSS, import.meta.url), "utf8");
-    expect(css).toMatch(/\.budgetWarn \{\s*color: var\(--kobe-status-attention\);/);
-    expect(css).toMatch(/\.budgetFull \{\s*color: var\(--kobe-status-failed\);/);
+    // The status colours' utilities (app/tailwind.css maps them to --kobe-status-*).
+    expect(BUDGET_LEVEL_CLASS.warn).toBe("text-status-attention");
+    expect(BUDGET_LEVEL_CLASS.full).toMatch(/\btext-status-failed\b/);
+    expect(BUDGET_LEVEL_CLASS.ok).toBeUndefined();
   });
 });
 
@@ -188,6 +193,8 @@ describe("team budgets page (KOBE-42)", () => {
     await screen.findByText("The member's budget was saved.");
     expect(body(calls, "PUT")).toEqual({ ...none, monthly_usd: 25 });
     await userEvent.click(screen.getByRole("button", { name: "Remove budget of Bob" }));
+    expect(summary(calls)).not.toContain("DELETE /v1/team/budgets/members/u-bob");
+    await answerConfirm("Remove Bob's budget?", "Remove budget");
     await screen.findByText("Budget removed.");
   });
 

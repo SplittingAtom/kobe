@@ -7,11 +7,26 @@ import {
   type TeamModel,
   type TeamModels,
 } from "../../../lib/admin/api/team/models";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  Notice,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { ResourceView, confirmed } from "../parts";
+import { ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * Team console: the team's models (spec D6, D30; `/v1/team/models`, team.models.manage). Team
@@ -25,12 +40,10 @@ export function TeamModelsPage() {
 
   return (
     <>
-      <h1>Models</h1>
-      <p className={styles.hint}>
-        Choose which of the site&apos;s models your team may use and which one is the default.
-        Conversations use the default unless someone picks another enabled model for them. Usage is
-        charged to the team&apos;s budget.
-      </p>
+      <PageHeader
+        title="Models"
+        description="Choose which of the site's models your team may use and which one is the default. Conversations use the default unless someone picks another enabled model for them. Usage is charged to the team's budget."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="models">
         {(data) => (
@@ -52,18 +65,23 @@ function ModelsTable({
   readonly mutation: Mutation;
   readonly onChanged: () => void;
 }) {
+  const [confirm, confirmDialog] = useConfirm();
   if (data.models.length === 0) {
-    return <p>The site&apos;s catalog is empty: ask a site admin to publish models.</p>;
+    return <EmptyState title="The site's catalog is empty: ask a site admin to publish models." />;
   }
   const enabled = data.models.filter((m) => m.enabled);
   const defaultModel = data.models.find((m) => m.alias === data.default);
 
   async function toggle(m: TeamModel) {
     if (m.enabled) {
-      const warning = m.isDefault
-        ? `Disable ${modelName(m)}? It is the team's default: conversations without a chosen model can't run until you pick another default. Conversations that chose it stop too.`
-        : `Disable ${modelName(m)}? Conversations that chose it stop until they pick another model.`;
-      if (!confirmed(warning)) return;
+      const yes = await confirm({
+        title: `Disable ${modelName(m)}?`,
+        description: m.isDefault
+          ? "It is the team's default: conversations without a chosen model can't run until you pick another default. Conversations that chose it stop too."
+          : "Conversations that chose it stop until they pick another model.",
+        confirmLabel: `Disable ${modelName(m)}`,
+      });
+      if (!yes) return;
     }
     const done = await mutation.run(
       () => setTeamModel(teamId, m.alias, { enabled: !m.enabled }),
@@ -86,77 +104,72 @@ function ModelsTable({
   return (
     <>
       {enabled.length === 0 ? (
-        <p className={styles.banner}>
-          No model is enabled: your team&apos;s agents can&apos;t answer until you enable one.
-        </p>
+        <Notice tone="warn">
+          <p>
+            No model is enabled: your team&apos;s agents can&apos;t answer until you enable one.
+          </p>
+        </Notice>
       ) : defaultModel === undefined ? (
-        <p className={styles.banner}>
-          No default model: conversations that don&apos;t choose a model can&apos;t run. Pick a
-          default below.
-        </p>
+        <Notice tone="warn">
+          <p>
+            No default model: conversations that don&apos;t choose a model can&apos;t run. Pick a
+            default below.
+          </p>
+        </Notice>
       ) : (
         <p>
           Default: <strong>{modelName(defaultModel)}</strong> ({enabled.length} of{" "}
           {data.models.length} models enabled)
         </p>
       )}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <caption>Site catalog ({data.models.length})</caption>
-          <thead>
-            <tr>
-              <th scope="col">Model</th>
-              <th scope="col">Provider model</th>
-              <th scope="col">Enabled</th>
-              <th scope="col">Default</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.models.map((m) => (
-              <tr key={m.alias}>
-                <th scope="row">
-                  {modelName(m)}
-                  {m.label !== null && (
-                    <>
-                      <br />
-                      <code className={styles.hint}>{m.alias}</code>
-                    </>
-                  )}
-                </th>
-                <td>
-                  <code>{m.gatewayModel}</code>
-                </td>
-                <td>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={m.enabled}
-                      disabled={mutation.pending}
-                      onChange={() => void toggle(m)}
-                    />
-                    <span className={styles.visuallyHidden}> {modelName(m)} enabled</span>
-                  </label>
-                </td>
-                <td>
-                  {m.isDefault ? (
-                    <strong>Default</strong>
-                  ) : m.enabled ? (
-                    <button
-                      type="button"
-                      disabled={mutation.pending}
-                      onClick={() => void makeDefault(m)}
-                    >
-                      Make default<span className={styles.visuallyHidden}> {modelName(m)}</span>
-                    </button>
-                  ) : (
-                    <span className={styles.hint}>Enable first</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Table caption={`Site catalog (${data.models.length})`}>
+        <TableHead>
+          <TableRow>
+            <TableHeader>Model</TableHeader>
+            <TableHeader>Provider model</TableHeader>
+            <TableHeader>Enabled</TableHeader>
+            <TableHeader>Default</TableHeader>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {data.models.map((m) => (
+            <TableRow key={m.alias}>
+              <TableRowHeader>
+                {modelName(m)}
+                {m.label !== null && (
+                  <>
+                    <br />
+                    <code className="text-sm font-normal text-console-muted">{m.alias}</code>
+                  </>
+                )}
+              </TableRowHeader>
+              <TableCell>
+                <code>{m.gatewayModel}</code>
+              </TableCell>
+              <TableCell>
+                <Checkbox
+                  label={<span className="sr-only">{modelName(m)} enabled</span>}
+                  checked={m.enabled}
+                  disabled={mutation.pending}
+                  onChange={() => void toggle(m)}
+                />
+              </TableCell>
+              <TableCell>
+                {m.isDefault ? (
+                  <Badge tone="accent">Default</Badge>
+                ) : m.enabled ? (
+                  <Button size="sm" disabled={mutation.pending} onClick={() => void makeDefault(m)}>
+                    Make default<span className="sr-only"> {modelName(m)}</span>
+                  </Button>
+                ) : (
+                  <span className="text-sm text-console-muted">Enable first</span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {confirmDialog}
     </>
   );
 }

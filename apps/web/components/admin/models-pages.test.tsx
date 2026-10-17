@@ -5,7 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { SiteModelsPage } from "./site/models-page";
 import { TeamModelsPage } from "./team/models-page";
-import { TEAM, renderSite, renderTeam, stubApi, summary, type RecordedCall } from "./testing";
+import {
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+  type RecordedCall,
+} from "./testing";
 
 /** KOBE-44: site Models and providers, team Models (over KOBE-40's API, snake_case wire). */
 const T = "2026-10-03T10:00:00Z";
@@ -523,8 +531,6 @@ describe("team: models", () => {
   });
 
   it("warns before disabling the default, and when the team has none", async () => {
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
     const calls = stubApi({
       "GET /v1/team/models": [
         200,
@@ -533,9 +539,12 @@ describe("team: models", () => {
     });
     renderTeam(<TeamModelsPage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByLabelText("Kimi K2.7 Code enabled"));
-    expect(String(confirm.mock.calls[0])).toMatch(/team's default/);
+    const box = await screen.findByLabelText("Kimi K2.7 Code enabled");
+    await user.click(box);
+    const asked = await answerConfirm("Disable Kimi K2.7 Code?", "Cancel");
+    expect(asked).toMatch(/team's default/);
     expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+    expect((box as HTMLInputElement).checked).toBe(true);
     cleanup();
     stubApi({
       "GET /v1/team/models": [200, { models: [teamModel("glm", true, false)], default: null }],

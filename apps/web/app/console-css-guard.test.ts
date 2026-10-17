@@ -170,14 +170,12 @@ const CONSOLE_DIRS = [
 ] as const;
 
 /** The CSS modules console code may still import. Drop one when its last user moves. */
-const CSS_MODULES = [
-  "components/admin/admin.module.css",
-  "components/admin/usage/usage.module.css",
-] as const;
+const CSS_MODULES = ["components/admin/admin.module.css"] as const;
 
 /** Files on Tailwind and the console primitives: no CSS module. Add each page as it moves. */
 const ON_TAILWIND = [
   "app/admin/layout.tsx",
+  "components/admin/budgets/amount-fields.tsx",
   "components/admin/console-nav.tsx",
   "components/admin/console-shell.tsx",
   "components/admin/console-theme-toggle.tsx",
@@ -197,6 +195,7 @@ const ON_TAILWIND = [
   "components/admin/team/agent-builder/version-history.tsx",
   "components/admin/team/agent-inventory.tsx",
   "components/admin/team/agents-page.tsx",
+  "components/admin/team/budgets-page.tsx",
   "components/admin/team/eval-settings-page.tsx",
   "components/admin/team/followups-page.tsx",
   "components/admin/team/gallery-agents.tsx",
@@ -204,13 +203,17 @@ const ON_TAILWIND = [
   "components/admin/team/members-page.tsx",
   "components/admin/team/memory-page.tsx",
   "components/admin/team/memory-switches-form.tsx",
+  "components/admin/team/models-page.tsx",
   "components/admin/team/schedules-page.tsx",
   "components/admin/team/skill-editor/files-editor.tsx",
   "components/admin/team/skill-editor/skill-editor-page.tsx",
   "components/admin/team/skill-editor/skill-reach.tsx",
   "components/admin/team/skill-editor/skills-page.tsx",
   "components/admin/team/skill-review-page.tsx",
+  "components/admin/team/usage-page.tsx",
   "components/admin/team/web-search-page.tsx",
+  "components/admin/usage/usage-chart.tsx",
+  "components/admin/usage/usage-dashboard.tsx",
   "components/me/my-agents-shell.tsx",
 ] as const;
 
