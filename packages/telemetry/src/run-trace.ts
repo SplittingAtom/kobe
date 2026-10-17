@@ -15,6 +15,7 @@ import {
   runRootSpanId,
   runTraceId,
 } from "@kobe/protocol";
+import { epochTime } from "./spans.js";
 import { telemetryState } from "./state.js";
 
 /**
@@ -82,16 +83,18 @@ export function recordRunRootSpan(root: RunRootSpan): void {
   if (!telemetryState().enabled || generator === undefined) return;
   const ids = { traceId: runTraceId(root.runId), spanId: runRootSpanId(root.runId) };
   const span = generator.withIds(ids, () =>
-    trace
-      .getTracer("kobe")
-      .startSpan(
-        RUN_ROOT_SPAN_NAME,
-        { kind: SpanKind.INTERNAL, startTime: root.startMs, attributes: root.attributes },
-        ROOT_CONTEXT,
-      ),
+    trace.getTracer("kobe").startSpan(
+      RUN_ROOT_SPAN_NAME,
+      {
+        kind: SpanKind.INTERNAL,
+        startTime: epochTime(root.startMs),
+        attributes: root.attributes,
+      },
+      ROOT_CONTEXT,
+    ),
   );
   if (root.error) span.setStatus({ code: SpanStatusCode.ERROR });
-  span.end(Math.max(root.endMs, root.startMs));
+  span.end(epochTime(Math.max(root.endMs, root.startMs)));
 }
 
 /** Langfuse session attributes of a run's spans: `session.id` = thread, `user.id` = its owner. */

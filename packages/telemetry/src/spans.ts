@@ -102,9 +102,20 @@ export function markFailed(span: Span, error: unknown): void {
 
 export { SpanKind, SpanStatusCode };
 
+/**
+ * Epoch milliseconds as an OpenTelemetry time. A plain number is ambiguous to the SDK: one not
+ * above `performance.now()` (the process's uptime) is read as a performance timestamp, so a span
+ * whose start and end fall on either side of it gets a negative, zeroed duration. A Date is not.
+ */
+export function epochTime(ms: number): Date {
+  return new Date(ms);
+}
+
 export interface FinishedSpan {
   readonly attributes?: Attributes;
+  /** Epoch milliseconds. */
   readonly startTime: number;
+  /** Epoch milliseconds (default: now). */
   readonly endTime?: number;
   readonly kind?: SpanKind;
   readonly error?: boolean;
@@ -118,11 +129,11 @@ export function recordSpan(name: string, finished: FinishedSpan): void {
     name,
     {
       kind: finished.kind ?? SpanKind.INTERNAL,
-      startTime: finished.startTime,
+      startTime: epochTime(finished.startTime),
       ...(finished.attributes ? { attributes: finished.attributes } : {}),
     },
     finished.parent ?? context.active(),
   );
   if (finished.error) span.setStatus({ code: SpanStatusCode.ERROR });
-  span.end(finished.endTime ?? Date.now());
+  span.end(epochTime(finished.endTime ?? Date.now()));
 }
