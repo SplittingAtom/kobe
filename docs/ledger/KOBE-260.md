@@ -5,7 +5,8 @@
 - **Status:** done on branch, not pushed (group G2)
 - **Branch / worktree:** `group-2-quality` in `../Kobe-g2`
 - **Depends on:** KOBE-259 (catalog `reasoning`, output limits), KOBE-219 (server calls' low effort)
-- **Migrations:** `0125_thinking_controls` (generated), `0126_thinking_level_checks` (custom)
+- **Migrations:** `0125_thinking_controls` (generated), `0126_thinking_level_checks` (custom),
+  `0127_thinking_lowest` (generated, review S2)
 - **Design:** [docs/design/thinking-controls.md](../design/thinking-controls.md) (levels, settings,
   the mapping per control, enforcement, limits)
 
@@ -67,12 +68,33 @@ gemini_budget`, the ones each provider kind takes, and the rules (`thinkingPolic
 - **Pi**: `run.start.config.thinking_level` reaches Pi as `--thinking` (already wired); for
   `openai-completions` Pi sends no reasoning fields (`reasoning: false`), the gateway adds them.
 
+## Review fixes (coordinator, 2026-10-17)
+
+- **S1** the gateway parses and rebuilds the body: every caller reasoning field is removed in any
+  case Go/sonic would match (Kelvin sign included), then its own fields are written once; never
+  appended. Bifrost v2.2.5 source checked (`thinking.type` adaptive, `display`,
+  `output_config.effort` known); no Bifrost image in the loop, a Go-semantics decoder in the test.
+- **S2** `model_catalog.thinking_lowest` (`off` | `low`, 0127) and `ThinkingPolicy.lowest`: with
+  `low`, off means low and is never sent. Known families (`protocol/thinking-models.ts`) default to
+  low; off for them, and `anthropic_budget` for Claude models that reject budgets, are refused on
+  save. Site UI: "The model can turn thinking off" ("can't be turned off: Off uses the lowest").
+  0127 adds stricter checks: fine because 0125 has never been deployed.
+- **S3** Anthropic budget ≤ `max_tokens` − max(1,024, ¼), read from Anthropic's own `max_tokens`.
+- **S4** a sandbox call without a run gets the lowest level; an eval Job's (no run) the default.
+- **S5** top-level `fallbacks` (any case) refused, 400 `fallbacks_not_supported`.
+- **S6** bypass tests in `model-gateway/src/thinking.test.ts`; **S7** the reservation covers a
+  budget the gateway writes. **N1** the server clamps to the strictest alias of the provider model
+  too; **N2** "no level" is cached; **N3** team cell clamps a stale maximum; **N4** label; **N6**
+  doc line; **N7** non-owner PATCH test. Checks after the fixes: format, lint, typecheck green;
+  unit tests green (web alone: 173 files / 1752 tests, flaky only under turbo's parallel load);
+  `test:db` db 51 / 1242, model-gateway 6 / 20, server 118 / 1624; licence, hygiene ok. **N5**: the 0126 checks stay NOT VALID for good (every
+  row was NULL when they were added and each write is checked); no VALIDATE follow-up.
+
 ## Open questions (for Chris or the coordinator)
 
 - gate1: set glm-5.3 (Ollama Cloud) to reasoning + `reasoning_effort` on Site → Models after
   deploy, then run `e2e/browser` `thinking.spec.ts`. Ollama's `reasoning_effort: "none"` →
   `think: false` mapping is verified against the fake only.
-- `anthropic_*` replace the caller's whole `output_config` (Pi sends none today).
 - Contract changes (protocol `thinking.ts`, `run.started.thinking_level`, thread/team-model/usage
   fields) ride in this branch, not a separate PR.
 
