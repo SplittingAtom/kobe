@@ -75,10 +75,13 @@ const LISTED = {
 const bodyOf = (call: RecordedCall | undefined) =>
   JSON.parse(String(must(call).body)) as Record<string, unknown>;
 
+// The consoles ask in their own dialog (useConfirm); the native one must never be used.
 beforeEach(() =>
   vi.stubGlobal(
     "confirm",
-    vi.fn(() => true),
+    vi.fn(() => {
+      throw new Error("window.confirm used");
+    }),
   ),
 );
 afterEach(() => {
@@ -474,8 +477,28 @@ describe("site: models and providers", () => {
     await screen.findByText(/Saved kimi/);
     expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({ label: "Kimi" });
     await user.click(screen.getByRole("button", { name: "Remove kimi" }));
+    expect(summary(calls)).not.toContain("DELETE /v1/site/models/catalog/kimi");
+    expect(await answerConfirm("Remove kimi from the catalog?", "Remove kimi")).toMatch(
+      /Every team that enabled it loses it/,
+    );
     await screen.findByText(/Removed kimi from the catalog/);
     expect(summary(calls)).toContain("DELETE /v1/site/models/catalog/kimi");
+  });
+
+  it("asks before removing a provider, and says when catalog models still use it", async () => {
+    const calls = stubApi({
+      "GET /v1/site/models": [200, MODELS],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+    });
+    renderSite(<SiteModelsPage />);
+    const user = userEvent.setup();
+    const remove = await screen.findByRole("button", { name: "Remove Ollama Cloud" });
+    await user.click(remove);
+    expect(await answerConfirm("Ollama Cloud still serves 1 catalog model.", "Cancel")).toMatch(
+      /server will refuse/,
+    );
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(remove));
   });
 
   it("says so when the model gateway is not configured", async () => {

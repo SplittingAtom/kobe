@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import type { CatalogModel, TokenDefaults } from "../../../lib/admin/api/site/models";
-import styles from "../admin.module.css";
+import { Checkbox, Field, FormRow, TextInput } from "../../ui/console";
 
 /**
  * A catalog model's output limit, context window and reasoning flag (KOBE-259). An empty field
@@ -97,54 +97,52 @@ export function LimitsFields({
   const output = defaultOutput(choice.reasoning, defaults);
   return (
     <>
-      <label>
-        <input
-          type="checkbox"
-          checked={choice.reasoning}
-          onChange={(e) => choice.setReasoning(e.target.checked)}
-        />{" "}
-        Reasons before answering (a thinking model). Its reasoning counts against the output limit,
-        so it gets the higher default, and Kobe&apos;s short calls after a run (conversation titles)
-        ask it for low reasoning effort with more room.
-      </label>
-      <label>
-        Output limit (tokens, optional)
-        <input
-          type="number"
-          inputMode="numeric"
-          min={OUTPUT_RANGE[0]}
-          max={OUTPUT_RANGE[1]}
-          step={1}
-          placeholder={output === undefined ? "Site default" : `Site default: ${tokens(output)}`}
-          aria-describedby={`${id}-limits`}
-          value={choice.maxOutput}
-          onChange={(e) => choice.setMaxOutput(e.target.value)}
-        />
-      </label>
-      <label>
-        Context window (tokens, optional)
-        <input
-          type="number"
-          inputMode="numeric"
-          min={WINDOW_RANGE[0]}
-          max={WINDOW_RANGE[1]}
-          step={1}
-          placeholder={
-            defaults === undefined
-              ? "Site default"
-              : `Site default: ${tokens(defaults.contextWindow)}`
-          }
-          aria-describedby={`${id}-limits`}
-          value={choice.contextWindow}
-          onChange={(e) => choice.setContextWindow(e.target.value)}
-        />
-      </label>
-      <p id={`${id}-limits`} className={styles.hint}>
-        Leave a field empty for the site default. Each model call may write up to the output limit,
-        reasoning included: budgets hold that much while it runs, and a call that is stopped or cut
-        off is charged all of it. Use the values your provider documents for this model: it refuses
-        calls above its own maximum.
-      </p>
+      <Checkbox
+        label="Reasons before answering (a thinking model)."
+        hint="Its reasoning counts against the output limit, so it gets the higher default, and Kobe's short calls after a run (conversation titles) ask it for low reasoning effort with more room."
+        checked={choice.reasoning}
+        onChange={(e) => choice.setReasoning(e.target.checked)}
+      />
+      <FormRow className="mt-3">
+        <Field label="Output limit (tokens, optional)">
+          <TextInput
+            type="number"
+            inputMode="numeric"
+            className="w-48"
+            min={OUTPUT_RANGE[0]}
+            max={OUTPUT_RANGE[1]}
+            step={1}
+            placeholder={output === undefined ? "Site default" : `Site default: ${tokens(output)}`}
+            aria-describedby={`${id}-limits`}
+            value={choice.maxOutput}
+            onChange={(e) => choice.setMaxOutput(e.target.value)}
+          />
+        </Field>
+        <Field label="Context window (tokens, optional)">
+          <TextInput
+            type="number"
+            inputMode="numeric"
+            className="w-48"
+            min={WINDOW_RANGE[0]}
+            max={WINDOW_RANGE[1]}
+            step={1}
+            placeholder={
+              defaults === undefined
+                ? "Site default"
+                : `Site default: ${tokens(defaults.contextWindow)}`
+            }
+            aria-describedby={`${id}-limits`}
+            value={choice.contextWindow}
+            onChange={(e) => choice.setContextWindow(e.target.value)}
+          />
+        </Field>
+        <p id={`${id}-limits`} className="m-0 basis-full text-sm text-console-muted">
+          Leave a field empty for the site default. Each model call may write up to the output
+          limit, reasoning included: budgets hold that much while it runs, and a call that is
+          stopped or cut off is charged all of it. Use the values your provider documents for this
+          model: it refuses calls above its own maximum.
+        </p>
+      </FormRow>
     </>
   );
 }

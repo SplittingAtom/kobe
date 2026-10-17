@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import {
   getSiteBudget,
   setSiteBudget,
@@ -8,10 +8,10 @@ import {
   type SiteLimits,
 } from "../../../lib/admin/api/budgets";
 import { AmountFields, parseAmounts, useAmountTexts } from "../budgets/amount-fields";
+import { Button, Field, FieldError, FormRow, Section, TextInput } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * The site budget (spec D30, Bifrost's customer level; `/v1/site/budget`): every team's
@@ -21,8 +21,7 @@ export function SiteBudget() {
   const { state, reload } = useResource(getSiteBudget);
   const mutation = useMutation();
   return (
-    <section aria-labelledby="site-budget">
-      <h2 id="site-budget">Site budget</h2>
+    <Section id="site-budget" title="Site budget">
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="the site budget">
         {(limits) => (
@@ -42,7 +41,7 @@ export function SiteBudget() {
           />
         )}
       </ResourceView>
-    </section>
+    </Section>
   );
 }
 
@@ -58,6 +57,7 @@ function Form({
   const [amounts, setAmounts] = useAmountTexts(limits);
   const [rpm, setRpm] = useState(String(limits.userRequestsPerMinute));
   const [invalid, setInvalid] = useState<string | null>(null);
+  const errorId = useId();
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -72,19 +72,27 @@ function Form({
   }
 
   return (
-    <form className={styles.form} onSubmit={submit}>
-      {invalid && (
-        <p role="alert" className={styles.error}>
-          {invalid}
-        </p>
-      )}
-      <AmountFields value={amounts} onChange={setAmounts} prefix="Site " />
-      <label>
-        Requests per minute per user
-        <input inputMode="numeric" value={rpm} onChange={(e) => setRpm(e.target.value)} />
-      </label>
-      <button type="submit">Save site budget</button>
-      <p className={styles.hint}>
+    <form
+      onSubmit={submit}
+      aria-label="Site budget"
+      aria-describedby={invalid ? errorId : undefined}
+    >
+      {invalid && <FieldError id={errorId}>{invalid}</FieldError>}
+      <FormRow>
+        <AmountFields value={amounts} onChange={setAmounts} prefix="Site " />
+        <Field label="Requests per minute per user">
+          <TextInput
+            inputMode="numeric"
+            className="w-36"
+            value={rpm}
+            onChange={(e) => setRpm(e.target.value)}
+          />
+        </Field>
+        <Button type="submit" variant="primary">
+          Save site budget
+        </Button>
+      </FormRow>
+      <p className="m-0 text-sm text-console-muted">
         Months and days are calendar periods in UTC. Token budgets count input, output and cached
         tokens and also cap models without prices.
       </p>
