@@ -151,6 +151,8 @@ RUN groupadd --gid 1000 kobe \
  && setcap cap_setuid,cap_setgid=ep /opt/kobe/bin/kobe-runas \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow
 
+# Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).
+COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /usr/share/doc/kobe/
 USER 1000:1000
 WORKDIR /workspace
 # tini is PID 1; the entrypoint disables core dumps and runs node with --disable-sigusr1. Pod specs
