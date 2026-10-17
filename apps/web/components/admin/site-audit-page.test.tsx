@@ -113,17 +113,31 @@ describe("Site audit log (KOBE-291)", () => {
     expect(screen.queryByRole("button", { name: /delete|edit|remove/i })).toBeNull();
   });
 
-  it("shows the chain as verified with the attested head to record", async () => {
-    stubPage();
+  it("doesn't verify the chain on open: it says so until Verify chain is pressed", async () => {
+    const calls = stubPage();
     renderSite(<SiteAuditPage />);
-    const region = await screen.findByRole("region", { name: "Chain integrity" });
+    await table();
+    const region = screen.getByRole("region", { name: "Chain integrity" });
+    expect(within(region).getByText("Not verified yet.")).toBeTruthy();
+    expect(summary(calls)).not.toContain(INTEGRITY);
+
+    await userEvent.click(within(region).getByRole("button", { name: "Verify chain" }));
     expect(await within(region).findByText("Chain verified")).toBeTruthy();
+    expect(region.textContent).toMatch(/Last verified/);
+    expect(
+      within(region)
+        .getByText(/Last verified/)
+        .querySelector("time")
+        ?.getAttribute("datetime"),
+    ).toBe(VERIFIED.anchor.at);
     expect(region.textContent).toMatch(/All 10 events chain correctly, up to event #10/);
     expect(region.textContent).toContain(`10:${"c".repeat(64)}`);
     expect(region.textContent).toContain("d".repeat(64));
+    expect(within(region).queryByText("Not verified yet.")).toBeNull();
+    expect(summary(calls).filter((c) => c === INTEGRITY)).toHaveLength(1);
   });
 
-  it("names the first broken event, and checks again on request", async () => {
+  it("names the first broken event, and keeps it when the rate limit refuses a new check", async () => {
     const calls = stubPage({
       [INTEGRITY]: [
         [
@@ -140,13 +154,20 @@ describe("Site audit log (KOBE-291)", () => {
       ],
     });
     renderSite(<SiteAuditPage />);
-    const alert = await screen.findByRole("alert");
+    await table();
+    const region = screen.getByRole("region", { name: "Chain integrity" });
+    const verify = within(region).getByRole("button", { name: "Verify chain" });
+    await userEvent.click(verify);
+    const alert = await within(region).findByRole("alert");
     expect(alert.textContent).toMatch(/The chain is broken/);
     expect(alert.textContent).toMatch(/Event #4: its contents do not match its hash/);
-    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
-    const region = screen.getByRole("region", { name: "Chain integrity" });
-    expect(await within(region).findByText("Try the check again in a minute.")).toBeTruthy();
-    expect(within(region).queryByRole("alert")).toBeNull();
+    expect(region.textContent).toMatch(/Last verified/);
+
+    await userEvent.click(verify);
+    expect(await within(region).findByText(/^Try again in a minute/)).toBeTruthy();
+    // The refusal is a warning, and the last result stays.
+    expect(within(region).getAllByRole("alert")).toHaveLength(1);
+    expect(region.textContent).toMatch(/Event #4/);
     expect(summary(calls).filter((c) => c === INTEGRITY)).toHaveLength(2);
   });
 

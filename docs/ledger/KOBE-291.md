@@ -12,8 +12,8 @@
   applied by the server: action (exact name, checked against a name pattern before sending),
   category, actor (site users), team (site teams), From/To (`datetime-local` → ISO). Columns: seq,
   time, actor (name, email; "Kobe (system)"), team ("Site" for null), action, details, client.
-  Chain status from `GET /v1/site/audit/integrity`, run once when the page opens and on
-  "Check again": verified (count, head `seq:hash`, attestation MAC to record off the box), broken
+  Chain status from `GET /v1/site/audit/integrity`, only on **Verify chain** (coordinator,
+  2026-10-16): "Not verified yet" until then (the API keeps no last result), then verified (count, head `seq:hash`, attestation MAC to record off the box), broken
   (first bad event and what it means, as an error), or the server's 3/min refusal (a warning).
 - **Site Backup and restore** (`/admin/site/backup`, `components/admin/site/backup-page.tsx`,
   `lib/admin/api/site/backup.ts`): status (last `platform.restore.completed` from the audit log:
@@ -56,13 +56,16 @@
   client), so `prevHash`/`hash` or anything the server adds later never renders; target values
   render as text nodes (strings as-is, others as JSON), never as markup or links. Tests cover
   `<img onerror>`, `javascript:` and extra fields.
-- **Integrity on open:** each open costs one of the admin's 3 checks a minute; a 429 is shown as a
-  warning to wait. Said here in case review prefers on-demand only.
+- **Integrity on demand** (coordinator, 2026-10-16): no check on open; "Verify chain" runs it
+  and the latest result stays with when it ran (the attestation time). The API stores no last
+  result, so a fresh page says "Not verified yet". A 429 shows "Try again in a minute" as a
+  warning and keeps the previous result.
 
 ## Tests and evidence
 
 - `components/admin/site-audit-page.test.tsx` (12): section gating (admin/owner yes, user no),
-  rows and columns, read-only (GET only), verified/broken/429 chain states, all six filters in
+  rows and columns, read-only (GET only), no chain check on open, Verify chain verified/broken
+  with time, 429 keeps the last result, all six filters in
   the query, Clear, client-side validation (no request), paging keeps filters, 5xx hidden,
   erasure window, unknown erasure period, plain text and dropped fields, helpers.
 - `components/admin/site-backup-page.test.tsx` (4): ready section, last restore, never restored,
@@ -88,5 +91,4 @@
 
 ## Open questions
 
-- Should the chain check run only on demand instead of on open (see Decisions)?
 - The browser spec and the new screenshots need a gate1 run after deploy.

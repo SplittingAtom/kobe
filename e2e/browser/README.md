@@ -45,7 +45,7 @@ Without a local browser, run the same command in the matching image,
 
 ## Console sections (KOBE-291)
 
-`console-sections.spec.ts` opens the Site audit log (chain status, a category filter and Clear),
+`console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
 Site backup and restore, and the Team inventory, and checks none of them is a "coming soon"
 placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
 of the active team: `npx playwright test console-sections`.

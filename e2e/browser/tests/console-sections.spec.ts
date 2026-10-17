@@ -22,10 +22,14 @@ async function open(page: Page, path: string, title: string): Promise<void> {
 test("Site audit log: events, filters and the chain status", async ({ page }) => {
   await open(page, "/admin/site/audit", "Audit log");
   const chain = page.getByRole("region", { name: "Chain integrity" });
-  // Verified, broken, or the server's 3-a-minute limit: each is a definite answer.
+  // Never checked on open: only Verify chain runs it (the server allows 3 a minute).
+  await expect(chain.getByText("Not verified yet.")).toBeVisible();
+  await chain.getByRole("button", { name: "Verify chain" }).click();
   await expect(
-    chain.getByText(/Chain verified|The chain is broken|Try the check again/),
-  ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+    chain.getByText(/Chain verified|The chain is broken|^Try again in a minute/),
+  ).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await expect(chain.getByText("The chain is broken")).toHaveCount(0);
 
   const events = page.getByRole("table", { name: "Audit events, newest first" });

@@ -489,7 +489,7 @@ Pages are newest first: pass `nextCursor` back as `before`. Pass `after` (for ex
 to page oldest first, as an export does. Unknown parameters return 400.
 
 In the web app, site admins read the log in the Site console under **Audit log** (filters by
-action, category, actor, team and time; the chain check runs when the page opens, and the IP and
+action, category, actor, team and time; the chain is verified on request with **Verify chain**, which shows the result and when it ran, and the IP and
 user agent are shown only until the erasure period has passed), and team admins under the Team
 console's **Audit view** (KOBE-291).
 
