@@ -7,9 +7,8 @@ import {
   type InjectedHeader,
   type TeamEgressDomain,
 } from "../../../lib/admin/api/team/egress";
-import { confirmed } from "../parts";
+import { Button, Field, TextInput, useConfirm } from "../../ui/console";
 import type { Mutation } from "../use-resource";
-import styles from "../admin.module.css";
 
 const MAX_HEADERS = 8;
 const EMPTY: InjectedHeader = { name: "", value: "" };
@@ -35,6 +34,7 @@ export function DomainHeaders({
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<InjectedHeader[]>([EMPTY]);
   const names = domain.headerNames;
+  const [confirm, confirmDialog] = useConfirm();
 
   const update = (i: number, change: Partial<InjectedHeader>) =>
     setRows((all) => all.map((r, j) => (j === i ? { ...r, ...change } : r)));
@@ -59,7 +59,11 @@ export function DomainHeaders({
   }
 
   async function clear() {
-    if (!confirmed(`Remove the injected headers for ${domain.domain}?`)) return;
+    const yes = await confirm({
+      title: `Remove the injected headers for ${domain.domain}?`,
+      confirmLabel: "Remove headers",
+    });
+    if (!yes) return;
     const done = await mutation.run(
       () => clearDomainHeaders(teamId, domain.domain),
       () => `Removed the injected headers for ${domain.domain}.`,
@@ -69,71 +73,77 @@ export function DomainHeaders({
 
   if (!editing) {
     return (
-      <div>
+      <div className="flex flex-wrap items-center gap-1.5">
         {names.length > 0 ? (
-          <span>
+          <span className="flex flex-wrap gap-1">
             {names.map((n) => (
               <code key={n}>{n} </code>
             ))}
           </span>
         ) : (
-          <span className={styles.hint}>None</span>
-        )}{" "}
-        <button type="button" disabled={mutation.pending} onClick={() => setEditing(true)}>
+          <span className="text-sm text-console-muted">None</span>
+        )}
+        <Button size="sm" disabled={mutation.pending} onClick={() => setEditing(true)}>
           {names.length > 0 ? "Replace" : "Add"} headers
-          <span className={styles.visuallyHidden}> for {domain.domain}</span>
-        </button>
+          <span className="sr-only"> for {domain.domain}</span>
+        </Button>
         {names.length > 0 ? (
-          <button type="button" disabled={mutation.pending} onClick={() => void clear()}>
-            Remove headers<span className={styles.visuallyHidden}> for {domain.domain}</span>
-          </button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={mutation.pending}
+            onClick={() => void clear()}
+          >
+            Remove headers<span className="sr-only"> for {domain.domain}</span>
+          </Button>
         ) : null}
+        {confirmDialog}
       </div>
     );
   }
 
   return (
     <form
-      className={styles.form}
+      className="my-2 grid gap-3"
       aria-label={`Headers for ${domain.domain}`}
       onSubmit={(e) => void save(e)}
     >
-      <p className={styles.hint}>
+      <p className="m-0 text-sm text-console-muted">
         Sent by the egress proxy with every request the team&apos;s sandboxes make to{" "}
         <code>http://{domain.domain}/…</code> (upgraded to verified HTTPS). Values are stored
         encrypted and never shown again; saving replaces all headers for this domain.
       </p>
       {rows.map((row, i) => (
-        <div key={i}>
-          <label htmlFor={`${ids}-n${i}`}>Header name</label>
-          <input
-            id={`${ids}-n${i}`}
-            value={row.name}
-            autoComplete="off"
-            onChange={(e) => update(i, { name: e.target.value })}
-          />
-          <label htmlFor={`${ids}-v${i}`}>Value</label>
-          <input
-            id={`${ids}-v${i}`}
-            type="password"
-            value={row.value}
-            autoComplete="new-password"
-            onChange={(e) => update(i, { value: e.target.value })}
-          />
+        <div key={i} className="flex flex-wrap items-end gap-3">
+          <Field id={`${ids}-n${i}`} label="Header name">
+            <TextInput
+              value={row.name}
+              autoComplete="off"
+              onChange={(e) => update(i, { name: e.target.value })}
+            />
+          </Field>
+          <Field id={`${ids}-v${i}`} label="Value">
+            <TextInput
+              type="password"
+              value={row.value}
+              autoComplete="new-password"
+              onChange={(e) => update(i, { value: e.target.value })}
+            />
+          </Field>
         </div>
       ))}
-      <div className={styles.actions}>
+      <div className="flex flex-wrap gap-1.5">
         {rows.length < MAX_HEADERS ? (
-          <button type="button" onClick={() => setRows((all) => [...all, EMPTY])}>
+          <Button size="sm" onClick={() => setRows((all) => [...all, EMPTY])}>
             Another header
-          </button>
+          </Button>
         ) : null}
-        <button type="submit" disabled={mutation.pending}>
+        <Button size="sm" type="submit" variant="primary" disabled={mutation.pending}>
           Save headers
-        </button>
-        <button type="button" onClick={() => setEditing(false)}>
+        </Button>
+        <Button size="sm" onClick={() => setEditing(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );

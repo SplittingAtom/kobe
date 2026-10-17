@@ -5,11 +5,22 @@ import {
   listEgressRequests,
   type TeamEgressRequest,
 } from "../../../lib/admin/api/team/egress";
+import {
+  Button,
+  EmptyState,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 /**
  * Pending access requests (KOBE-39, D28): a member's sandbox was blocked from a host and they asked
@@ -36,68 +47,71 @@ export function EgressRequests({ onDecided }: { readonly onDecided: () => void }
   }
 
   return (
-    <section aria-labelledby="egress-requests">
-      <h2 id="egress-requests">Access requests</h2>
+    <Section id="egress-requests" title="Access requests">
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="access requests">
         {(requests) =>
           requests.length === 0 ? (
-            <p>No pending requests.</p>
+            <EmptyState title="No pending requests." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Pending requests ({requests.length})</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Blocked host</th>
-                    <th scope="col">Enables</th>
-                    <th scope="col">Requested by</th>
-                    <th scope="col">When</th>
-                    <th scope="col">Decision</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requests.map((r) => (
-                    <tr key={r.id}>
-                      <th scope="row">
-                        <code>{r.domain}</code>
-                      </th>
-                      <td>
-                        <code>{r.pattern}</code>
-                      </td>
-                      <td>
-                        {r.requestedBy.name}
-                        {r.threadId ? (
-                          <span className={styles.hint}> (thread {r.threadId.slice(0, 8)})</span>
-                        ) : null}
-                      </td>
-                      <td>
-                        <DateTime value={r.createdAt} />
-                      </td>
-                      <td className={styles.actions}>
-                        <button
-                          type="button"
+            <Table caption={`Pending requests (${requests.length})`}>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Blocked host</TableHeader>
+                  <TableHeader>Enables</TableHeader>
+                  <TableHeader>Requested by</TableHeader>
+                  <TableHeader>When</TableHeader>
+                  <TableHeader>Decision</TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {requests.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableRowHeader>
+                      <code>{r.domain}</code>
+                    </TableRowHeader>
+                    <TableCell>
+                      <code>{r.pattern}</code>
+                    </TableCell>
+                    <TableCell>
+                      {r.requestedBy.name}
+                      {r.threadId ? (
+                        <span className="text-sm text-console-muted">
+                          {" "}
+                          (thread {r.threadId.slice(0, 8)})
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <DateTime value={r.createdAt} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="primary"
                           disabled={mutation.pending}
                           onClick={() => void decide(r, "approve")}
                         >
-                          Approve<span className={styles.visuallyHidden}> {r.domain}</span>
-                        </button>
-                        <button
-                          type="button"
+                          Approve<span className="sr-only"> {r.domain}</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
                           disabled={mutation.pending}
                           onClick={() => void decide(r, "deny")}
                         >
-                          Deny<span className={styles.visuallyHidden}> {r.domain}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                          Deny<span className="sr-only"> {r.domain}</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>
-    </section>
+    </Section>
   );
 }

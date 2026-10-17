@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { RetentionMaximumPage } from "./site/retention-page";
 import { TeamRetentionPage } from "./team/retention-page";
-import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
+import { TEAM, answerConfirm, renderSite, renderTeam, stubApi } from "./testing";
 
 const view = (
   period: string,
@@ -54,7 +54,9 @@ describe("Team retention (KOBE-18)", () => {
     expect(screen.getByRole("radio", { name: "1 year" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "90 days" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    const asked = await answerConfirm("Keep conversations for 90 days only?", "Keep for 90 days");
+    expect(asked).toMatch(/deleted for good/);
     await screen.findByText(/Scheduled: from .* keeps conversations for 90 days/);
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ period: "90d" });
@@ -62,7 +64,6 @@ describe("Team retention (KOBE-18)", () => {
   });
 
   it("sends nothing when the confirmation is cancelled, and shows the server's refusal", async () => {
-    confirm.mockReturnValue(false);
     const calls = stubApi({
       "GET /v1/team/retention": [200, view("1y", "forever", "1y", ["30d", "90d", "1y", "forever"])],
       "PUT /v1/team/retention": [
@@ -73,6 +74,7 @@ describe("Team retention (KOBE-18)", () => {
     renderTeam(<TeamRetentionPage />);
     await userEvent.click(await screen.findByRole("radio", { name: "30 days" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await answerConfirm("Keep conversations for 30 days only?", "Cancel");
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
     // Longer than what applies: no confirmation needed; the server refuses it.
     await userEvent.click(screen.getByRole("radio", { name: "Forever" }));

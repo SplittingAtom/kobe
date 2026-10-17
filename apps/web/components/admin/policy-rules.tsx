@@ -1,12 +1,27 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import type { ApiResult } from "../../lib/api/client";
 import type { NewRule, PolicyRule, RuleEffect } from "../../lib/admin/api/policy";
+import {
+  Button,
+  EmptyState,
+  Field,
+  FormRow,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+  TextInput,
+  useConfirm,
+} from "../ui/console";
 import { MutationStatus } from "./error-notice";
-import { DateTime, ResourceView, confirmed } from "./parts";
+import { DateTime, ResourceView } from "./parts";
 import { useMutation, useResource } from "./use-resource";
-import styles from "./admin.module.css";
 
 const EFFECT_LABEL: Readonly<Record<RuleEffect, string>> = {
   deny: "Deny",
@@ -38,6 +53,8 @@ export function RulesEditor({
   const [toolGlob, setToolGlob] = useState("");
   const [note, setNote] = useState("");
   const [expires, setExpires] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+  const globHint = useId();
 
   async function onAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -60,7 +77,11 @@ export function RulesEditor({
   }
 
   async function onRemove(rule: PolicyRule) {
-    if (!confirmed(`Remove the rule "${EFFECT_LABEL[rule.effect]} ${rule.toolGlob}"?`)) return;
+    const yes = await confirm({
+      title: `Remove the rule "${EFFECT_LABEL[rule.effect]} ${rule.toolGlob}"?`,
+      confirmLabel: "Remove rule",
+    });
+    if (!yes) return;
     const done = await mutation.run(
       () => remove(rule.id),
       () => `Removed: ${EFFECT_LABEL[rule.effect]} for ${rule.toolGlob}.`,
@@ -70,45 +91,42 @@ export function RulesEditor({
 
   return (
     <>
-      <form onSubmit={onAdd} className={styles.form} aria-label="Add a rule">
-        <label>
-          Effect
-          <select value={effect} onChange={(e) => setEffect(e.target.value as RuleEffect)}>
-            {effects.map((x) => (
-              <option key={x} value={x}>
-                {EFFECT_LABEL[x]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tool pattern
-          <input
-            required
-            maxLength={256}
-            placeholder="mcp__github__*"
-            aria-describedby="rule-glob-hint"
-            value={toolGlob}
-            onChange={(e) => setToolGlob(e.target.value)}
-          />
-        </label>
-        <label>
-          Note (optional)
-          <input maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-        <label>
-          Expires (optional)
-          <input
-            type="datetime-local"
-            value={expires}
-            onChange={(e) => setExpires(e.target.value)}
-          />
-        </label>
-        <button type="submit" disabled={mutation.pending}>
-          Add rule
-        </button>
+      <form onSubmit={onAdd} aria-label="Add a rule">
+        <FormRow className="mb-1">
+          <Field label="Effect">
+            <Select value={effect} onChange={(e) => setEffect(e.target.value as RuleEffect)}>
+              {effects.map((x) => (
+                <option key={x} value={x}>
+                  {EFFECT_LABEL[x]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Tool pattern" required>
+            <TextInput
+              maxLength={256}
+              placeholder="mcp__github__*"
+              aria-describedby={globHint}
+              value={toolGlob}
+              onChange={(e) => setToolGlob(e.target.value)}
+            />
+          </Field>
+          <Field label="Note (optional)">
+            <TextInput maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <Field label="Expires (optional)">
+            <TextInput
+              type="datetime-local"
+              value={expires}
+              onChange={(e) => setExpires(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" variant="primary" disabled={mutation.pending}>
+            Add rule
+          </Button>
+        </FormRow>
       </form>
-      <p id="rule-glob-hint" className={styles.hint}>
+      <p id={globHint} className="m-0 mb-4 text-sm text-console-muted">
         A tool name or glob: a built-in tool (<code>bash</code>, <code>write</code>) or a
         connector&apos;s tools (<code>mcp__server__tool</code>, <code>mcp__server__*</code>).
       </p>
@@ -116,64 +134,63 @@ export function RulesEditor({
       <ResourceView state={state} label="rules">
         {(rules) =>
           rules.length === 0 ? (
-            <p>No rules yet.</p>
+            <EmptyState title="No rules yet." />
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>
-                  {caption} ({rules.length})
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Effect</th>
-                    <th scope="col">Tool pattern</th>
-                    <th scope="col">Arguments</th>
-                    <th scope="col">Note</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">
-                      <span className={styles.visuallyHidden}>Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rules.map((r) => (
-                    <tr key={r.id}>
-                      <td>{EFFECT_LABEL[r.effect]}</td>
-                      <th scope="row">
-                        <code>{r.toolGlob}</code>
-                      </th>
-                      <td>
-                        {r.argPattern === null
-                          ? "Any"
-                          : Object.entries(r.argPattern).map(([pointer, glob]) => (
-                              <div key={pointer}>
-                                <code>{pointer}</code> matches <code>{glob}</code>
-                              </div>
-                            ))}
-                      </td>
-                      <td>{r.note ?? ""}</td>
-                      <td>{r.expiresAt ? <DateTime value={r.expiresAt} /> : "Never"}</td>
-                      <td>
-                        <button
-                          type="button"
-                          disabled={mutation.pending}
-                          onClick={() => void onRemove(r)}
-                        >
-                          Remove
-                          <span className={styles.visuallyHidden}>
-                            {" "}
-                            rule {EFFECT_LABEL[r.effect]} {r.toolGlob}
-                          </span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table caption={`${caption} (${rules.length})`}>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Effect</TableHeader>
+                  <TableHeader>Tool pattern</TableHeader>
+                  <TableHeader>Arguments</TableHeader>
+                  <TableHeader>Note</TableHeader>
+                  <TableHeader>Expires</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rules.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>{EFFECT_LABEL[r.effect]}</TableCell>
+                    <TableRowHeader>
+                      <code>{r.toolGlob}</code>
+                    </TableRowHeader>
+                    <TableCell>
+                      {r.argPattern === null
+                        ? "Any"
+                        : Object.entries(r.argPattern).map(([pointer, glob]) => (
+                            <div key={pointer}>
+                              <code>{pointer}</code> matches <code>{glob}</code>
+                            </div>
+                          ))}
+                    </TableCell>
+                    <TableCell>{r.note ?? ""}</TableCell>
+                    <TableCell>
+                      {r.expiresAt ? <DateTime value={r.expiresAt} /> : "Never"}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={mutation.pending}
+                        onClick={() => void onRemove(r)}
+                      >
+                        Remove
+                        <span className="sr-only">
+                          {" "}
+                          rule {EFFECT_LABEL[r.effect]} {r.toolGlob}
+                        </span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )
         }
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }

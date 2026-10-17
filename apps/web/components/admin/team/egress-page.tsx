@@ -6,14 +6,27 @@ import {
   listTeamEgress,
   type TeamEgressDomain,
 } from "../../../lib/admin/api/team/egress";
+import {
+  Button,
+  Checkbox,
+  EmptyState,
+  PageHeader,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
-import { SharedHostingNote } from "../site/egress-ceiling-page";
+import { SharedHostingNote } from "../shared-hosting-note";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { DomainHeaders } from "./egress-headers";
 import { EgressRequests } from "./egress-requests";
-import styles from "../admin.module.css";
 
 /**
  * Team egress (spec D6/D28; `/v1/team/egress`): enablement (KOBE-38), access requests and injected
@@ -37,72 +50,65 @@ export function TeamEgressPage() {
 
   return (
     <>
-      <h1>Egress</h1>
-      <p className={styles.hint}>
-        Your team&apos;s sandboxes reach nothing on the internet until you enable a domain here, and
-        only domains in the site&apos;s egress ceiling can be enabled. Connections are HTTPS only
-        and logged to the audit view. Members can&apos;t enable domains themselves: when their
-        sandbox is blocked they can request access, and you approve or deny it here.
-      </p>
+      <PageHeader
+        title="Egress"
+        description="Your team's sandboxes reach nothing on the internet until you enable a domain here, and only domains in the site's egress ceiling can be enabled. Connections are HTTPS only and logged to the audit view. Members can't enable domains themselves: when their sandbox is blocked they can request access, and you approve or deny it here."
+      />
       <EgressRequests onDecided={reload} />
-      <h2>Domains</h2>
-      <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="egress domains">
-        {(domains) =>
-          domains.length === 0 ? (
-            <p>The site ceiling is empty: ask a site admin to add domains.</p>
-          ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <caption>Domains ({domains.length})</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Domain</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Enabled</th>
-                    <th scope="col">Since</th>
-                    <th scope="col">Injected headers</th>
-                  </tr>
-                </thead>
-                <tbody>
+      <Section title="Domains">
+        <MutationStatus error={mutation.error} notice={mutation.notice} />
+        <ResourceView state={state} label="egress domains">
+          {(domains) =>
+            domains.length === 0 ? (
+              <EmptyState title="The site ceiling is empty: ask a site admin to add domains." />
+            ) : (
+              <Table caption={`Domains (${domains.length})`}>
+                <TableHead>
+                  <TableRow>
+                    <TableHeader>Domain</TableHeader>
+                    <TableHeader>Status</TableHeader>
+                    <TableHeader>Enabled</TableHeader>
+                    <TableHeader>Since</TableHeader>
+                    <TableHeader>Injected headers</TableHeader>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
                   {domains.map((d) => (
-                    <tr key={d.domain}>
-                      <th scope="row">
+                    <TableRow key={d.domain}>
+                      <TableRowHeader>
                         <code>{d.domain}</code>
                         {d.sharedHosting ? <SharedHostingNote /> : null}
-                      </th>
-                      <td>
+                      </TableRowHeader>
+                      <TableCell>
                         {!d.inCeiling
                           ? "Suspended (not in the site ceiling)"
                           : d.enabled
                             ? "Enabled"
                             : "Off"}
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         {d.inCeiling ? (
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={d.enabled}
-                              disabled={mutation.pending}
-                              onChange={() => void toggle(d)}
-                            />
-                            <span className={styles.visuallyHidden}> {d.domain} enabled</span>
-                          </label>
+                          <Checkbox
+                            label={<span className="sr-only">{d.domain} enabled</span>}
+                            checked={d.enabled}
+                            disabled={mutation.pending}
+                            onChange={() => void toggle(d)}
+                          />
                         ) : (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant="danger"
                             disabled={mutation.pending}
                             onClick={() => void toggle(d)}
                           >
-                            Disable<span className={styles.visuallyHidden}> {d.domain}</span>
-                          </button>
+                            Disable<span className="sr-only"> {d.domain}</span>
+                          </Button>
                         )}
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <DateTime value={d.enabledAt} />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         {d.enabled && !d.domain.startsWith("*.") ? (
                           <DomainHeaders
                             teamId={teamId}
@@ -111,17 +117,17 @@ export function TeamEgressPage() {
                             onChanged={reload}
                           />
                         ) : (
-                          <span className={styles.hint}>—</span>
+                          <span className="text-console-muted">—</span>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </ResourceView>
+                </TableBody>
+              </Table>
+            )
+          }
+        </ResourceView>
+      </Section>
     </>
   );
 }

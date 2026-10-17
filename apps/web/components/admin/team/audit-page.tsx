@@ -4,12 +4,22 @@ import { useState } from "react";
 import type { ApiError, ApiResult } from "../../../lib/api/client";
 import { listTeamAudit, type TeamAuditEvent } from "../../../lib/admin/api/team/audit";
 import { listTeamGrants, type TeamGrants } from "../../../lib/admin/api/team/break-glass";
+import {
+  Button,
+  EmptyState,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { ErrorNotice } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
 import { BreakGlassBanners } from "./break-glass-page";
-import styles from "../admin.module.css";
 
 interface AuditData {
   readonly grants: TeamGrants;
@@ -47,7 +57,7 @@ export function TeamAuditPage() {
 
   return (
     <>
-      <h1>Audit view</h1>
+      <PageHeader title="Audit view" />
       <ResourceView state={state} label="audit events">
         {(data) => {
           const next = cursor === undefined ? data.nextCursor : cursor;
@@ -62,41 +72,41 @@ export function TeamAuditPage() {
           return (
             <>
               <BreakGlassBanners grants={data.grants.active} />
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>
-                  <caption>Events, newest first</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">When</th>
-                      <th scope="col">Who</th>
-                      <th scope="col">What</th>
-                      <th scope="col">Details</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              {events.length === 0 ? (
+                <EmptyState title="No events yet." />
+              ) : (
+                <Table caption="Events, newest first">
+                  <TableHead>
+                    <TableRow>
+                      <TableHeader>When</TableHeader>
+                      <TableHeader>Who</TableHeader>
+                      <TableHeader>What</TableHeader>
+                      <TableHeader>Details</TableHeader>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
                     {events.map((e) => (
-                      <tr key={e.id}>
-                        <td>
+                      <TableRow key={e.id}>
+                        <TableCell className="whitespace-nowrap">
                           <DateTime value={e.at} />
-                        </td>
-                        <td>{actorName(e)}</td>
-                        <td>
+                        </TableCell>
+                        <TableCell>{actorName(e)}</TableCell>
+                        <TableCell>
                           <code>{e.action}</code>
-                        </td>
-                        <td>
-                          <code>{JSON.stringify(e.target)}</code>
-                        </td>
-                      </tr>
+                        </TableCell>
+                        <TableCell>
+                          <code className="break-all">{JSON.stringify(e.target)}</code>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-              {events.length === 0 && <p>No events yet.</p>}
+                  </TableBody>
+                </Table>
+              )}
               {error && <ErrorNotice error={error} />}
               {next && (
-                <button type="button" onClick={() => void loadMore()}>
+                <Button className="mt-3" onClick={() => void loadMore()}>
                   Load more
-                </button>
+                </Button>
               )}
             </>
           );

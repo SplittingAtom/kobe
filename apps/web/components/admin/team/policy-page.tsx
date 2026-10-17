@@ -1,21 +1,19 @@
 "use client";
 
 import { createTeamRule, deleteTeamRule, listTeamRules } from "../../../lib/admin/api/team/policy";
+import { PageHeader } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { RulesEditor } from "../policy-rules";
-import styles from "../admin.module.css";
 
 /** Team tool policy (spec D6/D29; `/v1/team/policy`, KOBE-35). */
 export function TeamPolicyPage() {
   const teamId = useTeamAccess().team.id;
   return (
     <>
-      <h1>Policy</h1>
-      <p className={styles.hint}>
-        Team rules apply inside the site floor: they can deny or ask for more, and allow rules only
-        pre-approve one built-in tool or one connector&apos;s tools. Site deny and ask rules always
-        win.
-      </p>
+      <PageHeader
+        title="Policy"
+        description="Team rules apply inside the site floor: they can deny or ask for more, and allow rules only pre-approve one built-in tool or one connector's tools. Site deny and ask rules always win."
+      />
       <RulesEditor
         caption="Team rules"
         effects={["deny", "ask", "allow"]}

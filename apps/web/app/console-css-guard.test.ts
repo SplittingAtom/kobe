@@ -184,6 +184,8 @@ const ON_TAILWIND = [
   "components/admin/isolation-banner.tsx",
   "components/admin/overview.tsx",
   "components/admin/placeholder.tsx",
+  "components/admin/policy-rules.tsx",
+  "components/admin/shared-hosting-note.tsx",
   "components/admin/team/agent-builder/agent-builder-page.tsx",
   "components/admin/team/agent-builder/eval-report.tsx",
   "components/admin/team/agent-builder/eval-status.tsx",
@@ -195,7 +197,13 @@ const ON_TAILWIND = [
   "components/admin/team/agent-builder/version-history.tsx",
   "components/admin/team/agent-inventory.tsx",
   "components/admin/team/agents-page.tsx",
+  "components/admin/team/audit-page.tsx",
+  "components/admin/team/break-glass-page.tsx",
   "components/admin/team/budgets-page.tsx",
+  "components/admin/team/connectors-page.tsx",
+  "components/admin/team/egress-headers.tsx",
+  "components/admin/team/egress-page.tsx",
+  "components/admin/team/egress-requests.tsx",
   "components/admin/team/eval-settings-page.tsx",
   "components/admin/team/followups-page.tsx",
   "components/admin/team/gallery-agents.tsx",
@@ -204,6 +212,8 @@ const ON_TAILWIND = [
   "components/admin/team/memory-page.tsx",
   "components/admin/team/memory-switches-form.tsx",
   "components/admin/team/models-page.tsx",
+  "components/admin/team/policy-page.tsx",
+  "components/admin/team/retention-page.tsx",
   "components/admin/team/schedules-page.tsx",
   "components/admin/team/skill-editor/files-editor.tsx",
   "components/admin/team/skill-editor/skill-editor-page.tsx",
@@ -217,11 +227,31 @@ const ON_TAILWIND = [
   "components/me/my-agents-shell.tsx",
 ] as const;
 
+/**
+ * Whole directories on Tailwind (KOBE-295: the Team console, and the usage and budget parts it
+ * shares with the Site console): no file in them may import a CSS module, new files included.
+ */
+const TAILWIND_DIRS = [
+  "app/admin/team",
+  "components/admin/team",
+  "components/admin/usage",
+  "components/admin/budgets",
+] as const;
+
 function sources(dir: string): string[] {
   return readdirSync(join(WEB, dir), { withFileTypes: true }).flatMap((e) => {
     const path = join(dir, e.name);
     if (e.isDirectory()) return sources(path);
     return /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [path] : [];
+  });
+}
+
+/** CSS modules under `dir`. */
+function cssModulesIn(dir: string): string[] {
+  return readdirSync(join(WEB, dir), { withFileTypes: true }).flatMap((e) => {
+    const path = join(dir, e.name);
+    if (e.isDirectory()) return cssModulesIn(path);
+    return e.name.endsWith(".module.css") ? [path] : [];
   });
 }
 
@@ -267,6 +297,13 @@ describe("console CSS modules (KOBE-294, KOBE-295, KOBE-296)", () => {
     expect(ON_TAILWIND.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
     // The primitives themselves never use one.
     expect(sources("components/ui/console").flatMap(moduleImports)).toEqual([]);
+  });
+
+  it("the Team console and its shared parts import no CSS module, and no module lives there", () => {
+    const files = TAILWIND_DIRS.flatMap(sources);
+    expect(files.length).toBeGreaterThan(40);
+    expect(files.flatMap(moduleImports).map((i) => `${i.file}: ${i.module}`)).toEqual([]);
+    expect(TAILWIND_DIRS.flatMap(cssModulesIn)).toEqual([]);
   });
 
   it("a file that uses the console primitives imports no CSS module (pages move whole)", () => {

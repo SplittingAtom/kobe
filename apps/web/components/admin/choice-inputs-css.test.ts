@@ -97,12 +97,9 @@ describe("checkboxes and radios sit inline before their text (KOBE-283)", () => 
   });
 
   it("the connector tool list has no bullets", () => {
-    const list = CONSOLE_CSS.find(
-      (r) => r.file.endsWith("admin.module.css") && r.selector === ".choiceList",
-    );
-    expect(list?.body).toMatch(/list-style\s*:\s*none/);
+    // On Tailwind since KOBE-295: the list's own utilities, so its checkboxes lead each row.
     expect(read("components/admin/team/connectors-page.tsx")).toMatch(
-      /<ul aria-label="Tools" className=\{styles\.choiceList\}>/,
+      /<ul aria-label="Tools" className="[^"]*\blist-none\b[^"]*">/,
     );
   });
 });

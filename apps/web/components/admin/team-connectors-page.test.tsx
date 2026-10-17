@@ -3,7 +3,7 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamConnectorsPage } from "./team/connectors-page";
-import { renderTeam, stubApi } from "./testing";
+import { answerConfirm, renderTeam, stubApi } from "./testing";
 
 const BASE = "/v1/team/connectors";
 const tool = (name: string, over: Record<string, unknown> = {}) => ({
@@ -148,6 +148,8 @@ describe("Team connectors (KOBE-105)", () => {
     renderTeam(<TeamConnectorsPage />);
     await screen.findByRole("article", { name: "jira" });
     await userEvent.click(card("jira").getByRole("button", { name: /Disable/ }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await answerConfirm("Disable jira for the team?", "Disable jira");
     expect(await screen.findByText("Not enabled")).toBeTruthy();
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });

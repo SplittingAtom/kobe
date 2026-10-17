@@ -6,11 +6,6 @@
 /* In the `kobe-legacy` layer (app/theme.css, KOBE-294): below Tailwind's utilities, so a utility
    on an element always wins over this module; delete the module once its pages move. */
 @layer kobe-legacy {
-  .soon {
-    color: var(--admin-muted);
-    font-size: 0.85em;
-  }
-
   .error {
     padding: 0.5rem 0.75rem;
     border-left: 4px solid var(--admin-danger);
@@ -74,34 +69,9 @@
     gap: 0.2rem;
   }
 
-  /* A connector's tool list: no bullets, so its checkboxes lead each row. */
-  .choiceList {
-    list-style: none;
-    margin: 0.5rem 0;
-    padding: 0;
-  }
-
   .hint {
     color: var(--admin-muted);
     font-size: 0.9em;
-  }
-
-  .cards {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-    gap: 0.75rem;
-  }
-
-  .card {
-    padding: 0.75rem;
-    border: 1px solid var(--admin-border);
-    border-radius: 0.5rem;
-  }
-
-  .card p {
-    margin: 0.25rem 0 0;
   }
 
   .dl {
@@ -121,23 +91,5 @@
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-
-  /* Budget usage lines (KOBE-301): amber from 80 %, red from 100 %, from the status colours. */
-  .budgetWarn {
-    color: var(--kobe-status-attention);
-  }
-
-  .budgetFull {
-    color: var(--kobe-status-failed);
-    font-weight: 600;
-  }
-
-  .budgetIcon {
-    display: inline-block;
-    width: 0.875rem;
-    height: 0.875rem;
-    margin-inline-end: 0.25rem;
-    vertical-align: -0.125rem;
   }
 }

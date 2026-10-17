@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { EgressCeilingPage } from "./site/egress-ceiling-page";
 import { TeamEgressPage } from "./team/egress-page";
-import { TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
+import { TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
 
 const entry = (domain: string, preset: string | null, in_ceiling: boolean) => ({
   domain,
@@ -270,6 +270,8 @@ describe("Team egress", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Remove headers for pkgs.example.com" }),
     );
+    expect(summary(calls)).not.toContain("DELETE /v1/team/egress/domains/pkgs.example.com/headers");
+    await answerConfirm("Remove the injected headers for pkgs.example.com?", "Remove headers");
     await screen.findByText("Removed the injected headers for pkgs.example.com.");
   });
 });

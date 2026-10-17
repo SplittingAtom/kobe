@@ -11,11 +11,23 @@ import {
   type TeamConnectorTool,
 } from "../../../lib/admin/api/team/connectors";
 import { AUTH_LABELS } from "../../../lib/admin/api/site/connectors";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  ChoiceGroup,
+  EmptyState,
+  Notice,
+  PageHeader,
+  Radio,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { ResourceView, confirmed } from "../parts";
+import { ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
-import styles from "../admin.module.css";
+
+const HINT = "text-sm text-console-muted";
 
 /**
  * Team console: connectors (spec D27; `/v1/team/connectors`, team.connectors.manage). Off by
@@ -29,26 +41,27 @@ export function TeamConnectorsPage() {
 
   return (
     <>
-      <h1>Connectors</h1>
-      <p className={styles.hint}>
-        Connectors are off until you enable them. Enabled connectors offer their tools to the
-        team&apos;s agents; each member adds their own API key where one is needed.
-      </p>
+      <PageHeader
+        title="Connectors"
+        description="Connectors are off until you enable them. Enabled connectors offer their tools to the team's agents; each member adds their own API key where one is needed."
+      />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="connectors">
         {(connectors) =>
           connectors.length === 0 ? (
-            <p>No connectors are registered: ask a site admin to register one.</p>
+            <EmptyState title="No connectors are registered: ask a site admin to register one." />
           ) : (
-            connectors.map((c) => (
-              <ConnectorCard
-                key={c.id}
-                teamId={teamId}
-                connector={c}
-                mutation={mutation}
-                onChanged={reload}
-              />
-            ))
+            <div className="grid gap-4">
+              {connectors.map((c) => (
+                <ConnectorCard
+                  key={c.id}
+                  teamId={teamId}
+                  connector={c}
+                  mutation={mutation}
+                  onChanged={reload}
+                />
+              ))}
+            </div>
           )
         }
       </ResourceView>
@@ -76,6 +89,7 @@ function ConnectorCard({
   const [exposure, setExposure] = useState<Exposure>(c.exposure ?? "read_only");
   const [ticked, setTicked] = useState<readonly string[]>(pinnedTicks(c));
   const blocked = c.status === "disabled" && !c.enabled;
+  const [confirm, confirmDialog] = useConfirm();
 
   async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -87,9 +101,12 @@ function ConnectorCard({
   }
 
   async function disable() {
-    if (!confirmed(`Disable ${c.name} for the team? Its tools stop being offered to agents.`)) {
-      return;
-    }
+    const yes = await confirm({
+      title: `Disable ${c.name} for the team?`,
+      description: "Its tools stop being offered to agents.",
+      confirmLabel: `Disable ${c.name}`,
+    });
+    if (!yes) return;
     const done = await mutation.run(
       () => disableTeamConnector(teamId, c.id),
       () => `Disabled ${c.name}.`,
@@ -101,41 +118,44 @@ function ConnectorCard({
     setTicked((cur) => (cur.includes(piName) ? cur.filter((t) => t !== piName) : [...cur, piName]));
 
   return (
-    <article aria-label={c.name} className={styles.form}>
-      <h2>
+    <article
+      aria-label={c.name}
+      className="box-border rounded-lg border border-console-border bg-console-bg p-4"
+    >
+      <h2 className="m-0 flex items-center gap-2 text-lg font-semibold">
         {c.iconUrl ? (
           <img src={c.iconUrl} alt="" width={20} height={20} referrerPolicy="no-referrer" />
-        ) : null}{" "}
+        ) : null}
         {c.name}
       </h2>
-      <p>
-        <strong>
+      <p className="m-0 mt-1 flex flex-wrap items-center gap-2">
+        <Badge tone={c.enabled ? "running" : "neutral"}>
           {c.enabled ? `Enabled (${EXPOSURE_LABELS[c.exposure ?? "read_only"]})` : "Not enabled"}
-        </strong>{" "}
-        <span className={styles.hint}>{AUTH_LABELS[c.authKind]}</span>
+        </Badge>
+        <span className={HINT}>{AUTH_LABELS[c.authKind]}</span>
       </p>
       {c.status === "disabled" ? (
-        <p className={styles.banner}>
-          Disabled by a site admin: its tools are not offered
-          {c.enabled ? "" : " and the team cannot enable it"}.
-        </p>
+        <Notice tone="warn">
+          <p>
+            Disabled by a site admin: its tools are not offered
+            {c.enabled ? "" : " and the team cannot enable it"}.
+          </p>
+        </Notice>
       ) : null}
-      <form onSubmit={save} aria-label={`Exposure of ${c.name}`}>
+      <form onSubmit={save} aria-label={`Exposure of ${c.name}`} className="mt-3">
         {blocked ? null : (
-          <fieldset disabled={mutation.pending}>
-            <legend>What the team&apos;s agents may use</legend>
+          <ChoiceGroup legend="What the team's agents may use">
             {(Object.keys(EXPOSURE_LABELS) as Exposure[]).map((x) => (
-              <label key={x}>
-                <input
-                  type="radio"
-                  name={`exposure-${c.id}`}
-                  checked={exposure === x}
-                  onChange={() => setExposure(x)}
-                />{" "}
-                {EXPOSURE_LABELS[x]}
-              </label>
+              <Radio
+                key={x}
+                name={`exposure-${c.id}`}
+                label={EXPOSURE_LABELS[x]}
+                checked={exposure === x}
+                disabled={mutation.pending}
+                onChange={() => setExposure(x)}
+              />
             ))}
-          </fieldset>
+          </ChoiceGroup>
         )}
         <ToolList
           tools={c.tools}
@@ -144,18 +164,21 @@ function ConnectorCard({
           onToggle={toggleTick}
           disabled={mutation.pending}
         />
-        {blocked ? null : (
-          <button type="submit" disabled={mutation.pending}>
-            {c.enabled ? "Save exposure" : "Enable"}
-            <span className={styles.visuallyHidden}> {c.name}</span>
-          </button>
-        )}{" "}
-        {c.enabled ? (
-          <button type="button" disabled={mutation.pending} onClick={() => void disable()}>
-            Disable<span className={styles.visuallyHidden}> {c.name}</span>
-          </button>
-        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {blocked ? null : (
+            <Button type="submit" variant="primary" disabled={mutation.pending}>
+              {c.enabled ? "Save exposure" : "Enable"}
+              <span className="sr-only"> {c.name}</span>
+            </Button>
+          )}
+          {c.enabled ? (
+            <Button variant="danger" disabled={mutation.pending} onClick={() => void disable()}>
+              Disable<span className="sr-only"> {c.name}</span>
+            </Button>
+          ) : null}
+        </div>
       </form>
+      {confirmDialog}
     </article>
   );
 }
@@ -173,38 +196,41 @@ function ToolList({
   readonly onToggle: (piName: string) => void;
   readonly disabled: boolean;
 }) {
-  if (tools.length === 0) return <p className={styles.hint}>No tools are approved yet.</p>;
+  if (tools.length === 0) return <p className={`m-0 my-2 ${HINT}`}>No tools are approved yet.</p>;
   return (
     <>
-      <p className={styles.hint}>
+      <p className={`m-0 my-2 ${HINT}`}>
         A tool that doesn&apos;t declare itself read-only is treated as able to change data, and one
         that doesn&apos;t say otherwise as able to reach outside systems. Read-only exposure offers
         only tools that declare themselves read-only.
       </p>
-      <ul aria-label="Tools" className={styles.choiceList}>
+      <ul aria-label="Tools" className="m-0 my-2 grid list-none gap-1 p-0">
         {tools.map((t) => {
           const drifted = t.status === "drifted";
           return (
-            <li key={t.piName} aria-label={`${t.name} tool`}>
+            <li
+              key={t.piName}
+              aria-label={`${t.name} tool`}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1"
+            >
               {choosing ? (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={!drifted && ticked.includes(t.piName)}
-                    disabled={disabled || drifted}
-                    onChange={() => onToggle(t.piName)}
-                  />{" "}
-                  {t.name}
-                </label>
+                <Checkbox
+                  label={t.name}
+                  checked={!drifted && ticked.includes(t.piName)}
+                  disabled={disabled || drifted}
+                  onChange={() => onToggle(t.piName)}
+                />
               ) : (
                 <code>{t.name}</code>
-              )}{" "}
+              )}
               {drifted ? (
-                <span>Unavailable: changed upstream, waiting for a site admin</span>
+                <Badge tone="attention">
+                  Unavailable: changed upstream, waiting for a site admin
+                </Badge>
               ) : (
                 <>
-                  <span className={styles.hint}>{t.readOnly ? "Read-only" : "Write"}</span>{" "}
-                  <span className={styles.hint}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
+                  <span className={HINT}>{t.readOnly ? "Read-only" : "Write"}</span>
+                  <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
                 </>
               )}
             </li>

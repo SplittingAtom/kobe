@@ -15,6 +15,7 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView, confirmed } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import styles from "../admin.module.css";
+import { SharedHostingNote } from "../shared-hosting-note";
 
 export const PRESET_LABEL: Readonly<Record<EgressPreset, string>> = {
   package_registries: "Package registries",
@@ -249,16 +250,5 @@ function DomainTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-/** Domain fronting (KOBE-38): the proxy sees only the TLS server name. */
-export function SharedHostingNote() {
-  return (
-    <span className={styles.hint}>
-      {" "}
-      Shared hosting or CDN: a sandbox allowed here may also reach other sites behind the same front
-      (domain fronting).
-    </span>
   );
 }
