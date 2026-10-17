@@ -110,7 +110,8 @@ describe("Skill editor: create", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add file" }));
     await userEvent.type(screen.getByLabelText("Path of file 1"), "../x");
     await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/fix 3 problems/i);
+    // The summary first, then each field's own error (KOBE-295: console Field errors).
+    expect(must((await screen.findAllByRole("alert"))[0]).textContent).toMatch(/fix 3 problems/i);
     expect(screen.getByLabelText("Name").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByLabelText("Description").getAttribute("aria-invalid")).toBe("true");
     expect(screen.getByLabelText("Path of file 1").getAttribute("aria-invalid")).toBe("true");

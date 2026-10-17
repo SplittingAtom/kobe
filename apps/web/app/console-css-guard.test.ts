@@ -173,8 +173,6 @@ const CONSOLE_DIRS = [
 const CSS_MODULES = [
   "components/admin/admin.module.css",
   "components/admin/usage/usage.module.css",
-  "components/admin/team/agent-builder/agent-builder.module.css",
-  "components/admin/team/skill-editor/skill-editor.module.css",
 ] as const;
 
 /** Files on Tailwind and the console primitives: no CSS module. Add each page as it moves. */
@@ -202,6 +200,10 @@ const ON_TAILWIND = [
   "components/admin/team/gallery-agents.tsx",
   "components/admin/team/invites-page.tsx",
   "components/admin/team/members-page.tsx",
+  "components/admin/team/skill-editor/files-editor.tsx",
+  "components/admin/team/skill-editor/skill-editor-page.tsx",
+  "components/admin/team/skill-editor/skill-reach.tsx",
+  "components/admin/team/skill-editor/skills-page.tsx",
   "components/me/my-agents-shell.tsx",
 ] as const;
 
