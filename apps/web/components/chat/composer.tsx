@@ -23,9 +23,11 @@ import { IN_TRASH, READ_ONLY } from "../../lib/chat/thread-commands";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
+import { cn } from "../../lib/utils";
 import { ModelPicker } from "./model-picker";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
+import panelStyles from "./composer.module.css";
 
 const NOTHING_TO_STEER = "Nothing is running to steer.";
 
@@ -197,11 +199,15 @@ export function Composer({
         }}
       >
         <div
+          data-kobe-composer-panel
           data-dragging={dragging || undefined}
           onDragOver={onDragOver}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
-          className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
+          className={cn(
+            panelStyles.panel,
+            "border-foreground/10 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2",
+          )}
         >
           <MentionPicker draft={draft} input={input} />
           <SlashMenu input={input} />
@@ -222,7 +228,10 @@ export function Composer({
             submitMode="enter"
             rows={1}
             enterKeyHint="send"
-            className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none"
+            className={cn(
+              panelStyles.input,
+              "caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none",
+            )}
           />
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <input

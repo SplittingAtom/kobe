@@ -1,0 +1,25 @@
+/* The composer panel's outline (KOBE-374), from the tokens in app/theme.css. Outlines and shadows
+   never take layout space, so focus, a run and a drop change no size or position. */
+
+/* Focus anywhere in the composer (text, chips, buttons) outlines the whole panel: darker and
+   thicker than its border, 3:1 or more on the page in both themes (app/theme-css.test.ts). */
+.panel {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  transition:
+    outline-color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+
+.panel:focus-within {
+  outline-color: var(--kobe-composer-focus);
+}
+
+/* The text field has no ring of its own: the panel's outline shows where the focus is. More
+   specific than the chat's `.app :focus-visible` ring and the inputs' base ring. Buttons inside
+   keep their own focus ring, so keyboard focus stays visible on each control. */
+.panel .input:focus,
+.panel .input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
