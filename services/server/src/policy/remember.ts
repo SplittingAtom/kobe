@@ -9,7 +9,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
-import { exactArgPattern, rememberExpiry } from "./remember-scope.js";
+import { exactArgPattern, exactPinsAllArguments, rememberExpiry } from "./remember-scope.js";
 import { auditRule, fitsScope, storedTeam, type StoredRule } from "./rule-store.js";
 import { USER_LIMITS } from "./schemas.js";
 import { pruneEndedUserRules } from "./user-rules.js";
@@ -136,6 +136,7 @@ export async function insertUserAllowRule(
       rememberScope: rule.scope,
       threadId: rule.scope === "thread" ? call.threadId : null,
       runId: rule.scope === "run" ? call.runId : null,
+      exactKeys: argPattern !== undefined && exactPinsAllArguments(call.tool),
     })
     .returning();
   if (!row) throw new Error("user rule insert returned no row");

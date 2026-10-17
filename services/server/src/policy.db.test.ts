@@ -525,6 +525,22 @@ describe("D29 order end to end (rules from Postgres)", () => {
       { path: "x", edits },
     );
     expect(timed.ok && timed.rule.arg_pattern).toEqual({ "/path": "/workspace/x" });
+    // An exact MCP rule pins every argument and their key set (review S3); a path tool only its path.
+    const mcp = await remember(
+      "bob",
+      finance,
+      "mcp__jira__create_issue",
+      { tool_glob: "mcp__jira__create_issue", scope: "day", exact: true },
+      { project: "KOBE", summary: "Fix" },
+    );
+    const flags = await adminQuery<{ id: string; exact_keys: boolean }>(
+      `SELECT id, exact_keys FROM tool_rules WHERE id = ANY($1)`,
+      [[mcp.ok && mcp.rule.id, timed.ok && timed.rule.id]],
+    );
+    expect(Object.fromEntries(flags.map((f) => [f.id, f.exact_keys]))).toEqual({
+      [mcp.ok ? mcp.rule.id : ""]: true,
+      [timed.ok ? timed.rule.id : ""]: false,
+    });
     expect(timed.ok && Date.parse(timed.rule.expires_at ?? "") - Date.now()).toBeGreaterThan(
       86_000_000,
     );

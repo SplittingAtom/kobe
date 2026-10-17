@@ -22,9 +22,9 @@ import {
 import { evaluatePolicy } from "./evaluate.js";
 import { matchArgPattern } from "./patterns.js";
 import { rememberRefusal } from "./remember.js";
-import { rememberedRuleAllowed } from "./remember-limits.js";
+import { rememberedRuleAllowed, rememberedRuleRefusal } from "./remember-limits.js";
 import { endOfLocalDay, exactArgPattern, literalGlob, rememberExpiry } from "./remember-scope.js";
-import type { PolicyRule } from "./rules.js";
+import { exactKeysMatch, type PolicyRule } from "./rules.js";
 import { DEFAULT_POLICY_SETTINGS } from "./settings.js";
 
 /** KOBE-289: every remember scope and admin limit, as the engine enforces them. */
@@ -298,5 +298,69 @@ describe("server-computed expiries", () => {
     expect(rememberExpiry("today", NOW, "Europe/Berlin", 3600)?.toISOString()).toBe(
       "2026-10-02T13:00:00.000Z",
     );
+  });
+});
+
+describe("review S3/S4: exact means exact", () => {
+  const pattern = { "/project": "KOBE", "/summary": "Fix" };
+  const exact = rule("user", "allow", "mcp__jira__create_issue", {
+    remember_scope: "forever",
+    arg_pattern: pattern,
+    exact_keys: true,
+  });
+
+  it("an exact MCP rule matches the same arguments only: no extra, none missing", () => {
+    expect(decide(jira, [exact], { input: { project: "KOBE", summary: "Fix" } }).effect).toBe(
+      "allow",
+    );
+    expect(
+      decide(jira, [exact], { input: { project: "KOBE", summary: "Fix", body: "leak" } }).effect,
+    ).toBe("require_approval");
+    expect(decide(jira, [exact], { input: { project: "KOBE" } }).effect).toBe("require_approval");
+    // Without the key check (older rules) only the pinned pointers count.
+    const loose = { ...exact, exact_keys: false };
+    expect(
+      decide(jira, [loose], { input: { project: "KOBE", summary: "Fix", body: "x" } }).effect,
+    ).toBe("allow");
+  });
+
+  it("decodes escaped keys and refuses deeper pointers", () => {
+    expect(exactKeysMatch({ "/a~1b": "x", "/c~0": "y" }, { "a/b": "x", "c~": "y" })).toBe(true);
+    expect(exactKeysMatch({ "/a/b": "x" }, { a: { b: "x" } })).toBe(false);
+    expect(exactKeysMatch(undefined, {})).toBe(false);
+  });
+
+  it("under exact-only, an older wildcard pattern is not exact and is ignored", () => {
+    const only = limits({ exact_only: true });
+    const wildcard = rule("user", "allow", "write", {
+      remember_scope: "forever",
+      arg_pattern: { "/path": "/workspace/*" },
+    });
+    const literal = rule("user", "allow", "write", {
+      remember_scope: "forever",
+      arg_pattern: { "/path": "/workspace/notes.md" },
+    });
+    expect(decide(write, [wildcard], { limits: only }).effect).toBe("require_approval");
+    expect(decide(write, [literal], { limits: only }).effect).toBe("allow");
+    expect(rememberedRuleRefusal(wildcard, write, only, NOW)).toBe("not_exact");
+  });
+
+  it("names why a rule no longer applies", () => {
+    const r = rule("user", "allow", "bash", {
+      remember_scope: "forever",
+      created_at: NOW.toISOString(),
+    });
+    expect(rememberedRuleRefusal(r, bash, undefined, NOW)).toBe("destructive");
+    expect(
+      rememberedRuleRefusal({ ...r, tool_glob: "write" }, write, limits({ scopes: ["run"] }), NOW),
+    ).toBe("scope_not_allowed");
+    expect(
+      rememberedRuleRefusal(
+        { ...r, created_at: "2026-01-01T00:00:00.000Z" },
+        write,
+        limits({ max_duration_seconds: 60 }),
+        NOW,
+      ),
+    ).toBe("too_old");
   });
 });

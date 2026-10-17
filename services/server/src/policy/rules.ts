@@ -35,6 +35,11 @@ export interface PolicyRule {
   readonly run_id?: string;
   /** ISO timestamp the rule was made (admins' max duration counts from it). */
   readonly created_at?: string;
+  /**
+   * "Only this exact action" over every top-level argument (KOBE-289 review S3): the input's
+   * top-level keys must be exactly the pattern's, so an extra or a missing argument never matches.
+   */
+  readonly exact_keys?: boolean;
 }
 
 /** The run a call belongs to: thread- and run-bound rules match only their own. */
@@ -83,6 +88,27 @@ export function bindingMatches(rule: PolicyRule, binding: CallBinding | undefine
   return true;
 }
 
+/** RFC 6901 unescaping of one reference token. */
+function unescapeToken(token: string): string {
+  return token.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+/**
+ * An exact rule's key check (S3): every pattern pointer names one top-level key, and the input has
+ * exactly those keys. A pattern with a deeper pointer can't be checked this way: no match.
+ */
+export function exactKeysMatch(pattern: ArgPattern | undefined, input: JsonObject): boolean {
+  if (pattern === undefined) return false;
+  const pinned = new Set<string>();
+  for (const pointer of Object.keys(pattern)) {
+    const tokens = pointer.split("/").slice(1);
+    if (tokens.length !== 1) return false;
+    pinned.add(unescapeToken(tokens[0] ?? ""));
+  }
+  const keys = Object.keys(input);
+  return keys.length === pinned.size && keys.every((k) => pinned.has(k));
+}
+
 /** Whether `rule` applies to this call: active, tool glob matches the name, arg pattern matches. */
 export function ruleMatches(
   rule: PolicyRule,
@@ -101,6 +127,7 @@ export function ruleMatches(
   }
   const bias = biasOf(rule.effect);
   if (!matchSubject(rule.tool_glob, tool.name, bias)) return false;
+  if (rule.exact_keys === true && !exactKeysMatch(rule.arg_pattern, input)) return false;
   return rule.arg_pattern === undefined || matchArgPattern(rule.arg_pattern, input, bias);
 }
 

@@ -70,13 +70,27 @@ function pointerToken(key: string): string {
   return key.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
-/** What the exact pattern pins: the built-in's primary argument, else every top-level argument. */
-function pinnedPointers(tool: ToolDescriptor, view: JsonObject): string[] {
+function primaryArg(tool: ToolDescriptor): string | undefined {
   const builtin =
     tool.source !== "mcp" && Object.hasOwn(BUILTIN_TOOLS, tool.name)
       ? BUILTIN_TOOLS[tool.name]
       : undefined;
-  if (builtin?.primary_arg !== undefined) return [builtin.primary_arg];
+  return builtin?.primary_arg;
+}
+
+/**
+ * Whether "only this exact action" pins every argument (then the rule also requires exactly the
+ * same top-level keys, review S3), or only a built-in's primary one (the exact path of a file
+ * tool: the content may differ; the card says so).
+ */
+export function exactPinsAllArguments(tool: ToolDescriptor): boolean {
+  return primaryArg(tool) === undefined;
+}
+
+/** What the exact pattern pins: the built-in's primary argument, else every top-level argument. */
+function pinnedPointers(tool: ToolDescriptor, view: JsonObject): string[] {
+  const primary = primaryArg(tool);
+  if (primary !== undefined) return [primary];
   return Object.keys(view)
     .sort()
     .map((k) => `/${pointerToken(k)}`);

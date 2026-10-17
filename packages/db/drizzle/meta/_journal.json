@@ -869,6 +869,13 @@
       "when": 1792254758302,
       "tag": "0123_tool_rules_remember_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792257998576,
+      "tag": "0124_tool_rules_exact_keys",
+      "breakpoints": true
     }
   ]
 }

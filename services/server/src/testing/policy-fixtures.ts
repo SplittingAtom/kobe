@@ -80,7 +80,14 @@ export function rule(
   extra: Partial<
     Pick<
       PolicyRule,
-      "arg_pattern" | "expires_at" | "id" | "remember_scope" | "thread_id" | "run_id" | "created_at"
+      | "arg_pattern"
+      | "expires_at"
+      | "id"
+      | "remember_scope"
+      | "thread_id"
+      | "run_id"
+      | "created_at"
+      | "exact_keys"
     >
   > = {},
 ): PolicyRule {

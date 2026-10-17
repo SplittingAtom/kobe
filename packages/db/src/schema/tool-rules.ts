@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -94,6 +95,11 @@ export const toolRules = pgTable(
     runId: uuid(),
     /** When the rule last allowed a call (the member's Approvals page). */
     lastUsedAt: timestamp({ withTimezone: true }),
+    /**
+     * "Only this exact action" pinning every top-level argument (KOBE-289 review S3): the rule
+     * matches only inputs whose top-level keys are exactly its pattern's (no extra, none missing).
+     */
+    exactKeys: boolean().notNull().default(false),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
