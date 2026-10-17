@@ -25,6 +25,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * History echo (OpenAI chat API only, KOBE-284 e2e): a last user message `history?` is answered with
  * `fake-openai: history said: <the earlier user and assistant texts as "role: text", " | " joined>`,
  * so a test can see which conversation the model was given (a fork's copied history).
+ *
+ * Reasoning (OpenAI chat API only, KOBE-260 e2e): a last user message `think?` is answered like a
+ * model that thinks unless told not to (Ollama's glm-5.3): a `reasoning_content` part
+ * (`fake reasoning at <effort>`) before the text `fake-openai: thought at <effort>`, where
+ * `<effort>` is the request's `reasoning_effort` (`default` when absent). With
+ * `reasoning_effort: "none"` there is no reasoning part and the text says `thought at none`.
  */
 export interface SeenRequest {
   readonly method: string;
@@ -35,7 +41,24 @@ export interface SeenRequest {
   readonly includeUsage?: boolean;
   /** The output cap the request asked for, any API style (KOBE-259); absent when it set none. */
   readonly maxOutputTokens?: number;
+  /**
+   * The thinking fields the request carried (KOBE-260): `reasoning_effort`, `reasoning`,
+   * `thinking`, `output_config`, Gemini's `generationConfig.thinkingConfig`. Absent: none.
+   */
+  readonly thinking?: Readonly<Record<string, unknown>>;
 }
+
+const THINKING_FIELDS = ["reasoning_effort", "reasoning", "thinking", "output_config"];
+
+function thinkingFields(body: Record<string, unknown>): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const key of THINKING_FIELDS) if (key in body) out[key] = body[key];
+  const generation = body.generationConfig as Record<string, unknown> | undefined;
+  if (generation && "thinkingConfig" in generation) out.thinkingConfig = generation.thinkingConfig;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+const THINK_ECHO = "think?";
 
 /** `max_tokens` / `max_completion_tokens` (OpenAI, Anthropic) or Gemini's `maxOutputTokens`. */
 function requestedMaxOutput(body: Record<string, unknown>): number | undefined {
@@ -343,16 +366,26 @@ function openaiToolCall(res: ServerResponse, model: string): void {
   ]);
 }
 
-function openai(res: ServerResponse, reply: string, stream: boolean, model: string): void {
+function openai(
+  res: ServerResponse,
+  reply: string,
+  stream: boolean,
+  model: string,
+  /** Reasoning sent before the text (`reasoning_content`, as Ollama and vLLM send it). */
+  reasoning?: string,
+): void {
   if (!stream) {
+    const message = {
+      role: "assistant",
+      content: reply,
+      ...(reasoning === undefined ? {} : { reasoning_content: reasoning }),
+    };
     json(res, 200, {
       id: "chatcmpl-fake",
       object: "chat.completion",
       created: 1,
       model,
-      choices: [
-        { index: 0, message: { role: "assistant", content: reply }, finish_reason: "stop" },
-      ],
+      choices: [{ index: 0, message, finish_reason: "stop" }],
       usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
     });
     return;
@@ -368,6 +401,7 @@ function openai(res: ServerResponse, reply: string, stream: boolean, model: stri
     })}\n\n`;
   sse(res, [
     chunk({ role: "assistant", content: "" }, null),
+    ...(reasoning === undefined ? [] : [chunk({ reasoning_content: reasoning }, null)]),
     ...reply.split(" ").map((w, i) => chunk({ content: i === 0 ? w : ` ${w}` }, null)),
     chunk({}, "stop", { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 }),
     "data: [DONE]\n\n",
@@ -460,6 +494,7 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
     }
     const options = body.stream_options as Record<string, unknown> | undefined;
     const maxOutputTokens = requestedMaxOutput(body);
+    const thinking = thinkingFields(body);
     seen.push({
       method: req.method ?? "",
       path: url.pathname,
@@ -468,6 +503,7 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         ? { includeUsage: options?.include_usage === true }
         : {}),
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      ...(thinking === undefined ? {} : { thinking }),
     });
     const text = lastUserText(body);
     const model = typeof body.model === "string" ? body.model : "fake-model";
@@ -503,6 +539,11 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         openai(res, `fake-openai: tools said: ${toolNames(body).join(",")}`, stream, model);
       } else if (text === SYSTEM_ECHO) {
         openai(res, `fake-openai: system said: ${systemText(body)}`, stream, model);
+      } else if (text === THINK_ECHO) {
+        const effort =
+          typeof body.reasoning_effort === "string" ? body.reasoning_effort : "default";
+        const reasoning = effort === "none" ? undefined : `fake reasoning at ${effort}`;
+        openai(res, `fake-openai: thought at ${effort}`, stream, model, reasoning);
       } else if (text === HISTORY_ECHO) {
         openai(res, `fake-openai: history said: ${historyText(body)}`, stream, model);
       } else if (text.startsWith(BASH_PREFIX)) {

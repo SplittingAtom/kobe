@@ -15,6 +15,7 @@ import {
   loadGatewayPrincipal,
   notifyModels,
   runSessionOf,
+  runThinkingLevelOf,
   serverCallRunMatches,
   type RunSession,
   recordModelUsage,
@@ -24,6 +25,7 @@ import {
   deriveServerCallTokenKey,
   deriveTraceSpanKey,
 } from "@kobe/protocol/node";
+import type { ThinkingLevel } from "@kobe/protocol";
 import { verifySessionToken } from "@kobe/session-token";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
@@ -105,6 +107,13 @@ const runSessions = new TtlCache<RunSession | undefined>({
   keep: (value) => value !== undefined,
 });
 
+/** A run's thinking level is fixed when it starts (KOBE-260): cached long, bounded. */
+const runThinking = new TtlCache<ThinkingLevel | undefined>({
+  ttlMs: 10 * 60_000,
+  maxEntries: 10_000,
+  keep: (value) => value !== undefined,
+});
+
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
 const usage = new DbUsageSink({
   write: (records) => recordModelUsage(db, records),
@@ -137,6 +146,9 @@ const server = createModelGateway({
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
   },
+  // KOBE-260: the level the server recorded when the run started.
+  runThinking: (teamId, runId) =>
+    runThinking.get(`${teamId}:${runId}`, () => runThinkingLevelOf(db, teamId, runId)),
   // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
   tracing: {
     spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.sessionKey)),

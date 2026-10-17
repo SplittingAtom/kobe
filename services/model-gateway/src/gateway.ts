@@ -8,7 +8,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
-import type { ServerCallClaims, SessionTokenClaims } from "@kobe/protocol";
+import type { ServerCallClaims, SessionTokenClaims, ThinkingLevel } from "@kobe/protocol";
 import { SessionTokenError } from "@kobe/session-token";
 import {
   contentAttributes,
@@ -35,6 +35,7 @@ import {
   type ServerCallOptions,
 } from "./server-call.js";
 import { classify, forwardedQuery, type Route, type RouteKind } from "./routes.js";
+import { applyThinking, callThinkingLevel } from "./thinking.js";
 import type { RunTokenSubject } from "@kobe/db";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
 import { chargedOutput } from "./usage/charge.js";
@@ -74,6 +75,11 @@ export interface GatewayOptions {
     /** Enforcement: a call without a run token is refused (off for rollout). */
     readonly require: boolean;
   };
+  /**
+   * A run's recorded thinking level (KOBE-260; cached by the caller, it never changes). Absent:
+   * calls use the model's default level.
+   */
+  readonly runThinking?: (teamId: string, runId: string) => Promise<ThinkingLevel | undefined>;
   /** Run traces (KOBE-274); absent: spans of sandbox calls hang under the run's root. */
   readonly tracing?: GatewayTracing;
   /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
@@ -413,6 +419,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     let aborted = false;
     let call: CallContext | undefined;
     let traceContext: Context | undefined;
+    let thinkingLevel: ThinkingLevel | undefined;
     try {
       // 4. Liveness, the member's virtual key and the team's enabled models.
       let resolution = await options.principals.resolve(
@@ -540,9 +547,24 @@ export function createModelGateway(options: GatewayOptions): Server {
           );
           return;
         }
+        // KOBE-260: the thinking level the server decided, in the model's control's form.
+        const policy = model === undefined ? undefined : resolution.thinking.get(model);
+        if (policy !== undefined) {
+          const runLevel =
+            runId === undefined ? undefined : await options.runThinking?.(identity.teamId, runId);
+          const level = callThinkingLevel(policy, runLevel);
+          const rewritten = applyThinking(body, route, policy, level, scanned.maxOutputTokens);
+          if (!rewritten.ok) {
+            status = rewritten.status;
+            sendError(res, kind, rewritten.status, rewritten.code, rewritten.message);
+            return;
+          }
+          forwardBody = rewritten.body;
+          thinkingLevel = rewritten.level;
+        }
         // KOBE-43: a streaming Chat Completions call always asks for its usage report.
         if (scanned.stream && route.path === "/v1/chat/completions") {
-          forwardBody = withStreamUsage(body);
+          forwardBody = withStreamUsage(forwardBody);
         }
       }
       call = {
@@ -641,6 +663,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           "kobe.call_id": call.callId,
           "kobe.usage_kind": call.purpose ?? "run",
           "kobe.route": call.route,
+          ...(thinkingLevel === undefined ? {} : { "kobe.thinking_level": thinkingLevel }),
           ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
           ...(usage === undefined
             ? {}

@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
+import {
+  SecretBox,
+  VIRTUAL_KEY_PURPOSE,
+  virtualKeyContext,
+  type GatewayPrincipal,
+  type GatewayThinkingRow,
+} from "@kobe/db";
+import type { ThinkingLevel } from "@kobe/protocol";
 import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
@@ -24,6 +31,10 @@ export interface LocalGatewayOptions {
   readonly isRunLeased?: (runId: string) => boolean;
   /** KOBE-42 seam, e.g. to refuse calls with 503 + Retry-After. */
   readonly gate?: CallGate;
+  /** KOBE-260: the enabled models' thinking settings (site and team), as the store reads them. */
+  readonly thinking?: readonly GatewayThinkingRow[];
+  /** KOBE-260: a run's recorded thinking level, by run id. */
+  readonly runThinking?: (runId: string) => ThinkingLevel | undefined;
 }
 
 export interface LocalGateway {
@@ -42,6 +53,8 @@ export interface LocalGateway {
   /** A `kobe.model-gateway` token for this sandbox; `expiresInSeconds` may be negative. */
   mintToken(over?: { expiresInSeconds?: number; sandboxId?: string }): string;
   setEnabledModels(models: readonly string[]): void;
+  /** KOBE-260: replaces the thinking settings (an admin change). */
+  setThinking(rows: readonly GatewayThinkingRow[]): void;
   close(): Promise<void>;
 }
 
@@ -64,6 +77,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
   const identity = { sandboxId: randomUUID(), teamId: randomUUID(), userId: randomUUID() };
   const virtualKey = `sk-bf-${randomUUID()}`;
   let enabled = [...options.enabledModels];
+  let thinking = [...(options.thinking ?? [])];
   const seen: SeenRequest[] = [];
   const calls: CallRecord[] = [];
   const upstream = createFakeLlm(seen);
@@ -76,6 +90,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
       valueEnc: box.seal(virtualKey, virtualKeyContext(identity.teamId, identity.userId)),
     },
     enabledModels: enabled,
+    thinking: thinking.filter((t) => enabled.includes(t.model)),
   });
   const principals = new PrincipalCache(
     { load: async () => principal(), requestKey: async () => undefined },
@@ -86,6 +101,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     verify: (token) => verifySessionToken(token, "kobe.model-gateway", sessionKey),
     principals,
     isRunLeased: async (_team, runId) => options.isRunLeased?.(runId) ?? true,
+    runThinking: async (_team, runId) => options.runThinking?.(runId),
     // The harness' sessions carry no run token: enforcement stays off, legacy run ids apply.
     runTokens: {
       key: deriveRunTokenKey(new TextEncoder().encode(sessionKey)),
@@ -129,6 +145,9 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     },
     setEnabledModels(models) {
       enabled = [...models];
+    },
+    setThinking(rows) {
+      thinking = [...rows];
     },
     async close() {
       await closeServer(shim);
