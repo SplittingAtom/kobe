@@ -2,6 +2,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { findSection } from "../../lib/admin/nav/registry";
+import { comingIn } from "../../lib/admin/nav/types";
 import { must } from "../../lib/testing/must";
 import { ConsoleLinks } from "./console-links";
 import { ConsoleOverview } from "./overview";
@@ -24,7 +25,7 @@ describe("console overview", () => {
       "/admin/site/users",
     );
     const models = screen.getByRole("region", { name: "Models and connectors" });
-    expect(models.textContent).toMatch(/Coming in KOBE-63/);
+    expect(models.textContent).toMatch(/On hold KOBE-63/);
   });
 
   it("lists only the team sections the role covers", () => {
@@ -42,9 +43,18 @@ describe("console overview", () => {
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    render(<SectionPlaceholder section={must(findSection("site", "web-search"))} />);
+    const section = { ...must(findSection("site", "web-search")), status: comingIn("KOBE-999") };
+    render(<SectionPlaceholder section={section} />);
     expect(screen.getByRole("heading", { name: "Web search" })).toBeTruthy();
-    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-63.");
+    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-999.");
+  });
+
+  it("says why a section is on hold (KOBE-291)", () => {
+    render(<SectionPlaceholder section={must(findSection("site", "web-search"))} />);
+    const note = screen.getByRole("note");
+    expect(note.textContent).toMatch(/^On hold/);
+    expect(note.textContent).toMatch(/while the provider is chosen.*\(KOBE-63\)/);
+    expect(note.textContent).not.toMatch(/Coming in/);
   });
 });
 

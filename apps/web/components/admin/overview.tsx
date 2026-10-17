@@ -32,7 +32,9 @@ export function ConsoleOverview({ kind }: { readonly kind: ConsoleKind }) {
                 </Link>
                 <p className="m-0 mt-1">{s.description}</p>
                 {s.status.kind === "placeholder" && (
-                  <p className="m-0 mt-1 text-sm text-console-muted">Coming in {s.status.ticket}</p>
+                  <p className="m-0 mt-1 text-sm text-console-muted">
+                    {s.status.onHold ? "On hold" : "Coming in"} {s.status.ticket}
+                  </p>
                 )}
               </li>
             ))}

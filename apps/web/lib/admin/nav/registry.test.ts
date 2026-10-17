@@ -22,8 +22,20 @@ import {
   type ConsoleSection,
   type SiteAccess,
   type TeamAccess,
+  type TicketId,
 } from "./types";
 import { must } from "../../testing/must";
+
+/**
+ * Tickets a console placeholder may still name, each with why it is open (KOBE-291). A section
+ * whose ticket is done must not stay "coming soon": the ticket that builds it adds the page, marks
+ * it READY and removes its line here. A ticket with a ledger in docs/ledger counts as started.
+ */
+const OPEN_PLACEHOLDER_TICKETS: Readonly<Record<string, string>> = {
+  "KOBE-63": "web search provider choice on hold (Chris, 2026-10-15)",
+};
+
+const LEDGER_DIR = new URL("../../../../../docs/ledger/", import.meta.url);
 
 const user = { id: "u-1", name: "Ada", email: "ada@example.com" };
 const site = (siteRole: SiteAccess["siteRole"]): SiteAccess => ({
@@ -101,6 +113,45 @@ describe("registry contents", () => {
       }
     },
   );
+
+  it.each(["site", "team"] as const)(
+    "%s: a placeholder names a ticket that is still open (KOBE-291)",
+    (kind) => {
+      for (const s of sectionsOf(kind)) {
+        if (s.status.kind !== "placeholder") continue;
+        const { ticket } = s.status;
+        expect(
+          OPEN_PLACEHOLDER_TICKETS,
+          `${s.id} waits for ${ticket}: if it is still open, add it to OPEN_PLACEHOLDER_TICKETS with why`,
+        ).toHaveProperty([ticket]);
+        expect(
+          existsSync(new URL(`${ticket}.md`, LEDGER_DIR)),
+          `${s.id} waits for ${ticket}, which has a ledger (work on it started or finished): build the page and mark it READY, or remove the entry`,
+        ).toBe(false);
+      }
+    },
+  );
+
+  it("lists only tickets a placeholder still names, each with its reason", () => {
+    const named = new Set(
+      [...SITE_SECTIONS, ...TEAM_SECTIONS].flatMap((s) =>
+        s.status.kind === "placeholder" ? [s.status.ticket] : [],
+      ),
+    );
+    for (const [ticket, reason] of Object.entries(OPEN_PLACEHOLDER_TICKETS)) {
+      expect(
+        named.has(ticket as TicketId),
+        `${ticket}: no placeholder names it; drop its line`,
+      ).toBe(true);
+      expect(reason.trim()).not.toBe("");
+    }
+  });
+
+  it("keeps web search a placeholder on hold, with why (Chris)", () => {
+    const status = must(SITE_SECTIONS.find((s) => s.id === "web-search")).status;
+    expect(status.kind).toBe("placeholder");
+    expect(status.kind === "placeholder" && status.onHold).toMatch(/on hold/i);
+  });
 
   it.each(["site", "team"] as const)("%s: every page directory belongs to a section", (kind) => {
     const dir = new URL(`../../../app/admin/${CONSOLE_SEGMENTS[kind]}/`, import.meta.url);

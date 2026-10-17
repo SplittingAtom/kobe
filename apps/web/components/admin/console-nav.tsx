@@ -28,8 +28,10 @@ export function ConsoleNav({
               {s.status.kind === "placeholder" && (
                 <span className="text-[0.85em] text-console-muted">
                   {" "}
-                  <span aria-hidden="true">·</span> soon
-                  <span className="sr-only">, coming in {s.status.ticket}</span>
+                  <span aria-hidden="true">·</span> {s.status.onHold ? "on hold" : "soon"}
+                  <span className="sr-only">
+                    , {s.status.onHold ? "on hold" : "coming in"} {s.status.ticket}
+                  </span>
                 </span>
               )}
             </SideNavLink>

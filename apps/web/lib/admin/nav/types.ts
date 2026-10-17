@@ -23,7 +23,13 @@ export type SiteRole = "owner" | "admin" | "user";
 export type TicketId = `KOBE-${number}`;
 
 export type SectionStatus =
-  { readonly kind: "ready" } | { readonly kind: "placeholder"; readonly ticket: TicketId };
+  | { readonly kind: "ready" }
+  | {
+      readonly kind: "placeholder";
+      readonly ticket: TicketId;
+      /** Why the ticket is paused on purpose; absent while it is simply still to come. */
+      readonly onHold?: string;
+    };
 
 export const SITE_GROUPS = [
   "People",
@@ -80,9 +86,18 @@ export function defineTeamSection(section: Omit<TeamSection, "console">): TeamSe
   return { console: "team", ...section };
 }
 
-/** `{ kind: "placeholder", ticket }` for a section whose API another ticket builds. */
+/**
+ * `{ kind: "placeholder", ticket }` for a section whose API another ticket builds. The ticket must
+ * still be open: registry.test.ts fails once it has a ledger (KOBE-291), so finished work never
+ * stays "coming soon".
+ */
 export function comingIn(ticket: TicketId): SectionStatus {
   return { kind: "placeholder", ticket };
+}
+
+/** A placeholder whose ticket is paused on purpose; `reason` is shown with it ("on hold"). */
+export function onHold(ticket: TicketId, reason: string): SectionStatus {
+  return { kind: "placeholder", ticket, onHold: reason };
 }
 
 export const READY: SectionStatus = { kind: "ready" };
