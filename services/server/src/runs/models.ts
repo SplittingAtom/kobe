@@ -1,4 +1,11 @@
-import type { PiModelApi, PiThreadConfig, ThinkingLevel, ThinkingPolicy } from "@kobe/protocol";
+import {
+  narrowThinkingPolicy,
+  strictestThinkingPolicy,
+  type PiModelApi,
+  type PiThreadConfig,
+  type ThinkingLevel,
+  type ThinkingPolicy,
+} from "@kobe/protocol";
 import { catalogThinking } from "../models/thinking.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
 import {
@@ -71,6 +78,7 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
       thinkingAllowed: modelCatalog.thinkingAllowed,
       thinkingDefault: modelCatalog.thinkingDefault,
       thinkingMax: modelCatalog.thinkingMax,
+      thinkingLowest: modelCatalog.thinkingLowest,
       teamThinkingMax: teamModels.thinkingMax,
     })
     .from(teamModels)
@@ -119,11 +127,19 @@ export async function resolveRunModel(
     return { ok: false, code: "agent_model_not_enabled", alias: requestedAlias };
   }
   if (chosen === undefined) return { ok: true, model: undefined };
+  // Several aliases may name one provider model: the gateway writes the strictest of their
+  // policies, so the run records that one too (review N1).
+  const strictest = strictestThinkingPolicy(
+    enabled
+      .filter((m) => m.gatewayModel === chosen.gatewayModel)
+      .map((m) => narrowThinkingPolicy(m.thinking.site, m.thinking.teamMax)),
+  );
+  const thinking = strictest === undefined ? chosen.thinking : { site: strictest, teamMax: null };
   return {
     ok: true,
     model: { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
     limits: chosen.limits,
-    thinking: chosen.thinking,
+    thinking,
   };
 }
 

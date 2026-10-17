@@ -9021,9 +9021,13 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "lowest": {
+                      "type": "string",
+                      "enum": ["off", "low"]
                     }
                   },
-                  "required": ["control", "allowed", "default", "max"],
+                  "required": ["control", "allowed", "default", "max", "lowest"],
                   "additionalProperties": false
                 },
                 "gateway_model": {

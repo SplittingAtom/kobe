@@ -106,7 +106,7 @@ describe("run model resolution (D30)", () => {
       model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
       limits: { maxOutputTokens: null, contextWindow: null, reasoning: false },
       thinking: {
-        site: { control: "none", allowed: false, default: null, max: null },
+        site: { control: "none", allowed: false, default: null, max: null, lowest: "off" },
         teamMax: null,
       },
     });
@@ -271,6 +271,13 @@ describe("run model resolution (D30)", () => {
         const r = await owner.patch(`/v1/threads/${threadId}`, { thinking_level: bad });
         expect(r.status, String(bad)).toBe(400);
       }
+      // Only the owner chooses (review N7): another member can't, even on a shared thread.
+      const shared = await owner.post(`/v1/threads/${threadId}/share`, { visibility: "team" });
+      expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+      const reader = f.on(0, await f.member(w.team));
+      const refused = await reader.patch(`/v1/threads/${threadId}`, { thinking_level: "off" });
+      expect(refused.status).not.toBe(200);
+      expect((await owner.get(`/v1/threads/${threadId}`)).json.thinking_level).toBe("high");
     } finally {
       await site(`thinking_control = 'none', thinking_allowed = false, thinking_default = NULL,
         thinking_max = NULL, reasoning = false`);

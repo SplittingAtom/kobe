@@ -1,12 +1,16 @@
 import type { ModelProviderKind, ThinkingLevelValue, modelCatalog } from "@kobe/db";
 import {
+  THINKING_CONTROLS_WITHOUT_OFF,
   effectiveThinkingLevel,
+  knownThinkingLowest,
+  knownThinkingProblem,
   narrowThinkingPolicy,
   selectableThinkingLevels,
   teamThinkingProblem,
   thinkingControlFits,
   thinkingControlSchema,
   thinkingLevelSchema,
+  thinkingLowestSchema,
   thinkingPolicyProblem,
   type ThinkingLevel,
   type ThinkingPolicy,
@@ -26,6 +30,11 @@ export const thinkingPolicySchema = z.strictObject({
   allowed: z.boolean({ error: "allowed is true or false" }),
   default: thinkingLevelSchema.nullable(),
   max: thinkingLevelSchema.nullable(),
+  /**
+   * The lowest level the model accepts (review S2): `low` when it cannot turn thinking off.
+   * Absent: what Kobe knows of the model's family, else `off` (`low` for `anthropic_effort`).
+   */
+  lowest: thinkingLowestSchema.optional(),
 });
 export type ThinkingPolicyInput = z.infer<typeof thinkingPolicySchema>;
 
@@ -37,17 +46,40 @@ export const NO_THINKING: ThinkingPolicy = {
   allowed: false,
   default: null,
   max: null,
+  lowest: "off",
 };
+
+/** The API's policy, its `lowest` filled in from the control and the model's known family. */
+export function policyOf(input: ThinkingPolicyInput, model: string): ThinkingPolicy {
+  const lowest =
+    input.lowest ??
+    (input.control === "none"
+      ? "off"
+      : THINKING_CONTROLS_WITHOUT_OFF.includes(input.control)
+        ? "low"
+        : (knownThinkingLowest(model) ?? "off"));
+  return {
+    control: input.control,
+    allowed: input.allowed,
+    default: input.default,
+    max: input.max,
+    lowest,
+  };
+}
 
 /** A catalog row's policy. */
 export function catalogThinking(
-  row: Pick<CatalogRow, "thinkingControl" | "thinkingAllowed" | "thinkingDefault" | "thinkingMax">,
+  row: Pick<
+    CatalogRow,
+    "thinkingControl" | "thinkingAllowed" | "thinkingDefault" | "thinkingMax" | "thinkingLowest"
+  >,
 ): ThinkingPolicy {
   return {
     control: row.thinkingControl,
     allowed: row.thinkingAllowed,
     default: row.thinkingDefault,
     max: row.thinkingMax,
+    lowest: row.thinkingLowest,
   };
 }
 
@@ -57,6 +89,7 @@ export const thinkingColumns = (p: ThinkingPolicy) => ({
   thinkingAllowed: p.allowed,
   thinkingDefault: p.default,
   thinkingMax: p.max,
+  thinkingLowest: p.lowest,
 });
 
 export type ThinkingCheck =
@@ -73,6 +106,8 @@ export function checkCatalogThinking(
   before: ThinkingPolicy,
   kind: ModelProviderKind,
   reasoning: boolean,
+  /** The provider's model id: known families are checked too (review S2). */
+  model: string,
 ): ThinkingCheck {
   const policy = next ?? before;
   if (!thinkingControlFits(kind, policy.control)) {
@@ -82,7 +117,7 @@ export function checkCatalogThinking(
       message: `The thinking control ${policy.control} does not fit a ${kind} provider. Pick one for this provider, or none.`,
     };
   }
-  const problem = thinkingPolicyProblem(policy, reasoning);
+  const problem = thinkingPolicyProblem(policy, reasoning) ?? knownThinkingProblem(model, policy);
   return problem === undefined
     ? { ok: true, policy }
     : { ok: false, error: "thinking_invalid", message: `Thinking: ${problem}.` };
@@ -103,6 +138,8 @@ export interface ThinkingView {
   readonly allowed: boolean;
   readonly default: ThinkingLevel | null;
   readonly max: ThinkingLevel | null;
+  /** `low` when the model cannot turn thinking off ("off" then means low). */
+  readonly lowest: ThinkingPolicy["lowest"];
 }
 
 export const thinkingView = (p: ThinkingPolicy): ThinkingView => ({
@@ -110,6 +147,7 @@ export const thinkingView = (p: ThinkingPolicy): ThinkingView => ({
   allowed: p.allowed,
   default: p.default,
   max: p.max,
+  lowest: p.lowest,
 });
 
 /** For the chat: the policy in force for the team, the default level and what members may pick. */

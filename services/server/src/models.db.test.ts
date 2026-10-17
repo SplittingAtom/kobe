@@ -484,7 +484,7 @@ describe("catalog and team enablement", () => {
       thinking: THINK,
     });
     expect(add.status, JSON.stringify(add.json)).toBe(201);
-    expect(add.json.model.thinking).toEqual(THINK);
+    expect(add.json.model.thinking).toEqual({ ...THINK, lowest: "off" });
     const wrongKind = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
       thinking: { ...THINK, control: "anthropic_adaptive" },
     });
@@ -517,13 +517,40 @@ describe("catalog and team enablement", () => {
     const off = { control: "reasoning_effort", allowed: false, default: null, max: null };
     const set = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, { thinking: off });
     expect(set.status, JSON.stringify(set.json)).toBe(200);
+    const stored = { ...off, lowest: "off" };
     expect((await as.siteAdmin.get(MODELS)).json.catalog).toEqual(
-      expect.arrayContaining([expect.objectContaining({ alias: "glm", thinking: off })]),
+      expect.arrayContaining([expect.objectContaining({ alias: "glm", thinking: stored })]),
     );
     expect((await audit("models.catalog")).at(-1)?.target).toMatchObject({
       alias: "glm",
-      thinking: off,
+      thinking: stored,
     });
+    // Models that cannot turn thinking off (review S2): known families default to low, an
+    // explicit off for them is refused, and anthropic budgets are refused where Claude rejects them.
+    const o3 = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "o3",
+      provider_id: "openai",
+      model: "o3",
+      reasoning: true,
+      thinking: THINK,
+    });
+    expect(o3.status, JSON.stringify(o3.json)).toBe(201);
+    expect(o3.json.model.thinking).toMatchObject({ lowest: "low" });
+    const o3Off = await as.siteAdmin.patch(`${MODELS}/catalog/o3`, {
+      thinking: { ...THINK, lowest: "off" },
+    });
+    expect(o3Off.json).toMatchObject({ code: "thinking_invalid" });
+    expect(o3Off.json.message).toContain("cannot turn thinking off");
+    expect((await as.siteAdmin.delete(`${MODELS}/catalog/o3`)).status).toBe(204);
+    const budget = await as.siteAdmin.post(`${MODELS}/catalog`, {
+      alias: "opus48",
+      provider_id: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning: true,
+      thinking: { ...THINK, control: "anthropic_budget" },
+    });
+    expect(budget.json).toMatchObject({ code: "thinking_invalid" });
+    expect(budget.json.message).toContain("refuses thinking budgets");
     // Anthropic models that cannot turn thinking off: always allowed, never off by default.
     const alwaysOn = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "opus",

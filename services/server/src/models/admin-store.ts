@@ -26,6 +26,7 @@ import {
   NO_THINKING,
   catalogThinking,
   checkCatalogThinking,
+  policyOf,
   thinkingColumns,
   thinkingView,
   type ThinkingView,
@@ -415,10 +416,11 @@ export async function addCatalogEntry(
       return { ok: false, error: "partial_prices" };
     }
     const thinking = checkCatalogThinking(
-      input.thinking,
+      input.thinking === undefined ? undefined : policyOf(input.thinking, input.model),
       NO_THINKING,
       provider.kind,
       input.reasoning ?? false,
+      input.model,
     );
     if (!thinking.ok) return thinking;
     const [row] = await tx
@@ -499,18 +501,20 @@ export async function updateCatalogEntry(
       return { ok: false, error: "output_limit_exceeds_context", contextWindow: window };
     }
     const reasoning = input.reasoning ?? before.reasoning;
+    const model = input.model ?? before.model;
     const thinking = checkCatalogThinking(
-      input.thinking,
+      input.thinking === undefined ? undefined : policyOf(input.thinking, model),
       catalogThinking(before),
       provider.kind,
       reasoning,
+      model,
     );
     if (!thinking.ok) return thinking;
     const [row] = await tx
       .update(modelCatalog)
       .set({
         providerId,
-        model: input.model ?? before.model,
+        model,
         label: input.label === undefined ? before.label : input.label,
         inputModalities: input.input_modalities ?? before.inputModalities,
         ...prices,

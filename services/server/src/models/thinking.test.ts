@@ -11,13 +11,20 @@ import {
   THINKING_LEVELS,
 } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
-import { chatThinking, checkCatalogThinking, NO_THINKING, runThinkingLevel } from "./thinking.js";
+import {
+  chatThinking,
+  checkCatalogThinking,
+  NO_THINKING,
+  policyOf,
+  runThinkingLevel,
+} from "./thinking.js";
 
 const EFFORT = {
   control: "reasoning_effort",
   allowed: true,
   default: "medium",
   max: "high",
+  lowest: "off",
 } as const;
 
 describe("thinking settings on the server (KOBE-260)", () => {
@@ -30,22 +37,42 @@ describe("thinking settings on the server (KOBE-260)", () => {
   });
 
   it("checks a catalog write against the provider kind and the reasoning flag", () => {
-    expect(checkCatalogThinking(EFFORT, NO_THINKING, "ollama", true)).toEqual({
+    expect(checkCatalogThinking(EFFORT, NO_THINKING, "ollama", true, "glm-5.3")).toEqual({
       ok: true,
       policy: EFFORT,
     });
-    expect(checkCatalogThinking(undefined, EFFORT, "ollama", false)).toMatchObject({
+    expect(checkCatalogThinking(undefined, EFFORT, "ollama", false, "glm-5.3")).toMatchObject({
       ok: false,
       error: "thinking_invalid",
     });
-    expect(checkCatalogThinking(EFFORT, NO_THINKING, "anthropic", true)).toMatchObject({
+    expect(checkCatalogThinking(EFFORT, NO_THINKING, "anthropic", true, "glm-5.3")).toMatchObject({
       ok: false,
       message: expect.stringContaining("anthropic"),
     });
     // Moving the model to another provider kind re-checks the stored control.
-    expect(checkCatalogThinking(undefined, EFFORT, "gemini", true)).toMatchObject({ ok: false });
-    expect(checkCatalogThinking(undefined, NO_THINKING, "gemini", false)).toMatchObject({
+    expect(checkCatalogThinking(undefined, EFFORT, "gemini", true, "glm-5.3")).toMatchObject({
+      ok: false,
+    });
+    expect(checkCatalogThinking(undefined, NO_THINKING, "gemini", false, "glm-5.3")).toMatchObject({
       ok: true,
+    });
+  });
+
+  it("fills in the lowest level from known families and refuses off for them (review S2)", () => {
+    const input = {
+      control: "reasoning_effort",
+      allowed: true,
+      default: "low",
+      max: "high",
+    } as const;
+    expect(policyOf(input, "o3").lowest).toBe("low");
+    expect(policyOf(input, "glm-5.3").lowest).toBe("off");
+    expect(policyOf({ ...input, control: "anthropic_effort" }, "claude-x").lowest).toBe("low");
+    expect(policyOf({ ...input, lowest: "low" }, "glm-5.3").lowest).toBe("low");
+    const o3Off = { ...EFFORT, lowest: "off" as const };
+    expect(checkCatalogThinking(o3Off, NO_THINKING, "openai", true, "o3")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("cannot turn thinking off"),
     });
   });
 

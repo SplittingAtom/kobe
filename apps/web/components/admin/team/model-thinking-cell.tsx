@@ -12,6 +12,18 @@ import { THINKING_LEVEL_LABELS } from "../site/model-thinking";
  */
 const SITE = "site";
 
+/** A stored team maximum as it applies now (review N3): never above the site's options. */
+function shown(
+  teamMax: ThinkingLevel | null,
+  levels: readonly ThinkingLevel[],
+): ThinkingLevel | null {
+  if (teamMax === null || levels.includes(teamMax)) return teamMax;
+  // Above every narrower level: it is the site's maximum now.
+  return levels.length > 0 && thinkingRank(teamMax) < thinkingRank(levels[0] as ThinkingLevel)
+    ? (levels[0] as ThinkingLevel)
+    : null;
+}
+
 export function TeamThinkingCell({
   model: m,
   disabled,
@@ -29,14 +41,14 @@ export function TeamThinkingCell({
     return <span className="text-sm text-console-muted">Off (site setting)</span>;
   }
   const siteMax = site.max;
-  const lowest = lowestThinking(site.control);
+  const lowest = lowestThinking(site);
   const levels = THINKING_LEVELS.filter(
     (l) => thinkingRank(l) >= thinkingRank(lowest) && thinkingRank(l) < thinkingRank(siteMax),
   );
   return (
     <Select
       aria-label={`Highest thinking level for ${modelName(m)}`}
-      value={m.thinkingMax ?? SITE}
+      value={shown(m.thinkingMax ?? null, levels) ?? SITE}
       disabled={disabled || !m.enabled}
       onChange={(e) => onChange(e.target.value === SITE ? null : (e.target.value as ThinkingLevel))}
     >

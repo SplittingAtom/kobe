@@ -1,4 +1,4 @@
-import { thinkingControlSchema, thinkingLevelSchema } from "@kobe/protocol";
+import { thinkingControlSchema, thinkingLevelSchema, thinkingLowestSchema } from "@kobe/protocol";
 import { z } from "zod";
 import { aliasSchema, teamModelSchema } from "../models/schemas.js";
 
@@ -42,6 +42,8 @@ export const teamModelResponseSchema = z.strictObject({
     allowed: z.boolean(),
     default: thinkingLevelSchema.nullable(),
     max: thinkingLevelSchema.nullable(),
+    /** `low` when the model cannot turn thinking off: "off" then means low. */
+    lowest: thinkingLowestSchema,
   }),
   gateway_model: z.string(),
   input_usd_per_mtok: price,

@@ -2,6 +2,8 @@
 
 import {
   THINKING_CONTROLS_BY_KIND,
+  THINKING_CONTROLS_WITHOUT_OFF,
+  knownThinkingLowest,
   THINKING_LEVELS,
   lowestThinking,
   thinkingRank,
@@ -25,11 +27,12 @@ export const NO_THINKING: ThinkingPolicy = {
   allowed: false,
   default: null,
   max: null,
+  lowest: "off",
 };
 
 export const THINKING_CONTROL_LABELS: Readonly<Record<ThinkingControl, string>> = {
   none: "Not controlled (the provider decides)",
-  reasoning_effort: "reasoning_effort parameter (OpenAI style: OpenAI, Ollama, vLLM…)",
+  reasoning_effort: "reasoning_effort parameter (OpenAI style: OpenAI, Ollama…)",
   anthropic_adaptive: "Adaptive thinking with an effort (can be turned off)",
   anthropic_effort: "Effort only (thinking cannot be turned off)",
   anthropic_budget: "Thinking budget (older Claude models)",
@@ -67,22 +70,34 @@ export function normalizeThinking(
   p: ThinkingPolicy,
   reasoning: boolean,
   kind: ProviderKind | undefined,
+  /** The provider's model id: a family known not to turn thinking off keeps `low` (S2). */
+  model = "",
 ): ThinkingPolicy {
   if (!reasoning || p.control === "none" || !controlsFor(kind).includes(p.control)) {
     return NO_THINKING;
   }
-  const lowest = lowestThinking(p.control);
+  const lowestValue =
+    THINKING_CONTROLS_WITHOUT_OFF.includes(p.control) || knownThinkingLowest(model) === "low"
+      ? "low"
+      : p.lowest;
+  const lowest = lowestThinking({ control: p.control, lowest: lowestValue });
   const allowed = p.allowed || lowest !== "off";
-  if (!allowed) return { control: p.control, allowed: false, default: null, max: null };
+  if (!allowed) {
+    return { control: p.control, allowed: false, default: null, max: null, lowest: "off" };
+  }
   const max = p.max === null || p.max === "off" ? "high" : p.max;
   const wanted = p.default ?? "low";
   const clamped = thinkingRank(wanted) > thinkingRank(max) ? max : wanted;
   const fallback = thinkingRank(clamped) < thinkingRank(lowest) ? lowest : clamped;
-  return { control: p.control, allowed: true, default: fallback, max };
+  return { control: p.control, allowed: true, default: fallback, max, lowest: lowestValue };
 }
 
 const same = (a: ThinkingPolicy, b: ThinkingPolicy) =>
-  a.control === b.control && a.allowed === b.allowed && a.default === b.default && a.max === b.max;
+  a.control === b.control &&
+  a.allowed === b.allowed &&
+  a.default === b.default &&
+  a.max === b.max &&
+  a.lowest === b.lowest;
 
 /** `{ thinking }` when the form's policy differs from the stored one (or, new, from none). */
 export function thinkingChange(
@@ -90,8 +105,10 @@ export function thinkingChange(
   reasoning: boolean,
   kind: ProviderKind | undefined,
   model?: CatalogModel,
+  /** The model id in the form (it may have changed). */
+  modelId = model?.model ?? "",
 ): { readonly thinking?: ThinkingPolicy } {
-  const next = normalizeThinking(choice.policy, reasoning, kind);
+  const next = normalizeThinking(choice.policy, reasoning, kind, modelId);
   const before = model?.thinking ?? NO_THINKING;
   // An older server sends no thinking settings and takes none.
   if (model !== undefined && model.thinking === undefined && same(next, NO_THINKING)) return {};
@@ -102,18 +119,23 @@ export function ThinkingFields({
   choice,
   reasoning,
   kind,
+  model,
 }: {
   readonly choice: ThinkingChoice;
   readonly reasoning: boolean;
   readonly kind: ProviderKind | undefined;
+  /** The provider's model id as typed (known families can't turn thinking off). */
+  readonly model: string;
 }) {
   const id = useId();
   if (!reasoning) return null;
   const controls = controlsFor(kind);
-  const p = normalizeThinking(choice.policy, reasoning, kind);
-  const lowest = p.control === "none" ? "off" : lowestThinking(p.control);
+  const p = normalizeThinking(choice.policy, reasoning, kind, model);
+  const lowest = p.control === "none" ? "off" : lowestThinking(p);
+  const fixedLowest =
+    THINKING_CONTROLS_WITHOUT_OFF.includes(p.control) || knownThinkingLowest(model) === "low";
   const set = (over: Partial<ThinkingPolicy>) =>
-    choice.set(normalizeThinking({ ...p, ...over }, reasoning, kind));
+    choice.set(normalizeThinking({ ...p, ...over }, reasoning, kind, model));
   const levels = THINKING_LEVELS.filter((l) => thinkingRank(l) >= thinkingRank(lowest));
   return (
     <fieldset className="m-0 mb-3 border-0 p-0" aria-describedby={`${id}-hint`}>
@@ -142,11 +164,24 @@ export function ThinkingFields({
       {p.control !== "none" && (
         <>
           <Checkbox
+            label="The model can turn thinking off"
+            hint={
+              lowest === "off"
+                ? "Off is sent to the provider as off."
+                : fixedLowest
+                  ? "This model can't turn thinking off: Off uses the lowest level (low)."
+                  : "Can't be turned off: Off uses the lowest level (low), so it never fails."
+            }
+            checked={lowest === "off"}
+            disabled={fixedLowest}
+            onChange={(e) => set({ lowest: e.target.checked ? "off" : "low", allowed: true })}
+          />
+          <Checkbox
             label="Allow thinking"
             hint={
               lowest === "off"
                 ? "Unticked, every run asks this model not to think (thinking off)."
-                : "This control cannot turn thinking off: the lowest level is low."
+                : "This model can't turn thinking off: the lowest level is low."
             }
             checked={p.allowed}
             disabled={lowest !== "off"}
@@ -208,5 +243,6 @@ export function thinkingText(m: CatalogModel): string {
   if (!p.allowed) return "Thinking off";
   const def = THINKING_LEVEL_LABELS[p.default ?? "low"].toLowerCase();
   const max = THINKING_LEVEL_LABELS[p.max ?? "high"].toLowerCase();
-  return `Thinking ${def}, up to ${max}`;
+  const fixed = lowestThinking(p) === "low" ? " (can't be turned off)" : "";
+  return `Thinking ${def}, up to ${max}${fixed}`;
 }

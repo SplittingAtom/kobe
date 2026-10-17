@@ -64,6 +64,7 @@ const MODELS = {
   configured: true,
   token_defaults: TOKEN_DEFAULTS,
 };
+const NO = { control: "none", allowed: false, default: null, max: null, lowest: "off" };
 const LISTED = {
   provider_id: "ollama",
   models: ["glm-5.3", "kimi-k2.7-code"],
@@ -415,8 +416,14 @@ describe("site: models and providers", () => {
   });
 
   it("sets a reasoning model's thinking control, allowance and levels (KOBE-260)", async () => {
-    const NONE = { control: "none", allowed: false, default: null, max: null };
-    const EFFORT = { control: "reasoning_effort", allowed: true, default: "low", max: "medium" };
+    const NONE = { control: "none", allowed: false, default: null, max: null, lowest: "off" };
+    const EFFORT = {
+      control: "reasoning_effort",
+      allowed: true,
+      default: "low",
+      max: "medium",
+      lowest: "off",
+    };
     const calls = stubApi({
       "GET /v1/site/models": [
         200,
@@ -468,12 +475,82 @@ describe("site: models and providers", () => {
     await user.click(within(form).getByRole("button", { name: "Save glm" }));
     await screen.findByText(/Saved glm/);
     expect(bodyOf(calls.find((c) => c.url.endsWith("/catalog/glm")))).toEqual({
-      thinking: { control: "reasoning_effort", allowed: false, default: null, max: null },
+      thinking: {
+        control: "reasoning_effort",
+        allowed: false,
+        default: null,
+        max: null,
+        lowest: "off",
+      },
     });
   });
 
+  it("marks a model that cannot turn thinking off; known families are fixed (KOBE-260 S2)", async () => {
+    const calls = stubApi({
+      "GET /v1/site/models": [
+        200,
+        {
+          ...MODELS,
+          catalog: [
+            { ...KIMI, reasoning: true, thinking: { ...NO, lowest: "off" } },
+            { ...KIMI, alias: "o3", model: "o3", reasoning: true, thinking: NO },
+          ],
+        },
+      ],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/site/models/catalog/kimi": [200, { model: KIMI }],
+    });
+    renderSite(<SiteModelsPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Edit kimi" }));
+    const form = screen.getByRole("form", { name: "Edit kimi" });
+    await user.selectOptions(
+      within(form).getByLabelText("How the gateway sets it"),
+      "reasoning_effort",
+    );
+    const canOff = within(form).getByLabelText(
+      "The model can turn thinking off",
+    ) as HTMLInputElement;
+    expect(canOff.checked).toBe(true);
+    await user.click(canOff);
+    expect(form.textContent).toContain("Off uses the lowest level (low)");
+    // Off is not a default any more; Allow thinking stays on.
+    const def = within(form).getByLabelText("Default level");
+    expect(
+      within(def)
+        .getAllByRole("option")
+        .map((o) => o.getAttribute("value")),
+    ).not.toContain("off");
+    await user.click(within(form).getByRole("button", { name: "Save kimi" }));
+    await screen.findByText(/Saved/);
+    expect(bodyOf(calls.find((c) => c.url.endsWith("/catalog/kimi")))).toEqual({
+      thinking: {
+        control: "reasoning_effort",
+        allowed: true,
+        default: "low",
+        max: "high",
+        lowest: "low",
+      },
+    });
+    // o3 is known not to turn thinking off: the box is fixed.
+    await user.click(screen.getByRole("button", { name: "Edit o3" }));
+    const o3 = screen.getByRole("form", { name: "Edit o3" });
+    await user.selectOptions(
+      within(o3).getByLabelText("How the gateway sets it"),
+      "reasoning_effort",
+    );
+    const fixed = within(o3).getByLabelText("The model can turn thinking off") as HTMLInputElement;
+    expect([fixed.checked, fixed.disabled]).toEqual([false, true]);
+  });
+
   it("drops the thinking control with the reasoning flag (KOBE-260)", async () => {
-    const EFFORT = { control: "reasoning_effort", allowed: true, default: "low", max: "high" };
+    const EFFORT = {
+      control: "reasoning_effort",
+      allowed: true,
+      default: "low",
+      max: "high",
+      lowest: "off",
+    };
     const calls = stubApi({
       "GET /v1/site/models": [
         200,
@@ -492,7 +569,7 @@ describe("site: models and providers", () => {
     await screen.findByText(/Saved kimi/);
     expect(bodyOf(calls.find((c) => c.url.endsWith("/catalog/kimi")))).toEqual({
       reasoning: false,
-      thinking: { control: "none", allowed: false, default: null, max: null },
+      thinking: { control: "none", allowed: false, default: null, max: null, lowest: "off" },
     });
   });
 
@@ -631,7 +708,13 @@ describe("team: models", () => {
   });
 
   it("lowers a model's thinking maximum for the team, never above the site's (KOBE-260)", async () => {
-    const site = { control: "reasoning_effort", allowed: true, default: "medium", max: "medium" };
+    const site = {
+      control: "reasoning_effort",
+      allowed: true,
+      default: "medium",
+      max: "medium",
+      lowest: "off",
+    };
     const thinking = {
       ...teamModel("glm", true, false),
       thinking: site,
