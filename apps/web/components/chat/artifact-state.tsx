@@ -69,6 +69,11 @@ export interface ArtifactPanelApi {
   openFile(path: string): void;
   /** The file's tab closes: it is no longer in the workspace (`goneFile` names it). */
   dropFile(path: string): void;
+  /**
+   * A workspace file or folder moved or was renamed (KOBE-304): open file tabs of it follow, on
+   * the thread on screen (tabs remembered on other threads find the file gone and say so).
+   */
+  moveFiles(from: string, to: string): void;
   /** The last file whose tab was dropped, until the member dismisses the notice. */
   readonly goneFile: string | null;
   dismissGone(): void;
@@ -273,7 +278,7 @@ export function ArtifactPanelProvider({
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
-  const { openArtifact: openTab, drop } = t;
+  const { openArtifact: openTab, drop, retargetFiles: moveFiles } = t;
   const [hiddenIn, setHiddenIn] = useState<string | undefined | null>(null);
   // Hidden for the thread it was hidden on (`null`: shown); another thread shows its own tabs.
   const hidden = hiddenIn !== null && hiddenIn === threadId && !sheet.asSheet;
@@ -330,6 +335,7 @@ export function ArtifactPanelProvider({
       openArtifact,
       openFile,
       dropFile,
+      moveFiles,
       goneFile,
       dismissGone,
       activate: t.activate,
@@ -344,6 +350,7 @@ export function ArtifactPanelProvider({
       toggleColumn,
       openFile,
       dropFile,
+      moveFiles,
       goneFile,
       dismissGone,
       t.tabs,

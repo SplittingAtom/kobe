@@ -8,6 +8,7 @@ import {
   openTab,
   readTabs,
   retainTabs,
+  retargetFileTabs,
   writeTabs,
   type ArtifactTabs,
 } from "../../lib/chat/artifact-tabs";
@@ -36,6 +37,8 @@ export interface ArtifactTabsApi {
   prune(existing: ReadonlySet<string>): void;
   /** Drops one tab whose content is gone (a deleted file); focus as `closeTab` when it was there. */
   drop(id: string): void;
+  /** A workspace file or folder moved: its file tabs follow (KOBE-304). */
+  retargetFiles(from: string, to: string): void;
 }
 
 /** The shell's artifact column (`components/shell/shell-grid.tsx`). */
@@ -119,5 +122,24 @@ export function useArtifactTabs(key: string | null, conversation?: string): Arti
     setTabs((prev) => closeTabIn(prev, id));
     setRequest((prev) => (prev?.id === id ? null : prev));
   }, []);
-  return { tabs, request, openArtifact, autoOpen, activate, closeTab, close, prune, drop };
+  const retargetFiles = useCallback((from: string, to: string) => {
+    setTabs((prev) => retargetFileTabs(prev, from, to));
+    setRequest((prev) => {
+      if (prev === null) return prev;
+      const id = retargetFileTabs({ open: [prev.id], active: prev.id }, from, to).active;
+      return id === null || id === prev.id ? prev : { ...prev, id };
+    });
+  }, []);
+  return {
+    tabs,
+    request,
+    openArtifact,
+    autoOpen,
+    activate,
+    closeTab,
+    close,
+    prune,
+    drop,
+    retargetFiles,
+  };
 }

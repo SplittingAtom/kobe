@@ -1,31 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRightIcon, FileIcon, FolderIcon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { FolderIcon, UploadIcon } from "lucide-react";
 import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
-import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
+import { describeFileError, isReadOnlyPath, parentPath } from "../../lib/files/format";
+import { folderError, type DroppedItems } from "../../lib/files/drop";
+import { baseName, expandedKey, joinPath } from "../../lib/files/tree";
 import { ErrorNotice } from "../admin/error-notice";
 import { copyText } from "../../lib/clipboard";
 import type { MenuBindings } from "../../lib/shell/menu";
-import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
-import { useFolder } from "./use-folder";
+import { cn } from "../../lib/utils";
+import { ConfirmDelete, MoveForm, RenameForm } from "./file-dialogs";
+import { DROP_FOLDER_ATTR, FileTreeView, type Dragging, type TreeFocus } from "./file-tree";
+import { useFileTree, type FileTree } from "./use-file-tree";
 
 const COPY_FAILED = {
   status: 0,
   code: "client_error",
   message: "The path could not be copied: the browser refused the clipboard.",
 } as const;
-
-/** A cancelled delete gives the focus back to the row's ⋯ button (KOBE-292). */
-function focusRowMenu(list: HTMLElement | null, name: string): void {
-  const row = [...(list?.querySelectorAll<HTMLElement>("li[data-file]") ?? [])].find(
-    (li) => li.dataset["file"] === name,
-  );
-  row?.querySelector<HTMLElement>('[data-command="file-row-actions"]')?.focus();
-}
 
 /** The sandbox syncs shortly after it starts; read the listing again after this. */
 const DEFAULT_REFRESH_AFTER_WAKE_MS = 4000;
@@ -40,7 +36,7 @@ function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: numb
   useEffect(() => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    if (mounted.current) reload(); // the first listing is useFolder's own
+    if (mounted.current) reload(); // the first listing is the tree's own
     mounted.current = true;
     void api.wake().then((res) => {
       if (!current) return;
@@ -59,221 +55,198 @@ function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: numb
   return doneKey !== key;
 }
 
-function Breadcrumb({ path, onOpen }: { readonly path: string; onOpen(path: string): void }) {
-  const parts = path === "" ? [] : path.split("/");
-  return (
-    <nav aria-label="Folder path" className="flex flex-wrap items-center gap-1 text-xs">
-      <button type="button" className="underline" onClick={() => onOpen("")}>
-        Workspace
-      </button>
-      {parts.map((part, i) => {
-        const target = parts.slice(0, i + 1).join("/");
-        const last = i === parts.length - 1;
-        return (
-          <span key={target} className="flex items-center gap-1">
-            <ChevronRightIcon aria-hidden className="size-3" />
-            {last ? (
-              <span aria-current="page">{part}</span>
-            ) : (
-              <button type="button" className="underline" onClick={() => onOpen(target)}>
-                {part}
-              </button>
-            )}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
+type Dialog = { readonly kind: "delete" | "rename" | "move"; readonly entry: FileEntry } | null;
 
-function ReadOnlyBadge() {
-  return (
-    <span className="text-muted-foreground rounded-full border px-1.5 text-[0.65rem]">
-      Read-only
-    </span>
-  );
-}
+const where = (folder: string) => (folder === "" ? "the workspace root" : folder);
 
-function ConfirmDelete({
-  entry,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  readonly entry: FileEntry;
-  readonly busy: boolean;
-  onConfirm(): void;
-  onCancel(): void;
-}) {
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
-  return (
-    <div
-      role="alertdialog"
-      aria-labelledby="kobe-files-confirm"
-      className="border-destructive/40 mt-2 flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs"
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onCancel();
-        }
-      }}
-    >
-      <p id="kobe-files-confirm" className="m-0 min-w-0 flex-1">
-        {entry.type === "dir"
-          ? `Delete the folder ${entry.name} and everything in it? This cannot be undone.`
-          : `Delete ${entry.name}? This cannot be undone.`}
-      </p>
-      <button
-        type="button"
-        ref={cancel}
-        className="rounded-md border px-2 py-0.5"
-        onClick={onCancel}
-      >
-        Cancel
-      </button>
-      <button
-        type="button"
-        className="text-destructive border-destructive/40 rounded-md border px-2 py-0.5"
-        disabled={busy}
-        onClick={onConfirm}
-      >
-        Delete
-      </button>
-    </div>
-  );
-}
-
-/** A row's ⋯ menu (KOBE-292): Open, Download (files), Copy path, Delete (unless read-only). */
+/** A row's ⋯ menu (KOBE-292, KOBE-304): Open, Download, Rename, Move to…, Copy path, Delete. */
 function rowBindings(
   entry: FileEntry,
   handlers: {
     readonly onOpen: (() => void) | undefined;
     readonly onDownload: () => void;
+    readonly onRename: () => void;
+    readonly onMove: () => void;
     readonly onCopyPath: () => void;
     readonly onDelete: () => void;
   },
 ): MenuBindings {
   const readOnly = isReadOnlyPath(entry.path);
+  const change = (onSelect: () => void, destructive = false) => ({
+    onSelect,
+    movesFocus: true,
+    ...(destructive ? { destructive } : {}),
+  });
   return {
     ...(handlers.onOpen ? { "open-file": { onSelect: handlers.onOpen } } : {}),
     ...(entry.type === "file" ? { "download-file": { onSelect: handlers.onDownload } } : {}),
-    "copy-file-path": { onSelect: handlers.onCopyPath },
     ...(readOnly
       ? {}
-      : { "delete-file": { onSelect: handlers.onDelete, destructive: true, movesFocus: true } }),
+      : { "rename-file": change(handlers.onRename), "move-file": change(handlers.onMove) }),
+    "copy-file-path": { onSelect: handlers.onCopyPath },
+    ...(readOnly ? {} : { "delete-file": change(handlers.onDelete, true) }),
   };
 }
 
-function Row({
-  entry,
-  onOpen,
-  onOpenFile,
-  onDownload,
-  onCopyPath,
-  onDelete,
+/** The top-level row: the workspace's name, a drop target for the top level, and Upload. */
+function RootHeader({
+  drag,
+  folder,
+  busy,
+  onUpload,
 }: {
-  readonly entry: FileEntry;
-  onOpen(path: string): void;
-  /** Views a file in the artifact column (KOBE-268); without it a file's name is plain text. */
-  readonly onOpenFile: ((entry: FileEntry) => void) | undefined;
-  onDownload(entry: FileEntry): void;
-  onCopyPath(entry: FileEntry): void;
-  onDelete(entry: FileEntry): void;
+  readonly drag: Parameters<Parameters<typeof FileTreeView>[0]["header"]>[0];
+  readonly folder: string;
+  readonly busy: boolean;
+  onUpload(files: FileList | null): void;
 }) {
-  const readOnly = isReadOnlyPath(entry.path);
-  const dir = entry.type === "dir";
-  const open = dir ? () => onOpen(entry.path) : onOpenFile && (() => onOpenFile(entry));
+  const label = `Upload a file to ${where(folder)}`;
   return (
-    <li data-file={entry.name} className="group/row flex items-center gap-2 py-1">
-      {dir ? (
-        <FolderIcon aria-hidden className="size-4 shrink-0" />
-      ) : (
-        <FileIcon aria-hidden className="size-4 shrink-0" />
+    <div
+      {...{ [DROP_FOLDER_ATTR]: "" }}
+      {...(drag.target === "" ? { "data-drop-target": "" } : {})}
+      className={cn(
+        "flex h-6.5 items-center gap-1 rounded-sm ps-0.5 text-xs font-medium",
+        drag.target === "" && "bg-accent ring-ring ring-1 ring-inset",
       )}
-      {dir ? (
-        <button
-          type="button"
-          className="min-w-0 flex-1 truncate text-start underline"
-          aria-label={`Open folder ${entry.name}`}
-          onClick={() => onOpen(entry.path)}
+      onDragOver={(e) => drag.handlers.over(e, "", true)}
+      onDrop={(e) => drag.handlers.drop(e, "", true)}
+    >
+      <FolderIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">Workspace</span>
+      {!isReadOnlyPath(folder) && (
+        <label
+          className={cn(
+            "hover:bg-muted flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md",
+            busy && "pointer-events-none opacity-50",
+          )}
+          title={label}
         >
-          {entry.name}
-        </button>
-      ) : onOpenFile ? (
-        <button
-          type="button"
-          className="min-w-0 flex-1 truncate text-start hover:underline"
-          aria-label={`View ${entry.name}`}
-          onClick={() => onOpenFile(entry)}
-        >
-          {entry.name}
-        </button>
-      ) : (
-        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+          <UploadIcon aria-hidden className="size-3.5" />
+          <input
+            type="file"
+            multiple
+            className="sr-only"
+            disabled={busy}
+            aria-label={label}
+            onChange={(e) => {
+              onUpload(e.currentTarget.files);
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
       )}
-      {readOnly && entry.path.split("/").length === 1 && <ReadOnlyBadge />}
-      {entry.sizeBytes !== null && (
-        <span className="text-muted-foreground text-xs">{formatBytes(entry.sizeBytes)}</span>
-      )}
-      <ActionMenu
-        trigger="file-row-actions"
-        label={`Actions for ${entry.name}`}
-        scope="file-menu"
-        size="md"
-        className={ROW_REVEAL}
-        bindings={rowBindings(entry, {
-          onOpen: open,
-          onDownload: () => onDownload(entry),
-          onCopyPath: () => onCopyPath(entry),
-          onDelete: () => onDelete(entry),
-        })}
-      />
-    </li>
+    </div>
   );
 }
 
+function FolderNote({ folder }: { readonly folder: string }) {
+  if (!isReadOnlyPath(folder)) return null;
+  return (
+    <p className="text-muted-foreground m-0 text-xs">
+      {folder === WORKSPACE_DROP_FOLDER
+        ? "Drop files on the rail to add them here. Files your threads attached are read-only."
+        : "This folder is read-only: files here cannot be uploaded or deleted."}
+    </p>
+  );
+}
+
+function Status({ tree }: { readonly tree: FileTree }) {
+  const { root } = tree;
+  if (root.loading && root.entries.length === 0 && !root.error) {
+    return (
+      <p role="status" className="m-0 text-xs">
+        Loading files…
+      </p>
+    );
+  }
+  if (!root.loading && !root.error && root.entries.length === 0) {
+    return <p className="text-muted-foreground m-0 text-xs">Your workspace is empty.</p>;
+  }
+  return null;
+}
+
+function FolderErrors({ tree }: { readonly tree: FileTree }): ReactNode {
+  return (
+    <>
+      {tree.root.error && <ErrorNotice error={describeFileError(tree.root.error)} />}
+      {tree.errors.map(({ folder, load }) =>
+        load.error ? (
+          <ErrorNotice
+            key={folder}
+            error={{
+              ...describeFileError(load.error),
+              message: `${folder}: ${describeFileError(load.error).message}`,
+            }}
+          />
+        ) : null,
+      )}
+    </>
+  );
+}
+
+/**
+ * The workspace rail's Files (KOBE-148, KOBE-304): a compact tree of the caller's synced
+ * workspace with file-type icons. Files open in the artifact column (KOBE-268); each row has the
+ * ⋯ menu (KOBE-292); files and folders move by drag and drop or Move to…, and rename with F2 or
+ * the menu, through the server's move API, which decides; files dropped from the computer onto a
+ * folder upload there (anywhere else on the rail they go to uploads/, KOBE-199).
+ */
 export function FileBrowser({
   api,
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
   wakeKey = 0,
   showFolder = null,
   onOpenFile,
+  onMoved,
 }: {
   readonly api: FilesApi;
-  /** A file's name opens it in the artifact column (KOBE-268); folders still navigate. */
+  /** A file opens in the artifact column (KOBE-268). */
   readonly onOpenFile?: ((entry: FileEntry) => void) | undefined;
+  /** A file or folder moved: open tabs of it follow (KOBE-304, ac-9). */
+  readonly onMoved?: ((from: string, to: string) => void) | undefined;
   readonly refreshAfterWakeMs?: number;
   /** A new value wakes the sandbox and lists again (Show files, refresh). */
   readonly wakeKey?: number;
-  /** Opens this folder, once per `seq` (uploads/ after a rail drop, KOBE-199). */
+  /** Reveals this folder, once per `seq` (uploads/ after a rail drop, KOBE-199). */
   readonly showFolder?: { readonly path: string; readonly seq: number } | null;
 }) {
-  const [path, setPath] = useState(showFolder?.path ?? "");
-  const shownSeq = useRef(showFolder?.seq ?? 0);
-  const folder = useFolder(api, path);
-  const waking = useWake(api, folder.reload, refreshAfterWakeMs, wakeKey);
-  const [pending, setPending] = useState<FileEntry | null>(null);
+  const tree = useFileTree(api, expandedKey(api.teamId));
+  const waking = useWake(api, tree.reloadAll, refreshAfterWakeMs, wakeKey);
+  const [focus, setFocus] = useState<TreeFocus>({ path: null, folder: "" });
+  const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState("");
-  const readOnly = isReadOnlyPath(path);
-  const list = useRef<HTMLUListElement>(null);
+  const [focusRequest, setFocusRequest] = useState<{ path: string; seq: number } | null>(null);
+  const shownSeq = useRef(showFolder?.seq ?? 0);
+  const { reveal, moved } = tree;
 
-  const open = useCallback((next: string) => {
-    setPath(next);
-    setPending(null);
+  const focusRow = useCallback(
+    (path: string) => setFocusRequest((prev) => ({ path, seq: (prev?.seq ?? 0) + 1 })),
+    [],
+  );
+  const start = () => {
     setActionError(null);
     setNotice("");
-  }, []);
+  };
+
+  const firstShow = useRef(true);
   useEffect(() => {
-    if (!showFolder || showFolder.seq === shownSeq.current) return;
+    if (!showFolder) return;
+    if (showFolder.seq === shownSeq.current && !firstShow.current) return;
+    firstShow.current = false;
     shownSeq.current = showFolder.seq;
-    open(showFolder.path);
-  }, [showFolder, open]);
+    reveal(showFolder.path); // a drop landed there: open it and list it again
+  }, [showFolder, reveal]);
+
+  const closeDialog = (entry: FileEntry) => {
+    setDialog(null);
+    focusRow(entry.path);
+  };
 
   const download = async (entry: FileEntry) => {
-    setActionError(null);
+    start();
     const res = await api.download(entry.path);
     if (!res.ok) return setActionError(describeFileError(res.error));
     saveBytes(entry.name, res.data);
@@ -290,110 +263,142 @@ export function FileBrowser({
 
   const remove = async (entry: FileEntry) => {
     setBusy(true);
-    setActionError(null);
+    start();
     const res = await api.remove(entry.path);
     setBusy(false);
-    setPending(null);
-    if (!res.ok) return setActionError(describeFileError(res.error));
+    setDialog(null);
+    if (!res.ok) {
+      focusRow(entry.path);
+      return setActionError(describeFileError(res.error));
+    }
     setNotice(`Deleted ${entry.name}`);
-    folder.reload();
+    reveal(parentPath(entry.path));
+    focusRow(parentPath(entry.path));
   };
 
-  const upload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const move = async (from: string, to: string, verb: "Moved" | "Renamed") => {
     setBusy(true);
-    setActionError(null);
+    start();
+    const res = await api.move(from, to);
+    setBusy(false);
+    setDialog(null);
+    if (!res.ok) {
+      focusRow(from);
+      return setActionError(describeFileError(res.error));
+    }
+    moved(from, to);
+    reveal(parentPath(from));
+    if (parentPath(to) !== parentPath(from)) reveal(parentPath(to));
+    onMoved?.(from, to);
+    setNotice(
+      verb === "Renamed"
+        ? `Renamed ${baseName(from)} to ${baseName(to)}`
+        : `Moved ${baseName(from)} to ${where(parentPath(to))}`,
+    );
+    focusRow(to);
+  };
+
+  const uploadInto = async (folder: string, items: DroppedItems) => {
+    setBusy(true);
+    start();
     const done: string[] = [];
-    for (const file of Array.from(files)) {
-      const res = await api.upload(path, file);
+    if (items.folders.length > 0) setActionError(folderError(items.folders));
+    for (const file of items.files) {
+      const res = await api.upload(folder, file);
       if (!res.ok) {
-        setActionError(describeFileError(res.error));
-        break;
+        const described = describeFileError(res.error);
+        setActionError({ ...described, message: `${file.name}: ${described.message}` });
+        if (res.error.code === "quota_exceeded") break;
+        continue;
       }
-      done.push(file.name);
+      done.push(res.data.name);
     }
     setBusy(false);
     if (done.length > 0) {
       setNotice(`Uploaded ${done.join(", ")}`);
-      folder.reload();
+      reveal(folder);
     }
   };
 
-  const where = path === "" ? "the workspace root" : path;
+  const actions = {
+    onOpenFile,
+    bindings: (entry: FileEntry) =>
+      rowBindings(entry, {
+        onOpen:
+          entry.type === "dir"
+            ? () => {
+                tree.expand(entry.path);
+                focusRow(entry.path);
+              }
+            : onOpenFile && (() => onOpenFile(entry)),
+        onDownload: () => void download(entry),
+        onRename: () => setDialog({ kind: "rename", entry }),
+        onMove: () => setDialog({ kind: "move", entry }),
+        onCopyPath: () => copyPath(entry),
+        onDelete: () => setDialog({ kind: "delete", entry }),
+      }),
+    onRename: (entry: FileEntry) => setDialog({ kind: "rename", entry }),
+    onDelete: (entry: FileEntry) => setDialog({ kind: "delete", entry }),
+    onMove: (dragging: Dragging, folder: string) =>
+      void move(dragging.path, joinPath(folder, baseName(dragging.path)), "Moved"),
+    onUpload: (folder: string, items: DroppedItems) => void uploadInto(folder, items),
+  };
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
-      <Breadcrumb path={path} onOpen={open} />
+    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-2 py-1.5">
       {waking && (
         <p role="status" className="text-muted-foreground m-0 text-xs">
           Showing the last synced files while your sandbox wakes.
         </p>
       )}
-      {readOnly ? (
-        <p className="text-muted-foreground m-0 text-xs">
-          {path === WORKSPACE_DROP_FOLDER
-            ? "Drop files on the rail to add them here. Files your threads attached are read-only."
-            : "This folder is read-only: files here cannot be uploaded or deleted."}
-        </p>
-      ) : (
-        <label className="text-xs">
-          <span className="sr-only">{`Upload a file to ${where}`}</span>
-          <input
-            type="file"
-            multiple
-            disabled={busy}
-            aria-label={`Upload a file to ${where}`}
-            onChange={(e) => {
-              void upload(e.currentTarget.files);
-              e.currentTarget.value = "";
-            }}
-          />
-        </label>
-      )}
-      {folder.error && <ErrorNotice error={describeFileError(folder.error)} />}
+      <FolderErrors tree={tree} />
       {actionError && <ErrorNotice error={actionError} />}
-      {folder.loading && folder.entries.length === 0 && !folder.error && (
-        <p role="status" className="m-0">
-          Loading files…
-        </p>
-      )}
-      {!folder.loading && !folder.error && folder.entries.length === 0 && (
-        <p className="text-muted-foreground m-0 text-xs">This folder is empty.</p>
-      )}
-      <ul
-        ref={list}
-        aria-label={`Files in ${where}`}
-        className="m-0 list-none divide-y ps-0 text-sm"
-      >
-        {folder.entries.map((entry) => (
-          <Row
-            key={entry.path}
-            entry={entry}
-            onOpen={open}
-            onOpenFile={onOpenFile}
-            onDownload={(e) => void download(e)}
-            onCopyPath={copyPath}
-            onDelete={setPending}
+      <FileTreeView
+        tree={tree}
+        label="Files in your workspace"
+        actions={actions}
+        focusRequest={focusRequest}
+        onFocusChange={setFocus}
+        header={(drag) => (
+          <RootHeader
+            drag={drag}
+            folder={focus.folder}
+            busy={busy}
+            onUpload={(files) =>
+              void uploadInto(focus.folder, { files: Array.from(files ?? []), folders: [] })
+            }
           />
-        ))}
-      </ul>
-      {folder.nextCursor !== null && (
-        <button
-          type="button"
-          className="self-start rounded-md border px-2 py-0.5 text-xs"
-          onClick={folder.loadMore}
-        >
-          Load more
-        </button>
-      )}
-      {pending && (
+        )}
+      />
+      <Status tree={tree} />
+      <FolderNote folder={focus.folder} />
+      {dialog?.kind === "delete" && (
         <ConfirmDelete
-          entry={pending}
+          entry={dialog.entry}
           busy={busy}
-          onConfirm={() => void remove(pending)}
-          onCancel={() => {
-            setPending(null);
-            focusRowMenu(list.current, pending.name);
-          }}
+          onConfirm={() => void remove(dialog.entry)}
+          onCancel={() => closeDialog(dialog.entry)}
+        />
+      )}
+      {dialog?.kind === "rename" && (
+        <RenameForm
+          entry={dialog.entry}
+          busy={busy}
+          onRename={(name) =>
+            void move(dialog.entry.path, joinPath(parentPath(dialog.entry.path), name), "Renamed")
+          }
+          onCancel={() => closeDialog(dialog.entry)}
+        />
+      )}
+      {dialog?.kind === "move" && (
+        <MoveForm
+          entry={dialog.entry}
+          folders={tree.knownFolders}
+          busy={busy}
+          onMove={(folder) =>
+            void move(dialog.entry.path, joinPath(folder, baseName(dialog.entry.path)), "Moved")
+          }
+          onCancel={() => closeDialog(dialog.entry)}
         />
       )}
       <p role="status" className="sr-only">

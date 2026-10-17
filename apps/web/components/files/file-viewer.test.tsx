@@ -55,6 +55,15 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     return Response.json({ status: "waking" }, { status: 202 });
   }
   const path = url.searchParams.get("path") ?? "";
+  if (method === "POST" && url.pathname === "/v1/workspace/files/move") {
+    const { from, to } = JSON.parse(String(init.body)) as { from: string; to: string };
+    for (const [p, bytes] of [...files]) {
+      if (p !== from && !p.startsWith(`${from}/`)) continue;
+      files.delete(p);
+      files.set(`${to}${p.slice(from.length)}`, bytes);
+    }
+    return Response.json({ from, to, type: "file", files: 1 });
+  }
   if (url.pathname === "/v1/workspace/files") {
     const entries = listing(path);
     if (path !== "" && entries.length === 0) {
@@ -103,7 +112,7 @@ async function openFiles(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function view(user: ReturnType<typeof userEvent.setup>, section: HTMLElement, name: string) {
-  await user.click(await within(section).findByRole("button", { name: `View ${name}` }));
+  await user.click(await within(section).findByRole("treeitem", { name }));
   await screen.findByRole("tab", { name, selected: true });
   return screen.getByRole("tabpanel");
 }
@@ -138,30 +147,28 @@ afterEach(() => {
 });
 
 describe("opening files (ac-1)", () => {
-  it("a file opens as the active tab; folders still navigate; Download works in row and tab", async () => {
+  it("a file opens as the active tab; folders expand in place; Download works in row and tab", async () => {
     files.set("notes/todo.md", enc("# Todo"));
     files.set("report.csv", enc("a,b\n1,2"));
     mount(thread("Work"));
     const user = userEvent.setup();
     const section = await openFiles(user);
-    await user.click(await within(section).findByRole("button", { name: "Open folder notes" }));
+    await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
     const panel = await view(user, section, "todo.md");
     expect(await within(panel).findByRole("heading", { name: "Todo" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "todo.md" })).toBeTruthy();
 
-    const crumbs = within(section).getByRole("navigation", { name: "Folder path" });
-    await user.click(within(crumbs).getByRole("button", { name: "Workspace" }));
+    // The tree keeps notes/ open beside the top level (KOBE-304: no breadcrumb).
     await view(user, section, "report.csv");
     expect(tabNames()).toEqual(["todo.md", "report.csv*"]);
     // Opening an open file again only activates it.
-    await user.click(within(section).getByRole("button", { name: "Open folder notes" }));
     await view(user, section, "todo.md");
     expect(tabNames()).toEqual(["todo.md*", "report.csv"]);
     // KOBE-269: the rows' icons (since KOBE-292 one ⋯ menu button) and the tab's keep their
-    // size: the standard 32 px target.
+    // size. KOBE-304's compact rows (26 px) take the 24 px button (WCAG 2.5.8's minimum target).
     expect(crushedIconButtons()).toEqual([]);
     const actions = within(section).getByRole("button", { name: "Actions for todo.md" });
-    expect(actions.className).toMatch(/\bsize-8\b/);
+    expect(actions.className).toMatch(/\bsize-6\b/);
     // KOBE-269: the Files list sits flush, without the browser's list indent and margins.
     expect(browserSpaced(section)).toEqual([]);
 
@@ -189,7 +196,7 @@ describe("opening again (ac-1, ac-3)", () => {
     expect(await within(panel).findByRole("heading", { name: "Two" })).toBeTruthy();
 
     files.delete("a.md");
-    const opener = within(section).getByRole("button", { name: "View a.md" });
+    const opener = within(section).getByRole("treeitem", { name: "a.md" });
     await user.click(opener);
     expect(await screen.findByText(/a\.md is no longer in your workspace/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("tablist")).toBeNull());
@@ -212,6 +219,47 @@ describe("opening again (ac-1, ac-3)", () => {
   });
 });
 
+describe("moved files (KOBE-304, ac-9)", () => {
+  it("an open file's tab follows a rename and a move of its folder", async () => {
+    files.set("notes/a.md", enc("# Kept"));
+    const threadId = thread("Work");
+    mount(threadId);
+    const user = userEvent.setup();
+    const section = await openFiles(user);
+    await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
+    const panel = await view(user, section, "a.md");
+    expect(await within(panel).findByRole("heading", { name: "Kept" })).toBeTruthy();
+    // Rename with F2 from the row.
+    within(section).getByRole("treeitem", { name: "a.md" }).focus();
+    await user.keyboard("{F2}");
+    const input = within(
+      await within(section).findByRole("dialog", { name: "Rename a.md" }),
+    ).getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "b.md{Enter}");
+    await waitFor(() => expect(tabNames()).toEqual(["b.md*"]));
+    expect(
+      await within(screen.getByRole("tabpanel")).findByRole("heading", { name: "Kept" }),
+    ).toBeTruthy();
+    // The folder moves (drag and drop is the pointer's way; Move to… the keyboard's).
+    await user.click(
+      within(within(section).getByRole("treeitem", { name: "notes" })).getByRole("button", {
+        name: "Actions for notes",
+      }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const folderInput = within(
+      await within(section).findByRole("dialog", { name: "Rename notes" }),
+    ).getByRole("textbox");
+    await user.clear(folderInput);
+    await user.type(folderInput, "archive{Enter}");
+    await waitFor(() =>
+      expect(localStorage.getItem(tabsKey(fake.teamId, threadId))).toContain("file:archive/b.md"),
+    );
+    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+  });
+});
+
 describe("narrow screens (KOBE-201)", () => {
   it("390: a file from the drawer opens as a full-screen sheet; the drawer makes way", async () => {
     resizeWindow(390);
@@ -222,7 +270,7 @@ describe("narrow screens (KOBE-201)", () => {
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
     const section = within(drawer).getByRole("region", { name: "Files" });
     await user.click(await within(section).findByRole("button", { name: "Open files" }));
-    await user.click(await within(section).findByRole("button", { name: "View a.md" }));
+    await user.click(await within(section).findByRole("treeitem", { name: "a.md" }));
     const sheet = await screen.findByRole("dialog", { name: "a.md" });
     expect(sheet.getAttribute("aria-modal")).toBe("true");
     expect(await within(sheet).findByRole("heading", { name: "On a phone" })).toBeTruthy();

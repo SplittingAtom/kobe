@@ -125,6 +125,7 @@ function RailFiles({
           wakeKey={rail.filesRequests}
           showFolder={showFolder}
           onOpenFile={openFile}
+          onMoved={panel?.moveFiles}
         />
       )}
     </section>

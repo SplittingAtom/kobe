@@ -10,6 +10,7 @@ import {
   openTab,
   readTabs,
   retainTabs,
+  retargetFileTabs,
   tabsKey,
   writeTabs,
 } from "./artifact-tabs";
@@ -57,6 +58,25 @@ describe("tab state", () => {
   it("leaves file tabs to the file viewer (KOBE-268): the artifact list never drops them", () => {
     const tabs = { open: [A, F, B], active: F };
     expect(retainTabs(tabs, new Set([B]))).toEqual({ open: [F, B], active: F });
+  });
+});
+
+describe("moved files (KOBE-304)", () => {
+  it("file tabs of a moved file or folder follow it, in place, keeping the active one", () => {
+    const tabs = { open: [A, F, "file:notes/b.md", "file:other.md"], active: F };
+    expect(retargetFileTabs(tabs, "notes", "archive/notes")).toEqual({
+      open: [A, "file:archive/notes/todo list.md", "file:archive/notes/b.md", "file:other.md"],
+      active: "file:archive/notes/todo list.md",
+    });
+    expect(retargetFileTabs(tabs, "other.md", "renamed.md").open.at(-1)).toBe("file:renamed.md");
+    // Untouched: the same value (no re-render, no storage write).
+    expect(retargetFileTabs(tabs, "note", "x")).toBe(tabs);
+    // A tab that would duplicate an open one merges into it.
+    const dup = { open: ["file:a.md", "file:b.md"], active: "file:a.md" };
+    expect(retargetFileTabs(dup, "a.md", "b.md")).toEqual({
+      open: ["file:b.md"],
+      active: "file:b.md",
+    });
   });
 });
 
