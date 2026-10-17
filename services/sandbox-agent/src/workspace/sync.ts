@@ -20,6 +20,7 @@ import {
   hashFile,
   lockServerOwned,
   openForUpload,
+  pruneEmptyParents,
   removeFile,
   renameWithin,
   scanWorkspace,
@@ -636,7 +637,11 @@ export class WorkspaceSync {
           : k !== undefined && !k.deleted && sameAs(file, k);
       const owned = isServerOwnedPath(e.path);
       if (e.deleted) {
-        if (file && (unchanged || owned)) await removeFile(this.#o.root, e.path);
+        if (file && (unchanged || owned)) {
+          await removeFile(this.#o.root, e.path);
+          // A server move or delete leaves no empty folders behind (KOBE-304).
+          if (e.origin === "server" && !owned) await pruneEmptyParents(this.#o.root, e.path);
+        }
         this.#known.set(e.path, known(e));
         applied += 1;
         continue;

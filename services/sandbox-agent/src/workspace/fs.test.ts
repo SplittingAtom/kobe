@@ -17,6 +17,7 @@ import {
   conflictCopyName,
   ensureParents,
   lockServerOwned,
+  pruneEmptyParents,
   renameWithin,
   truncateUtf8,
 } from "./fs.js";
@@ -112,5 +113,21 @@ describe("workspace fs helpers", () => {
     // Locked read-only: make it removable for the cleanup.
     await chmod(path.join(root, "projects/acme"), 0o755);
     await chmod(path.join(root, "projects"), 0o755);
+  });
+
+  it("prunes emptied parent folders up to the root, never through a symlink or into server areas", async () => {
+    const root = await dir();
+    await mkdir(path.join(root, "a/b/c"), { recursive: true });
+    await writeFile(path.join(root, "a/keep.txt"), "k");
+    expect(await pruneEmptyParents(root, "a/b/c/gone.txt")).toBe(2);
+    expect(await readdir(path.join(root, "a"))).toEqual(["keep.txt"]);
+    const outside = await dir();
+    await mkdir(path.join(outside, "inner"));
+    await symlink(outside, path.join(root, "link"));
+    expect(await pruneEmptyParents(root, "link/inner/x")).toBe(0);
+    expect(await readdir(outside)).toEqual(["inner"]);
+    await mkdir(path.join(root, "uploads/t"), { recursive: true });
+    expect(await pruneEmptyParents(root, "uploads/t/x")).toBe(0);
+    expect(await readdir(path.join(root, "uploads"))).toEqual(["t"]);
   });
 });

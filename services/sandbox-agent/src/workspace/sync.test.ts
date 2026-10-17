@@ -308,6 +308,37 @@ describe("workspace sync (agent)", () => {
     expect(server.livePaths()).toEqual(["edited.txt", "kept.txt", "new.txt"]);
   });
 
+  it("follows a server move: new paths arrive, old files and their empty folders go, edits stay (KOBE-304)", async () => {
+    const root = await volume();
+    await put(root, "reports/2026/q1.csv", "q1");
+    await put(root, "reports/2026/q2.csv", "q2");
+    await put(root, "reports/notes.md", "n");
+    await put(root, "keep/empty-on-purpose/.gitkeep", "");
+    const sync = await started(root);
+    await sync.push();
+    // The server's move (manifest-first): new rows, then tombstones of the old ones.
+    for (const p of ["reports/2026/q1.csv", "reports/2026/q2.csv", "reports/notes.md"]) {
+      server.serverWrite(`archive/${p}`, server.content(p) ?? "");
+    }
+    for (const p of ["reports/2026/q1.csv", "reports/2026/q2.csv", "reports/notes.md"]) {
+      server.serverDelete(p);
+    }
+    await put(root, "reports/notes.md", "edited before the pull");
+    await sync.pull();
+    expect(await text(root, "archive/reports/2026/q2.csv")).toBe("q2");
+    expect(await exists(root, "reports/2026")).toBe(false); // emptied by the move: gone
+    expect(await text(root, "reports/notes.md")).toBe("edited before the pull"); // an edit wins
+    expect(await exists(root, "keep/empty-on-purpose/.gitkeep")).toBe(true);
+    await sync.push();
+    expect(server.livePaths()).toEqual([
+      "archive/reports/2026/q1.csv",
+      "archive/reports/2026/q2.csv",
+      "archive/reports/notes.md",
+      "keep/empty-on-purpose/.gitkeep",
+      "reports/notes.md",
+    ]);
+  });
+
   it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {
     const root = await volume();
     const sync = await started(root);

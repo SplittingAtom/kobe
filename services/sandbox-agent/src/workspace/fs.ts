@@ -8,6 +8,7 @@ import {
   opendir,
   rename,
   rm,
+  rmdir,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
@@ -381,6 +382,30 @@ export async function removeFile(root: string, rel: string): Promise<void> {
   if (!stat || stat.isDirectory()) return;
   if (isServerOwnedPath(rel)) await ensureParents(root, rel);
   await unlink(abs).catch(() => {});
+}
+
+/**
+ * After the server moved or deleted `rel` (KOBE-304): its parent folders that are now empty go,
+ * deepest first, up to the workspace root. Only real directories (never a symlink) of the agent's
+ * own area are touched; `rmdir` refuses a folder that still holds anything, which ends the walk.
+ */
+export async function pruneEmptyParents(root: string, rel: string): Promise<number> {
+  let removed = 0;
+  for (
+    let dir = path.posix.dirname(rel);
+    dir !== "." && dir !== "";
+    dir = path.posix.dirname(dir)
+  ) {
+    if (isServerOwnedPath(`${dir}/`) || isExcludedPath(`${dir}/`)) return removed;
+    if (!(await parentsAreDirs(root, `${dir}/x`))) return removed;
+    try {
+      await rmdir(path.join(root, dir));
+      removed += 1;
+    } catch {
+      return removed;
+    }
+  }
+  return removed;
 }
 
 const utf8Bytes = (s: string): number => Buffer.byteLength(s, "utf8");
