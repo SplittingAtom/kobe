@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import type { KobeDb, TeamRole } from "@kobe/db";
 import { teamRoleAllows } from "../authz/permissions.js";
-import { agentFeedbackTotals } from "../feedback/totals.js";
+import { agentFeedbackTotals, wholeDays } from "../feedback/totals.js";
 import { parseUsageRange } from "../routes/usage.js";
 import { forbidden, invalidRequest, notFound } from "./http.js";
 import type { ResolvedAgent } from "./version-routes.js";
@@ -33,8 +33,8 @@ export function mayReadFeedbackTotals(found: ResolvedAgent, role: TeamRole): boo
 
 /**
  * `GET /v1/agents/{id}/feedback?from&to` (KOBE-275): the agent's per-version rating totals in the
- * active team (`from`/`to` as for usage: ISO times, default the last 30 days; by day only, so
- * `bucket=hour` is refused). Counts only, each over at least `FEEDBACK_MIN_RATERS` other raters, no
+ * active team (`from`/`to` as for usage: ISO times, default the last 30 days; then snapped to
+ * whole UTC days ending at the start of today, review R1; `bucket=hour` is refused). Counts only, each over at least `FEEDBACK_MIN_RATERS` other raters, no
  * content (D5/D10), so it needs no break-glass and is not audited.
  */
 export function mountFeedbackTotals<E extends { Variables: object }>(
@@ -59,7 +59,7 @@ export function mountFeedbackTotals<E extends { Variables: object }>(
         options.teamId(c),
         options.userId(c),
         { scope: found.agent.scope, id: found.agent.id },
-        range,
+        wholeDays(range),
       ),
     );
   });

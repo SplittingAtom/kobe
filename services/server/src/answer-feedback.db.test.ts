@@ -122,6 +122,8 @@ const mine = async (p: Person, threadId: string) => {
   };
 };
 
+const holdAdmins = new Map<string, { placer: string; approver: string }>();
+
 async function placeHold(teamId: string, userId: string | null): Promise<string> {
   const placer = await f.fx.person(`hp${randomUUID().slice(0, 4)}`);
   const approver = await f.fx.person(`ha${randomUUID().slice(0, 4)}`);
@@ -137,7 +139,22 @@ async function placeHold(teamId: string, userId: string | null): Promise<string>
     `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
     [id, approver.id],
   );
+  holdAdmins.set(id, { placer: placer.id, approver: approver.id });
   return id;
+}
+
+async function releaseHold(id: string): Promise<void> {
+  const admins = holdAdmins.get(id);
+  if (!admins) throw new Error(`no hold ${id}`);
+  await f.fx.admin.query(
+    `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(),
+       release_reason = 'closed' WHERE id = $1`,
+    [id, admins.placer],
+  );
+  await f.fx.admin.query(
+    `UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+    [id, admins.approver],
+  );
 }
 
 describe("rating answers (ac-1)", () => {
@@ -308,7 +325,13 @@ async function seedRatings(
   teamId: string,
   agent: { scope: string; id: string; version: number | null },
   n: number,
-  values: { rating: "up" | "down"; reasons?: string[]; model?: string | null },
+  values: {
+    rating: "up" | "down";
+    reasons?: string[];
+    model?: string | null;
+    /** When it was rated (default 1: yesterday, a finished day the totals include). */
+    daysAgo?: number;
+  },
 ): Promise<string[]> {
   const raters: string[] = [];
   for (let i = 0; i < n; i += 1) {
@@ -329,8 +352,9 @@ async function seedRatings(
     );
     await f.fx.admin.query(
       `INSERT INTO answer_feedback (team_id, thread_id, run_id, user_id, rating, reasons,
-         agent_scope, agent_id, agent_version, model_alias)
-       VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10)`,
+         agent_scope, agent_id, agent_version, model_alias, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10,
+         now() - make_interval(days => $11::int), now() - make_interval(days => $11::int))`,
       [
         teamId,
         threadId,
@@ -342,6 +366,7 @@ async function seedRatings(
         agent.id,
         agent.version,
         values.model ?? null,
+        values.daysAgo ?? 1,
       ],
     );
     raters.push(userId);
@@ -362,53 +387,106 @@ describe("totals for agent owners (ac-3)", () => {
     const x = await world();
     await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "team" });
     await rate(x.author, x.runId, { rating: "down", reasons: ["wrong"], comment: "SECRET-1" });
-    await rate(x.reader, x.runId, { rating: "down", reasons: ["unsafe"], comment: "SECRET-2" });
-    // Two real raters: below the minimum, nothing but "not enough" shows.
-    const few = await totals(x.w.owner, x.agentId);
-    expect(few.json).toMatchObject({
+    await rate(x.reader, x.runId, { rating: "down", reasons: ["wrong"], comment: "SECRET-2" });
+    // Rated yesterday (today's ratings count once the day is over).
+    await f.fx.admin.query(
+      `UPDATE answer_feedback SET created_at = created_at - interval '1 day',
+         updated_at = updated_at - interval '1 day' WHERE team_id = $1`,
+      [x.w.team],
+    );
+    // Two raters: below the minimum, nothing but "not enough" shows.
+    expect((await totals(x.w.owner, x.agentId)).json).toMatchObject({
       bucket: "day",
       min_raters: 5,
       totals: WITHHELD,
-      versions: [],
-      series: [],
+      versions: null,
+      series: null,
     });
 
     const agent = { scope: "team", id: x.agentId, version: 1 };
-    await seedRatings(x.w.team, agent, 4, { rating: "down", reasons: ["wrong"], model: "fast" });
+    await seedRatings(x.w.team, agent, 5, { rating: "down", reasons: ["wrong"], model: "fast" });
     await seedRatings(x.w.team, agent, 5, { rating: "up", model: "smart" });
     const res = await totals(x.w.owner, x.agentId);
     expect(res.json).toMatchObject({
-      totals: { enough: true, up: 5, down: 6, rate: 5 / 11 },
+      totals: { enough: true, up: 5, down: 7, rate: 5 / 12 },
       versions: [
         {
           version: 1,
-          enough: true,
           up: 5,
-          down: 6,
-          // wrong: 5 raters (the author and four); unsafe: one rater, withheld.
-          reasons: {
-            wrong: 5,
-            unsafe: null,
-            too_slow: null,
-            ignored_instructions: null,
-            other: null,
-          },
-          // fast: four raters, withheld; smart: five; the two real ones (model unknown) withheld.
-          models: [{ model: "smart", enough: true, up: 5, down: 0, rate: 1 }],
+          down: 7,
+          reasons: { wrong: 7, unsafe: 0, too_slow: 0, ignored_instructions: 0, other: 0 },
+          // The two real ratings (model unknown) are under five raters: no model breakdown.
+          models: null,
         },
       ],
     });
-    expect(res.json.series).toHaveLength(1);
+    expect(res.json.series).toEqual([
+      { start: expect.stringMatching(/T00:00:00\.000Z$/), up: 5, down: 7 },
+    ]);
     for (const secret of ["SECRET", x.threadId, x.runId, x.author.id, x.reader.id]) {
       expect(res.text).not.toContain(secret);
     }
-    // Days only.
     expect((await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?bucket=hour`)).status).toBe(
       400,
     );
     expect(
       (await as(x.w.owner).get(`/v1/agents/${x.agentId}/feedback?from=yesterday`)).status,
     ).toBe(400);
+  });
+
+  it("hides a whole breakdown when any of its cells is under five raters (no differencing)", async () => {
+    const x = await world();
+    const agent = { scope: "team", id: x.agentId, version: 1 };
+    await seedRatings(x.w.team, agent, 5, { rating: "up", model: "smart", daysAgo: 2 });
+    await seedRatings(x.w.team, agent, 5, { rating: "down", reasons: ["wrong"], model: "smart" });
+    // One lone rater: another model, another reason, another day, another version.
+    await seedRatings(x.w.team, { ...agent, version: 2 }, 1, {
+      rating: "down",
+      reasons: ["unsafe"],
+      model: "fast",
+      daysAgo: 3,
+    });
+    const res = (await totals(x.w.owner, x.agentId)).json;
+    // The totals stand (11 raters), but no breakdown could leave the lone rating as a remainder.
+    expect(res.totals).toEqual({ enough: true, up: 5, down: 6, rate: 5 / 11 });
+    expect(res.versions).toBeNull();
+    expect(res.series).toBeNull();
+    // Without the lone rater's version and day, the version's own breakdowns still hide it.
+    const y = await world();
+    const solo = { scope: "team", id: y.agentId, version: 1 };
+    await seedRatings(y.w.team, solo, 5, { rating: "down", reasons: ["wrong"], model: "smart" });
+    await seedRatings(y.w.team, solo, 1, { rating: "down", reasons: ["unsafe"], model: "fast" });
+    const one = (await totals(y.w.owner, y.agentId)).json;
+    expect(one.totals).toMatchObject({ enough: true, down: 6 });
+    expect(one.series).toEqual([{ start: expect.any(String), up: 0, down: 6 }]);
+    expect(one.versions).toEqual([
+      { version: 1, up: 0, down: 6, rate: 0, reasons: null, models: null },
+    ]);
+  });
+
+  it("counts whole finished days only, so ranges a minute apart or a new rating today reveal nothing", async () => {
+    const x = await world();
+    const agent = { scope: "team", id: x.agentId, version: 1 };
+    await seedRatings(x.w.team, agent, 6, { rating: "up", daysAgo: 2 });
+    const before = (await totals(x.w.owner, x.agentId)).json;
+    expect(before.totals).toMatchObject({ enough: true, up: 6 });
+    // Today's ratings don't count yet, whatever the range asks for.
+    await seedRatings(x.w.team, agent, 1, { rating: "down", daysAgo: 0 });
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    expect((await totals(x.w.owner, x.agentId)).json).toEqual(before);
+    expect((await totals(x.w.owner, x.agentId, `?to=${tomorrow}`)).json.totals).toEqual(
+      before.totals,
+    );
+    // Two ranges a minute apart inside a day give the same answer, snapped to midnight.
+    const start = new Date(Date.now() - 5 * 86_400_000);
+    const at = (minutes: number) => new Date(start.getTime() + minutes * 60_000).toISOString();
+    const [a, b] = [
+      (await totals(x.w.owner, x.agentId, `?from=${at(0)}&to=${at(4 * 24 * 60)}`)).json,
+      (await totals(x.w.owner, x.agentId, `?from=${at(1)}&to=${at(4 * 24 * 60 + 1)}`)).json,
+    ];
+    expect(a).toEqual(b);
+    expect(a.from).toMatch(/T00:00:00\.000Z$/);
+    expect(a.to).toMatch(/T00:00:00\.000Z$/);
   });
 
   it("doesn't count the caller among the raters, and shows a one-rater agent nothing", async () => {
@@ -423,8 +501,8 @@ describe("totals for agent owners (ac-3)", () => {
     await seedRatings(x.w.team, agent, 1, { rating: "down", reasons: ["unsafe"] });
     expect((await totals(x.reader, own)).json).toMatchObject({
       totals: WITHHELD,
-      versions: [],
-      series: [],
+      versions: null,
+      series: null,
     });
     // Four others plus the owner's own rating: still four other raters.
     await seedRatings(x.w.team, agent, 3, { rating: "up" });
@@ -442,7 +520,6 @@ describe("totals for agent owners (ac-3)", () => {
       down: 1,
       rate: 5 / 6,
     });
-    // The team admin, as a sixth viewer, sees the same numbers (everyone is another rater).
     expect((await totals(x.w.owner, own)).json.totals).toMatchObject({ enough: true, up: 5 });
   });
 
@@ -553,6 +630,46 @@ describe("ratings follow their thread (ac-4)", () => {
     expect(historyLeft.rowCount).toBe(3);
   });
 
+  it("answer a reader on a held owner's thread exactly as on an unheld one", async () => {
+    const x = await world();
+    const y = await world();
+    for (const t of [x, y]) {
+      await as(t.author).post(`/v1/threads/${t.threadId}/share`, { visibility: "team" });
+      await rate(t.reader, t.runId, { rating: "down", comment: "reader note" });
+    }
+    await placeHold(x.w.team, x.author.id);
+    const shape = (res: { status: number; json: unknown; text: string }) => {
+      const body = res.json as Record<string, unknown> | null;
+      return {
+        status: res.status,
+        body: body && { ...body, run_id: "-", thread_id: "-", entry_id: "-", updated_at: "-" },
+        text: body ? undefined : res.text,
+      };
+    };
+    for (const body of [
+      { rating: "up" },
+      { rating: "up" },
+      { rating: "down", reasons: ["other"] },
+    ]) {
+      expect(shape(await rate(x.reader, x.runId, body))).toEqual(
+        shape(await rate(y.reader, y.runId, body)),
+      );
+    }
+    expect(shape(await clear(x.reader, x.runId))).toEqual(shape(await clear(y.reader, y.runId)));
+    expect(shape(await as(x.reader).get(`/v1/threads/${x.threadId}/feedback`)).status).toBe(200);
+    expect((await mine(x.reader, x.threadId)).answers[0]?.feedback).toBeNull();
+    // The held thread's evidence is kept: the first comment, the later reason, the clear.
+    const kept = await f.fx.admin.query<{ comment: string | null; change: string }>(
+      `SELECT comment, change FROM answer_feedback_history WHERE team_id = $1 ORDER BY kept_at, change`,
+      [x.w.team],
+    );
+    expect(kept.rows).toEqual([
+      { comment: "reader note", change: "changed" },
+      { comment: null, change: "changed" },
+      { comment: null, change: "cleared" },
+    ]);
+  });
+
   it("keep a held reader's own comment on someone else's thread, silently", async () => {
     const x = await world();
     await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "team" });
@@ -565,6 +682,31 @@ describe("ratings follow their thread (ac-4)", () => {
       [x.w.team],
     );
     expect(kept.rows).toEqual([{ user_id: x.reader.id, comment: "reader's note" }]);
+  });
+
+  it("purge what a hold kept once the hold is released", async () => {
+    const x = await world();
+    await rate(x.author, x.runId, { rating: "down", comment: "kept for the matter" });
+    const hold = await placeHold(x.w.team, x.author.id);
+    expect((await clear(x.author, x.runId)).status).toBe(204);
+    const kept = () =>
+      f.fx.admin.query(`SELECT 1 FROM answer_feedback_history WHERE team_id = $1`, [x.w.team]);
+    const pass = () => runRetentionPass({ db: f.fx.db, logger: pino({ level: "silent" }) });
+    // Still held: the pass keeps it.
+    await pass();
+    expect((await kept()).rowCount).toBe(1);
+    await releaseHold(hold);
+    const result = await pass();
+    expect(result.teams.find((t) => t.teamId === x.w.team)).toMatchObject({
+      feedbackHistory: { rows: 1 },
+      failed: false,
+    });
+    expect((await kept()).rowCount).toBe(0);
+    const audited = await f.fx.admin.query<{ target: unknown }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'retention.feedback_history_purged'`,
+      [x.w.team],
+    );
+    expect(audited.rows).toEqual([{ target: { rows: 1 } }]);
   });
 
   it("are in the member's export with their comment, their own only", async () => {

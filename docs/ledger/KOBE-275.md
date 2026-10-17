@@ -36,21 +36,27 @@
   thread-bound break-glass read, immutable, delete/TRUNCATE refused while the owner is held,
   cascades with its thread). Copies are made only while the thread exists, so a rater's hold never
   stalls the purge of someone else's unheld thread (cascades see the thread gone). An unchanged
-  retry keeps nothing. The 0109 refusing triggers are dropped in 0111. Tests: held and unheld
-  members get the same responses; the old values are kept (db and server).
+  retry keeps nothing. The 0109 refusing triggers are dropped in 0111. Once no hold covers owner or
+  rater, the retention pass purges the kept rows (`retention/feedback-history.ts`, audited
+  `retention.feedback_history_purged`, review R3). Tests: held and unheld owners and readers get the
+  same responses; the old values are kept, then purged after the release (db and server).
 - **Break-glass:** `break_glass_read` policy shaped like artifacts' (thread-bound). No break-glass
   read kind exposes ratings yet (none needed for v1; the policy keeps the rule "content readable
   only under a grant").
 - **Not audited** per click (ticket); reading totals needs no break-glass (counts only).
 - **Export:** `feedback.json` in the member's thread export lists their own ratings in the team
   (with comments), on their threads and on threads shared with them; never another member's.
-- **Totals** (`GET /v1/agents/{id}/feedback?from&to`, same range rules as usage, days only): per
-  version up/down/rate, reason counts, by model alias, and a daily series by `updated_at`. Every
-  number stands on `FEEDBACK_MIN_RATERS` = 5 distinct raters other than the caller (review S1): the
-  totals show `enough: false` with nulls below it; versions, models and days below it are left out;
-  reasons below it are null. `bucket=hour` is a 400. Who: team agent
-  → whoever may edit it (builder-owner) or team admins; personal → its owner; gallery → team admins.
-  The SQL selects no comment, thread, run, entry or user column (test greps the response).
+- **Totals** (`GET /v1/agents/{id}/feedback?from&to`, range rules as usage, then snapped to whole
+  UTC days ending at the start of today: review R1, `wholeDays`, feedback only): per version
+  up/down/rate, reason counts, by model alias, and a daily series by `updated_at`. Every number
+  stands on `FEEDBACK_MIN_RATERS` = 5 distinct raters other than the caller (S1); below it the totals
+  show `enough: false`, and a breakdown (versions, a version's models or reasons, days) is null
+  unless all its non-empty cells pass, so no hidden cell is the total minus the rest (R2).
+  `bucket=hour` is a 400. **Residual (for Chris):** two overlapping whole-day ranges can still
+  differ by one finished day (`[D1, D10)` vs `[D1, D11)`), each side over k; closing that needs fixed
+  windows or noise. Accepted for now. Who: team agent → whoever may edit it (builder-owner) or team
+  admins; personal → its owner; gallery → team admins. The SQL selects no comment, thread, run,
+  entry or user column (tests grep the response).
 - **Langfuse:** Langfuse's public scores API (OTLP has no scores) with the exporter's own endpoint and
   headers, on only when `KOBE_OTEL_ENDPOINT` ends in `/api/public/otel`. Score id = the rating's id
   (change → upsert, clear → delete), trace id = `runTraceId(run)`, `BOOLEAN` 1/0, metadata ids and
@@ -78,8 +84,9 @@ The agent console's quality view; the API is done and tested (`answer-feedback.d
   answers 200 (403 for members and non-owner builders: hide it; 404: no agent).
 - Web client: `agentFeedbackTotals(agentId, {from, to, bucket})` → `AgentFeedbackTotals`
   (`@kobe/protocol`), camelized like the usage console's client.
-- "Not enough ratings yet" wherever `enough` is false or a cell is missing (`min_raters` in the
-  answer); no hour buckets.
+- "Not enough ratings yet" when `totals.enough` is false; "Not enough ratings to break down" where
+  `versions`, `series`, a version's `models` or `reasons` is null (`min_raters` in the answer);
+  days only, and say that today's ratings show tomorrow.
 - Content: totals (up, down, rate), a per-version table (version, up, down, rate, top reasons from
   `reasons`), a by-model breakdown per version (`models`, null = "unknown"), a series chart of
   `series` (up/down per day) with the usage console's range picker (30 days default, max 400).
@@ -89,7 +96,7 @@ The agent console's quality view; the API is done and tested (`answer-feedback.d
 
 - Readers may rate (above): confirm or switch to owner-only.
 - The migration normally lands in its own PR first (ac-2); on the group branch it is its own commits
-  (`9e53b109`, review fixes in 0110/0111). Opus DB review: changes requested, addressed; re-review pending.
+  (`9e53b109`, review fixes in 0110/0111). Opus DB review: approved after two rounds (B1, S1-S3, R1-R3 fixed).
 - gate1: deploy the group branch, then run `e2e/browser/tests/answer-feedback.spec.ts` and check the
   score on the run's trace in Langfuse (ac-5).
 

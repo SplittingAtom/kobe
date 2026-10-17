@@ -763,6 +763,11 @@ export const AUDIT_EVENTS = {
   /** Ended runs' live events folded away 7 days after the run (system; entries keep the content). */
   "retention.compacted": event("team", { runs: count, events: count }),
   /**
+   * Answer feedback kept for a legal hold purged once no hold covers its thread's owner or rater
+   * (system; KOBE-275; count only).
+   */
+  "retention.feedback_history_purged": event("team", { rows: count }),
+  /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
    * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
    * Counts only, never paths or content; live files and held owners' memory are never in a batch.

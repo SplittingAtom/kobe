@@ -348,11 +348,18 @@ describe("answer_feedback break-glass read", () => {
     await rate(a, ann, { comment: "on ann's" });
     await rate(b, ann, { comment: "ann on bob's" });
     await rate(await answer(other, ann), ann, { comment: "other team" });
+    // A held change keeps the old comment in the history, readable under the same grants.
+    const h = await hold(t, ann);
+    await exec(
+      t,
+      `UPDATE answer_feedback SET comment = 'on ann''s, edited' WHERE team_id = '${t}' AND thread_id = '${a.threadId}'`,
+    );
+    await release(h);
     expect(await visible(null)).toEqual([]);
-    expect(await visible(await grant(t))).toEqual(["ann on bob's", "on ann's"]);
+    expect(await visible(await grant(t))).toEqual(["ann on bob's", "on ann's", "on ann's, edited"]);
     expect(await visible(await grant(t, { thread: b.threadId }))).toEqual(["ann on bob's"]);
     // A user grant reads that user's threads (thread content), like thread_entries.
-    expect(await visible(await grant(t, { user: ann }))).toEqual(["on ann's"]);
+    expect(await visible(await grant(t, { user: ann }))).toEqual(["on ann's", "on ann's, edited"]);
     const g = await grant(t);
     expect(
       await visible(g, `UPDATE answer_feedback SET comment = 'x' WHERE team_id = '${t}'`),

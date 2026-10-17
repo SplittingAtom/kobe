@@ -118,9 +118,8 @@ export type FeedbackErrorCode = keyof typeof FEEDBACK_ERROR_HTTP_STATUS;
 
 /**
  * Fewest distinct raters, not counting the caller, behind any number the totals show (KOBE-275
- * review S1): a cell with fewer is withheld ("not enough ratings yet"), so the totals never single
- * out one member's ratings or reasons. The caller's own ratings still count in the numbers: they
- * know them anyway.
+ * review S1): a cell with fewer is withheld, so the totals never single out one member's ratings
+ * or reasons. The caller's own ratings still count in the numbers: they know them anyway.
  */
 export const FEEDBACK_MIN_RATERS = 5;
 
@@ -136,24 +135,34 @@ export const feedbackCountsSchema = z.strictObject({
 });
 export type FeedbackCounts = z.infer<typeof feedbackCountsSchema>;
 
-/**
- * Thumbs-down reasons counted (one rating may give several). Every reason is present; null when
- * fewer than {@link FEEDBACK_MIN_RATERS} other members gave it.
- */
+/** Thumbs-down reasons counted (one rating may give several). Every reason is present. */
 export const feedbackReasonCountsSchema = z.strictObject(
-  Object.fromEntries(
-    FEEDBACK_REASONS.map((r) => [r, z.number().int().nonnegative().nullable()]),
-  ) as Record<FeedbackReason, z.ZodNullable<z.ZodNumber>>,
+  Object.fromEntries(FEEDBACK_REASONS.map((r) => [r, z.number().int().nonnegative()])) as Record<
+    FeedbackReason,
+    z.ZodNumber
+  >,
 );
 export type FeedbackReasonCounts = z.infer<typeof feedbackReasonCountsSchema>;
 
+const shownCountsSchema = z.strictObject({
+  up: z.number().int().nonnegative(),
+  down: z.number().int().nonnegative(),
+  rate: z.number().min(0).max(1).nullable(),
+});
+
 /**
  * `GET /v1/agents/{agent_id}/feedback?from&to`: ratings in the active team of answers by this
- * agent, per published version (builder test threads are never rated), by model alias (null =
- * unknown) and per day of the rating's last change (days only: finer buckets would single people
- * out). Counts only: no thread, run, member or comment is reachable through it. `totals` is always
- * present (with `enough`); versions, models and days below {@link FEEDBACK_MIN_RATERS} raters are
- * left out.
+ * agent, by published version (builder test threads are never rated), model alias (null =
+ * unknown), reason and day of the rating's last change.
+ *
+ * Counts only: no thread, run, member or comment is reachable through it. Small numbers would
+ * single people out (review S1, R1, R2), so:
+ * - the range is whole UTC days, ending at the start of today at the latest (`from` is snapped down
+ *   to midnight, `to` up, then capped): no two queries differ by less than a finished day;
+ * - `totals` shows numbers only over {@link FEEDBACK_MIN_RATERS} raters (else `enough: false`);
+ * - a breakdown (the versions, a version's models, a version's reasons, the days) is shown only
+ *   when every one of its non-empty cells has that many raters; otherwise it is null, "not enough
+ *   ratings to break down", so no hidden cell can be worked out from the total and the rest.
  */
 export const agentFeedbackTotalsSchema = z.strictObject({
   agent_id: uuidSchema,
@@ -162,22 +171,26 @@ export const agentFeedbackTotalsSchema = z.strictObject({
   bucket: z.literal("day"),
   min_raters: z.number().int().positive(),
   totals: feedbackCountsSchema,
-  versions: z.array(
-    z.strictObject({
-      version: z.number().int().positive().nullable(),
-      ...feedbackCountsSchema.shape,
-      reasons: feedbackReasonCountsSchema,
-      models: z.array(
-        z.strictObject({ model: z.string().nullable(), ...feedbackCountsSchema.shape }),
-      ),
-    }),
-  ),
-  series: z.array(
-    z.strictObject({
-      start: timestampSchema,
-      up: z.number().int().nonnegative(),
-      down: z.number().int().nonnegative(),
-    }),
-  ),
+  versions: z
+    .array(
+      z.strictObject({
+        version: z.number().int().positive().nullable(),
+        ...shownCountsSchema.shape,
+        reasons: feedbackReasonCountsSchema.nullable(),
+        models: z
+          .array(z.strictObject({ model: z.string().nullable(), ...shownCountsSchema.shape }))
+          .nullable(),
+      }),
+    )
+    .nullable(),
+  series: z
+    .array(
+      z.strictObject({
+        start: timestampSchema,
+        up: z.number().int().nonnegative(),
+        down: z.number().int().nonnegative(),
+      }),
+    )
+    .nullable(),
 });
 export type AgentFeedbackTotals = z.infer<typeof agentFeedbackTotalsSchema>;
