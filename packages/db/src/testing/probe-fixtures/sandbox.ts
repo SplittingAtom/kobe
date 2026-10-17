@@ -9,6 +9,7 @@ import {
   threads,
   users,
   workspaceBlobs,
+  workspaceFileHoldHistory,
   workspaceFiles,
   workspaceSync,
 } from "../../schema/index.js";
@@ -101,5 +102,19 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
   workspace_blobs: async (tx, teamId) => {
     const { userId } = await insertRun(tx, teamId);
     await tx.insert(workspaceBlobs).values({ teamId, userId, sha256: PROBE_SHA, size: 3 });
+  },
+  workspace_file_hold_history: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx.insert(workspaceFileHoldHistory).values({
+      teamId,
+      userId,
+      path: "probe-old.txt",
+      movedTo: "probe-new.txt",
+      sha256: PROBE_SHA,
+      blobKey: `teams/${teamId}/users/${userId}/workspace/${PROBE_SHA}`,
+      size: 3,
+      mtimeMs: 0,
+      fileRev: 1,
+    });
   },
 };

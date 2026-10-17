@@ -12,6 +12,8 @@ export const sandbox = defineDomain({
     "workspace_sync",
     "workspace_files",
     "workspace_blobs",
+    // A legal hold's copy of moved files' old paths (KOBE-304).
+    "workspace_file_hold_history",
   ],
   siteWide: [],
   grants: {},
