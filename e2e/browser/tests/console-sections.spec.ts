@@ -91,28 +91,46 @@ async function overflow(page: Page, name: string) {
   }, name);
 }
 
-test("Team inventory: the agent table fits at 1280 px and scrolls in its box on a phone", async ({
-  page,
-}) => {
-  await open(page, "/admin/team/inventory", "Inventory");
+/**
+ * KOBE-306, asserted on layout rather than the team's data (names, counts and dates vary): the
+ * page never scrolls sideways, the table either fits or is its own named scroll region (scrolls,
+ * never clips), every row's ⋯ button can be brought fully into view, and the fixed-width cells
+ * stay compact (dates on one line, the ⋯ button the only action control).
+ */
+async function checkAgentTable(page: Page): Promise<void> {
   const table = page.getByRole("table", { name: "Agent inventory" });
-  test.skip((await table.count()) === 0, "the team has no agents");
-  // KOBE-306: compact dates, actions behind one ⋯ button per row, nothing scrolled away.
-  expect(await overflow(page, "Agent inventory")).toEqual({ table: 0, page: 0 });
-  const menus = table.getByRole("button", { name: /^Actions for / });
-  await expect(menus.first()).toBeInViewport({ ratio: 1 });
-  await expect(table.getByRole("button", { name: /to Orbit$|^Suspend|^Reactivate/ })).toHaveCount(
-    0,
-  );
-  for (const time of await table.locator("time").all()) {
-    await expect(time).toHaveAttribute("title", /\d{4}/);
-    expect((await time.boundingBox())?.height ?? 0).toBeLessThan(30);
-  }
-
-  await page.setViewportSize({ width: 390, height: 844 });
   const scroll = await overflow(page, "Agent inventory");
   expect(scroll.page).toBe(0);
   if (scroll.table > 0) {
     await expect(page.getByRole("region", { name: "Agent inventory" })).toBeVisible();
   }
+  await expect(table.getByRole("button", { name: /to Orbit$|^Suspend|^Reactivate/ })).toHaveCount(
+    0,
+  );
+  for (const menu of await table.getByRole("button", { name: /^Actions for / }).all()) {
+    await menu.scrollIntoViewIfNeeded();
+    await expect(menu).toBeInViewport({ ratio: 1 });
+  }
+  for (const time of await table.locator("time").all()) {
+    // One line on screen; the full date for screen readers (visually hidden text).
+    expect((await time.boundingBox())?.height ?? 0).toBeLessThan(30);
+    await expect(time.locator(".sr-only")).not.toBeEmpty();
+  }
+}
+
+test("Team inventory: the agent table scrolls in its box, never the page, at 1280 and 390 px", async ({
+  page,
+}) => {
+  await open(page, "/admin/team/inventory", "Inventory");
+  const agents = page.getByRole("region", { name: "Agents" });
+  const table = agents.getByRole("table", { name: "Agent inventory" });
+  await expect(table.or(agents.getByText("No agents yet."))).toBeVisible();
+  // Rows are the team's own; with none there is no table to lay out (the page check still runs).
+  if ((await table.count()) === 0) {
+    expect((await overflow(page, "Agent inventory")).page).toBe(0);
+    return;
+  }
+  await checkAgentTable(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await checkAgentTable(page);
 });
