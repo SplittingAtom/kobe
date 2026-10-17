@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { getTeamMemory, putTeamMemory } from "../../../lib/admin/api/team/memory";
 import { ResourceView } from "../parts";
@@ -16,7 +17,7 @@ export function TeamMemoryPage() {
   const { state, reload } = useResource(() => getTeamMemory(teamId));
   return (
     <>
-      <h1>Memory</h1>
+      <PageHeader title="Memory" />
       <ResourceView state={state} label="memory settings">
         {(switches) => (
           <MemorySwitchesForm

@@ -10,11 +10,21 @@ import {
   type SkillReview,
 } from "../../../lib/admin/api/team/skill-review";
 import { TEAM_SKILL_RULE } from "../../../lib/admin/skills/reach";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  PageHeader,
+  Section,
+  useConfirm,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
+
+const HINT = "m-0 my-1 text-sm text-console-muted";
 
 const FILTERS: readonly ReviewFilter[] = ["pending", "approved", "rejected"];
 
@@ -26,14 +36,10 @@ const FILTERS: readonly ReviewFilter[] = ["pending", "approved", "rejected"];
 export function SkillReviewPage() {
   return (
     <>
-      <h1>Skill review</h1>
-      <p className={styles.hint}>
-        Every new version of a team skill is scanned when it is uploaded and stays unusable until a
-        team admin approves it. The scan is a heuristic that flags network calls, pipes into a
-        shell, package installs, obfuscation and secret-shaped strings: read the findings, and the
-        skill, before approving. Rejecting an approved version takes it out of use again.{" "}
-        {TEAM_SKILL_RULE}
-      </p>
+      <PageHeader
+        title="Skill review"
+        description={`Every new version of a team skill is scanned when it is uploaded and stays unusable until a team admin approves it. The scan is a heuristic that flags network calls, pipes into a shell, package installs, obfuscation and secret-shaped strings: read the findings, and the skill, before approving. Rejecting an approved version takes it out of use again. ${TEAM_SKILL_RULE}`}
+      />
       <PersonalSkillsSwitch />
       <ReviewQueue />
     </>
@@ -45,39 +51,32 @@ function PersonalSkillsSwitch() {
   const { state, reload } = useResource(() => getPersonalSkillsDisabled(teamId));
   const mutation = useMutation();
   return (
-    <section aria-labelledby="personal-skills-heading">
-      <h2 id="personal-skills-heading">Personal skills</h2>
+    <Section id="personal-skills-heading" title="Personal skills">
       <ResourceView state={state} label="the personal skills setting">
         {(disabled) => (
           <>
-            <label>
-              <input
-                type="checkbox"
-                checked={disabled}
-                disabled={mutation.pending}
-                onChange={async (e) => {
-                  const next = e.target.checked;
-                  const done = await mutation.run(
-                    () => putPersonalSkillsDisabled(teamId, next),
-                    (value) =>
-                      value
-                        ? "Personal skills are off for this team."
-                        : "Personal skills are on for this team.",
-                  );
-                  if (done) reload();
-                }}
-              />{" "}
-              Disable personal skills in this team
-            </label>
-            <p className={styles.hint}>
-              Members&apos; own skills are then left out of their runs here (they see a notice that
-              they were omitted). They keep them in other teams. Team skills are not affected.
-            </p>
+            <Checkbox
+              label="Disable personal skills in this team"
+              hint="Members' own skills are then left out of their runs here (they see a notice that they were omitted). They keep them in other teams. Team skills are not affected."
+              checked={disabled}
+              disabled={mutation.pending}
+              onChange={async (e) => {
+                const next = e.target.checked;
+                const done = await mutation.run(
+                  () => putPersonalSkillsDisabled(teamId, next),
+                  (value) =>
+                    value
+                      ? "Personal skills are off for this team."
+                      : "Personal skills are on for this team.",
+                );
+                if (done) reload();
+              }}
+            />
             <MutationStatus error={mutation.error} notice={mutation.notice} />
           </>
         )}
       </ResourceView>
-    </section>
+    </Section>
   );
 }
 
@@ -85,19 +84,24 @@ function ReviewQueue() {
   const teamId = useTeamAccess().team.id;
   const [filter, setFilter] = useState<ReviewFilter>("pending");
   return (
-    <section aria-labelledby="queue-heading">
-      <h2 id="queue-heading">Versions</h2>
-      <div role="group" aria-label="Show">
+    <Section id="queue-heading" title="Versions">
+      <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5">
         {FILTERS.map((f) => (
-          <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>
+          <Button
+            key={f}
+            size="sm"
+            variant={filter === f ? "primary" : "secondary"}
+            aria-pressed={filter === f}
+            onClick={() => setFilter(f)}
+          >
             {f[0]?.toUpperCase()}
             {f.slice(1)}
-          </button>
+          </Button>
         ))}
       </div>
       {/* Keyed by filter: switching it loads a fresh list. */}
       <ReviewList key={filter} teamId={teamId} filter={filter} />
-    </section>
+    </Section>
   );
 }
 
@@ -110,14 +114,17 @@ function ReviewList({
 }) {
   const { state, reload } = useResource(() => listSkillReviews(teamId, filter));
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
 
   async function decide(review: SkillReview, decision: "approved" | "rejected") {
     if (
       decision === "approved" &&
       review.flagged &&
-      !confirmed(
-        `${review.slug} v${review.version} was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}). Approve it anyway?`,
-      )
+      !(await confirm({
+        title: `Approve ${review.slug} v${review.version} anyway?`,
+        description: `It was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}).`,
+        confirmLabel: "Approve anyway",
+      }))
     ) {
       return;
     }
@@ -134,9 +141,9 @@ function ReviewList({
       <ResourceView state={state} label="skill versions">
         {(reviews) =>
           reviews.length === 0 ? (
-            <p>No {filter} skill versions.</p>
+            <EmptyState className="mt-3" title={`No ${filter} skill versions.`} />
           ) : (
-            <ul>
+            <ul className="m-0 mt-3 grid list-none gap-3 p-0">
               {reviews.map((r) => (
                 <li key={`${r.skillId}:${r.version}`}>
                   <ReviewItem
@@ -150,6 +157,7 @@ function ReviewList({
           )
         }
       </ResourceView>
+      {confirmDialog}
     </>
   );
 }
@@ -164,14 +172,20 @@ function ReviewItem({
   readonly onDecide: (decision: "approved" | "rejected") => void;
 }) {
   return (
-    <article aria-label={`${review.slug} version ${review.version}`}>
-      <h3>
-        {review.slug} v{review.version} {review.scope === "personal" && <em>(personal skill)</em>}{" "}
-        {review.flagged && <strong>Flagged: {review.findings.length}</strong>}
-        {review.blocked && <strong>Blocklisted</strong>}{" "}
-        {review.unscanned && <strong>Not scanned yet</strong>}
+    <article
+      aria-label={`${review.slug} version ${review.version}`}
+      className="box-border rounded-lg border border-console-border bg-console-bg p-3"
+    >
+      <h3 className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold">
+        <span>
+          {review.slug} v{review.version}
+        </span>
+        {review.scope === "personal" && <em className="font-normal">(personal skill)</em>}
+        {review.flagged && <Badge tone="attention">Flagged: {review.findings.length}</Badge>}
+        {review.blocked && <Badge tone="failed">Blocklisted</Badge>}
+        {review.unscanned && <Badge>Not scanned yet</Badge>}
       </h3>
-      <p className={styles.hint}>
+      <p className={HINT}>
         Scanned <DateTime value={review.scannedAt} />. {review.scripts.length} script
         {review.scripts.length === 1 ? "" : "s"}
         {review.skipped.length > 0 ? `, ${review.skipped.length} file(s) not scanned` : ""}.
@@ -183,27 +197,27 @@ function ReviewItem({
         )}
       </p>
       {review.findings.length > 0 && (
-        <ul aria-label="Findings">
+        <ul aria-label="Findings" className="m-0 my-2 ps-5">
           {review.findings.map((f) => (
             <li key={`${f.file}:${f.line}:${f.category}`}>
               <strong>{f.category}</strong> ({f.rule}) in {f.file}:{f.line}:{" "}
-              <code>{f.excerpt}</code>
+              <code className="break-all">{f.excerpt}</code>
             </li>
           ))}
         </ul>
       )}
-      <p>
+      <div className="mt-2 flex flex-wrap gap-2">
         {review.status !== "approved" && (
-          <button type="button" disabled={busy} onClick={() => onDecide("approved")}>
+          <Button size="sm" disabled={busy} onClick={() => onDecide("approved")}>
             Approve
-          </button>
-        )}{" "}
-        {review.status !== "rejected" && (
-          <button type="button" disabled={busy} onClick={() => onDecide("rejected")}>
-            Reject
-          </button>
+          </Button>
         )}
-      </p>
+        {review.status !== "rejected" && (
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => onDecide("rejected")}>
+            Reject
+          </Button>
+        )}
+      </div>
     </article>
   );
 }

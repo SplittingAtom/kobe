@@ -6,11 +6,11 @@ import {
   putTeamWebSearch,
   type TeamWebSearch,
 } from "../../../lib/admin/api/team/web-search";
+import { Button, Checkbox, Notice, PageHeader } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 const PROVIDER_LABELS: Record<string, string> = { brave: "Brave", tavily: "Tavily", exa: "Exa" };
 
@@ -24,16 +24,18 @@ export function TeamWebSearchPage() {
   const { state, reload } = useResource(() => getTeamWebSearch(teamId));
   return (
     <>
-      <h1>Web search</h1>
+      <PageHeader title="Web search" />
       <ResourceView state={state} label="web search">
         {(setting) =>
           setting.available ? (
             <WebSearchForm teamId={teamId} setting={setting} onSaved={reload} />
           ) : (
-            <p>
-              The site admin has not set up a web search provider, so web search is not available to
-              teams yet.
-            </p>
+            <Notice>
+              <p>
+                The site admin has not set up a web search provider, so web search is not available
+                to teams yet.
+              </p>
+            </Notice>
           )
         }
       </ResourceView>
@@ -68,18 +70,21 @@ function WebSearchForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Web search">
-      <label>
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />{" "}
-        Allow web search for this team&apos;s agents
-      </label>
-      <p className={styles.hint}>
-        When on, the text of agents&apos; search queries is sent to {provider}, the provider your
-        site admin configured, and leaves this site. Off by default; do not turn it on if queries
-        could contain information that must stay inside.
-      </p>
-      <button type="submit" disabled={mutation.pending || enabled === setting.enabled}>
-        Save
-      </button>
+      <Checkbox
+        label="Allow web search for this team's agents"
+        hint={`When on, the text of agents' search queries is sent to ${provider}, the provider your site admin configured, and leaves this site. Off by default; do not turn it on if queries could contain information that must stay inside.`}
+        checked={enabled}
+        onChange={(e) => setEnabled(e.target.checked)}
+      />
+      <div className="my-4">
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={mutation.pending || enabled === setting.enabled}
+        >
+          Save
+        </Button>
+      </div>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );

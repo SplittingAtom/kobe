@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import {
   getEvalSettings,
   putEvalSettings,
   type EvalSettings,
 } from "../../../lib/admin/api/team/eval-settings";
+import { Button, Checkbox, FieldError, PageHeader, TextInput } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
-import styles from "../admin.module.css";
 
 const percent = (rate: number): string => `${Math.round(rate * 1000) / 10}%`;
 
@@ -24,13 +24,10 @@ export function EvalSettingsPage() {
   const { state, reload } = useResource(() => getEvalSettings(teamId));
   return (
     <>
-      <h1>Agent evaluation</h1>
-      <p className={styles.hint}>
-        With this on, Publish first runs a set of attacks (prompt injection and misuse scenarios)
-        against the agent in an isolated job, using the team&apos;s models; their cost counts toward
-        the team&apos;s budgets. The agent is published only if the share of attacks that succeed is
-        at or below the limit. An evaluation that fails to run blocks publishing too; try again.
-      </p>
+      <PageHeader
+        title="Agent evaluation"
+        description="With this on, Publish first runs a set of attacks (prompt injection and misuse scenarios) against the agent in an isolated job, using the team's models; their cost counts toward the team's budgets. The agent is published only if the share of attacks that succeed is at or below the limit. An evaluation that fails to run blocks publishing too; try again."
+      />
       <ResourceView state={state} label="evaluation settings">
         {(settings) => <SettingsForm teamId={teamId} settings={settings} onSaved={reload} />}
       </ResourceView>
@@ -48,6 +45,7 @@ function SettingsForm({
   readonly onSaved: () => void;
 }) {
   const mutation = useMutation();
+  const id = useId();
   const [enabled, setEnabled] = useState(settings.enabled);
   const [limit, setLimit] = useState(String(Math.round(settings.maxAttackSuccessRate * 1000) / 10));
   const parsed = Number(limit);
@@ -71,33 +69,36 @@ function SettingsForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Agent evaluation settings" noValidate>
-      <label>
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />{" "}
-        Require a passing evaluation before publishing
-      </label>
-      <p>
-        <label>
-          Block publishing when more than{" "}
-          <input
+      <Checkbox
+        label="Require a passing evaluation before publishing"
+        checked={enabled}
+        onChange={(e) => setEnabled(e.target.checked)}
+      />
+      <div className="my-4 flex flex-col gap-1">
+        <label className="inline-flex flex-wrap items-center gap-2">
+          Block publishing when more than
+          <TextInput
             type="number"
             min={0}
             max={100}
             step="any"
+            className="w-24"
             value={limit}
             aria-invalid={!valid}
+            aria-describedby={`${valid ? "" : `${id}-error `}${id}-hint`}
             onChange={(e) => setLimit(e.target.value)}
-          />{" "}
+          />
           % of attacks succeed
         </label>
-      </p>
-      {!valid && <p className={styles.hint}>Enter a number from 0 to 100.</p>}
-      <p className={styles.hint}>
-        0% blocks the agent if any attack succeeds. The default set has five scenarios, so each one
-        is 20%.
-      </p>
-      <button type="submit" disabled={mutation.pending || !valid || !changed}>
+        {!valid && <FieldError id={`${id}-error`}>Enter a number from 0 to 100.</FieldError>}
+        <p id={`${id}-hint`} className="m-0 text-sm text-console-muted">
+          0% blocks the agent if any attack succeeds. The default set has five scenarios, so each
+          one is 20%.
+        </p>
+      </div>
+      <Button type="submit" variant="primary" disabled={mutation.pending || !valid || !changed}>
         Save
-      </button>
+      </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );
