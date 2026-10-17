@@ -73,6 +73,13 @@ export const OUTCOME_TONE: Record<Outcome, StatusTone> = {
   running: "running",
 };
 
+/**
+ * The tool's name chip (KOBE-374): gold (app/theme.css `--kobe-tool-badge*`), so tool use is
+ * recognisable at a glance; the outcome colours stay on the step's icon and label.
+ */
+export const TOOL_BADGE =
+  "border-tool-badge-border bg-tool-badge-bg text-tool-badge shrink-0 rounded-md border px-1.5 font-mono text-xs leading-5 font-medium";
+
 /** A finished artifact call in an old thread: no live event, so the id comes from the result. */
 function ReopenArtifact({ result }: { readonly result: unknown }) {
   const id = artifactIdFromToolResult(result);
@@ -123,12 +130,16 @@ function ToolCardHeader({
       />
       {skill === undefined ? (
         <>
-          <span className="text-foreground shrink-0 font-mono font-medium">{toolName}</span>
+          <span data-kobe-tool-badge className={TOOL_BADGE}>
+            {toolName}
+          </span>
           {summary !== "" && <span className="min-w-0 truncate font-mono text-xs">{summary}</span>}
         </>
       ) : (
         <>
-          <span className="text-foreground shrink-0 font-medium">Read skill</span>
+          <span data-kobe-tool-badge className={cn(TOOL_BADGE, "font-sans")}>
+            Read skill
+          </span>
           <span className="text-foreground min-w-0 truncate font-mono text-xs">{skill}</span>
         </>
       )}

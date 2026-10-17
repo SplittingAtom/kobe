@@ -54,6 +54,10 @@
   --color-status-idle: var(--kobe-status-idle);
   --color-status-accent: var(--kobe-status-accent);
   --color-status-accent-fg: var(--kobe-status-accent-fg);
+  /* The gold tool badge (KOBE-374): text-tool-badge, bg-tool-badge-bg, border-tool-badge-border. */
+  --color-tool-badge: var(--kobe-tool-badge);
+  --color-tool-badge-bg: var(--kobe-tool-badge-bg);
+  --color-tool-badge-border: var(--kobe-tool-badge-border);
   /* The consoles' and My area's palette (KOBE-294, app/theme.css): text-console-fg,
      bg-console-panel, border-console-border, text-console-accent, bg-console-danger-bg, … */
   --color-console-fg: var(--kobe-console-fg);
