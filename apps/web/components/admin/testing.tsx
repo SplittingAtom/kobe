@@ -49,6 +49,19 @@ export function stubApi(routes: Record<string, Reply | readonly Reply[]>): Recor
   return calls;
 }
 
+/**
+ * Console and My-area pages ask in their own dialog (`useConfirm`, KOBE-294..296): the native
+ * `window.confirm` must never be used there, so it fails the test. Call it in `beforeEach`.
+ */
+export function forbidNativeConfirm(): void {
+  vi.stubGlobal(
+    "confirm",
+    vi.fn(() => {
+      throw new Error("window.confirm used: console pages ask with useConfirm()");
+    }),
+  );
+}
+
 export const ME = { id: "u-me", name: "Ada", email: "ada@x.io" };
 
 export function renderSite(ui: ReactElement, siteRole: SiteAccess["siteRole"] = "admin") {

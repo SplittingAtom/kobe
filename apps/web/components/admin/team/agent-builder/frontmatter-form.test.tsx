@@ -3,8 +3,10 @@ import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_FORM, type FormState } from "../../../../lib/admin/agent-builder/form-model";
-import { renderTeam, stubApi } from "../../testing";
+import { forbidNativeConfirm, renderTeam, stubApi } from "../../testing";
 import { FrontmatterForm } from "./frontmatter-form";
+
+beforeEach(forbidNativeConfirm);
 
 beforeEach(() => {
   stubApi({});

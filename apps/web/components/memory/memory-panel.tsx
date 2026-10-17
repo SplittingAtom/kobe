@@ -124,7 +124,7 @@ function DocList({
               <Button
                 variant="ghost"
                 size="sm"
-                className="font-mono"
+                className="text-start font-mono break-all whitespace-normal"
                 aria-label={`Open ${visible(d.path)}`}
                 onClick={() => onOpen(d.id)}
               >

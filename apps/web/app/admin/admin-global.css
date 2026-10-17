@@ -1,7 +1,8 @@
 /* The consoles and My area (app/admin/layout.tsx and app/me/layout.tsx import this). Tailwind's
    theme and utilities, the same build as the chat's (app/tailwind.css, KOBE-294), without
    preflight: every page is on the console primitives (components/ui/console, KOBE-296), which
-   carry their own resets. Every rule here is scoped to
+   carry their own resets, and plain content keeps the browser defaults the pages were
+   baselined with (a preflight would restyle every page at once). Every rule here is scoped to
    the console root (`data-kobe-console`, the console and My-area shells), so nothing reaches the
    chat (app/console-css-guard.test.ts). */
 @import "../tailwind.css";

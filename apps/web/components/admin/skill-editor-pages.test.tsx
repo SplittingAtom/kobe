@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { SkillEditorPage } from "./team/skill-editor/skill-editor-page";
 import { SkillsPage } from "./team/skill-editor/skills-page";
-import { renderTeam, stubApi, type RecordedCall } from "./testing";
+import { forbidNativeConfirm, renderTeam, stubApi, type RecordedCall } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const SKILL = {
   id: "s-1",

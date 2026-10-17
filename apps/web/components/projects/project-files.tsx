@@ -24,9 +24,10 @@ import {
   useConfirm,
 } from "../ui/console";
 
+import { useProjectsApi, useRoster } from "./use-projects";
+
 /** The list's heading: focus lands here when a delete empties the list. */
 const HEADING = "project-files";
-import { useProjectsApi, useRoster } from "./use-projects";
 
 function size(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;

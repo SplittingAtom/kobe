@@ -10,7 +10,7 @@ import { RolesPage } from "./site/roles-page";
 import { SettingsPage } from "./site/settings-page";
 import { TeamsPage } from "./site/teams-page";
 import { UsersPage } from "./site/users-page";
-import { ME, answerConfirm, renderSite, stubApi, summary } from "./testing";
+import { forbidNativeConfirm, ME, answerConfirm, renderSite, stubApi, summary } from "./testing";
 
 const user = (id: string, name: string, siteRole: string, deactivatedAt: string | null = null) => ({
   id,
@@ -35,15 +35,7 @@ const forbidden = [
   { code: "forbidden", message: "You don't have permission to do that." },
 ] as const;
 
-beforeEach(() => {
-  // The console asks in its own dialog (useConfirm); the native one must never be used.
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -88,7 +80,8 @@ describe("Users", () => {
       ],
     });
     renderSite(<UsersPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
+    const deactivate = await screen.findByRole("button", { name: "Deactivate Bob" });
+    await userEvent.click(deactivate);
     expect(summary(calls)).toEqual(["GET /v1/site/users"]);
     const asked = await answerConfirm("Deactivate Bob?", "Deactivate");
     expect(asked).toMatch(/Every session ends now/);
@@ -102,6 +95,8 @@ describe("Users", () => {
         "GET /v1/site/users",
       ]),
     );
+    // The button was disabled while the change ran: focus comes back to it, not the page top.
+    await waitFor(() => expect(document.activeElement).toBe(deactivate));
   });
 
   it("does nothing when the confirmation is declined, and returns focus to the button", async () => {
@@ -120,7 +115,11 @@ describe("Users", () => {
       "POST /v1/site/users/u-gone/reactivate": [200, { user_id: "u-gone", deactivated: false }],
     });
     renderSite(<UsersPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Reactivate Gus" }));
+    const reactivate = await screen.findByRole("button", { name: "Reactivate Gus" });
+    await userEvent.click(reactivate);
+    await answerConfirm("Reactivate Gus?", "Cancel");
+    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    await userEvent.click(reactivate);
     expect(await answerConfirm("Reactivate Gus?", "Reactivate")).toMatch(/sign in again/);
     await screen.findByText("Gus can sign in again.");
     expect(summary(calls)).toContain("POST /v1/site/users/u-gone/reactivate");
@@ -194,7 +193,9 @@ describe("Invitations", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Resend to new@x.io" }));
     await screen.findByText("Invitation sent to new@x.io.");
     await userEvent.click(screen.getByRole("button", { name: "Revoke invitation to new@x.io" }));
+    await answerConfirm("Revoke the invitation to new@x.io?", "Cancel");
     expect(summary(calls)).not.toContain("DELETE /v1/site/invites/i-1");
+    await userEvent.click(screen.getByRole("button", { name: "Revoke invitation to new@x.io" }));
     expect(await answerConfirm("Revoke the invitation to new@x.io?", "Revoke")).toMatch(
       /link stops working/,
     );
@@ -245,7 +246,9 @@ describe("Site roles", () => {
     });
     renderSite(<RolesPage />, "owner");
     await userEvent.click(await screen.findByRole("button", { name: "Revoke Admin from Abe" }));
+    await answerConfirm("Revoke Admin from Abe?", "Cancel");
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Revoke Admin from Abe" }));
     expect(await answerConfirm("Revoke Admin from Abe?", "Revoke Admin")).toMatch(/become a User/);
     await screen.findByText("Abe is now a User.");
     const grant = await screen.findByRole("form", { name: "Grant Admin" });

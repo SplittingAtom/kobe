@@ -14,7 +14,15 @@ import {
   spentOf,
   tokensOf,
 } from "./team/budgets-page";
-import { TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
   month_usd: month,
@@ -56,12 +64,7 @@ const MEMBERS = {
   ],
 };
 
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

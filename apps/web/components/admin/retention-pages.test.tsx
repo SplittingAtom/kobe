@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { RetentionMaximumPage } from "./site/retention-page";
 import { TeamRetentionPage } from "./team/retention-page";
-import { TEAM, answerConfirm, renderSite, renderTeam, stubApi } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+} from "./testing";
 
 const view = (
   period: string,
@@ -25,14 +32,7 @@ const view = (
 const AT = "2026-10-11T03:00:00.000Z";
 
 // The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

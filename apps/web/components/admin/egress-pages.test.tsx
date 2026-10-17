@@ -5,7 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { EgressCeilingPage } from "./site/egress-ceiling-page";
 import { TeamEgressPage } from "./team/egress-page";
-import { TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const entry = (domain: string, preset: string | null, in_ceiling: boolean) => ({
   domain,
@@ -28,15 +36,7 @@ const CEILING = {
   presets: ["package_registries", "git_hosts", "web_search"],
 };
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -81,7 +81,9 @@ describe("Site egress ceiling", () => {
     await userEvent.click(screen.getByRole("button", { name: "Remove all package registries" }));
     await screen.findByText(/all out of the ceiling/);
     await userEvent.click(screen.getByRole("button", { name: "Delete *.example.com" }));
+    await answerConfirm("Delete *.example.com?", "Cancel");
     expect(summary(calls)).not.toContain("DELETE /v1/site/egress-ceiling/*.example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Delete *.example.com" }));
     expect(await answerConfirm("Delete *.example.com?", "Delete *.example.com")).toMatch(
       /Every team that enabled it loses it/,
     );

@@ -5,7 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { PolicyFloorPage } from "./site/policy-floor-page";
 import { TeamPolicyPage } from "./team/policy-page";
-import { TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const rule = (
   id: string,
@@ -26,15 +34,7 @@ const rule = (
   ...extra,
 });
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

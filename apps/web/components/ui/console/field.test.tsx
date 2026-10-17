@@ -79,6 +79,10 @@ describe("choices (KOBE-283: inline before their text)", () => {
     expect(label?.firstElementChild).toBe(box);
     expect(label?.className).toContain("inline-flex");
     expect(label?.className).not.toMatch(/flex-col|block/);
+    expect(label?.className).toMatch(/\bitems-center\b/);
+    // The box keeps its size: never stretched or squeezed by the row (KOBE-283).
+    expect(box.className).toMatch(/\bsize-4\b/);
+    expect(box.className).toMatch(/\bshrink-0\b/);
     expect(description(box)).toBe("Members can't change it.");
     await userEvent.click(screen.getByText("Read only"));
     expect(onChange).toHaveBeenCalledTimes(1);

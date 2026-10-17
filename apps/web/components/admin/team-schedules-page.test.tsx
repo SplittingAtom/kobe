@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { TeamSchedulesPage } from "./team/schedules-page";
-import { ME, renderTeam, stubApi, summary } from "./testing";
+import { forbidNativeConfirm, ME, renderTeam, stubApi, summary } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 afterEach(() => {
   cleanup();

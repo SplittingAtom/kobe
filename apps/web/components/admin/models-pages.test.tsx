@@ -6,6 +6,7 @@ import { must } from "../../lib/testing/must";
 import { SiteModelsPage } from "./site/models-page";
 import { TeamModelsPage } from "./team/models-page";
 import {
+  forbidNativeConfirm,
   TEAM,
   answerConfirm,
   renderSite,
@@ -75,15 +76,7 @@ const LISTED = {
 const bodyOf = (call: RecordedCall | undefined) =>
   JSON.parse(String(must(call).body)) as Record<string, unknown>;
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -477,7 +470,9 @@ describe("site: models and providers", () => {
     await screen.findByText(/Saved kimi/);
     expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({ label: "Kimi" });
     await user.click(screen.getByRole("button", { name: "Remove kimi" }));
+    await answerConfirm("Remove kimi from the catalog?", "Cancel");
     expect(summary(calls)).not.toContain("DELETE /v1/site/models/catalog/kimi");
+    await user.click(screen.getByRole("button", { name: "Remove kimi" }));
     expect(await answerConfirm("Remove kimi from the catalog?", "Remove kimi")).toMatch(
       /Every team that enabled it loses it/,
     );

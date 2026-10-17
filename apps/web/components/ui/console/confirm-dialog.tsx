@@ -21,15 +21,46 @@ function consoleMain(): HTMLElement | null {
 }
 
 /** A control that can take focus back: still on the page and not disabled. */
-function focusable(el: HTMLElement | null | undefined): el is HTMLElement {
+function focusable(el: HTMLElement | null): boolean {
   return !!el && el.isConnected && !el.matches(":disabled");
+}
+
+/** How long a confirmed action may keep its control disabled before focus stops waiting. */
+const REENABLE_WAIT_MS = 15_000;
+
+/**
+ * After a confirmed action the asking control is usually disabled while the action runs (the
+ * page's pending state) and enabled again once it ends. Focus waits on `interim` (the page's
+ * main) meanwhile and returns to the control when it is enabled, unless the person has moved
+ * focus elsewhere or the control left the page.
+ */
+function focusWhenEnabled(target: HTMLElement, interim: HTMLElement | null): void {
+  if (typeof MutationObserver === "undefined") return;
+  const waiting = () => {
+    const active = document.activeElement;
+    return active === null || active === document.body || active === interim || active === target;
+  };
+  const observer = new MutationObserver(() => {
+    if (!target.isConnected || !waiting()) return stop();
+    if (!target.matches(":disabled")) {
+      target.focus();
+      stop();
+    }
+  });
+  const timer = setTimeout(() => stop(), REENABLE_WAIT_MS);
+  function stop() {
+    observer.disconnect();
+    clearTimeout(timer);
+  }
+  observer.observe(target, { attributes: true, attributeFilter: ["disabled", "aria-busy"] });
 }
 
 /**
  * Asks before a change that can't be undone from here (Radix AlertDialog: modal, focus trapped,
  * Escape and Cancel decline). On close, focus returns to the control that asked, or, when the
  * action removed or disabled it, to `fallbackFocus()` (the page's main, by default), so a
- * keyboard user is never dropped at the top of the document. It mounts in the console root
+ * keyboard user is never dropped at the top of the document; a control that was only disabled
+ * while the action ran gets focus back once it is enabled again. It mounts in the console root
  * (KOBE-281's portal theming, components/ui/chat-portal.ts), so it takes the console's font and
  * both themes.
  */
@@ -61,10 +92,22 @@ export function ConfirmDialog({
           className="fixed top-1/2 left-1/2 z-50 box-border max-h-[calc(100dvh-2rem)] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-console-border bg-console-bg p-5 text-console-fg shadow-lg"
           {...(description ? {} : { "aria-describedby": undefined })}
           onCloseAutoFocus={(event) => {
-            const target = focusable(returnFocus) ? returnFocus : fallbackFocus();
-            if (target) {
+            const control = returnFocus ?? null;
+            if (control && focusable(control)) {
               event.preventDefault();
-              target.focus();
+              control.focus();
+              // The action may still disable it (which drops focus): back to it afterwards.
+              focusWhenEnabled(control, fallbackFocus());
+              return;
+            }
+            const fallback = fallbackFocus();
+            if (fallback) {
+              event.preventDefault();
+              fallback.focus();
+            }
+            // Disabled while the confirmed action runs: back to it once it is enabled again.
+            if (control?.isConnected) {
+              focusWhenEnabled(control, fallback);
             }
           }}
         >

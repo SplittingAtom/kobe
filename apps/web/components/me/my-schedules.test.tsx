@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { answerConfirm, renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { MySchedulesPage } from "./my-schedules-page";
 
 const MEMBER = { role: "member", permissions: ["team.chat", "team.schedules.personal"] } as const;
@@ -39,14 +39,7 @@ const agents = [
 ] as const;
 
 // The console asks in its own dialog (useConfirm); the native one must never be used.
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -186,7 +179,11 @@ describe("Schedules page (KOBE-175)", () => {
     await user.click(
       await screen.findByRole("button", { name: "Delete schedule Summarise <b>sales</b>" }),
     );
+    await answerConfirm("Delete this schedule?", "Cancel");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await user.click(
+      screen.getByRole("button", { name: "Delete schedule Summarise <b>sales</b>" }),
+    );
     expect(await answerConfirm("Delete this schedule?", "Delete schedule")).toMatch(
       /already started stay/,
     );

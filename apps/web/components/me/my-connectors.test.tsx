@@ -2,7 +2,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { answerConfirm, renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { MyConnectorsPage } from "./my-connectors-page";
 
 const TEAM_CONNECTORS = "/v1/team/connectors";
@@ -28,15 +28,7 @@ const grant = {
   updated_at: "2026-10-05T10:00:00Z",
 };
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -107,7 +99,9 @@ describe("My connector keys (KOBE-105)", () => {
     await userEvent.click(card("jira").getByRole("button", { name: "Replace key" }));
     await screen.findByText("Key replaced.");
     await userEvent.click(card("jira").getByRole("button", { name: "Remove key" }));
+    await answerConfirm("Remove your key for jira?", "Cancel");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(card("jira").getByRole("button", { name: "Remove key" }));
     expect(await answerConfirm("Remove your key for jira?", "Remove key")).toMatch(
       /runs can't use it/,
     );

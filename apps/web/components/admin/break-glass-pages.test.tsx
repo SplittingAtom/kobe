@@ -7,7 +7,16 @@ import { BreakGlassPage } from "./site/break-glass-page";
 import { entryText } from "./site/break-glass-reader";
 import { TeamAuditPage } from "./team/audit-page";
 import { TeamBreakGlassPage } from "./team/break-glass-page";
-import { ME, TEAM, answerConfirm, renderSite, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  ME,
+  TEAM,
+  answerConfirm,
+  renderSite,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -50,14 +59,7 @@ const ACTIVE_OWN = grant({
 });
 
 // The console asks in its own dialog (useConfirm); the native one must never be used.
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -114,6 +116,9 @@ describe("site break-glass page", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Deny" }));
     await answerConfirm(/^Deny break-glass access to /, "Cancel");
     expect(summary(calls)).not.toContain("POST /v1/site/break-glass/g-1/deny");
+    await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    await answerConfirm(/^Approve break-glass access to /, "Cancel");
+    expect(summary(calls)).not.toContain("POST /v1/site/break-glass/g-1/approve");
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
     await answerConfirm(/^Approve break-glass access to /, "Approve");
     expect((await screen.findByRole("alert")).textContent).toContain(

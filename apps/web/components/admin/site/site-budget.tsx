@@ -74,7 +74,7 @@ function Form({
   return (
     <form
       onSubmit={submit}
-      aria-label="Site budget"
+      aria-label="Site budget limits"
       aria-describedby={invalid ? errorId : undefined}
     >
       {invalid && <FieldError id={errorId}>{invalid}</FieldError>}

@@ -3,7 +3,7 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamConnectorsPage } from "./team/connectors-page";
-import { answerConfirm, renderTeam, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "./testing";
 
 const BASE = "/v1/team/connectors";
 const tool = (name: string, over: Record<string, unknown> = {}) => ({
@@ -32,12 +32,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

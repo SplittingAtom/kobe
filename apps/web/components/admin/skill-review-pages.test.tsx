@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { must } from "../../lib/testing/must";
 import { SkillReviewPage } from "./team/skill-review-page";
-import { TEAM, answerConfirm, renderTeam, stubApi } from "./testing";
+import { forbidNativeConfirm, TEAM, answerConfirm, renderTeam, stubApi } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const review = (over: Record<string, unknown> = {}) => ({
   skillId: "11111111-1111-4111-8111-111111111111",

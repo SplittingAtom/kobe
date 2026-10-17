@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillBlocklistPage } from "./site/skill-blocklist-page";
-import { answerConfirm, renderSite, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/skill-blocklist";
 const H1 = "a".repeat(64);
@@ -15,15 +15,7 @@ const entry = (contentHash: string, reason: string) => ({
   addedAt: "2026-10-04T10:00:00.000Z",
 });
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

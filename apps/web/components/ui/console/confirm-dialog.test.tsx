@@ -144,6 +144,52 @@ describe("focus and lifecycle (review S3, nits)", () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
+  it("after a confirmed action, focus returns to its control once it is enabled again", async () => {
+    // The page disables the control while the action runs (mutation pending), as console pages do.
+    let finish: () => void = () => undefined;
+    function Deactivate() {
+      const [confirm, dialog] = useConfirm();
+      const [pending, setPending] = useState(false);
+      return (
+        <div data-kobe-console="">
+          <main id="console-main" tabIndex={-1}>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={async (e) => {
+                const trigger = eventTrigger(e);
+                if (
+                  !(await confirm(
+                    { title: "Deactivate Bob?", confirmLabel: "Deactivate" },
+                    trigger,
+                  ))
+                )
+                  return;
+                setPending(true);
+                await new Promise<void>((resolve) => {
+                  finish = resolve;
+                });
+                setPending(false);
+              }}
+            >
+              Deactivate Bob
+            </button>
+          </main>
+          {dialog}
+        </div>
+      );
+    }
+    render(<Deactivate />);
+    const trigger = screen.getByRole("button", { name: "Deactivate Bob" });
+    await userEvent.click(trigger);
+    const dialog = await screen.findByRole("alertdialog", { name: "Deactivate Bob?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect(document.activeElement?.id).toBe("console-main"));
+    act(() => finish());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it("a press outside the dialog doesn't answer it", async () => {
     const dialog = await (async () => {
       render(<Remove onAnswer={() => {}} />);

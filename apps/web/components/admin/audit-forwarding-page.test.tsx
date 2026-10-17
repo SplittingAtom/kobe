@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { must } from "../../lib/testing/must";
 import { AuditForwardingPage } from "./site/audit-forwarding-page";
-import { renderSite, stubApi, summary } from "./testing";
+import { forbidNativeConfirm, renderSite, stubApi, summary } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const URL_ = "GET /v1/site/audit/forwarding";
 const AT = "2026-10-15T10:00:00.000Z";

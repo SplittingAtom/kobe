@@ -1,7 +1,8 @@
 /* The one Tailwind CSS v4 build, for the chat (app/chat-global.css) and the consoles and My area
    (app/admin/admin-global.css, KOBE-294). Only the theme and utilities layers are imported, never
-   Tailwind's preflight: the consoles' CSS-module pages rely on browser defaults until they move
-   (KOBE-295, KOBE-296), and the chat scopes the preflight slice it needs to its own root. Utilities
+   Tailwind's preflight: the console primitives carry their own resets (KOBE-294..296), plain
+   content (lists, headings, code) keeps the browser defaults the pages were designed and
+   screenshot-baselined with, and the chat scopes the preflight slice it needs to its own root. Utilities
    only style elements that carry them, so loading this file on a page changes nothing by itself.
    Both stylesheets import this file, so a page that has both (after client navigation) gets two
    identical copies: keep every theme token here, never in one of them, or the copies differ.

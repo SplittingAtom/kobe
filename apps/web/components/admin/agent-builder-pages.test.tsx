@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { EvalReportPage } from "./team/agent-builder/eval-report";
 import { AgentBuilderPage } from "./team/agent-builder/agent-builder-page";
-import { TEAM, answerConfirm, renderTeam, stubApi } from "./testing";
+import { forbidNativeConfirm, TEAM, answerConfirm, renderTeam, stubApi } from "./testing";
 
 const AGENT = {
   id: "a-1",
@@ -61,10 +61,7 @@ const READ = {
 
 let assign: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  );
+  forbidNativeConfirm();
   assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign, reload: vi.fn() });
 });

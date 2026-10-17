@@ -6,7 +6,15 @@ import { must } from "../../lib/testing/must";
 import { TeamAgentsPage } from "./team/agents-page";
 import { TeamInvitesPage } from "./team/invites-page";
 import { MembersPage } from "./team/members-page";
-import { ME, TEAM, answerConfirm, renderTeam, stubApi, summary } from "./testing";
+import {
+  forbidNativeConfirm,
+  ME,
+  TEAM,
+  answerConfirm,
+  renderTeam,
+  stubApi,
+  summary,
+} from "./testing";
 
 const MEMBERS = {
   members: [
@@ -46,10 +54,7 @@ const AGENTS = {
 
 let assign: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  );
+  forbidNativeConfirm();
   assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign, reload: vi.fn() });
 });

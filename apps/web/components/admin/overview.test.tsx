@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { findSection } from "../../lib/admin/nav/registry";
 import { must } from "../../lib/testing/must";
 import { ConsoleLinks } from "./console-links";
 import { ConsoleOverview } from "./overview";
 import { SectionPlaceholder } from "./placeholder";
-import { ME, renderSite, renderTeam, stubApi } from "./testing";
+import { forbidNativeConfirm, ME, renderSite, renderTeam, stubApi } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 afterEach(() => {
   cleanup();

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { LegalHoldPage } from "./site/legal-hold-page";
 import { SettingsPage } from "./site/settings-page";
-import { answerConfirm, ME, renderSite, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, ME, renderSite, stubApi } from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -68,14 +68,7 @@ const RELEASING = hold({
 });
 
 // The console asks in its own dialog (useConfirm); the native one must never be used.
-beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  );
-});
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

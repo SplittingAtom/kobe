@@ -4,9 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, renderTeam, stubApi } from "../admin/testing";
 import { SkillEditorPage } from "../admin/team/skill-editor/skill-editor-page";
 import { SkillsPage } from "../admin/team/skill-editor/skills-page";
+
+beforeEach(forbidNativeConfirm);
 
 const MEMBER = { role: "member", permissions: ["team.personal.create"] } as const;
 const SKILL = {

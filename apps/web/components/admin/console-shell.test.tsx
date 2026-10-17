@@ -7,6 +7,9 @@ import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { must } from "../../lib/testing/must";
 import { ConsoleShell } from "./console-shell";
 import { ISOLATION_EVENT } from "./isolation-banner";
+import { forbidNativeConfirm } from "./testing";
+
+beforeEach(forbidNativeConfirm);
 
 const user = { id: "u-1", name: "Ada", email: "a@x.io" };
 const ok = <T,>(data: T): Promise<ApiResult<T>> => Promise.resolve({ ok: true, status: 200, data });

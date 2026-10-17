@@ -6,6 +6,7 @@ import { worded, type Project, type ProjectMember, type ProjectRole } from "../.
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
+import { useFocusAfterRemoval } from "../admin/use-focus-after-removal";
 import { useMutation, useResource } from "../admin/use-resource";
 import {
   Button,
@@ -27,6 +28,9 @@ import { useProjectsApi, useRoster } from "./use-projects";
 
 const ROLES: readonly ProjectRole[] = ["owner", "member"];
 
+/** The section's heading: focus lands here when a removal empties the list. */
+const HEADING = "project-members";
+
 /** Members of one project: add, remove and roles for owners and admins; a list for everyone else. */
 export function ProjectMembers({
   project,
@@ -42,19 +46,22 @@ export function ProjectMembers({
   const mutation = useMutation();
   const editable = canManage && project.archivedAt === null;
   const [confirm, confirmDialog] = useConfirm();
+  const focus = useFocusAfterRemoval(
+    state.status === "ready" ? state.data.members.map((m) => m.userId) : null,
+    HEADING,
+  );
 
   const act = async <T,>(change: () => Promise<ApiResult<T>>, notice: string) => {
-    if (
-      await mutation.run(
-        async () => worded(await change()),
-        () => notice,
-      )
-    )
-      reload();
+    const done = await mutation.run(
+      async () => worded(await change()),
+      () => notice,
+    );
+    if (done) reload();
+    return done;
   };
 
   return (
-    <Section id="project-members" title="Members">
+    <Section id={HEADING} title="Members">
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="members">
         {(data) => {
@@ -66,54 +73,54 @@ export function ProjectMembers({
                   ? "Everyone in the team is a member. Only owners are listed; switch to selected people to choose who is in."
                   : "Only the people listed here are members."}
               </p>
-              <Table caption="Project members" hideCaption>
-                <TableHead>
-                  <TableRow>
-                    <TableHeader>Person</TableHeader>
-                    <TableHeader>Role</TableHeader>
-                    <TableHeader>Added</TableHeader>
-                    <TableHeader>
-                      <span className="sr-only">Actions</span>
-                    </TableHeader>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data.members.map((m) => (
-                    <MemberRow
-                      key={`${m.userId}:${m.role}`}
-                      member={m}
-                      name={roster.nameOf(m.userId)}
-                      isMe={m.userId === me}
-                      editable={editable}
-                      pending={mutation.pending}
-                      onRole={(role) =>
-                        act(
-                          () => api.setMemberRole(project.id, m.userId, role),
-                          `${roster.nameOf(m.userId)} is now ${role}.`,
-                        )
-                      }
-                      onRemove={async (trigger) => {
-                        const yes = await confirm(
-                          {
-                            title: `Remove ${roster.nameOf(m.userId)} from this project?`,
-                            confirmLabel: "Remove",
-                          },
-                          trigger,
-                        );
-                        if (!yes) return;
-                        await act(
-                          () => api.removeMember(project.id, m.userId),
-                          `Removed ${roster.nameOf(m.userId)}.`,
-                        );
-                        // The row may be gone: keep focus in the section.
-                        if (trigger && !trigger.isConnected) {
-                          document.getElementById("project-members")?.focus();
+              <div ref={focus.container}>
+                <Table caption="Project members" hideCaption>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeader>Person</TableHeader>
+                      <TableHeader>Role</TableHeader>
+                      <TableHeader>Added</TableHeader>
+                      <TableHeader>
+                        <span className="sr-only">Actions</span>
+                      </TableHeader>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {data.members.map((m, index) => (
+                      <MemberRow
+                        key={`${m.userId}:${m.role}`}
+                        member={m}
+                        name={roster.nameOf(m.userId)}
+                        isMe={m.userId === me}
+                        editable={editable}
+                        pending={mutation.pending}
+                        onRole={(role) =>
+                          act(
+                            () => api.setMemberRole(project.id, m.userId, role),
+                            `${roster.nameOf(m.userId)} is now ${role}.`,
+                          )
                         }
-                      }}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
+                        onRemove={async (trigger) => {
+                          const yes = await confirm(
+                            {
+                              title: `Remove ${roster.nameOf(m.userId)} from this project?`,
+                              confirmLabel: "Remove",
+                            },
+                            trigger,
+                          );
+                          if (!yes) return;
+                          const done = await act(
+                            () => api.removeMember(project.id, m.userId),
+                            `Removed ${roster.nameOf(m.userId)}.`,
+                          );
+                          // Once the reloaded list drops the row: the next Remove, or the heading.
+                          if (done) focus.removed(m.userId, index);
+                        }}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
               {editable && (
                 <AddMember
                   candidates={
@@ -153,7 +160,7 @@ function MemberRow({
   readonly isMe: boolean;
   readonly editable: boolean;
   readonly pending: boolean;
-  readonly onRole: (role: ProjectRole) => Promise<void>;
+  readonly onRole: (role: ProjectRole) => Promise<unknown>;
   readonly onRemove: (trigger: HTMLElement | null) => Promise<void>;
 }) {
   const [role, setRole] = useState(member.role);
@@ -201,6 +208,7 @@ function MemberRow({
           <Button
             size="sm"
             variant="danger"
+            data-remove=""
             disabled={pending}
             onClick={(e) => void onRemove(eventTrigger(e))}
           >
@@ -223,7 +231,7 @@ function AddMember({
     readonly email: string;
   }[];
   readonly pending: boolean;
-  readonly onAdd: (userId: string, role: ProjectRole) => Promise<void>;
+  readonly onAdd: (userId: string, role: ProjectRole) => Promise<unknown>;
 }) {
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState<ProjectRole>("member");

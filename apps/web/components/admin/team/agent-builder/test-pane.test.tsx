@@ -4,9 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../../../lib/chat/testing/fake-kobe";
 import { must } from "../../../../lib/testing/must";
-import { TEAM, ME, renderTeam, stubApi } from "../../testing";
+import { forbidNativeConfirm, TEAM, ME, renderTeam, stubApi } from "../../testing";
 import { AgentBuilderPage } from "./agent-builder-page";
 import { AgentTestPane } from "./test-pane";
+
+beforeEach(forbidNativeConfirm);
 
 const AGENT = "11111111-1111-4111-8111-111111111111";
 const DRAFT = {

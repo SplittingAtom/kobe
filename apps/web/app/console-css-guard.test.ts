@@ -193,13 +193,15 @@ function cssModulesIn(dir: string): string[] {
 }
 
 /**
- * Every CSS module a file imports, relative to apps/web: `import x from`, `import * as x from`,
- * a bare `import "…module.css"`, and `require`/dynamic `import()` of one.
+ * Any import or re-export of a CSS module: default, namespace, named and mixed imports, a bare
+ * `import "…module.css"`, `export … from`, and `require`/dynamic `import()` of one.
  */
+const MODULE_IMPORT =
+  /(?:(?:import|export)\s+(?:[^"';]*?\s+from\s+)?|(?:require|import)\s*\(\s*)["']([^"']+\.module\.css)["']/g;
+
+/** Every CSS module a file imports or re-exports, relative to apps/web. */
 function moduleImports(file: string): string[] {
-  const re =
-    /(?:import\s+(?:(?:\*\s+as\s+)?\w+\s+from\s+)?|(?:require|import)\s*\(\s*)["']([^"']+\.module\.css)["']/g;
-  return [...read(file).matchAll(re)].map((m) =>
+  return [...read(file).matchAll(MODULE_IMPORT)].map((m) =>
     relative(WEB, join(WEB, dirname(file), m[1] ?? "")),
   );
 }
@@ -265,6 +267,19 @@ describe("no CSS modules in the consoles or the My area (KOBE-296)", () => {
     const re =
       /(?:import\s+(?:(?:\*\s+as\s+)?\w+\s+from\s+)?|(?:require|import)\s*\(\s*)["']([^"']+\.module\.css)["']/g;
     expect(samples.map((line) => [...line.matchAll(re)].length)).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  it("console code lives in the guarded trees (a new console directory must join CONSOLE_DIRS)", () => {
+    const guarded = (f: string) => CONSOLE_DIRS.some((d) => f.startsWith(join(...d.split("/"))));
+    const consoleCode = (f: string) =>
+      /from\s+"(?:\.\.?\/)+(?:components\/)?ui\/console(?:\/[\w-]+)?"|import\s+["'][^"']*admin-global\.css["']/.test(
+        read(f),
+      );
+    const outside = ["app", "components"]
+      .flatMap(sources)
+      .filter((f) => !guarded(f) && f !== join("app", "console-css-guard.test.ts"))
+      .filter(consoleCode);
+    expect(outside).toEqual([]);
   });
 
   it("pages use the console primitives", () => {

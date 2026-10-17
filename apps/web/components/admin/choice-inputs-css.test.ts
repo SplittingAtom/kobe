@@ -81,17 +81,10 @@ describe("checkboxes and radios sit inline before their text (KOBE-283)", () => 
         /(display\s*:\s*(block|flex|grid)|flex-direction\s*:\s*column)/.test(r.body),
     );
     // Since KOBE-296 no console stylesheet lays labels out: fields are the primitives' `Field`
-    // (label above the control) and choices their `Checkbox`/`Radio` (box inline, below).
+    // (label above the control) and choices their `Checkbox`/`Radio`, whose inline box is pinned
+    // by a rendered test (components/ui/console/field.test.tsx). This keeps the global sheets
+    // from bringing a stacking rule back.
     expect(stacking.filter((r) => !LEAVES_CHOICES_OUT.test(r.selector)).map(where)).toEqual([]);
-  });
-
-  it("the choice primitive keeps its box inline before its text, in one label", () => {
-    const inputs = read("components/ui/console/inputs.tsx");
-    expect(inputs).toMatch(
-      /data-slot="console-choice-label"\s+className="inline-flex [^"]*\bitems-center\b[^"]*"/,
-    );
-    // The box never grows or shrinks to fill a row.
-    expect(inputs).toMatch(/type=\{type\}[\s\S]*?className=\{`m-0 size-4 shrink-0 /);
   });
 
   it("no rule makes every input full width or a block: checkboxes and radios are skipped", () => {

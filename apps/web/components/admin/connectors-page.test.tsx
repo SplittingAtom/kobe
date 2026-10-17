@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectorsPage } from "./site/connectors-page";
-import { answerConfirm, renderSite, stubApi } from "./testing";
+import { forbidNativeConfirm, answerConfirm, renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/connectors";
 const connector = (over: Record<string, unknown> = {}) => ({
@@ -20,15 +20,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

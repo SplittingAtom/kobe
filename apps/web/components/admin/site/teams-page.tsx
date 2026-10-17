@@ -232,6 +232,7 @@ function TeamRow({
                 <TextInput
                   required
                   maxLength={100}
+                  className="font-normal"
                   autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}

@@ -3,7 +3,7 @@ import { cleanup, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { answerConfirm, renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, answerConfirm, renderTeam, stubApi } from "../admin/testing";
 import { MyMemoryPage } from "./my-memory-page";
 
 const DOC = "00000000-0000-4000-8000-0000000d0c01";
@@ -30,15 +30,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
 const LIST = "/v1/memory?scope=user";
 const ONE = `/v1/memory/${DOC}`;
 
-// The consoles ask in their own dialog (useConfirm); the native one must never be used.
-beforeEach(() =>
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => {
-      throw new Error("window.confirm used");
-    }),
-  ),
-);
+beforeEach(forbidNativeConfirm);
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { AgentBuilderPage } from "../admin/team/agent-builder/agent-builder-page";
-import { TEAM, ME, renderTeam, stubApi } from "../admin/testing";
+import { forbidNativeConfirm, TEAM, ME, renderTeam, stubApi } from "../admin/testing";
 import { MyAgentsPage } from "./my-agents-page";
 import { MyAgentsShell } from "./my-agents-shell";
 
@@ -34,10 +34,7 @@ const READ = {
 
 let assign: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true),
-  );
+  forbidNativeConfirm();
   assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign, reload: vi.fn() });
 });

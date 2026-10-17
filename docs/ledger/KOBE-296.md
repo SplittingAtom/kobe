@@ -40,17 +40,26 @@
 - **Confirmations:** every `window.confirm` on these pages is `useConfirm()` with its trigger:
   the same question, split into title and description; the confirm button names the action
   (`Revoke`, `Remove kimi`, `Delete schedule`, `Cap at 30 days`, …); placing/approving uses the
-  primary tone, removing/denying danger. Tests answer the dialog (`answerConfirm`), check nothing
-  is sent before the answer, and the shared `confirm` stub now throws, so any native confirm left
-  fails. New cancel tests: deactivate user (focus back on the button), reactivate, transfer
-  ownership, provider removal (in-use warning), web search removal, connector, blocklist, legal
-  hold deny, break-glass deny, retention maximum, memory delete.
+  primary tone, removing/denying danger. Tests answer the dialog (`answerConfirm`) and check
+  nothing is sent before the answer. Every console and My-area test file calls
+  `beforeEach(forbidNativeConfirm)` (`components/admin/testing.tsx`), which makes
+  `window.confirm` throw; no `confirm: () => true` stub is left. Cancel paths are tested for
+  every confirmation on these pages: deactivate and reactivate user, revoke Admin, transfer
+  ownership, site invite revoke, provider and catalog model removal, web search removal,
+  connector, egress domain delete, blocklist, legal hold deny, break-glass approve and deny,
+  retention maximum, memory delete, connector key, schedule, project member, file, archive and
+  delete.
+- **Focus after a confirmed action** (review S4, `confirm-dialog.tsx`): when the asking control is
+  disabled while the action runs, focus waits on the page's main and returns to the control once
+  it is enabled again (unless the person moved focus or the control left the page; 15 s at most).
+  Tests: the dialog's own, and Users (deactivate) end to end.
 - **Focus after a removal** (KOBE-294 S3 pattern, now `components/admin/use-focus-after-removal.ts`):
   site invitations, providers, catalog models, connectors, custom egress domains, schedules and
-  project files move focus to the next row's remove control, else the list's Section heading.
-  Blocklist (list remounts) and memory delete focus the heading; a removed key focuses its
-  field; a removed project member falls back to the Members heading. Tests cover connectors,
-  blocklist, memory and connector keys.
+  project files and project members move focus to the next row's remove control, else the
+  list's Section heading. Blocklist (list remounts) and memory delete focus the heading; a
+  removed key focuses its field. Tests cover connectors, blocklist, memory, connector keys and
+  project members. Known gap: removing the web search provider remounts its form (keyed by
+  `updatedAt`, as before), so focus falls to the page.
 - **KOBE-295 review nit:** the Site budget's request-rate field was a plain label beside console
   Fields; the whole form is on `Field` now. Label text unchanged (coordinator, 2026-10-16).
 - Dark mode: only console/status tokens. Portals: the confirm dialog mounts in the console root
@@ -118,12 +127,15 @@ boxes with an icon instead of the `--admin-*` banners and error boxes; fieldsets
   chat) and the chat's modules are untouched.
 - A console preflight slice (KOBE-294 decision) is now possible but not done: it would restyle
   every page again; worth its own ticket if wanted.
+- The "Memory of" picker still comes before the page title (DOM and tab order unchanged); moving
+  it into the header means re-keying the panel, left for a follow-up.
 - Section landmark names: the break-glass reader's open thread is named by its title (was
   "Thread <title>"); the project "New project" box is a region named the same as before.
 
 ## Evidence (acceptance criteria)
 
-- **ac-1 (met):** `console-css-guard.test.ts` (15 tests); `admin.module.css` and
+- **ac-1 (met):** `console-css-guard.test.ts` (16 tests; the matcher also catches named and
+  mixed imports and re-exports, and console code outside the guarded trees fails); `admin.module.css` and
   `usage.module.css` deleted (with the builder and skill-editor modules from 295); no console or
   My-area file imports a `.module.css`.
 - **ac-2 (pending gate1):** behaviour unchanged per the tests above (existing assertions kept,
