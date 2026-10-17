@@ -60,6 +60,12 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     tool: "bash",
     reasons: [{ ...reason, code: "team_deny_rule", stage: "team_deny" }],
   },
+  "policy.rule_applied": {
+    tool_call_id: "tc_11",
+    tool: "bash",
+    rule_id: EXAMPLE_IDS.approval,
+    scope: "thread",
+  },
   "context.omitted": {
     items: [
       { kind: "connector", name: "github", reason: "not_user_connected" },

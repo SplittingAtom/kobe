@@ -12,6 +12,7 @@ import {
 } from "./common.js";
 import { skippedActionsSchema } from "./notifications.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
+import { rememberScopeSchema } from "./remember.js";
 import {
   SERVER_CALL_PURPOSES,
   generatedTitleSchema,
@@ -32,6 +33,7 @@ export const KOBE_EVENT_TYPES = [
   "approval.requested",
   "approval.resolved",
   "policy.denied",
+  "policy.rule_applied",
   "egress.blocked",
   "steer.applied",
   "memory.updated",
@@ -192,6 +194,16 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     tool_call_id: idSchema,
     tool: z.string().min(1).max(256),
     reasons: z.array(policyReasonSchema).min(1),
+  }),
+  /**
+   * A call ran without asking because one of the member's remembered approvals allowed it
+   * (KOBE-289): the tool card says "Allowed by your rule (<scope>)". Never the input.
+   */
+  "policy.rule_applied": z.strictObject({
+    tool_call_id: idSchema,
+    tool: z.string().min(1).max(256),
+    rule_id: uuidSchema,
+    scope: rememberScopeSchema,
   }),
   "context.omitted": z.strictObject({
     /**

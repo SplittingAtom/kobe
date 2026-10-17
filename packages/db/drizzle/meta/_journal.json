@@ -855,6 +855,20 @@
       "when": 1792227277269,
       "tag": "0121_agent_eval_cases_hidden",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792254745938,
+      "tag": "0122_tool_rules_remember",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792254758302,
+      "tag": "0123_tool_rules_remember_scopes",
+      "breakpoints": true
     }
   ]
 }

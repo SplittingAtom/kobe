@@ -33,6 +33,7 @@ describe("Kobe Event Stream types", () => {
       "approval.requested",
       "approval.resolved",
       "policy.denied",
+      "policy.rule_applied",
       "egress.blocked",
       "steer.applied",
       "memory.updated",

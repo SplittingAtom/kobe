@@ -5,6 +5,7 @@ export * from "./glob.js";
 export * from "./approval.js";
 export * from "./tools.js";
 export * from "./policy.js";
+export * from "./remember.js";
 export * from "./events.js";
 export * from "./artifacts.js";
 export * from "./memory.js";

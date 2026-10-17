@@ -21,7 +21,15 @@ export const policyFixtures: Record<(typeof policy.team)[number], ProbeFixture> 
     await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
     await tx.insert(toolRules).values([
       { teamId, scope: "team", effect: "deny", toolGlob: "bash", createdBy: userId },
-      { teamId, scope: "user", userId, effect: "allow", toolGlob: "read", createdBy: userId },
+      {
+        teamId,
+        scope: "user",
+        userId,
+        effect: "allow",
+        toolGlob: "read",
+        createdBy: userId,
+        rememberScope: "forever",
+      },
     ]);
   },
   team_egress: async (tx, teamId) => {
