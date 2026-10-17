@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import type { KobeTx } from "../../client.js";
 import {
   answerFeedback,
+  answerFeedbackHistory,
   events,
   runEvents,
   runs,
@@ -90,6 +91,30 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
       rating: "down",
       reasons: ["wrong"],
       comment: "probe comment",
+    });
+  },
+  answer_feedback_history: async (tx, teamId) => {
+    // A held rating's kept copy (KOBE-275 review B1); written here directly, as the trigger would.
+    const threadId = await insertThread(tx, teamId);
+    const [thread] = await tx
+      .select({ ownerUserId: threads.ownerUserId })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    if (!thread) throw new Error("probe: thread vanished");
+    const runId = await insertRun(tx, teamId, threadId);
+    const now = new Date();
+    await tx.insert(answerFeedbackHistory).values({
+      teamId,
+      feedbackId: randomUUID(),
+      threadId,
+      runId,
+      userId: thread.ownerUserId,
+      rating: "down",
+      reasons: ["other"],
+      comment: "probe kept comment",
+      ratedAt: now,
+      ratedUpdatedAt: now,
+      change: "cleared",
     });
   },
 };

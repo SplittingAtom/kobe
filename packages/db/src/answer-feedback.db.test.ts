@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb } from "./client.js";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
+import { BREAK_GLASS_ACTOR_SETTING, BREAK_GLASS_GRANT_SETTING } from "./settings.js";
 import { withTeam } from "./with-team.js";
 
 /**
@@ -129,6 +130,15 @@ const count = async (teamId: string) =>
     ).rows[0]?.n ?? 0,
   );
 
+const kept = async (teamId: string) =>
+  (
+    await admin.query<{ user_id: string; rating: string; comment: string | null; change: string }>(
+      `SELECT user_id, rating, comment, change FROM answer_feedback_history WHERE team_id = $1
+        ORDER BY kept_at, change`,
+      [teamId],
+    )
+  ).rows;
+
 beforeAll(async () => {
   await appClient.connect();
   await admin.connect();
@@ -219,7 +229,7 @@ describe("answer_feedback", () => {
     expect(await count(t)).toBe(0);
   });
 
-  it("is neither cleared, changed nor purged while a hold covers the thread's owner", async () => {
+  it("keeps a held owner's ratings silently: change and clear go through, the old rows are kept", async () => {
     const t = await team();
     const ann = await user("Ann");
     const bob = await user("Bob");
@@ -227,32 +237,144 @@ describe("answer_feedback", () => {
     await rate(a, ann);
     await rate(a, bob, { rating: "up", reasons: "{}", comment: null });
     const h = await hold(t, ann);
+    // A retry with the same values keeps nothing.
+    expect(
+      await errorCode(
+        exec(
+          t,
+          `UPDATE answer_feedback SET updated_at = now() WHERE team_id = '${t}' AND user_id = '${ann}'`,
+        ),
+      ),
+    ).toBeUndefined();
+    expect(await kept(t)).toEqual([]);
     for (const statement of [
-      `DELETE FROM answer_feedback WHERE team_id = '${t}' AND user_id = '${bob}'`,
       `UPDATE answer_feedback SET comment = NULL, reasons = '{}', rating = 'up' WHERE team_id = '${t}' AND user_id = '${ann}'`,
-      `DELETE FROM threads WHERE team_id = '${t}' AND id = '${a.threadId}'`,
+      `DELETE FROM answer_feedback WHERE team_id = '${t}' AND user_id = '${bob}'`,
     ]) {
-      expect(await errorCode(exec(t, statement)), statement).toBe(LEGAL_HOLD_SQLSTATE);
+      expect(await errorCode(exec(t, statement)), statement).toBeUndefined();
     }
-    expect(await errorCode(owner.query(`TRUNCATE answer_feedback`))).toBe(LEGAL_HOLD_SQLSTATE);
-    expect(await count(t)).toBe(2);
-    // A new rating removes nothing.
-    const carl = await user("Carl");
-    expect(await errorCode(rate(a, carl))).toBeUndefined();
+    // The members' new state stands; the old values are kept.
+    expect(await count(t)).toBe(1);
+    expect(await kept(t)).toEqual([
+      { user_id: ann, rating: "down", comment: "made it up", change: "changed" },
+      { user_id: bob, rating: "up", comment: null, change: "cleared" },
+    ]);
+    // The thread (and with it everything) can't be purged; the kept rows can't be removed.
+    expect(
+      await errorCode(
+        exec(t, `DELETE FROM threads WHERE team_id = '${t}' AND id = '${a.threadId}'`),
+      ),
+    ).toBe(LEGAL_HOLD_SQLSTATE);
+    expect(
+      await errorCode(exec(t, `DELETE FROM answer_feedback_history WHERE team_id = '${t}'`)),
+    ).toBe(LEGAL_HOLD_SQLSTATE);
+    expect(
+      await errorCode(
+        exec(t, `UPDATE answer_feedback_history SET comment = 'x' WHERE team_id = '${t}'`),
+      ),
+    ).toBe("55000");
+    for (const table of ["answer_feedback", "answer_feedback_history"]) {
+      expect(await errorCode(owner.query(`TRUNCATE ${table}`)), table).toBe(LEGAL_HOLD_SQLSTATE);
+    }
+    // After the release, nothing more is kept; the history goes with the thread.
     await release(h);
-    await exec(t, `DELETE FROM answer_feedback WHERE team_id = '${t}' AND user_id = '${bob}'`);
-    expect(await count(t)).toBe(2);
+    await exec(t, `DELETE FROM answer_feedback WHERE team_id = '${t}'`);
+    expect(await kept(t)).toHaveLength(2);
+    await exec(t, `DELETE FROM threads WHERE team_id = '${t}' AND id = '${a.threadId}'`);
+    expect(await kept(t)).toEqual([]);
   });
 
-  it("follows the thread's owner, not the rater: a held rater never stalls another's purge", async () => {
+  it("keeps a held rater's own comment on someone else's thread, and never stalls its purge", async () => {
     const t = await team();
     const ann = await user("Ann");
     const bob = await user("Bob");
     const a = await answer(t, ann);
     await rate(a, bob);
     const h = await hold(t, bob);
+    await exec(t, `DELETE FROM answer_feedback WHERE team_id = '${t}' AND user_id = '${bob}'`);
+    expect(await kept(t)).toEqual([
+      { user_id: bob, rating: "down", comment: "made it up", change: "cleared" },
+    ]);
+    // Ann's thread isn't held: its purge goes through, history included.
+    await rate(a, bob, { rating: "up", reasons: "{}", comment: null });
     await exec(t, `DELETE FROM threads WHERE team_id = '${t}' AND id = '${a.threadId}'`);
     expect(await count(t)).toBe(0);
+    expect(await kept(t)).toEqual([]);
     await release(h);
+  });
+});
+
+describe("answer_feedback break-glass read", () => {
+  async function grant(teamId: string, scope: { thread?: string; user?: string } = {}) {
+    const { rows } = await appClient.query<{ id: string }>(
+      `INSERT INTO break_glass_grants (team_id, admin_id, thread_id, user_id, reason)
+       VALUES ($1, $2, $3, $4, 'probe') RETURNING id`,
+      [teamId, requester, scope.thread ?? null, scope.user ?? null],
+    );
+    const id = rows[0]?.id ?? "";
+    await appClient.query(
+      `UPDATE break_glass_grants SET status = 'approved', approver_id = $2 WHERE id = $1`,
+      [id, approver],
+    );
+    return id;
+  }
+
+  /** Comments of both tables the app role sees under a grant (or none), in a rolled-back read. */
+  async function visible(grantId: string | null, write?: string) {
+    await appClient.query("BEGIN");
+    try {
+      if (grantId)
+        await appClient.query(
+          `SELECT set_config('${BREAK_GLASS_GRANT_SETTING}', $1, true), set_config('${BREAK_GLASS_ACTOR_SETTING}', $2, true)`,
+          [grantId, requester],
+        );
+      if (write) return await errorCode(appClient.query(write));
+      const { rows } = await appClient.query<{ comment: string }>(
+        `SELECT comment FROM answer_feedback UNION ALL SELECT comment FROM answer_feedback_history`,
+      );
+      return rows.map((r) => r.comment).sort();
+    } finally {
+      await appClient.query("ROLLBACK");
+    }
+  }
+
+  it("reads the grant's team, user or thread only, never writes, and nothing once it expired", async () => {
+    const t = await team();
+    const other = await team();
+    const ann = await user("Ann");
+    const bob = await user("Bob");
+    const a = await answer(t, ann);
+    const b = await answer(t, bob);
+    await rate(a, ann, { comment: "on ann's" });
+    await rate(b, ann, { comment: "ann on bob's" });
+    await rate(await answer(other, ann), ann, { comment: "other team" });
+    expect(await visible(null)).toEqual([]);
+    expect(await visible(await grant(t))).toEqual(["ann on bob's", "on ann's"]);
+    expect(await visible(await grant(t, { thread: b.threadId }))).toEqual(["ann on bob's"]);
+    // A user grant reads that user's threads (thread content), like thread_entries.
+    expect(await visible(await grant(t, { user: ann }))).toEqual(["on ann's"]);
+    const g = await grant(t);
+    expect(
+      await visible(g, `UPDATE answer_feedback SET comment = 'x' WHERE team_id = '${t}'`),
+    ).toBeUndefined();
+    expect(await count(t)).toBe(2);
+    expect((await admin.query(`SELECT 1 FROM answer_feedback WHERE comment = 'x'`)).rowCount).toBe(
+      0,
+    );
+    expect(
+      await visible(
+        g,
+        `INSERT INTO answer_feedback (team_id, thread_id, run_id, user_id, rating) VALUES ('${t}', '${a.threadId}', '${a.runId}', '${bob}', 'up')`,
+      ),
+    ).toBe("42501");
+    // The window passes (superuser, triggers bypassed, as time would).
+    await admin.query(`SET session_replication_role = replica`);
+    await admin.query(
+      `UPDATE break_glass_grants SET starts_at = now() - interval '2 hours', expires_at = now() - interval '1 hour',
+         request_expires_at = now() - interval '1 hour' WHERE id = $1`,
+      [g],
+    );
+    await admin.query(`SET session_replication_role = origin`);
+    expect(await visible(g)).toEqual([]);
   });
 });

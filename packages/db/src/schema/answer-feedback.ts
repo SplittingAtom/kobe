@@ -140,3 +140,69 @@ export const answerFeedback = pgTable(
     check("answer_feedback_updated_at", sql`${t.updatedAt} >= ${t.createdAt}`),
   ],
 );
+
+/** Why a held rating's old values were kept (`answer_feedback_history.change`). */
+export const ANSWER_FEEDBACK_HISTORY_CHANGES = ["changed", "cleared"] as const;
+export type AnswerFeedbackHistoryChange = (typeof ANSWER_FEEDBACK_HISTORY_CHANGES)[number];
+
+/**
+ * A legal hold's copy of a rating (KOBE-275 review B1/S2): when a member changes or clears a rating
+ * while a hold covers the thread's owner or the rater, a trigger (custom migration
+ * `*_answer_feedback_hold.sql`) copies the old row here, and the member's change goes through as
+ * usual: a hold is never refused or otherwise visible to them. Written only by that trigger;
+ * immutable; nothing in the API reads it (break-glass and holds only). It follows its thread and
+ * run (cascade), and deleting it is refused while a hold covers the thread's owner.
+ */
+export const answerFeedbackHistory = pgTable(
+  "answer_feedback_history",
+  {
+    teamId: uuid()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    id: uuid().notNull().defaultRandom(),
+    /** The rating's id (`answer_feedback.id`); no key: a cleared rating's row is gone. */
+    feedbackId: uuid().notNull(),
+    threadId: uuid().notNull(),
+    runId: uuid().notNull(),
+    entryId: text(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    rating: text().$type<AnswerFeedbackRating>().notNull(),
+    reasons: text().array().$type<AnswerFeedbackReason[]>().notNull(),
+    comment: text(),
+    agentScope: agentScope(),
+    agentId: uuid(),
+    agentVersion: integer(),
+    modelAlias: text(),
+    /** The rating's own times, as they were. */
+    ratedAt: timestamp({ withTimezone: true }).notNull(),
+    ratedUpdatedAt: timestamp({ withTimezone: true }).notNull(),
+    change: text().$type<AnswerFeedbackHistoryChange>().notNull(),
+    keptAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.id] }),
+    foreignKey({
+      name: "answer_feedback_history_run_fk",
+      columns: [t.teamId, t.runId],
+      foreignColumns: [runs.teamId, runs.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "answer_feedback_history_thread_fk",
+      columns: [t.teamId, t.threadId],
+      foreignColumns: [threads.teamId, threads.id],
+    }).onDelete("cascade"),
+    // The thread and run keys' cascades, and a custodian's lookup by rating.
+    index("answer_feedback_history_thread_idx").on(t.teamId, t.threadId),
+    index("answer_feedback_history_run_idx").on(t.teamId, t.runId, t.feedbackId),
+    check(
+      "answer_feedback_history_change",
+      sql`${t.change} IN (${textList(ANSWER_FEEDBACK_HISTORY_CHANGES)})`,
+    ),
+    check(
+      "answer_feedback_history_rating",
+      sql`${t.rating} IN (${textList(ANSWER_FEEDBACK_RATINGS)})`,
+    ),
+  ],
+);
