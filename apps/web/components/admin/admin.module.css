@@ -3,138 +3,141 @@
    variables (--admin-fg, …), link colour and focus ring are in app/admin/admin-global.css. KOBE-295
    and KOBE-296 move the rest; delete each class as its last user goes (app/console-css-guard.test.ts
    fails on a class still in use). */
+/* In the `kobe-legacy` layer (app/theme.css, KOBE-294): below Tailwind's utilities, so a utility
+   on an element always wins over this module; delete the module once its pages move. */
+@layer kobe-legacy {
+  .soon {
+    color: var(--admin-muted);
+    font-size: 0.85em;
+  }
 
-.soon {
-  color: var(--admin-muted);
-  font-size: 0.85em;
-}
+  .error {
+    padding: 0.5rem 0.75rem;
+    border-left: 4px solid var(--admin-danger);
+    background: var(--admin-danger-bg);
+  }
 
-.error {
-  padding: 0.5rem 0.75rem;
-  border-left: 4px solid var(--admin-danger);
-  background: var(--admin-danger-bg);
-}
+  .error p {
+    margin: 0.25rem 0;
+  }
 
-.error p {
-  margin: 0.25rem 0;
-}
+  .banner {
+    margin-bottom: 1rem;
+    padding: 0.5rem 0.75rem;
+    border-left: 4px solid #b7791f;
+    background: var(--admin-warn-bg);
+  }
 
-.banner {
-  margin-bottom: 1rem;
-  padding: 0.5rem 0.75rem;
-  border-left: 4px solid #b7791f;
-  background: var(--admin-warn-bg);
-}
+  .tableWrap {
+    overflow-x: auto;
+  }
 
-.tableWrap {
-  overflow-x: auto;
-}
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+  }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
+  .table caption {
+    text-align: left;
+    font-weight: 600;
+    padding-bottom: 0.5rem;
+  }
 
-.table caption {
-  text-align: left;
-  font-weight: 600;
-  padding-bottom: 0.5rem;
-}
+  .table th,
+  .table td {
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--admin-border);
+    vertical-align: top;
+  }
 
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--admin-border);
-  vertical-align: top;
-}
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
+  .form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+    margin: 1rem 0;
+  }
 
-.form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
-  margin: 1rem 0;
-}
+  /* A field's caption stacks above its control. A choice (checkbox or radio) is left out: it stays
+     inline before its text, wherever it sits in a form (KOBE-283). Stacking it put each box on its own
+     row, stretched and so drawn centred above its label. */
+  .form label:not(:has(input:is([type="checkbox"], [type="radio"]))) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
 
-/* A field's caption stacks above its control. A choice (checkbox or radio) is left out: it stays
-   inline before its text, wherever it sits in a form (KOBE-283). Stacking it put each box on its own
-   row, stretched and so drawn centred above its label. */
-.form label:not(:has(input:is([type="checkbox"], [type="radio"]))) {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
+  /* A connector's tool list: no bullets, so its checkboxes lead each row. */
+  .choiceList {
+    list-style: none;
+    margin: 0.5rem 0;
+    padding: 0;
+  }
 
-/* A connector's tool list: no bullets, so its checkboxes lead each row. */
-.choiceList {
-  list-style: none;
-  margin: 0.5rem 0;
-  padding: 0;
-}
+  .hint {
+    color: var(--admin-muted);
+    font-size: 0.9em;
+  }
 
-.hint {
-  color: var(--admin-muted);
-  font-size: 0.9em;
-}
+  .cards {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+  }
 
-.cards {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 0.75rem;
-}
+  .card {
+    padding: 0.75rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 0.5rem;
+  }
 
-.card {
-  padding: 0.75rem;
-  border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
-}
+  .card p {
+    margin: 0.25rem 0 0;
+  }
 
-.card p {
-  margin: 0.25rem 0 0;
-}
+  .dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+  }
 
-.dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-}
+  .dl dd {
+    margin: 0;
+  }
 
-.dl dd {
-  margin: 0;
-}
+  .visuallyHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
+  /* Budget usage lines (KOBE-301): amber from 80 %, red from 100 %, from the status colours. */
+  .budgetWarn {
+    color: var(--kobe-status-attention);
+  }
 
-/* Budget usage lines (KOBE-301): amber from 80 %, red from 100 %, from the status colours. */
-.budgetWarn {
-  color: var(--kobe-status-attention);
-}
+  .budgetFull {
+    color: var(--kobe-status-failed);
+    font-weight: 600;
+  }
 
-.budgetFull {
-  color: var(--kobe-status-failed);
-  font-weight: 600;
-}
-
-.budgetIcon {
-  display: inline-block;
-  width: 0.875rem;
-  height: 0.875rem;
-  margin-inline-end: 0.25rem;
-  vertical-align: -0.125rem;
+  .budgetIcon {
+    display: inline-block;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-inline-end: 0.25rem;
+    vertical-align: -0.125rem;
+  }
 }

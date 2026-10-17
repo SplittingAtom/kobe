@@ -9,6 +9,11 @@
    and the pages that use browser defaults (sign-in, setup) switch too. The two dark blocks below
    must stay identical (app/theme-css.test.ts); other stylesheets only read these tokens. */
 
+/* Cascade layers, declared once before any other stylesheet (the root layout loads this file
+   first): Tailwind's (app/tailwind.css), with the consoles' remaining CSS modules in `kobe-legacy`
+   between the base rules and the utilities, so a utility always beats a module rule (KOBE-294). */
+@layer properties, theme, base, kobe-legacy, components, utilities;
+
 :root {
   color-scheme: light dark;
 
@@ -45,6 +50,11 @@
   --kobe-console-bg: #ffffff;
   --kobe-console-panel: #f4f4f6;
   --kobe-console-border: #d9d9df;
+  /* Form-control boundaries (KOBE-294): 3:1 or more on the page and the panel (WCAG 1.4.11);
+     --kobe-console-border is for decorative dividers only. */
+  --kobe-console-control-border: #80808c;
+  /* The backdrop behind a console dialog. */
+  --kobe-console-overlay: rgb(0 0 0 / 50%);
 
   /* Status colours (KOBE-301), one set for every activity cue: running = green, needs you
      (approval, interrupted) = amber, failed or denied = red, done = muted green, idle or Trash =
@@ -107,6 +117,8 @@
   --kobe-console-bg: #16161a;
   --kobe-console-panel: #202027;
   --kobe-console-border: #3a3a45;
+  --kobe-console-control-border: #74747f;
+  --kobe-console-overlay: rgb(0 0 0 / 70%);
   --kobe-status-running: #4ade80;
   --kobe-status-running-bg: #052e16;
   --kobe-status-attention: #fbbf24;
@@ -151,6 +163,8 @@
     --kobe-console-bg: #16161a;
     --kobe-console-panel: #202027;
     --kobe-console-border: #3a3a45;
+    --kobe-console-control-border: #74747f;
+    --kobe-console-overlay: rgb(0 0 0 / 70%);
     --kobe-status-running: #4ade80;
     --kobe-status-running-bg: #052e16;
     --kobe-status-attention: #fbbf24;

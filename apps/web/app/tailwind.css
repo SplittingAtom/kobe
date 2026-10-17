@@ -6,7 +6,7 @@
    Both stylesheets import this file, so a page that has both (after client navigation) gets two
    identical copies: keep every theme token here, never in one of them, or the copies differ.
    The tokens and both themes live in app/theme.css (KOBE-282). */
-@layer theme, base, components, utilities;
+@layer theme, base, kobe-legacy, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
@@ -60,6 +60,8 @@
   --color-console-bg: var(--kobe-console-bg);
   --color-console-panel: var(--kobe-console-panel);
   --color-console-border: var(--kobe-console-border);
+  --color-console-control: var(--kobe-console-control-border);
+  --color-console-overlay: var(--kobe-console-overlay);
   --color-console-accent: var(--admin-accent);
   --color-console-danger: var(--admin-danger);
   --color-console-danger-bg: var(--admin-danger-bg);

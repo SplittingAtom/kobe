@@ -184,6 +184,18 @@ describe("status tokens (KOBE-301)", () => {
     });
   }
 
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`console form-control borders keep 3:1 on the page and the panel (${name}, KOBE-294)`, () => {
+      const border = resolve(theme, "--kobe-console-control-border");
+      for (const surface of ["--kobe-console-bg", "--kobe-console-panel"]) {
+        expect(contrast(border, resolve(theme, surface)), surface).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+
   it("the gauges read the status colours, and both dark blocks set the same ones", () => {
     expect(light.get("--kobe-gauge-warn")).toBe("var(--kobe-status-attention)");
     expect(light.get("--kobe-gauge-full")).toBe("var(--kobe-status-failed)");

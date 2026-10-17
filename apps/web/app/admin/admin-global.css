@@ -11,9 +11,9 @@ body:has([data-kobe-console]) {
   margin: 0;
 }
 
-/* What the shell's CSS module gave every page inside it, kept for the pages still on CSS modules
-   (KOBE-295, KOBE-296 move them). In the base layer, so any utility overrides it. */
 @layer base {
+  /* Legacy, for the pages still on CSS modules (KOBE-295 and KOBE-296 move them; delete these
+     with the last module): the shell's variables. */
   [data-kobe-console] {
     /* Both themes: app/theme.css (KOBE-282), which also sets the shared --admin-accent,
        --admin-danger, --admin-danger-bg and --admin-warn-bg. */
@@ -24,6 +24,18 @@ body:has([data-kobe-console]) {
     --admin-border: var(--kobe-console-border);
   }
 
+  /* Legacy: choices side by side in a module page's fieldset (exposure, retention period) keep
+     apart (KOBE-283). Primitive choices (`data-slot`) are spaced by their ChoiceGroup. */
+  [data-kobe-console]
+    fieldset
+    label:not([data-slot]):has(input:is([type="checkbox"], [type="radio"])) {
+    margin-inline-end: 1rem;
+  }
+
+  /* Permanent: links in running text (notices, hints, descriptions) and any focusable element
+     without its own ring. Primitives carry their own ring and colours (components/ui/console),
+     so nothing depends on these for them; app/console-css-guard.test.ts pins them. In the base
+     layer, so any utility overrides them. */
   [data-kobe-console] a {
     color: var(--admin-accent);
   }
@@ -31,11 +43,6 @@ body:has([data-kobe-console]) {
   [data-kobe-console] :focus-visible {
     outline: 3px solid var(--admin-accent);
     outline-offset: 2px;
-  }
-
-  /* Choices side by side in a fieldset (exposure, retention period) keep apart (KOBE-283). */
-  [data-kobe-console] fieldset label:has(input:is([type="checkbox"], [type="radio"])) {
-    margin-inline-end: 1rem;
   }
 
   /* The header's theme toggle shows a tooltip, which the chat's preflight slice sizes in the chat;
