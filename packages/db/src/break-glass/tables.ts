@@ -17,6 +17,8 @@ export const BREAK_GLASS_READABLE_TABLES = [
   "project_files",
   "answer_feedback",
   "answer_feedback_history",
+  "agent_eval_cases",
+  "agent_eval_case_history",
 ] as const satisfies readonly TeamTable[];
 
 export type BreakGlassReadableTable = (typeof BREAK_GLASS_READABLE_TABLES)[number];

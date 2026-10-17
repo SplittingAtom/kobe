@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  agentEvalCaseHistory,
+  agentEvalCases,
   orbitEvals,
   teamAgents,
   teamEvalSettings,
@@ -138,6 +140,37 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       definition: { frontmatter: { name: "Probe" }, prompt: "" },
       model: "probe/model",
       threshold: 0.2,
+      // An eval with a frozen shared case (KOBE-276).
+      caseIds: [randomUUID()],
+    });
+  },
+  agent_eval_cases: async (tx, teamId) => {
+    // An accepted shared case of a team agent (KOBE-276), by its sharer.
+    const { userId, agentId } = await probeAgent(tx, teamId);
+    await tx.insert(agentEvalCases).values({
+      teamId,
+      userId,
+      agentScope: "team",
+      agentId,
+      agentVersion: 1,
+      content: { prompt: "probe prompt", answer: "probe answer" },
+      status: "accepted",
+      expectedBehaviour: "probe expected",
+      reviewedAt: new Date(),
+    });
+  },
+  agent_eval_case_history: async (tx, teamId) => {
+    // A withdrawn case kept for a hold (KOBE-276); written here directly, as the trigger would.
+    const { userId, agentId } = await probeAgent(tx, teamId);
+    await tx.insert(agentEvalCaseHistory).values({
+      teamId,
+      caseId: randomUUID(),
+      userId,
+      agentScope: "team",
+      agentId,
+      content: { prompt: "probe kept prompt" },
+      status: "open",
+      sharedAt: new Date(),
     });
   },
 };

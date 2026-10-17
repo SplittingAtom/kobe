@@ -98,6 +98,17 @@ export const orbitEvals = pgTable(
     /** The tool manifest evaluated; publishing is refused if the floor changed it meanwhile. */
     toolManifest: jsonb().$type<Record<string, unknown>>(),
     jobName: text(),
+    /**
+     * Shared eval cases (KOBE-276) frozen into this eval: the agent's accepted cases when it
+     * started, run as an extra suite. Empty: none (and for evals from before it).
+     */
+    caseIds: uuid()
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** Cases scored, and those that failed (null until a verdict, or with no cases). */
+    caseScored: integer(),
+    caseFailures: integer(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp({ withTimezone: true }),
     finishedAt: timestamp({ withTimezone: true }),
@@ -127,6 +138,8 @@ export const orbitEvals = pgTable(
         AND (${t.status} <> 'errored' OR (${t.error} IS NOT NULL AND ${t.finishedAt} IS NOT NULL))
         AND (${t.version} IS NULL OR ${t.status} = 'passed')`,
     ),
+    // KOBE-276's `orbit_evals_cases` (case counts within the frozen set): SQL-only and NOT VALID
+    // (`*_agent_eval_cases_rls.sql`), as the table already has rows.
     check("orbit_evals_error_len", sql`${t.error} IS NULL OR char_length(${t.error}) <= 2000`),
   ],
 );

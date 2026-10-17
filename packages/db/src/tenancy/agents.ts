@@ -1,6 +1,6 @@
 import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 
-/** Agents, Skills, Gallery & Orbit (KOBE-45–52). */
+/** Agents, Skills, Gallery & Orbit (KOBE-45–52), shared eval cases (KOBE-276). */
 export const agents = defineDomain({
   team: [
     "team_agents",
@@ -12,6 +12,8 @@ export const agents = defineDomain({
     "team_skill_settings",
     "team_eval_settings",
     "orbit_evals",
+    "agent_eval_cases",
+    "agent_eval_case_history",
   ],
   siteWide: [
     "skill_blocklist",
