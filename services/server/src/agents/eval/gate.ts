@@ -1,6 +1,6 @@
 import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import { withTeam, type KobeDb } from "@kobe/db";
-import { acceptedCases } from "../../eval-cases/review.js";
+import { acceptedCases, caseReviewerPresent } from "../../eval-cases/review.js";
 import { EVAL_CASES_MAX_BYTES, casesFile } from "./cases.js";
 import type { BackgroundTasks } from "../../background.js";
 import type { TeamRef } from "../../sandbox/manifests.js";
@@ -137,9 +137,13 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
       err instanceof Error ? err.message : "This draft can't be exported for evaluation.",
     );
   }
-  // The agent's accepted shared cases (KOBE-276), frozen now: they run as an extra suite.
-  const cases = await withTeam(db, input.team.id, (tx) =>
-    acceptedCases(tx, { teamId: input.team.id, agentId: agent.id, scope: location.scope }),
+  // The agent's accepted shared cases (KOBE-276), frozen now: they run as an extra suite. Only
+  // while someone can review them: a team agent whose owner left or can no longer build would
+  // otherwise be blocked by cases nobody may dismiss (review S1); they run again if that changes.
+  const cases = await withTeam(db, input.team.id, async (tx) =>
+    (await caseReviewerPresent(tx, input.team.id, agent))
+      ? acceptedCases(tx, { teamId: input.team.id, agentId: agent.id, scope: location.scope })
+      : [],
   );
   const casesJson = casesFile(cases);
   if (casesJson !== null && Buffer.byteLength(casesJson, "utf8") > EVAL_CASES_MAX_BYTES) {
@@ -175,7 +179,7 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
   const runner = input.runner;
   input.background.run(
     "orbit eval driver failed",
-    () => runner.run({ record, team: input.team, orbitYaml: yaml, casesJson }),
+    () => runner.run({ record, team: input.team, orbitYaml: yaml }),
     { evalId: record.id, teamId: input.team.id },
   );
   return { kind: "started", eval: record };

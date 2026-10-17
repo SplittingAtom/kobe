@@ -13,7 +13,7 @@ from pathlib import Path
 # Before inspect_ai is imported: no dotenv credential loading, no telemetry-style surprises.
 os.environ.setdefault("PYTHON_DOTENV_DISABLED", "1")
 
-from .cases import load_cases
+from .cases import fetch_cases, load_cases
 from .scenarios import DEFAULT_PACK, PackError, load_pack
 from .settings import Settings, SettingsError, load_settings
 
@@ -25,7 +25,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="kobe-orbit-eval", description=__doc__)
     p.add_argument("--orbit-yaml", type=Path, required=True, help="exported Orbit YAML (KOBE-90/91)")
     p.add_argument("--pack", type=Path, default=DEFAULT_PACK, help="scenario pack (default: built in)")
-    p.add_argument("--cases", type=Path, help="shared eval cases (KOBE-276) to run as an extra suite")
+    cases = p.add_mutually_exclusive_group()
+    cases.add_argument("--cases", type=Path, help="shared eval cases (KOBE-276) to run as an extra suite")
+    cases.add_argument(
+        "--gateway-cases", action="store_true",
+        help="fetch the eval's shared cases from the model gateway with the session token (KOBE-276)",
+    )
     p.add_argument("--output", type=Path, help="write the JSON result here (always also printed to stdout)")
     p.add_argument("--epochs", type=int, default=1, help="repeats per scenario (default 1)")
     p.add_argument("--validate-only", action="store_true", help="load and validate inputs, make no model calls")
@@ -77,6 +82,8 @@ def run(args: argparse.Namespace) -> dict | None:
         print(f"ok: {len(pack.scenarios)} scenarios{extra}, agent {agent.name!r} with {len(agent.tools)} tools", file=sys.stderr)
         return None
     settings = load_settings()
+    if args.gateway_cases:
+        cases = fetch_cases(settings.gateway_url, settings.session_token)
     model_id = _model_id(settings, agent)
     os.environ.update(settings.inspect_env())
     with tempfile.TemporaryDirectory(prefix="kobe-orbit-logs-") as log_dir:

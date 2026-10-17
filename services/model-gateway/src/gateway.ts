@@ -78,6 +78,14 @@ export interface GatewayOptions {
   readonly tracing?: GatewayTracing;
   /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
   readonly serverCalls?: ServerCallOptions;
+  /**
+   * Shared eval cases for a running Orbit eval Job (KOBE-276): `GET /kobe/eval-cases` with the
+   * eval's own token answers its `cases.json` (null: not that member's running eval, or none).
+   * Absent: the route is a 404.
+   */
+  readonly evalCases?: {
+    readonly load: (teamId: string, userId: string, evalId: string) => Promise<string | null>;
+  };
   readonly bifrostUrl: string;
   readonly limiter: CallLimiter;
   /** Request bytes held in memory, per sandbox and in total. */
@@ -92,6 +100,9 @@ export interface GatewayOptions {
   readonly settings: { readonly maxBodyBytes: number; readonly idleTimeoutMs: number };
   readonly ready: () => boolean;
 }
+
+/** Where an Orbit eval Job reads its shared cases (KOBE-276); never forwarded to Bifrost. */
+export const EVAL_CASES_PATH = "/kobe/eval-cases";
 
 /** Bifrost's error types meaning "this virtual key does not exist here". */
 const KEY_UNKNOWN = new Set(["access_not_found", "virtual_key_required"]);
@@ -280,6 +291,54 @@ export function createModelGateway(options: GatewayOptions): Server {
     };
   }
 
+  /**
+   * An Orbit eval Job's shared cases (KOBE-276 review S2): the case text stays in Postgres until
+   * the Job asks for it with its eval token. The eval must be live for that member (the
+   * principal), within the request rate, and the store answers only that member's running eval.
+   */
+  async function serveEvalCases(
+    req: IncomingMessage,
+    res: ServerResponse,
+    identity: {
+      readonly teamId: string;
+      readonly userId: string;
+      readonly sandboxId: string | undefined;
+    },
+  ): Promise<void> {
+    const evalId = identity.sandboxId;
+    if (!options.evalCases || req.method !== "GET" || evalId === undefined) {
+      sendError(res, "openai", 404, "not_found", "Not a model inference endpoint.");
+      return;
+    }
+    if (!options.rate.allow(evalId)) {
+      sendError(res, "openai", 429, "rate_limited", "Too many requests.", 1);
+      return;
+    }
+    const who = await options.principals.resolve(identity.teamId, identity.userId, evalId);
+    if (!who.ok) {
+      sendError(res, "openai", 403, "forbidden", "This eval can't read shared cases.");
+      return;
+    }
+    let file: string | null;
+    try {
+      file = await options.evalCases.load(identity.teamId, identity.userId, evalId);
+    } catch (err) {
+      logger.error({ err, teamId: identity.teamId, evalId }, "eval cases could not be read");
+      sendError(res, "openai", 503, "unavailable", "Shared cases are unavailable.");
+      return;
+    }
+    if (file === null) {
+      sendError(res, "openai", 404, "not_found", "No shared cases for this eval.");
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(file);
+  }
+
   async function handle(
     req: IncomingMessage,
     res: ServerResponse,
@@ -300,6 +359,10 @@ export function createModelGateway(options: GatewayOptions): Server {
     const caller = authenticate(req, url, route);
     if (!caller.ok) {
       sendError(res, kind, caller.status, caller.code, caller.message);
+      return;
+    }
+    if (url.pathname === EVAL_CASES_PATH && !caller.serverCall) {
+      await serveEvalCases(req, res, caller.identity);
       return;
     }
     // 2. Inference paths only.

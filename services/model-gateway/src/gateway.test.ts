@@ -161,6 +161,10 @@ interface ShimOptions {
   readonly requireRunToken?: boolean;
 }
 
+/** What the fake case store answers, by eval id (KOBE-276); the calls it saw. */
+let caseFiles = new Map<string, string>();
+let caseLoads: [string, string, string][] = [];
+
 async function start(over: ShimOptions = {}): Promise<void> {
   if (shim.listening) {
     shim.closeAllConnections();
@@ -207,6 +211,12 @@ async function start(over: ShimOptions = {}): Promise<void> {
     logger,
     settings: { maxBodyBytes: 4096, idleTimeoutMs: 5_000 },
     ready: () => true,
+    evalCases: {
+      load: async (t, u, e) => {
+        caseLoads.push([t, u, e]);
+        return caseFiles.get(e) ?? null;
+      },
+    },
   });
   await new Promise<void>((r) => shim.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(shim.address() as AddressInfo).port}`;
@@ -214,6 +224,8 @@ async function start(over: ShimOptions = {}): Promise<void> {
 
 beforeEach(async () => {
   hits.length = 0;
+  caseFiles = new Map();
+  caseLoads = [];
   records = [];
   forgot = 0;
   keyRequests = 0;
@@ -937,5 +949,32 @@ describe("tracing (KOBE-10)", () => {
     await new Promise((r) => setTimeout(r, 20));
     const span = exporter.getFinishedSpans()[0];
     expect(String(span?.attributes["gen_ai.prompt"])).toContain(PROMPT);
+  });
+});
+
+describe("shared eval cases for an Orbit eval Job (KOBE-276)", () => {
+  const get = (headers: Record<string, string>) =>
+    call("/kobe/eval-cases", { method: "GET", headers });
+
+  it("serves the running eval's cases with its own token, from the store, never via Bifrost", async () => {
+    caseFiles.set(sandbox, '{"cases":[]}\n');
+    const res = await get(bearer());
+    expect(res.status).toBe(200);
+    expect(res.text).toBe('{"cases":[]}\n');
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(caseLoads).toEqual([[team, user, sandbox]]);
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses without a valid token, for a revoked principal, another method, or no cases", async () => {
+    caseFiles.set(sandbox, "{}");
+    expect((await get({})).status).toBe(401);
+    expect((await get(bearer(token({ key: OTHER_KEY })))).status).toBe(401);
+    expect((await call("/kobe/eval-cases", { headers: bearer() })).status).toBe(404);
+    expect((await get(bearer(token({ sub: randomUUID() })))).status).toBe(404);
+    principal = { ...principal, sandbox: "revoked" };
+    expect((await get(bearer())).status).toBe(403);
+    expect(caseLoads.map((l) => l[2])).not.toContain(undefined);
+    expect(hits).toEqual([]);
   });
 });

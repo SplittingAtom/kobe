@@ -100,6 +100,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.path == "/kobe/eval-cases":
+            # Shared cases (KOBE-276), as the Kobe gateway serves them to a running eval.
+            import base64
+            import os
+            with open(AUTH_LOG, "a") as fh:
+                fh.write(f"{self.path} {self.headers.get('authorization', '')} cases\n")
+            data = base64.b64decode(os.environ.get("CASES_B64", ""))
+            self.send_response(200 if data else 404)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ok")

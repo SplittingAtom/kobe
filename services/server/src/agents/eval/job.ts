@@ -11,7 +11,6 @@ import {
   SANDBOX_UID,
 } from "../../sandbox/constants.js";
 import { isUuid, type KubeObject } from "../../sandbox/manifests.js";
-import { EVAL_CASES_FILE } from "./cases.js";
 
 /**
  * Pure builders for an Orbit eval (KOBE-93): one ConfigMap (the exported Orbit YAML) and one Job in
@@ -47,15 +46,14 @@ const labels = (teamId: string, evalId: string): Record<string, string> => ({
 });
 
 /**
- * The exported YAML as a ConfigMap (a plain input, not a credential), with the shared eval cases
- * (KOBE-276) as `cases.json` when the eval runs any.
+ * The exported YAML as a ConfigMap (a plain input, not a credential). Shared eval cases never go
+ * in here: the Job fetches them from the model gateway (KOBE-276 review S2).
  */
 export function evalConfigMapManifest(input: {
   readonly namespace: string;
   readonly teamId: string;
   readonly evalId: string;
   readonly orbitYaml: string;
-  readonly casesJson?: string | null;
 }): KubeObject {
   return {
     apiVersion: "v1",
@@ -65,10 +63,7 @@ export function evalConfigMapManifest(input: {
       namespace: input.namespace,
       labels: labels(input.teamId, input.evalId),
     },
-    data: {
-      [EVAL_INPUT_FILE]: input.orbitYaml,
-      ...(input.casesJson ? { [EVAL_CASES_FILE]: input.casesJson } : {}),
-    },
+    data: { [EVAL_INPUT_FILE]: input.orbitYaml },
   };
 }
 
@@ -86,7 +81,7 @@ export interface EvalJobInput {
   readonly model: string;
   /** Short-lived gateway token scoped to this team and eval. */
   readonly token: string;
-  /** The ConfigMap holds `cases.json` (KOBE-276): the image runs it as an extra suite. */
+  /** The eval runs shared cases (KOBE-276): the image fetches them from the gateway. */
   readonly withCases?: boolean;
 }
 
@@ -129,7 +124,7 @@ export function evalPodSpec(input: EvalJobInput): Record<string, unknown> {
         name: EVAL_CONTAINER,
         image: e.image,
         imagePullPolicy: s.imagePullPolicy,
-        // The image's default command, plus the shared cases when there are any.
+        // The image's default command, plus the shared cases (from the gateway) when there are any.
         ...(input.withCases
           ? {
               args: [
@@ -137,8 +132,7 @@ export function evalPodSpec(input: EvalJobInput): Record<string, unknown> {
                 `${EVAL_INPUT_DIR}/${EVAL_INPUT_FILE}`,
                 "--output",
                 `${EVAL_OUTPUT_DIR}/result.json`,
-                "--cases",
-                `${EVAL_INPUT_DIR}/${EVAL_CASES_FILE}`,
+                "--gateway-cases",
               ],
             }
           : {}),

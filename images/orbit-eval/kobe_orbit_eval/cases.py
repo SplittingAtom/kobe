@@ -37,6 +37,7 @@ MAX_CASES = 50
 # Score values: 1 passed, 0 failed, -1 the grader's answer had no verdict.
 UNGRADED = -1
 GRADER_MAX_TOKENS = 400
+GRADER_ATTEMPTS = 2
 
 
 class Turn(BaseModel):
@@ -79,22 +80,53 @@ class CaseFile(BaseModel):
     cases: tuple[Case, ...] = Field(min_length=1, max_length=MAX_CASES)
 
 
-def load_cases(path: Path) -> CaseFile:
+def parse_cases(raw_bytes: bytes, source: str) -> CaseFile:
+    if len(raw_bytes) > MAX_CASES_BYTES:
+        raise PackError(f"{source}: shared cases larger than {MAX_CASES_BYTES} bytes")
     try:
-        if path.stat().st_size > MAX_CASES_BYTES:
-            raise PackError(f"{path}: cases file larger than {MAX_CASES_BYTES} bytes")
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PackError(f"cannot read the shared cases {path}: {type(exc).__name__}") from exc
+        raw = json.loads(raw_bytes.decode("utf-8"))
+    except ValueError as exc:
+        raise PackError(f"cannot read the shared cases {source}: {type(exc).__name__}") from exc
     try:
         cases = CaseFile.model_validate(raw)
     except ValidationError as exc:
         # The error count only: the messages would quote case text.
-        raise PackError(f"invalid shared cases {path}: {exc.error_count()} errors") from exc
+        raise PackError(f"invalid shared cases {source}: {exc.error_count()} errors") from exc
     ids = [c.id for c in cases.cases]
     if len(set(ids)) != len(ids):
-        raise PackError(f"invalid shared cases {path}: duplicate case ids")
+        raise PackError(f"invalid shared cases {source}: duplicate case ids")
     return cases
+
+
+def load_cases(path: Path) -> CaseFile:
+    try:
+        if path.stat().st_size > MAX_CASES_BYTES:
+            raise PackError(f"{path}: shared cases larger than {MAX_CASES_BYTES} bytes")
+        raw_bytes = path.read_bytes()
+    except OSError as exc:
+        raise PackError(f"cannot read the shared cases {path}: {type(exc).__name__}") from exc
+    return parse_cases(raw_bytes, str(path))
+
+
+class CasesUnavailable(RuntimeError):
+    """The gateway didn't hand over the eval's shared cases (the eval errors, fail closed)."""
+
+
+def fetch_cases(gateway_url: str, session_token: str, timeout: float = 30.0) -> CaseFile:
+    """The eval's shared cases from the Kobe model gateway (KOBE-276): never stored in the Job."""
+    import urllib.error
+    import urllib.request
+
+    url = f"{gateway_url.rstrip('/')}/kobe/eval-cases"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {session_token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - gateway URL from settings
+            body = response.read(MAX_CASES_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise CasesUnavailable(f"the gateway answered {exc.code} for the shared cases") from None
+    except (urllib.error.URLError, OSError) as exc:
+        raise CasesUnavailable(f"the shared cases could not be fetched: {type(exc).__name__}") from None
+    return parse_cases(body, "from the gateway")
 
 
 def case_prompt(case: Case) -> str:
@@ -183,10 +215,15 @@ def expected_behaviour() -> Scorer:
             reply=reply or "(no answer)",
             expected=meta["expected"],
         )
-        output = await get_model().generate(
-            prompt, config=GenerateConfig(temperature=0.0, max_tokens=GRADER_MAX_TOKENS)
-        )
-        verdict = parse_grade(output.completion)
+        verdict = None
+        # One retry when the grader's reply has no verdict line (review N7), then an error.
+        for _ in range(GRADER_ATTEMPTS):
+            output = await get_model().generate(
+                prompt, config=GenerateConfig(temperature=0.0, max_tokens=GRADER_MAX_TOKENS)
+            )
+            verdict = parse_grade(output.completion)
+            if verdict is not None:
+                break
         return Score(value=UNGRADED if verdict is None else int(verdict))
 
     return score

@@ -46,3 +46,9 @@ export {
   type RunTokenRecord,
   type RunTokenSubject,
 } from "./run-tokens.js";
+export {
+  EVAL_CASE_SUITE,
+  evalCasesFile,
+  loadEvalCaseFile,
+  type EvalCaseFileEntry,
+} from "./eval-cases.js";

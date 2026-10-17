@@ -63,8 +63,6 @@ export interface EvalRun {
   readonly team: TeamRef;
   /** The exported Orbit YAML of the evaluated draft. */
   readonly orbitYaml: string;
-  /** The frozen shared eval cases (KOBE-276) as `cases.json`; null or absent: none. */
-  readonly casesJson?: string | null;
 }
 
 const ref = (kind: string, name: string, namespace: string, apiVersion = "v1"): ObjectRef => ({
@@ -185,13 +183,7 @@ export class EvalRunner {
       throw new Error("The model gateway Service has no ClusterIP.");
     }
     const common = { namespace, teamId: team.id, evalId: record.id };
-    const casesJson = run.casesJson ?? null;
-    if (record.caseIds.length > 0 && casesJson === null) {
-      throw new Error("The eval's shared cases are missing.");
-    }
-    await options.kube.apply(
-      evalConfigMapManifest({ ...common, orbitYaml: run.orbitYaml, casesJson }),
-    );
+    await options.kube.apply(evalConfigMapManifest({ ...common, orbitYaml: run.orbitYaml }));
     // Running before the Job exists: the gateway accepts the eval's token only while it is running.
     if (!(await markRunning(options.db, team.id, record.id, evalJobName(record.id)))) {
       throw new Error("The eval was finished by someone else before its Job started.");
@@ -205,7 +197,7 @@ export class EvalRunner {
         gatewayAddress: address,
         model: record.model,
         token,
-        withCases: casesJson !== null,
+        withCases: record.caseIds.length > 0,
       }),
     );
     // The Job owns its ConfigMap: both go when the Job's TTL expires.

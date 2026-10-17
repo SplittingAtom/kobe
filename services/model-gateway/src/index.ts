@@ -11,6 +11,7 @@ import {
   createDb,
   isActiveRunLeasedTo,
   isRunTokenActive,
+  loadEvalCaseFile,
   loadGatewayPrincipal,
   notifyModels,
   runSessionOf,
@@ -124,6 +125,8 @@ let draining = false;
 const server = createModelGateway({
   verify: (token) => verifySessionToken(token, "kobe.model-gateway", config.sessionKey),
   principals,
+  // Shared eval cases for a running Orbit eval Job (KOBE-276): read from Postgres on request.
+  evalCases: { load: (teamId, userId, evalId) => loadEvalCaseFile(db, teamId, userId, evalId) },
   isRunLeased: (teamId, runId, sandboxId) =>
     leases.get(`${teamId}:${runId}:${sandboxId}`, () =>
       isActiveRunLeasedTo(db, teamId, runId, sandboxId),

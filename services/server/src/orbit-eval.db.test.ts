@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { loadGatewayPrincipal } from "@kobe/db";
+import { loadEvalCaseFile, loadGatewayPrincipal } from "@kobe/db";
 import { verifySessionToken } from "@kobe/session-token";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { EvalRunner } from "./agents/eval/service.js";
@@ -716,8 +716,8 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
     const ids: string[] = [];
     for (const [i, status] of statuses.entries()) {
       const { rows } = await h.admin.query<{ id: string }>(
-        `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, agent_version, content, status, expected_behaviour, reviewed_at)
-         VALUES ($1, $2, 'team', $3, 1, $4::jsonb, $5, $6, CASE WHEN $5 = 'open' THEN NULL ELSE now() END)
+        `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, agent_version, content, status, expected_behaviour, reviewed_at, created_at)
+         VALUES ($1, $2, 'team', $3, 1, $4::jsonb, $5, $6, CASE WHEN $5 = 'open' THEN NULL ELSE now() END, now() - interval '1 day')
          RETURNING id`,
         [
           finance,
@@ -777,24 +777,15 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       `SELECT case_ids FROM orbit_evals WHERE id = $1`,
       [list[0].id],
     );
-    expect(row.rows[0]?.case_ids).toEqual([a, b]);
-    // The ConfigMap carries the accepted cases only, with no member; the Job is told to run them.
+    expect([...(row.rows[0]?.case_ids ?? [])].sort()).toEqual([a, b].sort());
+    // No case text in any Kubernetes object (review S2): the ConfigMap holds the agent only, and
+    // the Job is told to fetch its cases from the gateway.
     const maps = kube.all("ConfigMap") as unknown as {
       metadata: { name: string };
       data: Record<string, string>;
     }[];
     const map = maps.find((m) => m.metadata.name === `orbit-eval-${list[0].id}`);
-    const file = JSON.parse(map?.data["cases.json"] ?? "{}") as {
-      suite: string;
-      cases: { id: string; prompt: string; expected: string; tool_outputs: unknown[] }[];
-    };
-    expect(file.suite).toBe("shared-cases");
-    expect(file.cases.map((c) => [c.id, c.prompt, c.expected])).toEqual([
-      [a, "Prompt 1 (accepted)", "Expected 1"],
-      [b, "Prompt 2 (accepted)", "Expected 2"],
-    ]);
-    const text = map?.data["cases.json"] ?? "";
-    for (const absent of [open, dismissed, "carol", "user_id"]) expect(text).not.toContain(absent);
+    expect(Object.keys(map?.data ?? {})).toEqual(["agent.yaml"]);
     const job = (
       kube.all("Job") as unknown as {
         metadata: { name: string };
@@ -806,9 +797,38 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       "/input/agent.yaml",
       "--output",
       "/output/result.json",
-      "--cases",
-      "/input/cases.json",
+      "--gateway-cases",
     ]);
+    expect(JSON.stringify([...kube.all("ConfigMap"), ...kube.all("Job")])).not.toContain(
+      "Prompt 1",
+    );
+    // What the gateway serves the running eval: the accepted, frozen cases only, no member.
+    await h.admin.query(
+      `UPDATE orbit_evals SET status = 'running', finished_at = NULL, version = NULL WHERE id = $1`,
+      [list[0].id],
+    );
+    const served = await loadEvalCaseFile(h.deps.database.db, finance, builderId, list[0].id);
+    expect(await loadEvalCaseFile(h.deps.database.db, finance, adminId, list[0].id)).toBeNull();
+    await h.admin.query(
+      `UPDATE orbit_evals SET status = 'passed', finished_at = now(), version = 1 WHERE id = $1`,
+      [list[0].id],
+    );
+    const file = JSON.parse(served ?? "{}") as {
+      suite: string;
+      cases: { id: string; prompt: string; expected: string }[];
+    };
+    expect(file.suite).toBe("shared-cases");
+    expect(file.cases.map((c) => c.id)).toEqual(row.rows[0]?.case_ids);
+    expect(file.cases.map((c) => [c.id, c.prompt, c.expected]).sort()).toEqual(
+      [
+        [a, "Prompt 1 (accepted)", "Expected 1"],
+        [b, "Prompt 2 (accepted)", "Expected 2"],
+      ].sort(),
+    );
+    for (const absent of [open, dismissed, "carol", "user_id"])
+      expect(served).not.toContain(absent);
+    // Only while the eval runs, and only for the member who started it.
+    expect(await loadEvalCaseFile(h.deps.database.db, finance, builderId, list[0].id)).toBeNull();
     // The report on the eval holds ids and outcomes only.
     const detail = (await builder.get(`/v1/agents/${id}/evals/${list[0].id}`)).json.eval;
     expect(JSON.stringify(detail.report)).not.toContain("Prompt 1");
@@ -872,5 +892,32 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       }[]
     ).find((m) => m.metadata.name === `orbit-eval-${latest}`);
     expect(Object.keys(map?.data ?? {})).toEqual(["agent.yaml"]);
+  });
+
+  it("leaves out cases nobody can review: the team agent's owner can't build any more (review S1)", async () => {
+    await gateOn(0.2);
+    const id = await draft();
+    await cases(id, ["accepted"]);
+    // The owner is demoted; a team admin publishes. No case can block it, as nobody may dismiss it.
+    await h.admin.query(
+      `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
+      [finance, builderId],
+    );
+    try {
+      jobResult = clean();
+      const res = await admin.request("POST", `/v1/agents/${id}/publish`, {}, ANY);
+      expect(res.status, JSON.stringify(res.json)).toBe(202);
+      await settled();
+      expect((await admin.get(`/v1/agents/${id}/evals`)).json.evals[0]).toMatchObject({
+        status: "passed",
+        version: 1,
+        cases: { total: 0, scored: null },
+      });
+    } finally {
+      await h.admin.query(
+        `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+        [finance, builderId],
+      );
+    }
   });
 });

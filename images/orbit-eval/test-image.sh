@@ -106,7 +106,8 @@ expect "validates a KOBE-90 export fixture without model calls" 'ok: 5 scenarios
 
 echo "== evaluation against a fake model endpoint"
 docker run -d "${HARDENED[@]}" --network "$NET" --name "$RUN_ID-fake" \
-  -e "SERVER_B64=$(base64 <"$HERE/testing/fake_model_server.py" | tr -d '\n')" --entrypoint python "$IMAGE" \
+  -e "SERVER_B64=$(base64 <"$HERE/testing/fake_model_server.py" | tr -d '\n')" \
+  -e "CASES_B64=$(base64 <"$FIX/cases.json" | tr -d '\n')" --entrypoint python "$IMAGE" \
   -c 'import base64, os; exec(base64.b64decode(os.environ["SERVER_B64"]))' 8080 >/dev/null
 for _ in $(seq 1 30); do
   docker exec "$RUN_ID-fake" python -c 'import urllib.request as u; u.urlopen("http://127.0.0.1:8080")' \
@@ -181,8 +182,10 @@ rm -f "/tmp/$RUN_ID-badcases.json"
 expect "invalid shared cases are rejected" 'invalid shared cases' "$out"
 expect "...without quoting their text" '^none$' "$(grep -F 'secret prompt text' <<<"$out" >/dev/null && echo leaked || echo none)"
 expect "...exit code 2" 'rc=2$' "$out"
-out="$(casejob cases "$FIX/cases.json" "${GATEWAY[@]}" KOBE_EVAL_MODEL=fake-safe)"
+out="$(job cases "$FIX/agent-bash.yaml" "${GATEWAY[@]}" KOBE_EVAL_MODEL=fake-safe -- "${STDIN_YAML[@]}" --gateway-cases)"
 expect "an ungradeable case: exit code 1 (the server fails the eval closed)" 'rc=1$' "$out"
+expect "the cases come from the gateway with the session token" '^/kobe/eval-cases Bearer '"$TOKEN"' cases$' \
+  "$(docker exec "$RUN_ID-fake" cat /tmp/fake-model-auth.log | grep -F /kobe/eval-cases | sort -u)"
 json="$(sed -n '/^{/,/^}/p' <<<"$out")"
 if python3 - "$json" <<'PY'
 import json, sys
@@ -194,6 +197,9 @@ assert [r["status"] for r in c["results"]] == ["passed", "failed", "error"], c["
 assert set(c["results"][0]) == {"id", "status"}
 PY
 then pass "cases pass with the replayed tool output, fail without it, error when ungradeable"; else fail "case results" "${out:0:800}"; fi
+out="$(job nocases "$FIX/agent-bash.yaml" KOBE_MODEL_GATEWAY_URL="http://$RUN_ID-fake:9" KOBE_MODEL_SESSION_TOKEN="$TOKEN" -- "${STDIN_YAML[@]}" --gateway-cases)"
+expect "no cases from the gateway: the run fails (exit 3) without the token in the message" 'rc=3$' "$out"
+expect "...token not echoed" '^none$' "$(grep -F "$TOKEN" <<<"$out" >/dev/null && echo leaked || echo none)"
 expect "the result holds no case text" '^none$' \
   "$(grep -E 'census|Made the number up|figures.csv|Canberra' <<<"$json" >/dev/null && echo leaked || echo none)"
 
