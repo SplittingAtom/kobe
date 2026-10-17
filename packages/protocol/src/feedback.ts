@@ -96,6 +96,8 @@ export const threadFeedbackSchema = z.strictObject({
       run_id: uuidSchema,
       user_entry_id: idSchema.nullable(),
       feedback: answerFeedbackSchema.nullable(),
+      /** The caller shared this rating as an eval case (KOBE-276): the case's id. */
+      eval_case_id: uuidSchema.nullable().optional(),
     }),
   ),
 });

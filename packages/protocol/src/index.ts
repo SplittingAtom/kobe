@@ -26,3 +26,4 @@ export * from "./sandbox-wire/index.js";
 export * from "./ui-preferences.js";
 export * from "./threads.js";
 export * from "./feedback.js";
+export * from "./eval-cases.js";
