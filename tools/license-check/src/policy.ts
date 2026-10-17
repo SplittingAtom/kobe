@@ -41,6 +41,9 @@ export interface LicenseException {
   /** Exact package versions covered; a new version must be re-justified. */
   readonly versions: readonly string[];
   readonly reason: string;
+  /** Who signed the exception off (Chris, spec D3) and when (YYYY-MM-DD). */
+  readonly approvedBy?: string;
+  readonly approvedOn?: string;
 }
 
 export type LicenseExceptions = Readonly<Record<string, LicenseException>>;
@@ -112,6 +115,25 @@ export function findStaleExceptions(
           .some(
             (pkg) => pkg.name === name && pkg.versions.some((v) => exception.versions.includes(v)),
           ),
+    )
+    .map(([name]) => name);
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Exceptions that are not fully documented: each needs a reason, pinned versions, the approver and
+ * the date of the sign-off. An exception still waiting for sign-off fails the check (spec D3).
+ */
+export function findUndocumentedExceptions(exceptions: LicenseExceptions): string[] {
+  return Object.entries(exceptions)
+    .filter(
+      ([, e]) =>
+        !e.reason?.trim() ||
+        !Array.isArray(e.versions) ||
+        e.versions.length === 0 ||
+        !e.approvedBy?.trim() ||
+        !ISO_DATE.test(e.approvedOn ?? ""),
     )
     .map(([name]) => name);
 }

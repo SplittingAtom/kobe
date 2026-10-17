@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   findStaleExceptions,
+  findUndocumentedExceptions,
   findViolations,
   type LicenseExceptions,
   type LicenseReport,
@@ -36,11 +37,12 @@ function fail(lines: readonly string[]): never {
 
 function main(): void {
   const exceptions = JSON.parse(readFileSync(exceptionsPath, "utf8")) as LicenseExceptions;
-  const unjustified = Object.entries(exceptions)
-    .filter(([, e]) => !e.reason?.trim() || !Array.isArray(e.versions) || e.versions.length === 0)
-    .map(([name]) => name);
-  if (unjustified.length > 0) {
-    fail([`License exceptions need a reason and pinned versions: ${unjustified.join(", ")}`]);
+  const undocumented = findUndocumentedExceptions(exceptions);
+  if (undocumented.length > 0) {
+    fail([
+      `License exceptions need a reason, pinned versions, approvedBy and approvedOn (YYYY-MM-DD): ${undocumented.join(", ")}`,
+      "Exceptions are signed off by Chris (spec D3); record who approved it and when.",
+    ]);
   }
 
   const lockfile = reportPath ? "" : readFileSync(lockfilePath, "utf8");

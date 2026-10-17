@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { evaluateLicense, findStaleExceptions, findViolations } from "./policy.js";
+import {
+  evaluateLicense,
+  findStaleExceptions,
+  findUndocumentedExceptions,
+  findViolations,
+} from "./policy.js";
 
 describe("evaluateLicense", () => {
   it.each(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MPL-2.0", "ISC", "0BSD", "Zlib"])(
@@ -111,5 +116,31 @@ describe("findStaleExceptions", () => {
     const report = { MIT: [{ name: "khroma", versions: ["2.1.0"] }] };
     const exceptions = { khroma: { license: "Unknown", versions: ["2.1.0"], reason: "no field" } };
     expect(findStaleExceptions(report, exceptions)).toEqual([]);
+  });
+});
+
+describe("findUndocumentedExceptions", () => {
+  const approved = {
+    license: "CC-BY-4.0",
+    versions: ["1.0.0"],
+    reason: "data",
+    approvedBy: "Chris",
+    approvedOn: "2026-10-17",
+  };
+
+  it("accepts an exception with a reason, versions, an approver and a date", () => {
+    expect(findUndocumentedExceptions({ data: approved })).toEqual([]);
+  });
+
+  it.each([
+    ["no approver", { ...approved, approvedBy: "" }],
+    ["no date", { ...approved, approvedOn: undefined }],
+    ["a date that is not YYYY-MM-DD", { ...approved, approvedOn: "17 Oct 2026" }],
+    ["no reason", { ...approved, reason: " " }],
+    ["no pinned versions", { ...approved, versions: [] }],
+  ])("rejects an exception with %s", (_label, exception) => {
+    const { approvedOn, ...rest } = exception;
+    const entry = approvedOn === undefined ? rest : { ...rest, approvedOn };
+    expect(findUndocumentedExceptions({ pending: entry })).toEqual(["pending"]);
   });
 });
