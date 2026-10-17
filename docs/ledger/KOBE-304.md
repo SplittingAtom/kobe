@@ -126,3 +126,22 @@
   with renames (no second copy); not simulated.
 - **Tripwire test** (`agent.models.test.ts`, untouched): a 1 ms poll racing Pi's start; passes
   alone and in the package run (4/4 and full suite); a load-dependent flake, not KOBE-304.
+
+## Re-review follow-up (2026-10-17)
+
+- **R1:** a restore treats a journalled move whose source is gone and destination present as
+  applied (an earlier attempt or process renamed it), so a retried restore keeps the moved edit.
+  A renamed file older than its moved row (an upload made while asleep) is kept as a conflict
+  copy and the row is downloaded; a newer one is kept and pushed.
+- **R2:** rekeyed states are marked `moved` and never shadow the new path's rows; a commit to the
+  old path that landed after the move keeps the renamed file, pushed onto the moved row.
+- `.kobe/workspace-sync.json` is written with an on-volume check (`assertOnVolume`).
+- Tests: `sync.test.ts` (restore retried after a transient download error; upload while asleep
+  then moved; a commit racing the move), each failing without its fix.
+
+## Follow-ups (not in KOBE-304)
+
+- **N8:** no read path for `workspace_file_hold_history` (as `workspace_files`): confirm the
+  custodian story, or add a hold-admin read.
+- **N9:** a held move takes a few ms longer (the hold INSERT); the residual accepted in KOBE-275.
+- **N10:** the browser's delete still answers 409 `legal_hold`; make it silent like the move.
