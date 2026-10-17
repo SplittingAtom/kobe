@@ -10,6 +10,7 @@ import type { ChatApi } from "./api";
 import { createFilesApi, type FilesApi } from "../files/api";
 import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
+import { ComposerMentionChannel } from "./mention-insert";
 import { MentionStore } from "./mentions";
 import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
@@ -76,6 +77,8 @@ export class ChatSession {
   readonly files: FilesApi;
   /** Files picked with `@` per composer draft (KOBE-223). */
   readonly mentions = new MentionStore();
+  /** Mentions asked from the Files rail (drag, row menu) for the composer on screen (KOBE-374). */
+  readonly composerMentions = new ComposerMentionChannel();
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
   readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */

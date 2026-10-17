@@ -59,11 +59,15 @@ type Dialog = { readonly kind: "delete" | "rename" | "move"; readonly entry: Fil
 
 const where = (folder: string) => (folder === "" ? "the workspace root" : folder);
 
-/** A row's ⋯ menu (KOBE-292, KOBE-304): Open, Download, Rename, Move to…, Copy path, Delete. */
+/**
+ * A row's ⋯ menu (KOBE-292, KOBE-304): Open, Mention in message (files, KOBE-374), Download,
+ * Rename, Move to…, Copy path, Delete.
+ */
 function rowBindings(
   entry: FileEntry,
   handlers: {
     readonly onOpen: (() => void) | undefined;
+    readonly onMention: (() => void) | undefined;
     readonly onDownload: () => void;
     readonly onRename: () => void;
     readonly onMove: () => void;
@@ -79,6 +83,10 @@ function rowBindings(
   });
   return {
     ...(handlers.onOpen ? { "open-file": { onSelect: handlers.onOpen } } : {}),
+    // Focus goes to the composer, so the menu doesn't give it back to its button.
+    ...(entry.type === "file" && handlers.onMention
+      ? { "mention-file": { onSelect: handlers.onMention, movesFocus: true } }
+      : {}),
     ...(entry.type === "file" ? { "download-file": { onSelect: handlers.onDownload } } : {}),
     ...(readOnly
       ? {}
@@ -199,8 +207,14 @@ export function FileBrowser({
   showFolder = null,
   onOpenFile,
   onMoved,
+  onMention,
 }: {
   readonly api: FilesApi;
+  /**
+   * "Mention in message" (KOBE-374): the file goes into the composer as an @file mention; the
+   * answer is why it could not, or undefined once it did. Absent: no such item.
+   */
+  readonly onMention?: ((entry: FileEntry) => string | undefined) | undefined;
   /** A file opens in the artifact column (KOBE-268). */
   readonly onOpenFile?: ((entry: FileEntry) => void) | undefined;
   /** A file or folder moved: open tabs of it follow (KOBE-304, ac-9). */
@@ -251,6 +265,16 @@ export function FileBrowser({
     if (!res.ok) return setActionError(describeFileError(res.error));
     saveBytes(entry.name, res.data);
     setNotice(`Downloaded ${entry.name}`);
+  };
+
+  const mention = (entry: FileEntry) => {
+    start();
+    const refused = onMention?.(entry);
+    if (refused !== undefined) {
+      focusRow(entry.path);
+      return setActionError({ status: 0, code: "client_error", message: refused });
+    }
+    setNotice(`Mentioned ${entry.name} in your message`);
   };
 
   /** The path inside the workspace (the agent's working directory), as the listing names it. */
@@ -331,6 +355,7 @@ export function FileBrowser({
                 focusRow(entry.path);
               }
             : onOpenFile && (() => onOpenFile(entry)),
+        onMention: onMention && (() => mention(entry)),
         onDownload: () => void download(entry),
         onRename: () => setDialog({ kind: "rename", entry }),
         onMove: () => setDialog({ kind: "move", entry }),

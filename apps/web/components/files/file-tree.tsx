@@ -13,6 +13,7 @@ import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
 import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { FileEntry } from "../../lib/files/api";
 import { carriesFiles, droppedItems, type DroppedItems } from "../../lib/files/drop";
+import { carriesWorkspaceRow, startRowDrag } from "../../lib/files/drag";
 import { formatBytes, isReadOnlyPath, parentPath } from "../../lib/files/format";
 import { FILE_KIND_LABELS, fileKind, fileKindIcon, folderIcon } from "../../lib/files/icons";
 import {
@@ -27,8 +28,8 @@ import { cn } from "../../lib/utils";
 import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
 import type { FileTree } from "./use-file-tree";
 
-/** The drag's own type: a tree row being moved (never files from the computer). */
-export const TREE_DRAG_TYPE = "application/x-kobe-workspace-path";
+/** The drag's own type: a tree row being moved or mentioned (never files from the computer). */
+export { TREE_DRAG_TYPE } from "../../lib/files/drag";
 /** Marks the folders that take files dropped from the computer (the rail's zone leaves them). */
 export const DROP_FOLDER_ATTR = "data-kobe-drop-folder";
 /** Indentation per level, px. */
@@ -157,7 +158,8 @@ function EntryRow({
       data-path={entry.path}
       {...(dropHere ? { "data-drop-target": "" } : {})}
       {...(takesFiles ? { [DROP_FOLDER_ATTR]: "" } : {})}
-      draggable={!readOnly}
+      // Read-only files still drag, to be mentioned in the composer (KOBE-374); never moved.
+      draggable={!readOnly || !dir}
       title={entry.path}
       className={cn(
         "group/row relative flex h-6.5 cursor-default items-center gap-1 rounded-sm pe-0.5 text-sm outline-none select-none",
@@ -279,14 +281,16 @@ function useDrag(actions: TreeActions) {
   }, []);
   const handlers: DragHandlers = {
     start(e, row) {
-      if (isReadOnlyPath(row.entry.path)) return e.preventDefault();
+      const readOnly = isReadOnlyPath(row.entry.path);
+      if (readOnly && row.entry.type === "dir") return e.preventDefault();
       dragging.current = { path: row.entry.path, type: row.entry.type };
-      e.dataTransfer.setData(TREE_DRAG_TYPE, row.entry.path);
-      e.dataTransfer.effectAllowed = "move";
+      // A drop on the composer mentions it (copy); on a folder here it moves (canMoveInto
+      // refuses read-only sources).
+      startRowDrag(e.dataTransfer, dragging.current, !readOnly);
     },
     over(e, folder, takesFiles) {
       const own = dragging.current;
-      if (own && Array.from(e.dataTransfer.types).includes(TREE_DRAG_TYPE)) {
+      if (own && carriesWorkspaceRow(e.dataTransfer)) {
         if (!canMoveInto(own.path, own.type, folder)) {
           e.dataTransfer.dropEffect = "none";
           return setTarget(null);
@@ -303,7 +307,7 @@ function useDrag(actions: TreeActions) {
     },
     drop(e, folder, takesFiles) {
       const own = dragging.current;
-      if (own && Array.from(e.dataTransfer.types).includes(TREE_DRAG_TYPE)) {
+      if (own && carriesWorkspaceRow(e.dataTransfer)) {
         e.preventDefault();
         end();
         if (canMoveInto(own.path, own.type, folder)) actions.onMove(own, folder);

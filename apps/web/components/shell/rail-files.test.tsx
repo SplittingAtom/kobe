@@ -215,9 +215,10 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(button.className).toMatch(/\bsize-6\b/);
     const menu = await rowMenu("report.csv");
     expect(menu.closest("[data-kobe-chat]")).not.toBeNull();
-    // Rename and Move to… since the move API (KOBE-304).
+    // Rename and Move to… since the move API (KOBE-304); Mention in message for files (KOBE-374).
     expect(menuNames(menu)).toEqual([
       "Open",
+      "Mention in message",
       "Download",
       "Rename",
       "Move to…",
@@ -330,6 +331,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     // A file directly in uploads/ is a rail drop (KOBE-199): its owner may delete it.
     expect(menuNames(await rowMenu("brief.pdf"))).toEqual([
       "Open",
+      "Mention in message",
       "Download",
       "Rename",
       "Move to…",

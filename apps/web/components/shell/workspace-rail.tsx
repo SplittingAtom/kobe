@@ -1,10 +1,12 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { useArtifactPanel } from "../chat/artifact-state";
+import { ChatSessionContext } from "../chat/kobe-runtime";
+import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
@@ -99,6 +101,16 @@ function RailFiles({
         panel.openFile(entry.path);
       }
     : undefined;
+  // "Mention in message" (KOBE-374): into the composer on screen, which the drawer makes way for.
+  const session = useContext(ChatSessionContext);
+  const mention = session
+    ? (entry: FileEntry) => {
+        const refused =
+          mentionRefusal(entry.path, entry.type) ?? session.composerMentions.request(entry.path);
+        if (refused === undefined && rail.drawer) rail.closeDrawer();
+        return refused;
+      }
+    : undefined;
   return (
     <section
       id={SECTION_IDS.files}
@@ -128,6 +140,7 @@ function RailFiles({
           showFolder={showFolder}
           onOpenFile={openFile}
           onMoved={panel?.moveFiles}
+          onMention={mention}
         />
       )}
     </section>

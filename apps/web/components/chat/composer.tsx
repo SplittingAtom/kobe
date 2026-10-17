@@ -14,6 +14,8 @@ import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
 import { MentionChips, MentionPicker } from "./mention-picker";
+import { useComposerMentionDrop } from "./composer-mention-drop";
+import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
 import { useComposerDictation, useSteer } from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
@@ -115,17 +117,25 @@ export function Composer({
     attach(e.target.files);
     e.target.value = ""; // the same file can be picked again after removing it
   };
+  const readOnly = extras.state.summary?.readOnly === true;
+  // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
+  const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const onDragOver = (e: DragEvent) => {
-    if (!hasFiles(e)) return;
+    if (rowDrop.over(e) || !hasFiles(e)) return;
     e.preventDefault();
     setDragging(true);
   };
   const onDrop = (e: DragEvent) => {
-    if (!hasFiles(e)) return;
+    if (rowDrop.drop(e) || !hasFiles(e)) return;
     e.preventDefault();
     setDragging(false);
     attach(e.dataTransfer.files);
+  };
+  const onDragLeave = (e: DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return; // into a child
+    setDragging(false);
+    rowDrop.leave();
   };
 
   const queue = async () => {
@@ -139,7 +149,6 @@ export function Composer({
       aui.composer.setText("");
     }
   };
-  const readOnly = extras.state.summary?.readOnly === true;
   useBindCommands(
     composerBindings(
       () => input.current?.focus(),
@@ -149,6 +158,7 @@ export function Composer({
   );
   const editLast = useBoundCommands()["edit-last-message"];
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (rowDrop.notice !== "") rowDrop.clearNotice();
     if (wantsEditLast(e)) {
       if (editLast?.onSelect && !editLast.blocker) {
         e.preventDefault();
@@ -202,8 +212,9 @@ export function Composer({
           data-kobe-composer-panel
           data-running={running || undefined}
           data-dragging={dragging || undefined}
+          data-mention-drop={rowDrop.rowDrop ?? undefined}
           onDragOver={onDragOver}
-          onDragLeave={() => setDragging(false)}
+          onDragLeave={onDragLeave}
           onDrop={onDrop}
           className={cn(
             panelStyles.panel,
@@ -294,7 +305,13 @@ export function Composer({
           </div>
         </div>
         <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
-          {blocker !== undefined ? (
+          {rowDrop.rowDrop === "file" ? (
+            "Drop to mention this file"
+          ) : rowDrop.rowDrop === "folder" ? (
+            <span role="status">{MENTION_FOLDER_REFUSED}</span>
+          ) : rowDrop.notice !== "" ? (
+            <span role="status">{rowDrop.notice}</span>
+          ) : blocker !== undefined ? (
             <span role="status">{blocker}</span>
           ) : dictation.error ? (
             <span role="alert">{dictation.error}</span>

@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ArrowDownIcon,
   ArrowUpIcon,
+  AtSignIcon,
   BellIcon,
   BotIcon,
   BrainIcon,
@@ -332,6 +333,8 @@ const LIST = [
   // A Files row's menu (KOBE-292). Rename (also F2 in the tree) and Move to… (the keyboard way to
   // move, beside drag and drop) use the workspace move API (KOBE-304).
   { id: "open-file", name: "Open", icon: ExternalLinkIcon, scope: "file-menu" },
+  // The keyboard way to drag a file onto the composer (KOBE-374): an @file mention (KOBE-223).
+  { id: "mention-file", name: "Mention in message", icon: AtSignIcon, scope: "file-menu" },
   { id: "download-file", name: "Download", icon: DownloadIcon, scope: "file-menu" },
   { id: "rename-file", name: "Rename", icon: PencilIcon, scope: "file-menu" },
   { id: "move-file", name: "Move to…", icon: FolderInputIcon, scope: "file-menu" },

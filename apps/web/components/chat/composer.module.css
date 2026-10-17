@@ -54,3 +54,15 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--kobe-status-running) 45%, transparent);
   }
 }
+
+/* A file row from the Files tree over the composer (KOBE-374): the panel lights up as the drop
+   target for a mention; a folder, which can't be mentioned, gets a dashed red outline instead. */
+.panel[data-mention-drop="file"] {
+  outline-color: var(--admin-accent);
+  background-color: color-mix(in srgb, var(--admin-accent) 6%, transparent);
+}
+
+.panel[data-mention-drop="folder"] {
+  outline-style: dashed;
+  outline-color: var(--kobe-status-failed);
+}
