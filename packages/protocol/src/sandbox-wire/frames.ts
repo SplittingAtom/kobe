@@ -596,6 +596,20 @@ export const ackFrameSchema = frame("ack", { run_id: uuidSchema, seq });
 /** Gap on a live socket: re-send this run's `pi.event` frames from `from_seq` (= durable_seq + 1). */
 export const resendFrameSchema = frame("resend", { run_id: uuidSchema, from_seq: seq });
 
+/**
+ * `hello.capabilities` entry of an agent that applies server moves as local renames (KOBE-304,
+ * `workspace-sync.ts` moves) and takes {@link workspaceMovedFrameSchema}.
+ */
+export const CAPABILITY_WORKSPACE_MOVES = "workspace_moves";
+
+/**
+ * The member moved or renamed something in the workspace (KOBE-304): replay the server's moves
+ * (`GET moves`) and pull now, rather than at the next interval. A hint only: no answer, no
+ * content; sent only to agents that announced {@link CAPABILITY_WORKSPACE_MOVES}. A hibernated
+ * sandbox gets none and replays on wake, before its first pull.
+ */
+export const workspaceMovedFrameSchema = frame("workspace.moved", {});
+
 /** Drain and close: abort nothing in flight unless `deadline_ms` passes. */
 export const shutdownFrameSchema = frame("shutdown", {
   /** `hibernate` | `destroy` | `replaced` today; open (informational). */
@@ -622,6 +636,7 @@ export const serverToSandboxFrameSchema = z.union([
   ackFrameSchema,
   resendFrameSchema,
   shutdownFrameSchema,
+  workspaceMovedFrameSchema,
   pingFrame,
   pongFrame,
   serverErrorFrame,

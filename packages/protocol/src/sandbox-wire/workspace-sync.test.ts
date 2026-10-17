@@ -6,8 +6,12 @@ import {
   isServerOwnedPath,
   workspaceChangeSchema,
   workspaceEntrySchema,
+  workspaceMoveRecordSchema,
+  workspaceMovesPageSchema,
   workspacePathIssue,
 } from "./workspace-sync.js";
+import { CAPABILITY_WORKSPACE_MOVES } from "./frames.js";
+import { decodeServerFrame, encodeFrame } from "./codec.js";
 
 const SHA = "a".repeat(64);
 
@@ -126,5 +130,28 @@ describe("member drop path (KOBE-199)", () => {
       expect(isMemberDropPath(`uploads/${name}`)).toBe(false);
     }
     expect(isThreadFolderName("report.pdf")).toBe(false);
+  });
+});
+
+describe("workspace moves (KOBE-304)", () => {
+  it("lists moves with their first revision, paths and kind", () => {
+    const page = { moves: [{ rev: 7, from: "a", to: "b/a", type: "dir" }], more: false };
+    expect(workspaceMovesPageSchema.parse(page)).toEqual(page);
+    for (const bad of [
+      { rev: 0, from: "a", to: "b", type: "file" },
+      { rev: 1, from: "../a", to: "b", type: "file" },
+      { rev: 1, from: "a", to: "/b", type: "file" },
+      { rev: 1, from: "a", to: "b", type: "link" },
+      { rev: 1, from: "a", to: "b", type: "file", extra: 1 },
+    ]) {
+      expect(workspaceMoveRecordSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("the agent is nudged with an empty workspace.moved frame", () => {
+    const frame = { v: 1, type: "workspace.moved" };
+    expect(decodeServerFrame(encodeFrame(frame))).toEqual({ ok: true, frame });
+    expect(decodeServerFrame(encodeFrame({ ...frame, path: "a" }))).toMatchObject({ ok: false });
+    expect(CAPABILITY_WORKSPACE_MOVES).toBe("workspace_moves");
   });
 });
