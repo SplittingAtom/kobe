@@ -542,6 +542,16 @@ describe("catalog and team enablement", () => {
     expect(o3Off.json).toMatchObject({ code: "thinking_invalid" });
     expect(o3Off.json.message).toContain("cannot turn thinking off");
     expect((await as.siteAdmin.delete(`${MODELS}/catalog/o3`)).status).toBe(204);
+    // An admin's own "can't turn off" survives a PATCH that leaves `lowest` out (re-review R2).
+    const lowSet = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
+      thinking: { ...THINK, lowest: "low" },
+    });
+    expect(lowSet.json.model?.thinking).toMatchObject({ lowest: "low" });
+    const partial = await as.siteAdmin.patch(`${MODELS}/catalog/glm`, {
+      thinking: { ...THINK, max: "high" },
+    });
+    expect(partial.status, JSON.stringify(partial.json)).toBe(200);
+    expect(partial.json.model.thinking).toMatchObject({ max: "high", lowest: "low" });
     const budget = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "opus48",
       provider_id: "anthropic",

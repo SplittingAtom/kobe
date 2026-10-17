@@ -259,11 +259,36 @@ describe("the Anthropic budget leaves room for the answer (S3)", () => {
       type: "enabled",
       budget_tokens: 1_024,
     });
-    expect(anthropicBudget("low", 1_024, { ...p, lowest: "low" })).toEqual({ type: "disabled" });
+    // R3: no valid form at all for a model that cannot turn off: the gateway says so.
+    expect(anthropicBudget("low", 1_024, { ...p, lowest: "low" })).toBe("no_room");
+    const refused = applyThinking(
+      body({ model: "c", max_tokens: 900 }),
+      MESSAGES,
+      policy({ control: "anthropic_budget", lowest: "low", default: "low" }),
+      "low",
+    );
+    expect(refused).toMatchObject({ ok: false, status: 400, code: "thinking_budget_too_small" });
     expect(anthropicBudget("high", undefined, p)).toEqual({
       type: "enabled",
       budget_tokens: 24_576,
     });
+  });
+
+  it("collapses case variants of max_tokens to the one Go would read (R1)", () => {
+    // Raw bytes: an exact duplicate and a case variant, the last one wins in Go.
+    const raw = Buffer.from(
+      '{"model":"c","max_tokens":100000,"max_tokens":2048,"MAX_TOKENS":4096,' +
+        '"thinking":{"type":"enabled","budget_tokens":9},"thinking":{"budget_tokens":99999}}',
+    );
+    const out = applyThinking(raw, MESSAGES, policy({ control: "anthropic_budget" }), "high");
+    if (!out.ok) throw new Error(out.code);
+    const text = out.body.toString();
+    expect(text.match(/max_tokens/gi)).toHaveLength(1);
+    expect(goDecode(text)).toMatchObject({
+      max_tokens: 4_096,
+      thinking: { type: "enabled", budget_tokens: 3_072 },
+    });
+    expect(text).not.toMatch(/99999|"budget_tokens":9\b/);
   });
 
   it("reads Anthropic's own max_tokens, not a larger key it ignores", () => {

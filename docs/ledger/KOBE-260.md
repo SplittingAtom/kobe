@@ -90,6 +90,13 @@ gemini_budget`, the ones each provider kind takes, and the rules (`thinkingPolic
   `test:db` db 51 / 1242, model-gateway 6 / 20, server 118 / 1624; licence, hygiene ok. **N5**: the 0126 checks stay NOT VALID for good (every
   row was NULL when they were added and each write is checked); no VALIDATE follow-up.
 
+## Re-review nits (approved, 2026-10-17)
+
+- **R1** case variants and duplicates of `max_tokens` collapse to one key (Go's last value).
+- **R2** a catalog PATCH without `lowest` keeps the stored value while the control is unchanged.
+- **R3** no room for a budget: `disabled` where off is allowed (documented), else 1,024, else
+  400 `thinking_budget_too_small`. Raw duplicate-key bytes now in a gateway test.
+
 ## Open questions (for Chris or the coordinator)
 
 - gate1: set glm-5.3 (Ollama Cloud) to reasoning + `reasoning_effort` on Site → Models after

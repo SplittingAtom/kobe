@@ -209,6 +209,13 @@ export function applyThinking(
       return out({ ...stripped, ...anthropicAdaptive(level, outputFormat(parsed)) });
     case "anthropic_budget": {
       const thinking = anthropicBudget(level, lastValue(parsed, MAX_TOKENS), policy);
+      if (thinking === "no_room") {
+        return refuse(
+          "thinking_budget_too_small",
+          "max_tokens leaves no room for this model's smallest thinking budget (1,024 tokens), " +
+            "and it cannot turn thinking off: raise max_tokens above 1,024.",
+        );
+      }
       return out(
         { ...stripped, thinking },
         thinking.type === "enabled" ? thinking.budget_tokens : undefined,
@@ -219,13 +226,20 @@ export function applyThinking(
   }
 }
 
-/** The body without any reasoning field (and without `output_config`, rebuilt by the caller). */
+/**
+ * The body without any reasoning field (and without `output_config`, rebuilt by the caller), and
+ * with one `max_tokens` (re-review R1): case variants collapse to the value Go's decoder would read
+ * (the last), so the provider and the budget below see the same limit whichever way Bifrost
+ * matches keys.
+ */
 function withoutReasoning(json: JsonObject): JsonObject {
+  const maxTokens = lastValue(json, MAX_TOKENS);
+  const kept = Object.entries(json).filter(([key]) => {
+    const k = fold(key);
+    return !REASONING_FIELDS.has(k) && k !== OUTPUT_CONFIG && k !== MAX_TOKENS;
+  });
   return Object.fromEntries(
-    Object.entries(json).filter(([key]) => {
-      const k = fold(key);
-      return !REASONING_FIELDS.has(k) && k !== OUTPUT_CONFIG;
-    }),
+    maxTokens === undefined ? kept : [...kept, ["max_tokens", maxTokens] as const],
   );
 }
 
@@ -266,13 +280,18 @@ type AnthropicThinking =
 
 /**
  * Anthropic's older budget form (review S3): at most `max_tokens` minus the answer's share, at
- * least 1,024; with less room, off (or 1,024 for a model that cannot turn it off, when it fits).
+ * least 1,024. With less room than that (re-review R3):
+ *
+ * - a model that can turn thinking off gets `disabled` on purpose: thinking would take the room
+ *   the answer needs (the KOBE-258 failure), and the provider accepts it;
+ * - a model that cannot gets the smallest budget (1,024) while `max_tokens` is above it, else
+ *   `no_room`: the provider would refuse any form, so the gateway refuses with a clear message.
  */
 export function anthropicBudget(
   level: ThinkingLevel,
   maxTokens: unknown,
   policy: Pick<ThinkingPolicy, "control" | "lowest">,
-): AnthropicThinking {
+): AnthropicThinking | "no_room" {
   if (level === "off") return { type: "disabled" };
   const max =
     typeof maxTokens === "number" && Number.isInteger(maxTokens) && maxTokens > 0
@@ -284,10 +303,10 @@ export function anthropicBudget(
       : max - Math.max(ANSWER_MIN_TOKENS, Math.ceil(max * ANSWER_MIN_SHARE));
   const budget = Math.min(ANTHROPIC_BUDGET[level], room);
   if (budget >= ANTHROPIC_MIN_BUDGET) return { type: "enabled", budget_tokens: budget };
-  if (lowestThinking(policy) === "off" || max === undefined || max <= ANTHROPIC_MIN_BUDGET) {
-    return { type: "disabled" };
-  }
-  return { type: "enabled", budget_tokens: ANTHROPIC_MIN_BUDGET };
+  if (lowestThinking(policy) === "off") return { type: "disabled" };
+  return max !== undefined && max > ANTHROPIC_MIN_BUDGET
+    ? { type: "enabled", budget_tokens: ANTHROPIC_MIN_BUDGET }
+    : "no_room";
 }
 
 /** Gemini: `generationConfig.thinkingConfig`, every other generation setting kept. */

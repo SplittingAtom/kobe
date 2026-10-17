@@ -69,6 +69,13 @@ describe("thinking settings on the server (KOBE-260)", () => {
     expect(policyOf(input, "glm-5.3").lowest).toBe("off");
     expect(policyOf({ ...input, control: "anthropic_effort" }, "claude-x").lowest).toBe("low");
     expect(policyOf({ ...input, lowest: "low" }, "glm-5.3").lowest).toBe("low");
+    // A partial update keeps the stored lowest level while the control is the same (R2).
+    const stored = { ...EFFORT, lowest: "low" as const };
+    expect(policyOf(input, "glm-5.3", stored).lowest).toBe("low");
+    expect(policyOf({ ...input, lowest: "off" }, "glm-5.3", stored).lowest).toBe("off");
+    expect(policyOf({ ...input, control: "anthropic_adaptive" }, "claude-x", stored).lowest).toBe(
+      "off",
+    );
     const o3Off = { ...EFFORT, lowest: "off" as const };
     expect(checkCatalogThinking(o3Off, NO_THINKING, "openai", true, "o3")).toMatchObject({
       ok: false,

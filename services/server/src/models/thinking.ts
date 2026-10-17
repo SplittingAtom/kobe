@@ -49,15 +49,26 @@ export const NO_THINKING: ThinkingPolicy = {
   lowest: "off",
 };
 
-/** The API's policy, its `lowest` filled in from the control and the model's known family. */
-export function policyOf(input: ThinkingPolicyInput, model: string): ThinkingPolicy {
+/**
+ * The API's policy with `lowest` filled in when the caller left it out: `low` for a control
+ * without off or a family known not to turn thinking off, else the stored value when the control
+ * is unchanged (a partial update keeps it, re-review R2), else `off`.
+ */
+export function policyOf(
+  input: ThinkingPolicyInput,
+  model: string,
+  before?: ThinkingPolicy,
+): ThinkingPolicy {
   const lowest =
     input.lowest ??
     (input.control === "none"
       ? "off"
-      : THINKING_CONTROLS_WITHOUT_OFF.includes(input.control)
+      : THINKING_CONTROLS_WITHOUT_OFF.includes(input.control) ||
+          knownThinkingLowest(model) === "low"
         ? "low"
-        : (knownThinkingLowest(model) ?? "off"));
+        : before !== undefined && before.control === input.control
+          ? before.lowest
+          : "off");
   return {
     control: input.control,
     allowed: input.allowed,

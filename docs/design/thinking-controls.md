@@ -65,6 +65,11 @@ Which control a model needs is the admin's choice (Site → Models), never guess
   caller's `budget_tokens` would survive. Bifrost v2.2.5's source knows `thinking.type` adaptive,
   `display` and `output_config.effort` (`core/providers/anthropic/types.go`); the forms are not run
   against a Bifrost image in CI (the unit test decodes with Go semantics instead).
+- `max_tokens` in any letter case collapses to one key with the value Go would read (the last),
+  so the budget below and the provider see the same limit (re-review R1).
+- Anthropic budget without room (re-review R3): a model that can turn thinking off gets
+  `disabled` (thinking would starve the answer, KOBE-258); one that cannot gets 1,024 while
+  `max_tokens` is above it, else 400 `thinking_budget_too_small` (no form would be accepted).
 - Unknown provider fields never pass: the gateway never sends `x-bf-passthrough-extra-params`
   (and strips any `x-bf-*` a caller sends). Count-token calls pass unchanged.
 - **Fallbacks are refused (review S5).** A top-level `fallbacks` in any case would let Bifrost

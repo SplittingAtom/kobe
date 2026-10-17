@@ -503,7 +503,9 @@ export async function updateCatalogEntry(
     const reasoning = input.reasoning ?? before.reasoning;
     const model = input.model ?? before.model;
     const thinking = checkCatalogThinking(
-      input.thinking === undefined ? undefined : policyOf(input.thinking, model),
+      input.thinking === undefined
+        ? undefined
+        : policyOf(input.thinking, model, catalogThinking(before)),
       catalogThinking(before),
       provider.kind,
       reasoning,
