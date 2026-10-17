@@ -9,6 +9,7 @@ import type {
   ApprovalStatus,
   JsonObject,
   PolicyReason,
+  RememberScope,
   RiskClass,
   RunStatus,
   ThreadStatus,
@@ -229,8 +230,35 @@ export interface ApprovalView {
 
 export interface ApprovalDecisionBody {
   readonly decision: "allow" | "deny";
-  /** "Always allow this tool": a remember-rule for exactly this tool, optionally expiring. */
-  readonly remember?: { readonly toolGlob: string; readonly expiresIn?: number | undefined };
+  /**
+   * "Remember": a rule for exactly this tool with a scope (KOBE-289). `exact` pins this action;
+   * the server derives the pattern and the expiry itself and refuses what the team's limits don't
+   * allow.
+   */
+  readonly remember?: {
+    readonly toolGlob: string;
+    readonly scope: RememberScope;
+    readonly exact?: boolean | undefined;
+  };
+}
+
+/** `GET /v1/approvals/{id}/remember` (KOBE-289): what the card may offer, as the server decided. */
+export interface RememberOptions {
+  readonly approvalId: string;
+  readonly runId: string;
+  readonly canRemember: boolean;
+  readonly reason: string | null;
+  readonly choices: readonly {
+    readonly scope: RememberScope;
+    readonly label: string;
+    readonly expiresAt: string | null;
+  }[];
+  readonly timeZone: string;
+  /** The exact-action pattern (JSON pointer → literal glob), kept verbatim. */
+  readonly exact: { readonly argPattern: Readonly<Record<string, string>> } | null;
+  readonly exactOnly: boolean;
+  readonly approveAll: { readonly approvalIds: readonly string[] } | null;
+  readonly approveAllReason: string | null;
 }
 
 /** A member's request to enable a blocked egress domain (KOBE-39, `/v1/egress/requests`). */

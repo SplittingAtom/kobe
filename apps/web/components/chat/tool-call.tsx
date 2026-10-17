@@ -2,6 +2,7 @@
 
 import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { BanIcon, CheckIcon, CircleAlertIcon, ClockIcon, LoaderIcon } from "lucide-react";
+import { REMEMBER_SCOPE_LABELS } from "@kobe/protocol";
 import type { ComponentType } from "react";
 import { formatDuration, inputSummary } from "../../lib/chat/history";
 import type { ToolActivity } from "../../lib/chat/live";
@@ -195,6 +196,12 @@ function ToolCardSlots({
             ))}
           </ul>
         </div>
+      )}
+      {activity.ruleApplied && (
+        <p className={styles.notice} role="note">
+          Allowed by your rule ({REMEMBER_SCOPE_LABELS[activity.ruleApplied.scope]}). You can revoke
+          it in My area, Approvals.
+        </p>
       )}
       {activity.egressBlocked.map((blocked) => (
         <EgressBlocked key={blocked.domain} payload={blocked} />

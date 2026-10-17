@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KobeEventPayload } from "@kobe/protocol";
@@ -79,17 +79,19 @@ describe("approval card", () => {
     expect(screen.getByText("Waiting for approval")).toBeTruthy();
   });
 
-  it("Allow with 'always allow' posts the remember-rule for exactly this tool, then shows it", async () => {
+  it("Allow with 'remember' posts the scope the member chose for exactly this tool", async () => {
     const { user } = await waitingRun();
-    await user.click(screen.getByRole("checkbox", { name: /Always allow/ }));
-    await user.selectOptions(screen.getByLabelText("Remember for"), "for 30 days");
+    const box = await screen.findByRole("checkbox", { name: /Remember: allow/ });
+    await user.click(box);
+    await user.selectOptions(screen.getByLabelText("Remember for"), "this conversation");
+    expect(screen.getByText("Ends with this conversation.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Allow" }));
-    await screen.findByText(/Approved\. Kobe will not ask again/);
+    await screen.findByText(/Approved and remembered\. You can revoke it in My area, Approvals\./);
     expect(decisions()).toEqual([
       expect.objectContaining({
         path: `/v1/approvals/${APPROVAL}`,
         team: fake.teamId,
-        body: { decision: "allow", remember: { tool_glob: TOOL, expires_in: 30 * 24 * 3600 } },
+        body: { decision: "allow", remember: { tool_glob: TOOL, scope: "thread" } },
       }),
     ]);
     expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
@@ -98,10 +100,127 @@ describe("approval card", () => {
 
   it("Deny says the tool did not run; remember is never sent with a deny", async () => {
     const { user } = await waitingRun();
-    await user.click(screen.getByRole("checkbox", { name: /Always allow/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /Remember: allow/ }));
     await user.click(screen.getByRole("button", { name: "Deny" }));
     await screen.findByText("Denied. The tool did not run.");
     expect(decisions().map((r) => r.body)).toEqual([{ decision: "deny" }]);
+  });
+
+  it("offers only the choices the server allows (the team's limits), nothing else", async () => {
+    fake.rememberOptions = (id) => ({
+      approval_id: id,
+      run_id: "r",
+      can_remember: true,
+      reason: null,
+      choices: [
+        { scope: "thread", label: "this conversation", expires_at: null },
+        { scope: "today", label: "until end of today", expires_at: "2026-10-17T22:00:00.000Z" },
+      ],
+      time_zone: "Europe/Berlin",
+      exact: null,
+      exact_only: false,
+      approve_all: null,
+      approve_all_reason: "Only one approval is waiting in this run.",
+    });
+    const { user } = await waitingRun();
+    await user.click(await screen.findByRole("checkbox", { name: /Remember: allow/ }));
+    const select = screen.getByLabelText("Remember for") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "this conversation",
+      "until end of today",
+    ]);
+    await user.selectOptions(select, "until end of today");
+    expect(screen.getByText(/Ends at midnight \(Europe\/Berlin\)/)).toBeTruthy();
+    // No exact pattern from the server: the choice isn't offered.
+    expect(screen.queryByRole("checkbox", { name: /Only this exact action/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve all waiting/ })).toBeNull();
+  });
+
+  it("shows the reason instead when the team allows no remembering", async () => {
+    fake.rememberOptions = (id) => ({
+      approval_id: id,
+      run_id: "r",
+      can_remember: false,
+      reason: "Your team doesn't allow remembering this approval.",
+      choices: [],
+      time_zone: "UTC",
+      exact: null,
+      exact_only: false,
+      approve_all: null,
+      approve_all_reason: null,
+    });
+    await waitingRun();
+    await screen.findByText("Your team doesn't allow remembering this approval.");
+    expect(screen.queryByRole("checkbox", { name: /Remember/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
+  });
+
+  it("'only this exact action' shows the server's pattern before saving and asks for it", async () => {
+    const { user } = await waitingRun();
+    await user.click(await screen.findByRole("checkbox", { name: /Remember: allow/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Only this exact action/ }));
+    const shown = screen.getByRole("list", { name: "Exact action to remember" });
+    expect(shown.textContent).toContain("/project is exactly OPS");
+    expect(shown.textContent).toContain("/summary is exactly Rotate keys");
+    await user.click(screen.getByRole("button", { name: "Allow" }));
+    await screen.findByText(/Approved and remembered/);
+    expect(decisions().map((r) => r.body)).toEqual([
+      { decision: "allow", remember: { tool_glob: TOOL, scope: "thread", exact: true } },
+    ]);
+  });
+
+  it("exact-only teams: the exact choice is ticked and can't be unticked", async () => {
+    const base = fake.rememberOptions;
+    fake.rememberOptions = (id) => ({ ...base(id), exact_only: true });
+    const { user } = await waitingRun();
+    await user.click(await screen.findByRole("checkbox", { name: /Remember: allow/ }));
+    const exact = screen.getByRole("checkbox", {
+      name: /Only this exact action/,
+    }) as HTMLInputElement;
+    expect(exact.checked).toBe(true);
+    expect(exact.disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Allow" }));
+    await screen.findByText(/Approved and remembered/);
+    expect(decisions()[0]?.body).toMatchObject({ remember: { exact: true } });
+  });
+
+  it("'Approve all waiting' allows every waiting call of the run after confirming", async () => {
+    const { user, runId } = await waitingRun();
+    fake.agent.toolCall(runId, "tc2", TOOL, { project: "OPS", summary: "Second" }, "m1");
+    const second = "00000000-0000-4000-8000-000900000002";
+    fake.requestApproval(runId, asked({ approval_id: second, tool_call_id: "tc2" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("group", { name: /Approval needed/ })).toHaveLength(2),
+    );
+    // The card that loads its options after the second request offers it.
+    const cards = screen.getAllByRole("group", { name: /Approval needed/ });
+    const last = must(cards[1]);
+    await user.click(await within(last).findByRole("button", { name: "Approve all waiting (2)" }));
+    const confirm = within(last).getByRole("group", { name: "Approve all waiting" });
+    expect(confirm.textContent).toMatch(/Allow all 2 calls waiting in this run\?/);
+    await user.click(within(confirm).getByRole("button", { name: "Allow all 2" }));
+    await waitFor(() => expect(screen.getAllByText("Approved.")).toHaveLength(2));
+    const all = fake.requests.find((r) => r.path === "/v1/approvals/approve-all");
+    expect(all?.body).toEqual({ run_id: runId, approval_ids: [APPROVAL, second].sort() });
+  });
+
+  it("a call a remembered approval allowed says so on its tool card", async () => {
+    const t = fake.addThread("Ops");
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "file a ticket{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const runId = must(fake.activeRun(t)).run_id;
+    await streaming(fake, runId);
+    fake.agent.toolCall(runId, "tc9", TOOL, { project: "OPS" }, "m1");
+    fake.emit(runId, "policy.rule_applied", {
+      tool_call_id: "tc9",
+      tool: TOOL,
+      rule_id: "00000000-0000-4000-8000-0000000000aa",
+      scope: "today",
+    });
+    const note = await screen.findByText(/Allowed by your rule \(until end of today\)\./);
+    expect(note.textContent).toMatch(/revoke it in My area, Approvals/);
   });
 
   it("an expiry from the server ends the card visibly", async () => {
@@ -176,11 +295,37 @@ describe("ApprovalCard", () => {
     expect(title).not.toContain("\u0435");
   });
 
-  it("does not offer 'Always allow' for destructive tools", () => {
+  it("never offers 'remember' for destructive tools, whatever the options say", async () => {
+    const withOptions = {
+      ...api,
+      rememberOptions: vi.fn(() =>
+        Promise.resolve({
+          ok: true as const,
+          status: 200,
+          data: {
+            approvalId: APPROVAL,
+            runId: "r",
+            canRemember: true,
+            reason: null,
+            choices: [{ scope: "day" as const, label: "for 1 day", expiresAt: null }],
+            timeZone: "UTC",
+            exact: null,
+            exactOnly: false,
+            approveAll: null,
+            approveAllReason: null,
+          },
+        }),
+      ),
+    };
     render(
-      <ApprovalCard requested={asked({ risk: "destructive" })} resolved={undefined} api={api} />,
+      <ApprovalCard
+        requested={asked({ risk: "destructive" })}
+        resolved={undefined}
+        api={withOptions}
+      />,
     );
-    expect(screen.queryByRole("checkbox", { name: /Always allow/ })).toBeNull();
+    await waitFor(() => expect(withOptions.rememberOptions).toHaveBeenCalled());
+    expect(screen.queryByRole("checkbox", { name: /Remember/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
   });
 

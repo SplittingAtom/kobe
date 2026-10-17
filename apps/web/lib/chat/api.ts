@@ -25,6 +25,7 @@ import type { ThreadMarkers } from "./markers";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
+  RememberOptions,
   EgressRequest,
   EntryPage,
   PendingMessages,
@@ -218,6 +219,13 @@ export interface ChatApi {
   getApproval(approvalId: string): Promise<ApiResult<ApprovalView>>;
   /** `POST /v1/approvals/{id}` (§6.1): allow or deny, optionally remembering an allow. */
   decideApproval(approvalId: string, body: ApprovalDecisionBody): Promise<ApiResult<ApprovalView>>;
+  /** What the card may offer for a pending approval (KOBE-289; the server decides it). */
+  rememberOptions(approvalId: string): Promise<ApiResult<RememberOptions>>;
+  /** "Approve all waiting" (KOBE-289): each listed approval of the run, signed on its own. */
+  approveAll(
+    runId: string,
+    approvalIds: readonly string[],
+  ): Promise<ApiResult<{ readonly approvals: readonly ApprovalView[] }>>;
   /**
    * Request access (KOBE-39): ask the team's admins to enable a blocked domain (`POST
    * /v1/egress/requests`); 201 new, 200 already pending, 409 `already_enabled`/`not_in_ceiling`.
@@ -392,11 +400,16 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           : {
               remember: {
                 tool_glob: body.remember.toolGlob,
-                ...(body.remember.expiresIn === undefined
-                  ? {}
-                  : { expires_in: body.remember.expiresIn }),
+                scope: body.remember.scope,
+                ...(body.remember.exact ? { exact: true } : {}),
               },
             }),
+      }),
+    rememberOptions: (id) => get(`/v1/approvals/${enc(id)}/remember`),
+    approveAll: (runId, approvalIds) =>
+      send("POST", "/v1/approvals/approve-all", {
+        run_id: runId,
+        approval_ids: [...approvalIds],
       }),
   };
 }
