@@ -1,0 +1,555 @@
+# Third-party inventory source (KOBE-375). `pnpm licenses:update` renders THIRD_PARTY_LICENSES.md
+# and NOTICE from this file, pnpm-lock.yaml, the pnpm licenses report, the committed image reports
+# (images/*/third-party-licenses.json) and the exception files; `pnpm license:check` fails when
+# they are stale. Add a row here when you add an image (Dockerfile FROM, chart, dev or CI
+# manifest), a chart dependency or an external service; the check names what is missing.
+#
+# Row fields: id, component, version, license (SPDX), use (linked / bundled / separate process /
+# optional / external / dev-only / test-only), where, link (license text), images (normalised
+# repositories the row covers: no tag, digest or docker.io/library prefix). A license outside
+# the MIT/Apache/BSD/MPL family also needs `reason` and `approval: {by, on, ref}`; never add an
+# approval Chris has not given (spec D3).
+
+notice: |
+  Kobe
+  Copyright 2026 SplittingAtom
+
+  This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+npm:
+  title: "Web and services: npm packages (pnpm workspace)"
+  intro: >-
+    Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled"
+    packages are in the production dependencies of a deployable and ship in its image (the
+    services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent
+    in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped.
+    Checked by `pnpm license:check` (CI `checks`).
+  exceptions: tools/license-check/license-exceptions.json
+  # Importers whose production dependencies ship in an image, and the image.
+  deployables:
+    apps/web: web
+    services/server: server
+    services/mcp-proxy: mcp-proxy
+    services/egress-proxy: egress-proxy
+    services/model-gateway: model-gateway
+    services/sandbox-agent: sandbox
+  # Native builds that only install on a matching OS/CPU; the license is the parent project's
+  # and is compared with the report wherever the package is installed.
+  platformPackages:
+    - pattern: "@esbuild/*"
+      license: MIT
+      link: https://github.com/evanw/esbuild/blob/main/LICENSE.md
+    - pattern: "@next/swc-*"
+      license: MIT
+      link: https://github.com/vercel/next.js/blob/canary/license.md
+    - pattern: "@rolldown/binding-*"
+      license: MIT
+      link: https://github.com/rolldown/rolldown/blob/main/LICENSE
+    - pattern: "@tailwindcss/oxide-*"
+      license: MIT
+      link: https://github.com/tailwindlabs/tailwindcss/blob/main/LICENSE
+    - pattern: "@turbo/*"
+      license: MIT
+      link: https://github.com/vercel/turborepo/blob/main/LICENSE
+    - pattern: "lightningcss-*"
+      license: MPL-2.0
+      link: https://github.com/parcel-bundler/lightningcss/blob/master/LICENSE
+    - pattern: fsevents
+      license: MIT
+      link: https://github.com/fsevents/fsevents/blob/master/LICENSE
+    - pattern: "@napi-rs/wasm-runtime"
+      license: MIT
+      link: https://github.com/napi-rs/napi-rs/blob/main/LICENSE
+    - pattern: "@emnapi/*"
+      license: MIT
+      link: https://github.com/toyobayashi/emnapi/blob/main/LICENSE
+    - pattern: "@tybys/wasm-util"
+      license: MIT
+      link: https://github.com/toyobayashi/wasm-util/blob/main/LICENSE
+    - pattern: "@oxc-project/*"
+      license: MIT
+      link: https://github.com/oxc-project/oxc/blob/main/LICENSE
+  # Packages whose reported license depends on the pnpm store (no license field in package.json).
+  licenseOverrides:
+    - package: khroma@2.1.0
+      license: MIT
+      reportedAs: [Unknown]
+      reason: MIT in the repository and npm metadata; package.json has no license field (KOBE-130).
+
+imageReports:
+  - id: sandbox
+    title: "Sandbox image: Python and npm packages"
+    intro: >-
+      What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sandbox`): the
+      Python data stack (`images/sandbox/requirements.txt`), Pi and its dependencies
+      (`images/sandbox/pi/package-lock.json`), kobe-sandbox-agent's production dependencies and
+      the npm CLI. The committed report is `images/sandbox/third-party-licenses.json`; CI
+      `sandbox-image` compares it with the built image and runs the policy check on it.
+    image: sandbox
+    report: images/sandbox/third-party-licenses.json
+    exceptions: images/sandbox/license-exceptions.json
+    locations:
+      python: Python site-packages
+      /opt/pi: Pi (/opt/pi)
+      /opt/kobe/sandbox-agent: kobe-sandbox-agent
+      /usr/local/lib: npm CLI (/usr/local/lib/node_modules)
+  - id: orbit-eval
+    title: "Orbit eval image: Python packages"
+    intro: >-
+      What the same script finds in the Orbit eval image (`kobe-orbit-eval`, KOBE-92): Orbit
+      v1.0.3 and Inspect AI with their dependencies (`ci/orbit/requirements.txt`,
+      `images/orbit-eval/orbit-requirements.txt`). The committed report is
+      `images/orbit-eval/third-party-licenses.json`; CI `orbit-eval-image` compares it with the
+      built image.
+    image: orbit-eval
+    report: images/orbit-eval/third-party-licenses.json
+    exceptions: images/orbit-eval/license-exceptions.json
+    locations:
+      python: Python site-packages
+
+npmLockfiles:
+  - id: e2e-browser
+    title: "Playwright browser suite: npm packages"
+    path: e2e/browser/package-lock.json
+    section: dev
+    use: test-only
+    where: e2e/browser (run against a deployment, not shipped)
+
+sections:
+  - id: images
+    title: Container and base images
+    intro: >-
+      Base images of Kobe's own images (every Dockerfile FROM) and what they bring along. The Debian
+      packages are separate, unmodified programs that agents or the image invoke; Kobe does not
+      link against them. Native libraries that Python wheels bundle are listed here too.
+    rows:
+      - id: node-image
+        component: Node.js official image (`node`)
+        version: 24-slim (services, web); 22-trixie-slim, digest-pinned (sandbox build stages and the node binary in the sandbox)
+        license: MIT
+        use: bundled (base image; Node.js runs Kobe's services)
+        where: images web, server, mcp-proxy, egress-proxy, model-gateway, sandbox
+        link: https://github.com/nodejs/node/blob/main/LICENSE
+        images: [node]
+        reason: >-
+          Node.js is MIT; its LICENSE lists the licenses of the libraries it bundles. The slim
+          images are Debian-based (see the Debian base system row).
+      - id: python-image
+        component: Python official image (`python`), CPython 3.12
+        version: 3.12-slim-trixie, digest-pinned
+        license: Python-2.0
+        use: bundled (base image; separate process)
+        where: images sandbox, orbit-eval
+        link: https://docs.python.org/3.12/license.html
+        images: [python]
+        reason: >-
+          The Python interpreter is a separate program that runs agents' code and the Orbit
+          runner; the PSF license is permissive (BSD-style), not copyleft.
+      - id: debian-base
+        component: Debian 13 (trixie) / 12 (bookworm) base system (libc6, bash, coreutils, perl-base, ...)
+        version: as in the pinned base images
+        license: GPL-2.0-or-later AND LGPL-2.1-or-later AND MIT AND BSD-3-Clause
+        use: bundled (base image; separate programs and system libraries)
+        where: every Kobe image
+        link: https://www.debian.org/legal/licenses/
+        images: []
+        reason: >-
+          The operating system of the base images, shipped unmodified; Kobe's programs run on it
+          and use the C library through Node.js/Python, as every program on the system does.
+          Per-package copyright files are in /usr/share/doc/<package>/copyright in each image.
+      - id: debian-sandbox-tools
+        component: "Sandbox tools from Debian: git, less, procps"
+        version: git 1:2.47.3-0+deb13u1, less 668-1, procps 2:4.0.4-9
+        license: GPL-2.0-only AND (GPL-3.0-or-later OR BSD-2-Clause) AND GPL-2.0-or-later
+        use: bundled (separate process)
+        where: sandbox image
+        link: https://sources.debian.org/src/git/1:2.47.3-0+deb13u1/debian/copyright/
+        images: []
+        reason: >-
+          Separate, unmodified programs that agents invoke from the shell; Kobe does not link
+          against them, so GPL obligations stay with those programs (source from Debian).
+      - id: debian-sandbox-permissive
+        component: "Sandbox tools from Debian: curl, jq, ripgrep, file, zip, unzip, libcap2-bin, ca-certificates"
+        version: curl 8.14.1-2+deb13u7, jq 1.7.1-6+deb13u4, ripgrep 14.1.1-1+b4, file 1:5.46-5, zip 3.0-15+deb13u1, unzip 6.0-29+deb13u1, libcap2-bin 1:2.75-10+deb13u1+b3, ca-certificates 20250419
+        license: curl AND MIT AND (MIT OR Unlicense) AND BSD-2-Clause AND Info-ZIP AND (BSD-3-Clause OR GPL-2.0-only) AND MPL-2.0
+        use: bundled (separate process)
+        where: sandbox image
+        link: https://www.debian.org/legal/licenses/
+        images: []
+        reason: >-
+          Separate, unmodified programs (curl's and Info-ZIP's licenses are permissive, MIT-like);
+          setcap from libcap2-bin is used at build time only.
+      - id: tini
+        component: tini
+        version: 0.19.0-3+b8 (Debian)
+        license: MIT
+        use: bundled (separate process, PID 1)
+        where: sandbox image
+        link: https://github.com/krallin/tini/blob/master/LICENSE
+        images: []
+      - id: glibc-static
+        component: GNU C Library (glibc), statically linked into kobe-runas
+        version: Debian trixie libc6-dev (build stage)
+        license: LGPL-2.1-or-later
+        use: linked (static) into kobe-runas
+        where: sandbox image (/opt/kobe/bin/kobe-runas)
+        link: https://sourceware.org/git/?p=glibc.git;a=blob;f=COPYING.LIB
+        images: []
+        reason: >-
+          kobe-runas is built with -static-pie. LGPL-2.1 section 6 allows static linking when the
+          recipient can relink: kobe-runas's complete source (images/sandbox/runas) and build
+          (images/sandbox/Dockerfile) are public, and glibc's source is available from Debian.
+      - id: wheel-native-libs
+        component: Native libraries bundled in Python wheels (numpy.libs, pillow.libs, pyarrow)
+        version: as shipped in numpy 2.5.3, pillow 12.3.0, pyarrow 25.0.1
+        license: BSD-3-Clause AND GPL-3.0-or-later WITH GCC-exception-3.1 AND FTL AND IJG AND libpng-2.0 AND libtiff AND MIT AND BSD-2-Clause AND Zlib AND Apache-2.0
+        use: linked (by the Python packages that ship them)
+        where: sandbox image
+        link: https://github.com/python-pillow/Pillow/blob/main/LICENSE
+        images: []
+        reason: >-
+          numpy bundles OpenBLAS (BSD-3-Clause) and libgfortran/libquadmath (GPL with the GCC
+          Runtime Library Exception, which permits use in non-GPL programs); pillow bundles
+          FreeType (FTL, BSD-style), libjpeg-turbo (IJG), libpng, libtiff, libwebp, lcms2,
+          harfbuzz, zstd, brotli, libavif, openjpeg, xz and libxcb (permissive); pyarrow bundles
+          Apache Arrow's C++ libraries (Apache-2.0, NOTICE included in NOTICE).
+
+  - id: chart
+    title: Chart and cluster components
+    intro: >-
+      What the Helm chart deploys or needs on the cluster, and the services it talks to. None of
+      these are linked into Kobe's code. S3-compatible storage, SMTP, the audit SIEM and the
+      OpenTelemetry backend are services the site operates (chart values `s3`, `smtp`,
+      `auditForwarding`, `telemetry`); Kobe ships none of them. Every top-level key of
+      charts/kobe/values.yaml is classified in `chartValues` in tools/license-check/inventory.yaml.
+    rows:
+      - id: pi
+        component: Pi coding agent (`@earendil-works/pi-coding-agent`)
+        version: 1.0.0 (pinned in images/sandbox/pi/package-lock.json)
+        license: MIT
+        use: bundled (separate process, RPC mode under kobe-sandbox-agent)
+        where: sandbox image (/opt/pi); dependencies in the sandbox table
+        link: https://github.com/earendil-works/pi/blob/v1.0.0/LICENSE
+        images: []
+        reason: >-
+          Checked at v1.0.0: the repository has one LICENSE (MIT) at its root; the npm package
+          declares MIT; packages/mcp/LICENSES holds the MIT license of the MCP TypeScript SDK.
+      - id: agent-sandbox
+        component: agent-sandbox controller (kubernetes-sigs/agent-sandbox)
+        version: v1.0.4 (scripts/install-agent-sandbox.sh)
+        license: Apache-2.0
+        use: separate process (cluster prerequisite, installed by the site)
+        where: cluster (agent-sandbox-system); CRDs Sandbox, SandboxTemplate/Claim/WarmPool
+        link: https://github.com/kubernetes-sigs/agent-sandbox/blob/v1.0.4/LICENSE
+        images: []
+        reason: >-
+          Checked at v1.0.4: a single LICENSE (Apache-2.0) at the repository root, no NOTICE.
+      - id: gvisor
+        component: gVisor (runsc)
+        version: 20260928.0 (scripts/install-gvisor-k3s.sh, scripts/dev-cluster.sh)
+        license: Apache-2.0
+        use: separate process (container runtime, cluster prerequisite)
+        where: every node; RuntimeClass handler runsc
+        link: https://github.com/google/gvisor/blob/master/LICENSE
+        images: []
+      - id: kata
+        component: Kata Containers
+        version: chosen by the site (alternative to gVisor)
+        license: Apache-2.0
+        use: separate process (container runtime, optional)
+        where: nodes; RuntimeClass handler kata*
+        link: https://github.com/kata-containers/kata-containers/blob/main/LICENSE
+        images: []
+      - id: k3s
+        component: k3s (with its bundled Traefik ingress and kube-router network policy)
+        version: ">= 1.30 (CI and dev: v1.34.6-k3s1)"
+        license: Apache-2.0
+        use: external (the cluster Kobe is installed on)
+        where: cluster
+        link: https://github.com/k3s-io/k3s/blob/master/LICENSE
+        images: [rancher/k3s]
+      - id: traefik
+        component: Traefik ingress controller (bundled with k3s)
+        version: as shipped by k3s
+        license: MIT
+        use: external (ingress, `ingress.className`)
+        where: cluster
+        link: https://github.com/traefik/traefik/blob/master/LICENSE.md
+        images: []
+      - id: helm
+        component: Helm
+        version: "3.x"
+        license: Apache-2.0
+        use: external (installs the chart)
+        where: the operator's machine or CI
+        link: https://github.com/helm/helm/blob/main/LICENSE
+        images: []
+      - id: cert-manager
+        component: cert-manager
+        version: chosen by the site
+        license: Apache-2.0
+        use: optional, external (`ingress.tls.clusterIssuer`)
+        where: cluster
+        link: https://github.com/cert-manager/cert-manager/blob/master/LICENSE
+        images: []
+      - id: cnpg
+        component: CloudNativePG operator
+        version: chosen by the site
+        license: Apache-2.0
+        use: optional, external (`postgres.mode=cnpg`; the chart creates a Cluster resource)
+        where: cluster (cnpg-system)
+        link: https://github.com/cloudnative-pg/cloudnative-pg/blob/main/LICENSE
+        images: []
+      - id: postgres
+        component: PostgreSQL (CloudNativePG image `ghcr.io/cloudnative-pg/postgresql`, or an external server)
+        version: "17"
+        license: PostgreSQL
+        use: separate process (Kobe's database; bundled image only with postgres.mode=cnpg)
+        where: cluster (Kobe's namespace) or the site's server
+        link: https://www.postgresql.org/about/licence/
+        images: [ghcr.io/cloudnative-pg/postgresql]
+        reason: >-
+          A separate server Kobe talks to over the network; the PostgreSQL License is permissive
+          (MIT/BSD-like). The image's build files (cloudnative-pg/postgres-containers) are
+          Apache-2.0.
+      - id: bifrost
+        component: Bifrost model gateway (`maximhq/bifrost`)
+        version: v2.2.5, digest-pinned (images/bifrost/Dockerfile, chart `bifrost.image`)
+        license: Apache-2.0
+        use: separate process (pulled unmodified by the chart)
+        where: cluster (Kobe's namespace)
+        link: https://github.com/maximhq/bifrost/blob/transports/v2.2.5/LICENSE
+        images: [maximhq/bifrost]
+        reason: >-
+          Checked at transports/v2.2.5: a single LICENSE (Apache-2.0); Kobe uses none of the
+          enterprise features (docs/licensing.md). Re-check on every bump.
+      - id: clamav
+        component: ClamAV (`clamav/clamav`)
+        version: "1.4"
+        license: GPL-2.0-only
+        use: optional, separate process (off by default; `clamav.enabled`)
+        where: cluster (Kobe's namespace)
+        link: https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt
+        images: [clamav/clamav]
+        reason: >-
+          Runs as its own unmodified service image; the server talks to clamd over TCP (INSTREAM)
+          and links none of its code, so GPL obligations stay with ClamAV (spec D26).
+      - id: longhorn
+        component: Longhorn
+        version: chosen by the site
+        license: Apache-2.0
+        use: optional, external (`sandbox.workspace.longhornStrictLocal`)
+        where: cluster
+        link: https://github.com/longhorn/longhorn/blob/master/LICENSE
+        images: []
+      - id: rancher
+        component: Rancher
+        version: chosen by the site
+        license: Apache-2.0
+        use: optional, external (`rancher.enabled` grants one RBAC verb)
+        where: cluster management
+        link: https://github.com/rancher/rancher/blob/main/LICENSE
+        images: []
+      - id: langfuse
+        component: Langfuse (one possible OpenTelemetry tracing backend)
+        version: chosen by the site
+        license: MIT AND LicenseRef-Langfuse-Enterprise
+        use: optional, external (an OTLP endpoint in `telemetry`; not shipped by Kobe)
+        where: the site's own install
+        link: https://github.com/langfuse/langfuse/blob/main/LICENSE
+        images: []
+        reason: >-
+          Kobe only exports OTLP to an endpoint the site chooses and ships no Langfuse code or
+          image. Langfuse's core is MIT; its ee/ directories are under a commercial license that
+          only applies to the site's own Langfuse install.
+
+  - id: dev
+    title: Dev and test-only tools
+    intro: >-
+      Used to develop, test and run CI for Kobe; never shipped in an image or installed by the
+      chart.
+    rows:
+      - id: playwright
+        component: Playwright (`@playwright/test`)
+        version: 1.55.0
+        license: Apache-2.0
+        use: test-only
+        where: e2e/browser (packages below)
+        link: https://github.com/microsoft/playwright/blob/main/LICENSE
+        images: []
+      - id: mailpit
+        component: Mailpit (`axllent/mailpit`)
+        version: v1.31.3
+        license: MIT
+        use: dev-only (SMTP sink for the dev loop)
+        where: dev/mailpit.yaml (Tilt)
+        link: https://github.com/axllent/mailpit/blob/develop/LICENSE
+        images: [axllent/mailpit]
+      - id: k3d
+        component: k3d (and its k3d-proxy/k3d-tools images)
+        version: v5.9.0 (CI e2e)
+        license: MIT
+        use: dev-only, test-only (local and CI clusters)
+        where: scripts/dev-cluster.sh, .github/workflows/e2e.yml
+        link: https://github.com/k3d-io/k3d/blob/main/LICENSE.md
+        images: []
+      - id: tilt
+        component: Tilt
+        version: chosen by the developer
+        license: Apache-2.0
+        use: dev-only
+        where: Tiltfile
+        link: https://github.com/tilt-dev/tilt/blob/master/LICENSE
+        images: []
+      - id: postgres-dev
+        component: PostgreSQL official image (`postgres`)
+        version: "17"
+        license: PostgreSQL
+        use: dev-only, test-only (dev database, CI `db` jobs)
+        where: dev/postgres.yaml, .github/workflows/ci.yml
+        link: https://www.postgresql.org/about/licence/
+        images: [postgres]
+        reason: A separate server used by tests; the PostgreSQL License is permissive (MIT/BSD-like).
+      - id: seaweedfs
+        component: SeaweedFS (`chrislusf/seaweedfs`)
+        version: "4.48"
+        license: Apache-2.0
+        use: dev-only (S3 for the dev loop)
+        where: dev/s3.yaml
+        link: https://github.com/seaweedfs/seaweedfs/blob/master/LICENSE
+        images: [chrislusf/seaweedfs]
+      - id: busybox
+        component: BusyBox (`busybox`)
+        version: "1.37"
+        license: GPL-2.0-only
+        use: test-only (throwaway pods in e2e checks; dev-cluster preflight)
+        where: e2e/run.sh, scripts/dev-cluster.sh
+        link: https://git.busybox.net/busybox/tree/LICENSE
+        images: [busybox]
+        reason: >-
+          An unmodified upstream image run as a separate program in test clusters; never shipped
+          or distributed by Kobe.
+      - id: docker-dind
+        component: Docker Engine (`docker:dind`)
+        version: 29-dind
+        license: Apache-2.0
+        use: test-only (CI runner sidecar)
+        where: ci/runners/values.yaml
+        link: https://github.com/moby/moby/blob/master/LICENSE
+        images: [docker]
+      - id: actions-runner
+        component: GitHub Actions runner (`ghcr.io/actions/actions-runner`) and Actions Runner Controller charts
+        version: latest (runner); ARC scale-set charts per ci/runners/README.md
+        license: MIT AND Apache-2.0
+        use: test-only (self-hosted CI runners)
+        where: ci/runners
+        link: https://github.com/actions/runner/blob/main/LICENSE
+        images: [ghcr.io/actions/actions-runner]
+      - id: registry
+        component: Distribution registry (`registry`)
+        version: 3, digest-pinned
+        license: Apache-2.0
+        use: test-only (Docker Hub pull-through cache for CI)
+        where: ci/runners/dockerhub-mirror.yaml
+        link: https://github.com/distribution/distribution/blob/main/LICENSE
+        images: [registry]
+      - id: buildkit
+        component: BuildKit (`moby/buildkit`)
+        version: buildx-stable-1
+        license: Apache-2.0
+        use: test-only (CI image builds)
+        where: .github/workflows/e2e.yml, publish.yml
+        link: https://github.com/moby/buildkit/blob/master/LICENSE
+        images: [moby/buildkit]
+      - id: trivy
+        component: Trivy (aquasecurity/trivy-action)
+        version: action v0.36.0
+        license: Apache-2.0
+        use: test-only (CI vulnerability scan)
+        where: .github/workflows/sandbox-image.yml, orbit-eval-image.yml
+        link: https://github.com/aquasecurity/trivy/blob/main/LICENSE
+        images: []
+      - id: orbit-ci
+        component: Orbit (loader check in CI)
+        version: v1.0.3 (commit pinned in .github/workflows/ci.yml)
+        license: Apache-2.0
+        use: test-only (CI `orbit-loader`; the same Python dependencies as the Orbit eval image)
+        where: ci/orbit
+        link: https://github.com/wlanderson0/orbit/blob/main/LICENSE
+        images: []
+      - id: pnpm
+        component: pnpm
+        version: 12.8.1 (packageManager)
+        license: MIT
+        use: dev-only (package manager; also runs in the image build stages)
+        where: repository root, Dockerfile build stages
+        link: https://github.com/pnpm/pnpm/blob/main/LICENSE
+        images: []
+
+  - id: assets
+    title: Assets (icons and fonts)
+    intro: >-
+      The web UI ships no font files (it uses the system font stacks) and no images; its icons
+      come from lucide-react (in the npm table). Fonts reach the sandbox image only inside Python
+      packages, which use them to render charts and PDFs.
+    rows:
+      - id: lucide
+        component: Lucide icons (`lucide-react`)
+        version: 1.55.0
+        license: ISC
+        use: linked, bundled
+        where: web image
+        link: https://github.com/lucide-icons/lucide/blob/main/LICENSE
+        images: []
+        reason: Lucide is ISC; icons derived from Feather are MIT, as its LICENSE states.
+      - id: matplotlib-fonts
+        component: Fonts and font metrics in matplotlib (DejaVu, STIX, Computer Modern, PDF core-font metrics)
+        version: matplotlib 3.11.2
+        license: Bitstream-Vera AND OFL-1.1 AND LicenseRef-BaKoMa AND APAFML
+        use: bundled (data files of a Python package)
+        where: sandbox image (matplotlib/mpl-data/fonts)
+        link: https://github.com/matplotlib/matplotlib/tree/main/LICENSE
+        images: []
+        reason: >-
+          Font files read by matplotlib to draw charts, shipped unmodified inside its wheel with
+          their license files (LICENSE_DEJAVU, LICENSE_STIX); font licenses cover the fonts, not
+          the charts made with them.
+      - id: reportlab-fonts
+        component: Fonts in reportlab (Bitstream Vera, DarkGarden, Type 1 core-font substitutes)
+        version: reportlab 5.0.1
+        license: Bitstream-Vera AND GPL-2.0-or-later WITH Font-exception-2.0 AND BSD-3-Clause
+        use: bundled (data files of a Python package)
+        where: sandbox image (reportlab/fonts)
+        link: https://github.com/MrBitBucket/reportlab-mirror/blob/master/LICENSE
+        images: []
+        reason: >-
+          Font files shipped unmodified inside reportlab's wheel with their license files. The
+          DarkGarden font is GPL with the font exception, so PDFs that embed it are not covered by
+          the GPL; Kobe neither modifies nor links it.
+
+# Every top-level key of charts/kobe/values.yaml: "first-party" (Kobe's own components),
+# "site-provided" (a service the site operates; Kobe ships nothing) or the inventory rows it
+# brings in. A new key fails the check until it is classified here.
+chartValues:
+  global: first-party
+  isolation: [gvisor, kata]
+  sandbox: [agent-sandbox, pi, longhorn]
+  rancher: [rancher]
+  publicUrl: first-party
+  auth: first-party
+  smtp: site-provided
+  web: first-party
+  server: first-party
+  scheduler: first-party
+  mcpProxy: first-party
+  envelope: first-party
+  telemetry: [langfuse]
+  egressProxy: first-party
+  modelGateway: first-party
+  bifrost: [bifrost]
+  postgres: [cnpg, postgres]
+  retention: first-party
+  s3: site-provided
+  ingress: [traefik, cert-manager]
+  clamav: [clamav]
+  auditForwarding: site-provided

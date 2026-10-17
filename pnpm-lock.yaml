@@ -613,7 +613,11 @@ importers:
         specifier: ^8.18.2
         version: 8.18.2
 
-  tools/license-check: {}
+  tools/license-check:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
 packages:
 

@@ -15,6 +15,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "license:check": "turbo run license:check",
+    "licenses:update": "turbo run build --filter=@kobe/license-check && pnpm --filter @kobe/license-check run licenses:update",
     "images:check": "scripts/check-images.sh",
     "test:db": "turbo run test:db",
     "db:check": "pnpm --filter @kobe/db run db:check",
