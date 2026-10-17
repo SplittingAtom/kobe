@@ -63,6 +63,13 @@ export const agentEvalCases = pgTable(
     expectedBehaviour: text(),
     reviewedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Set by the retention pass when the case would have been purged but a legal hold keeps it
+     * (past the window, or its sharer's offboarding is due): from then on it looks purged for
+     * good, whatever the window or the membership later become (review R1). Set once, never
+     * cleared (custom migration `*_agent_eval_cases_hidden.sql`).
+     */
+    hiddenAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),

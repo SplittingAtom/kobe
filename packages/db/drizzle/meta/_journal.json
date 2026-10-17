@@ -841,6 +841,20 @@
       "when": 1792225593110,
       "tag": "0119_orbit_evals_cases_validate",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792227276094,
+      "tag": "0120_eval_case_hiding_and_fetch",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792227277269,
+      "tag": "0121_agent_eval_cases_hidden",
+      "breakpoints": true
     }
   ]
 }

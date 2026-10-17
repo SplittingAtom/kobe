@@ -109,6 +109,13 @@ export const orbitEvals = pgTable(
     /** Cases scored, and those that failed (null until a verdict, or with no cases). */
     caseScored: integer(),
     caseFailures: integer(),
+    /**
+     * Accepted cases left out of this eval, counted by reason (review R4), never which ones:
+     * `no_reviewer` = the team agent's owner can no longer review them. `{}`: none.
+     */
+    caseSkips: jsonb().$type<Record<string, number>>().notNull().default({}),
+    /** When the Job fetched its cases from the gateway: one fetch per eval (review R2). */
+    casesFetchedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp({ withTimezone: true }),
     finishedAt: timestamp({ withTimezone: true }),
@@ -138,6 +145,7 @@ export const orbitEvals = pgTable(
         AND (${t.status} <> 'errored' OR (${t.error} IS NOT NULL AND ${t.finishedAt} IS NOT NULL))
         AND (${t.version} IS NULL OR ${t.status} = 'passed')`,
     ),
+    // `orbit_evals_case_skips` (an object): SQL-only, NOT VALID then validated (`*_agent_eval_cases_hidden.sql`).
     // KOBE-276's `orbit_evals_cases` (case counts within the frozen set): SQL-only and NOT VALID
     // (`*_agent_eval_cases_rls.sql`), as the table already has rows.
     check("orbit_evals_error_len", sql`${t.error} IS NULL OR char_length(${t.error}) <= 2000`),
