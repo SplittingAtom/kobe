@@ -25,6 +25,7 @@ import {
   TableRow,
   TableRowHeader,
   TextInput,
+  eventTrigger,
   useConfirm,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
@@ -79,12 +80,15 @@ export function TeamInvitesPage() {
     }
   }
 
-  async function revoke(invite: TeamInvite, index: number) {
-    const yes = await confirm({
-      title: `Revoke the invitation to ${invite.email}?`,
-      description: "The link in their email stops working. You can invite them again later.",
-      confirmLabel: "Revoke",
-    });
+  async function revoke(invite: TeamInvite, index: number, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Revoke the invitation to ${invite.email}?`,
+        description: "The link in their email stops working. You can invite them again later.",
+        confirmLabel: "Revoke",
+      },
+      trigger,
+    );
     if (!yes) return;
     const done = await mutation.run(
       () => revokeTeamInvite(teamId, invite.id),
@@ -172,7 +176,7 @@ export function TeamInvitesPage() {
                             variant="danger"
                             data-revoke=""
                             disabled={mutation.pending}
-                            onClick={() => void revoke(i, index)}
+                            onClick={(e) => void revoke(i, index, eventTrigger(e))}
                           >
                             Revoke
                             <span className="sr-only"> invitation to {i.email}</span>

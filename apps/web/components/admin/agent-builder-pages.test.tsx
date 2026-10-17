@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
@@ -179,6 +179,65 @@ describe("Agent builder: edit and publish", () => {
     await userEvent.click(screen.getByRole("button", { name: "Publish…" }));
     await userEvent.click(screen.getByRole("button", { name: "Publish v3" }));
     expect((await within(screen.getByRole("dialog")).findByRole("alert")).textContent).toMatch(
+      "Someone else changed this agent.",
+    );
+  });
+
+  it("gives the Publish button its focus back after Cancel and after Escape (review M1)", async () => {
+    stubApi(READ);
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const publish = await screen.findByRole("button", { name: "Publish…" });
+    await userEvent.click(publish);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" })),
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(publish));
+
+    await userEvent.click(publish);
+    await screen.findByRole("dialog");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(publish));
+  });
+
+  it("stays open on an outside press, and can't be closed while publishing (review S1)", async () => {
+    let answer: (value: Response) => void = () => {};
+    stubApi(READ);
+    const api = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) =>
+        url === "/v1/agents/a-1/publish"
+          ? new Promise<Response>((resolve) => {
+              answer = resolve;
+            })
+          : api(url, init),
+      ),
+    );
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Publish…" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish v3" }));
+    // In flight: Escape, Cancel and outside presses leave it open.
+    await userEvent.keyboard("{Escape}");
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(
+      (within(dialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    answer(
+      new Response(
+        JSON.stringify({ code: "revision_mismatch", message: "Someone else changed this agent." }),
+        { status: 412 },
+      ),
+    );
+    // The refusal shows in the dialog that is still open.
+    expect((await within(dialog).findByRole("alert")).textContent).toMatch(
       "Someone else changed this agent.",
     );
   });

@@ -21,6 +21,7 @@ import {
   PageHeader,
   Radio,
   useConfirm,
+  eventTrigger,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
@@ -100,12 +101,15 @@ function ConnectorCard({
     if (done) onChanged();
   }
 
-  async function disable() {
-    const yes = await confirm({
-      title: `Disable ${c.name} for the team?`,
-      description: "Its tools stop being offered to agents.",
-      confirmLabel: `Disable ${c.name}`,
-    });
+  async function disable(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Disable ${c.name} for the team?`,
+        description: "Its tools stop being offered to agents.",
+        confirmLabel: `Disable ${c.name}`,
+      },
+      trigger,
+    );
     if (!yes) return;
     const done = await mutation.run(
       () => disableTeamConnector(teamId, c.id),
@@ -172,7 +176,11 @@ function ConnectorCard({
             </Button>
           )}
           {c.enabled ? (
-            <Button variant="danger" disabled={mutation.pending} onClick={() => void disable()}>
+            <Button
+              variant="danger"
+              disabled={mutation.pending}
+              onClick={(e) => void disable(eventTrigger(e))}
+            >
               Disable<span className="sr-only"> {c.name}</span>
             </Button>
           ) : null}

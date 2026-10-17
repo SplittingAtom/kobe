@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
+  eventTrigger,
   useConfirm,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
@@ -72,15 +73,18 @@ function ModelsTable({
   const enabled = data.models.filter((m) => m.enabled);
   const defaultModel = data.models.find((m) => m.alias === data.default);
 
-  async function toggle(m: TeamModel) {
+  async function toggle(m: TeamModel, trigger: HTMLElement | null) {
     if (m.enabled) {
-      const yes = await confirm({
-        title: `Disable ${modelName(m)}?`,
-        description: m.isDefault
-          ? "It is the team's default: conversations without a chosen model can't run until you pick another default. Conversations that chose it stop too."
-          : "Conversations that chose it stop until they pick another model.",
-        confirmLabel: `Disable ${modelName(m)}`,
-      });
+      const yes = await confirm(
+        {
+          title: `Disable ${modelName(m)}?`,
+          description: m.isDefault
+            ? "It is the team's default: conversations without a chosen model can't run until you pick another default. Conversations that chose it stop too."
+            : "Conversations that chose it stop until they pick another model.",
+          confirmLabel: `Disable ${modelName(m)}`,
+        },
+        trigger,
+      );
       if (!yes) return;
     }
     const done = await mutation.run(
@@ -151,7 +155,7 @@ function ModelsTable({
                   label={<span className="sr-only">{modelName(m)} enabled</span>}
                   checked={m.enabled}
                   disabled={mutation.pending}
-                  onChange={() => void toggle(m)}
+                  onChange={(e) => void toggle(m, eventTrigger(e))}
                 />
               </TableCell>
               <TableCell>

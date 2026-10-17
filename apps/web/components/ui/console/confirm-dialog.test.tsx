@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { useConfirm } from "./confirm-dialog";
+import { eventTrigger, useConfirm } from "./confirm-dialog";
 
 /**
  * KOBE-294 (ac-2): the console's confirm dialog. A modal alert dialog named by its question,
@@ -115,6 +115,45 @@ describe("focus and lifecycle (review S3, nits)", () => {
     await waitFor(() => expect(answers).toEqual([true]));
     expect(screen.queryByRole("button", { name: "Remove Ada" })).toBeNull();
     await waitFor(() => expect(document.activeElement?.id).toBe("console-main"));
+  });
+
+  it("returns focus to the control passed as the trigger, though a mouse click left it unfocused", async () => {
+    // Safari and macOS Firefox: clicking a button doesn't focus it (fireEvent moves no focus).
+    function Ask() {
+      const [confirm, dialog] = useConfirm();
+      return (
+        <div data-kobe-console="">
+          <button
+            type="button"
+            onClick={(e) =>
+              void confirm({ title: "Disable jira?", confirmLabel: "Disable" }, eventTrigger(e))
+            }
+          >
+            Disable jira
+          </button>
+          {dialog}
+        </div>
+      );
+    }
+    render(<Ask />);
+    const trigger = screen.getByRole("button", { name: "Disable jira" });
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("alertdialog", { name: "Disable jira?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("a press outside the dialog doesn't answer it", async () => {
+    const dialog = await (async () => {
+      render(<Remove onAnswer={() => {}} />);
+      await userEvent.click(screen.getByRole("button", { name: "Remove Ada" }));
+      return screen.findByRole("alertdialog", { name: "Remove Ada?" });
+    })();
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(document.body);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
   });
 
   it("an unanswered question resolves false when the component unmounts", async () => {

@@ -246,7 +246,7 @@ function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly are
           onChange={(files: readonly DraftFile[]) => set({ files })}
         />
         {errors.form && (
-          <p className="m-0 mt-2 text-sm font-medium text-console-danger">
+          <p role="alert" className="m-0 mt-2 text-sm font-medium text-console-danger">
             {errors.form.join(" ")}
           </p>
         )}

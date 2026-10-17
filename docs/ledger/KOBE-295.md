@@ -86,6 +86,23 @@ border; empty lists show an `EmptyState` box instead of a sentence; warnings and
   without the empty table. **Break-glass:** banners are warn Notices; "no access now" is an info
   Notice; the approval line sits under the admin's name in muted text.
 
+## Review fixes (coordinator review, 2026-10-16)
+
+- **M1:** the publish dialog moves focus in Radix's `onCloseAutoFocus` (the trap had undone the
+  builder's synchronous `focus()`): the Publish button after Cancel, Escape or a publish; the
+  "Safety evaluation" heading while an evaluation it started runs; else `#console-main`. Tests for
+  Cancel and Escape (fail on the old code).
+- **S1:** an outside press never closes it; while publishing, Escape and Cancel don't either, so a
+  refusal shows in the dialog (test). The only other console dialog is the AlertDialog confirm,
+  which ignores outside presses (now pinned by a test).
+- **S2:** `confirm(options, trigger)` takes the asking control (`eventTrigger(e)`: the clicked
+  control, or a form's submit button); every caller passes it; without one, `document.body` is
+  never used as the return target. Test with a click that leaves focus on the body.
+- **Nits:** form-level schema errors are `role="alert"` (builder, skill editor); the publish
+  dialog's description is its first paragraph only; budget class checks are literal; a table's
+  wrapper is a named, focusable region only while it overflows (ResizeObserver), so tables that
+  fit add no tab stop or landmark. The Site budget label mismatch goes with KOBE-296.
+
 ## Not migrated / left for KOBE-296
 
 - Site console and My-area pages (they still import `admin.module.css`); they render the shared
@@ -100,6 +117,6 @@ border; empty lists show an `EmptyState` box instead of a sentence; warnings and
   confirming" added for members, suspend, restore, skill approve, models, budgets, egress
   headers, policy, retention). Screenshots: Chris to run `consoles.spec.ts` against gate1 after
   the G7 deploy and compare with the baseline; intended diffs are listed above.
-- **ac-3 (partly):** web unit tests 159 files / 1561 tests green; `pnpm lint`, web typecheck,
+- **ac-3 (partly):** web unit tests 159 files / 1566 tests green; `pnpm lint`, web typecheck,
   `pnpm format:check`, `next build` and `scripts/check-public-hygiene.sh` ok (2026-10-16). The
   gate1 Playwright run is pending the deploy. No new dependencies.

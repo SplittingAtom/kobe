@@ -10,7 +10,15 @@ import {
   type RetentionPeriod,
   type TeamRetention,
 } from "../../../lib/admin/api/team/retention";
-import { Button, ChoiceGroup, Notice, PageHeader, Radio, useConfirm } from "../../ui/console";
+import {
+  Button,
+  ChoiceGroup,
+  Notice,
+  PageHeader,
+  Radio,
+  useConfirm,
+  eventTrigger,
+} from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
@@ -56,14 +64,18 @@ function RetentionForm({
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const trigger = eventTrigger(e);
     if (
       RANK[period] < RANK[retention.effective] &&
-      !(await confirm({
-        title: `Keep conversations for ${periodText(period)} only?`,
-        description:
-          "In 7 days, older ones start being deleted for good every night. Members are told and can export theirs first.",
-        confirmLabel: `Keep for ${periodText(period)}`,
-      }))
+      !(await confirm(
+        {
+          title: `Keep conversations for ${periodText(period)} only?`,
+          description:
+            "In 7 days, older ones start being deleted for good every night. Members are told and can export theirs first.",
+          confirmLabel: `Keep for ${periodText(period)}`,
+        },
+        trigger,
+      ))
     ) {
       return;
     }

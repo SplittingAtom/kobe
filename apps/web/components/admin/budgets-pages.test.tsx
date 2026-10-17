@@ -89,13 +89,13 @@ describe("budget usage colours (KOBE-301)", () => {
       "[data-budget-level]",
     );
     expect(warn?.getAttribute("data-budget-level")).toBe("warn");
-    expect(warn?.className).toBe(BUDGET_LEVEL_CLASS.warn);
+    expect(warn?.className).toBe("text-status-attention");
     expect(warn?.querySelector("svg[aria-hidden]")).not.toBeNull();
     const full = must(screen.getAllByText(/1M of 1M tokens \(100 %\)/)[0]).closest(
       "[data-budget-level]",
     );
     expect(full?.getAttribute("data-budget-level")).toBe("full");
-    expect(full?.className).toBe(BUDGET_LEVEL_CLASS.full);
+    expect(full?.className).toBe("font-semibold text-status-failed");
     expect(full?.textContent).toContain("used up");
     // Below 80 %: plain.
     expect(

@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
+  eventTrigger,
   useConfirm,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
@@ -39,16 +40,19 @@ export function MembersPage() {
   // Bumped after every role change so a refused change resets the row's select.
   const [generationKey, setGenerationKey] = useState(0);
 
-  async function changeRole(member: TeamMember, role: TeamRole) {
+  async function changeRole(member: TeamMember, role: TeamRole, trigger: HTMLElement | null) {
     const self = member.userId === access.user.id;
     if (
       self &&
       role !== "team_admin" &&
-      !(await confirm({
-        title: "Change your own role?",
-        description: "You'll lose the team console.",
-        confirmLabel: "Change my role",
-      }))
+      !(await confirm(
+        {
+          title: "Change your own role?",
+          description: "You'll lose the team console.",
+          confirmLabel: "Change my role",
+        },
+        trigger,
+      ))
     ) {
       reload();
       return;
@@ -65,7 +69,7 @@ export function MembersPage() {
     }
   }
 
-  async function remove(member: TeamMember) {
+  async function remove(member: TeamMember, trigger: HTMLElement | null) {
     const self = member.userId === access.user.id;
     const yes = await confirm(
       self
@@ -79,6 +83,7 @@ export function MembersPage() {
             description: "They lose access at once.",
             confirmLabel: `Remove ${member.name}`,
           },
+      trigger,
     );
     if (!yes) return;
     const done = await mutation.run(
@@ -129,7 +134,7 @@ export function MembersPage() {
                       key={`${m.userId}:${m.role}:${generationKey}`}
                       member={m}
                       pending={mutation.pending}
-                      onSave={(role) => changeRole(m, role)}
+                      onSave={(role, trigger) => changeRole(m, role, trigger)}
                     />
                   </TableCell>
                   <TableCell>
@@ -140,7 +145,7 @@ export function MembersPage() {
                       size="sm"
                       variant="danger"
                       disabled={mutation.pending}
-                      onClick={() => void remove(m)}
+                      onClick={(e) => void remove(m, eventTrigger(e))}
                     >
                       {m.userId === access.user.id ? "Leave team" : "Remove"}
                       <span className="sr-only"> {m.name}</span>
@@ -165,7 +170,7 @@ function RoleCell({
 }: {
   readonly member: TeamMember;
   readonly pending: boolean;
-  readonly onSave: (role: TeamRole) => Promise<void>;
+  readonly onSave: (role: TeamRole, trigger: HTMLElement | null) => Promise<void>;
 }) {
   const [role, setRole] = useState<TeamRole>(member.role);
   const id = `role-${member.userId}`;
@@ -175,7 +180,7 @@ function RoleCell({
       aria-label={`Change the role of ${member.name}`}
       onSubmit={(e) => {
         e.preventDefault();
-        void onSave(role);
+        void onSave(role, eventTrigger(e));
       }}
     >
       <label htmlFor={id} className="sr-only">

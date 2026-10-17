@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
+  eventTrigger,
 } from "../../../ui/console";
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
@@ -41,7 +42,7 @@ export function VersionHistory({
   readonly canExport: boolean;
   readonly canRestore: boolean;
   readonly restoring: boolean;
-  readonly onRestore: (version: number) => void;
+  readonly onRestore: (version: number, trigger: HTMLElement | null) => void;
 }) {
   const { state } = useResource(() => listTeamAgentVersions(teamId, agentId));
   const more = useMutation();
@@ -119,7 +120,7 @@ export function VersionHistory({
                             <Button
                               size="sm"
                               disabled={restoring}
-                              onClick={() => onRestore(v.version)}
+                              onClick={(e) => onRestore(v.version, eventTrigger(e))}
                             >
                               {`Restore version ${v.version}`}
                             </Button>

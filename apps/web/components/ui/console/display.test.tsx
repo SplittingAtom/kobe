@@ -112,6 +112,31 @@ describe("Table", () => {
     expect(within(table).getByRole("cell").textContent).toBe("Member");
     // Wide tables scroll inside their wrapper, not the page.
     expect(table.parentElement?.className).toContain("overflow-x-auto");
+    // It fits (happy-dom lays out nothing): no extra tab stop or landmark.
+    expect(table.parentElement?.getAttribute("role")).toBeNull();
+    expect(table.parentElement?.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("becomes a named, focusable scroll region only while it is wider than its box", () => {
+    const wide = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    const box = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    try {
+      render(
+        <Table caption="Agent inventory">
+          <TableBody>
+            <TableRow>
+              <TableCell>Triage</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>,
+      );
+      const region = screen.getByRole("region", { name: "Agent inventory" });
+      expect(region.tabIndex).toBe(0);
+      expect(within(region).getByRole("table", { name: "Agent inventory" })).toBeTruthy();
+    } finally {
+      wide.mockRestore();
+      box.mockRestore();
+    }
   });
 });
 
@@ -244,7 +269,9 @@ describe("API for KOBE-295/296 (review S5)", () => {
     expect(screen.getByRole("heading", { level: 3, name: "v2" })).toBeTruthy();
   });
 
-  it("a table's scroll region is named and keyboard-focusable; numeric cells align end", () => {
+  it("a wide table's scroll region is named and keyboard-focusable; numeric cells align end", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
     render(
       <Table caption="Spend" hideCaption>
         <TableBody>
@@ -259,5 +286,6 @@ describe("API for KOBE-295/296 (review S5)", () => {
     expect(screen.getByRole("table", { name: "Spend" })).toBeTruthy();
     expect(region.querySelector("caption")?.className).toContain("sr-only");
     expect(screen.getByRole("cell").className).toContain("text-end");
+    vi.restoreAllMocks();
   });
 });

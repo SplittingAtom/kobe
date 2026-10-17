@@ -205,14 +205,17 @@ function Builder({
     return done;
   }
 
-  async function restore(version: number) {
+  async function restore(version: number, trigger: HTMLElement | null) {
     if (!agent) return;
-    const yes = await confirm({
-      title: `Restore version ${version} as the newest version?`,
-      ...(dirty ? { description: "Your unsaved changes in the form are replaced." } : {}),
-      confirmLabel: `Restore version ${version}`,
-      tone: "primary",
-    });
+    const yes = await confirm(
+      {
+        title: `Restore version ${version} as the newest version?`,
+        ...(dirty ? { description: "Your unsaved changes in the form are replaced." } : {}),
+        confirmLabel: `Restore version ${version}`,
+        tone: "primary",
+      },
+      trigger,
+    );
     if (!yes) return;
     setPublished(null);
     await mutation.run(
@@ -307,7 +310,7 @@ function Builder({
           />
         </Field>
         {errors.form && (
-          <p className="m-0 mt-2 text-sm font-medium text-console-danger">
+          <p role="alert" className="m-0 mt-2 text-sm font-medium text-console-danger">
             {errors.form.join(" ")}
           </p>
         )}
@@ -383,21 +386,23 @@ function Builder({
           teamId={teamId}
           agent={agent}
           warnings={validation.warnings}
-          onClose={() => {
-            setPublishing(false);
-            publishButton.current?.focus();
-          }}
+          // The Publish button, or, while an evaluation it started runs (the button is disabled),
+          // the evaluation's heading.
+          returnFocus={() =>
+            publishButton.current?.disabled === false
+              ? publishButton.current
+              : document.getElementById("eval-heading")
+          }
+          onClose={() => setPublishing(false)}
           onEvaluating={(started) => {
             setEvalStarted(started);
             setPublishing(false);
-            publishButton.current?.focus();
           }}
           onPublished={(result, version) => {
             apply(result.agent);
             setHistoryKey((k) => k + 1);
             setPublished(`Published v${version}.`);
             setPublishing(false);
-            publishButton.current?.focus();
           }}
         />
       )}
@@ -411,7 +416,7 @@ function Builder({
           canExport={canExport}
           canRestore={canPublish}
           restoring={mutation.pending}
-          onRestore={(v) => void restore(v)}
+          onRestore={(v, trigger) => void restore(v, trigger)}
         />
       )}
       {confirmDialog}

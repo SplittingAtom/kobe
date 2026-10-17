@@ -7,7 +7,7 @@ import {
   type InjectedHeader,
   type TeamEgressDomain,
 } from "../../../lib/admin/api/team/egress";
-import { Button, Field, TextInput, useConfirm } from "../../ui/console";
+import { Button, Field, TextInput, useConfirm, eventTrigger } from "../../ui/console";
 import type { Mutation } from "../use-resource";
 
 const MAX_HEADERS = 8;
@@ -58,11 +58,14 @@ export function DomainHeaders({
     }
   }
 
-  async function clear() {
-    const yes = await confirm({
-      title: `Remove the injected headers for ${domain.domain}?`,
-      confirmLabel: "Remove headers",
-    });
+  async function clear(trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove the injected headers for ${domain.domain}?`,
+        confirmLabel: "Remove headers",
+      },
+      trigger,
+    );
     if (!yes) return;
     const done = await mutation.run(
       () => clearDomainHeaders(teamId, domain.domain),
@@ -92,7 +95,7 @@ export function DomainHeaders({
             size="sm"
             variant="danger"
             disabled={mutation.pending}
-            onClick={() => void clear()}
+            onClick={(e) => void clear(eventTrigger(e))}
           >
             Remove headers<span className="sr-only"> for {domain.domain}</span>
           </Button>

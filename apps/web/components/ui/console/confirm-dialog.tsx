@@ -97,14 +97,48 @@ interface Pending {
 }
 
 /**
- * `confirm(options)` resolves true once the person confirms, false when they cancel or press
- * Escape, when another question replaces it, or when the component unmounts (a team switch
- * re-keys pages). Render the returned dialog once in the component:
+ * The control an event came from, for `confirm(options, trigger)`: the submit button of a form's
+ * submit event, otherwise the element the handler sits on. Safari and macOS Firefox don't focus a
+ * button on a mouse click, so `document.activeElement` can't say which control asked.
+ */
+export function eventTrigger(event: {
+  readonly currentTarget: EventTarget | null;
+  readonly nativeEvent?: Event;
+}): HTMLElement | null {
+  if (event.currentTarget instanceof HTMLFormElement) {
+    // A form can't take focus: its submit button, when the browser says which one it was.
+    const submitter =
+      typeof SubmitEvent !== "undefined" && event.nativeEvent instanceof SubmitEvent
+        ? event.nativeEvent.submitter
+        : null;
+    return submitter instanceof HTMLElement ? submitter : null;
+  }
+  return event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+}
+
+/** Where focus returns: the given trigger, else the focused element, never the bare body. */
+function returnTarget(trigger: EventTarget | null | undefined): HTMLElement | null {
+  const from = trigger ?? document.activeElement;
+  return from instanceof HTMLElement && from !== document.body ? from : null;
+}
+
+export type Confirm = (
+  options: ConfirmOptions,
+  /** The control that asks (`eventTrigger(e)`): focus returns to it when the dialog closes. */
+  trigger?: EventTarget | null,
+) => Promise<boolean>;
+
+/**
+ * `confirm(options, trigger)` resolves true once the person confirms, false when they cancel or
+ * press Escape, when another question replaces it, or when the component unmounts (a team switch
+ * re-keys pages). Pass the asking control (`eventTrigger(event)`) so focus returns to it even after
+ * a mouse click that didn't focus it; without one, the focused element is used. Render the
+ * returned dialog once in the component:
  *
  *   const [confirm, confirmDialog] = useConfirm();
- *   if (!(await confirm({ title: "Revoke the invitation?", confirmLabel: "Revoke" }))) return;
+ *   if (!(await confirm({ title: "Revoke the invitation?", confirmLabel: "Revoke" }, eventTrigger(e)))) return;
  */
-export function useConfirm(): readonly [(options: ConfirmOptions) => Promise<boolean>, ReactNode] {
+export function useConfirm(): readonly [Confirm, ReactNode] {
   // The last question stays (closed) after an answer, so the dialog never empties while closing.
   const [state, setState] = useState<{ readonly ask: Pending; readonly open: boolean } | null>(
     null,
@@ -120,14 +154,12 @@ export function useConfirm(): readonly [(options: ConfirmOptions) => Promise<boo
     [],
   );
 
-  const confirm = useCallback(
-    (options: ConfirmOptions) =>
+  const confirm = useCallback<Confirm>(
+    (options, trigger) =>
       new Promise<boolean>((resolve) => {
         unanswered.current?.(false);
         unanswered.current = resolve;
-        const active = document.activeElement;
-        const returnFocus = active instanceof HTMLElement ? active : null;
-        setState({ ask: { options, resolve, returnFocus }, open: true });
+        setState({ ask: { options, resolve, returnFocus: returnTarget(trigger) }, open: true });
       }),
     [],
   );

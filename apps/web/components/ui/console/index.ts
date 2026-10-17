@@ -14,7 +14,13 @@
  */
 export { Badge, type BadgeTone } from "./badge";
 export { Button, buttonVariants, type ButtonVariant } from "./button";
-export { ConfirmDialog, useConfirm, type ConfirmOptions } from "./confirm-dialog";
+export {
+  ConfirmDialog,
+  eventTrigger,
+  useConfirm,
+  type Confirm,
+  type ConfirmOptions,
+} from "./confirm-dialog";
 export { EmptyState } from "./empty-state";
 export { Field, FieldError, FormRow, RequiredMark, useFieldControl } from "./field";
 export { FOCUS_RING } from "./focus";

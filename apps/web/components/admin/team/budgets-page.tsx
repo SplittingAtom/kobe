@@ -32,6 +32,7 @@ import {
   TableRow,
   TableRowHeader,
   TextInput,
+  eventTrigger,
   useConfirm,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
@@ -204,12 +205,15 @@ function Body({
   const siteRpm = budgets.site.userRequestsPerMinute;
   const [confirm, confirmDialog] = useConfirm();
 
-  async function removeBudget(m: TeamBudgets["members"][number]) {
-    const yes = await confirm({
-      title: `Remove ${m.name ?? "this member"}'s budget?`,
-      description: "The default member budget applies to them again.",
-      confirmLabel: "Remove budget",
-    });
+  async function removeBudget(m: TeamBudgets["members"][number], trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove ${m.name ?? "this member"}'s budget?`,
+        description: "The default member budget applies to them again.",
+        confirmLabel: "Remove budget",
+      },
+      trigger,
+    );
     if (yes) await run(() => removeMemberBudget(teamId, m.userId), "Budget removed.");
   }
 
@@ -341,7 +345,11 @@ function Body({
                   <TableRowHeader>{m.name ?? m.email ?? m.userId}</TableRowHeader>
                   <Usage amounts={m} spent={m.spent} />
                   <TableCell>
-                    <Button size="sm" variant="danger" onClick={() => void removeBudget(m)}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={(e) => void removeBudget(m, eventTrigger(e))}
+                    >
                       Remove budget of {m.name ?? m.email ?? "member"}
                     </Button>
                   </TableCell>

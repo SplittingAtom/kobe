@@ -21,6 +21,7 @@ import {
   TableRow,
   TableRowHeader,
   useConfirm,
+  eventTrigger,
 } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { OrbitExportButton } from "./agent-builder/orbit-export-button";
@@ -95,15 +96,18 @@ function InventoryTable({
     );
   }
 
-  async function toggle(agent: InventoryAgent) {
+  async function toggle(agent: InventoryAgent, trigger: HTMLElement | null) {
     const next = agent.status === "active" ? "suspended" : "active";
     if (
       next === "suspended" &&
-      !(await confirm({
-        title: `Suspend ${agent.name}?`,
-        description: "It can't start new runs in this team.",
-        confirmLabel: `Suspend ${agent.name}`,
-      }))
+      !(await confirm(
+        {
+          title: `Suspend ${agent.name}?`,
+          description: "It can't start new runs in this team.",
+          confirmLabel: `Suspend ${agent.name}`,
+        },
+        trigger,
+      ))
     ) {
       return;
     }
@@ -194,7 +198,7 @@ function InventoryTable({
                       size="sm"
                       variant={a.status === "active" ? "danger" : "secondary"}
                       disabled={mutation.pending}
-                      onClick={() => void toggle(a)}
+                      onClick={(e) => void toggle(a, eventTrigger(e))}
                     >
                       {a.status === "active" ? "Suspend" : "Reactivate"}
                       <span className="sr-only"> {a.name}</span>

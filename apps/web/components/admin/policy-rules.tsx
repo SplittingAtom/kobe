@@ -17,6 +17,7 @@ import {
   TableRow,
   TableRowHeader,
   TextInput,
+  eventTrigger,
   useConfirm,
 } from "../ui/console";
 import { MutationStatus } from "./error-notice";
@@ -76,11 +77,14 @@ export function RulesEditor({
     }
   }
 
-  async function onRemove(rule: PolicyRule) {
-    const yes = await confirm({
-      title: `Remove the rule "${EFFECT_LABEL[rule.effect]} ${rule.toolGlob}"?`,
-      confirmLabel: "Remove rule",
-    });
+  async function onRemove(rule: PolicyRule, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Remove the rule "${EFFECT_LABEL[rule.effect]} ${rule.toolGlob}"?`,
+        confirmLabel: "Remove rule",
+      },
+      trigger,
+    );
     if (!yes) return;
     const done = await mutation.run(
       () => remove(rule.id),
@@ -174,7 +178,7 @@ export function RulesEditor({
                         size="sm"
                         variant="danger"
                         disabled={mutation.pending}
-                        onClick={() => void onRemove(r)}
+                        onClick={(e) => void onRemove(r, eventTrigger(e))}
                       >
                         Remove
                         <span className="sr-only">

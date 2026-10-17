@@ -18,6 +18,7 @@ import {
   PageHeader,
   Section,
   useConfirm,
+  eventTrigger,
 } from "../../ui/console";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
@@ -116,15 +117,22 @@ function ReviewList({
   const mutation = useMutation();
   const [confirm, confirmDialog] = useConfirm();
 
-  async function decide(review: SkillReview, decision: "approved" | "rejected") {
+  async function decide(
+    review: SkillReview,
+    decision: "approved" | "rejected",
+    trigger: HTMLElement | null,
+  ) {
     if (
       decision === "approved" &&
       review.flagged &&
-      !(await confirm({
-        title: `Approve ${review.slug} v${review.version} anyway?`,
-        description: `It was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}).`,
-        confirmLabel: "Approve anyway",
-      }))
+      !(await confirm(
+        {
+          title: `Approve ${review.slug} v${review.version} anyway?`,
+          description: `It was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}).`,
+          confirmLabel: "Approve anyway",
+        },
+        trigger,
+      ))
     ) {
       return;
     }
@@ -149,7 +157,7 @@ function ReviewList({
                   <ReviewItem
                     review={r}
                     busy={mutation.pending}
-                    onDecide={(d) => void decide(r, d)}
+                    onDecide={(d, trigger) => void decide(r, d, trigger)}
                   />
                 </li>
               ))}
@@ -169,7 +177,7 @@ function ReviewItem({
 }: {
   readonly review: SkillReview;
   readonly busy: boolean;
-  readonly onDecide: (decision: "approved" | "rejected") => void;
+  readonly onDecide: (decision: "approved" | "rejected", trigger: HTMLElement | null) => void;
 }) {
   return (
     <article
@@ -208,12 +216,17 @@ function ReviewItem({
       )}
       <div className="mt-2 flex flex-wrap gap-2">
         {review.status !== "approved" && (
-          <Button size="sm" disabled={busy} onClick={() => onDecide("approved")}>
+          <Button size="sm" disabled={busy} onClick={(e) => onDecide("approved", eventTrigger(e))}>
             Approve
           </Button>
         )}
         {review.status !== "rejected" && (
-          <Button size="sm" variant="danger" disabled={busy} onClick={() => onDecide("rejected")}>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy}
+            onClick={(e) => onDecide("rejected", eventTrigger(e))}
+          >
             Reject
           </Button>
         )}
