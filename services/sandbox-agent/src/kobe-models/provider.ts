@@ -100,7 +100,8 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
     baseUrl: gatewayBaseUrl(gatewayUrl, api),
     // Thinking is opted into per run (`thinking_level`); OpenAI-compatible endpoints (vLLM,
     // Ollama, chat completions) reject reasoning parameters they do not know, so only the
-    // native vendor APIs advertise it. Catalog capability flags are a KOBE-44 follow-up.
+    // native vendor APIs advertise it. Either way the model gateway writes the run's level in
+    // the form the site admin chose for the model, replacing what Pi sends (KOBE-260).
     reasoning: api !== "openai-completions",
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
