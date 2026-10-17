@@ -35,6 +35,8 @@ export interface LocalGatewayOptions {
   readonly thinking?: readonly GatewayThinkingRow[];
   /** KOBE-260: a run's recorded thinking level, by run id. */
   readonly runThinking?: (runId: string) => ThinkingLevel | undefined;
+  /** KOBE-260: the token is an Orbit eval Job's (no run; the model's default level). */
+  readonly eval?: boolean;
 }
 
 export interface LocalGateway {
@@ -91,6 +93,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     },
     enabledModels: enabled,
     thinking: thinking.filter((t) => enabled.includes(t.model)),
+    ...(options.eval === true ? { eval: true as const } : {}),
   });
   const principals = new PrincipalCache(
     { load: async () => principal(), requestKey: async () => undefined },

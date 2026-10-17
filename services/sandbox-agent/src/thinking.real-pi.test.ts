@@ -39,6 +39,7 @@ const SITE: NonNullable<LocalGatewayOptions["thinking"]>[number] = {
   allowed: true,
   default: "low",
   max: "medium",
+  lowest: "off",
   teamMax: null,
 };
 

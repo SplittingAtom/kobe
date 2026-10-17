@@ -46,6 +46,10 @@ export interface SeenRequest {
    * `thinking`, `output_config`, Gemini's `generationConfig.thinkingConfig`. Absent: none.
    */
   readonly thinking?: Readonly<Record<string, unknown>>;
+  /** Bifrost control headers that reached the upstream besides `x-bf-vk` (none expected). */
+  readonly bifrostHeaders?: readonly string[];
+  /** The raw body as received, when at most 64 KiB (KOBE-260 bypass tests). */
+  readonly body?: string;
 }
 
 const THINKING_FIELDS = ["reasoning_effort", "reasoning", "thinking", "output_config"];
@@ -59,6 +63,8 @@ function thinkingFields(body: Record<string, unknown>): Record<string, unknown> 
 }
 
 const THINK_ECHO = "think?";
+/** Bodies up to this size are kept in `seen` (bypass tests); larger ones are not. */
+const MAX_SEEN_BODY = 64 * 1024;
 
 /** `max_tokens` / `max_completion_tokens` (OpenAI, Anthropic) or Gemini's `maxOutputTokens`. */
 function requestedMaxOutput(body: Record<string, unknown>): number | undefined {
@@ -495,6 +501,9 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
     const options = body.stream_options as Record<string, unknown> | undefined;
     const maxOutputTokens = requestedMaxOutput(body);
     const thinking = thinkingFields(body);
+    const bifrostHeaders = Object.keys(req.headers).filter(
+      (h) => h.startsWith("x-bf-") && h !== "x-bf-vk",
+    );
     seen.push({
       method: req.method ?? "",
       path: url.pathname,
@@ -504,6 +513,8 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         : {}),
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       ...(thinking === undefined ? {} : { thinking }),
+      ...(bifrostHeaders.length === 0 ? {} : { bifrostHeaders }),
+      ...(raw.length <= MAX_SEEN_BODY ? { body: raw.toString("utf8") } : {}),
     });
     const text = lastUserText(body);
     const model = typeof body.model === "string" ? body.model : "fake-model";

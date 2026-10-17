@@ -79,7 +79,10 @@ export interface GatewayOptions {
    * A run's recorded thinking level (KOBE-260; cached by the caller, it never changes). Absent:
    * calls use the model's default level.
    */
-  readonly runThinking?: (teamId: string, runId: string) => Promise<ThinkingLevel | undefined>;
+  readonly runThinking?: (
+    teamId: string,
+    runId: string,
+  ) => Promise<ThinkingLevel | null | undefined>;
   /** Run traces (KOBE-274); absent: spans of sandbox calls hang under the run's root. */
   readonly tracing?: GatewayTracing;
   /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
@@ -547,13 +550,28 @@ export function createModelGateway(options: GatewayOptions): Server {
           );
           return;
         }
+        // KOBE-260 review S5: Bifrost's `fallbacks` would reach other models past every
+        // per-model check (enablement, thinking): never from a sandbox.
+        if (scanned.fallbacks) {
+          status = 400;
+          sendError(
+            res,
+            kind,
+            400,
+            "fallbacks_not_supported",
+            "Model fallbacks are not accepted through the model gateway; the run's model is fixed.",
+          );
+          return;
+        }
         // KOBE-260: the thinking level the server decided, in the model's control's form.
         const policy = model === undefined ? undefined : resolution.thinking.get(model);
         if (policy !== undefined) {
           const runLevel =
             runId === undefined ? undefined : await options.runThinking?.(identity.teamId, runId);
-          const level = callThinkingLevel(policy, runLevel);
-          const rewritten = applyThinking(body, route, policy, level, scanned.maxOutputTokens);
+          const level = callThinkingLevel(policy, runLevel ?? undefined, {
+            eval: resolution.eval,
+          });
+          const rewritten = applyThinking(body, route, policy, level);
           if (!rewritten.ok) {
             status = rewritten.status;
             sendError(res, kind, rewritten.status, rewritten.code, rewritten.message);
@@ -561,6 +579,13 @@ export function createModelGateway(options: GatewayOptions): Server {
           }
           forwardBody = rewritten.body;
           thinkingLevel = rewritten.level;
+          // Review S7: a written thinking budget is output the reservation must hold.
+          if (rewritten.budgetTokens !== undefined && !countOnly) {
+            outputAllowance = Math.max(
+              outputAllowance,
+              chargedOutput(rewritten.budgetTokens, scanned.choices, false),
+            );
+          }
         }
         // KOBE-43: a streaming Chat Completions call always asks for its usage report.
         if (scanned.stream && route.path === "/v1/chat/completions") {

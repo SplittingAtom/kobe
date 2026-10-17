@@ -108,10 +108,10 @@ const runSessions = new TtlCache<RunSession | undefined>({
 });
 
 /** A run's thinking level is fixed when it starts (KOBE-260): cached long, bounded. */
-const runThinking = new TtlCache<ThinkingLevel | undefined>({
+// `null`: the run has no level (cached too, review N2: the record never changes).
+const runThinking = new TtlCache<ThinkingLevel | null>({
   ttlMs: 10 * 60_000,
   maxEntries: 10_000,
-  keep: (value) => value !== undefined,
 });
 
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
@@ -148,7 +148,10 @@ const server = createModelGateway({
   },
   // KOBE-260: the level the server recorded when the run started.
   runThinking: (teamId, runId) =>
-    runThinking.get(`${teamId}:${runId}`, () => runThinkingLevelOf(db, teamId, runId)),
+    runThinking.get(
+      `${teamId}:${runId}`,
+      async () => (await runThinkingLevelOf(db, teamId, runId)) ?? null,
+    ),
   // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
   tracing: {
     spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.sessionKey)),

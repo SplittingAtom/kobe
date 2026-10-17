@@ -28,6 +28,8 @@ export type Resolution =
       readonly reasoningModels: ReadonlySet<string>;
       /** Thinking settings of the enabled models with a control, team narrowing applied. */
       readonly thinking: ReadonlyMap<string, ThinkingPolicy>;
+      /** An Orbit eval Job's token: its calls have no run (default thinking level, S4). */
+      readonly eval: boolean;
     }
   | {
       readonly ok: false;
@@ -103,6 +105,7 @@ export class PrincipalCache {
         enabledModels: new Set(p.enabledModels),
         reasoningModels: new Set(p.reasoningModels ?? []),
         thinking: thinkingPolicies(p.thinking ?? []),
+        eval: p.eval === true,
       };
     } catch {
       return { ok: false, reason: "key_unreadable" };
