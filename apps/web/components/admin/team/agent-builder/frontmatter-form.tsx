@@ -4,9 +4,9 @@ import {
   type FieldErrors,
   type FormState,
 } from "../../../../lib/admin/agent-builder/form-model";
-import { Field } from "./field";
+import { Checkbox, Field, Notice, Select, Textarea, TextInput } from "../../../ui/console";
+import { fieldError } from "./field-errors";
 import { ModelField } from "./model-field";
-import styles from "./agent-builder.module.css";
 
 type TextKey = "name" | "role" | "description" | "icon";
 type ListKey = "skills" | "connectors" | "toolsAllow" | "toolsDeny" | "starters";
@@ -36,6 +36,9 @@ const MODE_LABELS = {
   auto: "Auto (allow-listed tools only)",
 } as const;
 
+/** Spans both columns of the form's grid on wide screens. */
+const WIDE = "md:col-span-2";
+
 /** The agent file's frontmatter as form controls; errors come from the agent-file schema. */
 export function FrontmatterForm({
   form,
@@ -52,18 +55,22 @@ export function FrontmatterForm({
     onChange({ ...form, [key]: value });
   const replaced = replacedConnectorNames(form);
   return (
-    <div className={styles.fields}>
+    <div className="my-4 grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
       {TEXT_FIELDS.map(({ key, label, hint, wide }) => (
-        <Field key={key} label={label} hint={hint} errors={errors[key]} wide={wide}>
-          {(control) => (
-            <input
-              {...control}
-              type="text"
-              value={form[key]}
-              readOnly={readOnly}
-              onChange={(e) => set(key, e.target.value)}
-            />
-          )}
+        <Field
+          key={key}
+          label={label}
+          hint={hint}
+          error={fieldError(errors[key])}
+          className={wide ? WIDE : ""}
+        >
+          <TextInput
+            type="text"
+            value={form[key]}
+            readOnly={readOnly}
+            className="w-full read-only:bg-console-panel"
+            onChange={(e) => set(key, e.target.value)}
+          />
         </Field>
       ))}
       <ModelField
@@ -75,61 +82,53 @@ export function FrontmatterForm({
       <Field
         label="Approval mode"
         hint="Never looser than the team's floor."
-        errors={errors.approvalMode}
+        error={fieldError(errors.approvalMode)}
       >
-        {(control) => (
-          <select
-            {...control}
-            value={form.approvalMode}
-            disabled={readOnly}
-            onChange={(e) => set("approvalMode", e.target.value as FormState["approvalMode"])}
-          >
-            <option value="">Team default</option>
-            {APPROVAL_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {MODE_LABELS[mode]}
-              </option>
-            ))}
-          </select>
-        )}
+        <Select
+          className="w-full"
+          value={form.approvalMode}
+          disabled={readOnly}
+          onChange={(e) => set("approvalMode", e.target.value as FormState["approvalMode"])}
+        >
+          <option value="">Team default</option>
+          {APPROVAL_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {MODE_LABELS[mode]}
+            </option>
+          ))}
+        </Select>
       </Field>
       {LIST_FIELDS.map(({ key, label, hint }) => (
-        <Field key={key} label={label} hint={hint} errors={errors[key]}>
-          {(control) => (
-            <textarea
-              {...control}
-              rows={4}
-              value={form[key]}
-              readOnly={readOnly || (key === "connectors" && form.connectorsAll)}
-              onChange={(e) => set(key, e.target.value)}
-            />
-          )}
+        <Field key={key} label={label} hint={hint} error={fieldError(errors[key])}>
+          <Textarea
+            rows={4}
+            value={form[key]}
+            readOnly={readOnly || (key === "connectors" && form.connectorsAll)}
+            className="w-full read-only:bg-console-panel"
+            onChange={(e) => set(key, e.target.value)}
+          />
         </Field>
       ))}
-      <label className={`${styles.checkbox} ${styles.wide}`}>
-        <input
-          type="checkbox"
-          checked={form.connectorsAll}
-          disabled={readOnly}
-          onChange={(e) => set("connectorsAll", e.target.checked)}
-        />
-        Use every connector the team enables (each person still connects their own account)
-      </label>
+      <Checkbox
+        className={WIDE}
+        checked={form.connectorsAll}
+        disabled={readOnly}
+        onChange={(e) => set("connectorsAll", e.target.checked)}
+        label="Use every connector the team enables (each person still connects their own account)"
+      />
       {replaced.length > 0 && (
-        <p role="note" className={styles.wide}>
+        <Notice role="note" className={`${WIDE} my-0`}>
           Every team connector replaces the connector names listed above ({replaced.join(", ")});
           they are not saved.
-        </p>
+        </Notice>
       )}
-      <label className={`${styles.checkbox} ${styles.wide}`}>
-        <input
-          type="checkbox"
-          checked={form.skillsExclusive}
-          disabled={readOnly}
-          onChange={(e) => set("skillsExclusive", e.target.checked)}
-        />
-        Use only the listed skills (none of the user&apos;s own)
-      </label>
+      <Checkbox
+        className={WIDE}
+        checked={form.skillsExclusive}
+        disabled={readOnly}
+        onChange={(e) => set("skillsExclusive", e.target.checked)}
+        label="Use only the listed skills (none of the user's own)"
+      />
     </div>
   );
 }

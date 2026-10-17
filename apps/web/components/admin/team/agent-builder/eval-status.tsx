@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listTeamAgentEvals, type AgentEval } from "../../../../lib/admin/api/team/agent-builder";
 import { DateTime } from "../../parts";
-import adminStyles from "../../admin.module.css";
+import { Button, Notice, Section } from "../../../ui/console";
 
 export const EVAL_POLL_MS = 3000;
 
@@ -83,10 +83,9 @@ export function EvalStatus({
 
   if (!latest) return null;
   return (
-    <section aria-labelledby="eval-heading">
-      <h2 id="eval-heading">Safety evaluation</h2>
+    <Section id="eval-heading" title="Safety evaluation">
       <EvalResult result={latest} canRetry={canRetry} onRetry={onRetry} />
-    </section>
+    </Section>
   );
 }
 
@@ -130,25 +129,18 @@ function EvalResult({
       );
     case "blocked":
       return (
-        <div role="alert" className={adminStyles.error}>
+        <Notice tone="error">
           <p>
             Blocked: {detail} Nothing was published. Change the agent to resist these attacks and
             publish again.
           </p>
-        </div>
+        </Notice>
       );
     case "errored":
       return (
-        <div role="alert" className={adminStyles.error}>
+        <Notice tone="error" actions={canRetry && <Button onClick={onRetry}>Retry publish</Button>}>
           <p>The evaluation could not complete, so nothing was published. {result.error}</p>
-          {canRetry && (
-            <p>
-              <button type="button" onClick={onRetry}>
-                Retry publish
-              </button>
-            </p>
-          )}
-        </div>
+        </Notice>
       );
   }
 }

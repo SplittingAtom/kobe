@@ -19,14 +19,22 @@ import {
   type FormState,
 } from "../../../../lib/admin/agent-builder/form-model";
 import { isSkillSlug } from "../../../../lib/admin/skills/reach";
+import {
+  Button,
+  Field,
+  Notice,
+  PageHeader,
+  Section,
+  Textarea,
+  TextInput,
+  useConfirm,
+} from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
-import { ResourceView, confirmed } from "../../parts";
+import { ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
-import adminStyles from "../../admin.module.css";
-import styles from "./agent-builder.module.css";
-import { Field } from "./field";
 import { EvalStatus } from "./eval-status";
+import { fieldError } from "./field-errors";
 import { FrontmatterForm } from "./frontmatter-form";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
@@ -57,18 +65,10 @@ export function AgentBuilderPage({
   readonly addSkill?: string | undefined;
 }) {
   const teamId = useTeamAccess().team.id;
-  const home = HOME[scope];
-  return (
-    <>
-      <p>
-        <Link href={home.base}>{home.back}</Link>
-      </p>
-      {agentId ? (
-        <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} addSkill={addSkill} />
-      ) : (
-        <Builder teamId={teamId} initial={null} scope={scope} />
-      )}
-    </>
+  return agentId ? (
+    <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} addSkill={addSkill} />
+  ) : (
+    <Builder teamId={teamId} initial={null} scope={scope} />
   );
 }
 
@@ -84,10 +84,26 @@ function ExistingAgent({
   readonly addSkill?: string | undefined;
 }) {
   const { state } = useResource(() => getTeamAgent(teamId, agentId));
+  if (state.status !== "ready") {
+    // Loading or refused: the way back stays on the page.
+    return (
+      <>
+        <BackLink scope={scope} />
+        <ResourceView state={state} label="agent">
+          {() => null}
+        </ResourceView>
+      </>
+    );
+  }
+  return <Builder teamId={teamId} initial={state.data.agent} scope={scope} addSkill={addSkill} />;
+}
+
+function BackLink({ scope }: { readonly scope: BuilderScope }) {
+  const home = HOME[scope];
   return (
-    <ResourceView state={state} label="agent">
-      {(data) => <Builder teamId={teamId} initial={data.agent} scope={scope} addSkill={addSkill} />}
-    </ResourceView>
+    <p className="m-0 mb-1 text-sm">
+      <Link href={home.base}>{home.back}</Link>
+    </p>
   );
 }
 
@@ -138,6 +154,7 @@ function Builder({
   const [evalStarted, setEvalStarted] = useState<AgentEval | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
   const publishButton = useRef<HTMLButtonElement>(null);
 
   const readOnly = agent !== null && (!agent.canEdit || Boolean(agent.archivedAt));
@@ -190,8 +207,13 @@ function Builder({
 
   async function restore(version: number) {
     if (!agent) return;
-    const warning = dirty ? " Your unsaved changes in the form are replaced." : "";
-    if (!confirmed(`Restore version ${version} as the newest version?${warning}`)) return;
+    const yes = await confirm({
+      title: `Restore version ${version} as the newest version?`,
+      ...(dirty ? { description: "Your unsaved changes in the form are replaced." } : {}),
+      confirmLabel: `Restore version ${version}`,
+      tone: "primary",
+    });
+    if (!yes) return;
     setPublished(null);
     await mutation.run(
       async () => {
@@ -224,25 +246,32 @@ function Builder({
 
   return (
     <>
-      <h1>{agent ? agent.name : home.title}</h1>
+      <PageHeader
+        title={agent ? agent.name : home.title}
+        back={<Link href={home.base}>{home.back}</Link>}
+      />
       {agent?.archivedAt && (
-        <p className={adminStyles.banner}>This agent is archived, so it can&apos;t be changed.</p>
+        <Notice tone="warn">
+          <p>This agent is archived, so it can&apos;t be changed.</p>
+        </Notice>
       )}
       {agent?.status === "suspended" && (
-        <p className={adminStyles.banner}>
-          This agent is suspended by a team admin, so it can&apos;t start new runs. You can still
-          edit and publish it.
-        </p>
+        <Notice tone="warn">
+          <p>
+            This agent is suspended by a team admin, so it can&apos;t start new runs. You can still
+            edit and publish it.
+          </p>
+        </Notice>
       )}
       {attempted && problemCount > 0 && (
-        <div role="alert" className={adminStyles.error}>
+        <Notice tone="error">
           <p>
             Fix {problemCount} {problemCount === 1 ? "problem" : "problems"} before saving.
           </p>
-        </div>
+        </Notice>
       )}
       {added !== undefined && dirty && (
-        <p role="status" className={adminStyles.hint}>
+        <p role="status" className="text-sm text-console-muted">
           Added {added} to this agent&apos;s skills. Save the draft and publish it to use the skill.
         </p>
       )}
@@ -258,55 +287,49 @@ function Builder({
           <Field
             label="Slug"
             hint={`Optional and permanent. Defaults to ${slugFromName(form.name)}.`}
-            errors={errors.slug}
+            error={fieldError(errors.slug)}
+            className="my-4"
           >
-            {(control) => (
-              <input
-                {...control}
-                type="text"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-              />
-            )}
+            <TextInput type="text" value={slug} onChange={(e) => setSlug(e.target.value)} />
           </Field>
         )}
         <FrontmatterForm form={form} errors={errors} readOnly={readOnly} onChange={setForm} />
         <Field
           label="System prompt"
           hint="What the agent is told at the start of every conversation."
-          errors={errors.prompt}
+          error={fieldError(errors.prompt)}
         >
-          {(control) => (
-            <textarea
-              {...control}
-              className={styles.prompt}
-              value={prompt}
-              readOnly={readOnly}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-          )}
+          <Textarea
+            className="min-h-72 w-full resize-y font-mono read-only:bg-console-panel"
+            value={prompt}
+            readOnly={readOnly}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
         </Field>
-        {errors.form && <p className={styles.fieldError}>{errors.form.join(" ")}</p>}
+        {errors.form && (
+          <p className="m-0 mt-2 text-sm font-medium text-console-danger">
+            {errors.form.join(" ")}
+          </p>
+        )}
         {!readOnly && (
-          <div className={styles.toolbar}>
-            <button type="submit" disabled={mutation.pending}>
+          <div className="my-4 flex flex-wrap items-center gap-2">
+            <Button type="submit" variant="primary" disabled={mutation.pending}>
               {agent ? "Save draft" : "Create agent"}
-            </button>
+            </Button>
             {canPublish && (
-              <button
+              <Button
                 ref={publishButton}
-                type="button"
                 disabled={dirty || mutation.pending || evaluating}
                 onClick={() => setPublishing(true)}
               >
                 {evaluating ? "Evaluating…" : "Publish…"}
-              </button>
+              </Button>
             )}
             {canPublish && dirty && (
-              <span className={adminStyles.hint}>Save your changes to publish them.</span>
+              <span className="text-sm text-console-muted">Save your changes to publish them.</span>
             )}
             {agent && !dirty && (
-              <span className={adminStyles.hint}>
+              <span className="text-sm text-console-muted">
                 {agent.currentVersion === null
                   ? "Never published."
                   : `Current version: v${agent.currentVersion}.`}
@@ -316,35 +339,30 @@ function Builder({
         )}
       </form>
       {agent && !readOnly && (
-        <section aria-labelledby="test-chat-heading">
-          <h2 id="test-chat-heading">Test chat</h2>
-          <p className={adminStyles.hint}>
-            Chat with the unpublished draft as last saved{dirty ? " (save your edits first)" : ""}.
-            It runs with the same policy, approvals and budgets as a published agent.
-          </p>
+        <Section
+          id="test-chat-heading"
+          title="Test chat"
+          description={`Chat with the unpublished draft as last saved${dirty ? " (save your edits first)" : ""}. It runs with the same policy, approvals and budgets as a published agent.`}
+        >
           {testing ? (
             <>
               <AgentTestPane key={agent.id} teamId={teamId} agentId={agent.id} />
-              <button type="button" onClick={() => setTesting(false)}>
-                Close test chat
-              </button>
+              <Button onClick={() => setTesting(false)}>Close test chat</Button>
             </>
           ) : (
-            <button type="button" onClick={() => setTesting(true)}>
-              Test chat
-            </button>
+            <Button onClick={() => setTesting(true)}>Test chat</Button>
           )}
-        </section>
+        </Section>
       )}
       {agent && canExport && agent.currentVersion !== null && (
-        <div className={styles.toolbar}>
+        <div className="my-4 flex flex-wrap items-center gap-2">
           <OrbitExportButton
             teamId={teamId}
             agentId={agent.id}
             agentSlug={agent.slug}
             version={agent.currentVersion}
           />
-          <span className={adminStyles.hint}>
+          <span className="text-sm text-console-muted">
             Downloads v{agent.currentVersion} as Orbit YAML for safety evaluation.
           </span>
         </div>
@@ -396,6 +414,7 @@ function Builder({
           onRestore={(v) => void restore(v)}
         />
       )}
+      {confirmDialog}
     </>
   );
 }

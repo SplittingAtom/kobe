@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { EvalReportPage } from "./team/agent-builder/eval-report";
 import { AgentBuilderPage } from "./team/agent-builder/agent-builder-page";
-import { TEAM, renderTeam, stubApi } from "./testing";
+import { TEAM, answerConfirm, renderTeam, stubApi } from "./testing";
 
 const AGENT = {
   id: "a-1",
@@ -78,7 +78,12 @@ describe("Agent builder: create", () => {
     const calls = stubApi(READ);
     renderTeam(<AgentBuilderPage />);
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/fix 1 problem/i);
+    // The summary and the field's own error are both announced (KOBE-295: console Field errors).
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.map((a) => a.textContent)).toEqual([
+      expect.stringMatching(/fix 1 problem/i),
+      expect.stringMatching(/empty/),
+    ]);
     const name = screen.getByLabelText("Name");
     expect(name.getAttribute("aria-invalid")).toBe("true");
     const describedBy = must(name.getAttribute("aria-describedby"));
@@ -233,6 +238,8 @@ describe("Agent builder: version history", () => {
     expect(within(must(rows[1])).getByText("Current")).toBeTruthy();
     expect(within(history).queryByRole("button", { name: "Restore version 2" })).toBeNull();
     await userEvent.click(within(history).getByRole("button", { name: "Restore version 1" }));
+    expect(calls.some((c) => c.url.endsWith("/rollback"))).toBe(false);
+    await answerConfirm("Restore version 1 as the newest version?", "Restore version 1");
     await screen.findByText("Restored v1 as v3.");
     const post = must(calls.find((c) => c.url.endsWith("/rollback")));
     expect(JSON.parse(String(post.body))).toEqual({ version: 1 });
@@ -243,14 +250,13 @@ describe("Agent builder: version history", () => {
   });
 
   it("doesn't restore when the user declines the confirmation", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false),
-    );
     const calls = stubApi(READ);
     renderTeam(<AgentBuilderPage agentId="a-1" />);
-    await userEvent.click(await screen.findByRole("button", { name: "Restore version 1" }));
+    const restore = await screen.findByRole("button", { name: "Restore version 1" });
+    await userEvent.click(restore);
+    await answerConfirm("Restore version 1 as the newest version?", "Cancel");
     expect(calls.some((c) => c.method === "POST")).toBe(false);
+    expect(document.activeElement).toBe(restore);
   });
 
   it("loads older versions on request", async () => {

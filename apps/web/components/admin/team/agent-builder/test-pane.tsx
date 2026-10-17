@@ -12,9 +12,8 @@ import type { ApiError } from "../../../../lib/api/client";
 import { ChatSessionContext, useKobeRuntime } from "../../../chat/kobe-runtime";
 import { ThreadView } from "../../../chat/thread-view";
 import { IconActionProvider } from "../../../shell/icon-action";
+import { Button } from "../../../ui/console";
 import { ErrorNotice } from "../../error-notice";
-import adminStyles from "../../admin.module.css";
-import styles from "./agent-builder.module.css";
 
 export interface AgentTestPaneProps {
   readonly teamId: string;
@@ -91,21 +90,20 @@ export function AgentTestPane({
   }
 
   return (
-    <div className={styles.testPane}>
-      <div className={styles.toolbar}>
-        <button type="button" onClick={() => setGeneration((n) => n + 1)}>
-          New test chat
-        </button>
-        <button type="button" onClick={() => void clear()}>
-          Clear test chats
-        </button>
-        <span className={adminStyles.hint}>
+    <div className="my-6">
+      <div className="my-4 flex flex-wrap items-center gap-2">
+        <Button onClick={() => setGeneration((n) => n + 1)}>New test chat</Button>
+        <Button onClick={() => void clear()}>Clear test chats</Button>
+        <span className="text-sm text-console-muted">
           Test chats are private to you, kept out of your conversation list, and still count toward
           budgets.
         </span>
       </div>
       {error && <ErrorNotice error={error} />}
-      <div data-kobe-chat className={styles.testChat}>
+      <div
+        data-kobe-chat
+        className="box-border flex h-[34rem] max-h-[80vh] flex-col overflow-hidden rounded-lg border border-console-border"
+      >
         <TestConversation
           // A new key is a fresh session and conversation.
           key={generation}

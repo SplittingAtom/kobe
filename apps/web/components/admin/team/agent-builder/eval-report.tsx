@@ -6,10 +6,21 @@ import {
   type AgentEvalDetail,
 } from "../../../../lib/admin/api/team/agent-builder";
 import { percent } from "../../../../lib/admin/orbit-score";
+import {
+  EmptyState,
+  Notice,
+  PageHeader,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
-import styles from "../../admin.module.css";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -54,10 +65,12 @@ export function EvalReportPage({
   const { state } = useResource(() => getTeamAgentEval(teamId, agentId, evalId));
   return (
     <>
-      <p>
-        <Link href={`/admin/team/agents/${encodeURIComponent(agentId)}`}>Back to the agent</Link>
-      </p>
-      <h1>Safety evaluation report</h1>
+      <PageHeader
+        title="Safety evaluation report"
+        back={
+          <Link href={`/admin/team/agents/${encodeURIComponent(agentId)}`}>Back to the agent</Link>
+        }
+      />
       <ResourceView state={state} label="the report">
         {({ eval: result }) => <Report result={result} />}
       </ResourceView>
@@ -70,7 +83,7 @@ function Report({ result }: { readonly result: AgentEvalDetail }) {
   const pack = isRecord(result.report) && isRecord(result.report.pack) ? result.report.pack : null;
   return (
     <>
-      <dl>
+      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 [&_dd]:m-0 [&_dt]:font-medium">
         <dt>Status</dt>
         <dd>{result.status}</dd>
         <dt>Attack success rate</dt>
@@ -98,37 +111,38 @@ function Report({ result }: { readonly result: AgentEvalDetail }) {
           </>
         )}
       </dl>
-      {result.error && <p role="alert">{result.error}</p>}
+      {result.error && (
+        <Notice tone="error">
+          <p>{result.error}</p>
+        </Notice>
+      )}
       {rows.length === 0 ? (
-        <p>This evaluation has no scenario results.</p>
+        <EmptyState className="mt-4" title="This evaluation has no scenario results." />
       ) : (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <caption>Scenarios</caption>
-            <thead>
-              <tr>
-                <th scope="col">Scenario</th>
-                <th scope="col">Category</th>
-                <th scope="col">Attempts</th>
-                <th scope="col">Attacks succeeded</th>
-                <th scope="col">Errors</th>
-                <th scope="col">Rate</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <th scope="row">{r.id}</th>
-                  <td>{r.category}</td>
-                  <td>{r.attempts}</td>
-                  <td>{r.successes}</td>
-                  <td>{r.errors}</td>
-                  <td>{r.rate}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table caption="Scenarios" className="mt-4">
+          <TableHead>
+            <TableRow>
+              <TableHeader>Scenario</TableHeader>
+              <TableHeader>Category</TableHeader>
+              <TableHeader numeric>Attempts</TableHeader>
+              <TableHeader numeric>Attacks succeeded</TableHeader>
+              <TableHeader numeric>Errors</TableHeader>
+              <TableHeader numeric>Rate</TableHeader>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.id}>
+                <TableRowHeader>{r.id}</TableRowHeader>
+                <TableCell>{r.category}</TableCell>
+                <TableCell numeric>{r.attempts}</TableCell>
+                <TableCell numeric>{r.successes}</TableCell>
+                <TableCell numeric>{r.errors}</TableCell>
+                <TableCell numeric>{r.rate}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </>
   );
