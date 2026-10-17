@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { knownThinkingLowest, knownThinkingProblem } from "./thinking-models.js";
 import {
   effectiveThinkingLevel,
+  strictestThinkingPolicy,
   narrowThinkingPolicy,
   selectableThinkingLevels,
   teamThinkingProblem,
@@ -14,20 +16,29 @@ const effort = (over: Partial<ThinkingPolicy> = {}): ThinkingPolicy => ({
   allowed: true,
   default: "low",
   max: "medium",
+  lowest: "off",
   ...over,
 });
-const NONE: ThinkingPolicy = { control: "none", allowed: false, default: null, max: null };
+const NONE: ThinkingPolicy = {
+  control: "none",
+  allowed: false,
+  default: null,
+  max: null,
+  lowest: "off",
+};
 const OFF: ThinkingPolicy = {
   control: "reasoning_effort",
   allowed: false,
   default: null,
   max: null,
+  lowest: "off",
 };
 const ALWAYS_ON: ThinkingPolicy = {
   control: "anthropic_effort",
   allowed: true,
   default: "low",
   max: "high",
+  lowest: "low",
 };
 
 describe("thinking policies (KOBE-260)", () => {
@@ -51,10 +62,17 @@ describe("thinking policies (KOBE-260)", () => {
     expect(thinkingPolicyProblem({ ...ALWAYS_ON, default: "off" }, true)).toMatch(/cannot turn/);
     expect(
       thinkingPolicyProblem(
-        { control: "anthropic_effort", allowed: false, default: null, max: null },
+        { control: "anthropic_effort", allowed: false, default: null, max: null, lowest: "low" },
         true,
       ),
     ).toMatch(/stays allowed/);
+    // anthropic_effort has no off at all; a model marked "cannot turn off" keeps thinking on.
+    expect(thinkingPolicyProblem({ ...ALWAYS_ON, lowest: "off" }, true)).toMatch(/lowest level/);
+    expect(thinkingPolicyProblem({ ...OFF, lowest: "low" }, true)).toMatch(/stays allowed/);
+    expect(thinkingPolicyProblem(effort({ lowest: "low", default: "off" }), true)).toMatch(
+      /at least low/,
+    );
+    expect(thinkingPolicyProblem({ ...NONE, lowest: "low" }, true)).toMatch(/no thinking levels/);
   });
 
   it("fits controls to provider kinds", () => {
@@ -73,6 +91,15 @@ describe("clamping (ac-2)", () => {
     expect(effectiveThinkingLevel(effort(), "off")).toBe("off");
     expect(effectiveThinkingLevel(effort(), "medium")).toBe("medium");
     expect(effectiveThinkingLevel(effort(), "high")).toBe("medium");
+  });
+
+  it("never sends off to a model that cannot turn thinking off (review S2)", () => {
+    const o3 = effort({ lowest: "low", default: "low", max: "high" });
+    expect(effectiveThinkingLevel(o3, "off")).toBe("low");
+    expect(selectableThinkingLevels(o3)).toEqual(["low", "medium", "high"]);
+    // A team's "off" is the lowest level too.
+    expect(narrowThinkingPolicy(o3, "off")).toEqual({ ...o3, max: "low" });
+    expect(teamThinkingProblem(o3, "off")).toMatch(/cannot turn/);
   });
 
   it("keeps thinking off when it is not allowed, and never below a control's lowest level", () => {
@@ -111,5 +138,56 @@ describe("team narrowing (ac-4)", () => {
     expect(teamThinkingProblem(effort(), "off")).toBeUndefined();
     expect(teamThinkingProblem(OFF, "off")).toBeUndefined();
     expect(teamThinkingProblem(effort(), null)).toBeUndefined();
+  });
+});
+
+describe("strictest policy of one model (review N1)", () => {
+  it("keeps the lowest ceiling; off beats any level; a control beats none", () => {
+    expect(strictestThinkingPolicy([effort({ max: "high" }), effort()])).toEqual(effort());
+    expect(strictestThinkingPolicy([effort(), OFF])).toEqual(OFF);
+    expect(strictestThinkingPolicy([NONE, effort()])).toEqual(effort());
+    expect(strictestThinkingPolicy([])).toBeUndefined();
+  });
+});
+
+describe("known model families (review S2)", () => {
+  it("knows which cannot turn thinking off", () => {
+    for (const m of [
+      "o3",
+      "o4-mini",
+      "gpt-5",
+      "openai/gpt-5-mini",
+      "gpt-5-pro",
+      "gemini-2.5-pro",
+    ]) {
+      expect(knownThinkingLowest(m), m).toBe("low");
+    }
+    for (const m of [
+      "gemini-3-pro-preview",
+      "claude-sonnet-5-5",
+      "claude-opus-5-5",
+      "claude-fable-5-1",
+    ]) {
+      expect(knownThinkingLowest(m), m).toBe("low");
+    }
+    for (const m of [
+      "gpt-5.1",
+      "gpt-5.2",
+      "gemini-2.5-flash",
+      "glm-5.3",
+      "claude-opus-4-6",
+      "qwen3",
+    ]) {
+      expect(knownThinkingLowest(m), m).toBeUndefined();
+    }
+  });
+
+  it("refuses off for them and budgets for Claude models that reject budget_tokens", () => {
+    expect(knownThinkingProblem("o3", effort())).toMatch(/cannot turn thinking off/);
+    expect(knownThinkingProblem("o3", effort({ lowest: "low", default: "low" }))).toBeUndefined();
+    const budget = effort({ control: "anthropic_budget" });
+    expect(knownThinkingProblem("claude-opus-4-8", budget)).toMatch(/refuses thinking budgets/);
+    expect(knownThinkingProblem("claude-haiku-4-5", budget)).toBeUndefined();
+    expect(knownThinkingProblem("o3", NONE)).toBeUndefined();
   });
 });

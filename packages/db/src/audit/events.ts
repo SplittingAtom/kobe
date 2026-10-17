@@ -7,6 +7,7 @@ import {
   PROVIDER_MODEL_PATTERN,
   THINKING_CONTROLS,
   THINKING_LEVELS,
+  THINKING_LOWEST,
 } from "../schema/models.js";
 import {
   BUDGET_PERIODS,
@@ -562,6 +563,7 @@ export const AUDIT_EVENTS = {
         allowed: z.boolean(),
         default: z.enum(THINKING_LEVELS).nullable(),
         max: z.enum(THINKING_LEVELS).nullable(),
+        lowest: z.enum(THINKING_LOWEST),
       })
       .optional(),
   }),

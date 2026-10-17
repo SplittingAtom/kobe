@@ -16,6 +16,7 @@ import {
   type ModelProviderKind,
   type ThinkingControlValue,
   type ThinkingLevelValue,
+  type ThinkingLowestValue,
 } from "../schema/index.js";
 import { withTeam } from "../with-team.js";
 
@@ -108,6 +109,11 @@ export interface GatewayPrincipal {
    * Absent: none (an older store).
    */
   readonly thinking?: readonly GatewayThinkingRow[];
+  /**
+   * The token is an Orbit eval Job's (KOBE-93): its calls belong to no run, so they use the
+   * model's default thinking level; any other sandbox call without a run gets the lowest.
+   */
+  readonly eval?: true;
 }
 
 /** One enabled alias's thinking settings as the gateway reads them (KOBE-260). */
@@ -118,6 +124,8 @@ export interface GatewayThinkingRow {
   readonly allowed: boolean;
   readonly default: ThinkingLevelValue | null;
   readonly max: ThinkingLevelValue | null;
+  /** The lowest level the model accepts (`low`: it cannot turn thinking off). */
+  readonly lowest: ThinkingLowestValue;
   /** The team's maximum (null: the site's). */
   readonly teamMax: ThinkingLevelValue | null;
 }
@@ -161,6 +169,7 @@ export async function loadGatewayPrincipal(
         allowed: modelCatalog.thinkingAllowed,
         default: modelCatalog.thinkingDefault,
         max: modelCatalog.thinkingMax,
+        lowest: modelCatalog.thinkingLowest,
         teamMax: teamModels.thinkingMax,
       })
       .from(teamModels)
@@ -178,6 +187,7 @@ export async function loadGatewayPrincipal(
         allowed: e.allowed,
         default: e.default,
         max: e.max,
+        lowest: e.lowest,
         teamMax: e.teamMax,
       }));
     // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
@@ -220,6 +230,7 @@ export async function loadGatewayPrincipal(
       virtualKey: vk,
       enabledModels: allowed,
       thinking: thinking.filter((t) => allowed.includes(t.model)),
+      ...(evalRun ? { eval: true as const } : {}),
     };
   });
 }

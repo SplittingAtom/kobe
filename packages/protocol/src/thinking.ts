@@ -50,8 +50,19 @@ export const thinkingControlSchema = z.enum(THINKING_CONTROLS, {
   error: "not a supported thinking control",
 });
 
-/** Controls that cannot turn thinking off: their lowest level is `low`. */
+/** Controls that cannot turn thinking off at all: their lowest level is always `low`. */
 export const THINKING_CONTROLS_WITHOUT_OFF: readonly ThinkingControl[] = ["anthropic_effort"];
+
+/**
+ * The lowest level a model accepts (KOBE-260 review S2): `off` when its provider can turn
+ * thinking off, `low` when it cannot (o-series and GPT-5, Gemini 2.5/3 Pro, Claude Sonnet 5.5 and
+ * Opus 5.5, …). `off` is then never sent: it means the lowest level, so it never causes a 400.
+ */
+export const THINKING_LOWEST = ["off", "low"] as const;
+export type ThinkingLowest = (typeof THINKING_LOWEST)[number];
+export const thinkingLowestSchema = z.enum(THINKING_LOWEST, {
+  error: "the lowest level is off or low",
+});
 
 /** The provider kinds (model catalog) each control fits: it is written in that API's form. */
 export const THINKING_CONTROLS_BY_KIND: Readonly<Record<string, readonly ThinkingControl[]>> = {
@@ -73,34 +84,42 @@ export const minThinking = (a: ThinkingLevel, b: ThinkingLevel): ThinkingLevel =
 const maxThinking = (a: ThinkingLevel, b: ThinkingLevel): ThinkingLevel =>
   thinkingRank(a) >= thinkingRank(b) ? a : b;
 
-/** The lowest level a control can express (`low` when it cannot turn thinking off). */
-export function lowestThinking(control: ThinkingControl): ThinkingLevel {
-  return THINKING_CONTROLS_WITHOUT_OFF.includes(control) ? "low" : "off";
+/**
+ * The lowest level a model's policy can express: `low` for a control without off, else the
+ * model's own `lowest`.
+ */
+export function lowestThinking(policy: Pick<ThinkingPolicy, "control" | "lowest">): ThinkingLevel {
+  return THINKING_CONTROLS_WITHOUT_OFF.includes(policy.control) ? "low" : policy.lowest;
 }
 
 /**
- * A model's thinking settings. `allowed` false (only for controls that can turn it off): thinking
+ * A model's thinking settings. `allowed` false (only for a model that can turn it off): thinking
  * is off for every run. `allowed` true: runs use `default` unless the member picks another level,
- * at most `max`. `control: "none"`: Kobe does not control it (`allowed` false, levels null).
+ * at most `max`, never below `lowest`. `control: "none"`: Kobe does not control it (`allowed`
+ * false, levels null, lowest off).
  */
 export interface ThinkingPolicy {
   readonly control: ThinkingControl;
   readonly allowed: boolean;
   readonly default: ThinkingLevel | null;
   readonly max: ThinkingLevel | null;
+  readonly lowest: ThinkingLowest;
 }
 
 /** Why a site policy is refused (API validation; the database checks the same rules). */
 export function thinkingPolicyProblem(p: ThinkingPolicy, reasoning: boolean): string | undefined {
   if (p.control === "none") {
-    return p.allowed || p.default !== null || p.max !== null
+    return p.allowed || p.default !== null || p.max !== null || p.lowest !== "off"
       ? "a model without a thinking control has no thinking levels"
       : undefined;
   }
   if (!reasoning) return "thinking controls are only for a model marked as reasoning";
-  const lowest = lowestThinking(p.control);
+  if (THINKING_CONTROLS_WITHOUT_OFF.includes(p.control) && p.lowest !== "low") {
+    return "this control cannot turn thinking off, so its lowest level is low";
+  }
+  const lowest = lowestThinking(p);
   if (!p.allowed) {
-    if (lowest !== "off") return "this control cannot turn thinking off, so thinking stays allowed";
+    if (lowest !== "off") return "this model cannot turn thinking off, so thinking stays allowed";
     return p.default !== null || p.max !== null
       ? "levels are only set when thinking is allowed"
       : undefined;
@@ -108,7 +127,7 @@ export function thinkingPolicyProblem(p: ThinkingPolicy, reasoning: boolean): st
   if (p.default === null || p.max === null) return "thinking needs a default and a maximum level";
   if (p.max === "off") return "the maximum level is above off when thinking is allowed";
   if (thinkingRank(p.default) < thinkingRank(lowest))
-    return "this control cannot turn thinking off";
+    return "this model cannot turn thinking off, so the default is at least low";
   if (thinkingRank(p.default) > thinkingRank(p.max)) return "the default is above the maximum";
   return undefined;
 }
@@ -123,14 +142,17 @@ export function narrowThinkingPolicy(
   teamMax: ThinkingLevel | null,
 ): ThinkingPolicy {
   if (teamMax === null || site.control === "none" || !site.allowed) return site;
-  const lowest = lowestThinking(site.control);
+  const lowest = lowestThinking(site);
   const max = maxThinking(minThinking(site.max ?? lowest, teamMax), lowest);
-  if (max === "off") return { control: site.control, allowed: false, default: null, max: null };
+  if (max === "off") {
+    return { control: site.control, allowed: false, default: null, max: null, lowest: "off" };
+  }
   return {
     control: site.control,
     allowed: true,
     default: minThinking(site.default ?? lowest, max),
     max,
+    lowest: site.lowest,
   };
 }
 
@@ -147,8 +169,8 @@ export function teamThinkingProblem(
   if (thinkingRank(teamMax) > thinkingRank(site.max ?? "off")) {
     return "a team can only lower the site's maximum";
   }
-  if (thinkingRank(teamMax) < thinkingRank(lowestThinking(site.control))) {
-    return "this control cannot turn thinking off";
+  if (thinkingRank(teamMax) < thinkingRank(lowestThinking(site))) {
+    return "this model cannot turn thinking off";
   }
   return undefined;
 }
@@ -163,7 +185,7 @@ export function effectiveThinkingLevel(
   requested: ThinkingLevel | null | undefined,
 ): ThinkingLevel | undefined {
   if (policy.control === "none") return undefined;
-  const lowest = lowestThinking(policy.control);
+  const lowest = lowestThinking(policy);
   if (!policy.allowed) return lowest;
   const max = policy.max ?? lowest;
   const wanted = requested ?? policy.default ?? lowest;
@@ -173,7 +195,23 @@ export function effectiveThinkingLevel(
 /** The levels a member may pick for a model (empty: no choice to offer). */
 export function selectableThinkingLevels(policy: ThinkingPolicy): readonly ThinkingLevel[] {
   if (policy.control === "none" || !policy.allowed || policy.max === null) return [];
-  const from = thinkingRank(lowestThinking(policy.control));
+  const from = thinkingRank(lowestThinking(policy));
   const to = thinkingRank(policy.max);
   return to > from ? THINKING_LEVELS.slice(from, to + 1) : [];
+}
+
+/** How strict a policy is: its ceiling (-1 when thinking is off). */
+const ceiling = (p: ThinkingPolicy): number =>
+  p.control === "none" ? Infinity : p.allowed && p.max !== null ? thinkingRank(p.max) : -1;
+
+/**
+ * The strictest of several policies for one provider model (several catalog aliases may name it;
+ * review N1): the server records and the gateway writes the same level. Undefined for none.
+ */
+export function strictestThinkingPolicy(
+  policies: readonly ThinkingPolicy[],
+): ThinkingPolicy | undefined {
+  let out: ThinkingPolicy | undefined;
+  for (const p of policies) if (out === undefined || ceiling(p) < ceiling(out)) out = p;
+  return out;
 }

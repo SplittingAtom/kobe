@@ -84,6 +84,9 @@ export const THINKING_CONTROLS = [
 export type ThinkingControlValue = (typeof THINKING_CONTROLS)[number];
 /** Controls that cannot turn thinking off (their lowest level is `low`). */
 export const THINKING_CONTROLS_WITHOUT_OFF = ["anthropic_effort"] as const;
+/** A model's lowest level: `off`, or `low` for a model that cannot turn thinking off. */
+export const THINKING_LOWEST = ["off", "low"] as const;
+export type ThinkingLowestValue = (typeof THINKING_LOWEST)[number];
 
 const sqlList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 /** `column IS NULL OR column IN (levels)`, for the level columns of several tables. */
@@ -202,6 +205,11 @@ export const modelCatalog = pgTable(
     thinkingDefault: text().$type<ThinkingLevelValue>(),
     /** The highest level members may pick (set only when thinking is allowed; above `off`). */
     thinkingMax: text().$type<ThinkingLevelValue>(),
+    /**
+     * The lowest level the model accepts (KOBE-260 review S2): `low` for a model whose provider
+     * cannot turn thinking off (o3, Gemini 2.5 Pro, Claude Sonnet 5.5, …), so "off" means low.
+     */
+    thinkingLowest: text().$type<ThinkingLowestValue>().notNull().default("off"),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -245,7 +253,8 @@ export const modelCatalog = pgTable(
     check(
       "model_catalog_thinking_values",
       sql`${t.thinkingControl} IN (${sqlList(THINKING_CONTROLS)})
-        AND (${thinkingLevelCheck(t.thinkingDefault)}) AND (${thinkingLevelCheck(t.thinkingMax)})`,
+        AND (${thinkingLevelCheck(t.thinkingDefault)}) AND (${thinkingLevelCheck(t.thinkingMax)})
+        AND ${t.thinkingLowest} IN (${sqlList(THINKING_LOWEST)})`,
     ),
     // KOBE-260: no control, no levels; a control only on a reasoning model; levels exactly when
     // thinking is allowed, default <= max, max above off; a control that can't turn thinking off
@@ -254,15 +263,17 @@ export const modelCatalog = pgTable(
       "model_catalog_thinking_shape",
       sql`CASE WHEN ${t.thinkingControl} = 'none'
           THEN NOT ${t.thinkingAllowed} AND ${t.thinkingDefault} IS NULL AND ${t.thinkingMax} IS NULL
+            AND ${t.thinkingLowest} = 'off'
         WHEN NOT ${t.reasoning} THEN false
+        WHEN ${t.thinkingControl} IN (${sqlList(THINKING_CONTROLS_WITHOUT_OFF)})
+          AND ${t.thinkingLowest} <> 'low' THEN false
         WHEN NOT ${t.thinkingAllowed}
-          THEN ${t.thinkingControl} NOT IN (${sqlList(THINKING_CONTROLS_WITHOUT_OFF)})
+          THEN ${t.thinkingLowest} = 'off'
             AND ${t.thinkingDefault} IS NULL AND ${t.thinkingMax} IS NULL
         ELSE ${t.thinkingDefault} IS NOT NULL AND ${t.thinkingMax} IS NOT NULL
           AND ${t.thinkingMax} <> 'off'
           AND ${levelRank(t.thinkingDefault)} <= ${levelRank(t.thinkingMax)}
-          AND (${t.thinkingDefault} <> 'off'
-            OR ${t.thinkingControl} NOT IN (${sqlList(THINKING_CONTROLS_WITHOUT_OFF)}))
+          AND ${levelRank(t.thinkingLowest)} <= ${levelRank(t.thinkingDefault)}
         END`,
     ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),

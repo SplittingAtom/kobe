@@ -165,6 +165,7 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
     thinkingAllowed: false,
     thinkingDefault: null,
     thinkingMax: null,
+    thinkingLowest: "off",
   } as const;
 
   it("persists a model's control, allowance and levels; nothing by default", async () => {
@@ -180,7 +181,9 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
         thinkingDefault: "off",
         thinkingMax: "high",
       });
-      await set({ thinkingControl: "anthropic_effort", thinkingDefault: "low" });
+      // A model that cannot turn thinking off (review S2): its lowest level is low.
+      await set({ thinkingLowest: "low", thinkingDefault: "low" });
+      await set({ thinkingControl: "anthropic_effort" });
     } finally {
       await set({ ...NONE, reasoning: false });
     }
@@ -224,6 +227,25 @@ describe("thinking settings (KOBE-260 ac-1, ac-4)", () => {
           thinkingDefault: "off",
           thinkingMax: "high",
         },
+        // Lowest level: off or low; a model that cannot turn off is always allowed, never off.
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingLowest: "minimal" },
+        { reasoning: true, thinkingControl: "reasoning_effort", thinkingLowest: "low" },
+        {
+          reasoning: true,
+          thinkingControl: "reasoning_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "off",
+          thinkingMax: "high",
+          thinkingLowest: "low",
+        },
+        { thinkingLowest: "low" }, // no control
+        {
+          reasoning: true,
+          thinkingControl: "anthropic_effort",
+          thinkingAllowed: true,
+          thinkingDefault: "low",
+          thinkingMax: "high",
+        }, // effort-only control: lowest must be low
       ] as Partial<typeof modelCatalog.$inferInsert>[]) {
         expect(pgCode(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
       }
@@ -412,6 +434,7 @@ describe("gateway principal", () => {
           allowed: true,
           default: "low",
           max: "high",
+          lowest: "off",
           teamMax: "medium",
         },
       ]);
