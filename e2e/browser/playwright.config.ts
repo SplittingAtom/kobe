@@ -27,6 +27,8 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: true,
+  // Screenshot baselines (consoles.spec.ts, KOBE-294): deployment data, so outside git.
+  snapshotPathTemplate: "{testDir}/../console-shots/{arg}{ext}",
   reporter: [
     ["list"],
     ["html", { open: "never" }],

@@ -43,6 +43,21 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Console screenshots (KOBE-294)
+
+`consoles.spec.ts` screenshots every Site console, Team console and My-area page in light and dark
+(full page, times masked) for the move of the consoles to Tailwind. It spends no tokens and changes
+nothing. `KOBE_USER` must be the site Owner and a team admin of the active team; the pages come
+from the consoles' navigation, and detail pages (an agent, a skill, a project) from the first item
+of their lists.
+
+```bash
+npx playwright test consoles --update-snapshots=all   # baseline, before a page's styling changes
+npx playwright test consoles                          # compare later; diffs in test-results/
+```
+
+Baselines land in `console-shots/<theme>/<page>.png` (gitignored: they show deployment data).
+
 ## What you get
 
 - `test-results/`: per-test traces and screenshots of failures, and `results.json`.
