@@ -51,6 +51,15 @@ rows, saves screenshots of the tree in light and dark (`test-results/.../files-t
 renames a file with F2, moves it by drag and drop and with Move to…, checks that a name clash is
 refused, and deletes the folder at the end. No tokens: `npx playwright test files-tree`.
 
+## Resizable rail (KOBE-305)
+
+`rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width
+survives a reload, Home/End (200 and 560 px at 1280), Mod+B collapse and expand (the width comes
+back), double-click back to 280 px, no handle at 960 and 390 px, and, with a file tab open in the
+artifact column, that End stops at 520 px so the conversation keeps 400 px and the column 360 px.
+Screenshots in light and dark (`test-results/.../rail-resize-*.png`). It uploads one small file
+and deletes it at the end; no tokens: `npx playwright test rail-resize`.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),

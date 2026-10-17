@@ -12,7 +12,21 @@ import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs"
 /** Lower edge of each band, in CSS px. */
 export const BREAKPOINTS = { overlay: 768, medium: 820, wide: 1100 } as const;
 
-export const RAIL_PX = { expanded: 280, collapsed: 48 } as const;
+/**
+ * The rail's column: 280 px expanded by default, 48 px collapsed. On wide windows the member can
+ * drag it between `min` (names still readable) and `max` (KOBE-305); the conversation's 400 px
+ * floor, and the artifact column's 360 px one while it is open, come first.
+ */
+export const RAIL_PX = { expanded: 280, collapsed: 48, min: 200, max: 560 } as const;
+
+/**
+ * The widest the expanded rail may be in a `grid` px wide shell: the conversation keeps its floor,
+ * and the artifact column its own while it is a column. Never under `RAIL_PX.min`.
+ */
+export function maxRailWidth(grid: number, artifactColumn: boolean): number {
+  const room = CONVERSATION_FLOOR_PX + (artifactColumn ? ARTIFACT_FLOOR_PX : 0);
+  return Math.max(RAIL_PX.min, Math.min(RAIL_PX.max, Math.round(grid) - room));
+}
 
 /**
  * - `wide` (≥ 1100): rail, artifact column, conversation; the member's sizes are honoured;
@@ -63,6 +77,8 @@ export interface LayoutInput {
   readonly artifactOpen: boolean;
   /** A dragged width in px; null is the default, half the space right of the rail. */
   readonly artifactWidth: number | null;
+  /** The rail's dragged width in px (KOBE-305); null or absent is the default, 280 px. */
+  readonly railWidth?: number | null;
 }
 
 export interface ShellLayout {
@@ -87,15 +103,17 @@ export function layoutAt({
   railCollapsed,
   artifactOpen,
   artifactWidth,
+  railWidth = null,
 }: LayoutInput): ShellLayout {
   const band = bandFor(width);
-  const rail =
-    band === "single"
-      ? 0
-      : railDocked(band) && !railCollapsed
-        ? RAIL_PX.expanded
-        : RAIL_PX.collapsed;
   const artifactMode = artifactModeOf(band, artifactOpen);
+  // min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room))
+  const expanded = Math.min(
+    railWidth ?? RAIL_PX.expanded,
+    maxRailWidth(width, artifactMode === "column"),
+  );
+  const rail =
+    band === "single" ? 0 : railDocked(band) && !railCollapsed ? expanded : RAIL_PX.collapsed;
   const space = width - rail;
   if (artifactMode !== "column") {
     return { band, rail, artifactMode, artifact: 0, conversation: space };

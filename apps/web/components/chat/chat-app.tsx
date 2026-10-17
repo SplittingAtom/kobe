@@ -24,7 +24,7 @@ import { ShortcutSheet } from "../shell/shortcut-sheet";
 import { ThreadGroupsProvider } from "../shell/thread-groups";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
-import { RailDrawerButton, RailProvider } from "../shell/rail-state";
+import { RailDrawerButton, RailProvider, useRail } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { DetailProvider } from "./detail";
@@ -126,18 +126,20 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
   return state;
 }
 
-/** The shell grid with the artifact column's dragged width (CE6) and sheet (CE7). */
+/** The shell grid with the rail's and the artifact column's dragged widths (CE6) and sheet (CE7). */
 function WorkspaceGrid(
   props: Omit<
     Parameters<typeof ShellGrid>[0],
-    "artifactWidth" | "artifactSheet" | "artifactHidden"
+    "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
   >,
 ) {
   const panel = useArtifactPanel();
+  const rail = useRail();
   return (
     <ShellGrid
       {...props}
       artifactWidth={panel?.width ?? null}
+      railWidth={rail?.width ?? null}
       artifactSheet={panel?.sheetOpen ?? false}
       artifactHidden={panel?.hidden ?? false}
     />

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { bandFor, bandFromMatches, BAND_QUERIES, BREAKPOINTS, layoutAt, RAIL_PX } from "./layout";
+import {
+  bandFor,
+  bandFromMatches,
+  BAND_QUERIES,
+  BREAKPOINTS,
+  layoutAt,
+  maxRailWidth,
+  RAIL_PX,
+} from "./layout";
 
 const open = { railCollapsed: false, artifactOpen: true, artifactWidth: null } as const;
 
@@ -98,5 +106,53 @@ describe("yield order and floors (CE7)", () => {
       conversation: 1000,
     });
     expect(layoutAt({ ...none, width: 960 })).toMatchObject({ rail: 48, conversation: 912 });
+  });
+});
+
+describe("the rail's dragged width (KOBE-305)", () => {
+  it("is bounded by its own limits and by the floors of the columns right of it", () => {
+    expect(RAIL_PX).toMatchObject({ expanded: 280, min: 200, max: 560 });
+    expect(maxRailWidth(2000, false)).toBe(560);
+    expect(maxRailWidth(1280, true)).toBe(520); // 1,280 − 400 − 360
+    expect(maxRailWidth(1100, true)).toBe(340);
+    expect(maxRailWidth(800, false)).toBe(400);
+    expect(maxRailWidth(500, true)).toBe(200); // never under the minimum
+  });
+
+  it("is honoured on wide windows while it fits, and the floors hold beside it", () => {
+    const wide = { railCollapsed: false, artifactOpen: false, artifactWidth: null } as const;
+    expect(layoutAt({ ...wide, width: 1280, railWidth: 400 })).toMatchObject({
+      rail: 400,
+      conversation: 880,
+    });
+    // With the artifact column open both floors come first: 1,100 − 760 = 340.
+    expect(layoutAt({ ...wide, artifactOpen: true, width: 1100, railWidth: 480 })).toMatchObject({
+      rail: 340,
+      artifact: 360,
+      conversation: 400,
+    });
+    // Collapsed (Mod+B) and narrower bands ignore it; it comes back when the rail expands.
+    expect(layoutAt({ ...wide, railCollapsed: true, width: 1280, railWidth: 400 }).rail).toBe(48);
+    expect(layoutAt({ ...wide, width: 960, railWidth: 400 }).rail).toBe(48);
+    expect(layoutAt({ ...wide, width: 390, railWidth: 400 }).rail).toBe(0);
+  });
+
+  it("keeps the conversation at 400 px and the artifact column at 360 px at every wide width", () => {
+    for (let width = BREAKPOINTS.wide; width <= 2000; width += 7) {
+      for (const railWidth of [RAIL_PX.min, 280, 420, RAIL_PX.max]) {
+        for (const artifactWidth of [null, 360, 900]) {
+          const l = layoutAt({
+            width,
+            railCollapsed: false,
+            artifactOpen: true,
+            artifactWidth,
+            railWidth,
+          });
+          expect(l.conversation, `${width} ${railWidth}`).toBeGreaterThanOrEqual(400);
+          expect(l.artifact, `${width} ${railWidth}`).toBeGreaterThanOrEqual(360);
+          expect(l.rail + l.artifact + l.conversation).toBe(width);
+        }
+      }
+    }
   });
 });
