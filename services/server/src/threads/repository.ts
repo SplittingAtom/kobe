@@ -1,3 +1,4 @@
+import { endThreadRules } from "../policy/user-rules.js";
 import {
   ACTIVE_RUN_STATUSES,
   and,
@@ -801,6 +802,8 @@ export async function trashThread(tx: KobeTx, viewer: Viewer, id: string): Promi
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
+  // Trash ends the thread's remembered approvals for good: a restore doesn't bring them back.
+  await endThreadRules(tx, viewer.teamId, [id]);
   await recordAudit(tx, {
     action: "thread.trashed",
     teamId: viewer.teamId,
@@ -914,5 +917,10 @@ export async function clearTestThreads(
       ),
     )
     .returning({ id: threads.id });
+  await endThreadRules(
+    tx,
+    viewer.teamId,
+    rows.map((r) => r.id),
+  );
   return rows.length;
 }
