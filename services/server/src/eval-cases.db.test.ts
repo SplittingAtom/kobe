@@ -293,7 +293,7 @@ describe("the agent owner's review (ac-2)", () => {
     expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases`)).json.accepted).toBe(1);
     expect((await owner.patch(path, { status: "dismissed" })).json.status).toBe("dismissed");
     const audited = await f.fx.admin.query<{ target: unknown }>(
-      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'agent.eval_case.reviewed' ORDER BY id`,
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'agent.eval_case.reviewed' ORDER BY seq`,
       [x.w.team],
     );
     expect(audited.rows.map((r) => r.target)).toEqual([
