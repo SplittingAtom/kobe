@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { pageAlerts } from "./support/alerts.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 
 /**
@@ -72,5 +73,46 @@ test("Team inventory: agents, skills and connectors", async ({ page }) => {
   await expect(
     agents.getByRole("table", { name: "Agent inventory" }).or(agents.getByText("No agents yet.")),
   ).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  // Not page.getByRole("alert"): Next's route announcer is one, empty or naming the page.
+  await expect(pageAlerts(page)).toHaveCount(0);
+});
+
+/** How far the table captioned `name`'s scroll box, and the page, are wider than their views. */
+async function overflow(page: Page, name: string) {
+  return page.evaluate((caption) => {
+    const wrapper = [...document.querySelectorAll<HTMLElement>('[data-slot="console-table"]')].find(
+      (w) => w.querySelector("caption")?.textContent === caption,
+    );
+    const root = document.documentElement;
+    return {
+      table: wrapper ? wrapper.scrollWidth - wrapper.clientWidth : -1,
+      page: root.scrollWidth - root.clientWidth,
+    };
+  }, name);
+}
+
+test("Team inventory: the agent table fits at 1280 px and scrolls in its box on a phone", async ({
+  page,
+}) => {
+  await open(page, "/admin/team/inventory", "Inventory");
+  const table = page.getByRole("table", { name: "Agent inventory" });
+  test.skip((await table.count()) === 0, "the team has no agents");
+  // KOBE-306: compact dates, actions behind one ⋯ button per row, nothing scrolled away.
+  expect(await overflow(page, "Agent inventory")).toEqual({ table: 0, page: 0 });
+  const menus = table.getByRole("button", { name: /^Actions for / });
+  await expect(menus.first()).toBeInViewport({ ratio: 1 });
+  await expect(table.getByRole("button", { name: /to Orbit$|^Suspend|^Reactivate/ })).toHaveCount(
+    0,
+  );
+  for (const time of await table.locator("time").all()) {
+    await expect(time).toHaveAttribute("title", /\d{4}/);
+    expect((await time.boundingBox())?.height ?? 0).toBeLessThan(30);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const scroll = await overflow(page, "Agent inventory");
+  expect(scroll.page).toBe(0);
+  if (scroll.table > 0) {
+    await expect(page.getByRole("region", { name: "Agent inventory" })).toBeVisible();
+  }
 });
