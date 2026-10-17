@@ -26,6 +26,7 @@ import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { useKobeExtras } from "./kobe-runtime";
+import { ShareCaseDialog } from "./share-case-dialog";
 
 /**
  * Thumbs up and down on answers (KOBE-275). Each member rates for themselves, readers of a shared
@@ -42,6 +43,8 @@ import { useKobeExtras } from "./kobe-runtime";
 interface Answer {
   readonly runId: string;
   readonly feedback: AnswerFeedback | null;
+  /** The member's eval case shared from this rating (KOBE-276), or null. */
+  readonly evalCaseId: string | null;
 }
 
 interface FeedbackContextValue {
@@ -49,6 +52,8 @@ interface FeedbackContextValue {
   readonly answers: ReadonlyMap<string, Answer> | null;
   readonly save: (runId: string, change: FeedbackChange) => Promise<boolean>;
   readonly clear: (runId: string) => Promise<boolean>;
+  /** The answer was shared as an eval case (its id), or withdrawn (null) (KOBE-276). */
+  readonly setCase: (runId: string, caseId: string | null) => void;
 }
 
 const FeedbackContext = createContext<FeedbackContextValue | null>(null);
@@ -56,17 +61,24 @@ const FeedbackContext = createContext<FeedbackContextValue | null>(null);
 function byPrompt(data: ThreadFeedback): Map<string, Answer> {
   return new Map(
     data.answers.flatMap((a) =>
-      a.userEntryId === null ? [] : [[a.userEntryId, { runId: a.runId, feedback: a.feedback }]],
+      a.userEntryId === null
+        ? []
+        : [
+            [
+              a.userEntryId,
+              { runId: a.runId, feedback: a.feedback, evalCaseId: a.evalCaseId ?? null },
+            ],
+          ],
     ),
   );
 }
 
-function withFeedback(
+function withAnswer(
   answers: ReadonlyMap<string, Answer>,
   runId: string,
-  feedback: AnswerFeedback | null,
+  change: Partial<Pick<Answer, "feedback" | "evalCaseId">>,
 ): Map<string, Answer> {
-  return new Map([...answers].map(([k, a]) => [k, a.runId === runId ? { runId, feedback } : a]));
+  return new Map([...answers].map(([k, a]) => [k, a.runId === runId ? { ...a, ...change } : a]));
 }
 
 /**
@@ -103,7 +115,7 @@ export function AnswerFeedbackProvider({ children }: { readonly children: ReactN
       if (!res.ok) return false;
       setRead((r) =>
         r && r.threadId === threadId
-          ? { threadId, answers: withFeedback(r.answers, runId, res.data) }
+          ? { threadId, answers: withAnswer(r.answers, runId, { feedback: res.data }) }
           : r,
       );
       return true;
@@ -117,14 +129,23 @@ export function AnswerFeedbackProvider({ children }: { readonly children: ReactN
       if (!res.ok) return false;
       setRead((r) =>
         r && r.threadId === threadId
-          ? { threadId, answers: withFeedback(r.answers, runId, null) }
+          ? { threadId, answers: withAnswer(r.answers, runId, { feedback: null }) }
           : r,
       );
       return true;
     },
     [controller, threadId],
   );
-  const value = useMemo(() => ({ answers, save, clear }), [answers, save, clear]);
+  const setCase = useCallback(
+    (runId: string, caseId: string | null) =>
+      setRead((r) =>
+        r && r.threadId === threadId
+          ? { threadId, answers: withAnswer(r.answers, runId, { evalCaseId: caseId }) }
+          : r,
+      ),
+    [threadId],
+  );
+  const value = useMemo(() => ({ answers, save, clear, setCase }), [answers, save, clear, setCase]);
   return <FeedbackContext.Provider value={value}>{children}</FeedbackContext.Provider>;
 }
 
@@ -218,10 +239,14 @@ export function AnswerFeedbackButtons() {
   );
 }
 
-/** Below the action bar: why a thumbs down (optional chips and comment), and save errors. */
+/**
+ * Below the action bar: why a thumbs down (optional chips and comment), save errors, and on your
+ * own conversation sharing the rated-down answer as an eval case (KOBE-276).
+ */
 export function AnswerFeedbackDetails() {
   const found = useAnswerFeedback();
   const scope = useContext(ScopeContext);
+  const readOnly = useKobeExtras()?.state.summary?.readOnly === true;
   if (scope?.error) {
     return (
       <p role="alert" className="text-destructive mx-2 mt-1 text-xs">
@@ -229,17 +254,88 @@ export function AnswerFeedbackDetails() {
       </p>
     );
   }
-  if (!found || !found.scope.detailsOpen || found.answer.feedback?.rating !== "down") return null;
+  if (!found) return null;
+  const { answer } = found;
+  const sharable = !readOnly && (answer.feedback?.rating === "down" || answer.evalCaseId !== null);
   return (
-    <DetailsForm
-      key={found.answer.runId}
-      runId={found.answer.runId}
-      feedback={found.answer.feedback}
-      entryId={found.entryId}
-      save={found.context.save}
-      onDone={() => found.scope.setDetailsOpen(false)}
-      onError={found.scope.setError}
-    />
+    <>
+      {found.scope.detailsOpen && answer.feedback?.rating === "down" && (
+        <DetailsForm
+          key={answer.runId}
+          runId={answer.runId}
+          feedback={answer.feedback}
+          entryId={found.entryId}
+          save={found.context.save}
+          onDone={() => found.scope.setDetailsOpen(false)}
+          onError={found.scope.setError}
+        />
+      )}
+      {sharable && (
+        <ShareCaseRow
+          runId={answer.runId}
+          caseId={answer.evalCaseId}
+          setCase={found.context.setCase}
+        />
+      )}
+    </>
+  );
+}
+
+/** "Share as an eval case…", or "Shared … Withdraw" once shared (KOBE-276). */
+function ShareCaseRow({
+  runId,
+  caseId,
+  setCase,
+}: {
+  readonly runId: string;
+  readonly caseId: string | null;
+  readonly setCase: FeedbackContextValue["setCase"];
+}) {
+  const controller = useKobeExtras()?.controller;
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const withdraw = async () => {
+    if (!controller || caseId === null || busy) return;
+    setBusy(true);
+    const res = await controller.withdrawEvalCase(caseId);
+    setBusy(false);
+    setError(res.ok ? null : "It wasn't withdrawn. Try again.");
+    if (res.ok) setCase(runId, null);
+  };
+  return (
+    <div className="text-muted-foreground mx-2 mt-1 flex flex-wrap items-center gap-2 text-xs">
+      {caseId === null ? (
+        <Button type="button" variant="ghost" size="xs" onClick={() => setOpen(true)}>
+          Share as an eval case…
+        </Button>
+      ) : (
+        <>
+          <span>Shared with the agent&apos;s owner as an eval case.</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={busy}
+            onClick={() => void withdraw()}
+          >
+            Withdraw
+          </Button>
+        </>
+      )}
+      {error !== null && (
+        <span role="alert" className="text-destructive">
+          {error}
+        </span>
+      )}
+      {open && (
+        <ShareCaseDialog
+          runId={runId}
+          onShared={(id) => setCase(runId, id)}
+          onOpenChange={setOpen}
+        />
+      )}
+    </div>
   );
 }
 

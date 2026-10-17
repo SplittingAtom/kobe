@@ -15,6 +15,12 @@ import {
   type FeedbackChange,
   type ThreadFeedback,
 } from "./feedback";
+import {
+  evalCaseOptionsBody,
+  type EvalCaseOptions,
+  type EvalCasePreview,
+  type MyEvalCase,
+} from "./eval-cases";
 import type { ThreadMarkers } from "./markers";
 import type {
   ApprovalDecisionBody,
@@ -194,6 +200,16 @@ export interface ChatApi {
   rateAnswer(runId: string, change: FeedbackChange): Promise<ApiResult<AnswerFeedback>>;
   /** Clears the caller's rating of an answer (KOBE-275); 204 also when there was none. */
   clearRating(runId: string): Promise<ApiResult<undefined>>;
+  /** What sharing a rated-down answer as an eval case would store (KOBE-276); shares nothing. */
+  previewEvalCase(runId: string, options: EvalCaseOptions): Promise<ApiResult<EvalCasePreview>>;
+  /** Shares it as previewed (the preview's digest), with the agent's owner (KOBE-276). */
+  shareEvalCase(
+    runId: string,
+    options: EvalCaseOptions,
+    digest: string,
+  ): Promise<ApiResult<MyEvalCase>>;
+  /** Withdraws the caller's case: the copy is deleted (KOBE-276); 204 also when there was none. */
+  withdrawEvalCase(caseId: string): Promise<ApiResult<undefined>>;
   /** A tool result's full output, trimmed in the entry list or offloaded (KOBE-208). */
   toolOutput(threadId: string, entryId: string): Promise<ApiResult<ToolOutput>>;
   /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
@@ -347,6 +363,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     rateAnswer: (runId, change) =>
       send("PUT", `/v1/runs/${enc(runId)}/feedback`, feedbackBody(change)),
     clearRating: (runId) => send("DELETE", `/v1/runs/${enc(runId)}/feedback`),
+    previewEvalCase: (runId, options) =>
+      send("POST", `/v1/runs/${enc(runId)}/eval-case/preview`, evalCaseOptionsBody(options)),
+    shareEvalCase: (runId, options, digest) =>
+      send("POST", `/v1/runs/${enc(runId)}/eval-case`, { ...evalCaseOptionsBody(options), digest }),
+    withdrawEvalCase: (caseId) => send("DELETE", `/v1/eval-cases/${enc(caseId)}`),
     toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),

@@ -36,6 +36,7 @@ import {
   type ThreadState,
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
+import type { EvalCaseOptions } from "./eval-cases";
 import type { FeedbackChange } from "./feedback";
 import { SHARED_ANNOUNCEMENT } from "./share";
 import type { ThreadEntry, ThreadRuns, ThreadSummary, ThreadVisibility } from "./types";
@@ -144,6 +145,17 @@ export class ThreadController {
 
   /** Clears the member's rating of an answer (KOBE-275). */
   readonly clearRating = (runId: string) => this.#api.clearRating(runId);
+
+  /** The preview of sharing an answer of this thread as an eval case (KOBE-276). */
+  readonly previewEvalCase = (runId: string, options: EvalCaseOptions) =>
+    this.#api.previewEvalCase(runId, options);
+
+  /** Shares an answer as previewed (KOBE-276). */
+  readonly shareEvalCase = (runId: string, options: EvalCaseOptions, digest: string) =>
+    this.#api.shareEvalCase(runId, options, digest);
+
+  /** Withdraws the member's eval case (KOBE-276). */
+  readonly withdrawEvalCase = (caseId: string) => this.#api.withdrawEvalCase(caseId);
 
   /** A tool output of this thread in full (KOBE-208: a large one, when its card opens). */
   readonly toolOutput = (entryId: string) => {

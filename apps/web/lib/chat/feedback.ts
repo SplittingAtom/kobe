@@ -27,6 +27,8 @@ export interface ThreadFeedback {
     readonly runId: string;
     readonly userEntryId: string | null;
     readonly feedback: AnswerFeedback | null;
+    /** The member shared this rating as an eval case (KOBE-276); absent on older servers. */
+    readonly evalCaseId?: string | null;
   }[];
 }
 

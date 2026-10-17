@@ -351,6 +351,11 @@ export class FakeKobe {
   /** The caller's answer ratings (KOBE-275), wire casing, by run id. */
   readonly feedback = new Map<string, Json>();
 
+  /** The caller's shared eval cases (KOBE-276), wire casing, by run id. */
+  readonly evalCases = new Map<string, Json>();
+  /** What a run's eval case preview offers to add (KOBE-276), wire casing, by run id. */
+  readonly evalCaseAvailable = new Map<string, Json>();
+
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
@@ -900,6 +905,7 @@ export class FakeKobe {
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
+      url.pathname.startsWith("/v1/eval-cases") ||
       url.pathname.startsWith("/v1/approvals") ||
       url.pathname === "/v1/team/retention" ||
       url.pathname === "/v1/projects" ||
@@ -1016,7 +1022,13 @@ export class FakeKobe {
     if (area === "projects" && id === undefined && method === "GET") {
       return json(200, { projects: this.projects });
     }
+    if (area === "runs" && id && action === "eval-case")
+      return this.#evalCase(method, id, sub, body);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
+    if (area === "eval-cases" && id && method === "DELETE") {
+      for (const [runId, c] of this.evalCases) if (c.id === id) this.evalCases.delete(runId);
+      return new Response(null, { status: 204 });
+    }
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
     if (area === "egress" && id === "requests") return this.#egressRoute(method, url, body);
     if (area === "team" && id === "retention" && method === "GET") {
@@ -1212,6 +1224,7 @@ export class FakeKobe {
           run_id: r.run_id,
           user_entry_id: r.user_entry_id ?? null,
           feedback: this.feedback.get(r.run_id) ?? null,
+          eval_case_id: (this.evalCases.get(r.run_id)?.id as string | undefined) ?? null,
         }));
       return json(200, { thread_id: thread.thread_id, answers });
     }
@@ -1499,6 +1512,84 @@ export class FakeKobe {
     return json(201, { run_id: run.run_id, queued: waits });
   }
 
+  /**
+   * `POST /v1/runs/{id}/eval-case[/preview]` (KOBE-276): the owner's thumbs down only; the copy
+   * adds a tool output or file name only when its id is ticked; the share needs the preview's
+   * digest (a stand-in hash of the content, like the server's).
+   */
+  #evalCase(
+    method: string,
+    runId: string,
+    sub: string | undefined,
+    body: Json | undefined,
+  ): Response {
+    const run = this.runs.get(runId);
+    if (!run || method !== "POST") return error(404, "run_not_found", "No answer with that id.");
+    const rating = this.feedback.get(runId);
+    const thread = this.threads.get(run.thread_id);
+    if (rating?.rating !== "down" || thread?.read_only === true) {
+      return error(409, "not_shareable", "Only your own thumbs down can be shared.");
+    }
+    const available = (this.evalCaseAvailable.get(runId) ?? {
+      earlier_exchanges: 0,
+      tool_outputs: [],
+      attachments: [],
+    }) as { earlier_exchanges: number; tool_outputs: Json[]; attachments: Json[] };
+    const ticked = (key: string) => (Array.isArray(body?.[key]) ? (body[key] as string[]) : []);
+    const tools = ticked("tool_output_ids");
+    const files = ticked("attachment_ids");
+    const known = (list: Json[], ids: string[]) => ids.every((i) => list.some((x) => x.id === i));
+    if (!known(available.tool_outputs, tools) || !known(available.attachments, files)) {
+      return error(400, "invalid_request");
+    }
+    const earlier = Math.min(Number(body?.earlier_exchanges ?? 0), available.earlier_exchanges);
+    const content = {
+      prompt: run.input || "The prompt",
+      answer: "Seven, it said.",
+      earlier: Array.from({ length: earlier }, (_, i) => [
+        { role: "user", text: `Earlier prompt ${i + 1}` },
+        { role: "assistant", text: `Earlier answer ${i + 1}` },
+      ]).flat(),
+      tool_outputs: available.tool_outputs
+        .filter((t) => tools.includes(t.id as string))
+        .map((t) => ({ tool: t.tool, text: `Output of ${t.id as string}`, is_error: false })),
+      attachments: available.attachments
+        .filter((a) => files.includes(a.id as string))
+        .map((a) => ({ name: a.name, mime_type: a.mime_type, size_bytes: a.size_bytes })),
+      reasons: rating.reasons ?? [],
+      comment: rating.comment ?? null,
+      truncated: false,
+    };
+    const digest = fakeDigest(JSON.stringify(content));
+    const shared = this.evalCases.get(runId);
+    if (sub === "preview") {
+      return json(200, {
+        run_id: runId,
+        agent: { scope: "team", id: uuid(7, 1), version: 1 },
+        content,
+        digest,
+        available,
+        shared_case_id: shared?.id ?? null,
+      });
+    }
+    if (shared) return error(409, "already_shared", "You already shared this answer.");
+    if (body?.digest !== digest) {
+      return error(409, "preview_stale", "What would be shared changed since the preview.");
+    }
+    this.#caseN += 1;
+    const stored = {
+      id: uuid(8, this.#caseN),
+      agent: { scope: "team", id: uuid(7, 1), version: 1 },
+      status: "open",
+      content,
+      shared_at: NOW,
+    };
+    this.evalCases.set(runId, stored);
+    return json(201, stored);
+  }
+
+  #caseN = 0;
+
   /** `PUT` / `DELETE /v1/runs/{id}/feedback` (KOBE-275), checked like the server's schema. */
   #feedback(method: string, run: FakeRun, body: Json | undefined): Response {
     if (method === "DELETE") {
@@ -1740,4 +1831,18 @@ export class FakeEventSource implements EventSourceLike {
   rewind(to: number): void {
     this.#lastEventId = to;
   }
+}
+
+/** A deterministic 64-hex stand-in for the server's SHA-256 digest (tests only). */
+function fakeDigest(text: string): string {
+  let out = "";
+  for (let seed = 0; seed < 8; seed += 1) {
+    let h = 0x811c9dc5 ^ seed;
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    out += h.toString(16).padStart(8, "0");
+  }
+  return out;
 }
