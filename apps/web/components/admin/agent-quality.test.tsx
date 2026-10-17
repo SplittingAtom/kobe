@@ -137,6 +137,57 @@ describe("agent ratings totals (KOBE-275 ac-3)", () => {
     expect(summary(calls)).toEqual([`GET ${URL(30)}`, `GET ${URL(7)}`]);
   });
 
+  it("never shows the old period's numbers under the new label while it loads", async () => {
+    let answer: (r: Response) => void = () => undefined;
+    const delayed = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetch = vi.fn(async (url: string) =>
+      url === URL(30) ? new Response(JSON.stringify(enough), { status: 200 }) : delayed,
+    );
+    vi.stubGlobal("fetch", fetch);
+    renderTeam(<AgentQuality teamId={TEAM.id} agentId={AGENT} />);
+    const section = await screen.findByRole("region", { name: "Ratings" });
+    await within(section).findByText("Thumbs up", { selector: "dt" });
+    await userEvent.selectOptions(within(section).getByLabelText("Period"), "90");
+    expect(await within(section).findByText("Loading ratings for the last 90 days…")).toBeTruthy();
+    expect(within(section).queryByText("Thumbs up", { selector: "dt" })).toBeNull();
+    expect(within(section).queryByRole("table")).toBeNull();
+    answer(new Response(JSON.stringify(notEnough(90)), { status: 200 }));
+    expect(await within(section).findByText(/Not enough ratings yet/)).toBeTruthy();
+    expect(within(section).queryByText(/Loading ratings/)).toBeNull();
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual([URL(30), URL(90)]);
+  });
+
+  it("drops an older period's late answer", async () => {
+    let answer30: (r: Response) => void = () => undefined;
+    const slow30 = new Promise<Response>((resolve) => {
+      answer30 = resolve;
+    });
+    let first = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === URL(30) && first) {
+          first = false;
+          return new Response(JSON.stringify(notEnough()), { status: 200 });
+        }
+        if (url === URL(7)) return slow30.then(() => new Response("{}", { status: 500 }));
+        return new Response(JSON.stringify({ ...enough, window_days: 90 }), { status: 200 });
+      }),
+    );
+    renderTeam(<AgentQuality teamId={TEAM.id} agentId={AGENT} />);
+    const select = await screen.findByLabelText("Period");
+    await userEvent.selectOptions(select, "7");
+    await userEvent.selectOptions(select, "90");
+    expect(await screen.findByText("Thumbs up", { selector: "dt" })).toBeTruthy();
+    answer30(new Response(null));
+    await new Promise((r) => setTimeout(r, 0));
+    // The 7-day request failing late changes nothing: the 90-day numbers stay.
+    expect(screen.getByText("Thumbs up", { selector: "dt" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("orders reasons by count, ties in the contract's order", () => {
     expect(topReasons(null)).toBe("Not enough ratings to break down");
     expect(

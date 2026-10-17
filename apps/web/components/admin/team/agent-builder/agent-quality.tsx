@@ -67,7 +67,16 @@ export function AgentQuality({
         </Select>
       </Field>
       {state.status === "error" && <ErrorNotice error={state.error} />}
-      {state.status === "ready" && <QualityBody totals={state.data} />}
+      {state.status === "ready" &&
+        // The last answer stays in the resource while the new period loads (a late answer from an
+        // older load is dropped): never show one period's numbers under another's label.
+        (state.data.windowDays === windowDays ? (
+          <QualityBody totals={state.data} />
+        ) : (
+          <p role="status" className="m-0 text-sm text-console-muted">
+            Loading ratings for the last {windowDays} days…
+          </p>
+        ))}
     </Section>
   );
 }
