@@ -7,10 +7,10 @@ import { expect, test } from "./support/chat.js";
  * comes back), double-click back to 280 px, no handle at 960 and 390 px, and the bounds beside an
  * open file tab (the artifact column): the conversation keeps 400 px and the column 360 px.
  * Screenshots of the widened rail with the Files tree in light and dark land in test-results/.
- * Uploads one small file and deletes it at the end. No model tokens.
+ * The width is a per-user preference on the server (CE8): the spec puts back the member's
+ * width as it found it. Uploads one small file and deletes it at the end. No model tokens.
  */
 const TEAM_KEY = "kobe.lastTeamId";
-const RAIL_WIDTH_KEY = "kobe.railWidth";
 const THEME_COOKIE = "kobe-theme";
 /** CSS px are whole at 1280 × 800; allow a pixel for borders and rounding. */
 const SLACK_PX = 1;
@@ -42,8 +42,30 @@ async function expectWidth(l: Locator, px: number) {
   await expect.poll(() => width(l)).toBeLessThanOrEqual(px + SLACK_PX);
 }
 
-const stored = (page: Page) =>
-  page.evaluate((key) => window.localStorage.getItem(key), RAIL_WIDTH_KEY);
+/** The member's stored rail width on the server (null or absent: the default). */
+async function stored(page: Page): Promise<number | null> {
+  const prefs = await prefsCall(page, "GET");
+  return (prefs["rail_width"] as number | null | undefined) ?? null;
+}
+
+/** `GET` or `PUT /v1/me/preferences` from the page; returns the stored preferences. */
+async function prefsCall(
+  page: Page,
+  method: "GET" | "PUT",
+  body?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return page.evaluate(
+    async ({ method, body }) => {
+      const init: RequestInit =
+        method === "PUT"
+          ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+          : { method };
+      const res = await fetch("/v1/me/preferences", init);
+      return ((await res.json()) as { preferences: Record<string, unknown> }).preferences;
+    },
+    { method, body },
+  );
+}
 
 test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a file tab", async ({
   chat,
@@ -52,7 +74,8 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   baseURL,
 }, testInfo) => {
   await chat.open();
-  await page.evaluate((key) => window.localStorage.removeItem(key), RAIL_WIDTH_KEY);
+  const before = await stored(page);
+  await prefsCall(page, "PUT", { rail_width: null });
   await page.reload();
   const rail = page.locator('[data-shell-region="rail"]');
   const conversation = page.locator('[data-shell-region="conversation"]');
@@ -72,7 +95,15 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   await page.mouse.move(box.x + box.width / 2 + 120, y, { steps: 4 });
   await page.mouse.up();
   await expectWidth(rail, 400);
-  await expect.poll(() => stored(page)).toBe("400");
+  await expect.poll(() => stored(page)).toBe(400); // saved debounced, per user
+  // Another browser context of the same member (another device) gets the same width.
+  const other = await context.browser()?.newContext({ storageState: await context.storageState() });
+  if (other) {
+    const second = await other.newPage();
+    await second.goto("/");
+    await expectWidth(second.locator('[data-shell-region="rail"]'), 400);
+    await other.close();
+  }
   await page.reload();
   await expectWidth(rail, 400);
 
@@ -145,5 +176,6 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
     await handle.dblclick();
   } finally {
     expect(await api(page, "DELETE", dir)).toBe(204);
+    await prefsCall(page, "PUT", { rail_width: before });
   }
 });

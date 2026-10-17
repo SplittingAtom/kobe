@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { RAIL_PX } from "../../lib/shell/layout";
-import { RAIL_WIDTH_KEY, RAIL_WIDTH_VAR } from "../../lib/shell/rail-width";
+import { PREFERENCES_PATH } from "../../lib/shell/preferences";
+import { RAIL_WIDTH_VAR } from "../../lib/shell/rail-width";
 import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
@@ -24,7 +25,10 @@ const regionOf = (name: string) =>
   must(document.querySelector<HTMLElement>(`[data-shell-region="${name}"]`));
 const grid = () => must(regionOf("rail").parentElement);
 const railVar = () => grid().style.getPropertyValue(RAIL_WIDTH_VAR);
-const stored = () => localStorage.getItem(RAIL_WIDTH_KEY);
+/** What the fake server holds for the member: their stored rail width (wire casing). */
+const stored = () => fake.preferences["rail_width"];
+const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
+const SAVED = { timeout: 3000 };
 const handle = () => screen.queryByRole("separator", { name: "Resize the workspace rail" });
 const mustHandle = () => must(handle());
 const aside = () => must(document.querySelector<HTMLElement>('aside[aria-label="Workspace"]'));
@@ -131,14 +135,16 @@ describe("the handle (ac-1, ac-3)", () => {
     fireEvent.pointerMove(h, { clientX: 120, pointerId: 1 }); // under the minimum
     expect(railVar()).toBe("200px");
     expect(h.getAttribute("aria-valuenow")).toBe("200");
-    expect(stored()).toBeNull(); // nothing saved mid-drag
+    expect(puts()).toHaveLength(0); // nothing saved mid-drag
     fireEvent.pointerMove(h, { clientX: 1000, pointerId: 1 }); // past the maximum
     expect(railVar()).toBe("560px");
     fireEvent.pointerMove(h, { clientX: 400.4, pointerId: 1 });
     expect(railVar()).toBe("400px");
     fireEvent.pointerUp(h, { clientX: 400, pointerId: 1 });
-    expect(stored()).toBe("400");
     expect(railVar()).toBe("400px");
+    await waitFor(() => expect(puts()).toHaveLength(1), SAVED);
+    expect(puts()[0]?.body).toEqual({ rail_width: 400 });
+    expect(stored()).toBe(400);
   });
 
   it("a press that doesn't move is a click: the width stays the default", async () => {
@@ -150,13 +156,14 @@ describe("the handle (ac-1, ac-3)", () => {
     fireEvent.pointerMove(h, { clientX: 400, pointerId: 1 });
     fireEvent.pointerUp(h, { clientX: 400, pointerId: 1 });
     expect(railVar()).toBe("");
-    expect(stored()).toBeNull();
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts()).toHaveLength(0);
   });
 });
 
 describe("persistence and reset (ac-2)", () => {
-  it("a reload restores the stored width", async () => {
-    localStorage.setItem(RAIL_WIDTH_KEY, "360");
+  it("applies the member's stored width, from any device", async () => {
+    fake.preferences = { rail_width: 360 };
     const h = await openShell();
     await waitFor(() => expect(railVar()).toBe("360px"));
     h.focus();
@@ -164,41 +171,40 @@ describe("persistence and reset (ac-2)", () => {
   });
 
   it("ignores a stored width out of bounds or garbled: the default applies", async () => {
-    localStorage.setItem(RAIL_WIDTH_KEY, "9000");
+    fake.preferences = { rail_width: 9000 };
     await openShell();
+    await waitFor(() => expect(fake.requests.some((r) => r.path === PREFERENCES_PATH)).toBe(true));
     expect(railVar()).toBe("");
     cleanup();
-    localStorage.setItem(RAIL_WIDTH_KEY, "wide");
+    fake.preferences = { rail_width: "wide" };
     await openShell();
     expect(railVar()).toBe("");
   });
 
-  it("works for this page when storage is blocked", async () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("SecurityError");
-    });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("QuotaExceededError");
-    });
+  it("saves keyboard changes debounced into one PUT", async () => {
     const h = await openShell();
     h.focus();
-    await userEvent.setup().keyboard("{ArrowRight}");
-    expect(railVar()).toBe("304px");
+    await userEvent.setup().keyboard("{ArrowRight}{ArrowRight}");
+    expect(railVar()).toBe("328px");
+    await waitFor(() => expect(puts()).toHaveLength(1), SAVED);
+    expect(puts()[0]?.body).toEqual({ rail_width: 328 });
   });
 
-  it("double-click goes back to the default and forgets the stored width", async () => {
-    localStorage.setItem(RAIL_WIDTH_KEY, "420");
+  it("double-click goes back to the default and saves that (null)", async () => {
+    fake.preferences = { rail_width: 420 };
     const h = await openShell();
     await waitFor(() => expect(railVar()).toBe("420px"));
     fireEvent.doubleClick(h);
     await waitFor(() => expect(railVar()).toBe(""));
+    await waitFor(() => expect(puts()).toHaveLength(1), SAVED);
+    expect(puts()[0]?.body).toEqual({ rail_width: null });
     expect(stored()).toBeNull();
   });
 });
 
 describe("with the rest of the shell (ac-4)", () => {
   it("Mod+B collapses the rail (no handle) and expanding restores the saved width", async () => {
-    localStorage.setItem(RAIL_WIDTH_KEY, "380");
+    fake.preferences = { rail_width: 380 };
     await openShell();
     await waitFor(() => expect(railVar()).toBe("380px"));
     toggleRail();
@@ -208,11 +214,11 @@ describe("with the rest of the shell (ac-4)", () => {
     await waitFor(() => expect(aside().hasAttribute("data-collapsed")).toBe(false));
     await waitFor(() => expect(handle()).not.toBeNull());
     expect(railVar()).toBe("380px");
-    expect(stored()).toBe("380");
+    expect(puts().every((p) => !("rail_width" in (p.body as object)))).toBe(true);
   });
 
   it("has no handle on narrow and phone widths, nor in the drawer", async () => {
-    localStorage.setItem(RAIL_WIDTH_KEY, "380");
+    fake.preferences = { rail_width: 380 };
     await openShell();
     for (const width of [960, 390]) {
       resizeWindow(width);
@@ -226,7 +232,8 @@ describe("with the rest of the shell (ac-4)", () => {
     // The stored width is untouched and comes back on a wide window.
     resizeWindow(DESKTOP_WIDTH);
     await waitFor(() => expect(handle()).not.toBeNull());
-    expect(stored()).toBe("380");
+    expect(stored()).toBe(380);
+    expect(railVar()).toBe("380px");
   });
 
   it("beside the artifact column, the rail's maximum keeps both floors", async () => {

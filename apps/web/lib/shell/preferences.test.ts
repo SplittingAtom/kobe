@@ -57,6 +57,10 @@ describe("wire", () => {
       detailExpanded: true,
     });
     expect(readPreferences({ preferences: { detailExpanded: 1 } })).toEqual({});
+    // KOBE-305: the rail's width.
+    expect(readPreferences({ preferences: { railWidth: 360 } })).toEqual({ railWidth: 360 });
+    expect(readPreferences({ preferences: { railWidth: null } })).toEqual({ railWidth: null });
+    expect(readPreferences({ preferences: { railWidth: 9000 } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -66,6 +70,8 @@ describe("wire", () => {
       artifact_width: null,
     });
     expect(toWire({ detailExpanded: false })).toEqual({ detail_expanded: false });
+    expect(toWire({ railWidth: 400 })).toEqual({ rail_width: 400 });
+    expect(toWire({ railWidth: null })).toEqual({ rail_width: null });
     expect(toWire({})).toEqual({});
   });
 });

@@ -1,6 +1,6 @@
 /**
- * Layout preferences per user (CE8, KOBE-202): the rail's collapsed state, the Threads/Files
- * divider and the artifact column's width follow the member across devices. The shell loads them
+ * Layout preferences per user (CE8, KOBE-202): the rail's collapsed state and width (KOBE-305),
+ * the Threads/Files divider and the artifact column's width follow the member across devices. The shell loads them
  * once at start (`GET /v1/me/preferences`) and applies them to the rail and the artifact column;
  * changes are debounced into one `PUT` of the keys that changed (callers commit on release or
  * toggle, never per pointer move), and what is still queued goes out when the page is hidden or
@@ -32,6 +32,8 @@ export interface LayoutPreferences {
   readonly artifactWidth?: number | null;
   /** The Detail toggle (KOBE-208): every reasoning block and tool card open. */
   readonly detailExpanded?: boolean;
+  /** The expanded rail's dragged width (KOBE-305); null: the default, 280 px. */
+  readonly railWidth?: number | null;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -42,6 +44,7 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.threads_share !== undefined ? { threadsShare: p.threads_share } : {}),
   ...(p.artifact_width !== undefined ? { artifactWidth: p.artifact_width } : {}),
   ...(p.detail_expanded !== undefined ? { detailExpanded: p.detail_expanded } : {}),
+  ...(p.rail_width !== undefined ? { railWidth: p.rail_width } : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -51,6 +54,7 @@ export function toWire(change: LayoutPreferences): UiPreferences {
     ...(change.threadsShare !== undefined ? { threads_share: change.threadsShare } : {}),
     ...(change.artifactWidth !== undefined ? { artifact_width: change.artifactWidth } : {}),
     ...(change.detailExpanded !== undefined ? { detail_expanded: change.detailExpanded } : {}),
+    ...(change.railWidth !== undefined ? { rail_width: change.railWidth } : {}),
   };
 }
 
@@ -66,6 +70,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       threads_share: raw.threadsShare,
       artifact_width: raw.artifactWidth,
       detail_expanded: raw.detailExpanded,
+      rail_width: raw.railWidth,
     }),
   );
 }

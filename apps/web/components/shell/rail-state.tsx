@@ -16,7 +16,7 @@ import {
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
-import { railWidthWithin, readRailWidth, writeRailWidth } from "../../lib/shell/rail-width";
+import { applyRailWidth, railWidthWithin } from "../../lib/shell/rail-width";
 import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
 
@@ -35,8 +35,8 @@ import { useShellBand } from "./shell-band";
  * over the shell (under 768 px the rail has no column, so the bar opens the drawer). The drawer is
  * never saved and never touches the choice, so the chosen state comes back when the window grows.
  *
- * The expanded rail's width (KOBE-305) is dragged on wide windows only and remembered in this
- * browser (`lib/shell/rail-width.ts`); collapsing keeps it, so expanding again restores it.
+ * The expanded rail's width (KOBE-305) is dragged on wide windows only and saved with the other
+ * preferences (per user, server-side); collapsing keeps it, so expanding again restores it.
  */
 export type RailSection = "threads" | "files";
 
@@ -89,30 +89,36 @@ export interface RailApi {
   requestFiles(): void;
   /** The expanded rail's dragged width in px (KOBE-305); null is the default, 280 px. */
   readonly width: number | null;
-  /** The member resized the rail: kept within its bounds and remembered in this browser. */
+  /** The member resized the rail: kept within its bounds and saved (per user, server-side). */
   setWidth(width: number): void;
-  /** Back to the default width (double-click on the handle), forgetting the stored one. */
+  /** Back to the default width (double-click on the handle), saved as `null`. */
   resetWidth(): void;
 }
 
-/** The rail's width, read from this browser once mounted (the server render has the default). */
-function useRailWidth() {
-  const [width, setState] = useState<number | null>(null);
-  useEffect(() => {
-    const stored = readRailWidth();
-    if (stored !== null) setState(stored);
-  }, []);
-  const setWidth = useCallback((next: number) => {
-    const within = railWidthWithin(next);
-    if (within === null) return;
-    setState(within);
-    writeRailWidth(within);
-  }, []);
-  const resetWidth = useCallback(() => {
-    setState(null);
-    writeRailWidth(null);
-  }, []);
-  return { width, setWidth, resetWidth };
+/**
+ * The rail's width: the member's stored width (server-side, CE8) applied once loaded unless they
+ * already resized on this page; a resize or a reset is saved (the handle is on wide windows only).
+ */
+function useRailWidth(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const stored = useStoredPreference<number | null>({
+    initial: null,
+    ready: preferences !== null,
+    resolve: () => applyRailWidth(preferences?.railWidth),
+    save: onSave && ((railWidth) => onSave({ railWidth })),
+  });
+  const { commit } = stored;
+  const setWidth = useCallback(
+    (next: number) => {
+      const within = railWidthWithin(next);
+      if (within !== null) commit(within);
+    },
+    [commit],
+  );
+  const resetWidth = useCallback(() => commit(null), [commit]);
+  return { width: stored.value, setWidth, resetWidth };
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -167,7 +173,7 @@ export function RailProvider({
     () => (docked ? chosenNow() : !drawerOpen),
     [docked, chosenNow, drawerOpen],
   );
-  const { width, setWidth, resetWidth } = useRailWidth();
+  const { width, setWidth, resetWidth } = useRailWidth(preferences, onSave);
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);

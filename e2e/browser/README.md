@@ -53,12 +53,13 @@ refused, and deletes the folder at the end. No tokens: `npx playwright test file
 
 ## Resizable rail (KOBE-305)
 
-`rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width
-survives a reload, Home/End (200 and 560 px at 1280), Mod+B collapse and expand (the width comes
+`rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width is
+saved per user (a second browser context gets it) and survives a reload, Home/End (200 and 560 px at 1280), Mod+B collapse and expand (the width comes
 back), double-click back to 280 px, no handle at 960 and 390 px, and, with a file tab open in the
 artifact column, that End stops at 520 px so the conversation keeps 400 px and the column 360 px.
 Screenshots in light and dark (`test-results/.../rail-resize-*.png`). It uploads one small file
-and deletes it at the end; no tokens: `npx playwright test rail-resize`.
+and deletes it at the end, and puts the member's stored rail width back as it found it; no
+tokens: `npx playwright test rail-resize`.
 
 ## Console sections (KOBE-291)
 

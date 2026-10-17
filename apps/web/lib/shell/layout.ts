@@ -7,6 +7,7 @@
  * `shell.module.css` lays this out with media queries on the same numbers; `layoutAt` states the
  * same rules as arithmetic, so tests can check the table without a layout engine.
  */
+import { RAIL_WIDTH_BOUNDS } from "@kobe/protocol";
 import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs";
 
 /** Lower edge of each band, in CSS px. */
@@ -17,7 +18,12 @@ export const BREAKPOINTS = { overlay: 768, medium: 820, wide: 1100 } as const;
  * drag it between `min` (names still readable) and `max` (KOBE-305); the conversation's 400 px
  * floor, and the artifact column's 360 px one while it is open, come first.
  */
-export const RAIL_PX = { expanded: 280, collapsed: 48, min: 200, max: 560 } as const;
+export const RAIL_PX = {
+  expanded: 280,
+  collapsed: 48,
+  min: RAIL_WIDTH_BOUNDS.min,
+  max: RAIL_WIDTH_BOUNDS.max,
+} as const;
 
 /**
  * The widest the expanded rail may be in a `grid` px wide shell: the conversation keeps its floor,
