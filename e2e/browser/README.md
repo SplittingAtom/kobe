@@ -43,6 +43,14 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Files tree (KOBE-304)
+
+`files-tree.spec.ts` uploads three small files into a new folder of the member's workspace, opens
+it in the rail's Files tree with the keyboard, checks the ARIA tree, the type icons and the 26 px
+rows, saves screenshots of the tree in light and dark (`test-results/.../files-tree-*.png`),
+renames a file with F2, moves it by drag and drop and with Move to…, checks that a name clash is
+refused, and deletes the folder at the end. No tokens: `npx playwright test files-tree`.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
