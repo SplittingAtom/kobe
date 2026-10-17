@@ -39,3 +39,48 @@ that; the minimum of 5 raters plus fixed windows is the accepted trade-off.
 
 With a Langfuse tracing backend, each rating is also a score on the run's trace (ids and reason
 codes; the comment only with `telemetry.captureContent`): see [tracing.md](tracing.md).
+
+## Sharing a thumbs down as an eval case
+
+A rating only improves an agent if its next version is tested against it (KOBE-276). On a thumbs
+down in your own conversation, **Share as an eval case…** opens a preview of exactly what the
+agent's owner gets:
+
+- the prompt, the answer, your reasons and comment; earlier exchanges (up to two), this answer's
+  tool outputs (up to four) and the names of files you attached are added only when you tick
+  them, never the files themselves. Long text is cut (6,000 characters for the prompt and the
+  answer, 1,500 for an earlier turn or a tool output), and the preview says so;
+- nothing is shared until **Share**: the server stores the copy only if it is still exactly what
+  the preview showed (its digest), so a rating edited in between asks you to look again;
+- the case is a copy owned by the agent: it keeps no link into the conversation and outlives it;
+  only the conversation's owner shares its exchanges (a reader of a shared conversation can't);
+  gallery agents take no cases.
+
+The agent's owner (a team agent's builder-owner, a personal agent's owner; not team admins who
+don't own it) lists the cases with the day they were shared, never who shared them, and accepts
+(with an expected behaviour or rubric of up to 2,000 characters), dismisses or reopens each.
+Install admins read cases only under break-glass (a team grant, or a user grant for that member's
+cases). Sharing and withdrawing are not audited (the audit log would name you to team admins); the
+owner's reviews are, by id and status.
+
+**Withdraw** deletes the copy; clearing your rating doesn't withdraw it. Cases are in your export
+(`eval-cases.json`), are purged once older than the team's retention period, go with a departed
+member's data at offboarding and with the team. Under a legal hold a withdrawal answers as usual
+while Kobe keeps the copy aside for the hold; the retention pass purges it after the release.
+
+### How accepted cases count in the pre-publish gate
+
+With the team's Orbit gate on (KOBE-93), every gated publish of the agent freezes its accepted
+cases (at most 20) into the eval and runs them in the same Job, next to the scenario pack, with no
+credential beyond the eval's own gateway token. Each case replays the prompt (and earlier turns)
+against the new version, with simulated tools that return the shared tool outputs; the eval's
+model then grades the new answer against the expected behaviour (pass or fail).
+
+- The pack's attack success rate and the cases' **failure rate** (failed ÷ graded) are each held
+  to the team's threshold; either above it blocks the publish.
+- A case that can't be graded, or a result that doesn't cover exactly the frozen cases, errors the
+  eval (fail closed: nothing is published; publish again to retry).
+- The eval's report and the builder's view hold case ids and outcomes only, never case text.
+- Known limits: the grader is the agent's own model (the eval token allows no other); tools are
+  simulated, so a case tests the answer, not the tool calls; a rollback to a version that already
+  passed under the current threshold is not re-run against newer cases.
