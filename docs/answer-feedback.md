@@ -70,7 +70,7 @@ owner's reviews are, by id and status.
 
 **Withdraw** deletes the copy. Clearing your rating doesn't withdraw it: `GET /v1/eval-cases`
 lists your cases whether or not the rating still exists, and `DELETE /v1/eval-cases/{id}`
-withdraws one (the settings page follows). Cases are in your export (`eval-cases.json`), are
+withdraws one; My area, **Shared cases** (profile menu, My shared cases) lists them with Withdraw. Cases are in your export (`eval-cases.json`), are
 purged once older than the team's retention period, go with a departed member's data at
 offboarding (unaudited on their own, so the audit log never names a sharer) and with the team.
 Under a legal hold a withdrawal answers as usual while Kobe keeps the copy aside for the hold; the

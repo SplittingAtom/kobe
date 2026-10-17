@@ -1,6 +1,6 @@
 # KOBE-275: Answer feedback: thumbs up/down per answer, agent-owner quality totals, Langfuse scores
 
-- **Status:** implemented on `group-2-quality` (not pushed); console page waits for G7; gate1 checks pending
+- **Status:** implemented on `group-2-quality` (not pushed), console page included; gate1 checks pending
 - **Branch / worktree:** `group-2-quality` in `../Kobe-g2` (group branch with KOBE-274, no own PR)
 - **Depends on:** KOBE-274 (run trace ids), KOBE-273 (gate1 Langfuse), KOBE-221 (team share)
 
@@ -76,22 +76,24 @@
   ratings or their history yet: follow-up (N5); export index, list limit, bidi filter, PUT rate
   limit left for later (N3, N4, N8, N9).
 
-## Remaining console work (after G7 merges, on its primitives)
+## Console page (done, on G7's primitives; commit `74853de8`)
 
-The agent console's quality view; the API is done and tested (`answer-feedback.db.test.ts`):
-
-- A **Quality** (or Ratings) section on the agent's page, shown when `GET /v1/agents/{id}/feedback`
-  answers 200 (403 for members and non-owner builders: hide it; 404: no agent).
-- Web client: `agentFeedbackTotals(agentId, {from, to, bucket})` → `AgentFeedbackTotals`
-  (`@kobe/protocol`), camelized like the usage console's client.
-- "Not enough ratings yet" when `totals.enough` is false; "Not enough ratings to break down" where
-  `versions`, `series`, a version's `models` or `reasons` is null (`min_raters` in the answer);
-  days only, and say that today's ratings show tomorrow.
-- A window picker with the three windows only (7, 30, 90 days; `window_days` in the answer).
-- Content: totals (up, down, rate), a per-version table (version, up, down, rate, top reasons from
-  `reasons`), a by-model breakdown per version (`models`, null = "unknown"), a series chart of
-  `series` (up/down per day).
-- Empty state ("No ratings yet"); never link to threads or members (none are in the answer).
+- **Ratings** section on the agent's page (`agent-builder/agent-quality.tsx`), so in the Team
+  console (`/admin/team/agents/{id}`) and My agents (`/me/agents/{id}`). Shown only once
+  `GET /v1/agents/{id}/feedback` answers 200; nothing at all on 403 (members, non-owner builders)
+  or 404. Client `lib/admin/api/feedback-totals.ts` (`getAgentFeedbackTotals(teamId, id, window)`;
+  the camelized reason keys are mapped back to the contract's codes).
+- "Period" select with the three windows only (7, 30 default, 90); a change asks for that window.
+- `enough: false` → "Not enough ratings yet" with `min_raters`, no number anywhere. Otherwise
+  totals (up, down, positive rate), "Ratings by version" (up, down, rate, reasons by count) and
+  "Ratings by model" tables; a null `versions`, `series`, version `reasons` or `models` reads "Not
+  enough ratings to break down" (never partial cells). Days: stacked bar chart (inline SVG, legend,
+  tooltips) plus the per-day table; the description says days are UTC and today's count tomorrow.
+- No link, member, comment or conversation anywhere in the section (tested). No "No ratings yet"
+  state: below k the answer can't tell none from few, by design.
+- Tests: `components/admin/agent-quality.test.tsx` (hidden on 403/404, below k, breakdowns
+  withheld, windows, no links, reason order). Browser: `e2e/browser/tests/agent-ratings.spec.ts`
+  (`KOBE_AGENT_ID`, gate1, pending).
 
 ## Open questions (for Chris or the coordinator)
 
@@ -109,9 +111,9 @@ The agent console's quality view; the API is done and tested (`answer-feedback.d
 - ac-2: `packages/db/drizzle/0108_answer_feedback.sql`, `0109_answer_feedback_rls.sql`;
   `packages/db/src/answer-feedback.db.test.ts`; probe fixture `probe-fixtures/conversations.ts`
   (probe and catalog suites green); Opus DB review pending.
-- ac-3: API and tests met (`answer-feedback.db.test.ts` "totals": minimum raters, one-rater agent,
-  caller not counted, personal and gallery agents; `agents/feedback-routes.test.ts`);
-  the console page waits for G7 (above).
+- ac-3 (met): API and tests (`answer-feedback.db.test.ts` "totals": minimum raters, one-rater agent,
+  caller not counted, personal and gallery agents; `agents/feedback-routes.test.ts`); console page
+  `components/admin/agent-quality.test.tsx` (2026-10-17); gate1 spec `agent-ratings.spec.ts` pending.
 - ac-4: Trash purge pass, silent holds (owner and rater), export (`answer-feedback.db.test.ts`); run,
   thread and team cascades, hold history, break-glass reads by team/user/thread grant, read-only,
   nothing after expiry (`packages/db/src/answer-feedback.db.test.ts`).

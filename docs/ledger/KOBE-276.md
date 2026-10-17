@@ -1,6 +1,6 @@
 # KOBE-276: Turn shared thumbs-down answers into Orbit eval cases (member consent)
 
-- **Status:** implemented on `group-2-quality` (not pushed); owner review page waits for G7
+- **Status:** implemented on `group-2-quality` (not pushed), console pages included; gate1 checks pending
 - **Branch / worktree:** `group-2-quality` in `../Kobe-g2` (group branch with KOBE-274/275)
 - **Depends on:** KOBE-275 (answer_feedback), KOBE-93 (eval gate), KOBE-92 (eval image)
 - **Migrations:** `0112_agent_eval_cases` (generated), `0113_agent_eval_cases_rls` (custom);
@@ -102,24 +102,36 @@
 - **R2:** the gateway fetch is single use (`orbit_evals.cases_fetched_at`) and serves only cases of
   the eval's agent, accepted, not hidden, shared during a current membership. Test.
 - **R4:** `orbit_evals.case_skips` (`{"no_reviewer": n}`), shown as `cases.skipped`. Test.
-- **R3:** the member's "My shared cases" settings list goes with G2's console pages (below).
+- **R3:** done: My area, Shared cases (`/me/shared-cases`, below).
 - **R5:** N3, N4, N5, N6, N9 stay follow-ups.
 
-## Remaining console work (after G7 merges, on its primitives)
+## Console pages (done, on G7's primitives)
 
-API done and tested (`services/server/src/eval-cases.db.test.ts`):
-
-- **Agent owner's "Shared cases" page** (agent console): `GET /v1/agents/{id}/eval-cases` (403 for
-  non-owners: hide the entry), list open first with prompt excerpt, reasons, `shared_on` (day),
-  status, `accepted`/`max_accepted`; detail `GET .../eval-cases/{caseId}` shows `content` as plain
-  text (earlier turns, tool outputs, file names, rating, `truncated` note); actions via `PATCH`:
-  Accept (requires the expected-behaviour textarea, ≤ 2,000), Dismiss, Reopen, edit expected
-  behaviour; errors `expected_behaviour_required`, `case_limit`. Never show or ask who shared it.
-- **Builder eval status** (`components/admin/team/agent-builder/eval-status.tsx`/`eval-report.tsx`):
-  show `eval.cases` (`total`, `scored`, `failed`, `failureRate`), e.g. "1 of 2 shared cases
-  failed", and say a block came from the cases when ASR is under the threshold.
-- **Member's "My shared cases" list** (settings): `GET /v1/eval-cases` + Withdraw, for cases whose
-  rating was cleared (the chat shows Withdraw only while the rating exists).
+- **Owner's Shared cases** (`7df2c5b5`, `components/admin/team/eval-cases/`): a "Shared cases"
+  section on the agent's page (open count, `accepted` of `max_accepted`, "Review shared cases")
+  only when `GET /v1/agents/{id}/eval-cases` answers 200 (nothing on 403: team admins who don't
+  own it, members; or 404). List at `…/agents/{id}/cases` (Team console and My agents): shared
+  day (UTC date only, `<time>` with the day), version, reasons, prompt excerpt, status, in the
+  server's order (status, day, random id; never re-sorted). Detail `…/cases/{caseId}`: the copy as
+  plain text (earlier turns, prompt, answer, tool outputs, file names, rating, comment, `truncated`
+  note), "Expected behaviour" (≤ 2,000, required to accept, checked before sending), Accept,
+  Dismiss, Reopen, Save expected behaviour; `case_limit` / `expected_behaviour_required` /
+  `case_not_found` in words. No sharer anywhere; `reviewed_at` not shown. Held or purged cases
+  never reach the page (the server's `liveCase`). Client `lib/admin/api/eval-cases.ts`.
+- **Eval status** (`a024172c`): the builder's Safety evaluation and the eval report show
+  `cases` ("1 of 2 shared cases failed (50%); the team's limit is 10%"), "Blocked by the shared
+  cases" when the attack rate stayed within the limit, and `skipped` by reason
+  (`no_reviewer`: the owner can't review cases now). `lib/admin/eval-case-counts.ts`.
+- **My shared cases** (`c597832b`, `/me/shared-cases`, profile menu "My shared cases"): every
+  case of the member in the team (also after the rating was cleared), agent name (best effort
+  from the agent lists, else "A team agent"/"Your agent"), version, status, shared day, the copy
+  in a disclosure, Withdraw through the console confirm dialog (focus moves to the next
+  Withdraw, else the list heading). DELETE is always 204, so a hold is silent.
+- No server change was needed.
+- Tests: `components/admin/shared-cases-pages.test.tsx`, `eval-case-counts.test.tsx`,
+  `components/me/my-shared-cases.test.tsx`, `shell.test.tsx` (menu). Browser (gate1, pending):
+  `e2e/browser/tests/shared-cases-review.spec.ts`, `eval-cases-gate.spec.ts` (`KOBE_AGENT_ID`),
+  `my-shared-cases.spec.ts` (`KOBE_AGENT`, one model turn).
 
 ## Open questions (for Chris or the coordinator)
 
@@ -134,12 +146,12 @@ API done and tested (`services/server/src/eval-cases.db.test.ts`):
 - ac-1 (met): `services/server/src/eval-cases.db.test.ts` "sharing a thumbs down after a preview"
   (preview stores nothing, ticks only, digest required, stale, once per rating, who may share);
   `apps/web/components/chat/share-case.test.tsx` (dialog, ticks, Cancel shares nothing, Withdraw).
-- ac-2 (API and gate met; review page waits for G7): `eval-cases.db.test.ts` "the agent owner's
+- ac-2 (met; review page and eval status 2026-10-17, `shared-cases-pages.test.tsx`, `eval-case-counts.test.tsx`): `eval-cases.db.test.ts` "the agent owner's
   review" (no sharer, day only, accept needs expected, dismiss, audit, cap);
   `orbit-eval.db.test.ts` "shared eval cases in the gate" (frozen ids, ConfigMap, args, pass,
   block on failure rate, fail closed); `agents/eval/{judge,job,cases}.test.ts`;
   `images/orbit-eval/test-image.sh` (39 checks incl. cases suite) on the remote Docker host.
-- ac-3 (met): `packages/db/src/agent-eval-cases.db.test.ts` (rating key SET NULL, survives thread,
+- ac-3 (met; Withdraw in My area 2026-10-17, `my-shared-cases.test.tsx`): `packages/db/src/agent-eval-cases.db.test.ts` (rating key SET NULL, survives thread,
   immutability, team cascade, silent hold history, release); `eval-cases.db.test.ts` (withdraw
   own only, held = unheld response, purge after release, retention window, offboarding, export).
 - ac-4 (met): `agent-eval-cases.db.test.ts` break-glass (team/user grant, no thread grant,
@@ -147,6 +159,8 @@ API done and tested (`services/server/src/eval-cases.db.test.ts`):
   catalog pins; `eval-cases.db.test.ts` "who reads cases" (member, reader, other builder, team
   admin 403; other team 404; site admin refused; personal agent hidden from team admin).
 - Review fixes (2026-10-17): see "Review fixes" above; runs below are before them.
+- Console pages (2026-10-17): format, lint, typecheck green; web tests 181 files / 1807 tests;
+  `next build` ok (5 new routes); public hygiene ok. No server change, so no new `test:db` run.
 - Runs (2026-10-17): format, lint, typecheck green; `turbo test` 27/27; `@kobe/db test:db` 49 files,
   1206 tests; `@kobe/server test:db` 115 files, 1562 tests (after the two 275 test updates);
   `test-image.sh` 39/39 on the remote Docker host.
