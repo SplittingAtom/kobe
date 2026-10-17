@@ -76,6 +76,7 @@ describe("how shared cases counted in the gate (KOBE-276)", () => {
     expect(blockedByCases(evalOf())).toBe(true);
     expect(blockedByCases(evalOf({ attackSuccessRate: 0.2 }))).toBe(false);
     expect(blockedByCases(evalOf({ status: "passed" }))).toBe(false);
+    expect(blockedByCases(evalOf({ attackSuccessRate: null }))).toBe(true);
   });
 
   it("the builder says a block came from the cases when attacks stayed within the limit", () => {

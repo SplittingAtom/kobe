@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
@@ -136,6 +136,10 @@ describe("reviewing one shared case (KOBE-276 ac-2)", () => {
     });
     expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
     expect(screen.getByRole("button", { name: "Reopen" })).toBeTruthy();
+    // Accept is gone with the new status: focus is on the case's review heading, not the body.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Review" })),
+    );
   });
 
   it("says what to do when the agent has the most accepted cases", async () => {
@@ -148,6 +152,24 @@ describe("reviewing one shared case (KOBE-276 ac-2)", () => {
     expect(
       await screen.findByText(/most accepted cases it can run\. Dismiss one first/),
     ).toBeTruthy();
+  });
+
+  it("keeps focus on the case after Dismiss and Reopen remove the pressed button", async () => {
+    stubApi({
+      [`GET ${ONE}`]: [200, detail()],
+      [`PATCH ${ONE}`]: [
+        [200, detail({ status: "dismissed" })],
+        [200, detail({ status: "open" })],
+      ],
+    });
+    renderTeam(<SharedCasePage scope="team" agentId={AGENT} caseId={C1} />);
+    const heading = await screen.findByRole("heading", { name: "Review" });
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
   it("dismisses, reopens and saves the expected behaviour", async () => {

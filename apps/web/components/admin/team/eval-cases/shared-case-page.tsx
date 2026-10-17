@@ -26,6 +26,9 @@ import {
   type AgentScope,
 } from "./case-format";
 
+/** The review's heading: focus lands here after a review action. */
+const REVIEW_HEADING = "case-review-heading";
+
 /** The review errors in words that say what to do (the server's codes, KOBE-276). */
 const REVIEW_ERRORS: Readonly<Record<string, string>> = {
   expected_behaviour_required: "Write the expected behaviour before accepting the case.",
@@ -84,7 +87,7 @@ function Review({
   const edited = trimmed !== (current.expectedBehaviour ?? "");
 
   async function send(review: EvalCaseReview, done: string) {
-    await mutation.run(
+    const ok = await mutation.run(
       async () => {
         const res = await reviewAgentEvalCase(teamId, agentId, current.id, review);
         if (res.ok) {
@@ -95,6 +98,10 @@ function Review({
       },
       () => done,
     );
+    // The pressed button may be gone with the new status (Accept once accepted, Dismiss once
+    // dismissed, Reopen once open): keep the keyboard on the case, at its review heading, which
+    // the success notice follows.
+    if (ok) requestAnimationFrame(() => document.getElementById(REVIEW_HEADING)?.focus());
   }
 
   function accept(e: FormEvent<HTMLFormElement>) {
@@ -135,6 +142,7 @@ function Review({
         <CaseContent content={current.content} />
       </Section>
       <Section
+        id={REVIEW_HEADING}
         title="Review"
         description="An accepted case replays this prompt against each new version; the evaluation's model then checks the answer against the expected behaviour."
       >

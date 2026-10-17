@@ -36,14 +36,13 @@ export function caseSkips(counts: EvalCaseCounts | undefined): readonly string[]
 }
 
 /**
- * A block that came from the shared cases: the attack success rate stayed within the limit, so
- * the cases' failure rate is what blocked the publish.
+ * A block that came from the shared cases: the attack success rate stayed within the limit (or
+ * has none), and the cases' failure rate is above it.
  */
 export function blockedByCases(result: AgentEval): boolean {
   return (
     result.status === "blocked" &&
-    result.attackSuccessRate !== null &&
-    result.attackSuccessRate <= result.threshold &&
+    (result.attackSuccessRate === null || result.attackSuccessRate <= result.threshold) &&
     (result.cases?.failureRate ?? 0) > result.threshold
   );
 }

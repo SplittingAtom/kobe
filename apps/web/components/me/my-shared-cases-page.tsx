@@ -44,6 +44,8 @@ function useAgentNames(teamId: string): ReadonlyMap<string, string> {
         const agents = lists.flatMap((res) => (res.ok ? res.data : []));
         setNames(new Map(agents.map((a) => [a.id, a.name])));
       })
+      // Names only: a list that can't be read (an error answer or a throw) leaves the neutral
+      // fallback name, and the cases themselves come from their own request, whose errors show.
       .catch(() => undefined);
     return () => {
       current = false;
@@ -68,6 +70,7 @@ export function MySharedCasesPage() {
   const focus = useFocusAfterRemoval(ids, HEADING);
 
   async function withdraw(item: MySharedCase, index: number, e: MouseEvent<HTMLButtonElement>) {
+    const trigger = eventTrigger(e);
     const yes = await confirm(
       {
         title: "Withdraw this shared case?",
@@ -75,7 +78,7 @@ export function MySharedCasesPage() {
           "The agent's owner no longer sees it and it leaves the agent's evaluations. Your rating stays as it is.",
         confirmLabel: "Withdraw",
       },
-      eventTrigger(e),
+      trigger,
     );
     if (!yes) return;
     const done = await mutation.run(
@@ -85,6 +88,9 @@ export function MySharedCasesPage() {
     if (done) {
       focus.removed(item.id, index);
       reload();
+    } else {
+      // The button was disabled while the request ran, which can drop focus: back to it.
+      requestAnimationFrame(() => trigger?.focus());
     }
   }
 
