@@ -435,7 +435,7 @@
   .resizeHandle:hover,
   .resizeHandle:focus-visible {
     background: var(--admin-accent);
-    outline: none;
+    outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
   }
 }
 
@@ -461,6 +461,21 @@
   .railHandle:hover,
   .railHandle:focus-visible {
     background: var(--admin-accent);
-    outline: none;
+    outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
+  }
+
+  /* An invisible hit area around the 6 px line: 12 px for a mouse, 24 px for touch (WCAG 2.5.8),
+     mostly outside the rail so the rail's scrollbars stay reachable. */
+  .railHandle::before {
+    position: absolute;
+    inset-block: 0;
+    inset-inline: -2px -4px;
+    content: "";
+  }
+}
+
+@media (width >= 1100px) and (pointer: coarse) {
+  .railHandle::before {
+    inset-inline: -4px -14px;
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { maxRailWidth, RAIL_PX } from "../../lib/shell/layout";
+import { shellGrid } from "../../lib/shell/preferences";
 import { RAIL_STEP_PX, RAIL_WIDTH_VAR } from "../../lib/shell/rail-width";
 import styles from "./shell.module.css";
 import { useSplitter, type SplitterRange } from "./use-splitter";
@@ -28,9 +29,10 @@ function measure(handle: HTMLElement | null): SplitterRange | null {
   return { value: width, min: RAIL_PX.min, max: maxRailWidth(space, column) };
 }
 
+/** The artifact column too: opening or closing it moves the maximum without resizing the rail. */
 function observe(handle: HTMLElement | null): readonly Element[] {
-  const { rail, grid } = regions(handle);
-  return rail && grid ? [rail, grid] : [];
+  const { rail, grid, artifact } = regions(handle);
+  return rail && grid ? [rail, grid, ...(artifact ? [artifact] : [])] : [];
 }
 
 function pointerValue(clientX: number, handle: HTMLElement): number | null {
@@ -46,7 +48,8 @@ function preview(width: number, handle: HTMLElement): void {
  * The drag handle on the expanded rail's right edge (KOBE-305): the artifact column's splitter
  * (`use-splitter.ts`) with the rail's bounds, from 200 px (names still readable) to 560 px or
  * less, so the conversation (and an open artifact column) keep their floors. Arrow keys step
- * 24 px, Page Up/Down four steps, Home/End jump to the bounds; double-click goes back to 280 px.
+ * 24 px, Page Up/Down four steps (stopping on 280 px on the way past), Home/End jump to the
+ * bounds; Enter or a double-click goes back to 280 px.
  * Rendered on wide windows only, while the rail is expanded: collapsed (Mod+B), narrower bands
  * and the drawer have no handle, and the chosen width comes back when the rail expands.
  */
@@ -68,6 +71,13 @@ export function RailResizeHandle({
       if (next !== width) onChange(next);
     },
     reset: onReset,
+    snap: RAIL_PX.expanded,
+    // Unmounted mid-drag: the grid shows the committed width again (React's style owns it).
+    revert: () => {
+      const grid = shellGrid();
+      if (width === null) grid?.style.removeProperty(RAIL_WIDTH_VAR);
+      else grid?.style.setProperty(RAIL_WIDTH_VAR, `${width}px`);
+    },
     step: RAIL_STEP_PX,
     fallback: { value: width ?? RAIL_PX.expanded, min: RAIL_PX.min, max: RAIL_PX.max },
   });

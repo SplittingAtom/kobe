@@ -18,8 +18,12 @@ import {
  *
  * - Drag: a press that moves less than {@link DRAG_THRESHOLD_PX} is a click (nothing changes);
  *   a drag shows each value directly and commits once, on release.
- * - Keys: arrows by one step, Page Up/Down by four, Home the minimum, End the maximum.
- * - Double-click: `reset` (back to the default), when the caller has one.
+ * - Keys: arrows by one step, Page Up/Down by four, Home the minimum, End the maximum; a step
+ *   that crosses `snap` (the default width) stops on it, so the keys reach it. Modified keys
+ *   (Alt, Ctrl, Cmd) pass through to the browser.
+ * - Enter or a double-click: `reset` (back to the default), when the caller has one.
+ * - A handle unmounted mid-drag (Mod+B, the window crossing a band) calls `revert`, so the
+ *   dragged value shown without a render doesn't outlive it.
  * - The aria values follow the real sizes (a dragged width, the rail collapsing, the window).
  */
 export interface SplitterRange {
@@ -42,6 +46,12 @@ const KEY_STEPS: Readonly<Record<string, KeyStep>> = {
   End: (_v, r) => r.max,
 };
 
+/** Arrow and Page keys: a step from `from` to `to` that crosses `snap` stops on it. */
+export function snapStep(from: number, to: number, snap: number | undefined): number {
+  if (snap === undefined) return to;
+  return (from < snap && to > snap) || (from > snap && to < snap) ? snap : to;
+}
+
 /** `value` within the range's bounds, in whole px. */
 export function clampToRange(value: number, range: Pick<SplitterRange, "min" | "max">): number {
   return Math.round(Math.min(range.max, Math.max(range.min, value)));
@@ -58,8 +68,12 @@ export interface SplitterOptions {
   preview(value: number, handle: HTMLElement): void;
   /** A value the member chose (a key, a release), within the bounds. */
   commit(value: number): void;
-  /** Double-click: back to the default. Absent: double-click does nothing. */
+  /** Enter or double-click: back to the default. Absent: both do nothing. */
   readonly reset?: (() => void) | undefined;
+  /** The default value, where arrow and Page steps stop on their way past. */
+  readonly snap?: number | undefined;
+  /** The handle unmounted mid-drag: undo the preview (show the committed value again). */
+  readonly revert?: (() => void) | undefined;
   /** One arrow key's step in px. */
   readonly step: number;
   /** The aria values until the first measure. */
@@ -74,6 +88,7 @@ export interface SplitterProps {
   readonly "aria-valuemin": number;
   readonly "aria-valuemax": number;
   readonly tabIndex: 0;
+  readonly "aria-keyshortcuts"?: string;
   onPointerDown(e: PointerEvent<HTMLDivElement>): void;
   onPointerMove(e: PointerEvent<HTMLDivElement>): void;
   onPointerUp(e: PointerEvent<HTMLDivElement>): void;
@@ -86,14 +101,27 @@ export interface SplitterProps {
 /** Follows the range as the observed elements (or the window) resize. */
 function useMeasuredRange(
   ref: RefObject<HTMLDivElement | null>,
-  options: SplitterOptions,
+  latest: RefObject<SplitterOptions>,
 ): readonly [SplitterRange | null, (next: SplitterRange | null) => void, () => void] {
-  const [range, setRange] = useState<SplitterRange | null>(null);
-  const latest = useRef(options);
-  useEffect(() => {
-    latest.current = options;
-  });
-  const remeasure = useCallback(() => setRange(latest.current.measure(ref.current)), [ref]);
+  const [range, setState] = useState<SplitterRange | null>(null);
+  // Unchanged bounds keep the same object: no render for a key the splitter doesn't handle.
+  const setRange = useCallback(
+    (next: SplitterRange | null) =>
+      setState((prev) =>
+        prev !== null &&
+        next !== null &&
+        prev.value === next.value &&
+        prev.min === next.min &&
+        prev.max === next.max
+          ? prev
+          : next,
+      ),
+    [],
+  );
+  const remeasure = useCallback(
+    () => setRange(latest.current.measure(ref.current)),
+    [ref, latest, setRange],
+  );
   useEffect(() => {
     remeasure();
     const targets = latest.current.observe(ref.current);
@@ -104,17 +132,29 @@ function useMeasuredRange(
     const observer = new ResizeObserver(remeasure);
     for (const target of targets) observer.observe(target);
     return () => observer.disconnect();
-  }, [ref, remeasure]);
+  }, [ref, latest, remeasure]);
   return [range, setRange, remeasure] as const;
 }
 
 /** The splitter's props: spread them on the handle's `<div>` (add its label and controls). */
 export function useSplitter(options: SplitterOptions): SplitterProps {
   const ref = useRef<HTMLDivElement>(null);
-  const [range, setRange, remeasure] = useMeasuredRange(ref, options);
+  const latest = useRef(options);
+  useEffect(() => {
+    latest.current = options;
+  });
+  const [range, setRange, remeasure] = useMeasuredRange(ref, latest);
   /** The drag under way: where it started, and the value shown once it moved (else null). */
   const drag = useRef<{ readonly startX: number; readonly value: number | null } | null>(null);
-  const { measure, pointerValue, preview, commit, reset, step, fallback } = options;
+  useEffect(
+    () => () => {
+      const dragged = drag.current?.value ?? null;
+      drag.current = null;
+      if (dragged !== null) latest.current.revert?.();
+    },
+    [],
+  );
+  const { measure, pointerValue, preview, commit, reset, snap, step, fallback } = options;
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -143,6 +183,12 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     if (next !== null) commit(next);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // the browser's own (Alt+Left is Back)
+    if (e.key === "Enter" && reset) {
+      e.preventDefault();
+      reset();
+      return;
+    }
     const keyStep = KEY_STEPS[e.key];
     const now = measure(e.currentTarget);
     if (!keyStep || !now) {
@@ -150,7 +196,9 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
       return;
     }
     e.preventDefault();
-    const next = clampToRange(keyStep(now.value, now, step), now);
+    const stepped = keyStep(now.value, now, step);
+    const isEdge = e.key === "Home" || e.key === "End";
+    const next = clampToRange(isEdge ? stepped : snapStep(now.value, stepped, snap), now);
     // Announced at once; the observer corrects it if the layout gives the column less.
     setRange({ ...now, value: next });
     commit(next);
@@ -165,6 +213,7 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     "aria-valuemin": shown.min,
     "aria-valuemax": shown.max,
     tabIndex: 0,
+    ...(reset ? { "aria-keyshortcuts": "Enter" } : {}),
     onPointerDown,
     onPointerMove,
     onPointerUp: onPointerEnd,

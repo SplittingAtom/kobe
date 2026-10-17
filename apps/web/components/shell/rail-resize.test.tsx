@@ -108,7 +108,7 @@ describe("the handle (ac-1, ac-3)", () => {
     expect(railVar()).toBe(""); // the CSS default
   });
 
-  it("arrow keys step 24 px, Page Up/Down four steps, Home and End jump to the bounds", async () => {
+  it("arrow keys step 24 px, Page Up/Down four steps (stopping on 280), Home and End jump to the bounds", async () => {
     const h = await openShell();
     h.focus();
     const user = userEvent.setup();
@@ -116,10 +116,12 @@ describe("the handle (ac-1, ac-3)", () => {
     expect(railVar()).toBe("304px");
     await user.keyboard("{ArrowLeft}{ArrowLeft}");
     expect(railVar()).toBe("256px");
+    await user.keyboard("{PageUp}"); // 256 + 96 passes the default: stops on 280
+    expect(railVar()).toBe("280px");
     await user.keyboard("{PageUp}");
-    expect(railVar()).toBe("352px");
+    expect(railVar()).toBe("376px");
     await user.keyboard("{PageDown}");
-    expect(railVar()).toBe("256px");
+    expect(railVar()).toBe("280px");
     await user.keyboard("{Home}");
     expect(railVar()).toBe("200px");
     await user.keyboard("{ArrowLeft}");
@@ -203,6 +205,37 @@ describe("persistence and reset (ac-2)", () => {
 });
 
 describe("with the rest of the shell (ac-4)", () => {
+  it("Enter resets to the default, and the keys stop on 280 px on the way back", async () => {
+    fake.preferences = { rail_width: 200 };
+    const h = await openShell();
+    await waitFor(() => expect(railVar()).toBe("200px"));
+    h.focus();
+    const user = userEvent.setup();
+    await user.keyboard("{PageUp}"); // 200 + 96 passes 280: stops there
+    expect(railVar()).toBe("280px");
+    await user.keyboard("{End}{Enter}");
+    await waitFor(() => expect(railVar()).toBe(""));
+    expect(h.getAttribute("aria-keyshortcuts")).toBe("Enter");
+    await waitFor(() => expect(stored()).toBeNull(), SAVED);
+  });
+
+  it("Mod+B during a drag drops the dragged width: the saved one shows, nothing is saved", async () => {
+    fake.preferences = { rail_width: 320 };
+    const h = await openShell();
+    await waitFor(() => expect(railVar()).toBe("320px"));
+    fireEvent.pointerDown(h, { clientX: 320, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(h, { clientX: 500, pointerId: 1 });
+    expect(railVar()).toBe("500px");
+    toggleRail();
+    await waitFor(() => expect(handle()).toBeNull());
+    expect(railVar()).toBe("320px");
+    toggleRail();
+    await waitFor(() => expect(handle()).not.toBeNull());
+    expect(railVar()).toBe("320px");
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts().every((p) => !("rail_width" in (p.body as object)))).toBe(true);
+  });
+
   it("Mod+B collapses the rail (no handle) and expanding restores the saved width", async () => {
     fake.preferences = { rail_width: 380 };
     await openShell();

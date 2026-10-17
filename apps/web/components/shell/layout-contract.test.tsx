@@ -221,6 +221,13 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     expect(declares(wide, ".railHandle:focus-visible", "background: var(--admin-accent);")).toBe(
       true,
     );
+    // A visible focus in forced colours too (no `outline: none`), and a 24 px touch target.
+    expect(declares(wide, ".railHandle:focus-visible", "outline: 2px solid transparent;")).toBe(
+      true,
+    );
+    expect(declares(wide, ".railHandle::before", "inset-inline: -2px -4px;")).toBe(true);
+    const touch = media(SHELL, "(width >= 1100px) and (pointer: coarse)");
+    expect(declares(touch, ".railHandle::before", "inset-inline: -4px -14px;")).toBe(true); // 4 + 6 + 14
   });
 });
 

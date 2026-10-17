@@ -75,3 +75,25 @@
   Postgres), web vitest 170 files / 1706 tests green apart from one timing flake in
   `file-tree.test.tsx` under the full parallel run (5 s timeout; green alone, file not touched),
   `next build` green.
+
+## Review follow-up (2026-10-17)
+
+- **Keyboard reset:** Enter on either splitter with a reset (the rail's) goes back to 280 px
+  (`aria-keyshortcuts="Enter"`); arrow and Page steps that cross 280 px stop on it, so the
+  default is reachable by keys (`snap`; the artifact column has none, unchanged).
+- **Unmount mid-drag:** the hook's cleanup calls `revert` when a drag showed a value; the rail
+  puts the committed width back on the grid (Mod+B or a band change during a drag).
+- **Hit area:** an invisible `::before` around the 6 px line, 12 px for a mouse and 24 px under
+  `(pointer: coarse)` (WCAG 2.5.8), mostly outside the rail so its scrollbars stay reachable.
+- **Tests:** `use-splitter.test.tsx` (pointer cancel commits, unmount mid-drag reverts, a press
+  that never moved has nothing to revert, window resize moves the bounds and the listener goes on
+  unmount, End from a clamped width, Enter, modified keys, the default stop); rail tests for
+  Enter and Mod+B mid-drag.
+- **Nits fixed:** Alt/Ctrl/Cmd + keys pass to the browser (both handles); focus outline
+  `2px solid transparent` instead of `none` (forced colours; both handles); the rail handle also
+  observes the artifact column (fresh `aria-valuemax` when it opens); unchanged bounds don't
+  re-render. Not changed: the grab offset (up to 4 px, as the artifact column) and the per-move
+  layout reads (cheap at this size). A width the window clamps yields in CSS and comes back as the
+  window grows; a key press from a clamped state saves the clamped value.
+- Checks: web vitest 171 files / 1717 tests green apart from one timing flake in
+  `conversation.test.tsx` under the full run (green alone); lint, typecheck, format green.
