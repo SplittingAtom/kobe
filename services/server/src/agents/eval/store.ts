@@ -66,6 +66,8 @@ export interface EvalRecord {
   readonly caseIds: readonly string[];
   readonly caseScored: number | null;
   readonly caseFailures: number | null;
+  /** Accepted cases left out, by reason (re-review R4). */
+  readonly caseSkips: Readonly<Record<string, number>>;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -95,6 +97,7 @@ const COLUMNS = {
   caseIds: orbitEvals.caseIds,
   caseScored: orbitEvals.caseScored,
   caseFailures: orbitEvals.caseFailures,
+  caseSkips: orbitEvals.caseSkips,
   createdAt: orbitEvals.createdAt,
   startedAt: orbitEvals.startedAt,
   finishedAt: orbitEvals.finishedAt,
@@ -170,6 +173,8 @@ export interface NewEval {
   readonly toolManifest?: Record<string, unknown>;
   /** The agent's accepted shared cases run as an extra suite (KOBE-276). */
   readonly caseIds?: readonly string[];
+  /** Accepted cases left out, by reason (`no_reviewer`). */
+  readonly caseSkips?: Readonly<Record<string, number>>;
 }
 
 /** A new `pending` eval; `eval_in_progress` when the agent has an unfinished one. */
@@ -180,7 +185,7 @@ export function createEval(
   return withTeam(db, input.teamId, async (tx) => {
     const [row] = await tx
       .insert(orbitEvals)
-      .values({ ...input, caseIds: [...(input.caseIds ?? [])] })
+      .values({ ...input, caseIds: [...(input.caseIds ?? [])], caseSkips: { ...input.caseSkips } })
       .onConflictDoNothing()
       .returning(COLUMNS);
     if (!row) return { ok: false, error: "eval_in_progress" } as const;

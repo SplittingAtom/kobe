@@ -5,6 +5,7 @@
 - **Depends on:** KOBE-275 (answer_feedback), KOBE-93 (eval gate), KOBE-92 (eval image)
 - **Migrations:** `0112_agent_eval_cases` (generated), `0113_agent_eval_cases_rls` (custom);
   review fixes `0118_agent_eval_cases_created_idx` (generated), `0119_orbit_evals_cases_validate`
+  (custom); re-review `0120_eval_case_hiding_and_fetch` (generated), `0121_agent_eval_cases_hidden`
   (custom)
 
 ## Plan
@@ -90,6 +91,19 @@
   N11: owner review edits under a hold are not kept (as agent drafts). Follow-ups: N3 (history
   insert guard; the probe fixture inserts directly), N4 (open-case cap or pagination), N5 (no
   break-glass read kind for cases), N6 (bound the answer walk by run time), N9 (bidi filter).
+
+## Re-review fixes (approved with R1–R5)
+
+- **R1:** `agent_eval_cases.hidden_at` (0120, set-once by the 0121 trigger): the retention pass
+  marks held cases it couldn't purge (past the window, or the sharer's offboarding due); `liveCase`
+  also needs `hidden_at IS NULL` and a case shared during the sharer's current membership. A
+  lengthened window or a rejoin never brings one back. Tests (window to forever; leave + rejoin).
+  Residual: a reactivation within a day of an offboarding falling due, before the nightly pass.
+- **R2:** the gateway fetch is single use (`orbit_evals.cases_fetched_at`) and serves only cases of
+  the eval's agent, accepted, not hidden, shared during a current membership. Test.
+- **R4:** `orbit_evals.case_skips` (`{"no_reviewer": n}`), shown as `cases.skipped`. Test.
+- **R3:** the member's "My shared cases" settings list goes with G2's console pages (below).
+- **R5:** N3, N4, N5, N6, N9 stay follow-ups.
 
 ## Remaining console work (after G7 merges, on its primitives)
 

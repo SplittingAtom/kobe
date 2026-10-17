@@ -23,6 +23,8 @@ export function evalView(e: EvalRecord, withReport = false) {
       failed: e.caseFailures,
       failureRate:
         e.caseScored !== null && e.caseScored > 0 ? (e.caseFailures ?? 0) / e.caseScored : null,
+      // Accepted cases left out, by reason: `no_reviewer` (the owner can't review them now).
+      skipped: e.caseSkips,
     },
     error: e.error,
     version: e.version,

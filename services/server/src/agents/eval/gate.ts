@@ -140,11 +140,17 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
   // The agent's accepted shared cases (KOBE-276), frozen now: they run as an extra suite. Only
   // while someone can review them: a team agent whose owner left or can no longer build would
   // otherwise be blocked by cases nobody may dismiss (review S1); they run again if that changes.
-  const cases = await withTeam(db, input.team.id, async (tx) =>
-    (await caseReviewerPresent(tx, input.team.id, agent))
-      ? acceptedCases(tx, { teamId: input.team.id, agentId: agent.id, scope: location.scope })
-      : [],
-  );
+  // The eval records how many were left out and why (re-review R4), never which.
+  const { cases, caseSkips } = await withTeam(db, input.team.id, async (tx) => {
+    const accepted = await acceptedCases(tx, {
+      teamId: input.team.id,
+      agentId: agent.id,
+      scope: location.scope,
+    });
+    return (await caseReviewerPresent(tx, input.team.id, agent))
+      ? { cases: accepted, caseSkips: {} }
+      : { cases: [], caseSkips: accepted.length > 0 ? { no_reviewer: accepted.length } : {} };
+  });
   const casesJson = casesFile(cases);
   if (casesJson !== null && Buffer.byteLength(casesJson, "utf8") > EVAL_CASES_MAX_BYTES) {
     return refused(
@@ -166,6 +172,7 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     toolManifest: toolManifest as unknown as Record<string, unknown>,
     threshold: settings.maxAttackSuccessRate,
     caseIds: cases.map((c) => c.id),
+    caseSkips,
     ...(rollbackFrom === undefined ? {} : { rollbackFrom }),
   });
   if (!created.ok) {

@@ -240,6 +240,16 @@ describe("agent_eval_cases", () => {
       ),
     ).toBeUndefined();
     expect(await cases(t)).toEqual([{ id, feedback_id: r.feedbackId, status: "accepted" }]);
+    // Hidden for a hold (re-review R1): set once, never cleared or moved.
+    expect(
+      await errorCode(exec(t, `UPDATE agent_eval_cases SET hidden_at = now() ${where}`)),
+    ).toBeUndefined();
+    for (const change of [`hidden_at = NULL`, `hidden_at = now() + interval '1 day'`]) {
+      expect(
+        await errorCode(exec(t, `UPDATE agent_eval_cases SET ${change} ${where}`)),
+        change,
+      ).toBe("55000");
+    }
   });
 
   it("goes with its team", async () => {

@@ -75,7 +75,8 @@ purged once older than the team's retention period, go with a departed member's 
 offboarding (unaudited on their own, so the audit log never names a sharer) and with the team.
 Under a legal hold a withdrawal answers as usual while Kobe keeps the copy aside for the hold; the
 retention pass purges it after the release. A case a hold keeps past the retention period, or
-past its sharer's membership, is shown to nobody and runs in no eval, exactly as if purged.
+past its sharer's membership, is shown to nobody and runs in no eval, exactly as if purged, and
+stays so if the retention period is lengthened later or the member rejoins.
 
 ### How accepted cases count in the pre-publish gate
 
@@ -83,11 +84,12 @@ With the team's Orbit gate on (KOBE-93), every gated publish of the agent freeze
 cases (at most 20) into the eval and runs them in the same Job, next to the scenario pack, with no
 credential beyond the eval's own gateway token. Case text is in no Kubernetes object: the Job
 fetches it from the model gateway with that token (`GET /kobe/eval-cases`), which reads it from
-Postgres only while the eval runs, for the member who started it; it lives in the pod's memory
+Postgres only while the eval runs, for the member who started it, and only once; it lives in
+the pod's memory
 and a temporary log directory deleted when the run ends. A case withdrawn or dismissed mid-eval
 is not served, and the eval errors (publish again). Cases on a team agent whose owner left or may
-no longer build are left out of the gate (nobody could dismiss them); they run again once the
-agent has such an owner. Each case replays the prompt (and earlier turns)
+no longer build are left out of the gate (nobody could dismiss them; the eval shows how many,
+`cases.skipped`); they run again once the agent has such an owner. Each case replays the prompt (and earlier turns)
 against the new version, with simulated tools that return the shared tool outputs; the eval's
 model then grades the new answer against the expected behaviour (pass or fail).
 

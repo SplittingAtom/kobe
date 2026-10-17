@@ -713,6 +713,11 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
     const carol = await h.admin.query<{ id: string }>(
       `SELECT id FROM users WHERE email = 'carol@eval.test'`,
     );
+    // Cases count only if shared during the sharer's membership (re-review R1).
+    await h.admin.query(
+      `UPDATE team_members SET created_at = now() - interval '90 days' WHERE team_id = $1`,
+      [finance],
+    );
     const ids: string[] = [];
     for (const [i, status] of statuses.entries()) {
       const { rows } = await h.admin.query<{ id: string }>(
@@ -807,8 +812,17 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       `UPDATE orbit_evals SET status = 'running', finished_at = NULL, version = NULL WHERE id = $1`,
       [list[0].id],
     );
-    const served = await loadEvalCaseFile(h.deps.database.db, finance, builderId, list[0].id);
+    // A case of another agent slipped into the frozen ids is never served (re-review R2).
+    const [foreign] = await cases(await draft(), ["accepted"]);
+    await h.admin.query(`UPDATE orbit_evals SET case_ids = case_ids || $2::uuid WHERE id = $1`, [
+      list[0].id,
+      foreign,
+    ]);
     expect(await loadEvalCaseFile(h.deps.database.db, finance, adminId, list[0].id)).toBeNull();
+    const served = await loadEvalCaseFile(h.deps.database.db, finance, builderId, list[0].id);
+    expect(served).not.toContain(foreign);
+    // One fetch per eval: a token read from the Job spec can't fetch again.
+    expect(await loadEvalCaseFile(h.deps.database.db, finance, builderId, list[0].id)).toBeNull();
     await h.admin.query(
       `UPDATE orbit_evals SET status = 'passed', finished_at = now(), version = 1 WHERE id = $1`,
       [list[0].id],
@@ -819,6 +833,7 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
     };
     expect(file.suite).toBe("shared-cases");
     expect(file.cases.map((c) => c.id)).toEqual(row.rows[0]?.case_ids);
+    expect(file.cases).toHaveLength(2);
     expect(file.cases.map((c) => [c.id, c.prompt, c.expected]).sort()).toEqual(
       [
         [a, "Prompt 1 (accepted)", "Expected 1"],
@@ -911,7 +926,7 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       expect((await admin.get(`/v1/agents/${id}/evals`)).json.evals[0]).toMatchObject({
         status: "passed",
         version: 1,
-        cases: { total: 0, scored: null },
+        cases: { total: 0, scored: null, skipped: { no_reviewer: 1 } },
       });
     } finally {
       await h.admin.query(

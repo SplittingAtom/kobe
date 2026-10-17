@@ -75,6 +75,7 @@ export async function purgeEvalCases(
           await audited(tx, teamId, "retention", n);
           return n;
         });
+  if (!options.stop?.()) await hideHeld(db, teamId, cutoff);
   const kept = await batches(db, teamId, options.stop, async (tx) => {
     const res = await tx.execute(sql`
       DELETE FROM agent_eval_case_history h
@@ -87,6 +88,27 @@ export async function purgeEvalCases(
     return n;
   });
   return { cases, kept };
+}
+
+/**
+ * Marks the cases a hold kept from a purge as hidden for good (re-review R1): those still past the
+ * window after the batches above (only held ones are left), and those of a member whose
+ * offboarding purge is due (unheld ones go with that sweep). Hidden cases look purged on every
+ * read whatever the window or the membership later become. Not audited: a count would show a hold.
+ */
+async function hideHeld(db: KobeDb, teamId: string, cutoff: Date | null): Promise<void> {
+  await withTeam(db, teamId, async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
+    await lockLegalHolds(tx);
+    const pastWindow = cutoff === null ? sql`FALSE` : sql`c.created_at < ${cutoff.toISOString()}`;
+    await tx.execute(sql`
+      UPDATE agent_eval_cases c SET hidden_at = now()
+       WHERE c.team_id = ${teamId} AND c.hidden_at IS NULL
+         AND (${pastWindow} OR EXISTS (
+           SELECT 1 FROM sandboxes s
+            WHERE s.team_id = c.team_id AND s.user_id = c.user_id AND s.state = 'destroyed'
+              AND s.retain_until IS NOT NULL AND s.retain_until <= now()))`);
+  });
 }
 
 /**

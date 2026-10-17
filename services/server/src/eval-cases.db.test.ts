@@ -136,12 +136,21 @@ async function attachment(x: World, name: string): Promise<string> {
  * cases back a day (superuser, triggers bypassed, as time would).
  */
 async function yesterday(team: string) {
+  await longMembers(team);
   await f.fx.admin.query(`SET session_replication_role = replica`);
   await f.fx.admin.query(
     `UPDATE agent_eval_cases SET created_at = created_at - interval '1 day' WHERE team_id = $1`,
     [team],
   );
   await f.fx.admin.query(`SET session_replication_role = origin`);
+}
+
+/** A case counts only if shared during its sharer's membership (re-review R1): members since long. */
+async function longMembers(team: string) {
+  await f.fx.admin.query(
+    `UPDATE team_members SET created_at = now() - interval '90 days' WHERE team_id = $1`,
+    [team],
+  );
 }
 const dayBefore = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
@@ -490,6 +499,7 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
     expect((await as(x.builder).get(`/v1/agents/${x.agentId}/eval-cases/${old}`)).status).toBe(200);
     // A 30-day window: both cases are shared 31 days ago; only the held member's stays.
     for (const t of [x, y]) {
+      await longMembers(t.w.team);
       await f.fx.admin.query(
         `INSERT INTO team_retention (team_id, period, updated_by) VALUES ($1, '30d', $2)`,
         [t.w.team, t.w.owner.id],
@@ -529,7 +539,37 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
       [x.w.team],
     );
     expect(audited.rows).toEqual([{ target: { reason: "retention", rows: 1 } }]);
+    // Once skipped, it stays looking purged even if the team keeps everything again (R1).
+    await f.fx.admin.query(`UPDATE team_retention SET period = 'forever' WHERE team_id = $1`, [
+      y.w.team,
+    ]);
+    expect((await owner.get(`/v1/agents/${y.agentId}/eval-cases`)).json.cases).toEqual([]);
+    expect((await owner.get(`/v1/agents/${y.agentId}/eval-cases/${kept}`)).status).toBe(404);
+    expect((await as(y.author).get("/v1/eval-cases")).json.cases).toEqual([]);
+    expect(
+      await withTeam(f.fx.db, y.w.team, (tx) =>
+        acceptedCases(tx, { teamId: y.w.team, agentId: y.agentId, scope: "team" }),
+      ),
+    ).toEqual([]);
     await releaseHold(hold);
+  });
+
+  it("never brings back a case shared before the sharer's current membership (R1)", async () => {
+    const x = await world();
+    const id = await shareAsPreviewed(x);
+    await yesterday(x.w.team);
+    const owner = as(x.builder);
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases/${id}`)).status).toBe(200);
+    // The sharer leaves (the case is hidden, as their offboarding would purge it) and rejoins.
+    await f.fx.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      x.w.team,
+      x.author.id,
+    ]);
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases/${id}`)).status).toBe(404);
+    await f.fx.addMember(x.w.team, x.author);
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases`)).json.cases).toEqual([]);
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases/${id}`)).status).toBe(404);
+    expect((await as(x.author).get("/v1/eval-cases")).json.cases).toEqual([]);
   });
 
   it("goes with a departed member's data at offboarding, unless held", async () => {
@@ -626,6 +666,7 @@ describe("who reads cases (ac-4)", () => {
     });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
     const agentId = created.json.agent.id as string;
+    await longMembers(w.team);
     await f.fx.admin.query(
       `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, content, created_at)
        VALUES ($1, $2, 'personal', $3, '{"prompt":"p","answer":"a","reasons":[]}', now() - interval '1 day')`,

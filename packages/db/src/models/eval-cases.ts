@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { KobeDb } from "../client.js";
 import { agentEvalCases, orbitEvals } from "../schema/index.js";
 import { withTeam } from "../with-team.js";
@@ -7,8 +7,8 @@ import { withTeam } from "../with-team.js";
  * The shared eval cases an Orbit eval Job runs (KOBE-276), as the eval image's `cases.json`. Case
  * text never sits in a Kubernetes object (review S2): the Job asks the model gateway for it with
  * its own eval token, and the gateway reads it here, under the team's RLS, only while that eval
- * is running for the member who started it. Only the cases frozen into the eval that are still
- * accepted come back, so a withdrawal or a dismissal takes effect at once (the eval then errors:
+ * is running for the member who started it, and only once. Only the cases frozen into the eval
+ * that are still accepted come back, so a withdrawal or a dismissal takes effect at once (the eval then errors:
  * its result can't cover a case it never got, and the publisher retries).
  */
 
@@ -44,8 +44,11 @@ export function evalCasesFile(cases: readonly EvalCaseFileEntry[]): string | nul
 }
 
 /**
- * `cases.json` for eval `evalId` of `userId` in `teamId`, or null when that eval is not running
- * for them or has no cases left.
+ * `cases.json` for eval `evalId` of `userId` in `teamId`, once (re-review R2): the first fetch
+ * stamps `cases_fetched_at`, and any later one, or one for an eval not running for them, gets
+ * null. Only cases frozen into the eval, of its agent, still accepted, not hidden for a hold, and
+ * shared during their sharer's current active membership are served (defence in depth: the gate
+ * froze only live ones; the retention window is not re-applied within an eval's few minutes).
  */
 export function loadEvalCaseFile(
   db: KobeDb,
@@ -55,17 +58,24 @@ export function loadEvalCaseFile(
 ): Promise<string | null> {
   return withTeam(db, teamId, async (tx) => {
     const [run] = await tx
-      .select({ caseIds: orbitEvals.caseIds })
-      .from(orbitEvals)
+      .update(orbitEvals)
+      .set({ casesFetchedAt: sql`now()` })
       .where(
         and(
           eq(orbitEvals.teamId, teamId),
           eq(orbitEvals.id, evalId),
           eq(orbitEvals.requestedBy, userId),
           eq(orbitEvals.status, "running"),
+          isNull(orbitEvals.casesFetchedAt),
+          sql`cardinality(${orbitEvals.caseIds}) > 0`,
         ),
-      );
-    if (!run || run.caseIds.length === 0) return null;
+      )
+      .returning({
+        caseIds: orbitEvals.caseIds,
+        agentId: orbitEvals.agentId,
+        agentScope: orbitEvals.agentScope,
+      });
+    if (!run || run.agentScope === "gallery") return null;
     const rows = await tx
       .select({
         id: agentEvalCases.id,
@@ -77,8 +87,14 @@ export function loadEvalCaseFile(
         and(
           eq(agentEvalCases.teamId, teamId),
           inArray(agentEvalCases.id, [...run.caseIds]),
+          eq(agentEvalCases.agentId, run.agentId),
+          eq(agentEvalCases.agentScope, run.agentScope),
           eq(agentEvalCases.status, "accepted"),
+          isNull(agentEvalCases.hiddenAt),
           sql`${agentEvalCases.expectedBehaviour} IS NOT NULL`,
+          sql`EXISTS (SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
+                WHERE m.team_id = ${agentEvalCases.teamId} AND m.user_id = ${agentEvalCases.userId}
+                  AND u.deactivated_at IS NULL AND m.created_at <= ${agentEvalCases.createdAt})`,
         ),
       );
     const order = new Map(run.caseIds.map((id, i) => [id, i]));
