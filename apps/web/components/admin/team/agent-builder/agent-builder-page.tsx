@@ -33,6 +33,7 @@ import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
 import { ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
+import { AgentQuality } from "./agent-quality";
 import { EvalStatus } from "./eval-status";
 import { fieldError } from "./field-errors";
 import { FrontmatterForm } from "./frontmatter-form";
@@ -406,6 +407,7 @@ function Builder({
           }}
         />
       )}
+      {agent && <AgentQuality teamId={teamId} agentId={agent.id} />}
       {agent && (
         <VersionHistory
           key={historyKey}
