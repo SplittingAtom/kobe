@@ -51,8 +51,13 @@ expect() { # name, regex, actual output: passes when every line of actual matche
   if [[ -n "$3" ]] && ! grep -Evq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 contains() { # name, regex, actual output: passes when some line matches regex
-  local got
+  local got key
   got=$(printf '%s\n' "$3" | tail -3)
+  # A `^key=value$` check reports that key's own line, not just the output's last lines.
+  if [[ $2 =~ ^\^([a-z_]+)= ]]; then
+    key=$(grep -E "^${BASH_REMATCH[1]}=" <<<"$3" | head -3 || true)
+    if [[ -n $key ]]; then got=$key; fi
+  fi
   if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 
@@ -1800,14 +1805,18 @@ const by = (n) => spans.filter((s) => s.name === n);
 const root = by("kobe.run")[0];
 const command = by("sandbox.command").find((s) => s.attributes["kobe.command.kind"] === "run.start");
 const run = by("sandbox.run")[0];
-const gateway = by("model_gateway.request")[0];
+// The sandbox's model call; the server's title and follow-up calls (KOBE-234) hang under the root.
+const gateways = by("model_gateway.request");
 const sandboxIds = new Set(spans.filter((s) => s.service === "kobe-sandbox-agent").map((s) => s.spanId));
+const nameOf = new Map(spans.map((s) => [s.spanId, s.name]));
 out("spans", spans.length);
+out("span_names", spans.map((s) => s.name).sort().join(","));
+out("gateway_parents", gateways.map((g) => nameOf.get(g.parentSpanId) ?? (g.parentSpanId ? "unknown" : "none")).join(","));
 out("services", [...new Set(spans.map((s) => s.service))].sort().join(","));
 out("root", root ? (root.spanId === rootId && !root.parentSpanId ? "ok" : "bad") : "missing");
 out("command_under_root", command && command.parentSpanId === rootId ? "ok" : "no");
 out("sandbox_run_under_command", run && command && run.parentSpanId === command.spanId ? "ok" : "no");
-out("gateway_under_sandbox", gateway && sandboxIds.has(gateway.parentSpanId) ? "ok" : "no");
+out("gateway_under_sandbox", gateways.some((g) => sandboxIds.has(g.parentSpanId)) ? "ok" : "no");
 const sessioned = spans.filter((s) => ["kobe.run", "sandbox.command", "sandbox.run", "sandbox.turn", "model_gateway.request"].includes(s.name));
 out("session", sessioned.length >= 4 && sessioned.every((s) => s.attributes["session.id"] === threadId && s.attributes["user.id"] === userId) ? "ok" : "no");
 out("content_keys", spans.flatMap((s) => Object.keys(s.attributes)).filter((k) => /^(gen_ai\.(prompt|completion)|kobe\.tool\.(input|output)|url\.query)/.test(k)).length);
@@ -1816,7 +1825,7 @@ out("names", /"(E2E owner|Owner)"/i.test(JSON.stringify(spans)) ? 1 : 0);
 JS
     chat_thread=$(printf '%s\n' "$chat_out" | sed -n 's/^thread_id=//p')
     traces=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$TRACE_JS" \
-      "$OTEL_SINK" "${chat_run:-00000000-0000-4000-8000-000000000000}" "${chat_thread:-none}" "${owner_id:-none}" 120000 2>&1 | tail -10)
+      "$OTEL_SINK" "${chat_run:-00000000-0000-4000-8000-000000000000}" "${chat_thread:-none}" "${owner_id:-none}" 120000 2>&1 | tail -14)
     printf '     traces: %s\n' "$(printf '%s' "$traces" | tr '\n' ' ')"
     contains "the run is one trace across server, sandbox agent and model gateway" \
       '^services=kobe-model-gateway,kobe-sandbox-agent,kobe-server$' "$traces"

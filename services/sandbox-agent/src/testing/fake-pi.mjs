@@ -22,7 +22,8 @@
 // session_before_compact (the answer goes into the summary); anything else appends a compaction
 // entry whose summary names the focus. `get_state` reports the selected model; `set_model` selects
 // only the model the model file named when this process started (what kobe-models registered).
-// Every command received is appended to <session file>.commands.jsonl for assertions.
+// Every command received is appended to <session file>.commands.jsonl for assertions; the model
+// file as read when a prompt arrives, to <session file>.model-at-prompt.jsonl.
 // It also plays kobe-policy's side of the fd-3 handshake: on channel.hello it answers channel.ready,
 // unless the last --extension path contains "refuse" (channel.refused) or "silent" (no answer).
 import { spawn } from "node:child_process";
@@ -461,6 +462,13 @@ process.stdin.on("data", (chunk) => {
     } catch {
       out({ type: "response", command: "parse", success: false, error: "parse" });
       continue;
+    }
+    // KOBE-274: the model file as Pi's first model call of this prompt would read it.
+    if (record.type === "prompt" && process.env.KOBE_MODEL_FILE) {
+      appendFileSync(
+        `${sessionFile}.model-at-prompt.jsonl`,
+        `${readPromptFile(process.env.KOBE_MODEL_FILE)}\n`,
+      );
     }
     if (record.type === "extension_ui_response") {
       dialogs.get(record.id)?.(record);

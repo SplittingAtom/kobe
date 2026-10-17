@@ -182,6 +182,7 @@ export class Agent {
       shareFiles: this.#filesEnabled(),
       projectTools: this.#projectsEnabled(),
       memoryTools: this.#memoryEnabled(),
+      traceparentOf: (runId) => this.#traces.modelParentOf(runId),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
         ? {}

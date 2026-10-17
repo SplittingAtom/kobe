@@ -5,8 +5,12 @@ import {
   runTraceId,
   type SandboxToServerFrame,
 } from "@kobe/protocol";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { RUN, runStart, startHarness, type Harness } from "./testing/harness.js";
+import { parseModelFile } from "./kobe-models/protocol.js";
+import type { ModelWiring } from "./models/types.js";
+import { RUN, THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
 
 /** KOBE-274 ac-5 / ac-2 (sandbox side): span frames only for runs started with a trace context. */
 let h: Harness;
@@ -52,5 +56,33 @@ describe("run spans over the wire (KOBE-274)", () => {
     expect(run?.parent_span_id).toBe(COMMAND_SPAN);
     expect(run?.attributes).toMatchObject({ "kobe.run.outcome": "completed" });
     expect(JSON.stringify(frame)).not.toMatch(/Hello/);
+  });
+
+  it("has Pi's first model call carry the run span: the model file holds it when the prompt arrives", async () => {
+    const models: ModelWiring = {
+      gatewayUrl: "http://model-gateway.kobe.internal:80",
+      extension: "/opt/kobe/pi-extensions/kobe-models/index.js",
+      tokens: { current: async () => "model-token-".padEnd(40, "1"), onChange: () => () => true },
+    };
+    h = await startHarness({ models });
+    const trace = {
+      traceparent: formatTraceparent(runTraceId(RUN), COMMAND_SPAN),
+      capture_content: false,
+    };
+    const model = { alias: "fast", gateway_model: "openai/gpt-fake", api: "openai-completions" };
+    expect(
+      await h.server.command(runStart("say:Hello", { trace, config: { model } })),
+    ).toMatchObject({ ok: true });
+    const atPrompt = path.join(h.sessions, `${THREAD}.jsonl.model-at-prompt.jsonl`);
+    await until(async () => (await readFile(atPrompt, "utf8").catch(() => "")) !== "");
+    const [line] = (await readFile(atPrompt, "utf8")).split("\n");
+    const file = parseModelFile(line ?? "");
+    expect(file.run_id).toBe(RUN);
+    const frame = await h.server.waitFor(
+      (f): f is Extract<SandboxToServerFrame, { type: "trace.spans" }> => f.type === "trace.spans",
+    );
+    const run = frame.spans.map((s) => parseSandboxSpan(s)).find((s) => s?.name === "sandbox.run");
+    expect(run).toBeDefined();
+    expect(file.traceparent).toBe(formatTraceparent(runTraceId(RUN), run?.span_id ?? ""));
   });
 });

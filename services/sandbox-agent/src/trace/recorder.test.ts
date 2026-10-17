@@ -127,6 +127,28 @@ describe("TraceRecorder (KOBE-274)", () => {
     ]);
   });
 
+  it("answers the run's current span for the model file: run, its turn, run again, none", () => {
+    const { recorder, spans, tick } = setup();
+    expect(recorder.modelParentOf(RUN)).toBeNull();
+    recorder.startRun(RUN, THREAD, trace());
+    const atStart = recorder.modelParentOf(RUN);
+    recorder.onPiEvent(RUN, { type: "turn_start" });
+    const inTurn = recorder.modelParentOf(RUN);
+    recorder.onPiEvent(RUN, { type: "turn_end" });
+    const afterTurn = recorder.modelParentOf(RUN);
+    tick(10);
+    recorder.runEnded(RUN);
+    recorder.flush();
+    expect(recorder.modelParentOf(RUN)).toBeNull();
+    const run = spans().find((s) => s.name === "sandbox.run");
+    const turn = spans().find((s) => s.name === "sandbox.turn");
+    expect([atStart, inTurn, afterTurn]).toEqual([
+      formatTraceparent(runTraceId(RUN), run?.span_id ?? ""),
+      formatTraceparent(runTraceId(RUN), turn?.span_id ?? ""),
+      formatTraceparent(runTraceId(RUN), run?.span_id ?? ""),
+    ]);
+  });
+
   it("adds tool content only with capture on", () => {
     const { recorder, spans, tick } = setup();
     recorder.startRun(RUN, THREAD, trace(true));

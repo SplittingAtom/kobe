@@ -302,6 +302,18 @@ export class TraceRecorder {
     this.#runs.delete(runId);
   }
 
+  /**
+   * The run's current span (its turn, else the run span) as a `traceparent` for Pi's model calls,
+   * or null for a run not recorded. The thread writes it into the model file with the run, before
+   * the prompt goes to Pi: `onModelParent` alone arrives before the thread has the run (dropped) and
+   * races Pi's first model call.
+   */
+  modelParentOf(runId: string): string | null {
+    const run = this.#live(runId);
+    if (!run) return null;
+    return formatTraceparent(run.traceId, (run.turn ?? run.root).spanId);
+  }
+
   #modelParent(runId: string, spanId: string): void {
     const run = this.#runs.get(runId);
     if (run) this.#deps.onModelParent?.(runId, formatTraceparent(run.traceId, spanId));

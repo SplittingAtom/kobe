@@ -90,7 +90,9 @@ The sandbox holds no collector endpoint and no credential (the sandbox template 
 `KOBE_OTEL_*` variable; tests assert it). When the server's tracing is on, `run.start` and
 `thread.compact` carry a trace context to agents that announce the `trace_spans` capability. The
 agent records spans from Pi's RPC events for those runs only and sends them as `trace.spans` frames
-over its existing WebSocket; Pi's model calls carry the current run or turn span as `traceparent`.
+over its existing WebSocket; Pi's model calls carry the current run or turn span as `traceparent`
+(the run span is in Pi's model file before the prompt goes out; a turn's span replaces it once the
+agent has seen the turn start, so a call racing that update hangs under the run span instead).
 With tracing off the server sends no trace context, and the agent records and sends nothing.
 
 The server takes a frame only for a run leased to that connection (a run it never held closes the
