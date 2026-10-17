@@ -3219,9 +3219,11 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
       fi
       sleep 1
     done
-    contains "the e2e sandbox reconnected to the rolled server before the MCP run is leased" '^reconnected=1$' \
-      "reconnected=$reconnected $(psql_kobe "SELECT 'state=' || state || ' idle_s=' || round(extract(epoch FROM now() - last_active_at))
+    if [[ "$reconnected" != 1 ]]; then # diagnostics on their own line, only on failure
+      printf '     e2e sandbox: %s\n' "$(psql_kobe "SELECT 'state=' || state || ' idle_s=' || round(extract(epoch FROM now() - last_active_at))
         FROM sandboxes WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$E2E_USER_ID'")"
+    fi
+    contains "the e2e sandbox reconnected to the rolled server before the MCP run is leased" '^reconnected=1$' "reconnected=$reconnected"
   fi
   psql_kobe "INSERT INTO connectors (id, name, url, tools_snapshot) VALUES ('$MCP_CONNECTOR', 'e2e-fake', 'http://$fake_mcp_ip/mcp', '$snapshot'::jsonb)
       ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, tools_snapshot = EXCLUDED.tools_snapshot;
