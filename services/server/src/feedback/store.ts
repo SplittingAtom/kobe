@@ -13,6 +13,7 @@ import {
   type AgentScope,
   type KobeTx,
 } from "@kobe/db";
+import { caseCutoff, liveCase } from "../eval-cases/visibility.js";
 import { findThread, type SummaryRow, type Viewer } from "../threads/repository.js";
 
 /**
@@ -279,6 +280,7 @@ export async function threadFeedback(
         eq(agentEvalCases.teamId, answerFeedback.teamId),
         eq(agentEvalCases.feedbackId, answerFeedback.id),
         eq(agentEvalCases.userId, viewer.userId),
+        liveCase(await caseCutoff(tx, viewer.teamId)),
       ),
     )
     .where(

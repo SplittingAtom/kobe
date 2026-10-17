@@ -7,9 +7,10 @@ import type {
   MyEvalCase,
   ShareEvalCaseBody,
 } from "@kobe/protocol";
-import { agentEvalCases, and, answerFeedback, desc, eq, runs, type KobeTx } from "@kobe/db";
+import { agentEvalCases, and, answerFeedback, desc, eq, runs, sql, type KobeTx } from "@kobe/db";
 import { findThread, type Viewer } from "../threads/repository.js";
 import { buildCopy, type BuiltCopy, type ExchangeSource } from "./copy.js";
+import { caseCutoff, liveCase } from "./visibility.js";
 
 /**
  * Sharing an answer as an eval case (KOBE-276), on the member's side. Runs inside the caller's
@@ -39,6 +40,8 @@ interface Shareable {
   readonly feedbackId: string;
   readonly agent: EvalCasePreview["agent"];
   readonly sharedCaseId: string | null;
+  /** This rating's case that only a hold keeps (past the window): replaced by a new share. */
+  readonly staleCaseId: string | null;
 }
 
 /** The viewer's thumbs down on their own conversation's ended answer `runId`, or why not. */
@@ -93,7 +96,10 @@ async function shareable(
   }
   if (run.userEntryId === null || run.input.trim() === "") return fail("exchange_unavailable");
   const [shared] = await tx
-    .select({ id: agentEvalCases.id })
+    .select({
+      id: agentEvalCases.id,
+      live: sql<boolean>`${liveCase(await caseCutoff(tx, viewer.teamId))}`,
+    })
     .from(agentEvalCases)
     .where(and(eq(agentEvalCases.teamId, viewer.teamId), eq(agentEvalCases.feedbackId, rating.id)));
   return {
@@ -110,7 +116,9 @@ async function shareable(
       },
       feedbackId: rating.id,
       agent: { scope: rating.agentScope, id: rating.agentId, version: rating.agentVersion },
-      sharedCaseId: shared?.id ?? null,
+      // A case past its window (kept only by a hold) counts as purged (review S3).
+      sharedCaseId: shared?.live ? shared.id : null,
+      staleCaseId: shared && !shared.live ? shared.id : null,
     },
   };
 }
@@ -201,6 +209,14 @@ export async function shareCase(
   const { found, copy } = built.value;
   if (found.sharedCaseId !== null) return fail("already_shared");
   if (copy.digest !== digest) return fail("preview_stale");
+  if (found.staleCaseId !== null) {
+    // As if purged: it goes (a hold keeps its copy aside) and the new share takes the key.
+    await tx
+      .delete(agentEvalCases)
+      .where(
+        and(eq(agentEvalCases.teamId, viewer.teamId), eq(agentEvalCases.id, found.staleCaseId)),
+      );
+  }
   const [row] = await tx
     .insert(agentEvalCases)
     .values({
@@ -219,12 +235,22 @@ export async function shareCase(
   return { ok: true, value: toMyCase(row) };
 }
 
-/** The viewer's own cases in the team, newest first. */
+/**
+ * The viewer's own live cases in the team, newest first, whether or not their rating still exists:
+ * the way to withdraw one after clearing the rating (review S6). A case past the window that only a
+ * hold keeps is not listed (as if purged).
+ */
 export async function myCases(tx: KobeTx, viewer: Viewer): Promise<MyEvalCase[]> {
   const rows = await tx
     .select(myColumns)
     .from(agentEvalCases)
-    .where(and(eq(agentEvalCases.teamId, viewer.teamId), eq(agentEvalCases.userId, viewer.userId)))
+    .where(
+      and(
+        eq(agentEvalCases.teamId, viewer.teamId),
+        eq(agentEvalCases.userId, viewer.userId),
+        liveCase(await caseCutoff(tx, viewer.teamId)),
+      ),
+    )
     .orderBy(desc(agentEvalCases.createdAt), desc(agentEvalCases.id))
     .limit(500);
   return rows.map(toMyCase);

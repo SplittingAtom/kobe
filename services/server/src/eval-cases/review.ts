@@ -9,9 +9,21 @@ import {
   type FeedbackReason,
   type ReviewEvalCaseBody,
 } from "@kobe/protocol";
-import { agentEvalCases, and, asc, desc, eq, sql, type KobeTx } from "@kobe/db";
+import {
+  agentEvalCases,
+  and,
+  asc,
+  eq,
+  isNull,
+  sql,
+  teamMembers,
+  users,
+  type KobeTx,
+} from "@kobe/db";
+import { teamRoleAllows } from "../authz/permissions.js";
 import { recordAudit } from "../audit/record.js";
 import { cutText } from "../threads/entry-output.js";
+import { caseCutoff, liveCase, sharedOnFinishedDay } from "./visibility.js";
 
 /**
  * The agent owner's side of shared eval cases (KOBE-276): list, read and review the cases shared
@@ -79,17 +91,28 @@ const ofAgent = (key: AgentKey) =>
     eq(agentEvalCases.agentScope, key.scope),
   );
 
-/** Most cases one list answers (open first, then accepted, then dismissed; newest first). */
+/**
+ * The agent's cases its owner may see (visibility.ts): live (within the window, sharer still a
+ * member: a case a hold keeps looks purged) and shared on a UTC day that has ended.
+ */
+async function ownerView(tx: KobeTx, key: AgentKey) {
+  return and(ofAgent(key), liveCase(await caseCutoff(tx, key.teamId)), sharedOnFinishedDay);
+}
+
+/**
+ * Most cases one list answers: open first, then accepted, then dismissed; newest day first, and
+ * within a day by id (random), so the order never tells the order of shares (review S5).
+ */
 const LIST_LIMIT = 500;
 
 export async function listAgentCases(tx: KobeTx, key: AgentKey): Promise<AgentEvalCases> {
   const rows = await tx
     .select(columns)
     .from(agentEvalCases)
-    .where(ofAgent(key))
+    .where(await ownerView(tx, key))
     .orderBy(
       sql`CASE ${agentEvalCases.status} WHEN 'open' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END`,
-      desc(agentEvalCases.createdAt),
+      sql`date_trunc('day', ${agentEvalCases.createdAt} AT TIME ZONE 'UTC') DESC`,
       asc(agentEvalCases.id),
     )
     .limit(LIST_LIMIT);
@@ -105,7 +128,7 @@ async function acceptedCount(tx: KobeTx, key: AgentKey): Promise<number> {
   const [row] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(agentEvalCases)
-    .where(and(ofAgent(key), eq(agentEvalCases.status, "accepted")));
+    .where(and(await ownerView(tx, key), eq(agentEvalCases.status, "accepted")));
   return row?.n ?? 0;
 }
 
@@ -117,7 +140,7 @@ export async function getAgentCase(
   const [row] = await tx
     .select(columns)
     .from(agentEvalCases)
-    .where(and(ofAgent(key), eq(agentEvalCases.id, caseId)));
+    .where(and(await ownerView(tx, key), eq(agentEvalCases.id, caseId)));
   return row ? toCase(row) : null;
 }
 
@@ -140,7 +163,7 @@ export async function reviewAgentCase(
   const [current] = await tx
     .select({ status: agentEvalCases.status, expected: agentEvalCases.expectedBehaviour })
     .from(agentEvalCases)
-    .where(and(ofAgent(key), eq(agentEvalCases.id, caseId)))
+    .where(and(await ownerView(tx, key), eq(agentEvalCases.id, caseId)))
     .for("update");
   if (!current) return { ok: false, error: "case_not_found" };
   const status = body.status ?? current.status;
@@ -178,7 +201,10 @@ export async function reviewAgentCase(
   return { ok: true, value: toCase(row) };
 }
 
-/** The agent's accepted cases, oldest first: what its next gated publish runs (KOBE-93). */
+/**
+ * The agent's accepted cases (live ones only: a case a hold keeps past its window never runs),
+ * what its next gated publish runs (KOBE-93).
+ */
 export async function acceptedCases(
   tx: KobeTx,
   key: AgentKey,
@@ -190,12 +216,38 @@ export async function acceptedCases(
       expected: agentEvalCases.expectedBehaviour,
     })
     .from(agentEvalCases)
-    .where(and(ofAgent(key), eq(agentEvalCases.status, "accepted")))
-    .orderBy(asc(agentEvalCases.createdAt), asc(agentEvalCases.id))
+    .where(and(await ownerView(tx, key), eq(agentEvalCases.status, "accepted")))
+    .orderBy(asc(agentEvalCases.id))
     .limit(EVAL_CASE_MAX_ACCEPTED);
   return rows.map((r) => ({
     id: r.id,
     content: r.content as unknown as EvalCaseContent,
     expected: r.expected ?? "",
   }));
+}
+
+/**
+ * Whether anyone can review the agent's cases (review S1): a personal agent's owner is the
+ * publisher; a team agent's owner must still be an active member who may build. Team admins
+ * can't read cases, so without such an owner the gate leaves them out.
+ */
+export async function caseReviewerPresent(
+  tx: KobeTx,
+  teamId: string,
+  agent: { readonly scope: string; readonly ownerUserId: string | null },
+): Promise<boolean> {
+  if (agent.scope === "personal") return true;
+  if (agent.scope !== "team" || agent.ownerUserId === null) return false;
+  const [member] = await tx
+    .select({ role: teamMembers.role })
+    .from(teamMembers)
+    .innerJoin(users, eq(users.id, teamMembers.userId))
+    .where(
+      and(
+        eq(teamMembers.teamId, teamId),
+        eq(teamMembers.userId, agent.ownerUserId),
+        isNull(users.deactivatedAt),
+      ),
+    );
+  return member !== undefined && teamRoleAllows(member.role, "team.agents.build");
 }

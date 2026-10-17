@@ -107,9 +107,13 @@ async function answerEntries(tx: KobeTx, src: ExchangeSource): Promise<EntryRow[
   return res.rows;
 }
 
-/** The message entries above the prompt on its branch, nearest first. */
-async function branchEntries(tx: KobeTx, src: ExchangeSource): Promise<EntryRow[]> {
-  const res = await tx.execute<EntryRow & { depth: number }>(sql`
+/**
+ * The message entries above the prompt on its branch, nearest first. `own` marks a prompt that a
+ * run of this thread sent (`runs.user_entry_id`): a fork copies another thread's entries but not
+ * its runs, so an inherited prompt is never `own` (KOBE-276 review B1).
+ */
+async function branchEntries(tx: KobeTx, src: ExchangeSource): Promise<BranchRow[]> {
+  const res = await tx.execute<BranchRow & { depth: number }>(sql`
     WITH RECURSIVE b (entry_id, parent_id, depth) AS (
       SELECT e.entry_id, e.parent_id, 0 FROM thread_entries e
        WHERE e.team_id = ${src.teamId} AND e.thread_id = ${src.threadId}
@@ -119,13 +123,19 @@ async function branchEntries(tx: KobeTx, src: ExchangeSource): Promise<EntryRow[
         JOIN thread_entries p ON p.team_id = ${src.teamId} AND p.thread_id = ${src.threadId}
                              AND p.entry_id = b.parent_id
        WHERE b.depth < ${MAX_BRANCH_DEPTH})
-    SELECT e.entry_id, e.blob_ref, e.payload, b.depth FROM b
+    SELECT e.entry_id, e.blob_ref, e.payload, b.depth,
+           EXISTS (SELECT 1 FROM runs r
+                    WHERE r.team_id = ${src.teamId} AND r.thread_id = ${src.threadId}
+                      AND r.user_entry_id = e.entry_id) AS own
+      FROM b
       JOIN thread_entries e ON e.team_id = ${src.teamId} AND e.thread_id = ${src.threadId}
                            AND e.entry_id = b.entry_id
      WHERE b.depth > 0 AND e.type = 'message'
      ORDER BY b.depth`);
   return res.rows;
 }
+
+type BranchRow = EntryRow & { readonly own: boolean };
 
 interface ToolResult {
   readonly id: string;
@@ -167,25 +177,31 @@ function readAnswer(rows: readonly EntryRow[]): Answer {
 
 type Turn = { readonly role: "user" | "assistant"; readonly text: string };
 
-/** Prompts and answer texts above the prompt, oldest first (tool-only turns left out). */
-function readBranch(rows: readonly EntryRow[]): { turns: Turn[]; offloaded: boolean } {
+/**
+ * Prompts and answer texts above the prompt, oldest first (tool-only turns left out): only whole
+ * exchanges whose prompt this thread's own runs sent. The walk stops at the first prompt that
+ * isn't (a fork's inherited history, another member's words) and drops its answer with it, and at
+ * an offloaded entry (it can't tell where an exchange starts).
+ */
+function readBranch(rows: readonly BranchRow[]): { turns: Turn[]; offloaded: boolean } {
   const turns: Turn[] = [];
-  let offloaded = false;
+  let pending: Turn[] = [];
   for (const row of rows) {
-    if (row.blob_ref !== null) {
-      offloaded = true;
-      continue;
-    }
+    if (row.blob_ref !== null) return { turns, offloaded: true };
     const m = messageOf(row.payload);
     if (m?.role !== "user" && m?.role !== "assistant") continue;
     let text = messageText(m.content);
-    if (m.role === "user") {
-      const at = text.indexOf(ATTACHED_MARK);
-      if (at >= 0) text = text.slice(0, at);
+    if (m.role === "assistant") {
+      if (text.trim() !== "") pending = [{ role: "assistant", text }, ...pending];
+      continue;
     }
-    if (text.trim() !== "") turns.unshift({ role: m.role, text });
+    if (!row.own) break;
+    const at = text.indexOf(ATTACHED_MARK);
+    if (at >= 0) text = text.slice(0, at);
+    turns.unshift(...(text.trim() === "" ? [] : [{ role: "user" as const, text }]), ...pending);
+    pending = [];
   }
-  return { turns, offloaded };
+  return { turns, offloaded: false };
 }
 
 /** The last `n` exchanges of `turns`: from the n-th prompt from the end, answers merged. */

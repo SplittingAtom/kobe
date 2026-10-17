@@ -3,6 +3,7 @@ import { strFromU8, unzipSync } from "fflate";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
+import { acceptedCases } from "./eval-cases/review.js";
 import { purgeDepartedCasesInTx } from "./retention/eval-cases.js";
 import { runRetentionPass } from "./retention/index.js";
 import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
@@ -130,6 +131,20 @@ async function attachment(x: World, name: string): Promise<string> {
   return rows[0]?.id ?? "";
 }
 
+/**
+ * The agent's owner sees a case only once its UTC day has ended (review S5): moves the team's
+ * cases back a day (superuser, triggers bypassed, as time would).
+ */
+async function yesterday(team: string) {
+  await f.fx.admin.query(`SET session_replication_role = replica`);
+  await f.fx.admin.query(
+    `UPDATE agent_eval_cases SET created_at = created_at - interval '1 day' WHERE team_id = $1`,
+    [team],
+  );
+  await f.fx.admin.query(`SET session_replication_role = origin`);
+}
+const dayBefore = () => new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
 const caseRows = async (team: string) =>
   (
     await f.fx.admin.query<{ id: string; user_id: string; status: string }>(
@@ -246,11 +261,80 @@ describe("sharing a thumbs down after a preview (ac-1)", () => {
   });
 });
 
+describe("own words only (review B1)", () => {
+  it("never shares another member's prompts: not as a project reader, not through a fork", async () => {
+    const x = await world();
+    const bob = x.reader;
+    const project = await as(x.w.owner).post("/v1/projects", {
+      name: `P ${randomUUID().slice(0, 6)}`,
+      members_mode: "selected",
+      member_user_ids: [x.author.id, bob.id],
+    });
+    expect(project.status, JSON.stringify(project.json)).toBe(201);
+    const moved = await as(x.author).post(`/v1/threads/${x.threadId}/move`, {
+      project_id: project.json.id,
+    });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+    expect(
+      (await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" }))
+        .status,
+    ).toBe(200);
+    // A project reader rates the author's answer for themselves, but can't share it.
+    expect((await as(bob).put(`/v1/runs/${x.runId}/feedback`, { rating: "down" })).status).toBe(
+      200,
+    );
+    expect((await preview(bob, x.runId)).json.code).toBe("not_shareable");
+
+    // Bob forks the author's conversation and continues it himself.
+    const forked = await as(bob).post(`/v1/threads/${x.threadId}/fork`, {
+      entry_id: x.second.entries.assistant,
+    });
+    expect(forked.status, JSON.stringify(forked.json)).toBe(201);
+    const forkId = forked.json.thread_id as string;
+    const bobWs = await f.connect(
+      { team: x.w.team, owner: bob, target: { teamId: x.w.team, userId: bob.id } },
+      0,
+    );
+    const ask = async (text: string) => {
+      const runId = await f.message(bob, forkId, text);
+      const start = await bobWs.started(runId);
+      bobWs.reply(start, `re: ${text}`);
+      await bobWs.acked(runId);
+      await f.until(x.w.team, runId, "completed");
+      expect((await as(bob).put(`/v1/runs/${runId}/feedback`, { rating: "down" })).status).toBe(
+        200,
+      );
+      return runId;
+    };
+    const first = await ask("Bob's first question");
+    // The fork's inherited exchanges are the author's: none can be added.
+    const one = await preview(bob, first, { earlier_exchanges: 2 });
+    expect(one.status, JSON.stringify(one.json)).toBe(200);
+    expect(one.json.available.earlier_exchanges).toBe(0);
+    expect(one.json.content.earlier).toEqual([]);
+    const second = await ask("Bob's second question");
+    const two = await preview(bob, second, { earlier_exchanges: 2 });
+    expect(two.json.available.earlier_exchanges).toBe(1);
+    expect(two.json.content.earlier).toEqual([
+      { role: "user", text: "Bob's first question" },
+      { role: "assistant", text: "re: Bob's first question" },
+    ]);
+    for (const text of [JSON.stringify(one.json), JSON.stringify(two.json)]) {
+      expect(text).not.toContain("capital of Australia");
+      expect(text).not.toContain("And its population?");
+    }
+  });
+});
+
 describe("the agent owner's review (ac-2)", () => {
   it("lists and reads cases without the sharer, accepts with an expected behaviour, dismisses", async () => {
     const x = await world();
     const id = await shareAsPreviewed(x);
     const owner = as(x.builder);
+    // Shared today: the owner sees it only once the day is over (no timing, review S5).
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases`)).json.cases).toEqual([]);
+    expect((await owner.get(`/v1/agents/${x.agentId}/eval-cases/${id}`)).status).toBe(404);
+    await yesterday(x.w.team);
     const list = await owner.get(`/v1/agents/${x.agentId}/eval-cases`);
     expect(list.status, JSON.stringify(list.json)).toBe(200);
     expect(list.json).toEqual({
@@ -264,7 +348,7 @@ describe("the agent owner's review (ac-2)", () => {
           agent_version: 1,
           reasons: ["wrong"],
           prompt_excerpt: "And its population?",
-          shared_on: new Date().toISOString().slice(0, 10),
+          shared_on: dayBefore(),
           expected_behaviour: null,
           reviewed_at: null,
         },
@@ -312,9 +396,10 @@ describe("the agent owner's review (ac-2)", () => {
   it("caps the accepted cases per agent", async () => {
     const x = await world();
     const id = await shareAsPreviewed(x);
+    await yesterday(x.w.team);
     await f.fx.admin.query(
-      `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, agent_version, content, status, expected_behaviour, reviewed_at)
-       SELECT $1, $2, 'team', $3, 1, '{"prompt":"p","answer":"a","reasons":[]}', 'accepted', 'x', now()
+      `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, agent_version, content, status, expected_behaviour, reviewed_at, created_at)
+       SELECT $1, $2, 'team', $3, 1, '{"prompt":"p","answer":"a","reasons":[]}', 'accepted', 'x', now(), now() - interval '1 day'
          FROM generate_series(1, 20)`,
       [x.w.team, x.reader.id, x.agentId],
     );
@@ -340,6 +425,20 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
     expect((await as(x.author).get("/v1/eval-cases")).json.cases).toEqual([]);
     // Withdrawn: the answer can be shared again.
     expect((await preview(x.author, x.runId)).json.shared_case_id).toBeNull();
+  });
+
+  it("lists and withdraws a case after its rating was cleared (review S6)", async () => {
+    const x = await world();
+    const id = await shareAsPreviewed(x);
+    expect((await as(x.author).delete(`/v1/runs/${x.runId}/feedback`)).status).toBe(204);
+    const listed = await as(x.author).get(`/v1/threads/${x.threadId}/feedback`);
+    expect(listed.json.answers.at(-1).eval_case_id).toBeNull();
+    // The member's own list still has it, and withdrawing deletes it.
+    expect((await as(x.author).get("/v1/eval-cases")).json.cases).toEqual([
+      expect.objectContaining({ id, status: "open" }),
+    ]);
+    expect((await as(x.author).delete(`/v1/eval-cases/${id}`)).status).toBe(204);
+    expect(await caseRows(x.w.team)).toEqual([]);
   });
 
   it("answers a held member's withdrawal like anyone's, keeps the copy and purges it after the release", async () => {
@@ -374,7 +473,8 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
     const x = await world();
     const y = await world();
     const old = await shareAsPreviewed(x);
-    await shareAsPreviewed(y);
+    const kept = await shareAsPreviewed(y);
+    await yesterday(x.w.team);
     // Deleted for good: the case is a copy and stays.
     await as(x.author).delete(`/v1/threads/${x.threadId}`);
     await f.fx.admin.query(
@@ -405,6 +505,25 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
     await pass();
     expect(await caseRows(x.w.team)).toEqual([]);
     expect(await caseRows(y.w.team)).toHaveLength(1);
+    // The held case past the window looks purged everywhere, so nothing shows the hold (S3):
+    // not to the agent's owner, not in the gate, not to the sharer, not in the export.
+    const owner = as(y.builder);
+    expect((await owner.get(`/v1/agents/${y.agentId}/eval-cases`)).json.cases).toEqual([]);
+    expect((await owner.get(`/v1/agents/${y.agentId}/eval-cases/${kept}`)).status).toBe(404);
+    expect((await as(y.author).get("/v1/eval-cases")).json.cases).toEqual([]);
+    await f.fx.admin.query(
+      `UPDATE agent_eval_cases SET status = 'accepted', expected_behaviour = 'x', reviewed_at = now() WHERE team_id = $1`,
+      [y.w.team],
+    );
+    expect(
+      await withTeam(f.fx.db, y.w.team, (tx) =>
+        acceptedCases(tx, { teamId: y.w.team, agentId: y.agentId, scope: "team" }),
+      ),
+    ).toEqual([]);
+    const exported = unzipSync((await as(y.author).get("/v1/threads/export")).bytes);
+    expect(JSON.parse(strFromU8(exported["eval-cases.json"] ?? new Uint8Array())).cases).toEqual(
+      [],
+    );
     const audited = await f.fx.admin.query<{ target: unknown }>(
       `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'retention.eval_cases_purged'`,
       [x.w.team],
@@ -423,6 +542,12 @@ describe("withdrawal, holds, retention, offboarding, export (ac-3)", () => {
     await releaseHold(hold);
     expect(await purge()).toBe(1);
     expect(await caseRows(x.w.team)).toEqual([]);
+    // No audit row names the departed sharer or counts their cases (review S4).
+    const rows = await f.fx.admin.query(
+      `SELECT 1 FROM audit_log WHERE team_id = $1 AND action = 'retention.eval_cases_purged'`,
+      [x.w.team],
+    );
+    expect(rows.rowCount).toBe(0);
   });
 
   it("is in the sharer's export, nobody else's", async () => {
@@ -452,6 +577,7 @@ describe("who reads cases (ac-4)", () => {
   it("is the agent's owner only: members, other builders, team admins and other teams are refused", async () => {
     const x = await world();
     const id = await shareAsPreviewed(x);
+    await yesterday(x.w.team);
     const otherBuilder = await f.member(x.w.team);
     await f.fx.admin.query(
       `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
@@ -482,6 +608,12 @@ describe("who reads cases (ac-4)", () => {
     // The owner still reads it; the member's list shows only their own.
     expect((await as(x.builder).get(paths[1] ?? "")).status).toBe(200);
     expect((await as(x.reader).get("/v1/eval-cases")).json.cases).toEqual([]);
+    // The owner who can no longer build loses access too.
+    await f.fx.admin.query(
+      `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
+      [x.w.team, x.builder.id],
+    );
+    for (const path of paths) expect((await as(x.builder).get(path)).status).toBe(403);
   });
 
   it("shows a personal agent's cases to its owner, never to a team admin", async () => {
@@ -495,8 +627,8 @@ describe("who reads cases (ac-4)", () => {
     expect(created.status, JSON.stringify(created.json)).toBe(201);
     const agentId = created.json.agent.id as string;
     await f.fx.admin.query(
-      `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, content)
-       VALUES ($1, $2, 'personal', $3, '{"prompt":"p","answer":"a","reasons":[]}')`,
+      `INSERT INTO agent_eval_cases (team_id, user_id, agent_scope, agent_id, content, created_at)
+       VALUES ($1, $2, 'personal', $3, '{"prompt":"p","answer":"a","reasons":[]}', now() - interval '1 day')`,
       [w.team, author.id, agentId],
     );
     expect((await as(author).get(`/v1/agents/${agentId}/eval-cases`)).json.cases).toHaveLength(1);

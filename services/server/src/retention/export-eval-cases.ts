@@ -1,4 +1,5 @@
 import { sql, withTeam, type KobeDb } from "@kobe/db";
+import { caseCutoff } from "../eval-cases/visibility.js";
 
 /**
  * `eval-cases.json` in a member's export (KOBE-276): the eval cases they shared in the team, with
@@ -37,10 +38,13 @@ export async function* evalCasesForExport(
   for (;;) {
     const cursor: string | null = after;
     const rows: Row[] = await withTeam(db, viewer.teamId, async (tx): Promise<Row[]> => {
+      // Past the window only a hold keeps a case: as if purged (review S3).
+      const cutoff = await caseCutoff(tx, viewer.teamId);
       const res = await tx.execute<Row>(sql`
         SELECT c.id, c.agent_scope, c.agent_id, c.agent_version, c.status, c.content, c.created_at
           FROM agent_eval_cases c
          WHERE c.team_id = ${viewer.teamId} AND c.user_id = ${viewer.userId}
+           ${cutoff === null ? sql.raw("") : sql`AND c.created_at >= ${cutoff.toISOString()}`}
            ${cursor === null ? sql.raw("") : sql`AND c.id > ${cursor}::uuid`}
          ORDER BY c.id LIMIT ${PAGE}`);
       return res.rows;

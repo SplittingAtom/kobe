@@ -5,7 +5,8 @@ import { recordAudit } from "../audit/record.js";
  * Shared eval cases in the retention pass and offboarding (KOBE-276, D18). A case is a member's
  * copy owned by the agent, so it outlives its thread; it is purged
  *  - once it is older than the team's retention window (counted from when it was shared),
- *  - with a departed member's data at offboarding (`purgeDepartedCasesInTx`),
+ *  - with a departed member's data at offboarding (`purgeDepartedCasesInTx`, not audited on its
+ *    own: it would name the sharer),
  *  - and copies kept for a hold (`agent_eval_case_history`) once no hold covers the member.
  * Never while a hold covers the member: each batch takes the legal-hold lock first and selects
  * unheld rows only (the tables' triggers back this up). Audited with counts only.
@@ -20,15 +21,15 @@ export interface EvalCasePurgeCounts {
 
 export const NO_EVAL_CASE_PURGE: EvalCasePurgeCounts = { cases: 0, kept: 0 };
 
-type Reason = "retention" | "offboarding" | "hold_released";
+type Reason = "retention" | "hold_released";
 
-async function audited(tx: KobeTx, teamId: string, reason: Reason, rows: number, userId?: string) {
+async function audited(tx: KobeTx, teamId: string, reason: Reason, rows: number) {
   if (rows === 0) return;
   await recordAudit(tx, {
     action: "retention.eval_cases_purged",
     actor: SYSTEM_ACTOR,
     teamId,
-    target: { reason, rows, ...(userId ? { userId } : {}) },
+    target: { reason, rows },
   });
 }
 
@@ -104,9 +105,9 @@ export async function purgeDepartedCasesInTx(
         WHERE k.team_id = ${teamId} AND k.user_id = ${userId}
           AND NOT public.legal_hold_covers(k.team_id, k.user_id)
         ORDER BY k.id LIMIT ${BATCH})`);
-  const n = res.rowCount ?? 0;
-  await audited(tx, teamId, "offboarding", n, userId);
-  return n;
+  // Not audited: a row would tell team admins (often the agent's owner) that this member shared
+  // cases, and how many (review S4). The offboarding step's own audit row covers the purge.
+  return res.rowCount ?? 0;
 }
 
 export const EVAL_CASE_BATCH = BATCH;

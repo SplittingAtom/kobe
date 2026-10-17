@@ -773,14 +773,13 @@ export const AUDIT_EVENTS = {
    */
   "retention.workspace_hold_history_purged": event("team", { rows: count }),
   /**
-   * Shared eval cases purged (system; KOBE-276): past the team's retention window (`retention`),
-   * a departed member's (`offboarding`, `userId`), or copies kept for a released hold
-   * (`hold_released`). Counts only; held members' cases are never in a batch.
+   * Shared eval cases purged (system; KOBE-276): past the team's retention window (`retention`)
+   * or copies kept for a released hold (`hold_released`). Counts only, never a member: a departed
+   * member's cases go with the offboarding step, unaudited on their own (review S4).
    */
   "retention.eval_cases_purged": event("team", {
-    reason: z.enum(["retention", "offboarding", "hold_released"]),
+    reason: z.enum(["retention", "hold_released"]),
     rows: count,
-    userId: id.optional(),
   }),
   /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
