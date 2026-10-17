@@ -9,17 +9,31 @@ components, dev and test tools, assets) is [THIRD_PARTY_LICENSES.md](../THIRD_PA
 Dependencies are limited to MIT/Apache/BSD/MPL-family licenses (spec D3; permissive equivalents
 such as ISC, 0BSD, BlueOak-1.0.0, Zlib, CC0-1.0 and Unlicense count as part of the family; AGPL
 and source-available licenses are excluded). Anything else needs a documented, version-pinned
-exception that Chris signs off, recording **who approved it and when**:
+entry that Chris decides on, recording **who approved it and when**:
 
-- a package: an entry in the scope's exceptions file with `license`, `versions`, `reason`,
-  `approvedBy` and `approvedOn` (YYYY-MM-DD); the check fails on an entry without them;
+- a package: an entry in the scope's exceptions file with `license`, `versions`, `reason`, and
+  either `approvedBy` + `approvedOn` (YYYY-MM-DD) or `pending: "gate review"`;
 - a component in the hand-maintained inventory (an image, a separate program, a data file):
-  `reason` and `approval: {by, on, ref}` on its row in `tools/license-check/inventory.yaml`.
+  `reason` and either `approval: {by, on, ref}` or `pending: gate review` on its row in
+  `tools/license-check/inventory.yaml`.
 
 Copyleft programs are acceptable only as **separate, unmodified programs** that Kobe runs or talks
 to without linking (the Debian GPL tools in the sandbox image, the optional ClamAV service); each
-is listed in the inventory with that reason. Nothing new outside the family merges until Chris has
-signed it off: the checks below fail first.
+is listed in the inventory with that reason.
+
+### License decisions never block work (Chris, 2026-10-17)
+
+A new component outside the family is added at once with `pending: gate review` and a reason; the
+agent carries on and never stops to ask. Pending items do not fail `pnpm license:check`: they are
+printed as warnings (GitHub annotations in CI) and listed under "Pending gate review" at the top
+of `THIRD_PARTY_LICENSES.md`, so PRs and the merge queue still pass. **Every gate review clears
+that list with Chris**: gate tickets run `pnpm license:gate` (the same check in strict mode,
+`LICENSE_GATE=1`, also `--gate` on the CLIs), which fails while anything is pending, and record
+his decisions as approvals (or replace the component).
+
+What still fails every push, because it is breakage rather than a license decision: a stale
+`THIRD_PARTY_LICENSES.md`, `NOTICE` or image report; an image, chart value or package outside
+the family with no entry at all (the entry must exist, even if pending); malformed data.
 
 ## Checks
 
@@ -69,7 +83,8 @@ Every Kobe image ships `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` under
 
 **Adding a dependency, image or service:** run `pnpm licenses:update` and commit the result; for a
 new image, chart component or external service add a row (or a `chartValues` entry) to
-`tools/license-check/inventory.yaml` first. `pnpm license:check` names anything missing.
+`tools/license-check/inventory.yaml` first, marked `pending: gate review` when it is outside the
+family. `pnpm license:check` names anything missing.
 
 ## Notes on specific components
 

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateLicense,
+  findMalformedExceptions,
+  findPendingExceptions,
   findStaleExceptions,
-  findUndocumentedExceptions,
   findViolations,
 } from "./policy.js";
 
@@ -119,7 +120,7 @@ describe("findStaleExceptions", () => {
   });
 });
 
-describe("findUndocumentedExceptions", () => {
+describe("exception approvals", () => {
   const approved = {
     license: "CC-BY-4.0",
     versions: ["1.0.0"],
@@ -127,20 +128,28 @@ describe("findUndocumentedExceptions", () => {
     approvedBy: "Chris",
     approvedOn: "2026-10-17",
   };
+  const { approvedBy: _by, approvedOn: _on, ...bare } = approved;
+  const pending = { ...bare, pending: "gate review" };
 
-  it("accepts an exception with a reason, versions, an approver and a date", () => {
-    expect(findUndocumentedExceptions({ data: approved })).toEqual([]);
+  it("accepts an approved exception and lists none as pending", () => {
+    expect(findMalformedExceptions({ data: approved })).toEqual([]);
+    expect(findPendingExceptions({ data: approved })).toEqual([]);
+  });
+
+  it("accepts a pending exception and lists it for the gate review", () => {
+    expect(findMalformedExceptions({ data: pending })).toEqual([]);
+    expect(findPendingExceptions({ data: pending })).toEqual(["data"]);
   });
 
   it.each([
+    ["neither an approval nor pending", bare],
     ["no approver", { ...approved, approvedBy: "" }],
-    ["no date", { ...approved, approvedOn: undefined }],
     ["a date that is not YYYY-MM-DD", { ...approved, approvedOn: "17 Oct 2026" }],
     ["no reason", { ...approved, reason: " " }],
     ["no pinned versions", { ...approved, versions: [] }],
-  ])("rejects an exception with %s", (_label, exception) => {
-    const { approvedOn, ...rest } = exception;
-    const entry = approvedOn === undefined ? rest : { ...rest, approvedOn };
-    expect(findUndocumentedExceptions({ pending: entry })).toEqual(["pending"]);
+    ["a pending value other than gate review", { ...bare, pending: "ask Chris" }],
+    ["both an approval and pending", { ...approved, pending: "gate review" }],
+  ])("rejects an exception with %s as malformed", (_label, exception) => {
+    expect(findMalformedExceptions({ x: exception })).toEqual(["x"]);
   });
 });

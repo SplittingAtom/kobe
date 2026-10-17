@@ -256,16 +256,24 @@ interface NpmLock {
 }
 
 /** Rows from an npm package-lock.json (v3), checked against the allowed family. */
-export function npmLockfileRows(lock: NpmLock, source: NpmLockfileSource): Rows {
+export function npmLockfileRows(
+  lock: NpmLock,
+  source: NpmLockfileSource,
+  exceptions: LicenseExceptions = {},
+): Rows {
   const problems: string[] = [];
   const seen = new Map<string, Row>();
   for (const [path, pkg] of Object.entries(lock.packages ?? {})) {
     if (path === "" || !pkg.version) continue;
     const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
     const license = pkg.license ?? "UNKNOWN";
-    if (!evaluateLicense(license).allowed) {
+    const exception = exceptions[name];
+    const isExcepted = exception?.license === license && exception.versions.includes(pkg.version);
+    if (!evaluateLicense(license).allowed && !isExcepted) {
+      const where = source.exceptions ?? "an exceptions file (npmLockfiles[].exceptions)";
       problems.push(
-        `${source.path}: ${name}@${pkg.version} is ${license} (outside the allowed family)`,
+        `${source.path}: ${name}@${pkg.version} is ${license} (outside the allowed family): ` +
+          `add an exception to ${where}`,
       );
     }
     seen.set(`${name}@${pkg.version}`, {
@@ -275,6 +283,7 @@ export function npmLockfileRows(lock: NpmLock, source: NpmLockfileSource): Rows 
       use: source.use,
       where: source.where,
       link: npmPage(name, pkg.version),
+      ...(isExcepted ? { excepted: true } : {}),
     });
   }
   const rows = [...seen.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, r]) => r);

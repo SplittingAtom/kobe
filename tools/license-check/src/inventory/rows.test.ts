@@ -200,7 +200,20 @@ describe("npmLockfileRows", () => {
     );
     expect(result.rows.map((r) => r.component)).toEqual(["bad", "playwright"]);
     expect(result.problems).toEqual([
-      "p.json: bad@1.0.0 is GPL-3.0-only (outside the allowed family)",
+      "p.json: bad@1.0.0 is GPL-3.0-only (outside the allowed family): add an exception to " +
+        "an exceptions file (npmLockfiles[].exceptions)",
     ]);
+  });
+
+  it("accepts a package its exceptions file covers", () => {
+    const result = npmLockfileRows(
+      { packages: { "node_modules/bad": { version: "1.0.0", license: "GPL-3.0-only" } } },
+      { id: "e", title: "t", path: "p.json", section: "dev", use: "test-only", where: "e" },
+      {
+        bad: { license: "GPL-3.0-only", versions: ["1.0.0"], reason: "r", pending: "gate review" },
+      },
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.rows[0]?.excepted).toBe(true);
   });
 });

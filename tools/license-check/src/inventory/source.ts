@@ -4,7 +4,7 @@
  * the generated reports into tables. Validated here so a malformed entry fails with its path.
  */
 import { parse } from "yaml";
-import { evaluateLicense } from "../policy.js";
+import { evaluateLicense, PENDING } from "../policy.js";
 
 export interface Approval {
   readonly by: string;
@@ -25,6 +25,8 @@ export interface HandRow {
   /** Why a component outside the allowed family is acceptable (separate program, data, ...). */
   readonly reason?: string;
   readonly approval?: Approval;
+  /** `"gate review"`: outside the allowed family and not decided yet (asked at the next gate). */
+  readonly pending?: string;
 }
 
 export interface HandSection {
@@ -64,6 +66,8 @@ export interface NpmLockfileSource {
   readonly section: string;
   readonly use: string;
   readonly where: string;
+  /** Exceptions file for packages outside the allowed family (same format as the others). */
+  readonly exceptions?: string;
 }
 
 export type ChartValueClass = "first-party" | "site-provided" | readonly string[];
@@ -134,6 +138,10 @@ function row(value: unknown, path: string): HandRow {
   const license = str(r.license, `${path}.license`);
   const reason = r.reason === undefined ? undefined : str(r.reason, `${path}.reason`);
   const approved = approval(r.approval, `${path}.approval`);
+  const pending = r.pending === undefined ? undefined : str(r.pending, `${path}.pending`);
+  if (pending !== undefined && (pending !== PENDING || approved !== undefined)) {
+    fail(`${path}.pending`, `must be "${PENDING}", and only on a row without an approval`);
+  }
   return {
     id: str(r.id, `${path}.id`),
     component: str(r.component, `${path}.component`),
@@ -145,6 +153,7 @@ function row(value: unknown, path: string): HandRow {
     images: strings(r.images, `${path}.images`),
     ...(reason === undefined ? {} : { reason }),
     ...(approved === undefined ? {} : { approval: approved }),
+    ...(pending === undefined ? {} : { pending }),
   };
 }
 
@@ -241,6 +250,7 @@ export function parseInventory(text: string): Inventory {
         section,
         use: str(f.use, `${p}.use`),
         where: str(f.where, `${p}.where`),
+        ...(f.exceptions === undefined ? {} : { exceptions: str(f.exceptions, `${p}.exceptions`) }),
       };
     }),
     sections,
@@ -248,15 +258,31 @@ export function parseInventory(text: string): Inventory {
   };
 }
 
-/** Hand rows outside the allowed family that lack a reason or Chris's recorded approval. */
-export function unapprovedRows(inventory: Inventory): string[] {
+function outsideFamily(r: HandRow): boolean {
+  return !evaluateLicense(r.license).allowed;
+}
+
+/**
+ * Rows outside the allowed family that are neither approved nor marked pending, or lack a reason:
+ * a data error (fails every check). Agents add the row with `pending: gate review` and a reason.
+ */
+export function malformedRows(inventory: Inventory): string[] {
   return inventory.sections.flatMap((section) =>
     section.rows
-      .filter((r) => !evaluateLicense(r.license).allowed && (!r.reason || !r.approval))
+      .filter((r) => outsideFamily(r) && (!r.reason || (!r.approval && !r.pending)))
       .map(
         (r) =>
           `${section.id}/${r.id}: ${r.license} is outside the allowed family (MIT/Apache/BSD/MPL); ` +
-          "it needs a reason and Chris's approval {by, on} (spec D3)",
+          `give it a reason and Chris's approval {by, on}, or pending: ${PENDING}`,
       ),
+  );
+}
+
+/** Rows waiting for Chris's decision at the next gate review. */
+export function pendingRows(inventory: Inventory): string[] {
+  return inventory.sections.flatMap((section) =>
+    section.rows
+      .filter((r) => outsideFamily(r) && r.reason && !r.approval && r.pending === PENDING)
+      .map((r) => `${r.component} ${r.version} (${r.license}): ${r.reason}`),
   );
 }

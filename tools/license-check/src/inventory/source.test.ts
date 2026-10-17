@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { renderInventory, renderNotice } from "./render.js";
-import { parseInventory, unapprovedRows } from "./source.js";
+import { malformedRows, parseInventory, pendingRows } from "./source.js";
 
 const BASE = `
 notice: Kobe
@@ -45,14 +45,39 @@ describe("parseInventory", () => {
 
   it("accepts an allowed license without an approval", () => {
     const inventory = parseInventory(section("        license: Apache-2.0"));
-    expect(unapprovedRows(inventory)).toEqual([]);
+    expect(malformedRows(inventory)).toEqual([]);
+    expect(pendingRows(inventory)).toEqual([]);
   });
 
-  it("requires a reason and an approval outside the allowed family", () => {
+  it("lists a row marked pending gate review for the gate, without failing", () => {
+    const inventory = parseInventory(
+      section(
+        "        license: GPL-2.0-only\n        reason: separate\n        pending: gate review",
+      ),
+    );
+    expect(malformedRows(inventory)).toEqual([]);
+    expect(pendingRows(inventory)).toEqual(["Bifrost v2.2.5 (GPL-2.0-only): separate"]);
+  });
+
+  it("rejects pending with any other value or next to an approval", () => {
+    expect(() =>
+      parseInventory(section("        license: GPL-2.0-only\n        pending: ask Chris")),
+    ).toThrow(/pending: must be "gate review"/);
+    expect(() =>
+      parseInventory(
+        section(
+          "        license: GPL-2.0-only\n        pending: gate review\n" +
+            "        approval: { by: Chris, on: 2026-10-17 }",
+        ),
+      ),
+    ).toThrow(/only on a row without an approval/);
+  });
+
+  it("requires a reason and an approval or pending outside the allowed family", () => {
     const pending = parseInventory(
       section("        license: GPL-2.0-only\n        reason: separate"),
     );
-    expect(unapprovedRows(pending)).toEqual([
+    expect(malformedRows(pending)).toEqual([
       expect.stringContaining("chart/bifrost: GPL-2.0-only is outside the allowed family"),
     ]);
     const approved = parseInventory(
@@ -61,7 +86,8 @@ describe("parseInventory", () => {
           "        approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }",
       ),
     );
-    expect(unapprovedRows(approved)).toEqual([]);
+    expect(malformedRows(approved)).toEqual([]);
+    expect(pendingRows(approved)).toEqual([]);
   });
 
   it("rejects a malformed approval date, an unknown row id and a missing field", () => {
@@ -104,7 +130,10 @@ describe("render", () => {
       ],
       sections: inventory.sections,
       appended: {},
+      pending: ["x 1 (GPL-2.0-only): why"],
     });
+    expect(md).toContain("## Pending gate review\n\nOutside the allowed family");
+    expect(md).toContain("- x 1 (GPL-2.0-only): why\n");
     expect(md).toContain("| x | 1 | MIT | dev-only | w | [license](https://l) |");
     expect(md).toContain("1 packages, 0 of them shipped in an image.");
     expect(md).toContain("a \\| b Approved by Chris on 2026-10-17 (KOBE-375). |");

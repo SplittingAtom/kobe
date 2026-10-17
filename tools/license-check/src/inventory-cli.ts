@@ -1,7 +1,9 @@
 /**
  * Third-party inventory (KOBE-375): THIRD_PARTY_LICENSES.md and NOTICE at the repository root.
  *
- *   inventory-cli.js check                         fail if either file is stale or a component lacks an entry
+ *   inventory-cli.js check [--gate]                fail if either file is stale or a component lacks an
+ *                                                  entry; pending license decisions are warnings, and
+ *                                                  failures with --gate (or LICENSE_GATE=1)
  *   inventory-cli.js update                        rewrite both files
  *   inventory-cli.js image-report <id> <raw.json> [--check]
  *                                                  write (or compare) the committed image report
@@ -14,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { buildInventory, type RepoFiles } from "./inventory/build.js";
 import { canonicalImageReport, type ImageReport, type PackageFiles } from "./inventory/rows.js";
 import { parseInventory } from "./inventory/source.js";
+import { fail, reportPending } from "./output.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SOURCE = "tools/license-check/inventory.yaml";
@@ -58,11 +61,6 @@ function repoFiles(): RepoFiles {
   };
 }
 
-function fail(lines: readonly string[]): never {
-  for (const l of lines) console.error(l);
-  process.exit(1);
-}
-
 function run(mode: "check" | "update"): void {
   const inventory = parseInventory(read(SOURCE));
   const built = buildInventory(inventory, repoFiles());
@@ -82,8 +80,12 @@ function run(mode: "check" | "update"): void {
   if (problems.length > 0) {
     fail([`Third-party inventory check failed (${SOURCE}):`, ...problems.map((p) => `  - ${p}`)]);
   }
+  reportPending(built.pending);
   if (mode === "check") {
-    console.log(`Third-party inventory up to date: ${built.rowCount} components.`);
+    console.log(
+      `Third-party inventory up to date: ${built.rowCount} components, ` +
+        `${built.pending.length} pending gate review.`,
+    );
   }
 }
 

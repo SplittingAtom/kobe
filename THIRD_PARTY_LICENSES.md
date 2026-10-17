@@ -15,6 +15,10 @@ How used: **linked** (imported by Kobe code), **bundled** (shipped inside a Kobe
 default), **external** (operated by the site, not shipped by Kobe), **dev-only** /
 **test-only** (never shipped).
 
+## Pending gate review
+
+Nothing is pending: every component outside the allowed family has Chris's approval.
+
 ## Web and services: npm packages (pnpm workspace)
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).

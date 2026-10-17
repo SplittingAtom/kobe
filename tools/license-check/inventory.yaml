@@ -7,8 +7,10 @@
 # Row fields: id, component, version, license (SPDX), use (linked / bundled / separate process /
 # optional / external / dev-only / test-only), where, link (license text), images (normalised
 # repositories the row covers: no tag, digest or docker.io/library prefix). A license outside
-# the MIT/Apache/BSD/MPL family also needs `reason` and `approval: {by, on, ref}`; never add an
-# approval Chris has not given (spec D3).
+# the MIT/Apache/BSD/MPL family also needs `reason` and either `approval: {by, on, ref}` (only
+# what Chris has approved, spec D3) or `pending: gate review`. Don't stop work to ask: add the row
+# as pending; pending items are warnings on every push, listed at the top of
+# THIRD_PARTY_LICENSES.md, and cleared with Chris at the next gate review (`pnpm license:gate`).
 
 notice: |
   Kobe

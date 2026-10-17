@@ -16,6 +16,8 @@ export interface Document {
   readonly sections: readonly HandSection[];
   /** Generated tables appended to a hand section (by section id). */
   readonly appended: Readonly<Record<string, readonly GeneratedTable[]>>;
+  /** License decisions queued for the next gate review. */
+  readonly pending: readonly string[];
 }
 
 function cell(text: string): string {
@@ -51,7 +53,9 @@ function rowTable(rows: readonly Row[]): string {
 function notes(row: HandRow): string {
   const approval = row.approval
     ? `Approved by ${row.approval.by} on ${row.approval.on}${row.approval.ref ? ` (${row.approval.ref})` : ""}.`
-    : "";
+    : row.pending
+      ? "Pending gate review."
+      : "";
   return [row.reason ?? "", approval].filter((s) => s !== "").join(" ");
 }
 
@@ -74,7 +78,7 @@ function exceptionList(path: string, exceptions: LicenseExceptions): string {
         `- \`${name}\` ${e.versions.join(", ")} (${e.license}): ${cell(e.reason)} ` +
         (e.approvedBy && e.approvedOn
           ? `Approved by ${e.approvedBy} on ${e.approvedOn}.`
-          : "Not approved yet."),
+          : "Pending gate review."),
     );
   return [`Documented exceptions (\`${path}\`):`, "", ...items].join("\n");
 }
@@ -113,6 +117,18 @@ export function renderInventory(doc: Document): string {
     "**test-only** (never shipped).",
     "",
   ];
+  parts.push("## Pending gate review", "");
+  parts.push(
+    doc.pending.length === 0
+      ? "Nothing is pending: every component outside the allowed family has Chris's approval."
+      : [
+          "Outside the allowed family and not decided yet; every gate review clears this list with",
+          "Chris (`pnpm license:gate` fails while it is not empty):",
+          "",
+          ...doc.pending.map((p) => `- ${cell(p)}`),
+        ].join("\n"),
+    "",
+  );
   for (const table of doc.generated) parts.push(...generatedBlock(table, "##"));
   for (const section of doc.sections) {
     parts.push(`## ${section.title}`, "", section.intro, "", handTable(section.rows), "");
