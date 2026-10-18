@@ -243,9 +243,10 @@ export async function recomputeOnce(deps: {
     } finally {
       await client
         .query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [RECOMPUTE_LOCK])
-        .catch(() => {
+        .catch((err: unknown) => {
           // A session that can't unlock must not go back to the pool still holding the lock:
           // destroying it drops the lock (and every replica can run again).
+          deps.log.warn({ err }, "skills: hash recompute unlock failed; dropping the connection");
           destroy = true;
         });
     }

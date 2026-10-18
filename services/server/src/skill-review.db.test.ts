@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { strToU8, zipSync } from "fflate";
@@ -48,8 +48,12 @@ const queue = async (who: Person, status = "pending") =>
     status: string;
     flagged: boolean;
     verdict: string;
+    findingsDigest: string;
     findings: { category: string; file: string }[];
   }[];
+/** The digest of the findings the reviewer is shown, to acknowledge exactly those (KOBE-312 S7). */
+const digestOf = async (who: Person, slug: string) =>
+  (await queue(who, "all")).find((r) => r.slug === slug)?.findingsDigest;
 
 beforeAll(async () => {
   h = await openHarness({ blobs: { objects: new MemoryObjects(), prefix: "kobe/" } });
@@ -160,7 +164,7 @@ describe("review queue", () => {
     const ok = await decide("alice", t.skillId, 1, {
       decision: "approved",
       note: "reviewed",
-      acknowledged: true,
+      acknowledgedFindings: await digestOf("alice", "decided"),
     });
     expect(ok.status, JSON.stringify(ok.json)).toBe(200);
     expect(ok.json.review).toMatchObject({
@@ -249,7 +253,7 @@ describe("flagged personal skills (KOBE-80)", () => {
       (
         await decide("alice", row.skillId, row.version, {
           decision: "approved",
-          acknowledged: true,
+          acknowledgedFindings: await digestOf("alice", "risky"),
         })
       ).status,
     ).toBe(200);
@@ -332,9 +336,10 @@ describe("scan verdict tiers in review (KOBE-312)", () => {
     const t = await team("bob", "blocked-tier", { "lib/mod.pyc": "\u0000compiled" });
     const row = (await queue("alice")).find((r) => r.slug === "blocked-tier");
     expect(row).toMatchObject({ verdict: "block", flagged: true });
+    const digest = await digestOf("alice", "blocked-tier");
     const asAdmin = await decide("alice", t.skillId, 1, {
       decision: "approved",
-      acknowledged: true,
+      acknowledgedFindings: digest,
     });
     expect(asAdmin).toMatchObject({ status: 409, json: { code: "scan_blocked" } });
     // Rejecting stays open to the team admin.
@@ -344,13 +349,14 @@ describe("scan verdict tiers in review (KOBE-312)", () => {
     try {
       const noReason = await decide("alice", t.skillId, 1, {
         decision: "approved",
-        acknowledged: true,
+        acknowledgedFindings: digest,
       });
       expect(noReason.status).toBe(400);
+      const reason = "Vendor-supplied wheel, checked by hand.";
       const override = await decide("alice", t.skillId, 1, {
         decision: "approved",
-        acknowledged: true,
-        note: "Vendor-supplied wheel, checked by hand.",
+        acknowledgedFindings: digest,
+        note: reason,
       });
       expect(override.status, JSON.stringify(override.json)).toBe(200);
       const { rows } = await h.admin.query(
@@ -362,9 +368,24 @@ describe("scan verdict tiers in review (KOBE-312)", () => {
         {
           team_id: finance,
           actor_id: ids.alice,
-          target: expect.objectContaining({ slug: "blocked-tier", version: 1, findings: 1 }),
+          target: expect.objectContaining({
+            slug: "blocked-tier",
+            version: 1,
+            findings: 1,
+            rules: ["compiled-code"],
+            reasonSha256: createHash("sha256").update(reason).digest("hex"),
+          }),
         },
       ]);
+      // A later decision rewrites the note; the override's audit still pins the reason it gave.
+      await decide("alice", t.skillId, 1, { decision: "rejected", note: "Changed my mind." });
+      const note = await h.admin.query(
+        `SELECT review_note FROM team_skill_reviews WHERE skill_id = $1`,
+        [t.skillId],
+      );
+      expect(createHash("sha256").update(note.rows[0].review_note).digest("hex")).not.toBe(
+        rows[0].target.reasonSha256,
+      );
     } finally {
       await h.admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [ids.alice]);
     }
@@ -380,5 +401,86 @@ describe("scan verdict tiers in review (KOBE-312)", () => {
     );
     expect((await queue("alice")).find((r) => r.slug === "old-flags")?.verdict).toBe("caution");
     expect((await decide("alice", t.skillId, 1, { decision: "approved" })).status).toBe(422);
+  });
+});
+
+describe("review gating holes (KOBE-312 review)", () => {
+  it("ties the acknowledgement to the findings shown: changed findings give 409 (S7)", async () => {
+    const t = await team("bob", "moving-findings", FLAGGED);
+    const seen = await digestOf("alice", "moving-findings");
+    expect(seen).toMatch(/^[0-9a-f]{64}$/);
+    // A rescan lands between the reviewer's look and the click.
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET findings = findings || findings WHERE skill_id = $1`,
+      [t.skillId],
+    );
+    const stale = await decide("alice", t.skillId, 1, {
+      decision: "approved",
+      acknowledgedFindings: seen,
+    });
+    expect(stale).toMatchObject({ status: 409, json: { code: "findings_changed" } });
+    const bare = await decide("alice", t.skillId, 1, { decision: "approved", acknowledged: true });
+    expect(bare.status).toBe(400);
+    const fresh = await decide("alice", t.skillId, 1, {
+      decision: "approved",
+      acknowledgedFindings: await digestOf("alice", "moving-findings"),
+    });
+    expect(fresh.status, JSON.stringify(fresh.json)).toBe(200);
+    const { rows } = await h.admin.query(
+      `SELECT target FROM audit_log WHERE action = 'skill.reviewed' AND target->>'skillId' = $1`,
+      [t.skillId],
+    );
+    expect(rows[0].target.findingsSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("refuses to approve a version that was never scanned (S4)", async () => {
+    const t = await team("bob", "never-scanned");
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET unscanned = true, flagged = false, findings = '[]'
+        WHERE skill_id = $1`,
+      [t.skillId],
+    );
+    const res = await decide("alice", t.skillId, 1, { decision: "approved" });
+    expect(res).toMatchObject({ status: 409, json: { code: "scan_pending" } });
+    expect((await decide("alice", t.skillId, 1, { decision: "rejected" })).status).toBe(200);
+  });
+
+  it("reads an old row whose only trace of a binary is `skipped` as Caution (S5)", async () => {
+    const t = await team("bob", "old-binary");
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET flagged = false, findings = '[]', skipped = '["lib/x.so"]'
+        WHERE skill_id = $1`,
+      [t.skillId],
+    );
+    expect((await queue("alice")).find((r) => r.slug === "old-binary")?.verdict).toBe("caution");
+    const res = await decide("alice", t.skillId, 1, { decision: "approved" });
+    expect(res).toMatchObject({ status: 422, json: { code: "acknowledgement_required" } });
+  });
+
+  it("needs team review for an old unflagged personal version that held a binary (S5)", async () => {
+    const frank = await h.createUser("frank@review.test");
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [finance, frank],
+    );
+    const fb = await h.signIn("frank@review.test");
+    expect((await fb.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
+    fb.team = finance;
+    const up = await fb.post("/v1/skills?scope=personal", zipOf("old-personal"));
+    expect(up.status, JSON.stringify(up.json)).toBe(201);
+    await h.admin.query(
+      `UPDATE personal_skill_scans SET flagged = false, findings = '[]', skipped = '["bin/tool"]'
+        WHERE skill_id = $1`,
+      [up.json.skill.id],
+    );
+    const db = h.deps.database.db;
+    const names = await withTeam(db, finance, (tx) =>
+      usablePersonalSkills(tx, { teamId: finance, userId: frank, ensureRows: true }),
+    );
+    expect(names.map((n) => n.name)).not.toContain("old-personal");
+    expect((await queue("alice")).find((r) => r.slug === "old-personal")).toMatchObject({
+      flagged: true,
+      verdict: "caution",
+    });
   });
 });

@@ -32,5 +32,14 @@ export const PROSE_RULES: readonly ProseRule[] = [
   },
 ];
 
-/** Zero-width, bidi-control and other invisible formatting characters. */
-export const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u00ad\ufeff]/;
+/**
+ * Invisible formatting characters that hide text from a reviewer: zero-width and bidi controls,
+ * the Unicode Tag block (U+E0000 to E007F, "ASCII smuggling"), variation selectors, Hangul fillers,
+ * the Mongolian vowel separator, the combining grapheme joiner and line/paragraph separators.
+ * Emoji keep working: one variation selector right after an emoji, and a zero-width joiner between
+ * emoji, are presentation, not smuggling (a run of selectors is still flagged).
+ */
+export const INVISIBLE =
+  // The combining marks in the classes are matched one at a time, on purpose.
+  // eslint-disable-next-line no-misleading-character-class
+  /[\u00ad\u034f\u061c\u115f\u1160\u180e\u200b\u200c\u200e\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\u2066-\u2069\u3164\ufeff\uffa0\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]|(?<!\p{Emoji})[\ufe00-\ufe0f]|(?<![\p{Emoji}\ufe0f])\u200d|\u200d(?!\p{Emoji})/u;

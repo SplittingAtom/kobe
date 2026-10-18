@@ -59,11 +59,20 @@ the Drizzle schema (`schema/registry.ts`, `grants.ts`, `installs.ts`), tenancy r
   `registry_versions(package_hash)` and `registry_review_events(actor_id)`. 0132/0133 edited in
   place (unreleased).
 
+- **Flagged self-approval (SK22, D10; review-312):** `registry_versions.self_approved`;
+  `registry_versions_review` = reviewer null or (reviewer = submitter) = flag;
+  `registry_versions_self_approval`: the flag only with an approval. Guard
+  `registry_versions_review_guard` (BEFORE INSERT OR UPDATE, invoker, pinned search_path) decides
+  the flag: a self-review must be an approval (else 42501 "withdraw"), by an active Site admin,
+  with no other active Site admin and no other active `skill_reviewer` grantee, read under
+  `break_glass_lock_admin_set()`; `site_grants_admin_set_lock` makes grant changes take that lock.
+  Reviewer, approval time and flag are frozen once approved (310/311 nit n2). Server wiring (audit
+  `selfApproved`, notification, UI flag) waits for the Registry review flow (Phase C): no server
+  code approves catalog versions yet.
+
 ## Open questions (for Chris or the coordinator)
 
-- SK22 allows a single-admin Site to self-approve with a flag (as break-glass); the
-  `registry_versions_review` CHECK forbids it outright. If that flag is wanted, the flow must
-  record a second actor or the check gets an explicit exception column.
+- None.
 
 ## Evidence (acceptance criteria → test or command output)
 

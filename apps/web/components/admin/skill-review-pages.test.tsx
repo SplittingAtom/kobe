@@ -19,6 +19,7 @@ const review = (over: Record<string, unknown> = {}) => ({
   status: "pending",
   flagged: false,
   verdict: "pass",
+  findingsDigest: "d".repeat(64),
   blocked: false,
   findings: [],
   scripts: [],
@@ -119,7 +120,7 @@ describe("Skill review (KOBE-80)", () => {
     // Confirming is the acknowledgement the server requires (KOBE-312).
     expect(JSON.parse(String(must(calls.find((c) => c.method === "POST")).body))).toEqual({
       decision: "approved",
-      acknowledged: true,
+      acknowledgedFindings: "d".repeat(64),
     });
   });
 
@@ -145,7 +146,7 @@ describe("Skill review (KOBE-80)", () => {
     await screen.findByText("report-writer v1.4.0 approved.");
     expect(JSON.parse(String(must(calls.find((c) => c.method === "POST")).body))).toEqual({
       decision: "approved",
-      acknowledged: true,
+      acknowledgedFindings: "d".repeat(64),
       note: "Checked by hand.",
     });
   });

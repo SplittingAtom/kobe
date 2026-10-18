@@ -243,20 +243,6 @@ describe("registry invariants", () => {
     });
   });
 
-  it("refuses a review by the submitter (S3)", async () => {
-    await withClient(database().appUrl, async (c) => {
-      await expect(
-        c.query(
-          `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
-             provenance, source, scan, verdict, state, submitted_by, reviewed_by, approved_at)
-           VALUES ($1, '3.0.0', 3, repeat('e', 64), repeat('e', 64), '{}', '{}', '{}', '{}', 'pass',
-             'approved', $2, $2, now())`,
-          [skillId, ids.user],
-        ),
-      ).rejects.toMatchObject({ constraint: "registry_versions_review" });
-    });
-  });
-
   it("installs only a version of the installed skill, inside the team", async () => {
     await inTeam(async (c) => {
       expect(
@@ -415,5 +401,183 @@ describe("registry invariants", () => {
         { registry_team_id: null },
       ]);
     });
+  });
+});
+
+describe("flagged self-approval on a single-admin Site (SK22, D10)", () => {
+  const people = { sub: randomUUID(), second: randomUUID(), grantee: randomUUID() };
+  let seq = 10;
+
+  beforeAll(async () => {
+    await withClient(database().adminUrl, async (c) => {
+      for (const [name, id] of Object.entries(people))
+        await c.query(`INSERT INTO users (id, name, email) VALUES ($1, $2, $3)`, [
+          id,
+          name,
+          `${name}-${suffix}@example.test`,
+        ]);
+      await c.query(`DELETE FROM site_grants`);
+      await c.query(`DELETE FROM site_roles`);
+      await c.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'owner')`, [people.sub]);
+    });
+  });
+
+  /** A version the submitter sent for review, as the app role. */
+  async function submitted(c: pg.Client, submitter = people.sub): Promise<string> {
+    seq += 1;
+    const r = await c.query<{ id: string }>(
+      `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
+         provenance, source, scan, verdict, state, submitted_by)
+       VALUES ($1, $2, $3, repeat('f', 64), repeat('f', 64), '{}', '{}', '{}', '{}', 'pass',
+         'in_review', $4) RETURNING id`,
+      [skillId, `5.0.${seq}`, seq, submitter],
+    );
+    return r.rows[0]?.id as string;
+  }
+  const approve = (c: pg.Client, id: string, by: string) =>
+    c.query<{ self_approved: boolean }>(
+      `UPDATE registry_versions SET state = 'approved', reviewed_by = $2, approved_at = now()
+        WHERE id = $1 RETURNING self_approved`,
+      [id, by],
+    );
+  const asAdmin = (sql: string, params: unknown[] = []) =>
+    withClient(database().adminUrl, (c) => c.query(sql, params));
+
+  it("lets the sole active admin approve their own submission, flagged", async () => {
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      const r = await approve(c, id, people.sub);
+      expect(r.rows[0]?.self_approved).toBe(true);
+    });
+  });
+
+  it("never flags a review by someone else", async () => {
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      const r = await c.query<{ self_approved: boolean }>(
+        `UPDATE registry_versions SET state = 'approved', reviewed_by = $2, approved_at = now(),
+           self_approved = true WHERE id = $1 RETURNING self_approved`,
+        [id, people.second],
+      );
+      expect(r.rows[0]?.self_approved).toBe(false);
+    });
+  });
+
+  it("refuses self-approval while a second active admin exists, but not a deactivated one", async () => {
+    await asAdmin(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [people.second]);
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      await expect(approve(c, id, people.sub)).rejects.toMatchObject({ code: "42501" });
+    });
+    await asAdmin(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [people.second]);
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      expect((await approve(c, id, people.sub)).rows[0]?.self_approved).toBe(true);
+    });
+    await asAdmin(`DELETE FROM site_roles WHERE user_id = $1`, [people.second]);
+  });
+
+  it("refuses self-approval while a skill reviewer grantee exists", async () => {
+    await withClient(database().appUrl, async (c) => {
+      await c.query(
+        `INSERT INTO site_grants (user_id, "grant", granted_by) VALUES ($1, 'skill_reviewer', $2)`,
+        [people.grantee, people.sub],
+      );
+      const id = await submitted(c);
+      await expect(approve(c, id, people.sub)).rejects.toMatchObject({ code: "42501" });
+      await c.query(`DELETE FROM site_grants WHERE user_id = $1`, [people.grantee]);
+    });
+  });
+
+  it("refuses self-approval by a submitter who is not a Site admin", async () => {
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c, people.grantee);
+      await expect(approve(c, id, people.grantee)).rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
+  it("refuses a self-review that is not an approval, and self-approved rows inserted directly", async () => {
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      await expect(
+        c.query(`UPDATE registry_versions SET state = 'rejected', reviewed_by = $2 WHERE id = $1`, [
+          id,
+          people.sub,
+        ]),
+      ).rejects.toMatchObject({ code: "42501" });
+      await asAdmin(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [
+        people.grantee,
+      ]);
+      await asAdmin(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [people.second]);
+      seq += 1;
+      await expect(
+        c.query(
+          `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash,
+             manifest, provenance, source, scan, verdict, state, submitted_by, reviewed_by,
+             approved_at, self_approved)
+           VALUES ($1, $2, $3, repeat('f', 64), repeat('f', 64), '{}', '{}', '{}', '{}', 'pass',
+             'approved', $4, $4, now(), true)`,
+          [skillId, `5.0.${seq}`, seq, people.sub],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await asAdmin(`DELETE FROM site_roles WHERE user_id = $1`, [people.grantee]);
+    });
+  });
+
+  it("keeps the flag consistent with the reviewer (23514 when the guard is bypassed)", async () => {
+    await withClient(database().adminUrl, async (c) => {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      seq += 1;
+      await expect(
+        c.query(
+          `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash,
+             manifest, provenance, source, scan, verdict, state, submitted_by, reviewed_by,
+             approved_at, self_approved)
+           VALUES ($1, $2, $3, repeat('f', 64), repeat('f', 64), '{}', '{}', '{}', '{}', 'pass',
+             'approved', $4, $4, now(), false)`,
+          [skillId, `5.0.${seq}`, seq, people.sub],
+        ),
+      ).rejects.toMatchObject({ code: "23514", constraint: "registry_versions_review" });
+      await c.query("ROLLBACK");
+    });
+  });
+
+  it("freezes the reviewer, approval time and flag once approved", async () => {
+    await withClient(database().appUrl, async (c) => {
+      const id = await submitted(c);
+      await approve(c, id, people.sub);
+      for (const set of [
+        "self_approved = false",
+        "reviewed_by = '" + people.second + "'",
+        "approved_at = now() - interval '1 day'",
+      ])
+        await expect(
+          c.query(`UPDATE registry_versions SET ${set} WHERE id = $1`, [id]),
+          set,
+        ).rejects.toMatchObject({ code: "55000" });
+      await c.query(`UPDATE registry_versions SET state = 'revoked' WHERE id = $1`, [id]);
+      await c.query(`UPDATE registry_versions SET state = 'approved' WHERE id = $1`, [id]);
+    });
+  });
+
+  it("waits for a concurrent skill reviewer grant before deciding the flag", async () => {
+    const id = await withClient(database().appUrl, (c) => submitted(c));
+    await withClient(database().appUrl, async (granter) => {
+      await granter.query("BEGIN");
+      await granter.query(
+        `INSERT INTO site_grants (user_id, "grant", granted_by) VALUES ($1, 'skill_reviewer', $2)`,
+        [people.grantee, people.sub],
+      );
+      const approval = withClient(database().appUrl, (c) => approve(c, id, people.sub));
+      const outcome = approval.then(
+        () => null,
+        (err: unknown) => err,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await granter.query("COMMIT");
+      expect(await outcome).toMatchObject({ code: "42501" });
+    });
+    await asAdmin(`DELETE FROM site_grants WHERE user_id = $1`, [people.grantee]);
   });
 });

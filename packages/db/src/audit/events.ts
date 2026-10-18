@@ -1313,10 +1313,17 @@ export const AUDIT_EVENTS = {
     verdict: z.enum(["pass", "caution", "block"]).optional(),
     /** The reviewer acknowledged the Caution or Block findings when approving (KOBE-312). */
     acknowledged: z.literal(true).optional(),
+    /** The digest of exactly the findings acknowledged (KOBE-312 review S7). */
+    findingsSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   }),
   /**
-   * A Site admin approved a version whose scan is Block (KOBE-312, SK32); the reason is the review
-   * note, not recorded here. Counts the blocking findings only.
+   * A Site admin approved a version whose scan is Block (KOBE-312, SK32). The reason is the review
+   * note, not recorded here (no free text); its SHA-256 is, so a later decision that rewrites the
+   * note can't rewrite the reason this override gave. Counts the blocking findings and names their
+   * rule ids (scanner ids, never content).
    */
   "skill.scan.override": event("team", {
     skillId: id,
@@ -1324,6 +1331,15 @@ export const AUDIT_EVENTS = {
     version,
     bundleHash: z.string().regex(/^[0-9a-f]{64}$/),
     findings: count,
+    /** Absent on overrides recorded before the KOBE-312 review. */
+    rules: z
+      .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
+      .max(16)
+      .optional(),
+    reasonSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),

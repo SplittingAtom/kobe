@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
 import { z } from "zod";
-import { scanSkillBundle, verdictOf, type ScanResult, type Verdict } from "@kobe/skill-scanner";
+import { scanSkillBundle, storedVerdict, type ScanResult, type Verdict } from "@kobe/skill-scanner";
 import {
   and,
   asc,
@@ -44,7 +45,7 @@ export function scanCanonicalZip(zip: Uint8Array): ScanResult {
 }
 
 const storedScan = (scan: ScanResult) => ({
-  flagged: scan.findings.length > 0,
+  flagged: scan.verdict !== "pass",
   findings: scan.findings.map((f) => ({ ...f })),
   scripts: [...scan.scripts],
   skipped: [...scan.skipped],
@@ -90,9 +91,29 @@ export interface ReviewRecord {
   readonly blocked: boolean;
 }
 
-/** The scan verdict of a review row (KOBE-312): from its findings' severities. */
-export const reviewVerdict = (r: { readonly findings: readonly StoredFinding[] }): Verdict =>
-  verdictOf(r.findings);
+/**
+ * The scan verdict of a review row (KOBE-312): from its findings' severities, and Caution for a
+ * row stored before KOBE-312 that skipped a file without a finding (review S5).
+ */
+export const reviewVerdict = (r: {
+  readonly findings: readonly StoredFinding[];
+  readonly skipped: readonly string[];
+}): Verdict => storedVerdict(r);
+
+/**
+ * A digest of the scan a reviewer is shown (findings and skipped files, as stored). Approving a
+ * Caution or Block scan acknowledges exactly this digest, so findings that change between the
+ * look and the click (a late scan, a rescan) are never covered unseen (review S7).
+ */
+export const findingsDigest = (r: {
+  readonly findings: readonly StoredFinding[];
+  readonly skipped: readonly string[];
+}): string =>
+  createHash("sha256")
+    .update(JSON.stringify({ findings: r.findings, skipped: r.skipped }))
+    .digest("hex");
+
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 const QUEUE_LIMIT = 200;
 const SCAN_BATCH = 20;
@@ -284,8 +305,12 @@ export type DecideError =
   | "not_found"
   | "unchanged"
   | "blocklisted"
+  /** The version was never scanned: it can be rejected, not approved (review S4). */
+  | "scan_pending"
   /** The scan is Caution: the reviewer must acknowledge its findings (KOBE-312). */
   | "acknowledgement_required"
+  /** The acknowledged findings are not the stored ones any more (review S7). */
+  | "findings_changed"
   /** The scan is Block: only a Site admin may approve, with a reason (KOBE-312). */
   | "scan_blocked"
   | "override_reason_required";
@@ -298,10 +323,33 @@ export interface Decision {
   readonly status: "approved" | "rejected";
   readonly note: string | null;
   readonly reviewerId: string;
-  /** The reviewer read and accepts the Caution findings (required to approve a Caution scan). */
-  readonly acknowledged?: boolean;
+  /**
+   * The `findingsDigest` of the scan the reviewer read and accepts (required to approve a
+   * Caution or Block scan; it must match the stored findings).
+   */
+  readonly acknowledgedFindings?: string;
   /** The reviewer may override a Block scan (a Site admin, `site.skills.override_scan`). */
   readonly mayOverrideBlock?: boolean;
+}
+
+/**
+ * Why an approval is refused, if it is: never scanned; Block without a Site admin's override and
+ * reason; Caution or Block without acknowledging exactly the stored findings.
+ */
+function approvalRefusal(
+  current: { readonly unscanned: boolean },
+  verdict: Verdict,
+  digest: string,
+  decision: Decision,
+): DecideError | null {
+  if (current.unscanned) return "scan_pending";
+  if (verdict === "block") {
+    if (!decision.mayOverrideBlock) return "scan_blocked";
+    if (!decision.note) return "override_reason_required";
+  }
+  if (verdict === "pass") return null;
+  if (!decision.acknowledgedFindings) return "acknowledgement_required";
+  return decision.acknowledgedFindings === digest ? null : "findings_changed";
 }
 
 /**
@@ -328,12 +376,11 @@ export function decideReview(
     const blocked = await isBlocked(tx, current.contentHash);
     if (decision.status === "approved" && blocked) return { ok: false, error: "blocklisted" };
     const verdict = reviewVerdict(current);
-    if (decision.status === "approved" && verdict === "block") {
-      if (!decision.mayOverrideBlock) return { ok: false, error: "scan_blocked" };
-      if (!decision.note) return { ok: false, error: "override_reason_required" };
+    const digest = findingsDigest(current);
+    if (decision.status === "approved") {
+      const refused = approvalRefusal(current, verdict, digest, decision);
+      if (refused) return { ok: false, error: refused };
     }
-    if (decision.status === "approved" && verdict !== "pass" && !decision.acknowledged)
-      return { ok: false, error: "acknowledgement_required" };
     if (decision.status === "approved" && verdict === "block") {
       await recordAudit(tx, {
         action: "skill.scan.override",
@@ -344,6 +391,12 @@ export function decideReview(
           version: at.version,
           bundleHash: current.contentHash,
           findings: current.findings.filter((f) => f.severity === "block").length,
+          rules: [
+            ...new Set(current.findings.filter((f) => f.severity === "block").map((f) => f.rule)),
+          ].sort(),
+          // The reason is the review note, which a later decision overwrites; its hash here
+          // keeps the override's reason tamper-evident (review S6).
+          reasonSha256: sha256(decision.note ?? ""),
         },
       });
     }
@@ -368,7 +421,9 @@ export function decideReview(
         previous: current.status,
         flagged: current.flagged,
         verdict,
-        ...(decision.status === "approved" && verdict !== "pass" ? { acknowledged: true } : {}),
+        ...(decision.status === "approved" && verdict !== "pass"
+          ? { acknowledged: true as const, findingsSha256: digest }
+          : {}),
       },
     });
     const semvers = await semversOf(tx, teamId, [current]);
@@ -461,7 +516,11 @@ export async function personalSkillUsage(
       ),
     )
     .where(eq(personalSkills.ownerUserId, args.userId));
-  const needsApproval = rows.filter((r) => r.scan === null || r.scan.flagged);
+  // Needs this team's approval: never scanned, or a scan that is not Pass (stored before KOBE-312
+  // too: a skipped binary with no finding reads as Caution, review S5).
+  const needs = (r: (typeof rows)[number]) =>
+    r.scan === null || r.scan.flagged || storedVerdict(r.scan) !== "pass";
+  const needsApproval = rows.filter(needs);
   if (needsApproval.length === 0) {
     return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [] };
   }
@@ -496,7 +555,7 @@ export async function personalSkillUsage(
             slug: r.name,
             contentHash: r.hash,
             unscanned: r.scan === null,
-            flagged: r.scan?.flagged ?? false,
+            flagged: r.scan !== null && needs(r),
             findings: r.scan?.findings ?? [],
             scripts: r.scan?.scripts ?? [],
             skipped: r.scan?.skipped ?? [],
@@ -505,10 +564,8 @@ export async function personalSkillUsage(
         .onConflictDoNothing();
     }
   }
-  const isUsable = (r: (typeof rows)[number]) => {
-    const needs = r.scan === null || r.scan.flagged;
-    return !needs || status.get(`${r.skillId}:${r.version}`) === "approved";
-  };
+  const isUsable = (r: (typeof rows)[number]) =>
+    !needs(r) || status.get(`${r.skillId}:${r.version}`) === "approved";
   return {
     usable: rows.filter(isUsable).map(({ name, hash }) => ({ name, hash })),
     blocked: rows.filter((r) => !isUsable(r)).map((r) => r.name),
@@ -525,7 +582,8 @@ async function readBytes(blobs: BlobStore, key: string): Promise<Uint8Array | nu
 
 /**
  * Scans review rows still marked unscanned (backfilled versions, or personal versions that
- * predate scanning), a batch per call, filling in their findings. A row whose bundle can't be
+ * predate scanning), a batch per call, filling in their findings. It scans the whole package
+ * (evals and manifest too) where one is stored, as the upload does. A row whose bundle can't be
  * read or scanned stays unscanned and is retried on the next listing.
  */
 export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string): Promise<void> {
@@ -544,7 +602,9 @@ export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string
         const [v] =
           r.scope === "team"
             ? await tx
-                .select({ key: teamSkillVersions.storageKey })
+                .select({
+                  key: sql<string>`coalesce(${teamSkillVersions.packageStorageKey}, ${teamSkillVersions.storageKey})`,
+                })
                 .from(teamSkillVersions)
                 .where(
                   and(
@@ -554,7 +614,9 @@ export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string
                   ),
                 )
             : await tx
-                .select({ key: personalSkillVersions.storageKey })
+                .select({
+                  key: sql<string>`coalesce(${personalSkillVersions.packageStorageKey}, ${personalSkillVersions.storageKey})`,
+                })
                 .from(personalSkillVersions)
                 .where(
                   and(

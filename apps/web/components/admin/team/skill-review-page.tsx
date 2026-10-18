@@ -123,7 +123,8 @@ function ReviewList({
     trigger: HTMLElement | null,
     reason: string,
   ) {
-    // Approving over findings is an explicit acknowledgement (KOBE-312): the dialog is it.
+    // Approving over findings is an explicit acknowledgement (KOBE-312): the dialog is it, and it
+    // covers exactly the findings shown (their digest; the server refuses if they changed).
     const findings = `${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}`;
     const acknowledged =
       decision === "approved" &&
@@ -143,7 +144,7 @@ function ReviewList({
     const done = await mutation.run(
       () =>
         decideSkillReview(teamId, review, decision, {
-          ...(acknowledged ? { acknowledged: true } : {}),
+          ...(acknowledged ? { acknowledgedFindings: review.findingsDigest } : {}),
           ...(reason.trim() ? { note: reason.trim() } : {}),
         }),
       () => `${review.slug} v${review.semver} ${decision}.`,

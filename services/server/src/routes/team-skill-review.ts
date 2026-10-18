@@ -6,6 +6,7 @@ import type { ServerDeps } from "../deps.js";
 import {
   decideReview,
   decodeCursor,
+  findingsDigest,
   reviewVerdict,
   listReviews,
   scanUnscanned,
@@ -24,8 +25,14 @@ const filterSchema = z.enum(["pending", "approved", "rejected", "all"]);
 const decisionSchema = z.strictObject({
   decision: z.enum(["approved", "rejected"]),
   note: z.string().trim().max(2000).optional(),
-  /** The reviewer read and accepts the scan's findings (KOBE-312). */
-  acknowledged: z.boolean().optional(),
+  /**
+   * The `findingsDigest` of the scan the reviewer read and accepts (KOBE-312): needed to approve a
+   * Caution or Block scan, and it must still match the stored findings.
+   */
+  acknowledgedFindings: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 const settingsSchema = z.strictObject({ personalSkillsDisabled: z.boolean() });
 const idSchema = z.uuid();
@@ -43,6 +50,8 @@ const reviewJson = (r: ReviewRecord) => ({
   status: r.status,
   flagged: r.flagged,
   verdict: reviewVerdict(r),
+  /** Echo it as `acknowledgedFindings` to approve exactly these findings. */
+  findingsDigest: findingsDigest(r),
   findings: r.findings,
   scripts: r.scripts,
   skipped: r.skipped,
@@ -101,7 +110,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           status: body.decision,
           note: body.note || null,
           reviewerId: c.get("user").id,
-          acknowledged: body.acknowledged === true,
+          ...(body.acknowledgedFindings ? { acknowledgedFindings: body.acknowledgedFindings } : {}),
           mayOverrideBlock: siteRoleAllows(c.get("siteRole"), "site.skills.override_scan"),
         },
       );
@@ -115,6 +124,22 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
               message: "The scan has findings: read them and acknowledge them to approve.",
             },
             422,
+          );
+        if (result.error === "findings_changed")
+          return c.json(
+            {
+              code: result.error,
+              message: "The scan's findings changed since you read them: review them again.",
+            },
+            409,
+          );
+        if (result.error === "scan_pending")
+          return c.json(
+            {
+              code: result.error,
+              message: "This version has not been scanned yet: it can be approved once it is.",
+            },
+            409,
           );
         if (result.error === "scan_blocked")
           return c.json(

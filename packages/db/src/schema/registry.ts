@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   check,
   foreignKey,
   index,
@@ -131,7 +132,10 @@ export const registryMaintainers = pgTable(
  *
  * Its identity is immutable once written (trigger `registry_versions_immutable`, migration 0133):
  * only the review state, claim, review, scorecards and mirror change; a new package is a new
- * version that a human reviews. Nobody approves their own submission (`registry_versions_review`).
+ * version that a human reviews. Nobody reviews their own submission, except that a single-admin
+ * Site may self-approve, flagged `self_approved` (SK22, as break-glass D10): the guard trigger
+ * `registry_versions_review_guard` (0133) decides the flag, and `registry_versions_review` keeps it
+ * consistent. The review (reviewer, approval time, flag) is frozen once approved.
  * Team-private data stays team-private: `source` (the originating team's ids) is shown only to
  * site reviewers and the submitting team, never to catalog browsers; `scorecard` and
  * `authoritative_scorecard` hold aggregate numbers only, never case inputs, outputs or
@@ -167,6 +171,11 @@ export const registryVersions = pgTable(
     claimedAt: ts(),
     reviewedBy: uuid().references(() => users.id),
     approvedAt: ts(),
+    /**
+     * The submitter approved alone (SK22): the Site had no other active admin and no skill
+     * reviewer. Set by the database only (`registry_versions_review_guard`).
+     */
+    selfApproved: boolean().notNull().default(false),
     /** Git mirror status of an approved version (SK29, optional). */
     mirror: jsonb().$type<Record<string, unknown>>(),
     updatedAt: ts().notNull().defaultNow(),
@@ -193,8 +202,16 @@ export const registryVersions = pgTable(
         AND (${t.mirror} IS NULL OR ${jsonObject(t.mirror)})`,
     ),
     check("registry_versions_claim", sql`(${t.claimedBy} IS NULL) = (${t.claimedAt} IS NULL)`),
-    // Separation of duties (SK22): nobody approves (or rejects) their own submission.
-    check("registry_versions_review", sql`${t.reviewedBy} IS DISTINCT FROM ${t.submittedBy}`),
+    // Separation of duties (SK22): a review by the submitter is a flagged self-approval, and only
+    // an approval (a submitter withdraws rather than rejects their own submission).
+    check(
+      "registry_versions_review",
+      sql`${t.reviewedBy} IS NULL OR (${t.reviewedBy} = ${t.submittedBy}) = ${t.selfApproved}`,
+    ),
+    check(
+      "registry_versions_self_approval",
+      sql`NOT ${t.selfApproved} OR ${t.approvedAt} IS NOT NULL`,
+    ),
     // A version that was ever published carries its approval; one that wasn't, none.
     check(
       "registry_versions_approval",

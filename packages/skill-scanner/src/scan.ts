@@ -1,126 +1,26 @@
-import {
-  SCRIPT_RULES,
-  pipesDownloadToInterpreter,
-  SECRET_RULES,
-  plausibleSecret,
-} from "./rules.js";
-import { extensionOf, fileTypeRule } from "./files.js";
-import { INVISIBLE, PROSE_RULES } from "./prose.js";
+import { extensionOf, fileTypeRule, isAssetExtension } from "./files.js";
+import { INVISIBLE } from "./prose.js";
+import { isScript, runReferences } from "./scripts.js";
+import { scanText } from "./text.js";
 import {
   RULE_SET_VERSION,
   SCAN_LIMITS,
   type Finding,
-  type FindingCategory,
   type ScanFile,
   type ScanResult,
   type Severity,
   type Verdict,
 } from "./types.js";
 
-const SCRIPT_EXTENSIONS = new Set([
-  "sh",
-  "bash",
-  "zsh",
-  "ksh",
-  "py",
-  "js",
-  "mjs",
-  "cjs",
-  "ts",
-  "rb",
-  "pl",
-  "php",
-  "ps1",
-  "bat",
-  "cmd",
-]);
-const BINARY_SNIFF_BYTES = 8000;
+const isBinary = (bytes: Uint8Array): boolean => bytes.includes(0);
+const decode = (bytes: Uint8Array) => new TextDecoder("utf-8").decode(bytes);
 
-const extension = extensionOf;
-
-function isScript(file: ScanFile): boolean {
-  if (SCRIPT_EXTENSIONS.has(extension(file.path))) return true;
-  return file.bytes[0] === 0x23 && file.bytes[1] === 0x21; // "#!"
-}
-
-function isBinary(bytes: Uint8Array): boolean {
-  return bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0);
-}
-
-function maskValue(value: string): string {
-  const keep = Math.min(4, Math.floor(value.length / 4));
-  return value.slice(0, keep) + "*".repeat(Math.max(value.length - keep, 4));
-}
-
-/** Masks every secret-shaped value so excerpts never carry one. */
-function maskSecrets(text: string): string {
-  return SECRET_RULES.reduce((acc, rule) => {
-    const global = new RegExp(rule.pattern.source, rule.pattern.flags + "g");
-    return acc.replace(global, (match: string, ...rest: unknown[]) => {
-      const value = rule.group === 0 ? match : String(rest[rule.group - 1]);
-      return match.replace(value, maskValue(value));
-    });
-  }, text);
-}
-
-function excerptOf(view: string): string {
-  const masked = maskSecrets(view).trim();
-  const max = SCAN_LIMITS.maxExcerptLength;
-  return masked.length > max ? masked.slice(0, max) + "…" : masked;
-}
-
-function matchSecret(view: string): string | undefined {
-  for (const rule of SECRET_RULES) {
-    const m = rule.pattern.exec(view);
-    if (!m) continue;
-    if (rule.group === 0 || plausibleSecret(m[rule.group] ?? "")) return rule.id;
-  }
-  return undefined;
-}
-
-function scanLine(line: string, script: boolean, first: boolean): Array<[FindingCategory, string]> {
-  const view = line.slice(0, SCAN_LIMITS.maxScanChars);
-  const hits = new Map<FindingCategory, string>();
-  // Prose rules run on every text file; one prose finding per line (the first rule that matches).
-  const visible = first ? view.replace(/^\ufeff/, "") : view;
-  const prose = INVISIBLE.test(visible)
-    ? "invisible-unicode"
-    : PROSE_RULES.find((r) => r.pattern.test(view))?.id;
-  if (prose) hits.set("prose", prose);
-  if (script) {
-    if (line.length > SCAN_LIMITS.maxLineLength) hits.set("obfuscation", "long-line");
-    if (pipesDownloadToInterpreter(view)) hits.set("pipe-to-shell", "fetch-pipe-exec");
-    for (const rule of SCRIPT_RULES) {
-      if (!hits.has(rule.category) && rule.pattern.test(view)) hits.set(rule.category, rule.id);
-    }
-  }
-  const secret = matchSecret(view);
-  if (secret) hits.set("secret", secret);
-  return [...hits];
-}
-
-function scanFile(file: ScanFile, script: boolean, budget: number): Finding[] {
-  const text = new TextDecoder("utf-8").decode(file.bytes);
-  const findings: Finding[] = [];
-  const limit = Math.min(SCAN_LIMITS.maxFindingsPerFile, budget);
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length && findings.length < limit; i++) {
-    const line = lines[i] ?? "";
-    for (const [category, rule] of scanLine(line, script, i === 0)) {
-      if (findings.length >= limit) break;
-      const view = line.slice(0, SCAN_LIMITS.maxScanChars);
-      findings.push({
-        category,
-        rule,
-        file: file.path,
-        line: i + 1,
-        excerpt: excerptOf(view),
-        severity: "caution",
-      });
-    }
-  }
-  return findings;
-}
+const fileFinding = (
+  path: string,
+  category: Finding["category"],
+  rule: string,
+  severity: Severity,
+): Finding => ({ category, rule, file: path, line: 0, excerpt: "", severity });
 
 /**
  * The verdict of a list of findings (stored ones too): Block if any blocks, Caution if any other,
@@ -132,48 +32,105 @@ export function verdictOf(findings: readonly { readonly severity?: Severity | st
 }
 
 /**
+ * The verdict of a stored scan. Before KOBE-312 the scanner skipped binaries and oversized files
+ * without a finding, so a stored row whose `skipped` names a file that no finding covers and that
+ * is not an allowed asset (by extension) reads as Caution, never Pass (review S5). For every scan
+ * made since, this equals its `verdict`.
+ */
+export function storedVerdict(scan: {
+  readonly findings: readonly { readonly severity?: Severity | string; readonly file?: string }[];
+  readonly skipped?: readonly string[];
+}): Verdict {
+  const verdict = verdictOf(scan.findings);
+  if (verdict !== "pass") return verdict;
+  const unexplained = (scan.skipped ?? []).some((p) => !isAssetExtension(extensionOf(p)));
+  return unexplained ? "caution" : "pass";
+}
+
+interface Collected {
+  readonly blocks: Finding[];
+  readonly cautions: Finding[];
+  readonly skipped: string[];
+  /** Where a cap first cut findings short, if anywhere. */
+  truncatedAt?: string;
+}
+
+/** The final list: Block findings first, then Caution, capped; a cut is recorded as a finding. */
+function capped(c: Collected): Finding[] {
+  const all = [...c.blocks, ...c.cautions];
+  const max = SCAN_LIMITS.maxFindings;
+  const cut = all.length > max;
+  const truncatedAt = c.truncatedAt ?? (cut ? all[max - 1]?.file : undefined);
+  if (truncatedAt === undefined) return all;
+  const kept = all.slice(0, max - 1);
+  // The marker carries the worst tier that was dropped, so the verdict never softens.
+  const lostBlock = all.slice(max - 1).some((f) => f.severity === "block");
+  return [
+    ...kept,
+    fileFinding(truncatedAt, "limit", "findings-truncated", lostBlock ? "block" : "caution"),
+  ];
+}
+
+/**
  * Statically scans a skill bundle, every file of it (hidden ones included). Pure: no I/O, bounded
- * work per file and per bundle. File types are checked for every file; text rules run on text
- * files within the size caps.
+ * work per file and per bundle. File types are checked for every file; text rules run on every
+ * text file within the size caps, and a file the caps keep from being read is itself Block, so
+ * bulk never buys a Pass. Block findings are never dropped by the findings cap.
  */
 export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
-  const scripts = files
-    .filter(isScript)
-    .map((f) => f.path)
-    .sort();
-  const scriptSet = new Set(scripts);
-  const skipped: string[] = [];
-  const findings: Finding[] = [];
+  const c: Collected = { blocks: [], cautions: [], skipped: [] };
+  const texts = new Map<string, string>();
   let total = 0;
+  let budgetHit = false;
   for (const file of files) {
+    if (INVISIBLE.test(file.path))
+      c.cautions.push(fileFinding(file.path, "prose", "invisible-unicode-path", "caution"));
     const binary = isBinary(file.bytes);
     const typeRule = fileTypeRule(file.path, file.bytes, binary);
-    if (typeRule && findings.length < SCAN_LIMITS.maxFindings) {
-      findings.push({
-        category: "file-type",
-        rule: typeRule,
-        file: file.path,
-        line: 0,
-        excerpt: "",
-        severity: "block",
-      });
+    if (typeRule) {
+      c.blocks.push(fileFinding(file.path, "file-type", typeRule, "block"));
       continue;
     }
-    const tooBig = file.bytes.length > SCAN_LIMITS.maxFileBytes;
-    if (tooBig || total + file.bytes.length > SCAN_LIMITS.maxTotalBytes || binary) {
-      skipped.push(file.path);
+    if (binary) {
+      c.skipped.push(file.path); // an allowed asset
+      continue;
+    }
+    if (file.bytes.length > SCAN_LIMITS.maxFileBytes) {
+      c.blocks.push(fileFinding(file.path, "limit", "oversized-file", "block"));
+      c.skipped.push(file.path);
+      continue;
+    }
+    if (total + file.bytes.length > SCAN_LIMITS.maxTotalBytes) {
+      if (!budgetHit) c.blocks.push(fileFinding(file.path, "limit", "scan-incomplete", "block"));
+      budgetHit = true;
+      c.skipped.push(file.path);
       continue;
     }
     total += file.bytes.length;
-    const budget = SCAN_LIMITS.maxFindings - findings.length;
-    if (budget <= 0) continue;
-    findings.push(...scanFile(file, scriptSet.has(file.path), budget));
+    texts.set(file.path, decode(file.bytes));
   }
+  const refs = runReferences(texts.values());
+  const scripts = files
+    .filter((f) => texts.has(f.path) && isScript(f, refs))
+    .map((f) => f.path)
+    .sort();
+  const scriptSet = new Set(scripts);
+  for (const [path, text] of texts) {
+    const budget = SCAN_LIMITS.maxFindings - c.cautions.length;
+    if (budget <= 0) {
+      c.truncatedAt ??= path;
+      continue;
+    }
+    const r = scanText(path, text, scriptSet.has(path), budget);
+    c.cautions.push(...r.findings);
+    if (r.truncated) c.truncatedAt ??= path;
+  }
+  const findings = capped(c);
   return {
     verdict: verdictOf(findings),
     ruleSetVersion: RULE_SET_VERSION,
     scripts,
     findings,
-    skipped,
+    skipped: c.skipped,
   };
 }

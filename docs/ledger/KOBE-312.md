@@ -37,10 +37,33 @@
 - **ac-4:** `skills/no-preapproval.test.ts`: frontmatter (incl. `allowed-tools`) is stored only;
   a run's skill ref is strictly `{name, sha256, size}`; no server source reads `allowed-tools`.
 
+- **Review fixes (B1, B2, S1–S7; rule set `2026.10.18.2`):**
+  - B1: a text file over 1 MiB is Block `oversized-file`; past the 20 MiB budget one Block
+    `scan-incomplete` (category `limit`). Long lines are read in overlapping windows.
+  - B2: Block findings are never capped (they come first); any cut adds `findings-truncated`
+    carrying the worst dropped tier.
+  - S1: NUL test over the whole file; zip/ELF/PE/Mach-O headers at any offset are Block
+    `embedded-binary` (polyglot assets, appended payloads); ar, lz4, compress always, and LZIP,
+    cab, cpio, xar, squashfs only in binary content (they are printable); more extensions.
+  - S2: scripts also by no extension, `scripts/`, invisible characters stripped from the extension,
+    or a run reference elsewhere (`bash x.txt`, `./tool`); pipe-to-shell rules on every text file.
+  - S3: Tag block, variation selectors (one after an emoji allowed), U+061C, Hangul fillers,
+    U+180E, U+034F, U+2028/2029; ZWJ between emoji allowed; paths get `invisible-unicode-path`.
+  - S4: approving an unscanned row is 409 `scan_pending`; late scans read the package zip.
+  - S5: `storedVerdict` reads a stored scan with a `skipped` non-asset file and no finding as
+    Caution (team review for personal versions); equals `verdict` for new scans.
+  - S6: `skill.scan.override` adds the blocking `rules` and `reasonSha256` of the note.
+  - S7: review JSON has `findingsDigest` (SHA-256 of stored findings + skipped); approving needs
+    `acknowledgedFindings` equal to it (409 `findings_changed`); `acknowledged` is gone from the
+    body; `skill.reviewed` records `findingsSha256`.
+
 ## Open questions (for Chris or the coordinator)
 
 - Rescans on a rule-set change (SK32) need the rule-set version stored per scan (a column):
-  left for the rescan ticket; nothing records `ruleSetVersion` yet.
+  KOBE-313. Until then S5's stopgap covers old binary rows; an ELF named `.png` in an old row
+  still reads Pass until rescanned.
+- Not done (nits): prose NFKC/paragraph matching (N1), the sandbox-agent no-preapproval grep (N4),
+  the reason box only for Site admins (N5), uploader ≠ overrider (N3).
 - The override must be done inside the team (team review route) by a Site admin who can act in
   it; a site-console override route can come with the Registry review (Phase C).
 
@@ -52,3 +75,5 @@
   Site admin with a reason, audited; Caution needs acknowledgement; old rows read as Caution);
   `apps/web/components/admin/skill-review-pages.test.tsx`.
 - ac-4: `services/server/src/skills/no-preapproval.test.ts`.
+- Review fixes: `packages/skill-scanner/src/bypasses.test.ts` (one golden case per PoC);
+  `skill-review.db.test.ts` "review gating holes"; the reviewer's `poc312/*.mjs` rerun.

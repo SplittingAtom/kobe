@@ -195,7 +195,10 @@ describe("bounds", () => {
   it("caps findings per file and stays fast on adversarial lines", () => {
     const many = file("m.sh", "curl https://x.test\n".repeat(5000));
     const r = scanSkillBundle([many]);
-    expect(r.findings.length).toBeLessThanOrEqual(SCAN_LIMITS.maxFindingsPerFile);
+    const fromFile = r.findings.filter((f) => f.category !== "limit");
+    expect(fromFile.length).toBeLessThanOrEqual(SCAN_LIMITS.maxFindingsPerFile);
+    // The cut is recorded, never silent.
+    expect(r.findings.at(-1)).toMatchObject({ rule: "findings-truncated", file: "m.sh" });
     const start = Date.now();
     scanSkillBundle([
       file("a.sh", "curl " + "|".repeat(50_000) + "\n"),
