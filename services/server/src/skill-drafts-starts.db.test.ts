@@ -510,6 +510,62 @@ describe("teams are walls (review S3)", () => {
     }
   });
 
+  it("copies no catalog skill that is archived or that this team blocked (review N4)", async () => {
+    await seedKobeSkills({
+      db: h.deps.database.db,
+      blobs: h.deps.blobs as NonNullable<typeof h.deps.blobs>,
+      log: silent,
+    });
+    const { rows } = await h.admin.query<{ id: string; skill_id: string; status: string }>(
+      `SELECT v.id, v.skill_id, s.status FROM registry_skills s
+         JOIN registry_versions v ON v.skill_id = s.id
+        WHERE s.name = 'skill-creator' AND v.state = 'approved' ORDER BY v.seq DESC LIMIT 1`,
+    );
+    const creator = rows[0];
+    if (!creator) throw new Error("Kobe skills not seeded");
+    await h.admin.query(
+      `INSERT INTO team_skill_installs (team_id, skill_id, version_id, pin_mode, access, installed_by)
+       VALUES ($1, $2, $3, 'pinned', 'available', $4) ON CONFLICT DO NOTHING`,
+      [team, creator.skill_id, creator.id, authorId],
+    );
+    await h.admin.query(`DELETE FROM rate_limits WHERE key = $1`, [
+      `kobe:skill-upload:${authorId}`,
+    ]);
+    const fork = () =>
+      author.post("/v1/skills/drafts/fork", {
+        source: { kind: "catalog", skillId: creator.skill_id },
+        name: "creator-copy",
+      });
+    const block = (inTeam: string) =>
+      h.admin.query(
+        `INSERT INTO team_skill_blocks (team_id, skill_id, blocked_by) VALUES ($1, $2, $3)`,
+        [inTeam, creator.skill_id, authorId],
+      );
+    const unblock = () =>
+      h.admin.query(`DELETE FROM team_skill_blocks WHERE skill_id = $1`, [creator.skill_id]);
+    try {
+      await h.admin.query(`UPDATE registry_skills SET status = 'archived' WHERE id = $1`, [
+        creator.skill_id,
+      ]);
+      expect((await fork()).status).toBe(404);
+      await h.admin.query(`UPDATE registry_skills SET status = $2 WHERE id = $1`, [
+        creator.skill_id,
+        creator.status,
+      ]);
+      await block(otherTeam);
+      const elsewhere = await fork();
+      expect(elsewhere.status, JSON.stringify(elsewhere.json)).toBe(201);
+      await block(team);
+      expect((await fork()).status).toBe(404);
+    } finally {
+      await unblock();
+      await h.admin.query(`UPDATE registry_skills SET status = $2 WHERE id = $1`, [
+        creator.skill_id,
+        creator.status,
+      ]);
+    }
+  });
+
   it("saves nothing from another team's conversation or the caller's workspace there", async () => {
     const otherThread = await inOtherTeam(async () => {
       const res = await author.post("/v1/threads", { title: "Elsewhere" });
@@ -585,7 +641,8 @@ describe("personal saves of the team's skills (review S4)", () => {
     const uploaded = await uploadDraft(zip("verbatim-team", files));
     const viaUpload = await confirmed(uploaded);
     expect([viaUpload.status, viaUpload.json.code]).toEqual([409, "team_content"]);
-    expect(viaUpload.json.message).toContain("can't become a personal skill");
+    expect(viaUpload.json.message).toContain("holds a Finance skill");
+    expect(viaUpload.json.message).not.toContain("forked");
 
     const threadId = (await author.post("/v1/threads", { title: "Copy" })).json.thread_id as string;
     await seedWorkspace(authorId, "skills/verbatim-team/SKILL.md", skillMd("verbatim-team"));

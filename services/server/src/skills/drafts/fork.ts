@@ -5,7 +5,9 @@ import {
   and,
   eq,
   inArray,
+  registrySkills,
   registryVersions,
+  teamSkillBlocks,
   teamSkillInstalls,
   withTeam,
   type KobeDb,
@@ -100,6 +102,19 @@ async function copyCatalog(
         ),
       );
     if (!install) return null;
+    // An archived catalog skill, or one this team blocked, is not there to copy (review N4).
+    const [skill] = await tx
+      .select({ status: registrySkills.status })
+      .from(registrySkills)
+      .where(eq(registrySkills.id, source.skillId));
+    if (!skill || skill.status === "archived") return null;
+    const [blocked] = await tx
+      .select({ skillId: teamSkillBlocks.skillId })
+      .from(teamSkillBlocks)
+      .where(
+        and(eq(teamSkillBlocks.teamId, ctx.teamId), eq(teamSkillBlocks.skillId, source.skillId)),
+      );
+    if (blocked) return null;
     const [version] = await tx
       .select()
       .from(registryVersions)

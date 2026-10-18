@@ -96,8 +96,10 @@
   and dynamic `import()` for traversal; no real offender found. Known gaps are in its comment.
 - **N1** workspace objects are read capped at the manifest size; a mismatch names key and path.
   **N3** `skill.draft.created` records the fork's parent (kind, skill, semver) or `fromThreadId`.
-  Not done: N2 (same-conversation race; needs a unique index), N4 (archived catalog skill or a
-  block: left open for C7), N5 (UX).
+  **N4** (coordinator) a catalog fork is refused (404) when the skill is archived or this team
+  blocked it; a block in another team doesn't matter (tested). The `team_content` message now
+  says "holds a <team> skill" for every copy path.
+  Not done: N2 (same-conversation race; needs a unique index), N5 (UX).
 - **Coordinator UX:** Save skill to Workbench stays in the chat with a banner linking the draft
   (`SavedSkillNotice`); Make a skill from this attaches the source and prefills the composer, and
   the member sends it.
