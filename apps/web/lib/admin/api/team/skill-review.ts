@@ -84,3 +84,30 @@ export async function putPersonalSkillsDisabled(
   });
   return res.ok ? { ...res, data: res.data.personalSkillsDisabled } : res;
 }
+
+/** The team's catalog switches (KOBE-316, SK25), both on by default. */
+export interface CatalogSwitches {
+  readonly membersMayAddCatalog: boolean;
+  readonly buildersMayInstallCatalog: boolean;
+}
+
+export async function getCatalogSwitches(teamId: string): Promise<ApiResult<CatalogSwitches>> {
+  const res = await apiRequest<CatalogSwitches>(`${BASE}/settings`, { teamId });
+  return res.ok
+    ? {
+        ...res,
+        data: {
+          membersMayAddCatalog: res.data.membersMayAddCatalog,
+          buildersMayInstallCatalog: res.data.buildersMayInstallCatalog,
+        },
+      }
+    : res;
+}
+
+/** Changes one or both switches (Team admins; audited). */
+export function putCatalogSwitches(
+  teamId: string,
+  change: Partial<CatalogSwitches>,
+): Promise<ApiResult<CatalogSwitches>> {
+  return apiRequest(`${BASE}/settings`, { method: "PUT", json: change, teamId });
+}

@@ -26,6 +26,18 @@ export async function lockInstall(tx: KobeTx, teamId: string, skillId: string): 
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
 
+/**
+ * The team's skill-name lock (KOBE-316, review R-N1): a new team skill (`store.ts` upload) and a
+ * catalog install, Reinstall or Default add check each other's names under it, so the SK27
+ * name-clash rule holds against concurrent writers. Taken after the Default-set and install locks
+ * (uploads take only this one), so the order never inverts. The key is the upload's own lock.
+ */
+export async function lockTeamSkillNames(tx: KobeTx, teamId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skills.team:${teamId}`}, 0))`,
+  );
+}
+
 /** The major of a semver string (the registry check guarantees the format). */
 export const majorOf = (semver: string): number => Number(semver.split(".", 1)[0]);
 

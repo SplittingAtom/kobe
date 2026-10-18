@@ -59,3 +59,47 @@ export function setPersonalSkillsDisabled(
     return disabled;
   });
 }
+
+export function getCatalogSwitches(db: KobeDb, teamId: string): Promise<CatalogSwitches> {
+  return withTeam(db, teamId, (tx) => readCatalogSwitches(tx, teamId));
+}
+
+/**
+ * Changes the catalog switches given (a Team admin's act, SK25) and audits the ones that changed;
+ * returns the values in force. A team with no settings row gets one (the personal switch stays
+ * at its default, off).
+ */
+export function setCatalogSwitches(
+  db: KobeDb,
+  teamId: string,
+  userId: string,
+  change: Partial<CatalogSwitches>,
+): Promise<CatalogSwitches> {
+  return withTeam(db, teamId, async (tx) => {
+    const before = await readCatalogSwitches(tx, teamId);
+    const after = { ...before, ...change };
+    const changed = {
+      ...(after.membersMayAdd !== before.membersMayAdd
+        ? { membersMayAddCatalog: after.membersMayAdd }
+        : {}),
+      ...(after.buildersMayInstall !== before.buildersMayInstall
+        ? { buildersMayInstallCatalog: after.buildersMayInstall }
+        : {}),
+    };
+    if (Object.keys(changed).length === 0) return before;
+    const values = {
+      membersMayAddCatalog: after.membersMayAdd,
+      buildersMayInstallCatalog: after.buildersMayInstall,
+      updatedBy: userId,
+    };
+    await tx
+      .insert(teamSkillSettings)
+      .values({ teamId, ...values })
+      .onConflictDoUpdate({
+        target: teamSkillSettings.teamId,
+        set: { ...values, updatedAt: new Date() },
+      });
+    await recordAudit(tx, { action: "skill.catalog_switches.changed", teamId, target: changed });
+    return after;
+  });
+}

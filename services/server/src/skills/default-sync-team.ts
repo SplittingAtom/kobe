@@ -5,6 +5,7 @@ import {
   defaultVersion,
   lockDefaultSet,
   lockInstall,
+  lockTeamSkillNames,
   type TargetVersion,
 } from "./default-target.js";
 
@@ -60,6 +61,7 @@ export async function addInTeam(
   installedBy: string,
 ): Promise<TeamStepResult> {
   await lockInstall(tx, teamId, skillId);
+  await lockTeamSkillNames(tx, teamId);
   const blocked = await tx.execute(sql`
     SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
   if (blocked.rows.length > 0) return { ...NOTHING, blocked: 1 };

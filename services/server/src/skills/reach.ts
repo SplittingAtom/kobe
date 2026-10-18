@@ -21,9 +21,11 @@ import { recordAudit } from "../audit/record.js";
 import { approvedTeamSkills } from "./review.js";
 
 /**
- * Which agents a team skill reaches (KOBE-297). Runs get a team skill when their agent's current
- * version names it, or, with "Offer to all agents" on and an approved version, when the agent is
- * not exclusive (resolver/resolve.ts). Listed here: the team's agents, the gallery and the
+ * Which agents a team skill reaches (KOBE-297, KOBE-316). Runs get a team skill when their agent's
+ * current version names it, or, with an approved version, when it is On by default and the agent
+ * is not exclusive, or when it is Required (every agent; resolver/resolve.ts). An On by default
+ * skill still reaches only members who haven't turned it off; an Available one only those who
+ * turned it on. Listed here: the team's agents, the gallery and the
  * caller's own personal agents (nobody else's exist for them), not archived. `canEdit` marks the
  * team agents the caller may change, for "Add to agent…".
  */
@@ -41,8 +43,12 @@ export interface ReachAgent {
   readonly canEdit: boolean;
 }
 
+type Offer = "none" | "default" | "required";
+
 export interface SkillReach {
   readonly offerToAll: boolean;
+  /** The access mode (KOBE-316): On by default and Required reach agents without naming. */
+  readonly access: "available" | "default_on" | "required" | "hidden";
   /** An approved version exists: neither naming nor the offer gives runs a skill without one. */
   readonly approved: boolean;
   readonly agents: readonly ReachAgent[];
@@ -121,11 +127,13 @@ const nameOf = (frontmatter: Record<string, unknown>, slug: string) =>
 function reachOf(
   row: AgentRow,
   slug: string,
-  offered: boolean,
+  offer: Offer,
   actor: { userId: string; role: TeamRole },
 ): ReachAgent | undefined {
   const access = agentAccess(actor, { scope: row.scope, ownerUserId: row.ownerUserId });
   const current = skillsOf(row.current);
+  // On by default reaches agents that aren't exclusive; Required reaches every agent (SK27).
+  const offered = offer === "required" || (offer === "default" && !current.exclusive);
   if (!access.readDefinition) {
     if (row.current === undefined || row.status !== "active") return undefined;
     return {
@@ -133,7 +141,7 @@ function reachOf(
       scope: row.scope,
       slug: row.slug,
       name: nameOf(row.current, row.slug),
-      via: offered && !current.exclusive ? "offer" : null,
+      via: offered ? "offer" : null,
       exclusive: false,
       inDraft: false,
       canEdit: false,
@@ -147,7 +155,7 @@ function reachOf(
     name: nameOf(row.current ?? row.draft, row.slug),
     via: current.names.includes(slug)
       ? "named"
-      : offered && row.current !== undefined && !current.exclusive
+      : offered && row.current !== undefined
         ? "offer"
         : null,
     exclusive: (row.current === undefined ? draft : current).exclusive,
@@ -164,20 +172,32 @@ export function skillReach(
 ): Promise<SkillReach | null> {
   return withTeam(db, viewer.teamId, async (tx) => {
     const [skill] = await tx
-      .select({ slug: teamSkills.slug, offerToAll: teamSkills.offerToAll })
+      .select({
+        slug: teamSkills.slug,
+        offerToAll: teamSkills.offerToAll,
+        access: teamSkills.access,
+      })
       .from(teamSkills)
       .where(and(eq(teamSkills.teamId, viewer.teamId), eq(teamSkills.id, skillId)));
     if (!skill) return null;
+    // "Offer to all agents" written alone (a rollback across KOBE-308) reads as On by default.
+    const mode = skill.offerToAll && skill.access === "available" ? "default_on" : skill.access;
     const approved = (await approvedTeamSkills(tx, viewer.teamId, [skill.slug])).length > 0;
     const rows = [
       ...(await teamAgentRows(tx, viewer.teamId)),
       ...(await siteAgentRows(tx, viewer.userId)),
     ];
-    const offered = skill.offerToAll && approved;
+    const offer: Offer = !approved
+      ? "none"
+      : mode === "required"
+        ? "required"
+        : mode === "default_on"
+          ? "default"
+          : "none";
     const agents = rows
-      .flatMap((r) => reachOf(r, skill.slug, offered, viewer) ?? [])
+      .flatMap((r) => reachOf(r, skill.slug, offer, viewer) ?? [])
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    return { offerToAll: skill.offerToAll, approved, agents };
+    return { offerToAll: skill.offerToAll, access: mode, approved, agents };
   });
 }
 

@@ -608,9 +608,15 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   previous release can't store skill uploads once the Job has run (a version without a semver is
   refused), from the end of the Job until Helm replaces them, and for as long as a `helm rollback`
   keeps the previous release running; run starts and reads keep working. A team admin who turns
-  "Offer to all agents" on or off on a rolled-back release leaves the access mode behind: after
-  upgrading again, save the skill's "Offer to all agents" setting once (unchanged is fine), which
-  brings the access mode back in step.
+  "Offer to all agents" on or off on a rolled-back release leaves the access mode behind. Since
+  KOBE-316 the access mode is set directly (Team console, a skill's Access selector), and an
+  offer written alone reads as On by default; after upgrading again, check that skill's Access.
+- **Members' own skill choices (KOBE-316, migration `0136_member_personal_enablements`).**
+  Members turn each personal skill on or off per team (`member_skill_enablements` gains
+  `personal_skill_id`; no row means on, so nothing changes on upgrade). Team skills get the access
+  mode selector in place of "Offer to all agents"; Builders set Available, On by default and
+  Hidden, Team admins also Required. Two team switches, "Members may add catalog skills for
+  themselves" and "Builders may install catalog skills", are on by default (migration 0135).
 - **Personal skill tables (KOBE-307, migration `0128_personal_skills_rename`).** Personal skills
   are no longer named after the Site: `site_skills`, `site_skill_versions` and `site_skill_scans`
   become `personal_skills`, `personal_skill_versions` and `personal_skill_scans`, with their

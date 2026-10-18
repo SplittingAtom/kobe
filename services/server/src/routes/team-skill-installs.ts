@@ -10,6 +10,8 @@ import {
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { teamRoleAllows } from "../authz/permissions.js";
+import { REQUIRED_WARN_AT } from "../skills/access.js";
 
 const idSchema = z.uuid();
 
@@ -38,7 +40,9 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     c.json(await listTeamInstalls(db, c.get("team").id)),
   );
 
-  app.put("/installs/:skillId", requireTeamPermission("team.skills.installs.manage"), async (c) => {
+  // Team admins, and Builders while "Builders may install catalog skills" is on (SK25); a Builder
+  // never sets or changes Required and never installs a deprecated version.
+  app.put("/installs/:skillId", requireTeamPermission("team.skills.publish"), async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));
     const body = await parseBody(c, putTeamSkillInstallSchema);
     if (!id.success || !body)
@@ -47,9 +51,16 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
       teamId: c.get("team").id,
       skillId: id.data,
       userId: c.get("user").id,
+      asBuilder: !teamRoleAllows(c.get("team").role, "team.skills.installs.manage"),
       ...body,
     });
-    if (r.ok) return c.json({ semver: r.semver, deprecated: r.deprecated });
+    if (r.ok)
+      return c.json({
+        semver: r.semver,
+        deprecated: r.deprecated,
+        requiredCount: r.requiredCount,
+        ...(r.requiredCount >= REQUIRED_WARN_AT ? { warning: "many_required" } : {}),
+      });
     const errors = {
       not_found: [404, "No catalog skill with that id."],
       no_version: [404, "The skill has no version with that number."],
@@ -58,6 +69,10 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
         "That version was withdrawn, revoked or suspended by a rescan, or is not approved.",
       ],
       blocked: [409, "The team blocked this skill: unblock it first."],
+      forbidden: [
+        403,
+        "Builders can install catalog skills only while the team allows it, and never Required or deprecated versions.",
+      ],
       name_clash: [
         409,
         "One of this team's own skills has the same name: rename or archive it first.",

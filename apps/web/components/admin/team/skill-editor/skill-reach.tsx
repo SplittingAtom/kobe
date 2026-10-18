@@ -4,14 +4,15 @@ import { useState } from "react";
 import {
   getSkillReach,
   getSkillUsage,
-  setSkillOffer,
+  setSkillAccess,
+  type SkillAccess,
   type SkillReach,
   type SkillReachAgent,
   type SkillSummary,
   type SkillUsage,
 } from "../../../../lib/admin/api/team/skills";
 import { addSkillHref, TEAM_SKILL_RULE } from "../../../../lib/admin/skills/reach";
-import { Button, Checkbox, Field, FormRow, Section, Select } from "../../../ui/console";
+import { Button, Field, FormRow, Section, Select } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
 import { DateTime } from "../../parts";
@@ -19,9 +20,23 @@ import { useMutation, useResource } from "../../use-resource";
 
 const HINT = "m-0 my-1 text-sm text-console-muted";
 
+const ACCESS_ORDER: readonly SkillAccess[] = ["available", "default_on", "required", "hidden"];
+const ACCESS_LABEL: Readonly<Record<SkillAccess, string>> = {
+  available: "Available",
+  default_on: "On by default",
+  required: "Required",
+  hidden: "Hidden",
+};
+const ACCESS_HINT: Readonly<Record<SkillAccess, string>> = {
+  available: "Members turn it on for themselves.",
+  default_on: "Loads for agents that aren't exclusive; members may turn it off.",
+  required: "Loads in every run in the team, exclusive agents too (team admins only).",
+  hidden: "Only for agents that name it.",
+};
+
 /**
  * Where a skill is used (KOBE-297), under its editor: for a team skill, the agents whose runs get
- * it (named, or by "Offer to all agents", which team admins switch) and "Add to agent…"; for any
+ * it (named, or by its access mode: On by default or Required, KOBE-316) and "Add to agent…"; for any
  * skill the caller may see usage of, how often runs used it. Both are extras: a failed read
  * leaves a quiet line, never an alert over the editor.
  */
@@ -46,6 +61,7 @@ function TeamReach({ skill }: { readonly skill: SkillSummary }) {
   const { state, reload } = useResource(() => getSkillReach(teamId, skill.id));
   const mutation = useMutation();
   const isAdmin = access.permissions.includes("team.skills.review");
+  const canSet = isAdmin || access.permissions.includes("team.skills.publish");
 
   return (
     <Section id="skill-reach-heading" title="Agents using this skill" description={TEAM_SKILL_RULE}>
@@ -55,23 +71,33 @@ function TeamReach({ skill }: { readonly skill: SkillSummary }) {
       )}
       {state.status === "ready" && (
         <>
-          <Checkbox
-            label="Offer to all agents"
-            checked={state.data.offerToAll}
-            disabled={!isAdmin || mutation.pending}
-            onChange={async (e) => {
-              const next = e.target.checked;
-              const done = await mutation.run(
-                () => setSkillOffer(teamId, skill.id, next),
-                (v) =>
-                  v.offerToAll
-                    ? "Offered to all agents that aren't exclusive."
-                    : "No longer offered to all agents.",
-              );
-              if (done) reload();
-            }}
-          />
-          {!isAdmin && <p className={HINT}>Only team admins can change this.</p>}
+          <Field label="Access" hint={ACCESS_HINT[state.data.access]}>
+            <Select
+              value={state.data.access}
+              disabled={
+                !canSet || (state.data.access === "required" && !isAdmin) || mutation.pending
+              }
+              onChange={async (e) => {
+                const next = e.target.value as SkillAccess;
+                const done = await mutation.run(
+                  () => setSkillAccess(teamId, skill.id, next),
+                  (v) =>
+                    v.warning === "many_required"
+                      ? `${ACCESS_LABEL[v.access]}. The team now has ${v.requiredCount} Required skills: they load in every run and count first against the limit of 64.`
+                      : `${ACCESS_LABEL[v.access]}.`,
+                );
+                if (done) reload();
+              }}
+            >
+              {ACCESS_ORDER.map((a) => (
+                <option key={a} value={a} disabled={a === "required" && !isAdmin}>
+                  {ACCESS_LABEL[a]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {!canSet && <p className={HINT}>Only builders and team admins can change this.</p>}
+          {canSet && !isAdmin && <p className={HINT}>Only team admins set or change Required.</p>}
           <MutationStatus error={mutation.error} notice={mutation.notice} />
           {!state.data.approved && (
             <p className={HINT}>
@@ -94,7 +120,7 @@ function ReachList({ reach }: { readonly reach: SkillReach }) {
       {using.map((a) => (
         <li key={a.id}>
           <strong>{a.name}</strong> {ORIGIN[a.scope]} ·{" "}
-          {a.via === "named" ? "names it" : "offered to all"}
+          {a.via === "named" ? "names it" : "by its access mode"}
         </li>
       ))}
     </ul>

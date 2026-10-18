@@ -12,7 +12,12 @@ import {
   scanUnscanned,
   type ReviewRecord,
 } from "../skills/review.js";
-import { getPersonalSkillsDisabled, setPersonalSkillsDisabled } from "../skills/settings.js";
+import {
+  getCatalogSwitches,
+  getPersonalSkillsDisabled,
+  setCatalogSwitches,
+  setPersonalSkillsDisabled,
+} from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 const STATUS_FILTERS = {
@@ -34,7 +39,13 @@ const decisionSchema = z.strictObject({
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
 });
-const settingsSchema = z.strictObject({ personalSkillsDisabled: z.boolean() });
+const settingsSchema = z
+  .strictObject({
+    personalSkillsDisabled: z.boolean().optional(),
+    membersMayAddCatalog: z.boolean().optional(),
+    buildersMayInstallCatalog: z.boolean().optional(),
+  })
+  .refine((b) => Object.values(b).some((v) => v !== undefined));
 const idSchema = z.uuid();
 const limitSchema = z.coerce.number().int().min(1).max(200);
 const versionSchema = z.coerce.number().int().positive().max(2147483647);
@@ -171,20 +182,43 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     },
   );
 
+  // The team's skill switches: personal skills (KOBE-80) and the catalog switches (KOBE-316,
+  // SK25: "Members may add catalog skills for themselves", "Builders may install catalog
+  // skills"). Any member reads them; Team admins change them, each change audited.
+  const settingsJson = async (teamId: string) => {
+    const catalog = await getCatalogSwitches(db, teamId);
+    return {
+      personalSkillsDisabled: await getPersonalSkillsDisabled(db, teamId),
+      membersMayAddCatalog: catalog.membersMayAdd,
+      buildersMayInstallCatalog: catalog.buildersMayInstall,
+    };
+  };
+
   app.get("/settings", requireTeamPermission("team.read"), async (c) =>
-    c.json({ personalSkillsDisabled: await getPersonalSkillsDisabled(db, c.get("team").id) }),
+    c.json(await settingsJson(c.get("team").id)),
   );
 
   app.put("/settings", requireTeamPermission("team.skills.review"), async (c) => {
     const body = await parseBody(c, settingsSchema);
-    if (!body) return invalidRequest(c, "Send personalSkillsDisabled: true or false.");
-    const value = await setPersonalSkillsDisabled(
-      db,
-      c.get("team").id,
-      c.get("user").id,
-      body.personalSkillsDisabled,
-    );
-    return c.json({ personalSkillsDisabled: value });
+    if (!body)
+      return invalidRequest(
+        c,
+        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog: true or false.",
+      );
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    if (body.personalSkillsDisabled !== undefined)
+      await setPersonalSkillsDisabled(db, teamId, userId, body.personalSkillsDisabled);
+    if (body.membersMayAddCatalog !== undefined || body.buildersMayInstallCatalog !== undefined)
+      await setCatalogSwitches(db, teamId, userId, {
+        ...(body.membersMayAddCatalog !== undefined
+          ? { membersMayAdd: body.membersMayAddCatalog }
+          : {}),
+        ...(body.buildersMayInstallCatalog !== undefined
+          ? { buildersMayInstall: body.buildersMayInstallCatalog }
+          : {}),
+      });
+    return c.json(await settingsJson(teamId));
   });
 
   return app;

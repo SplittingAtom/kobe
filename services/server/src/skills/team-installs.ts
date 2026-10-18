@@ -1,12 +1,15 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { addInTeam } from "./default-sync-team.js";
+import { readCatalogSwitches } from "./settings.js";
+import { requiredCount } from "./access.js";
 import {
   defaultTargets,
   defaultVersion,
   isDefaultSkill,
   lockDefaultSet,
   lockInstall,
+  lockTeamSkillNames,
 } from "./default-target.js";
 
 /**
@@ -155,6 +158,7 @@ export async function reinstallDefault(
     await lockDefaultSet(tx, "shared");
     // The install lock before any read: two concurrent Reinstalls run one after the other.
     await lockInstall(tx, teamId, skillId);
+    await lockTeamSkillNames(tx, teamId);
     const [target] = await defaultTargets(tx, skillId);
     const optout = await tx.execute(sql`
       SELECT 1 FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
@@ -209,10 +213,17 @@ export async function changeTeamInstall(
 }
 
 export type InstallResult =
-  | { readonly ok: true; readonly semver: string; readonly deprecated: boolean }
+  | {
+      readonly ok: true;
+      readonly semver: string;
+      readonly deprecated: boolean;
+      /** Required team skills and installs after this change (the console warns from 5). */
+      readonly requiredCount: number;
+    }
   | {
       readonly ok: false;
-      readonly code: "not_found" | "no_version" | "not_installable" | "name_clash" | "blocked";
+      readonly code:
+        "not_found" | "no_version" | "not_installable" | "name_clash" | "blocked" | "forbidden";
     };
 
 /**
@@ -233,12 +244,21 @@ export async function installCatalogSkill(
     readonly version: string;
     readonly pinMode: InstallRow["pinMode"];
     readonly access: InstallRow["access"];
+    /**
+     * The caller is a Builder, not a Team admin (SK25): allowed only while the team's switch
+     * "Builders may install catalog skills" is on, and never for Required (set or changed) or a
+     * deprecated version (the override is the Team admin's, SK31).
+     */
+    readonly asBuilder?: boolean;
   },
 ): Promise<InstallResult> {
   const { teamId, skillId } = input;
   return withTeam(db, teamId, async (tx): Promise<InstallResult> => {
     await lockDefaultSet(tx, "shared");
     await lockInstall(tx, teamId, skillId);
+    // The team's skill-name lock (store.ts uploads take it too): the name-clash checks on both
+    // sides see each other's commits (review R-N1).
+    await lockTeamSkillNames(tx, teamId);
     const skill = await tx.execute<{ name: string }>(
       sql`SELECT name FROM registry_skills WHERE id = ${skillId}`,
     );
@@ -260,6 +280,12 @@ export async function installCatalogSkill(
       FROM team_skill_installs i JOIN registry_versions rv ON rv.id = i.version_id
       WHERE i.team_id = ${teamId} AND i.skill_id = ${skillId}`);
     const previous = before.rows[0];
+    if (input.asBuilder) {
+      const { buildersMayInstall } = await readCatalogSwitches(tx, teamId);
+      const required = input.access === "required" || previous?.access === "required";
+      if (!buildersMayInstall || required || v.state === "deprecated")
+        return { ok: false, code: "forbidden" };
+    }
     const changed = sql`(team_skill_installs.version_id <> EXCLUDED.version_id
       OR team_skill_installs.pin_mode <> EXCLUDED.pin_mode
       OR team_skill_installs.access <> EXCLUDED.access)`;
@@ -297,6 +323,11 @@ export async function installCatalogSkill(
           : {}),
       },
     });
-    return { ok: true, semver: input.version, deprecated: v.state === "deprecated" };
+    return {
+      ok: true,
+      semver: input.version,
+      deprecated: v.state === "deprecated",
+      requiredCount: await requiredCount(tx, teamId),
+    };
   });
 }

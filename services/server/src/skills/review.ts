@@ -572,7 +572,15 @@ export async function personalSkillUsage(
         eq(personalSkillScans.version, personalSkillVersions.version),
       ),
     )
-    .where(eq(personalSkills.ownerUserId, args.userId));
+    .where(
+      and(
+        eq(personalSkills.ownerUserId, args.userId),
+        // Turned off in this team by its owner (KOBE-316, D22): not used, not queued for review.
+        sql`NOT EXISTS (SELECT 1 FROM member_skill_enablements e
+              WHERE e.team_id = ${args.teamId} AND e.user_id = ${args.userId}
+                AND e.personal_skill_id = ${personalSkills.id} AND NOT e.enabled)`,
+      ),
+    );
   // Needs this team's approval: never scanned, or a scan that is not Pass (stored before KOBE-312
   // too: a skipped binary with no finding reads as Caution, review S5).
   const needs = (r: (typeof rows)[number]) =>

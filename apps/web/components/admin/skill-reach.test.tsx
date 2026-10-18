@@ -11,9 +11,10 @@ import { forbidNativeConfirm, renderTeam, stubApi } from "./testing";
 beforeEach(forbidNativeConfirm);
 
 /**
- * KOBE-297 ac-2: a team skill's page lists the agents that use it (named, or by "Offer to all
- * agents"), lets team admins switch the offer, and opens a team agent's draft with the skill added
- * ("Add to agent…"). Usage is shown to the owner and team admins.
+ * KOBE-297 ac-2, KOBE-316 ac-2: a team skill's page lists the agents that use it (named, or by its
+ * access mode), lets builders set the access mode (Required: team admins only, with a warning from
+ * 5), and opens a team agent's draft with the skill added ("Add to agent…"). Usage is shown to the
+ * owner and team admins.
  */
 const SKILL = {
   id: "s-1",
@@ -41,6 +42,7 @@ const agent = (id: string, name: string, extra: Record<string, unknown> = {}) =>
 });
 const REACH = {
   offer_to_all: false,
+  access: "available",
   approved: true,
   agents: [
     agent("a-named", "Named", { via: "named" }),
@@ -54,6 +56,7 @@ const REACH = {
 const OFFERED = {
   ...REACH,
   offer_to_all: true,
+  access: "default_on",
   agents: REACH.agents.map((a) => (a.via === null && !a.exclusive ? { ...a, via: "offer" } : a)),
 };
 const USAGE = {
@@ -101,7 +104,7 @@ describe("team skill reach (KOBE-297)", () => {
     expect(screen.getByText(/Other agents: 1/)).toBeTruthy();
   });
 
-  it("a team admin turns on Offer to all agents; the list then shows every non-exclusive agent", async () => {
+  it("a team admin sets On by default; the list then shows every non-exclusive agent", async () => {
     const calls = stubApi({
       ...BASE,
       "GET /v1/skills/s-1/reach": [
@@ -109,39 +112,55 @@ describe("team skill reach (KOBE-297)", () => {
         [200, OFFERED],
       ],
       "GET /v1/skills/s-1/usage": [200, USAGE],
-      "PUT /v1/skills/s-1/offer": [200, { offer_to_all: true }],
+      "PUT /v1/skills/s-1/access": [200, { access: "default_on", required_count: 0 }],
     });
     renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
     await reachList();
-    const offer = screen.getByRole("checkbox", { name: "Offer to all agents" }) as HTMLInputElement;
-    expect(offer.checked).toBe(false);
-    await userEvent.click(offer);
+    const mode = screen.getByRole("combobox", { name: "Access" }) as HTMLSelectElement;
+    expect(mode.value).toBe("available");
+    await userEvent.selectOptions(mode, "default_on");
     const put = must(calls.find((c) => c.method === "PUT"));
-    expect(JSON.parse(put.body as string)).toEqual({ offerToAll: true });
+    expect(JSON.parse(put.body as string)).toEqual({ access: "default_on" });
     await waitFor(async () =>
       expect(rows(await reachList())).toEqual([
         "Named Team · names it",
-        "Plain Team · offered to all",
-        "Drafted Team · offered to all",
-        "Locked Team · offered to all",
-        "Kobe Built-in · offered to all",
+        "Plain Team · by its access mode",
+        "Drafted Team · by its access mode",
+        "Locked Team · by its access mode",
+        "Kobe Built-in · by its access mode",
       ]),
     );
   });
 
-  it("shows the server's refusal when the team already offers the most skills", async () => {
+  it("warns when the team reaches 5 Required skills", async () => {
     stubApi({
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [200, USAGE],
-      "PUT /v1/skills/s-1/offer": [
-        409,
-        { code: "offer_limit", message: "A team can offer at most 32 skills to all agents." },
+      "PUT /v1/skills/s-1/access": [
+        200,
+        { access: "required", required_count: 5, warning: "many_required" },
       ],
     });
     renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
     await reachList();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Offer to all agents" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Access" }), "required");
+    expect((await screen.findByText(/5 Required skills/)).textContent).toMatch(/limit of 64/);
+  });
+
+  it("shows the server's refusal when the team already has the most skills on for everyone", async () => {
+    stubApi({
+      ...BASE,
+      "GET /v1/skills/s-1/reach": [200, REACH],
+      "GET /v1/skills/s-1/usage": [200, USAGE],
+      "PUT /v1/skills/s-1/access": [
+        409,
+        { code: "offer_limit", message: "A team can have at most 32 skills On by default." },
+      ],
+    });
+    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    await reachList();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Access" }), "default_on");
     expect((await screen.findByRole("alert")).textContent).toMatch(/at most 32 skills/);
   });
 
@@ -151,10 +170,15 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [403, { code: "forbidden", message: "no" }],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, { role: "builder", permissions: [] });
+    renderTeam(<SkillEditorPage skillId="s-1" />, {
+      role: "builder",
+      permissions: ["team.skills.publish"],
+    });
     await reachList();
-    const offer = screen.getByRole("checkbox", { name: "Offer to all agents" }) as HTMLInputElement;
-    expect(offer.disabled).toBe(true);
+    // A builder sets the access mode, but not Required.
+    const mode = screen.getByRole("combobox", { name: "Access" }) as HTMLSelectElement;
+    expect(mode.disabled).toBe(false);
+    expect([...mode.options].filter((o) => o.disabled).map((o) => o.value)).toEqual(["required"]);
     const select = screen.getByRole("combobox", { name: "Add to agent…" }) as HTMLSelectElement;
     expect([...select.options].map((o) => o.textContent)).toEqual([
       "Choose an agent",

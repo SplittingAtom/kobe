@@ -56,7 +56,11 @@ describe("My skills list", () => {
     expect(screen.getByRole("link", { name: "New skill" }).getAttribute("href")).toBe(
       "/me/skills/new",
     );
-    expect(calls.map((c) => c.url)).toEqual(["/v1/skills?scope=personal"]);
+    // The skill list, then the member's choices in this team (KOBE-316).
+    expect(calls.map((c) => c.url).sort()).toEqual([
+      "/v1/me/skills/enablements",
+      "/v1/skills?scope=personal",
+    ]);
     expect(screen.queryByText("Scope")).toBeNull();
   });
 });

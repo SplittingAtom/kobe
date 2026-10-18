@@ -1359,6 +1359,31 @@ export const AUDIT_EVENTS = {
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
   /** A team admin turned a team skill's "Offer to all agents" on or off (KOBE-297). */
   "skill.offer.changed": event("team", { skillId: id, slug, offerToAll: z.boolean() }),
+  /**
+   * A team skill's access mode changed (KOBE-316, SK25): Available, On by default, Required (Team
+   * admins only) or Hidden.
+   */
+  "skill.access.changed": event("team", {
+    skillId: id,
+    slug,
+    access: z.enum(["available", "default_on", "required", "hidden"]),
+    previous: z.enum(["available", "default_on", "required", "hidden"]),
+  }),
+  /**
+   * A member turned a skill on or off for themselves in the team (KOBE-316, SK25, SK27): one of
+   * their personal skills, a team skill or a catalog install. Names only, never content.
+   */
+  "skill.enablement.changed": event("team", {
+    kind: z.enum(["personal", "team", "catalog"]),
+    skillId: id,
+    name: slug,
+    enabled: z.boolean(),
+  }),
+  /** A Team admin changed the team's catalog switches (KOBE-316, SK25); only the changed ones. */
+  "skill.catalog_switches.changed": event("team", {
+    membersMayAddCatalog: z.boolean().optional(),
+    buildersMayInstallCatalog: z.boolean().optional(),
+  }),
   /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */

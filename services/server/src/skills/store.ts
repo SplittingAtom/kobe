@@ -113,6 +113,7 @@ function inLocation<T>(db: KobeDb, location: SkillLocation, fn: (tx: KobeTx) => 
     : db.transaction((tx) => fn(tx));
 }
 
+/** Also the team's skill-name lock (`lockTeamSkillNames`): installs check names under it. */
 const lockKey = (l: SkillLocation) =>
   l.scope === "team" ? `kobe.skills.team:${l.teamId}` : `kobe.skills.personal:${l.ownerUserId}`;
 

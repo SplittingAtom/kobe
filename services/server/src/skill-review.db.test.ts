@@ -194,7 +194,8 @@ describe("review queue", () => {
 
 describe("personal skills switch", () => {
   it("defaults to allowed; team admins turn it off and on, audited once per change", async () => {
-    expect((await as.carol.get("/v1/team/skill-review/settings")).json).toEqual({
+    // The answer also carries the catalog switches since KOBE-316 (skill-enablements.db.test.ts).
+    expect((await as.carol.get("/v1/team/skill-review/settings")).json).toMatchObject({
       personalSkillsDisabled: false,
     });
     const body = { personalSkillsDisabled: true };
@@ -202,11 +203,11 @@ describe("personal skills switch", () => {
     expect(
       (await as.alice.put("/v1/team/skill-review/settings", { personalSkillsDisabled: 1 })).status,
     ).toBe(400);
-    expect((await as.alice.put("/v1/team/skill-review/settings", body)).json).toEqual(body);
+    expect((await as.alice.put("/v1/team/skill-review/settings", body)).json).toMatchObject(body);
     await as.alice.put("/v1/team/skill-review/settings", body);
-    expect((await as.carol.get("/v1/team/skill-review/settings")).json).toEqual(body);
+    expect((await as.carol.get("/v1/team/skill-review/settings")).json).toMatchObject(body);
     // Another team is unaffected.
-    expect((await as.dave.get("/v1/team/skill-review/settings")).json).toEqual({
+    expect((await as.dave.get("/v1/team/skill-review/settings")).json).toMatchObject({
       personalSkillsDisabled: false,
     });
     await as.alice.put("/v1/team/skill-review/settings", { personalSkillsDisabled: false });

@@ -4,6 +4,8 @@ import { withTeam } from "@kobe/db";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { SKILL_ACCESS_MODES } from "@kobe/protocol";
+import { setTeamSkillAccess } from "../skills/access.js";
 import { MAX_OFFERED_SKILLS, agentNames, setOfferToAll, skillReach } from "../skills/reach.js";
 import { findSkill, type SkillLocation, type SkillRecord } from "../skills/store.js";
 import { skillUsageInTx } from "../skills/usage.js";
@@ -13,6 +15,9 @@ type Ctx = Context<{ Variables: TeamVariables }>;
 
 const idSchema = z.uuid();
 const offerSchema = z.strictObject({ offerToAll: z.boolean() });
+const accessSchema = z.strictObject({ access: z.enum(SKILL_ACCESS_MODES) });
+
+const OFFER_LIMIT = `A team can have at most ${MAX_OFFERED_SKILLS} skills On by default or Required. Change another skill first.`;
 
 const notFound = (c: Ctx) => c.json({ code: "not_found", message: "No such skill." }, 404);
 
@@ -20,7 +25,11 @@ const notFound = (c: Ctx) => c.json({ code: "not_found", message: "No such skill
  * A skill's reach and use (KOBE-297), next to `skills.ts` under `/v1/skills`:
  * - `GET /:id/reach` (team skills): the agents whose runs get it, named or by the offer, and which
  *   of the team's agents the caller may add it to.
- * - `PUT /:id/offer` (team admins): "Offer to all agents" on or off, audited.
+ * - `PUT /:id/offer` (team admins): "Offer to all agents" on or off, audited (KOBE-297; the web
+ *   uses `/access` since KOBE-316, this stays for older pages).
+ * - `PUT /:id/access` (KOBE-316, SK25): the access mode. Builders set Available, On by default and
+ *   Hidden; only Team admins make a skill Required or change a Required one. Audited; the answer
+ *   carries the team's Required count and a warning from 5.
  * - `GET /:id/usage`: uses in this team (SKILL.md reads the server matched), the last one and the
  *   agents; for a team skill to its owner and team admins, for a personal one to its owner.
  */
@@ -70,6 +79,43 @@ export function skillReachRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
       },
       409,
     );
+  });
+
+  app.put("/:id/access", async (c) => {
+    const role = c.get("team").role;
+    if (!teamRoleAllows(role, "team.skills.publish"))
+      return c.json(
+        { code: "forbidden", message: "Only builders and team admins can change this." },
+        403,
+      );
+    const body = await parseBody(c, accessSchema);
+    if (!body)
+      return c.json(
+        {
+          code: "invalid_request",
+          message: "Send access: available, default_on, required or hidden.",
+        },
+        400,
+      );
+    const skill = await visible(c);
+    if (!skill || skill.scope !== "team") return notFound(c);
+    const result = await setTeamSkillAccess(db, {
+      teamId: c.get("team").id,
+      skillId: skill.id,
+      access: body.access,
+      mayRequire: teamRoleAllows(role, "team.skills.review"),
+    });
+    if (result.ok) {
+      const { ok: _ok, ...answer } = result;
+      return c.json(answer);
+    }
+    if (result.code === "not_found") return notFound(c);
+    if (result.code === "forbidden")
+      return c.json(
+        { code: "forbidden", message: "Only team admins set or change Required." },
+        403,
+      );
+    return c.json({ code: "offer_limit", message: OFFER_LIMIT }, 409);
   });
 
   app.get("/:id/usage", async (c) => {
