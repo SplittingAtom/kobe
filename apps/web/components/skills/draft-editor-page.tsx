@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SkillSaved } from "../../lib/admin/api/team/skills";
 import type { ApiError } from "../../lib/api/client";
-import { deleteDraft, shareDraft, type Destination } from "../../lib/skills/drafts-api";
+import { deleteDraft, type Destination } from "../../lib/skills/drafts-api";
 import { lintSkill } from "../../lib/skills/lint";
 import { SKILL_MD } from "../../lib/skills/skill-md";
 import {
@@ -226,19 +226,8 @@ function DraftSettings({
         disabled={mutation.pending}
         onCheckedChange={(shared) =>
           mutation.run(async () => {
-            const rev = await editor.flush();
-            if (rev === null)
-              return {
-                ok: false,
-                error: {
-                  status: 0,
-                  code: "unsaved_changes",
-                  message: "Your latest edits aren't saved yet.",
-                },
-              };
-            const res = await shareDraft(teamId, draft.id, rev, shared);
-            if (res.ok) editor.replaceDraft(res.data);
-            return res;
+            const err = await editor.share(shared);
+            return err ? { ok: false, error: err } : { ok: true, status: 200, data: null };
           })
         }
       />

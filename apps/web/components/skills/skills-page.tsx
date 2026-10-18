@@ -5,10 +5,7 @@ import { EmptyState, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from
 import { MySkillChoices } from "../admin/team/skill-editor/my-skill-choices";
 import { SkillList } from "./skill-list";
 import { WorkbenchList } from "./workbench-list";
-
-/** The Skills page's tabs (spec SK9), in order; `?tab=` names one. */
-export const SKILL_TABS = ["catalog", "team", "mine", "workbench"] as const;
-export type SkillTab = (typeof SKILL_TABS)[number];
+import { SKILL_TABS, skillTab, type SkillTab } from "../../lib/skills/tabs";
 
 const LABELS: Readonly<Record<SkillTab, string>> = {
   catalog: "Catalog",
@@ -16,12 +13,6 @@ const LABELS: Readonly<Record<SkillTab, string>> = {
   mine: "Mine",
   workbench: "Workbench",
 };
-
-/** The tab a `?tab=` value names; Team when it names none. */
-export function skillTab(value: string | string[] | undefined): SkillTab {
-  const v = Array.isArray(value) ? value[0] : value;
-  return (SKILL_TABS as readonly string[]).includes(v ?? "") ? (v as SkillTab) : "team";
-}
 
 /** Keeps the open tab in the address (so a reload or a shared link opens it), without a reload. */
 function rememberTab(tab: SkillTab): void {

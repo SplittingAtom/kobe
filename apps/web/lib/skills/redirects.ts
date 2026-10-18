@@ -6,7 +6,7 @@
 export interface SkillRedirect {
   readonly source: string;
   readonly destination: string;
-  readonly permanent: true;
+  readonly permanent: boolean;
 }
 
 export const SKILLS_PAGE = "/me/skills";
@@ -19,6 +19,7 @@ export function skillEditorRedirects(): SkillRedirect[] {
       destination: `${SKILLS_PAGE}?tab=workbench`,
       permanent: true,
     },
-    { source: "/me/skills/:id", destination: `${SKILLS_PAGE}?tab=mine`, permanent: true },
+    // Not permanent (no cached 308): a later /me/skills/<slug> page (C7) must stay possible.
+    { source: "/me/skills/:id", destination: `${SKILLS_PAGE}?tab=mine`, permanent: false },
   ];
 }

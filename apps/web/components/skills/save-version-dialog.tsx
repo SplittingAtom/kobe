@@ -39,20 +39,7 @@ export function bumpText(b: BumpSuggestion, destination: Destination): string {
  * to review, or their personal skill), Kobe suggests the number from what changed, and the
  * changelog line is required. Pending edits are saved first, and the save names that revision.
  */
-export function SaveVersionDialog({
-  open,
-  onOpenChange,
-  teamId,
-  teamName,
-  draft,
-  canTeam,
-  canPersonal,
-  flush,
-  onSaved,
-  returnFocus,
-}: {
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
+interface FormProps {
   readonly teamId: string;
   readonly teamName: string;
   readonly draft: DraftSummary;
@@ -60,35 +47,81 @@ export function SaveVersionDialog({
   readonly canPersonal: boolean;
   readonly flush: () => Promise<number | null>;
   readonly onSaved: (saved: SkillSaved, destination: Destination) => void;
+}
+
+const UNSAVED: ApiError = {
+  status: 0,
+  code: "unsaved_changes",
+  message: "Your latest edits aren't saved yet. Fix that, then save the version.",
+};
+
+export function SaveVersionDialog({
+  open,
+  onOpenChange,
+  returnFocus,
+  ...form
+}: FormProps & {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
   readonly returnFocus?: () => HTMLElement | null;
 }) {
+  // The form mounts each time the dialog opens, so nothing from the last save stays (review S5).
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`Save ${form.draft.name} as a version`}
+      description="Each version is immutable. A team version waits for a Team admin's review."
+      {...(returnFocus ? { returnFocus } : {})}
+    >
+      <SaveVersionForm {...form} />
+    </Dialog>
+  );
+}
+
+type BumpState =
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly bump: BumpSuggestion }
+  | { readonly status: "error"; readonly error: ApiError };
+
+function SaveVersionForm({
+  teamId,
+  teamName,
+  draft,
+  canTeam,
+  canPersonal,
+  flush,
+  onSaved,
+}: FormProps) {
   const [destination, setDestination] = useState<Destination>(canTeam ? "team" : "personal");
   const [semver, setSemver] = useState("");
   const [touched, setTouched] = useState(false);
   const [changelog, setChangelog] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [askConfirm, setAskConfirm] = useState<string | null>(null);
-  const [bump, setBump] = useState<BumpSuggestion | null>(null);
+  const [bump, setBump] = useState<BumpState>({ status: "loading" });
   const [attempted, setAttempted] = useState(false);
   const [failure, setFailure] = useState<ApiError | null>(null);
   const [pending, setPending] = useState(false);
   // The suggestion fills the number until the author types their own.
-  const version = touched ? semver : (bump?.suggested ?? "");
+  const version = touched ? semver : bump.status === "ready" ? (bump.bump.suggested ?? "") : "";
 
   useEffect(() => {
-    if (!open) return;
     let current = true;
-    setBump(null);
     void (async () => {
-      if ((await flush()) === null || !current) return;
+      const rev = await flush();
+      if (!current) return;
+      if (rev === null) return setBump({ status: "error", error: UNSAVED });
       const res = await suggestBump(teamId, draft.id, destination);
-      if (!current || !res.ok) return;
-      setBump(res.data);
+      if (current)
+        setBump(
+          res.ok ? { status: "ready", bump: res.data } : { status: "error", error: res.error },
+        );
     })();
     return () => {
       current = false;
     };
-  }, [open, destination, teamId, draft.id, flush]);
+  }, [destination, teamId, draft.id, flush]);
 
   const personalWarning =
     destination === "personal" && (draft.fromConversation || draft.coEdited || askConfirm !== null);
@@ -108,11 +141,7 @@ export function SaveVersionDialog({
     const rev = await flush();
     if (rev === null) {
       setPending(false);
-      setFailure({
-        status: 0,
-        code: "unsaved_changes",
-        message: "Your latest edits aren't saved yet.",
-      });
+      setFailure(UNSAVED);
       return;
     }
     const res = await saveDraftVersion(teamId, draft.id, rev, {
@@ -131,96 +160,89 @@ export function SaveVersionDialog({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={`Save ${draft.name} as a version`}
-      description="Each version is immutable. A team version waits for a Team admin's review."
-      {...(returnFocus ? { returnFocus } : {})}
+    <form
+      noValidate
+      className="grid gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
     >
-      <form
-        noValidate
-        className="grid gap-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <ChoiceGroup legend="Save to" stacked>
-          <Radio
-            name="destination"
-            label="Team skill"
-            hint={`Shared with ${teamName} after review.`}
-            checked={destination === "team"}
-            disabled={!canTeam}
-            onChange={() => setDestination("team")}
-          />
-          <Radio
-            name="destination"
-            label="My personal skill"
-            hint="Only yours; it goes with you to every team."
-            checked={destination === "personal"}
-            disabled={!canPersonal}
-            onChange={() => setDestination("personal")}
-          />
-        </ChoiceGroup>
-        <div>
-          <Field
-            label="Version"
-            hint="MAJOR.MINOR.PATCH, higher than the latest."
-            error={semverError ?? undefined}
-          >
-            <TextInput
-              type="text"
-              value={version}
-              onChange={(e) => {
-                setTouched(true);
-                setSemver(e.target.value);
-              }}
-            />
-          </Field>
-          <p className="m-0 mt-1 text-sm text-console-muted" role="status">
-            {bump ? bumpText(bump, destination) : "Working out the suggested version…"}
-          </p>
-        </div>
+      <ChoiceGroup legend="Save to" stacked>
+        <Radio
+          name="destination"
+          label="Team skill"
+          hint={`Shared with ${teamName} after review.`}
+          checked={destination === "team"}
+          disabled={!canTeam}
+          onChange={() => {
+            setBump({ status: "loading" });
+            setDestination("team");
+          }}
+        />
+        <Radio
+          name="destination"
+          label="My personal skill"
+          hint="Only yours; it goes with you to every team."
+          checked={destination === "personal"}
+          disabled={!canPersonal}
+          onChange={() => {
+            setBump({ status: "loading" });
+            setDestination("personal");
+          }}
+        />
+      </ChoiceGroup>
+      <div>
         <Field
-          label="Changelog"
-          hint="One line on what changed."
-          error={changelogError ?? undefined}
+          label="Version"
+          hint="MAJOR.MINOR.PATCH, higher than the latest."
+          error={semverError ?? undefined}
         >
-          <Textarea
-            rows={2}
-            className="w-full"
-            value={changelog}
-            onChange={(e) => setChangelog(e.target.value)}
+          <TextInput
+            type="text"
+            value={version}
+            onChange={(e) => {
+              setTouched(true);
+              setSemver(e.target.value);
+            }}
           />
         </Field>
-        {personalWarning && (
-          <Checkbox
-            label="Save it as my personal skill anyway"
-            hint={
-              askConfirm ??
-              `This draft ${draft.fromConversation ? `was started from a ${teamName} conversation` : `has changes by other ${teamName} members`}; personal skills go with you to every team.`
-            }
-            checked={confirmed}
-            onChange={(e) => setConfirmed(e.target.checked)}
-          />
-        )}
-        {failure && <ErrorNotice error={failure} />}
-        <div className="flex flex-wrap justify-end gap-2">
-          <DialogClose asChild>
-            <Button>Cancel</Button>
-          </DialogClose>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={pending}
-            aria-busy={pending || undefined}
-          >
-            Save version
-          </Button>
-        </div>
-      </form>
-    </Dialog>
+        <p className="m-0 mt-1 text-sm text-console-muted" role="status">
+          {bump.status === "ready"
+            ? bumpText(bump.bump, destination)
+            : bump.status === "loading"
+              ? "Working out the suggested version…"
+              : `No suggestion: ${bump.error.message} Give the number yourself.`}
+        </p>
+      </div>
+      <Field label="Changelog" hint="One line on what changed." error={changelogError ?? undefined}>
+        <Textarea
+          rows={2}
+          className="w-full"
+          value={changelog}
+          onChange={(e) => setChangelog(e.target.value)}
+        />
+      </Field>
+      {personalWarning && (
+        <Checkbox
+          label="Save it as my personal skill anyway"
+          hint={
+            askConfirm ??
+            `This draft ${draft.fromConversation ? `was started from a ${teamName} conversation` : `has changes by other ${teamName} members`}; personal skills go with you to every team.`
+          }
+          checked={confirmed}
+          onChange={(e) => setConfirmed(e.target.checked)}
+        />
+      )}
+      {failure && <ErrorNotice error={failure} />}
+      <div className="flex flex-wrap justify-end gap-2">
+        <DialogClose asChild>
+          <Button>Cancel</Button>
+        </DialogClose>
+        <Button type="submit" variant="primary" disabled={pending} aria-busy={pending || undefined}>
+          Save version
+        </Button>
+      </div>
+    </form>
   );
 }

@@ -71,19 +71,36 @@ function Findings({ scan }: { readonly scan: ScanPreview }) {
   );
 }
 
-/** The live scan preview (SK12, SK32): the verdict tier of the draft as last saved. */
+function scanStatusText(state: ScanState, shown: ScanPreview | null): string {
+  switch (state.status) {
+    case "idle":
+      return "Not scanned yet.";
+    case "running":
+      return "Scanning your latest change…";
+    case "ready":
+      return `Scanned as saved (revision ${state.scan.rev}).`;
+    case "problem":
+      return `Not scanned: ${state.message}`;
+    default:
+      return shown ? `${state.message} Last complete scan: revision ${shown.rev}.` : state.message;
+  }
+}
+
+/**
+ * The live scan preview (SK12, SK32): the verdict tier of the draft as last saved. A scan that
+ * couldn't finish says so and is asked again; it never shows as a Block (review S2).
+ */
 export function ScanPanel({ state }: { readonly state: ScanState }) {
-  const shown = state.status === "ready" ? state.scan : state.status === "idle" ? null : state.last;
+  const shown =
+    state.status === "ready"
+      ? state.scan
+      : state.status === "idle" || state.status === "problem"
+        ? null
+        : state.last;
   return (
     <Section title="Scan preview" level={3}>
       <p className="m-0 mb-2 text-sm text-console-muted" role="status">
-        {state.status === "running"
-          ? "Scanning your latest change…"
-          : state.status === "busy" || state.status === "error"
-            ? state.message
-            : shown
-              ? `Scanned as saved (revision ${shown.rev}).`
-              : "Not scanned yet."}
+        {scanStatusText(state, shown)}
       </p>
       {shown && <Findings scan={shown} />}
     </Section>

@@ -4,7 +4,7 @@ import { splitSkillMd } from "./skill-md";
 /**
  * Workbench lint (KOBE-321, spec SK12), run on every edit in the browser: SKILL.md's name rules,
  * a description that says what the skill does and when to use it, referenced files that exist,
- * scripts that SKILL.md lists, no absolute paths, and an `evals/` folder. Errors are what Save
+ * scripts that SKILL.md lists, no absolute paths into the package, and an `evals/` folder. Errors are what Save
  * version refuses; warnings are advice. The server stays the authority.
  */
 
@@ -34,8 +34,10 @@ const WHAT_MIN_WORDS = 3;
 const LINK = /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
 /** A skill-relative path to a file in the usual folders, not inside a longer absolute path. */
 const FOLDER_PATH = /(?<![\w./~\\-])((?:scripts|references|assets|evals)\/[\w./-]*[\w-])/g;
+/** An absolute path: `/a/b…`, `~/…` or a drive letter (not a URL: `://` is excluded). */
 const ABSOLUTE =
-  /(?<![\w.:/-])((?:\/(?:Users|home|root)\/|~\/)[^\s)`'"<>]+|[A-Za-z]:\\[^\s)`'"<>]+)/g;
+  /(?<![\w.:/~\\-])(\/[\w.@-]+(?:\/[\w.@-]+)*|~\/[^\s)`'"<>]+|[A-Za-z]:\\[^\s)`'"<>]+)/g;
+const PACKAGE_SEGMENT = /\/(?:scripts|references|assets|evals)\/|\/SKILL\.md$|\/kobe\.skill\.yaml$/;
 const EXTERNAL = /^(?:[a-z][a-z0-9+.-]*:|#|\/\/)/i;
 
 const item = (id: string, level: LintLevel, message: string, file?: string): LintItem => ({
@@ -139,17 +141,25 @@ function scriptItems(
     );
 }
 
-function absoluteItems(body: string): LintItem[] {
+/**
+ * Absolute paths into the package (coordinator, KOBE-321): a path ending in one of the draft's
+ * files or naming a skill folder. Others (`/workspace/out/…`, the sandbox's output) are fine.
+ */
+function absoluteItems(body: string, paths: readonly string[]): LintItem[] {
+  const intoPackage = (raw: string) => {
+    const p = raw.replaceAll("\\", "/").split(/[#?]/)[0] ?? "";
+    return PACKAGE_SEGMENT.test(p) || paths.some((f) => p.endsWith(`/${f}`));
+  };
   const found = [
     ...[...body.matchAll(LINK)].map((m) => m[1] ?? "").filter((t) => /^\/(?!\/)/.test(t)),
     ...[...body.matchAll(ABSOLUTE)].map((m) => m[1] ?? ""),
-  ];
+  ].filter(intoPackage);
   const ordered = [...new Set(found)].sort((a, b) => body.indexOf(a) - body.indexOf(b));
   return ordered.map((p) =>
     item(
       "absolute-path",
       "warning",
-      `${p} is an absolute path: refer to the skill's files relative to its folder, such as scripts/build.py.`,
+      `${p} is an absolute path into the skill: refer to its files relative to its folder, such as scripts/build.py.`,
     ),
   );
 }
@@ -172,7 +182,7 @@ export function lintSkill(input: LintInput): readonly LintItem[] {
     ...descriptionItems(description),
     ...referenceItems(body, input.paths),
     ...scriptItems(body, input.paths, input.scripts ?? []),
-    ...absoluteItems(body),
+    ...absoluteItems(body, input.paths),
     ...evals,
   ];
 }

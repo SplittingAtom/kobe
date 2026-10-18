@@ -93,22 +93,23 @@ describe("lintSkill", () => {
     ]);
   });
 
-  it("flags absolute paths", () => {
+  it("flags absolute paths into the package, not other absolute paths", () => {
     const body = [
-      "Run `/Users/ada/skills/report-writer/scripts/build.py`.",
-      "Or [this](/scripts/build.py), or ~/notes/x.md, or C:\\skills\\x.ps1.",
-      "Write the output to /workspace/out/report.pdf.",
-      "Run `scripts/build.py` and see [g](references/guide.md).",
+      "Run `/home/ada/skills/report-writer/scripts/build.py`.",
+      "Or [this](/scripts/build.py), or C:\\skills\\report-writer\\references\\guide.md.",
+      "Read /workspace/skills/report-writer/SKILL.md first.",
+      "Write the output to /workspace/out/report.pdf; notes go in ~/notes/x.md.",
+      "See https://x.test/scripts/build.py, then run `scripts/build.py` and see [g](references/guide.md).",
     ].join("\n");
     const items = lintSkill({
       skillMd: md("name: report-writer\ndescription: Writes reports. Use when asked.", body),
       paths: PATHS,
     });
     expect(items.filter((i) => i.id === "absolute-path").map((i) => i.message)).toEqual([
-      expect.stringContaining("/Users/ada/skills/report-writer/scripts/build.py"),
-      expect.stringContaining("/scripts/build.py"),
-      expect.stringContaining("~/notes/x.md"),
-      expect.stringContaining("C:\\skills\\x.ps1"),
+      expect.stringContaining("/home/ada/skills/report-writer/scripts/build.py"),
+      expect.stringContaining("/scripts/build.py is"),
+      expect.stringContaining("C:\\skills\\report-writer\\references\\guide.md"),
+      expect.stringContaining("/workspace/skills/report-writer/SKILL.md"),
     ]);
   });
 

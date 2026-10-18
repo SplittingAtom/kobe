@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { COMMANDS } from "../../lib/shell/commands";
 import { forbidNativeConfirm, renderTeam, stubApi, summary } from "../admin/testing";
-import { SkillsPage, skillTab } from "./skills-page";
+import { skillTab } from "../../lib/skills/tabs";
+import { SkillsPage } from "./skills-page";
 
 /** KOBE-321 (ac-1): the Skills page's tabs; the Workbench lists my drafts and shared ones. */
 const MEMBER = { role: "member", permissions: ["team.personal.create"] } as const;

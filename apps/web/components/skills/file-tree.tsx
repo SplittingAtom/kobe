@@ -58,7 +58,7 @@ export function FileTree({
                 <button
                   type="button"
                   aria-current={f.path === selected ? "true" : undefined}
-                  aria-label={f.path}
+                  aria-label={f.kind === "binary" ? `${f.path} (binary)` : f.path}
                   onClick={() => onSelect(f.path)}
                   className={cn(
                     "m-0 box-border w-full cursor-pointer truncate rounded border-0 bg-transparent px-2 py-1 text-start text-sm text-console-fg hover:bg-console-panel aria-[current=true]:bg-console-panel aria-[current=true]:font-semibold",

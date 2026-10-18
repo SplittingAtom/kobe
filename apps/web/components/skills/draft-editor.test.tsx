@@ -102,9 +102,11 @@ beforeEach(() => {
   assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign, reload: vi.fn() });
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.useRealTimers();
+  // Unmounting writes pending edits (review B2): let those reach the stub before it goes.
+  await new Promise((resolve) => setTimeout(resolve, 20));
   vi.unstubAllGlobals();
 });
 
@@ -174,6 +176,64 @@ describe("Workbench editor: lint, meter and live scan (ac-2)", () => {
   });
 });
 
+describe("Workbench editor: review fixes (B2, S1, S2, S4)", () => {
+  it("writes pending edits when the editor goes away (in-app navigation)", async () => {
+    const calls = stubApi(BASE as unknown as Parameters<typeof stubApi>[0]);
+    const view = renderTeam(<DraftEditorPage draftId="d-1" />, BUILDER);
+    await screen.findByText("Scanned as saved (revision 3).");
+    fireEvent.change(screen.getByLabelText("Instructions (SKILL.md body)"), {
+      target: { value: "Left before the timer." },
+    });
+    expect(puts(calls)).toHaveLength(0);
+    view.unmount();
+    await waitFor(() => expect(puts(calls)).toHaveLength(1));
+    expect(must(puts(calls)[0]).body).toContain("Left before the timer.");
+  });
+
+  it("asks a busy scan again after 1 s, and shows an unfinished one as unavailable, not Block", async () => {
+    const calls = await opened({
+      ...BASE,
+      "GET /v1/skills/drafts/d-1/scan": [
+        [200, SCAN(3)],
+        [429, { code: "scan_busy", message: "The scan preview is busy." }],
+        [503, { code: "scan_unavailable", message: "The scan preview couldn't finish." }],
+        [200, SCAN(4, "block", [])],
+      ],
+    });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Instructions (SKILL.md body)"), {
+      target: { value: "Edit." },
+    });
+    await act(() => vi.advanceTimersByTimeAsync(1300));
+    expect(screen.getByText(/Scan busy, trying again/)).toBeDefined();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText(/Scan unavailable, retrying/)).toBeDefined();
+    // The last complete scan still shows: Pass, never a Block for a scan that didn't finish.
+    expect(screen.getByText("Pass", { selector: "[data-slot=console-badge]" })).toBeDefined();
+    expect(scans(calls)).toHaveLength(3);
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(scans(calls)).toHaveLength(4);
+    expect(screen.getByText("Scanned as saved (revision 4).")).toBeDefined();
+  });
+
+  it("queues a new file behind a pending autosave, so it names the autosave's revision", async () => {
+    const calls = await opened({
+      ...BASE,
+      "PUT /v1/skills/drafts/d-1/files/notes.md": [200, { rev: 5, draft: DRAFT(5) }],
+    });
+    fireEvent.change(screen.getByLabelText("Instructions (SKILL.md body)"), {
+      target: { value: "Pending." },
+    });
+    await userEvent.type(screen.getByLabelText("New file"), "notes.md");
+    await userEvent.click(screen.getByRole("button", { name: "Add file" }));
+    await screen.findByLabelText("Contents of notes.md");
+    expect(puts(calls).map((c) => [c.url.split("/files/")[1], c.headers.get("if-match")])).toEqual([
+      ["SKILL.md", '"3"'],
+      ["notes.md", '"4"'],
+    ]);
+  });
+});
+
 describe("Workbench editor: files", () => {
   it("opens a text file, adds one (lint follows) and deletes one after asking", async () => {
     const calls = await opened({
@@ -182,7 +242,9 @@ describe("Workbench editor: files", () => {
       "DELETE /v1/skills/drafts/d-1/files/references/guide.md": [200, { rev: 5, draft: DRAFT(5) }],
     });
     const tree = within(screen.getByRole("navigation", { name: "Files" }));
-    expect(tree.getByRole("button", { name: "assets/logo.png" }).textContent).toContain("(binary)");
+    expect(tree.getByRole("button", { name: "assets/logo.png (binary)" }).textContent).toContain(
+      "(binary)",
+    );
     await userEvent.click(tree.getByRole("button", { name: "references/guide.md" }));
     expect(
       ((await screen.findByLabelText("Contents of references/guide.md")) as HTMLTextAreaElement)
@@ -329,6 +391,27 @@ describe("Workbench editor: Save version (ac-3)", () => {
         },
       ],
     ]);
+  });
+
+  it("says when there is no suggestion, and starts afresh each time it opens", async () => {
+    await opened({
+      ...BASE,
+      "GET /v1/skills/drafts/d-1/bump?destination=team": [
+        503,
+        { code: "skills_unavailable", message: "The latest version can't be read right now." },
+      ],
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save version" }));
+    let dialog = within(await screen.findByRole("dialog"));
+    expect(await dialog.findByText(/No suggestion: .*Give the number yourself/)).toBeDefined();
+    await userEvent.type(dialog.getByLabelText("Version"), "2.0.0");
+    await userEvent.type(dialog.getByLabelText("Changelog"), "Typed.");
+    await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Save version" }));
+    dialog = within(await screen.findByRole("dialog"));
+    expect((dialog.getByLabelText("Version") as HTMLInputElement).value).toBe("");
+    expect((dialog.getByLabelText("Changelog") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("keeps the number the author typed and shows the server's refusal", async () => {

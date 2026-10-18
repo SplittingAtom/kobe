@@ -11,7 +11,10 @@ import {
 import { cn } from "../../lib/utils";
 import { Button, Field, Notice, Textarea, TextInput } from "../ui/console";
 
-/** The description meter (SK12): its count, and a warning past 1,024 and again past 1,536. */
+/**
+ * The description meter (SK12): its count, and a warning past 1,024 and again past 1,536. Only the
+ * warning is announced (when it changes), not every keystroke's count.
+ */
 export function DescriptionMeter({
   description,
   id,
@@ -21,18 +24,19 @@ export function DescriptionMeter({
 }) {
   const meter = descriptionMeter(description);
   return (
-    <p
-      id={id}
-      aria-live="polite"
-      data-level={meter.level}
-      className={cn(
-        "m-0 mt-1 text-sm",
-        meter.level === "ok" ? "text-console-muted" : "font-medium text-console-danger",
-      )}
-    >
-      {meter.length.toLocaleString("en-US")} / 1,024 characters
-      {meter.message && <span>. {meter.message}</span>}
-    </p>
+    <div id={id} data-level={meter.level} className="mt-1 text-sm">
+      <p
+        className={cn(
+          "m-0",
+          meter.level === "ok" ? "text-console-muted" : "font-medium text-console-danger",
+        )}
+      >
+        {meter.length.toLocaleString("en-US")} / 1,024 characters
+      </p>
+      <p aria-live="polite" className="m-0 font-medium text-console-danger">
+        {meter.message}
+      </p>
+    </div>
   );
 }
 
@@ -117,7 +121,7 @@ function SkillMdForm({
       </div>
       <Field
         label="Other frontmatter (YAML)"
-        hint="Optional keys, such as license: MIT. Nothing here pre-approves tools."
+        hint="Optional keys, such as license: MIT. Nothing here pre-approves tools. The form rewrites the frontmatter (YAML comments go); edit SKILL.md as text to keep them."
         error={otherProblem ?? undefined}
       >
         <Textarea
