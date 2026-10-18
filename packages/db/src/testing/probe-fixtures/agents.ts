@@ -3,7 +3,9 @@ import {
   memberSkillEnablements,
   registrySkills,
   registryVersions,
+  skillDraftFileHistory,
   skillDraftFiles,
+  skillDraftHistory,
   skillDrafts,
   teamMembers,
   teamSkillBlocks,
@@ -259,22 +261,65 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
   },
   skill_draft_files: async (tx, teamId) => {
     // One text file and one binary file of a draft (KOBE-320).
-    const draftId = await probeDraft(tx, teamId);
+    const { userId, draftId } = await probeDraft(tx, teamId);
     await tx.insert(skillDraftFiles).values([
-      { teamId, draftId, path: "SKILL.md", textContent: "probe", size: 5 },
-      { teamId, draftId, path: "assets/x.bin", bytes: Buffer.from([0, 1, 2]), size: 3 },
+      { teamId, draftId, path: "SKILL.md", textContent: "probe", size: 5, updatedBy: userId },
+      {
+        teamId,
+        draftId,
+        path: "assets/x.bin",
+        bytes: Buffer.from([0, 1, 2]),
+        size: 3,
+        updatedBy: userId,
+      },
     ]);
+  },
+  skill_draft_history: async (tx, teamId) => {
+    // A deleted draft kept for a hold; written here directly, as the trigger would.
+    const userId = await probeUser(tx);
+    await tx.insert(skillDraftHistory).values({
+      teamId,
+      draftId: randomUUID(),
+      ownerUserId: userId,
+      updatedBy: userId,
+      name: "probe",
+      shared: false,
+      startedFrom: "blank",
+      rev: 1,
+      change: "deleted",
+      draftCreatedAt: new Date(),
+      draftUpdatedAt: new Date(),
+    });
+  },
+  skill_draft_file_history: async (tx, teamId) => {
+    const userId = await probeUser(tx);
+    await tx.insert(skillDraftFileHistory).values({
+      teamId,
+      draftId: randomUUID(),
+      ownerUserId: userId,
+      writtenBy: userId,
+      path: "SKILL.md",
+      textContent: "probe kept",
+      size: 10,
+      change: "overwritten",
+      writtenAt: new Date(),
+    });
   },
 };
 
-/** A Workbench draft (KOBE-320), shared with the team's builders. */
-async function probeDraft(tx: Parameters<ProbeFixture>[0], teamId: string): Promise<string> {
+async function probeUser(tx: Parameters<ProbeFixture>[0]): Promise<string> {
   const userId = randomUUID();
   await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  return userId;
+}
+
+/** A Workbench draft (KOBE-320), shared with the team's builders. */
+async function probeDraft(tx: Parameters<ProbeFixture>[0], teamId: string) {
+  const userId = await probeUser(tx);
   const [draft] = await tx
     .insert(skillDrafts)
     .values({ teamId, ownerUserId: userId, updatedBy: userId, name: "probe", shared: true })
     .returning({ id: skillDrafts.id });
   if (!draft) throw new Error("probe draft insert returned no row");
-  return draft.id;
+  return { userId, draftId: draft.id };
 }

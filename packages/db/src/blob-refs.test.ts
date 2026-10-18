@@ -79,4 +79,5 @@ const NOT_OBJECT_KEYS: Record<string, string> = {
   "site_budget_reservations.member_key": "a budget line key",
   "site_settings.key": "a setting name",
   "skill_drafts.parent_ref": "the skill version a draft was forked from (ids and a hash)",
+  "skill_draft_history.parent_ref": "a hold's copy of skill_drafts.parent_ref",
 };

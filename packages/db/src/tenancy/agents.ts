@@ -22,6 +22,8 @@ export const agents = defineDomain({
     // Workbench drafts (KOBE-320).
     "skill_drafts",
     "skill_draft_files",
+    "skill_draft_history",
+    "skill_draft_file_history",
   ],
   siteWide: [
     "skill_blocklist",

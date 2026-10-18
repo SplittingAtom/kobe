@@ -1,5 +1,5 @@
 {
-  "id": "dfdb62a1-9d22-449d-9082-656207864774",
+  "id": "ab771cee-d657-4aa0-b1d1-abe992c043b5",
   "prevId": "99981ebc-d6e9-4166-96ce-1901aee16ce0",
   "version": "7",
   "dialect": "postgresql",
@@ -17264,6 +17264,193 @@
       },
       "isRLSEnabled": false
     },
+    "public.skill_draft_file_history": {
+      "name": "skill_draft_file_history",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "draft_id": {
+          "name": "draft_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "written_by": {
+          "name": "written_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text_content": {
+          "name": "text_content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change": {
+          "name": "change",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "written_at": {
+          "name": "written_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kept_at": {
+          "name": "kept_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "skill_draft_file_history_owner_idx": {
+          "name": "skill_draft_file_history_owner_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skill_draft_file_history_writer_idx": {
+          "name": "skill_draft_file_history_writer_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "written_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "skill_draft_file_history_team_id_teams_id_fk": {
+          "name": "skill_draft_file_history_team_id_teams_id_fk",
+          "tableFrom": "skill_draft_file_history",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "skill_draft_file_history_owner_user_id_users_id_fk": {
+          "name": "skill_draft_file_history_owner_user_id_users_id_fk",
+          "tableFrom": "skill_draft_file_history",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "skill_draft_file_history_written_by_users_id_fk": {
+          "name": "skill_draft_file_history_written_by_users_id_fk",
+          "tableFrom": "skill_draft_file_history",
+          "tableTo": "users",
+          "columnsFrom": [
+            "written_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "skill_draft_file_history_team_id_id_pk": {
+          "name": "skill_draft_file_history_team_id_id_pk",
+          "columns": [
+            "team_id",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "skill_draft_file_history_change": {
+          "name": "skill_draft_file_history_change",
+          "value": "\"skill_draft_file_history\".\"change\" IN ('overwritten', 'deleted')"
+        },
+        "skill_draft_file_history_one_content": {
+          "name": "skill_draft_file_history_one_content",
+          "value": "(\"skill_draft_file_history\".\"text_content\" IS NULL) <> (\"skill_draft_file_history\".\"bytes\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.skill_draft_files": {
       "name": "skill_draft_files",
       "schema": "",
@@ -17310,9 +17497,37 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "skill_draft_files_writer_idx": {
+          "name": "skill_draft_files_writer_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "skill_draft_files_team_id_teams_id_fk": {
           "name": "skill_draft_files_team_id_teams_id_fk",
@@ -17325,6 +17540,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "skill_draft_files_updated_by_users_id_fk": {
+          "name": "skill_draft_files_updated_by_users_id_fk",
+          "tableFrom": "skill_draft_files",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "skill_draft_files_draft_fk": {
@@ -17367,6 +17595,207 @@
         "skill_draft_files_size": {
           "name": "skill_draft_files_size",
           "value": "\"skill_draft_files\".\"size\" = COALESCE(octet_length(\"skill_draft_files\".\"text_content\"), octet_length(\"skill_draft_files\".\"bytes\")) AND \"skill_draft_files\".\"size\" <= 5242880"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.skill_draft_history": {
+      "name": "skill_draft_history",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "draft_id": {
+          "name": "draft_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shared": {
+          "name": "shared",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_from": {
+          "name": "started_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parent_ref": {
+          "name": "parent_ref",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "from_thread_id": {
+          "name": "from_thread_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rev": {
+          "name": "rev",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "change": {
+          "name": "change",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "draft_created_at": {
+          "name": "draft_created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "draft_updated_at": {
+          "name": "draft_updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kept_at": {
+          "name": "kept_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "skill_draft_history_owner_idx": {
+          "name": "skill_draft_history_owner_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skill_draft_history_writer_idx": {
+          "name": "skill_draft_history_writer_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "skill_draft_history_team_id_teams_id_fk": {
+          "name": "skill_draft_history_team_id_teams_id_fk",
+          "tableFrom": "skill_draft_history",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "skill_draft_history_owner_user_id_users_id_fk": {
+          "name": "skill_draft_history_owner_user_id_users_id_fk",
+          "tableFrom": "skill_draft_history",
+          "tableTo": "users",
+          "columnsFrom": [
+            "owner_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "skill_draft_history_updated_by_users_id_fk": {
+          "name": "skill_draft_history_updated_by_users_id_fk",
+          "tableFrom": "skill_draft_history",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "skill_draft_history_team_id_id_pk": {
+          "name": "skill_draft_history_team_id_id_pk",
+          "columns": [
+            "team_id",
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "skill_draft_history_change": {
+          "name": "skill_draft_history_change",
+          "value": "\"skill_draft_history\".\"change\" IN ('changed', 'deleted')"
         }
       },
       "isRLSEnabled": false
@@ -17423,6 +17852,19 @@
         "from_thread_id": {
           "name": "from_thread_id",
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "co_edited": {
+          "name": "co_edited",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "owner_departed_at": {
+          "name": "owner_departed_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -17583,13 +18025,17 @@
           "name": "skill_drafts_parent_ref",
           "value": "\"skill_drafts\".\"parent_ref\" IS NULL OR (jsonb_typeof(\"skill_drafts\".\"parent_ref\") = 'object' AND octet_length(\"skill_drafts\".\"parent_ref\"::text) <= 4096)"
         },
+        "skill_drafts_provenance": {
+          "name": "skill_drafts_provenance",
+          "value": "(\"skill_drafts\".\"started_from\" = 'thread') = (\"skill_drafts\".\"from_thread_id\" IS NOT NULL) AND (\"skill_drafts\".\"started_from\" = 'fork') = (\"skill_drafts\".\"parent_ref\" IS NOT NULL)"
+        },
         "skill_drafts_rev_positive": {
           "name": "skill_drafts_rev_positive",
           "value": "\"skill_drafts\".\"rev\" > 0"
         },
         "skill_drafts_size": {
           "name": "skill_drafts_size",
-          "value": "\"skill_drafts\".\"size_bytes\" BETWEEN 0 AND 5242880 AND \"skill_drafts\".\"file_count\" >= 0"
+          "value": "\"skill_drafts\".\"size_bytes\" BETWEEN 0 AND 5242880 AND \"skill_drafts\".\"file_count\" BETWEEN 0 AND 200"
         }
       },
       "isRLSEnabled": false
