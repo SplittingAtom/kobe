@@ -4,7 +4,6 @@ import {
   parseTraceparent,
   runTraceId,
   type WireTraceContext,
-  CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
@@ -42,6 +41,17 @@ import {
   type RuntimeTamperReport,
 } from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
+
+/**
+ * Whether a stored command still lists image built-ins (`config.builtin_skills`, a run.start queued
+ * before KOBE-317). Read from the stored JSON: the frame schema no longer knows the field and
+ * parsing strips it (review-317 S1).
+ */
+function legacyBuiltins(row: CommandRow): boolean {
+  const config = (row.frame as { config?: unknown }).config;
+  const listed = (config as { builtin_skills?: unknown } | null | undefined)?.builtin_skills;
+  return Array.isArray(listed) && listed.length > 0;
+}
 
 /** What delivery needs from its connection. */
 export interface DeliveryHost {
@@ -416,17 +426,15 @@ export class CommandDelivery {
       );
       return;
     }
-    if (
-      row.kind === "run.start" &&
-      (frame as RunStartFrame).config?.builtin_skills?.length &&
-      !this.#host.hasCapability(CAPABILITY_BUILTIN_SKILLS)
-    ) {
-      // Same rule as bundles: never start without the built-in skills the run was resolved with.
+    if (row.kind === "run.start" && legacyBuiltins(row)) {
+      // A run.start queued before KOBE-317 lists image built-ins, which no frame carries any more
+      // (they are catalog bundles now): the run fails visibly rather than starting without the
+      // skills it was resolved with. Sending it again resolves them as Kobe's catalog skills.
       await this.#failRunStart(
         row,
         failure(
-          COMMAND_FAILURES.skillsUnsupported,
-          "this sandbox's agent is too old to load built-in skills; it must be upgraded",
+          COMMAND_FAILURES.queuedBeforeUpgrade,
+          "this run was queued before an upgrade and lists skills this sandbox no longer has; send it again",
         ),
       );
       return;

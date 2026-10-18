@@ -1,11 +1,15 @@
 import { resolveDraftAgent, resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
-import { resolveEffective } from "../resolver/resolve.js";
-import { isBuiltinSkillName } from "@kobe/protocol";
+import { resolveEffective, resolveSkills, type Omission } from "../resolver/resolve.js";
 import { agentSkills } from "@kobe/agent-file";
-import { bundleRefsFor } from "../skills/materialize.js";
+import { bundleRefsWithGaps } from "../skills/materialize.js";
 import { runSkillRefs } from "../skills/detect.js";
-import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
+import {
+  buildResolveInput,
+  loadRequiredSkillFacts,
+  loadSkillFacts,
+  loadTeamFacts,
+} from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
 import {
   buildRunMcp,
@@ -13,7 +17,51 @@ import {
   loadTeamConnectorRows,
   loadUserGrantFacts,
 } from "./run-mcp.js";
-import type { RunAgentResolver } from "./seams.js";
+import type { AgentResolution, AgentResolutionInput, RunAgentResolver } from "./seams.js";
+
+const unavailableOmissions = (names: readonly string[]): Omission[] =>
+  names.map((name) => ({ kind: "skill", name, reason: "unavailable" }));
+
+/**
+ * A run with no agent (review S6): the team's Required skills (SK27 step 1) and their notices,
+ * materialized and recorded like an agent's. Empty when the team has none.
+ */
+async function requiredOnly(
+  tx: KobeTx,
+  input: AgentResolutionInput,
+): Promise<Pick<Extract<AgentResolution, { ok: true }>, "config" | "omissions" | "skillRefs">> {
+  const owner = { teamId: input.teamId, userId: input.ownerUserId };
+  const facts = await loadRequiredSkillFacts(tx, owner.teamId, owner.userId);
+  if (facts.required.length === 0 && facts.requiredOmissions.length === 0) return {};
+  const resolved = resolveSkills({
+    agent: {
+      modelAlias: null,
+      approvalMode: null,
+      skills: [],
+      exclusiveSkills: true,
+      connectors: [],
+    },
+    team: {
+      models: [],
+      connectors: [],
+      personalSkillsDisabled: false,
+      requiredSkills: facts.required,
+      requiredOmissions: facts.requiredOmissions,
+    },
+    user: { skills: [], connectedConnectors: [] },
+    approvalFloor: "auto",
+    blockedHashes: facts.blockedHashes,
+  });
+  const { refs, unavailable } = await bundleRefsWithGaps(tx, owner, resolved.skills);
+  const omissions = [...resolved.omissions, ...unavailableOmissions(unavailable)];
+  const skillRefs = runSkillRefs(refs, resolved.skills);
+  return {
+    ...(omissions.length > 0 ? { omissions } : {}),
+    ...(refs.length > 0
+      ? { config: { skills: refs.map((s) => s.name), skill_bundles: refs }, skillRefs }
+      : {}),
+  };
+}
 
 /**
  * A test thread (KOBE-85: agent set, version null; the database allows that only for `is_test`)
@@ -67,6 +115,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
         ok: true,
         agent: null,
         approvalMode: strictestApprovalMode(input.approvalMode, floor),
+        ...(await requiredOnly(tx, input)),
       };
     }
     const owner = { teamId: input.teamId, userId: input.ownerUserId };
@@ -85,6 +134,8 @@ export const PINNED_AGENTS: RunAgentResolver = {
       userId: input.ownerUserId,
       agentSkillNames: agentSkills(frontmatter).names,
       personalSkillsDisabled: team.personalSkillsDisabled,
+      // A published team version runs the local skill versions it froze (KOBE-318).
+      ...(pinned.version.skillManifest ? { frozen: pinned.version.skillManifest.skills } : {}),
     });
     const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
     const connectedConnectors = connectedConnectorNames(
@@ -115,12 +166,12 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // Materialization list (KOBE-82), in this same transaction: the blocklist is read once more, so
     // a hash listed since the facts were loaded never reaches a sandbox. These refs are the only
     // skills the sandbox makes present; `skills` (names) always equals their names.
-    const skillBundles = await bundleRefsFor(
+    const { refs: skillBundles, unavailable } = await bundleRefsWithGaps(
       tx,
       { teamId: input.teamId, userId: input.ownerUserId },
       value.skills,
     );
-    const builtinSkills = value.builtinSkills.filter(isBuiltinSkillName);
+    const omissions = [...value.omissions, ...unavailableOmissions(unavailable)];
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""
         ? {}
@@ -130,11 +181,9 @@ export const PINNED_AGENTS: RunAgentResolver = {
       ...(skillBundles.length > 0
         ? { skills: skillBundles.map((s) => s.name), skill_bundles: skillBundles }
         : {}),
-      // Built-ins (KOBE-88) come from the sandbox image: no bundle, nothing to fetch or block.
-      ...(value.builtinSkills.length > 0 ? { builtin_skills: builtinSkills } : {}),
     };
     // KOBE-297: what this run.start lists, kept with the run so a SKILL.md read can be matched.
-    const skillRefs = runSkillRefs(skillBundles, value.skills, builtinSkills);
+    const skillRefs = runSkillRefs(skillBundles, value.skills);
     return {
       ok: true,
       agent: {
@@ -145,7 +194,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
           : {}),
       },
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
-      omissions: value.omissions,
+      omissions,
       mcp,
       ...(skillRefs.length > 0 ? { skillRefs } : {}),
       ...(Object.keys(config).length > 0 ? { config } : {}),

@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { SandboxToServerFrame, SkillBundleRef } from "@kobe/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSkillFetcher } from "./skills/client.js";
@@ -183,86 +182,30 @@ describe("skills at run start", () => {
   });
 });
 
-/** KOBE-88: built-in skills baked into the image; real bundles from `images/sandbox/skills`. */
-describe("built-in skills", () => {
-  const imageSkills = fileURLToPath(new URL("../../../images/sandbox/skills", import.meta.url));
-  const builtinEnv = { KOBE_BUILTIN_SKILLS_DIR: imageSkills };
-  const builtin = (names: string[]) => runStart("say:hi", { config: { builtin_skills: names } });
-
-  it("ships the seven gallery skills, each a SKILL.md bundle named like its directory", () => {
-    for (const name of [
-      "data-analysis",
-      "charts",
-      "docx",
-      "pdf",
-      "xlsx",
-      "code-review",
-      "skill-creator",
-    ]) {
-      const md = readFileSync(path.join(imageSkills, name, "SKILL.md"), "utf8");
-      expect(md).toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: "`));
-    }
+/**
+ * KOBE-317: the former built-ins are Kobe-published catalog skills and arrive as bundles like any
+ * other; the image path (`builtin_skills`, `KOBE_BUILTIN_SKILLS_DIR`) is gone.
+ */
+describe("former built-in skills", () => {
+  it("never advertises builtin_skills, even with the old image variable set", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kobe-builtin-gone-"));
+    h = await startHarness({ skills: store(), env: { KOBE_BUILTIN_SKILLS_DIR: dir } });
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles", "trace_spans"]);
+    await h.close();
+    await rm(dir, { recursive: true, force: true });
   });
 
-  it("registers exactly the listed built-ins with Pi, before the run's other skills", async () => {
-    const a = offer("alpha", "a");
-    h = await startHarness({ skills: store(), env: builtinEnv });
+  it("registers only the run's bundles; a stray builtin_skills field is ignored", async () => {
+    const pdf = offer("pdf", "p");
+    h = await startHarness({ skills: store() });
     expect(
-      await h.server.command(withSkills([a], { builtin_skills: ["pdf", "charts"] })),
+      await h.server.command(withSkills([pdf], { builtin_skills: ["pdf", "charts"] })),
     ).toMatchObject({ ok: true });
     await h.server.waitFor(settled(RUN));
     const [launch] = await launches();
     expect(skillArgs(launch?.argv as string[])).toEqual([
-      path.join(imageSkills, "pdf"),
-      path.join(imageSkills, "charts"),
-      path.join(skillsRoot, "store", `sk-${a.sha256}`),
+      path.join(skillsRoot, "store", `sk-${pdf.sha256}`),
     ]);
-    // Nothing is fetched for a built-in.
     expect(requests).toHaveLength(1);
-  });
-
-  it("registers no built-in the run does not list, and restarts Pi when the list changes", async () => {
-    h = await startHarness({ env: builtinEnv });
-    await h.server.command(builtin(["docx"]));
-    await h.server.waitFor(settled(RUN));
-    await h.server.command({
-      ...runStart("say:hi", { config: { approval_mode: "auto" } }),
-      run_id: RUN_2,
-    });
-    await h.server.waitFor(settled(RUN_2));
-    const all = await launches();
-    expect(skillArgs(all[0]?.argv as string[])).toEqual([path.join(imageSkills, "docx")]);
-    expect(skillArgs(all[1]?.argv as string[])).toEqual([]);
-  });
-
-  it("fails the run when the image lacks the listed built-in, or the sandbox has no built-ins", async () => {
-    const empty = await mkdtemp(path.join(tmpdir(), "kobe-builtin-empty-"));
-    h = await startHarness({ env: { KOBE_BUILTIN_SKILLS_DIR: empty } });
-    expect(await h.server.command(builtin(["xlsx"]))).toMatchObject({
-      ok: false,
-      error: { code: "pi_unavailable", message: expect.stringContaining("xlsx") },
-    });
-    await h.close();
-    await rm(empty, { recursive: true, force: true });
-    h = await startHarness();
-    expect(await h.server.command(builtin(["xlsx"]))).toMatchObject({
-      ok: false,
-      error: { code: "pi_unavailable" },
-    });
-  });
-
-  it("advertises builtin_skills in hello only when the image has a built-in directory", async () => {
-    h = await startHarness({ skills: store(), env: builtinEnv });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
-      "skill_bundles",
-      "builtin_skills",
-      "trace_spans",
-    ]);
-    await h.close();
-    h = await startHarness({ env: builtinEnv });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
-      "builtin_skills",
-      "trace_spans",
-    ]);
   });
 });

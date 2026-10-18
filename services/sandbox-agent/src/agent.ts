@@ -1,6 +1,5 @@
 import {
   CAPABILITY_ARTIFACTS,
-  CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_FILES,
@@ -193,9 +192,6 @@ export class Agent {
       identities: deps.identities,
       parentEnv: deps.parentEnv,
       ...(deps.skills === undefined ? {} : { skills: deps.skills }),
-      ...(config.builtinSkillsDir === undefined
-        ? {}
-        : { builtinSkillsDir: config.builtinSkillsDir }),
       maxProcesses: config.maxPiProcesses,
       idleMs: config.piIdleMs,
       restoreMaxBytes: config.restoreMaxBytes,
@@ -353,7 +349,6 @@ export class Agent {
   #hello(): HelloFrame {
     const capabilities = [
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
-      ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),

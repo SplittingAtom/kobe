@@ -1,15 +1,23 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
+import { siteRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import {
   decideReview,
   decodeCursor,
+  findingsDigest,
+  reviewVerdict,
   listReviews,
   scanUnscanned,
   type ReviewRecord,
 } from "../skills/review.js";
-import { getPersonalSkillsDisabled, setPersonalSkillsDisabled } from "../skills/settings.js";
+import {
+  getCatalogSwitches,
+  getPersonalSkillsDisabled,
+  setCatalogSwitches,
+  setPersonalSkillsDisabled,
+} from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 const STATUS_FILTERS = {
@@ -22,8 +30,22 @@ const filterSchema = z.enum(["pending", "approved", "rejected", "all"]);
 const decisionSchema = z.strictObject({
   decision: z.enum(["approved", "rejected"]),
   note: z.string().trim().max(2000).optional(),
+  /**
+   * The `findingsDigest` of the scan the reviewer read and accepts (KOBE-312): needed to approve a
+   * Caution or Block scan, and it must still match the stored findings.
+   */
+  acknowledgedFindings: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
-const settingsSchema = z.strictObject({ personalSkillsDisabled: z.boolean() });
+const settingsSchema = z
+  .strictObject({
+    personalSkillsDisabled: z.boolean().optional(),
+    membersMayAddCatalog: z.boolean().optional(),
+    buildersMayInstallCatalog: z.boolean().optional(),
+  })
+  .refine((b) => Object.values(b).some((v) => v !== undefined));
 const idSchema = z.uuid();
 const limitSchema = z.coerce.number().int().min(1).max(200);
 const versionSchema = z.coerce.number().int().positive().max(2147483647);
@@ -32,16 +54,22 @@ const reviewJson = (r: ReviewRecord) => ({
   skillId: r.skillId,
   slug: r.slug,
   version: r.version,
+  semver: r.semver,
   contentHash: r.contentHash,
   scope: r.scope,
   unscanned: r.unscanned,
   status: r.status,
   flagged: r.flagged,
+  verdict: reviewVerdict(r),
+  /** Echo it as `acknowledgedFindings` to approve exactly these findings. */
+  findingsDigest: findingsDigest(r),
   findings: r.findings,
   scripts: r.scripts,
   skipped: r.skipped,
   scannedAt: r.scannedAt,
   blocked: r.blocked,
+  /** A rescan on a scanner rule-set change turned the approved version Block (KOBE-313). */
+  suspended: r.suspendedAt !== null,
   reviewedBy: r.reviewedBy,
   reviewedAt: r.reviewedAt,
   reviewNote: r.reviewNote,
@@ -91,11 +119,52 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
         db,
         c.get("team").id,
         { skillId: skillId.data, version: version.data },
-        { status: body.decision, note: body.note || null, reviewerId: c.get("user").id },
+        {
+          status: body.decision,
+          note: body.note || null,
+          reviewerId: c.get("user").id,
+          ...(body.acknowledgedFindings ? { acknowledgedFindings: body.acknowledgedFindings } : {}),
+          mayOverrideBlock: siteRoleAllows(c.get("siteRole"), "site.skills.override_scan"),
+        },
       );
       if (!result.ok) {
         if (result.error === "not_found")
           return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        if (result.error === "acknowledgement_required")
+          return c.json(
+            {
+              code: result.error,
+              message: "The scan has findings: read them and acknowledge them to approve.",
+            },
+            422,
+          );
+        if (result.error === "findings_changed")
+          return c.json(
+            {
+              code: result.error,
+              message: "The scan's findings changed since you read them: review them again.",
+            },
+            409,
+          );
+        if (result.error === "scan_pending")
+          return c.json(
+            {
+              code: result.error,
+              message: "This version has not been scanned yet: it can be approved once it is.",
+            },
+            409,
+          );
+        if (result.error === "scan_blocked")
+          return c.json(
+            {
+              code: result.error,
+              message:
+                "The scan blocks this version: only a Site admin can approve it, with a reason.",
+            },
+            409,
+          );
+        if (result.error === "override_reason_required")
+          return invalidRequest(c, "Give a reason (note) to approve a version the scan blocks.");
         if (result.error === "blocklisted")
           return c.json(
             {
@@ -113,20 +182,43 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     },
   );
 
+  // The team's skill switches: personal skills (KOBE-80) and the catalog switches (KOBE-316,
+  // SK25: "Members may add catalog skills for themselves", "Builders may install catalog
+  // skills"). Any member reads them; Team admins change them, each change audited.
+  const settingsJson = async (teamId: string) => {
+    const catalog = await getCatalogSwitches(db, teamId);
+    return {
+      personalSkillsDisabled: await getPersonalSkillsDisabled(db, teamId),
+      membersMayAddCatalog: catalog.membersMayAdd,
+      buildersMayInstallCatalog: catalog.buildersMayInstall,
+    };
+  };
+
   app.get("/settings", requireTeamPermission("team.read"), async (c) =>
-    c.json({ personalSkillsDisabled: await getPersonalSkillsDisabled(db, c.get("team").id) }),
+    c.json(await settingsJson(c.get("team").id)),
   );
 
   app.put("/settings", requireTeamPermission("team.skills.review"), async (c) => {
     const body = await parseBody(c, settingsSchema);
-    if (!body) return invalidRequest(c, "Send personalSkillsDisabled: true or false.");
-    const value = await setPersonalSkillsDisabled(
-      db,
-      c.get("team").id,
-      c.get("user").id,
-      body.personalSkillsDisabled,
-    );
-    return c.json({ personalSkillsDisabled: value });
+    if (!body)
+      return invalidRequest(
+        c,
+        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog: true or false.",
+      );
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    if (body.personalSkillsDisabled !== undefined)
+      await setPersonalSkillsDisabled(db, teamId, userId, body.personalSkillsDisabled);
+    if (body.membersMayAddCatalog !== undefined || body.buildersMayInstallCatalog !== undefined)
+      await setCatalogSwitches(db, teamId, userId, {
+        ...(body.membersMayAddCatalog !== undefined
+          ? { membersMayAdd: body.membersMayAddCatalog }
+          : {}),
+        ...(body.buildersMayInstallCatalog !== undefined
+          ? { buildersMayInstall: body.buildersMayInstallCatalog }
+          : {}),
+      });
+    return c.json(await settingsJson(teamId));
   });
 
   return app;

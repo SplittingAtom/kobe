@@ -619,6 +619,68 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Agents freeze their skill versions (KOBE-318, migrations `0139_agent_skill_manifest` and
+  `0140_agent_skill_manifest_backfill`).** A published team agent version now runs the exact team
+  skill versions it named at publish, not the newest approved one: approving a newer version
+  changes the agent at its next publish (the agent builder says "Skill update available"). A
+  publish freezes each named team skill's newest version that can load and leaves out, with a
+  warning, one that has none. Every existing team agent version is frozen at the versions it
+  resolved to on upgrade day, so nothing changes on upgrade; the Job log says how many
+  (`kobe: … team agent versions frozen at … local skill versions`). A skill whose only versions
+  were pending review on upgrade day is not frozen: once approved, it reaches the agent at its
+  next publish. Catalog skills (Kobe's included) still follow the team's install; personal and
+  gallery agents freeze nothing. A frozen version that is later blocklisted, suspended by a rescan
+  or no longer approved is left out of runs with a notice until the agent is published again.
+  The backfill holds `team_agent_versions`, `team_skills`, `team_skill_reviews` and
+  `team_skill_installs` for its length, so run starts wait meanwhile (about 4 s for 20,000 agent
+  versions naming 8 skills each over 40,000 review rows, measured on a dev server). Server pods of
+  the previous release can't publish team agents (they answer 500) from the end of the Job until
+  Helm replaces them; run starts and reads keep working.
+  **Rolling back across this release and Kobe skills (KOBE-317, migrations 0137–0140) is
+  unsupported:** after a `helm rollback` the previous release can't publish team agents and ignores
+  the freeze. Take a `kobe backup` first. To go back, reinstall the previous release and restore
+  that backup (changes made after the upgrade are lost).
+- **Skill packages (KOBE-310, migration `0131_skill_store`).** Additive: a site-wide
+  `skill_hash_checks` table and a nullable `package_storage_key` on the skill version tables, so
+  the previous release keeps working and `helm rollback` is safe. After the upgrade the servers check, in the background (at start and every 10 minutes, one replica at a time), each stored skill version against the package contract
+  ([skill packages](skill-package.md#identity-one-hash-per-payload)) and logs
+  `skills: stored hashes checked against the package contract` with the counts: `aliased` versions
+  held `evals/` or `kobe.skill.yaml` (they share one blocklist identity with their runtime
+  payload), `legacy` ones use paths today's rules refuse (they keep running, but can't be
+  promoted or exported until re-saved), `unreadable` ones are retried at the next start. Uploads
+  from now on refuse such paths (`reserved_path`, `path_conflict`, `unsafe_path`), and a
+  package's `evals/` and `kobe.skill.yaml` no longer reach the sandbox.
+- **Skill version numbers (KOBE-308, migrations `0129_skill_semver` and
+  `0130_skill_semver_backfill`).** Every team and personal skill version gets a semver: version
+  n uploaded before becomes `0.n.0` (with `seq` n), and the Job log says how many
+  (`kobe: … skill versions numbered 0.<n>.0`). New uploads take the next minor unless the
+  uploader gives a higher number. Team skills set to "Offer to all agents" get the access mode
+  `default_on`, the others `available`. No row is removed or renumbered. Server pods of the
+  previous release can't store skill uploads once the Job has run (a version without a semver is
+  refused), from the end of the Job until Helm replaces them, and for as long as a `helm rollback`
+  keeps the previous release running; run starts and reads keep working. A team admin who turns
+  "Offer to all agents" on or off on a rolled-back release leaves the access mode behind. Since
+  KOBE-316 the access mode is set directly (Team console, a skill's Access selector), and an
+  offer written alone reads as On by default; after upgrading again, check that skill's Access.
+- **Members' own skill choices (KOBE-316, migration `0136_member_personal_enablements`).**
+  Members turn each personal skill on or off per team (`member_skill_enablements` gains
+  `personal_skill_id`; no row means on, so nothing changes on upgrade). Team skills get the access
+  mode selector in place of "Offer to all agents"; Builders set Available, On by default and
+  Hidden, Team admins also Required. Two team switches, "Members may add catalog skills for
+  themselves" and "Builders may install catalog skills", are on by default (migration 0135).
+- **Personal skill tables (KOBE-307, migration `0128_personal_skills_rename`).** Personal skills
+  are no longer named after the Site: `site_skills`, `site_skill_versions` and `site_skill_scans`
+  become `personal_skills`, `personal_skill_versions` and `personal_skill_scans`, with their
+  constraints and the trigger `personal_skill_versions_immutable`. Everything is renamed in place
+  (catalog only: no table is rewritten, no row copied, no audit row changed). Server pods of the
+  previous release fail run starts and skill uploads and lists on the renamed tables from the end
+  of the migration Job until Helm replaces them, so expect errors for that short window. Queries,
+  dashboards or scripts of your own that read `site_skill*` tables must use the new names. A
+  backup taken before this release restores only on the release it was taken with
+  ([backup and restore](backup-restore.md#limits)).
+  **This upgrade cannot be undone with `helm rollback`:** the previous release fails on the
+  renamed tables. Take a `kobe backup` first. To go back, reinstall the previous release and
+  restore that backup (changes made after the upgrade are lost).
 - **Site names in the database (KOBE-256, migration `0091_site_rename`).** The `install_*` tables
   become `site_*` (`site_settings`, `site_roles`, `site_agents`, …), with their constraints,
   indexes and triggers; the types `install_role` and `install_agent_scope` become `site_role` and

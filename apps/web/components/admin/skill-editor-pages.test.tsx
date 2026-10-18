@@ -16,6 +16,7 @@ const SKILL = {
   slug: "report-writer",
   description: "Writes reports",
   latest_version: 2,
+  latest_semver: "0.2.0",
   owner_user_id: "u-me",
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-02T10:00:00Z",
@@ -29,8 +30,15 @@ const BUNDLE = zipSync({
   "img/logo.png": PNG,
 });
 const SAVED = (version: number) => ({
-  skill: { ...SKILL, latest_version: version },
-  version: { version, content_hash: "h", size_bytes: 1, file_count: 3, uploaded_at: "x" },
+  skill: { ...SKILL, latest_version: version, latest_semver: `0.${version}.0` },
+  version: {
+    version,
+    semver: `0.${version}.0`,
+    content_hash: "h",
+    size_bytes: 1,
+    file_count: 3,
+    uploaded_at: "x",
+  },
 });
 const EXISTING = {
   "GET /v1/skills/s-1": [200, { skill: SKILL }],
@@ -77,6 +85,7 @@ describe("Skills list", () => {
     renderTeam(<SkillsPage />);
     const link = await screen.findByRole("link", { name: "report-writer" });
     expect(link.getAttribute("href")).toBe("/admin/team/skills/s-1");
+    expect(link.closest("tr")?.textContent).toContain("v0.2.0");
     expect(screen.getByRole("link", { name: "New skill" }).getAttribute("href")).toBe(
       "/admin/team/skills/new",
     );
@@ -147,12 +156,12 @@ describe("Skill editor: edit", () => {
       "# Guide",
     );
     expect(screen.getByText(/img\/logo\.png/)).toBeTruthy();
-    expect(screen.getByText("Current version: v2.")).toBeTruthy();
+    expect(screen.getByText("Current version: v0.2.0.")).toBeTruthy();
 
     await userEvent.type(body, "More.");
     await userEvent.click(screen.getByRole("button", { name: "Save as new version" }));
-    await waitFor(() => expect(screen.getByText("Saved as v3.")).toBeTruthy());
-    expect(screen.getByText("Current version: v3.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Saved as v0.3.0.")).toBeTruthy());
+    expect(screen.getByText("Current version: v0.3.0.")).toBeTruthy();
 
     const files = uploaded(calls);
     expect(Object.keys(files).sort()).toEqual(["SKILL.md", "img/logo.png", "refs/guide.md"]);

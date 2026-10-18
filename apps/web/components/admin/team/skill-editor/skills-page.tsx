@@ -16,6 +16,9 @@ import {
 } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { skillPaths, type SkillArea } from "./area";
+import { CatalogInstallsSection } from "./catalog-installs-section";
+import { CatalogSwitchesSection } from "./catalog-switches";
+import { MySkillChoices } from "./my-skill-choices";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 
@@ -66,7 +69,7 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
                     {area === "team" && (
                       <TableCell>{s.scope === "team" ? "Team" : "Personal"}</TableCell>
                     )}
-                    <TableCell>v{s.latestVersion}</TableCell>
+                    <TableCell>v{s.latestSemver}</TableCell>
                     <TableCell>
                       <DateTime value={s.updatedAt} />
                     </TableCell>
@@ -77,6 +80,9 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
           )
         }
       </ResourceView>
+      {area === "my" && <MySkillChoices />}
+      {area === "team" && <CatalogInstallsSection />}
+      {area === "team" && <CatalogSwitchesSection />}
     </>
   );
 }

@@ -1,9 +1,7 @@
 import { z } from "zod";
 import {
   SKILL_BLOCK_REASON_MAX,
-  and,
   desc,
-  eq,
   inArray,
   skillBlocklist,
   sql,
@@ -11,11 +9,17 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { hashGroups } from "./hash-checks.js";
 
 /**
  * The site skill blocklist (KOBE-81, spec D22): SHA-256 hashes of canonical skill bundles that
  * never load anywhere. Every enforcement point reads the table itself (upload, review decision,
  * run start); nothing is cached, so a new entry takes effect on the next request in every team.
+ *
+ * Entries work on alias groups (KOBE-310, docs/skill-package.md "Identity"): a stored hash whose
+ * zip held `evals/` or `kobe.skill.yaml` shares one identity with its runtime hash and every other
+ * stored hash aliased to it. A hash is blocked when any member of its group is listed; adding a
+ * hash whose group is already blocked changes nothing; removing one unblocks the whole group.
  */
 
 /** 64 hex characters in any case; stored lowercase like `content_hash`. */
@@ -33,14 +37,20 @@ export interface BlockedEntry {
   readonly addedAt: Date;
 }
 
-/** Which of `hashes` are blocklisted (a tiny indexed read; call it inside the enforcing transaction). */
+/**
+ * Which of `hashes` are blocked: listed themselves or through a member of their alias group (two
+ * small indexed reads; call it inside the enforcing transaction).
+ */
 export async function blockedAmong(tx: KobeTx, hashes: readonly string[]): Promise<string[]> {
   if (hashes.length === 0) return [];
+  const groups = await hashGroups(tx, hashes);
+  const members = [...new Set([...groups.values()].flat())];
   const rows = await tx
     .select({ hash: skillBlocklist.contentHash })
     .from(skillBlocklist)
-    .where(inArray(skillBlocklist.contentHash, [...new Set(hashes)]));
-  return rows.map((r) => r.hash);
+    .where(inArray(skillBlocklist.contentHash, members));
+  const listed = new Set(rows.map((r) => r.hash));
+  return [...groups].filter(([, group]) => group.some((h) => listed.has(h))).map(([h]) => h);
 }
 
 export async function isBlocked(tx: KobeTx, hash: string): Promise<boolean> {
@@ -104,12 +114,17 @@ export async function listBlocked(
   };
 }
 
-/** Adds a hash; false when it is already listed. Audited (hash only) in the same transaction. */
+/**
+ * Adds a hash; null when it, or a member of its alias group, is already listed (the group is
+ * already blocked). Audited (hash only) in the same transaction.
+ */
 export function addBlocked(
   db: KobeDb,
   entry: { hash: string; reason: string; userId: string },
 ): Promise<BlockedEntry | null> {
   return db.transaction(async (tx) => {
+    await lockBlocklist(tx);
+    if (await isBlocked(tx, entry.hash)) return null;
     const [row] = await tx
       .insert(skillBlocklist)
       .values({ contentHash: entry.hash, reason: entry.reason, addedBy: entry.userId })
@@ -121,15 +136,25 @@ export function addBlocked(
   });
 }
 
-/** Removes a hash; false when it was not listed. Audited in the same transaction. */
+/**
+ * Unblocks `hash` and its whole alias group: every listed member is removed (each audited, hash
+ * only, in the same transaction); false when nothing in the group was listed.
+ */
 export function removeBlocked(db: KobeDb, hash: string): Promise<boolean> {
   return db.transaction(async (tx) => {
+    await lockBlocklist(tx);
+    const group = (await hashGroups(tx, [hash])).get(hash) ?? [hash];
     const rows = await tx
       .delete(skillBlocklist)
-      .where(and(eq(skillBlocklist.contentHash, hash)))
+      .where(inArray(skillBlocklist.contentHash, group))
       .returning({ hash: skillBlocklist.contentHash });
     if (rows.length === 0) return false;
-    await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: hash } });
+    for (const r of rows.sort((a, b) => a.hash.localeCompare(b.hash)))
+      await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: r.hash } });
     return true;
   });
 }
+
+/** Serializes blocklist writes, so two adds in one alias group can't both see it unblocked. */
+const lockBlocklist = (tx: KobeTx) =>
+  tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.skill_blocklist', 0))`);

@@ -34,8 +34,8 @@ import {
   failureInfo,
   threadModelNotEnabled,
 } from "./failure-codes.js";
-import type { Omission } from "../resolver/resolve.js";
-import { recordRunSkillRefsInTx } from "../skills/usage.js";
+import { RUN_SKILLS_MAX, type Omission } from "../resolver/resolve.js";
+import { recordRunSkillRefsInTx, skillUpdatesInTx } from "../skills/usage.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
 import { runThinkingLevel } from "../models/thinking.js";
 import {
@@ -230,6 +230,16 @@ export async function promoteInTx(
       })
       .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
     await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
+    // KOBE-315 (CE12): skills at another version than this thread's last run with them.
+    const updates = await skillUpdatesInTx(tx, teamId, threadId, next.id, resolved.skillRefs ?? []);
+    if (updates.length > 0) {
+      await appendRunEventsInTx(tx, teamId, next.id, [
+        {
+          type: "thread.skill_updated",
+          payload: { thread_id: threadId, skills: updates.slice(0, RUN_SKILLS_MAX) },
+        },
+      ]);
+    }
     // KOBE-77: what the resolver left out, right after `run.started` (never on a recovery restart).
     const items = omittedItems(resolved.omissions ?? []);
     if (items !== undefined) {

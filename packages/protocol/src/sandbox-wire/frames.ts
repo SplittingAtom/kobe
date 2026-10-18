@@ -30,7 +30,7 @@ import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
-import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
+import { SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
   piBridgeCommandSchema,
   piExtensionUiRequestSchema,
@@ -384,11 +384,6 @@ export const piThreadConfigSchema = z.object({
    * effective skill. The sandbox materializes exactly these and nothing else. Absent = none.
    */
   skill_bundles: z.array(skillBundleRefSchema).max(SKILL_BUNDLES_MAX).optional(),
-  /**
-   * Built-in skills baked into the sandbox image that this run's effective skills include
-   * (KOBE-88, skill-bundles.ts). Registered with Pi from the image; nothing is fetched. Absent = none.
-   */
-  builtin_skills: z.array(z.enum(BUILTIN_SKILL_NAMES)).max(BUILTIN_SKILL_NAMES.length).optional(),
   /** Connectors to expose; Pi tool names become `mcp__<name>__<tool>` (verified Pi 1.0.0). */
   mcp_servers: z
     .array(z.strictObject({ name: connectorNameSchema, connector_id: uuidSchema }))

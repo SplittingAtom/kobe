@@ -110,12 +110,9 @@ ENV KOBE_EXEC_EXTENSION=/opt/kobe/pi-extensions/kobe-exec/index.js
 # token file into HTTPS_PROXY for each bash tool call. Root-owned and read-only: it runs in every
 # tool's shell, so sandbox code must not be able to change it.
 COPY images/sandbox/egress-env.sh /opt/kobe/egress-env.sh
-# Built-in gallery skills (KOBE-88): SKILL.md bundles plus offline helper scripts over the Python
-# stack above. Registered with Pi per run only when the run's effective skills list them
-# (`run.start.config.builtin_skills`); root-owned and read-only below. Scripts run through an
-# interpreter (`python scripts/x.py`), so no exec bit is needed.
-COPY images/sandbox/skills/ /opt/kobe/skills/
-ENV KOBE_BUILTIN_SKILLS_DIR=/opt/kobe/skills
+# The former built-in gallery skills (KOBE-88) are Kobe-published catalog skills (KOBE-317): the
+# server ships them (services/server/builtin-skills) and each run fetches them as skill bundles,
+# so the image carries none. Their helper scripts run on the Python stack above.
 
 # Users (KOBE-71): `kobe` (1000) runs kobe-sandbox-agent; group `kobe` (1000) is also the shared
 # /workspace group (the pod's fsGroup). `kobe-agent` (1001) is a group only the agent has (pod
@@ -124,8 +121,7 @@ ENV KOBE_BUILTIN_SKILLS_DIR=/opt/kobe/skills
 # their groups too, so it can hand a Pi its private runtime directory). `kobe-tool-<n>` (3000+n,
 # own group each) are their partner (tool) uids (KOBE-166, docs/design/paired-tool-uid.md): n pairs
 # with `kobe-pi-<n>`, shares the workspace group 1000 only, and is in no group of the Pi's.
-# /workspace is the persistent volume, /opt/kobe/skills holds the built-in gallery skills (KOBE-88,
-# root-owned, read-only), /opt/kobe/pi-extensions the root-owned Pi extensions, /run/kobe-agent the
+# /workspace is the persistent volume, /opt/kobe/pi-extensions the root-owned Pi extensions, /run/kobe-agent the
 # agent-only directory the pod mounts the bootstrap token under, /run/kobe-pi the mount point of
 # the volume the agent creates each Pi's private runtime directory in (KOBE-41/71).
 # Setuid/setgid bits are stripped so sandbox code has no privilege-escalation helpers; the only
@@ -145,13 +141,11 @@ RUN groupadd --gid 1000 kobe \
     done \
  && git config --system --add safe.directory /workspace \
  && git config --system --add safe.directory '/workspace/*' \
- && mkdir -p /workspace /opt/kobe/skills /run/kobe-agent /run/kobe-pi \
+ && mkdir -p /workspace /run/kobe-agent /run/kobe-pi \
  && chown 1000:1001 /run/kobe-agent && chmod 0700 /run/kobe-agent \
  && chmod 0555 /opt/kobe/entrypoint.sh \
  && chown 0:0 /opt/kobe/egress-env.sh && chmod 0444 /opt/kobe/egress-env.sh \
- && chown -R 0:0 /opt/kobe/pi-extensions /opt/kobe/skills \
- && find /opt/kobe/skills -type d -exec chmod 0555 {} + \
- && find /opt/kobe/skills -type f -exec chmod 0444 {} + \
+ && chown -R 0:0 /opt/kobe/pi-extensions \
  && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js /opt/kobe/pi-extensions/kobe-tools/*.js /opt/kobe/pi-extensions/kobe-exec/*.js \
  && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models /opt/kobe/pi-extensions/kobe-tools /opt/kobe/pi-extensions/kobe-exec \
  && chown kobe:kobe /workspace \

@@ -64,8 +64,8 @@ async function seedTeamSkill(
     const hash = hashOf(`${team}:${slug}`, i + 1);
     await admin.query(
       `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
-         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
-       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5)`,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5, '0.' || $3::int || '.0', $3::int)`,
       [team, skillId, i + 1, hash, ownerId],
     );
     await admin.query(
@@ -149,7 +149,7 @@ describe("ac-1: the server records a skill use from the run's own SKILL.md read"
     const given = hashOf(`${w.team}:pretty-html`);
     expect(frame.config?.skill_bundles?.map((b) => b.sha256)).toEqual([given]);
     expect((await skillsUsed(w.team, run)).refs).toEqual([
-      { name: "pretty-html", source: "team", sha256: given },
+      { name: "pretty-html", source: "team", sha256: given, semver: "0.1.0" },
     ]);
 
     readCall(ws, frame, "forged", storePath(hashOf(`${w.team}:not-given`)));
@@ -173,6 +173,7 @@ describe("ac-1: the server records a skill use from the run's own SKILL.md read"
         tool_call_id: "real",
         name: "pretty-html",
         source: "team",
+        semver: "0.1.0",
       },
     ]);
   });
@@ -315,7 +316,7 @@ describe("ac-2: Offer to all agents", () => {
     );
     expect(resolved.ok && resolved.config?.skills).toEqual(["nightly"]);
     expect(resolved.ok && resolved.skillRefs).toEqual([
-      { name: "nightly", source: "team", sha256: hashOf(`${w.team}:nightly`) },
+      { name: "nightly", source: "team", sha256: hashOf(`${w.team}:nightly`), semver: "0.1.0" },
     ]);
   });
 

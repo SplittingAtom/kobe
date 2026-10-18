@@ -19,6 +19,8 @@ export interface SkillReview {
   readonly skillId: string;
   readonly slug: string;
   readonly version: number;
+  /** MAJOR.MINOR.PATCH (KOBE-308): what the UI shows; `version` addresses the API. */
+  readonly semver: string;
   readonly contentHash: string;
   /** `personal`: a member's personal skill that needs this team's approval. */
   readonly scope: "team" | "personal";
@@ -26,6 +28,10 @@ export interface SkillReview {
   readonly unscanned: boolean;
   readonly status: ReviewStatus;
   readonly flagged: boolean;
+  /** Scan tier (KOBE-312): Caution findings need acknowledging; Block needs a Site admin. */
+  readonly verdict: "pass" | "caution" | "block";
+  /** Sent back as `acknowledgedFindings` to approve exactly the findings shown (KOBE-312). */
+  readonly findingsDigest: string;
   readonly findings: readonly SkillFinding[];
   readonly scripts: readonly string[];
   readonly skipped: readonly string[];
@@ -51,10 +57,11 @@ export async function decideSkillReview(
   teamId: string,
   review: Pick<SkillReview, "skillId" | "version">,
   decision: "approved" | "rejected",
+  options: { readonly acknowledgedFindings?: string; readonly note?: string } = {},
 ): Promise<ApiResult<SkillReview>> {
   const res = await apiRequest<{ review: SkillReview }>(
     `${BASE}/${enc(review.skillId)}/versions/${review.version}`,
-    { method: "POST", json: { decision }, teamId },
+    { method: "POST", json: { decision, ...options }, teamId },
   );
   return res.ok ? { ...res, data: res.data.review } : res;
 }
@@ -76,4 +83,31 @@ export async function putPersonalSkillsDisabled(
     teamId,
   });
   return res.ok ? { ...res, data: res.data.personalSkillsDisabled } : res;
+}
+
+/** The team's catalog switches (KOBE-316, SK25), both on by default. */
+export interface CatalogSwitches {
+  readonly membersMayAddCatalog: boolean;
+  readonly buildersMayInstallCatalog: boolean;
+}
+
+export async function getCatalogSwitches(teamId: string): Promise<ApiResult<CatalogSwitches>> {
+  const res = await apiRequest<CatalogSwitches>(`${BASE}/settings`, { teamId });
+  return res.ok
+    ? {
+        ...res,
+        data: {
+          membersMayAddCatalog: res.data.membersMayAddCatalog,
+          buildersMayInstallCatalog: res.data.buildersMayInstallCatalog,
+        },
+      }
+    : res;
+}
+
+/** Changes one or both switches (Team admins; audited). */
+export function putCatalogSwitches(
+  teamId: string,
+  change: Partial<CatalogSwitches>,
+): Promise<ApiResult<CatalogSwitches>> {
+  return apiRequest(`${BASE}/settings`, { method: "PUT", json: change, teamId });
 }

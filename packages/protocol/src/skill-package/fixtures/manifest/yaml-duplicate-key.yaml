@@ -1,0 +1,5 @@
+apiVersion: kobe.dev/skill/v1
+name: notes
+name: other
+version: 0.1.0
+summary: Takes meeting notes.

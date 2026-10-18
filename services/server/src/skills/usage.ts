@@ -164,3 +164,54 @@ export async function skillUsageInTx(
   }
   return { uses, lastUsedAt: last, agents };
 }
+
+/** A skill the run loads at another version than the thread's last run with it (CE12). */
+export interface SkillUpdate {
+  readonly name: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+/** Earlier runs looked at for each skill's previous version (newest first). */
+const UPDATE_LOOKBACK_RUNS = 20;
+
+/**
+ * The "Skill updated" changes of a run (KOBE-315, SK27, CE12): each skill it loads whose newest
+ * earlier run in the same thread (among the last {@link UPDATE_LOOKBACK_RUNS} started) loaded it
+ * at another version. Pure: `earlier` is newest first.
+ */
+export function skillUpdatesOf(
+  earlier: readonly (readonly RunSkillRef[])[],
+  current: readonly RunSkillRef[],
+): SkillUpdate[] {
+  const previous = new Map<string, string>();
+  for (const refs of earlier)
+    for (const r of refs) if (r.semver && !previous.has(r.name)) previous.set(r.name, r.semver);
+  const updates: SkillUpdate[] = [];
+  for (const r of current) {
+    const from = previous.get(r.name);
+    if (r.semver && from && from !== r.semver) updates.push({ name: r.name, from, to: r.semver });
+  }
+  return updates;
+}
+
+/** {@link skillUpdatesOf} for a run about to start, from the thread's earlier started runs. */
+export async function skillUpdatesInTx(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  runId: string,
+  current: readonly RunSkillRef[],
+): Promise<SkillUpdate[]> {
+  if (!current.some((r) => r.semver)) return [];
+  const res = await tx.execute<{ refs: RunSkillRef[] }>(sql`
+    SELECT skill_refs AS refs FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND id <> ${runId}
+       AND started_at IS NOT NULL
+     ORDER BY started_at DESC, created_at DESC
+     LIMIT ${UPDATE_LOOKBACK_RUNS}`);
+  return skillUpdatesOf(
+    res.rows.map((r) => r.refs),
+    current,
+  );
+}

@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: notes
+version: 0.1.0
+summary: Takes meeting notes.
+capabilities:
+  egress: ["*.example.com"]

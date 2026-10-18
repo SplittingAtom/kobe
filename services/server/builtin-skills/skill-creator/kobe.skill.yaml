@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: skill-creator
+version: 1.0.0
+summary: "Write, validate and package a Kobe skill: SKILL.md, scripts and references, by Kobe's rules."
+license: Apache-2.0
+changelog: Published by Kobe from the built-in skill of the same name.

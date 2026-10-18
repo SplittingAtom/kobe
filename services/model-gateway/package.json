@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Model gateway shim (spec D30): verifies sandbox session tokens and forwards inference to Bifrost with the member's virtual key",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

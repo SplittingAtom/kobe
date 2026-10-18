@@ -15,12 +15,7 @@ import { TAMPER_AUDIT_ATTEMPTS, auditRuntimeTamperInTx } from "./sandbox-wire/ru
  */
 const f = new RunFixture();
 const ACTION = "sandbox.runtime_tampered";
-const CAPABLE = [
-  "skill_bundles",
-  "builtin_skills",
-  CAPABILITY_RUN_TOKEN,
-  CAPABILITY_THREAD_COMPACT,
-];
+const CAPABLE = ["skill_bundles", CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPACT];
 const SANDBOX_TEXT = "agent/models.json changed by pid 4242";
 
 beforeAll(async () => {

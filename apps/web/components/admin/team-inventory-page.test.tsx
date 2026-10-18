@@ -393,6 +393,7 @@ describe("Inventory: skills and connectors (KOBE-291)", () => {
     slug: "pdf-tools",
     description: "Reads PDFs",
     latestVersion: 3,
+    latestSemver: "1.2.0",
     ownerUserId: null,
     createdAt: "2026-10-01T10:00:00Z",
     updatedAt: "2026-10-02T10:00:00Z",
@@ -449,7 +450,7 @@ describe("Inventory: skills and connectors (KOBE-291)", () => {
     const skillRow = (await within(skills).findByRole("rowheader", { name: /pdf-tools/ })).closest(
       "tr",
     ) as HTMLElement;
-    expect(skillRow.textContent).toMatch(/Reads PDFs.*v3/);
+    expect(skillRow.textContent).toMatch(/Reads PDFs.*v1\.2\.0/);
     expect(
       within(skillRow).getByRole("link", { name: "Open pdf-tools" }).getAttribute("href"),
     ).toBe("/admin/team/skills/s-1");

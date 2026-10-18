@@ -121,24 +121,33 @@ function ReviewList({
     review: SkillReview,
     decision: "approved" | "rejected",
     trigger: HTMLElement | null,
+    reason: string,
   ) {
-    if (
+    // Approving over findings is an explicit acknowledgement (KOBE-312): the dialog is it, and it
+    // covers exactly the findings shown (their digest; the server refuses if they changed).
+    const findings = `${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}`;
+    const acknowledged =
       decision === "approved" &&
-      review.flagged &&
-      !(await confirm(
+      review.verdict !== "pass" &&
+      (await confirm(
         {
-          title: `Approve ${review.slug} v${review.version} anyway?`,
-          description: `It was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}).`,
+          title: `Approve ${review.slug} v${review.semver} anyway?`,
+          description:
+            review.verdict === "block"
+              ? `The scan blocks it (${findings}). Only a Site admin can approve it, with a reason; the override is audited.`
+              : `It was flagged by the scan (${findings}). Approving acknowledges you read them.`,
           confirmLabel: "Approve anyway",
         },
         trigger,
-      ))
-    ) {
-      return;
-    }
+      ));
+    if (decision === "approved" && review.verdict !== "pass" && !acknowledged) return;
     const done = await mutation.run(
-      () => decideSkillReview(teamId, review, decision),
-      () => `${review.slug} v${review.version} ${decision}.`,
+      () =>
+        decideSkillReview(teamId, review, decision, {
+          ...(acknowledged ? { acknowledgedFindings: review.findingsDigest } : {}),
+          ...(reason.trim() ? { note: reason.trim() } : {}),
+        }),
+      () => `${review.slug} v${review.semver} ${decision}.`,
     );
     if (done) reload();
   }
@@ -157,7 +166,7 @@ function ReviewList({
                   <ReviewItem
                     review={r}
                     busy={mutation.pending}
-                    onDecide={(d, trigger) => void decide(r, d, trigger)}
+                    onDecide={(d, trigger, reason) => void decide(r, d, trigger, reason)}
                   />
                 </li>
               ))}
@@ -177,19 +186,27 @@ function ReviewItem({
 }: {
   readonly review: SkillReview;
   readonly busy: boolean;
-  readonly onDecide: (decision: "approved" | "rejected", trigger: HTMLElement | null) => void;
+  readonly onDecide: (
+    decision: "approved" | "rejected",
+    trigger: HTMLElement | null,
+    reason: string,
+  ) => void;
 }) {
+  const [reason, setReason] = useState("");
   return (
     <article
-      aria-label={`${review.slug} version ${review.version}`}
+      aria-label={`${review.slug} version ${review.semver}`}
       className="box-border rounded-lg border border-console-border bg-console-bg p-3"
     >
       <h3 className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold">
         <span>
-          {review.slug} v{review.version}
+          {review.slug} v{review.semver}
         </span>
         {review.scope === "personal" && <em className="font-normal">(personal skill)</em>}
-        {review.flagged && <Badge tone="attention">Flagged: {review.findings.length}</Badge>}
+        {review.verdict === "caution" && (
+          <Badge tone="attention">Caution: {review.findings.length}</Badge>
+        )}
+        {review.verdict === "block" && <Badge tone="failed">Blocked by scan</Badge>}
         {review.blocked && <Badge tone="failed">Blocklisted</Badge>}
         {review.unscanned && <Badge>Not scanned yet</Badge>}
       </h3>
@@ -214,9 +231,24 @@ function ReviewItem({
           ))}
         </ul>
       )}
+      {review.verdict === "block" && review.status !== "approved" && (
+        <label className="mt-2 block text-sm">
+          Reason for a Site admin override (audited)
+          <textarea
+            className="mt-1 block w-full rounded border border-console-border bg-console-bg p-1"
+            value={reason}
+            maxLength={2000}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+      )}
       <div className="mt-2 flex flex-wrap gap-2">
         {review.status !== "approved" && (
-          <Button size="sm" disabled={busy} onClick={(e) => onDecide("approved", eventTrigger(e))}>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={(e) => onDecide("approved", eventTrigger(e), reason)}
+          >
             Approve
           </Button>
         )}
@@ -225,7 +257,7 @@ function ReviewItem({
             size="sm"
             variant="danger"
             disabled={busy}
-            onClick={(e) => onDecide("rejected", eventTrigger(e))}
+            onClick={(e) => onDecide("rejected", eventTrigger(e), reason)}
           >
             Reject
           </Button>

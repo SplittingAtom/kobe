@@ -1,0 +1,6 @@
+ALTER TABLE "personal_skills" ADD CONSTRAINT "personal_skills_id_owner_unique" UNIQUE("id","owner_user_id");--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" DROP CONSTRAINT "member_skill_enablements_one_skill";--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD COLUMN "personal_skill_id" uuid;--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_personal_skill_fk" FOREIGN KEY ("personal_skill_id","user_id") REFERENCES "public"."personal_skills"("id","owner_user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "member_skill_enablements_personal_unique" ON "member_skill_enablements" USING btree ("team_id","user_id","personal_skill_id") WHERE "member_skill_enablements"."personal_skill_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_one_skill" CHECK (num_nonnulls("member_skill_enablements"."catalog_skill_id", "member_skill_enablements"."team_skill_id", "member_skill_enablements"."personal_skill_id") = 1);

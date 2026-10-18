@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "OpenTelemetry tracing for Kobe services: metadata-only spans, OTLP export from env, trace context propagation",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

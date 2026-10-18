@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Agent markdown file (spec D19, \u00a76.3): strict schema, safe parse, canonical export",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

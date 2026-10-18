@@ -629,14 +629,37 @@ describe("a version whose manifest can't be read (fail closed)", () => {
     await published("bob", id);
     // Manual SQL (or a future format): inserts are allowed, the trigger only stops changes.
     await h.admin.query(
-      `INSERT INTO team_agent_versions (team_id, agent_id, version, frontmatter, prompt, tool_manifest, published_by, draft_revision)
-       VALUES ($1, $2, 2, '{"name":"Corrupt"}', 'x', '{"format":99}', $3, 1)`,
+      `INSERT INTO team_agent_versions (team_id, agent_id, version, frontmatter, prompt, tool_manifest, published_by, draft_revision, skill_manifest)
+       VALUES ($1, $2, 2, '{"name":"Corrupt"}', 'x', '{"format":99}', $3, 1, '{"skills": []}')`,
       [finance, id, ids.bob],
     );
     const res = await as.bob.get(`/v1/agents/${id}/versions/2`);
     expect(res).toMatchObject({ status: 500, json: { code: "version_unreadable" } });
     const rollback = await as.bob.post(`/v1/agents/${id}/rollback`, { version: 2 });
     expect(rollback.json.code).toBe("version_unreadable");
+    const seam = await withTeam(h.deps.database.db, finance, (tx) =>
+      resolvePinnedAgent(
+        tx,
+        { teamId: finance, userId: ids.bob },
+        { agentScope: "team", agentId: id, agentVersion: 2 },
+      ),
+    );
+    expect(seam).toEqual({ ok: false, error: "version_unreadable" });
+  });
+
+  it("also when its frozen skill manifest doesn't parse (KOBE-318)", async () => {
+    const id = await create("bob", "team", "Corrupt skills");
+    await published("bob", id);
+    // A readable tool manifest (version 1's), but a frozen skill entry without id or version.
+    await h.admin.query(
+      `INSERT INTO team_agent_versions (team_id, agent_id, version, frontmatter, prompt, tool_manifest, published_by, draft_revision, skill_manifest)
+       SELECT team_id, agent_id, 2, frontmatter, prompt, tool_manifest, published_by, 1,
+         '{"skills": [{"name": "house"}]}'
+         FROM team_agent_versions WHERE team_id = $1 AND agent_id = $2 AND version = 1`,
+      [finance, id],
+    );
+    const res = await as.bob.get(`/v1/agents/${id}/versions/2`);
+    expect(res).toMatchObject({ status: 500, json: { code: "version_unreadable" } });
     const seam = await withTeam(h.deps.database.db, finance, (tx) =>
       resolvePinnedAgent(
         tx,

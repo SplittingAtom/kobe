@@ -16,7 +16,9 @@ export const SCRIPT_RULES: readonly Rule[] = [
   {
     category: "pipe-to-shell",
     id: "fetch-pipe-shell",
-    pattern: new RegExp(String.raw`\b${FETCH}\b[^|\n]*\|&?\s*(?:sudo\s+(?:-\S+\s+)*)?${SHELL}\b`),
+    pattern: new RegExp(
+      String.raw`\b${FETCH}\b[^|\n]{0,500}\|&?\s*(?:sudo\s+(?:-\S+\s+)*)?${SHELL}\b`,
+    ),
   },
   {
     category: "pipe-to-shell",
@@ -72,7 +74,7 @@ export const SCRIPT_RULES: readonly Rule[] = [
     category: "obfuscation",
     id: "decode-pipe-exec",
     pattern: new RegExp(
-      String.raw`\bbase64\s+(?:-d|-D|--decode)\b[^|\n]*\|\s*(?:sudo\s+)?(?:${SHELL}|python3?|perl|node)\b`,
+      String.raw`\bbase64\s+(?:-d|-D|--decode)\b[^|\n]{0,500}\|\s*(?:sudo\s+)?(?:${SHELL}|python3?|perl|node)\b`,
     ),
   },
   {

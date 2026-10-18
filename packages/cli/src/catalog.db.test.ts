@@ -50,10 +50,15 @@ describe("blob-ref columns on an older schema", () => {
     ];
     const present = await existingColumns(conn(), asked);
     const names = present.map((c) => `${c.table}.${c.column}`);
+    // Added after that level: the hold history (KOBE-304), personal_skill_versions (the 0128
+    // rename), the skill package keys (KOBE-310) and catalog bytes (KOBE-317).
+    const later = (c: { table: string; column: string }) =>
+      c.table === "workspace_file_hold_history" ||
+      c.table === "personal_skill_versions" ||
+      c.table === "registry_versions" ||
+      c.column === "package_storage_key";
     expect(names).toEqual(
-      BLOB_REF_COLUMNS.filter((c) => c.table !== "workspace_file_hold_history").map(
-        (c) => `${c.table}.${c.column}`,
-      ),
+      BLOB_REF_COLUMNS.filter((c) => !later(c)).map((c) => `${c.table}.${c.column}`),
     );
     await expect(referencedObjectKeys(conn(), present)).resolves.toEqual([]);
   });

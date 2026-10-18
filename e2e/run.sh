@@ -2133,7 +2133,8 @@ JS
     expect "the budget and prices are removed again" '^200 ' "$restore"
 
     # KOBE-89, KOBE-254: the one gallery agent, Kobe, completes a short sample task per built-in
-    # skill in the Owner's real sandbox (gVisor, the image's baked built-in skills, no network),
+    # skill in the Owner's real sandbox (gVisor, no network). Since KOBE-317 the skills are Kobe's
+    # catalog skills, fetched as bundles into the run's skill store (sk-<runtime hash>),
     # through the fake model: it answers "bash: <command>" with a bash tool call. Kobe pins no
     # model, so the runs use the team default. The server seeded it at start. Sandbox tools run
     # without approval unless a rule asks (KOBE-37 left one).
@@ -2146,7 +2147,12 @@ JS
       if [[ -z "$id" ]]; then echo "gallery_agent=missing:$1"; return; fi
       chat_run "$2" "${3:-300000}" "" "$id"
     }
-    gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89 && SK=/opt/kobe/skills'
+    gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89'
+    kobe_dir() { # a Kobe skill's directory in the run's skill store: its newest approved version
+      printf '/run/kobe-skills/store/sk-%s' "$(psql_kobe "SELECT v.runtime_hash FROM registry_versions v JOIN registry_skills s ON s.id = v.skill_id WHERE s.name = '$1' AND s.publisher = 'kobe' AND v.state = 'approved' ORDER BY v.seq DESC LIMIT 1")"
+    }
+    contains "Kobe skills: the seven are Kobe-published catalog skills, approved (KOBE-317)" '^7$' \
+      "$(psql_kobe "SELECT count(DISTINCT s.name) FROM registry_skills s JOIN registry_versions v ON v.skill_id = s.id WHERE s.publisher = 'kobe' AND v.state = 'approved'")"
     contains "the gallery holds exactly one agent, Kobe (key kobe)" '^kobe$' \
       "$(psql_kobe "SELECT string_agg(gallery_key, ',') FROM site_agents WHERE scope = 'gallery' AND archived_at IS NULL")"
     contains "Kobe asks for every team connector and narrows no tool" '^all:none$' \
@@ -2157,7 +2163,7 @@ JS
     contains "Kobe: the run completed with the expected text" '^text=fake-openai: hello-kobe-[0-9]+$' "$g_out"
     contains "Kobe: the thread is pinned to the gallery agent" '^gallery$' \
       "$(psql_kobe "SELECT agent_scope FROM threads WHERE id = '$(printf '%s\n' "$g_out" | sed -n 's/^thread_id=//p')'")"
-    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
+    g_out=$(gallery_run kobe "bash: $gal_dir && python $(kobe_dir data-analysis)/scripts/describe.py $(kobe_dir data-analysis)/scripts/sample.csv | grep -c 'rows: 6' && python $(kobe_dir charts)/scripts/chart.py $(kobe_dir charts)/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
     printf '     kobe data: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Kobe data: the run completed" '^terminal=run.completed$' "$g_out"
     contains "Kobe data: the data-analysis skill profiled the data and the charts skill produced a PNG" \
@@ -2171,11 +2177,11 @@ JS
     contains "Kobe: its published prompt has it say plainly that web search is unavailable" \
       'Web search is not available here, so I can only work from the material you give me\.' \
       "$(psql_kobe "SELECT v.prompt FROM site_agent_versions v JOIN site_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
-    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
+    g_out=$(gallery_run kobe "bash: $gal_dir && python $(kobe_dir docx)/scripts/md_to_docx.py $(kobe_dir docx)/scripts/sample.md out.docx --title T >/dev/null && python $(kobe_dir docx)/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python $(kobe_dir pdf)/scripts/md_to_pdf.py $(kobe_dir pdf)/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
     printf '     kobe documents: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Kobe documents: the docx and pdf skills produced and read back the files offline" \
       '^text=fake-openai: tool said: 1 docx-and-pdf-produced$' "$g_out"
-    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
+    g_out=$(gallery_run kobe "bash: $gal_dir && python $(kobe_dir code-review)/scripts/scan.py $(kobe_dir code-review)/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
     printf '     kobe code: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Kobe code: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
 

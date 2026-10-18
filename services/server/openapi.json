@@ -7828,10 +7828,56 @@
                 },
                 "source": {
                   "type": "string",
-                  "enum": ["team", "personal", "builtin"]
+                  "enum": ["team", "personal", "builtin", "catalog"]
+                },
+                "semver": {
+                  "type": "string"
                 }
               },
               "required": ["run_id", "user_entry_id", "tool_call_id", "name", "source"],
+              "additionalProperties": false
+            }
+          },
+          "skill_updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "user_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": ["run_id", "user_entry_id", "name", "from", "to"],
               "additionalProperties": false
             }
           },
@@ -8007,7 +8053,7 @@
             "type": "boolean"
           }
         },
-        "required": ["runs", "approvals", "skills", "projects", "agents", "truncated"],
+        "required": ["runs", "approvals", "skills", "skill_updates", "projects", "agents", "truncated"],
         "additionalProperties": false
       },
       "CompactThreadRequest": {

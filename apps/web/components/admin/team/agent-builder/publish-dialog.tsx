@@ -4,7 +4,6 @@ import {
   isEvalStarted,
   publishTeamAgent,
   type AgentDetail,
-  type AgentDetailSaved,
   type AgentEval,
   type PublishedAgent,
   type EvalStarted,
@@ -40,7 +39,7 @@ export function PublishDialog({
   readonly warnings: readonly string[];
   readonly onClose: () => void;
   /** `version` is the number the server assigned. */
-  readonly onPublished: (result: AgentDetailSaved, version: number) => void;
+  readonly onPublished: (result: PublishedAgent, version: number) => void;
   /** The team requires an Orbit eval first: it started, and publishing follows if it passes. */
   readonly onEvaluating: (evaluation: AgentEval) => void;
   /** Where focus goes when the dialog closes: the Publish button, or what stands for it. */

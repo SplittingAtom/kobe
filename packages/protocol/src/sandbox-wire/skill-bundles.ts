@@ -45,30 +45,9 @@ export const skillBundleRefSchema = z.strictObject({
 });
 export type SkillBundleRef = z.infer<typeof skillBundleRefSchema>;
 
-/**
- * Built-in (site-provided) skills (KOBE-88). The sandbox image bakes the gallery skills read-only
- * under `/opt/kobe/skills/<name>/` (root-owned, not writable by the agent, Pi or tool uids), so
- * there is nothing to fetch: `run.start.config.builtin_skills` lists the names of the built-ins the
- * run's effective skills include, and kobe-sandbox-agent registers exactly those with Pi
- * (`--skill <dir>`), never the unlisted ones. The server decides the list at run start (an agent
- * lists a built-in name like any skill); it is additive, optional and omitted when empty, and is
- * sent only to agents whose `hello.capabilities` lists {@link CAPABILITY_BUILTIN_SKILLS}: a run
- * that lists built-ins on an agent without it fails (`skills_unsupported`).
+/*
+ * Built-in skills (KOBE-88) no longer have a path of their own (KOBE-317, SK4): they are
+ * Kobe-published catalog skills and reach the sandbox as `skill_bundles` like any other. The
+ * `builtin_skills` capability and `run.start.config.builtin_skills` are gone; an older server that
+ * still sends the field to a newer agent never does, because it checks for the capability first.
  */
-export const CAPABILITY_BUILTIN_SKILLS = "builtin_skills";
-
-/** The skills the sandbox image ships. These names are reserved: they never resolve to team skills. */
-export const BUILTIN_SKILL_NAMES = [
-  "data-analysis",
-  "charts",
-  "docx",
-  "pdf",
-  "xlsx",
-  "code-review",
-  "skill-creator",
-] as const;
-export type BuiltinSkillName = (typeof BUILTIN_SKILL_NAMES)[number];
-
-export function isBuiltinSkillName(name: string): name is BuiltinSkillName {
-  return (BUILTIN_SKILL_NAMES as readonly string[]).includes(name);
-}

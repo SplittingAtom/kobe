@@ -7,3 +7,4 @@ export {
 } from "./run-orchestrator.js";
 export { EVENT_PAYLOAD_EXAMPLES } from "./event-examples.js";
 export { EXAMPLE_IDS } from "./ids.js";
+export * from "./skill-hash-vectors.js";

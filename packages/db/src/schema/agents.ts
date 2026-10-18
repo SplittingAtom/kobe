@@ -193,6 +193,18 @@ export const siteAgents = pgTable(
   ],
 );
 
+/** One frozen local skill version of a team agent version (KOBE-318). */
+export interface StoredFrozenSkill {
+  readonly name: string;
+  readonly skill_id: string;
+  readonly version: number;
+}
+
+/** `team_agent_versions.skill_manifest` as stored (the server validates it on every read). */
+export interface StoredSkillManifest {
+  readonly skills: readonly StoredFrozenSkill[];
+}
+
 const versionColumns = () => ({
   version: integer().notNull(),
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
@@ -253,6 +265,15 @@ export const teamAgentVersions = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     agentId: uuid().notNull(),
     ...versionColumns(),
+    /**
+     * The frozen local skill versions (KOBE-318, SK28): the exact team skill version each named
+     * local skill resolved to at publish, `{"skills": [{"name", "skill_id", "version"}]}` in the
+     * agent's order. Runs load these versions, never a newer one; catalog skills (Kobe's too)
+     * are not listed and follow the team install. Nullable here only for the backfill: custom
+     * migration 0140_agent_skill_manifest_backfill freezes existing versions and then requires a
+     * manifest with the SQL-only check `team_agent_versions_skill_manifest`.
+     */
+    skillManifest: jsonb().$type<StoredSkillManifest>(),
   },
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.teamId, t.agentId, t.version] }),

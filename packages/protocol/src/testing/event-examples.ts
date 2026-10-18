@@ -114,6 +114,10 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
   "run.failed": { error: { code: "provider_error", message: "Model provider returned 529" } },
   "run.interrupted": { reason: "sandbox_lost", last_entry_id: "b2c3d4e5", retryable: true },
   "run.budget_stopped": { scope: "team", message: "Team budget reached" },
+  "thread.skill_updated": {
+    thread_id: EXAMPLE_IDS.thread,
+    skills: [{ name: "xlsx", from: "1.4.2", to: "1.4.3" }],
+  },
   "thread.updated": { thread_id: EXAMPLE_IDS.thread, title: "Quarterly revenue by region" },
   "thread.suggestions": {
     thread_id: EXAMPLE_IDS.thread,

@@ -481,3 +481,14 @@ button.teamIcon {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* Icon-action links in the rail (Team console, Export my conversations; KOBE-421) keep the
+   buttons' text colour. `.app a` (chat.module.css) is unlayered, so it beats Tailwind's
+   `text-foreground` utility; this rule is more specific and wins. */
+.rail a[data-slot] {
+  color: var(--foreground);
+}
+
+.rail a[data-slot]:hover {
+  color: var(--accent-foreground);
+}
