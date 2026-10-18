@@ -138,7 +138,10 @@ async function memoryChip(page) {
       .innerText()
       .catch(() => "-");
     out("memory_page", oneLine(said).slice(-400));
-    const alerts = await page.getByRole("alert").allInnerTexts().catch(() => []);
+    const alerts = await page
+      .getByRole("alert")
+      .allInnerTexts()
+      .catch(() => []);
     out("memory_alerts", oneLine(alerts.join(" | ")).slice(0, 300) || "-");
   }
   const undo = page.getByRole("button", { name: /^Undo memory update / }).first();
