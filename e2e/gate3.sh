@@ -511,6 +511,7 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
       contains "ac-4 browser: the thread shows the Memory updated chip" '^memory_chip=visible$' "$br"
       contains "ac-4 browser: ...with Undo" '^memory_undo=present$' "$br"
       contains "ac-4 browser: one click on Undo undoes it" '^memory_undone=yes$' "$br"
+      show "memory doc after the browser's turn" "$(step memory-doc "\"user\":$U_M1,\"docId\":\"$DOC\"")"
     fi
     if [[ -n "${PINNED_THREAD:-}" ]]; then
       contains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br"

@@ -130,6 +130,17 @@ async function memoryChip(page) {
     () => false,
   );
   out("memory_chip", visible ? "visible" : "absent");
+  if (!visible) {
+    // Evidence: did the turn go out and run? The conversation's last words and any alert.
+    const said = await page
+      .locator('[data-shell-region="conversation"]')
+      .first()
+      .innerText()
+      .catch(() => "-");
+    out("memory_page", oneLine(said).slice(-400));
+    const alerts = await page.getByRole("alert").allInnerTexts().catch(() => []);
+    out("memory_alerts", oneLine(alerts.join(" | ")).slice(0, 300) || "-");
+  }
   const undo = page.getByRole("button", { name: /^Undo memory update / }).first();
   const present = (await undo.count()) > 0;
   out("memory_undo", present ? "present" : "absent");
