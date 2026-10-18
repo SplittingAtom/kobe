@@ -35,6 +35,12 @@ concurrency:
 permissions:
   contents: read
 
+# bash with pipefail (`bash --noprofile --norc -eo pipefail {0}`), not the default `bash -e`: the gate
+# shards pipe their run through `tee`, and without pipefail tee's status hid every gate's FAILED.
+defaults:
+  run:
+    shell: bash
+
 env:
   K3D_VERSION: v5.9.0
   K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
@@ -72,7 +78,7 @@ jobs:
           echo "ready=${ready} (draft now: ${draft})" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "ready=${ready}" >> "$GITHUB_OUTPUT"
           files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[].filename')"
-          if printf '%s\n' "${files}" | grep -qvE '^docs/|\.md$'; then code=true; else code=false; fi
+          if grep -qvE '^docs/|\.md$' <<<"${files}"; then code=true; else code=false; fi
           echo "code=${code}" | tee -a "$GITHUB_OUTPUT"
 
   image:
@@ -278,7 +284,8 @@ jobs:
           KOBE_DOCKERHUB_MIRROR: ${{ runner.environment == 'github-hosted' && 'https://mirror.gcr.io' || 'http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000' }}
           KOBE_IMAGE_ARCHIVES: ${{ matrix.shard == 'restore' && format('{0}/e2e-images', runner.temp) || '' }}
         run: |
-          # Gate shards keep their output for the stories job (GitHub's bash runs with pipefail).
+          # Gate shards keep their output for the stories job; `shell: bash` (above) has pipefail,
+          # so a gate's own exit status, not tee's, ends the step.
           logs="${RUNNER_TEMP}/gate-logs"
           mkdir -p "${logs}"
           case "${SHARD}" in
@@ -331,8 +338,8 @@ jobs:
         if: failure()
         run: |
           kubectl get pods -A -o wide
-          kubectl -n kobe-dev describe pods | tail -200
-          kubectl get events -A --sort-by=.lastTimestamp | tail -80
+          kubectl -n kobe-dev describe pods | tail -200 || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -80 || true
           kubectl -n kobe-dev logs --all-containers --prefix --tail=50 -l app.kubernetes.io/name=kobe || true
           kubectl get sandboxes,sandboxclaims,sandboxwarmpools,networkpolicies -A || true
           kubectl -n kobe-team-e2e describe pods | tail -120 || true
@@ -372,7 +379,11 @@ jobs:
             exit 1
           fi
           ls -l "${KOBE_GATE4_LOGS}"
-          KOBE_GATE4_VERDICT_ONLY=1 e2e/gate4.sh | tee -a "$GITHUB_STEP_SUMMARY"
+          rc=0
+          # Every gate run reached its verdict and none says FAILED (gate5 too), then U1-U16.
+          e2e/gate-verdicts.sh "${KOBE_GATE4_LOGS}" | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+          KOBE_GATE4_VERDICT_ONLY=1 e2e/gate4.sh | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+          exit "$rc"
 
   # The required check (branch protection and the merge-queue ruleset name it): passes only when
   # every image built, every shard passed and every story is proven. Skipped for draft PRs, as the

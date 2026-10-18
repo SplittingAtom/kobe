@@ -16,6 +16,11 @@ concurrency:
 permissions:
   contents: read
 
+# bash with pipefail for every step, as in e2e.yml: a failing command before a pipe fails the step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   checks:
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}

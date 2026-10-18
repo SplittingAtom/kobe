@@ -43,7 +43,9 @@ CLIENT_JS=$(cat e2e/gate1/client.mjs)
 AGENT_JS=$(cat e2e/gate1/agent.mjs)
 PODS=()
 cleanup() {
+  local rc=$?
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
+  verdict_on_exit "$rc" "Gate 1 suite"
 }
 trap cleanup EXIT
 
@@ -309,7 +311,7 @@ if [[ "$STEPS" == *" cold "* ]]; then
 fi
 
 if ((failed)); then
-  echo "Gate 1 suite: FAILED"
+  verdict "Gate 1 suite: FAILED"
   exit 1
 fi
-echo "Gate 1 suite: all checks passed"
+verdict "Gate 1 suite: all checks passed"

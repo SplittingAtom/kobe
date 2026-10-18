@@ -57,10 +57,12 @@ chmod 700 "$WORK"
 PODS=()
 UNDO=()
 cleanup() {
+  local rc=$?
   local u p
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   for u in "${UNDO[@]+"${UNDO[@]}"}"; do eval "$u" >/dev/null 2>&1 || true; done
   rm -rf "$WORK"
+  verdict_on_exit "$rc" "Gate 5"
 }
 trap cleanup EXIT
 want() { [[ " $STORIES " == *" $1 "* ]]; }
@@ -259,11 +261,11 @@ for s in $STORIES; do
 done
 n=$(wc -w <<<"$STORIES" | tr -d ' ')
 if ((failed)); then
-  echo "Gate 5: FAILED ($proven of $n stories proven; the API checks above count too)"
+  verdict "Gate 5: FAILED ($proven of $n stories proven; the API checks above count too)"
   exit 1
 fi
 if ((xfailed_stories)); then
-  echo "Gate 5: $proven of $n stories proven, $xfailed_stories with expected failures (filed; KOBE_GATE_STRICT=1 fails them)"
+  verdict "Gate 5: $proven of $n stories proven, $xfailed_stories with expected failures (filed; KOBE_GATE_STRICT=1 fails them)"
 else
-  echo "Gate 5: all $n stories proven"
+  verdict "Gate 5: all $n stories proven"
 fi

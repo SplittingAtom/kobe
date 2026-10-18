@@ -68,10 +68,12 @@ chmod 700 "$WORK"
 PODS=()
 UNDO=()
 cleanup() {
+  local rc=$?
   local u
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   for u in "${UNDO[@]+"${UNDO[@]}"}"; do eval "$u" >/dev/null 2>&1 || true; done
   rm -rf "$WORK"
+  verdict_on_exit "$rc" "Gate 2 suite"
 }
 trap cleanup EXIT
 
@@ -470,7 +472,7 @@ if [[ "$STEPS" == *" scan "* ]] && sbx_need "ac-5 (scan)"; then
 fi
 
 if ((failed)); then
-  echo "Gate 2 suite: FAILED"
+  verdict "Gate 2 suite: FAILED"
   exit 1
 fi
-echo "Gate 2 suite: all checks passed"
+verdict "Gate 2 suite: all checks passed"

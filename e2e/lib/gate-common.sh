@@ -3,10 +3,38 @@
 # Expects: KUBECTL, NS, RELEASE, SERVER, CLIENT_JS (the harness client's source), `failed` and PODS.
 ok() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; failed=1; }
+# The evidence a failed check prints: the lines of the key its regex anchors on (`^key=...`), else
+# the output's last three lines. A long line keeps its start and its end (an agent prompt or a
+# skills list sits at the end of the system prompt the model echoes).
+got() { # regex actual-output
+  local key="" line lines=""
+  [[ "$1" =~ ^\^([A-Za-z0-9_][A-Za-z0-9_\ .-]*)= ]] && key=${BASH_REMATCH[1]}
+  if [[ -n "$key" ]]; then
+    while IFS= read -r line; do [[ "$line" == "$key="* ]] && lines+="$line"$'\n'; done <<<"$2"
+  fi
+  [[ -n "$lines" ]] || lines=$(tail -3 <<<"$2")
+  awk '{ if (length($0) > 1600) print substr($0, 1, 400) " …[" length($0) - 1600 " chars]… " substr($0, length($0) - 1199); else print }' <<<"${lines%$'\n'}"
+}
 # Here-strings, not pipes: `grep -q` and `head` stop reading at the first match, and with pipefail
 # the writer's SIGPIPE ("printf: write error: Broken pipe") turned a passing check into a FAIL.
 contains() { # name, regex, actual output: passes when some line matches regex
-  if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$(tail -3 <<<"$3")]"; fi
+  if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$(got "$2" "$3")]"; fi
+}
+# The run's last line is its verdict, and its exit status agrees (KOBE-232): `verdict` prints the
+# verdict line; a harness that stops before it (set -e, an unbound variable, an early `exit`)
+# prints "<label>: FAILED (stopped early ...)" from its EXIT trap through `verdict_on_exit`.
+GATE_VERDICT_DONE=0
+GATE_ERR_AT=""
+# The last command that failed where set -e applies (its source text, unexpanded): where it stopped.
+trap 'GATE_ERR_AT="line $LINENO: ${BASH_COMMAND:0:200}"' ERR
+verdict() { # line → printed as the run's verdict
+  echo "$1"
+  GATE_VERDICT_DONE=1
+}
+verdict_on_exit() { # exit-status label: the FAILED verdict for a run that ended without one
+  if [[ "$1" != 0 && "$GATE_VERDICT_DONE" != 1 ]]; then
+    echo "$2: FAILED (stopped early, exit $1${GATE_ERR_AT:+, at $GATE_ERR_AT})"
+  fi
 }
 field() { sed -n "s/^$1=//p" <<<"$2" | sed -n 1p; } # key, output → value
 # An expected failure (KOBE-231): a check of a criterion the product does not meet yet, filed as a
@@ -19,9 +47,9 @@ xcontains() { # name, regex, actual output, reason (the filed failure)
     echo "XPASS $1: passes now, remove its expected-fail marker ($4)"
     failed=1
   elif [[ "${KOBE_GATE_STRICT:-0}" == 1 ]]; then
-    fail "$1: got [$(tail -3 <<<"$3")] ($4)"
+    fail "$1: got [$(got "$2" "$3")] ($4)"
   else
-    echo "XFAIL $1: got [$(tail -3 <<<"$3")] ($4)"
+    echo "XFAIL $1: got [$(got "$2" "$3")] ($4)"
     xfailed=$((xfailed + 1))
   fi
 }
