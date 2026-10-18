@@ -2,9 +2,26 @@ import { eq, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe
 import { recordAudit } from "../audit/record.js";
 
 /**
- * The team's skill switches (KOBE-80, D22). Today one: members' personal skills can be left out of
- * the team's runs. No row means the default, personal skills allowed.
+ * The team's skill switches (KOBE-80, D22; SK25): members' personal skills can be left out of the
+ * team's runs, and the catalog switches "Members may add catalog skills for themselves" and
+ * "Builders may install catalog skills" (both on by default). No row means the defaults.
  */
+
+export interface CatalogSwitches {
+  readonly membersMayAdd: boolean;
+  readonly buildersMayInstall: boolean;
+}
+
+export async function readCatalogSwitches(tx: KobeTx, teamId: string): Promise<CatalogSwitches> {
+  const [row] = await tx
+    .select({
+      membersMayAdd: teamSkillSettings.membersMayAddCatalog,
+      buildersMayInstall: teamSkillSettings.buildersMayInstallCatalog,
+    })
+    .from(teamSkillSettings)
+    .where(eq(teamSkillSettings.teamId, teamId));
+  return row ?? { membersMayAdd: true, buildersMayInstall: true };
+}
 
 export async function readPersonalSkillsDisabled(tx: KobeTx, teamId: string): Promise<boolean> {
   const [row] = await tx

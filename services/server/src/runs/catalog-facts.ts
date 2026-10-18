@@ -6,6 +6,7 @@ import {
   type CatalogVersion,
 } from "../resolver/catalog-pins.js";
 import type { SkillOmission, SkillRef } from "../resolver/resolve.js";
+import { readCatalogSwitches } from "../skills/settings.js";
 
 /**
  * Run-start inputs from the Site Skills Catalog (KOBE-315, SK25, SK27), inside `withTeam()`: the
@@ -13,6 +14,13 @@ import type { SkillOmission, SkillRef } from "../resolver/resolve.js";
  * their own adds) and the published versions of those skills. Each install or add becomes a ref at
  * the version its pin selects ({@link pickCatalogVersion}); one whose pin selects nothing runnable
  * becomes an omission (`revoked`, `suspended`, `not_approved`).
+ *
+ * Team gates (SK25, review S1), read here because this is where a run's skill set is decided:
+ * - a catalog skill the team blocked loads neither as an install nor as a member add, whatever
+ *   rows other writers left behind (an agent naming it gets `not_installed`);
+ * - a member add loads only while the team setting "Members may add catalog skills for
+ *   themselves" is on, and never for a skill the team installed Hidden (Hidden means "only for
+ *   agents that name it"). An add that doesn't load is ignored as if it weren't there.
  */
 export interface CatalogFacts {
   /** Step 2: catalog skills the agent names, at the team install's pin. */
@@ -97,20 +105,24 @@ export async function loadCatalogFacts(
     readonly namedCatalog: readonly string[];
   },
 ): Promise<CatalogFacts> {
+  const notBlocked = (skill: ReturnType<typeof sql>) => sql`NOT EXISTS (
+    SELECT 1 FROM team_skill_blocks b WHERE b.team_id = ${args.teamId} AND b.skill_id = ${skill})`;
   const installs = (
     await tx.execute<InstallRow>(sql`
       SELECT i.skill_id, s.name, i.version_id, i.pin_mode::text AS pin_mode, i.access::text AS access
       FROM team_skill_installs i JOIN registry_skills s ON s.id = i.skill_id
-      WHERE i.team_id = ${args.teamId}`)
+      WHERE i.team_id = ${args.teamId} AND ${notBlocked(sql`i.skill_id`)}`)
   ).rows;
+  const { membersMayAdd } = await readCatalogSwitches(tx, args.teamId);
+  const hidden = new Set(installs.filter((i) => i.access === "hidden").map((i) => i.skill_id));
   const enablements = (
     await tx.execute<EnablementRow>(sql`
       SELECT e.catalog_skill_id AS skill_id, s.name, e.enabled, e.version_id,
         e.pin_mode::text AS pin_mode
       FROM member_skill_enablements e JOIN registry_skills s ON s.id = e.catalog_skill_id
       WHERE e.team_id = ${args.teamId} AND e.user_id = ${args.userId}
-        AND e.catalog_skill_id IS NOT NULL`)
-  ).rows;
+        AND e.catalog_skill_id IS NOT NULL AND ${notBlocked(sql`e.catalog_skill_id`)}`)
+  ).rows.filter((e) => e.version_id === null || (membersMayAdd && !hidden.has(e.skill_id)));
   const versions = await versionsOf(tx, [
     ...new Set([...installs.map((i) => i.skill_id), ...enablements.map((e) => e.skill_id)]),
   ]);

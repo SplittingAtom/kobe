@@ -73,8 +73,10 @@ describe("Skill tags in the Site console (KOBE-314)", () => {
     expect(within(row).getByText(/Opted out: few/)).toBeTruthy();
     const syncs = await screen.findByRole("table", { name: "Default syncs" });
     expect(within(syncs).getAllByText("2 of 3 teams")).toHaveLength(2);
-    // Below the minimum count the breakdown is hidden, not partly shown.
-    expect(within(syncs).getAllByText(/Hidden: fewer than 3 teams/)).toHaveLength(2);
+    // While a job runs no counts show (a step would name a team); below the minimum count the
+    // breakdown is hidden, not partly shown.
+    expect(within(syncs).getByText("Counts show when the sync ends")).toBeTruthy();
+    expect(within(syncs).getAllByText(/Hidden: fewer than 3 teams/)).toHaveLength(1);
     expect(within(syncs).getByText("Failed after 5 attempts (no_version)")).toBeTruthy();
   });
 

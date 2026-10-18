@@ -164,3 +164,77 @@ describe("omission reasons", () => {
     expect(r.omissions).toEqual([{ kind: "skill", name: "bad", reason: "blocklisted" }]);
   });
 });
+
+describe("a Required or named skill keeps its name when it is left out (review S2)", () => {
+  const omitted = (r: ReturnType<typeof run>) => r.omissions.map((o) => `${o.name}:${o.reason}`);
+
+  it.each(["revoked", "suspended", "not_approved", "not_installed"] as const)(
+    "Required %s: no personal or step-3 skill of that name stands in",
+    (reason) => {
+      const r = run(
+        input({
+          team: {
+            requiredOmissions: [{ name: "xlsx", reason }],
+            offeredSkills: [cat("xlsx", "9.0.0")],
+          },
+          user: { skills: [mine("xlsx")] },
+        }),
+      );
+      expect(r.skills).toEqual([]);
+      expect(omitted(r)).toEqual([`xlsx:${reason}`, "xlsx:shadowed_by_agent"]);
+    },
+  );
+
+  it.each(["not_installed", "revoked", "suspended"] as const)(
+    "named catalog %s: no personal or step-3 skill of that name stands in",
+    (reason) => {
+      const r = run(
+        input({
+          agent: { skillOmissions: [{ name: "xlsx", reason }] },
+          team: { offeredSkills: [local("xlsx")] },
+          user: { skills: [mine("xlsx")] },
+        }),
+      );
+      expect(r.skills).toEqual([]);
+      expect(omitted(r)).toEqual([`xlsx:${reason}`, "xlsx:shadowed_by_agent"]);
+    },
+  );
+
+  it("named local not_approved or suspended: the personal skill of that name is shadowed", () => {
+    const r = run(
+      input({
+        agent: { unapprovedSkills: ["draft"], suspendedSkills: ["flagged"] },
+        user: { skills: [mine("draft"), mine("flagged")] },
+      }),
+    );
+    expect(r.skills).toEqual([]);
+    expect(omitted(r)).toEqual([
+      "draft:not_approved",
+      "flagged:suspended",
+      "draft:shadowed_by_agent",
+      "flagged:shadowed_by_agent",
+    ]);
+  });
+
+  it("a blocklisted Required skill holds its name against a personal one", () => {
+    const r = run(
+      input({
+        team: { requiredSkills: [cat("bad")] },
+        user: { skills: [mine("bad")] },
+        blockedHashes: ["c-bad-1.0.0"],
+      }),
+    );
+    expect(r.skills).toEqual([]);
+    expect(omitted(r)).toEqual(["bad:blocklisted", "bad:shadowed_by_agent"]);
+  });
+
+  it("a step-3 omission does not hold the name: the personal skill loads", () => {
+    const r = run(
+      input({
+        team: { offeredOmissions: [{ name: "xlsx", reason: "revoked" }] },
+        user: { skills: [mine("xlsx")] },
+      }),
+    );
+    expect(r.skills.map((s) => s.source)).toEqual(["personal"]);
+  });
+});

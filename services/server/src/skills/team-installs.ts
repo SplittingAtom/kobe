@@ -1,4 +1,4 @@
-import { sql, withTeam, type KobeDb } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { addInTeam } from "./default-sync-team.js";
 import {
@@ -34,6 +34,13 @@ export interface RemovedDefault {
   readonly optedOutBy: string;
   readonly reason: string | null;
   readonly at: string;
+}
+
+/** One of the team's own unarchived skills has this name (SK27's name-clash rule). */
+async function hasOwnSkillNamed(tx: KobeTx, teamId: string, name: string): Promise<boolean> {
+  const { rows } = await tx.execute(sql`
+    SELECT 1 FROM team_skills WHERE team_id = ${teamId} AND slug = ${name} AND archived_at IS NULL`);
+  return rows.length > 0;
 }
 
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
@@ -133,7 +140,7 @@ export async function uninstallCatalogSkill(
 
 export type ReinstallResult =
   | { readonly ok: true; readonly semver: string }
-  | { readonly ok: false; readonly code: "not_found" | "no_version" | "blocked" };
+  | { readonly ok: false; readonly code: "not_found" | "no_version" | "blocked" | "name_clash" };
 
 /**
  * Reinstalls a removed default (SK7): clears the team's opt-out and installs the skill as the
@@ -155,6 +162,7 @@ export async function reinstallDefault(
     const blocked = await tx.execute(sql`
       SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     if (blocked.rows.length > 0) return { ok: false, code: "blocked" };
+    if (await hasOwnSkillNamed(tx, teamId, target.name)) return { ok: false, code: "name_clash" };
     const version = await defaultVersion(tx, target);
     if (!version) return { ok: false, code: "no_version" };
     await tx.execute(sql`
@@ -204,15 +212,17 @@ export type InstallResult =
   | { readonly ok: true; readonly semver: string; readonly deprecated: boolean }
   | {
       readonly ok: false;
-      readonly code: "not_found" | "no_version" | "not_installable" | "name_clash";
+      readonly code: "not_found" | "no_version" | "not_installable" | "name_clash" | "blocked";
     };
 
 /**
  * Installs a catalog skill in the team, or changes its install (KOBE-315, SK25): a version by
- * semver (approved; a deprecated one with a warning; never withdrawn or revoked), a pin mode and
- * an access mode. Refused while one of the team's own (unarchived) skills has the same name (SK27:
- * rename or archive it first). Installing clears a Default opt-out; changing an install marks it
- * touched (the team's choice sticks, SK6). Audited.
+ * semver (approved; a deprecated one with a warning; never withdrawn, revoked or suspended by a
+ * rescan), a pin mode and an access mode. Refused while one of the team's own (unarchived) skills
+ * has the same name (SK27: rename or archive it first) and while the team blocks the skill (SK25;
+ * Reinstall refuses it the same way). Installing clears a Default opt-out. Any change to an
+ * existing install (version, pin mode or access: a Roll back or Move pin too) makes it the team's:
+ * touched and origin `team`, so a Default major move never overrides it (SK6). Audited.
  */
 export async function installCatalogSkill(
   db: KobeDb,
@@ -234,22 +244,25 @@ export async function installCatalogSkill(
     );
     const name = skill.rows[0]?.name;
     if (!name) return { ok: false, code: "not_found" };
-    const clash = await tx.execute(sql`
-      SELECT 1 FROM team_skills
-      WHERE team_id = ${teamId} AND slug = ${name} AND archived_at IS NULL`);
-    if (clash.rows.length > 0) return { ok: false, code: "name_clash" };
-    const version = await tx.execute<{ id: string; state: string }>(sql`
-      SELECT id, state::text AS state FROM registry_versions
-      WHERE skill_id = ${skillId} AND semver = ${input.version}`);
+    if (await hasOwnSkillNamed(tx, teamId, name)) return { ok: false, code: "name_clash" };
+    const blocked = await tx.execute(sql`
+      SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    if (blocked.rows.length > 0) return { ok: false, code: "blocked" };
+    const version = await tx.execute<{ id: string; state: string; suspended: boolean }>(sql`
+      SELECT id, state::text AS state, suspended_at IS NOT NULL AS suspended
+      FROM registry_versions WHERE skill_id = ${skillId} AND semver = ${input.version}`);
     const v = version.rows[0];
     if (!v) return { ok: false, code: "no_version" };
-    if (v.state !== "approved" && v.state !== "deprecated")
+    if ((v.state !== "approved" && v.state !== "deprecated") || v.suspended)
       return { ok: false, code: "not_installable" };
     const before = await tx.execute<{ semver: string; pin_mode: string; access: string }>(sql`
       SELECT rv.semver, i.pin_mode::text AS pin_mode, i.access::text AS access
       FROM team_skill_installs i JOIN registry_versions rv ON rv.id = i.version_id
       WHERE i.team_id = ${teamId} AND i.skill_id = ${skillId}`);
     const previous = before.rows[0];
+    const changed = sql`(team_skill_installs.version_id <> EXCLUDED.version_id
+      OR team_skill_installs.pin_mode <> EXCLUDED.pin_mode
+      OR team_skill_installs.access <> EXCLUDED.access)`;
     await tx.execute(sql`
       INSERT INTO team_skill_installs
         (team_id, skill_id, version_id, pin_mode, access, origin, installed_by)
@@ -258,9 +271,8 @@ export async function installCatalogSkill(
       ON CONFLICT (team_id, skill_id) DO UPDATE SET
         version_id = EXCLUDED.version_id, updated_at = now(),
         pin_mode = EXCLUDED.pin_mode, access = EXCLUDED.access,
-        team_changed_at = CASE
-          WHEN team_skill_installs.pin_mode <> EXCLUDED.pin_mode
-            OR team_skill_installs.access <> EXCLUDED.access THEN now()
+        origin = CASE WHEN ${changed} THEN 'team' ELSE team_skill_installs.origin END,
+        team_changed_at = CASE WHEN ${changed} THEN now()
           ELSE team_skill_installs.team_changed_at END`);
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);

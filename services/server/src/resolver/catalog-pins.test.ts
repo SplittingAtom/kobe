@@ -71,6 +71,21 @@ describe("retired versions (SK31)", () => {
     );
   });
 
+  it("Track latest stays in the newest published major: Revoke never drops it back (SK31)", () => {
+    const list = [v("1.9.0"), v("2.0.0", "revoked")];
+    expect(semverOf(pick(list, "latest", "1.9.0"))).toBe("revoked");
+    expect(semverOf(pick(list, "latest", "2.0.0"))).toBe("revoked");
+    // Withdrawn the same way: no move across majors.
+    expect(semverOf(pick([v("1.9.0"), v("2.0.0", "withdrawn")], "latest", "1.9.0"))).toBe(
+      "not_approved",
+    );
+    // Within the newest major, tracking still moves past a revoked top.
+    const within = [v("1.9.0"), v("2.0.0"), v("2.1.0", "revoked")];
+    expect(semverOf(pick(within, "latest", "1.9.0"))).toBe("2.0.0");
+    // A version still in review is not a published major.
+    expect(semverOf(pick([v("1.9.0"), v("2.0.0", "in_review")], "latest", "1.9.0"))).toBe("1.9.0");
+  });
+
   it("a suspended version never runs, and an older one does not take its place", () => {
     const list = [v("1.0.0"), v("1.1.0", "approved", true)];
     expect(semverOf(pick(list, "within_major", "1.0.0"))).toBe("suspended");

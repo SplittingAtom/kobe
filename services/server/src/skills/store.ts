@@ -99,7 +99,8 @@ export type UploadError =
   | "version_limit"
   | "blocklisted"
   | "semver_not_increasing"
-  | "semver_required";
+  | "semver_required"
+  | "name_clash";
 export type UploadResult =
   | { readonly ok: true; readonly skill: SkillRecord; readonly version: SkillVersionRecord }
   | { readonly ok: false; readonly error: Exclude<UploadError, SemverError> }
@@ -162,6 +163,10 @@ export function uploadSkillVersion(
         return { ok: false, error: "version_limit" };
     } else if ((await countSkills(tx, location)) >= MAX_LIVE_SKILLS) {
       return { ok: false, error: "skill_limit" };
+    } else if (location.scope === "team" && (await installedAs(tx, location.teamId, input.slug))) {
+      // SK27 the other way round (review S4): a new team skill never takes the name of a catalog
+      // skill the team installed; the team uninstalls it first.
+      return { ok: false, error: "name_clash" };
     }
     const semver = nextSemver(latest?.semver ?? null, input.semver);
     if (!semver.ok) {
@@ -229,6 +234,14 @@ async function findBySlug(
     and(eq(personalSkills.ownerUserId, location.ownerUserId), eq(personalSkills.slug, slug)),
   );
   return row ? toRecord("personal", row.skill, row.semver) : null;
+}
+
+/** Whether the team installed a catalog skill named `slug` (RLS: inside `withTeam`). */
+async function installedAs(tx: KobeTx, teamId: string, slug: string): Promise<boolean> {
+  const { rows } = await tx.execute(sql`
+    SELECT 1 FROM team_skill_installs i JOIN registry_skills s ON s.id = i.skill_id
+    WHERE i.team_id = ${teamId} AND s.name = ${slug}`);
+  return rows.length > 0;
 }
 
 /** Team skills with their latest version's semver (RLS: inside `withTeam`). */

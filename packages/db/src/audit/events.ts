@@ -1406,6 +1406,8 @@ export const AUDIT_EVENTS = {
     kept: count.optional(),
     optedOut: count.optional(),
     blocked: count.optional(),
+    /** Teams skipped because they have their own skill of the same name (KOBE-315 review). */
+    nameConflicts: count.optional(),
     converted: count.optional(),
     optoutsCleared: count.optional(),
     moved: count.optional(),
@@ -1418,11 +1420,14 @@ export const AUDIT_EVENTS = {
     attempts: count,
     error: z.string().regex(/^[a-z0-9_]{1,64}$/),
   }),
-  /** A Default sync or the new-team hook changed a team's install of a Default skill (SK8). */
+  /**
+   * A Default sync or the new-team hook changed a team's install of a Default skill (SK8), or
+   * skipped the team because it has its own skill of that name (`name_conflict`).
+   */
   "skill.default.applied": event("team", {
     skillId: id,
     name: catalogName,
-    change: z.enum(["installed", "converted", "optout_cleared", "moved"]),
+    change: z.enum(["installed", "converted", "optout_cleared", "moved", "name_conflict"]),
     semver: z.string().max(32).optional(),
   }),
   /** A Team admin uninstalled a catalog skill; for a Default skill that records an opt-out (SK7). */

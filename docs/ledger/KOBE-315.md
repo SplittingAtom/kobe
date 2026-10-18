@@ -4,16 +4,18 @@
 
 ## Handoff (for the agent continuing from KOBE-316)
 
-- **Branch state:** `group-skills-a` holds KOBE-307..315. 314 was reviewed and its fixes are in
-  (`954a2952` migration edit, `ba0f2ad9` code); 315 is waiting for review. Migrations run
-  0128..0135, and the next free number is 0136. Nothing is pushed.
+- **Branch state:** `group-skills-a` holds KOBE-307..315 plus KOBE-423 (backup key columns). The
+  315 review fixes are in (0135 edited in place, then code; see "Review fixes"), waiting for
+  re-review. Migrations run 0128..0135; the next free number is 0136. Nothing is pushed.
 - **Conventions and traps:** as in the KOBE-313 handoff. Also:
   - After any audit event or schema change, rebuild `@kobe/db` before typechecking the server.
   - `UPDATE_OPENAPI=1 npx vitest run src/openapi/document.test.ts` regenerates
     `services/server/openapi.json` when markers or events change.
   - The KOBE-255 test forbids "install" in audit action names.
   - `site-rename-migration.db.test.ts` lists objects with "install" in their names.
-- **For 316:** `team_skills.access` is what the resolver reads now, through
+- **For 316:** `team_skill_settings` has `members_may_add_catalog` (read by the resolver) and
+  `builders_may_install_catalog` (unused yet: 316 adds the setting route and lets Builders install
+  when it is on). `team_skills.access` is what the resolver reads, through
   `teamSkillAccess` in `runs/resolver-input.ts`. Members' toggles are rows in
   `member_skill_enablements`: `team_skill_id` set, `enabled` true or false. Personal skill toggles
   are not read yet.
@@ -110,13 +112,36 @@ web marker and badge.
   and `unavailable` (web labels added), and the event `thread.skill_updated`. `openapi.json` was
   regenerated.
 
+## Review fixes (review-315, review-314 nits)
+
+- **S1 team gates (`catalog-facts.ts`):** installs and member adds of a skill in
+  `team_skill_blocks` never load (named: `not_installed`), whatever rows are left. Member adds load
+  only while `team_skill_settings.members_may_add_catalog` is on (default on) and never for a
+  Hidden install; a disallowed add is ignored. The install PUT and Reinstall refuse `blocked`.
+- **S2:** every step-1/2 omission (Required: revoked, suspended, not_approved; named: not_installed,
+  revoked, suspended, not_approved) claims its name, so no personal or step-3 skill stands in
+  (`shadowed_by_agent`). N1: suspended Required / On by default team skills are reported.
+- **S3:** Track latest follows the newest published major; revoked or withdrawn there never drops
+  back to an older major.
+- **S4:** a new team skill whose slug is an installed catalog skill's name is refused (409
+  `name_clash`). Named resolution: a team skill wins unless the team installed the catalog skill
+  and its own is archived or was never approved.
+- **S5:** any PUT change (version too) marks the install touched and origin `team`; suspended
+  versions are `not_installable`. Deprecated still installs with `deprecated: true` (no ack flag).
+- **S6:** runs with no agent load the team's Required skills (and their notices), nothing else.
+- **Default sync (coordinator):** a team with its own unarchived skill of the name is skipped,
+  audited per team as `skill.default.applied` `change: name_conflict`, counted in
+  `skill_default_syncs.name_conflicts` (masked like the other team counts). Reinstall refuses
+  `name_clash`. Migration 0135 edited in place (also the two catalog switches).
+- **N-314a:** `/default-syncs` shows no counts until a job is done or failed. **N-314b:** an `add`
+  installs the Default's current major.
+- Also N7 (catalog names need a published version) and N8 (dead `offeredSkillNames`). The parity
+  test's generator was seeded by the clock (every fixture identical); it now seeds by label and a
+  second family (name clashes, over the cap) checks D1–D4 exactly. Not done: N2, N4, N5, N6.
+
 ## Open questions (for Chris or the coordinator)
 
-- The Default sync still installs into a team that has a local skill of the same name. At run
-  time the local skill wins in steps 1–2, and in step 3 local sorts first. Should the sync skip
-  such teams instead? (That needs a count column, so a migration.)
-- Builders may install catalog skills (team setting, SK25): no such setting exists yet, so only
-  Team admins can.
+- Builders may install catalog skills: the column exists (0135); 316 wires the setting.
 
 ## Evidence (acceptance criteria → test or command output)
 

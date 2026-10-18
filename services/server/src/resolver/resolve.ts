@@ -144,7 +144,7 @@ export const RUN_SKILLS_MAX = SKILL_BUNDLES_MAX;
  * 4. the member's personal skills.
  * Exclusive agents stop after step 2. A blocklisted hash (or alias) is omitted, never replaced.
  */
-function resolveSkills(input: ResolveInput): {
+export function resolveSkills(input: ResolveInput): {
   skills: SkillRef[];
   omissions: Omission[];
 } {
@@ -158,8 +158,9 @@ function resolveSkills(input: ResolveInput): {
   const taken = new Set<string>();
   /**
    * Steps 1–3: an omission for a block, silence for a name an earlier step already loads. A
-   * blocked Required or named skill still holds its name (`claim`): a later skill of that name
-   * never stands in for it.
+   * Required or named skill holds its name even when it is left out (`claim`: blocklisted here,
+   * or revoked, suspended, not installed or not approved by its loader): a later skill of that
+   * name never stands in for the one the admin or builder chose (SK28: never swapped silently).
    */
   const add = (s: SkillRef, claim = false) => {
     if (isBlocked(s)) {
@@ -170,15 +171,19 @@ function resolveSkills(input: ResolveInput): {
       skills.push(s);
     }
   };
+  const omitClaimed = (name: string, reason: OmissionReason) => {
+    omitName(name, reason);
+    taken.add(name);
+  };
   const exclusive = input.agent.exclusiveSkills;
 
   for (const s of input.team.requiredSkills ?? []) add(s, true);
-  for (const o of input.team.requiredOmissions ?? []) omitName(o.name, o.reason);
+  for (const o of input.team.requiredOmissions ?? []) omitClaimed(o.name, o.reason);
 
   for (const s of [...input.agent.skills, ...(input.agent.catalogSkills ?? [])]) add(s, true);
-  for (const name of input.agent.unapprovedSkills ?? []) omitName(name, "not_approved");
-  for (const name of input.agent.suspendedSkills ?? []) omitName(name, "suspended");
-  for (const o of input.agent.skillOmissions ?? []) omitName(o.name, o.reason);
+  for (const name of input.agent.unapprovedSkills ?? []) omitClaimed(name, "not_approved");
+  for (const name of input.agent.suspendedSkills ?? []) omitClaimed(name, "suspended");
+  for (const o of input.agent.skillOmissions ?? []) omitClaimed(o.name, o.reason);
   // Built-ins (KOBE-88) are the agent's too: a later skill of that name is shadowed by them.
   for (const name of input.agent.builtinSkills ?? []) taken.add(name);
   const steps12 = new Set(taken);

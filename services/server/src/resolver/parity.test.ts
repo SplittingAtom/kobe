@@ -1,15 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { seededRandom } from "../testing/event-stream-fixture.js";
-import { resolveEffective, type ResolveInput, type SkillRef } from "./resolve.js";
+import { createHash } from "node:crypto";
+import { RUN_SKILLS_MAX, resolveEffective, type ResolveInput, type SkillRef } from "./resolve.js";
 
 /**
  * KOBE-315 ac-4: parity with the resolver before SK27. Today's runs (no catalog installs, no
  * Required skills) resolve to the same skills, with the same hashes, and the same omissions as
  * the KOBE-313 resolver did. The only intended difference is order: offered (On by default) team
  * skills are step 3, before personal skills (step 4), so where an offered and a personal skill share
- * a name the offered one now wins; the fixtures below keep such names apart, and the order test
- * in resolve.test.ts covers that case.
+ * a name the offered one now wins. The first family keeps such names apart; the second ("name
+ * clashes and the cap") lets every list share names and run past the cap, and checks the exact
+ * result against the legacy one with each documented difference applied ({@link expectedNow}):
+ *
+ * - D1: an offered skill beats a personal one of the same name (`shadowed`);
+ * - D2 (review S2): a named skill that is not approved or suspended keeps its name, so neither a
+ *   personal (`shadowed_by_agent`) nor an offered skill of that name stands in;
+ * - D3: a blocklisted offered skill gets a `blocklisted` notice (it was left out silently);
+ * - D4: the cap of 64 counts in the new order (named, offered, personal).
  */
+
+/**
+ * A generator seeded by the fixture's label (mulberry32), so each label is its own fixture and a
+ * failure reproduces by name. (`seededRandom` seeds from the clock, which made every fixture of
+ * one run the same.)
+ */
+function seededRandom(label: string): () => number {
+  let a = createHash("sha256").update(label).digest().readUInt32LE(0);
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /** The KOBE-313 skill resolution, verbatim but for types (git 2e4ac678 resolve.ts). */
 function legacySkills(input: ResolveInput) {
@@ -123,18 +146,120 @@ describe("resolver v2 parity with today's runs (ac-4)", () => {
     const after = resolveEffective(input);
     if (!after.ok) throw new Error("resolve failed");
     expect(after.value.skills.map(key).sort()).toEqual(before.skills.map(key).sort());
-    // A blocklisted offered skill now says so (it was left out silently before).
-    const blockedOffered = new Set(
-      (input.team.offeredSkills ?? [])
-        .filter((s) => input.blockedHashes.includes(s.hash) && !input.agent.exclusiveSkills)
-        .map((s) => `${s.name}:blocklisted`),
-    );
+    // A blocklisted offered skill now says so (it was left out silently before), one notice each.
+    const blockedOffered = (input.team.offeredSkills ?? [])
+      .filter((s) => input.blockedHashes.includes(s.hash) && !input.agent.exclusiveSkills)
+      .map((s) => `${s.name}:blocklisted`);
     expect(
       after.value.omissions
         .filter((o) => o.kind === "skill")
         .map(omissionKey)
-        .filter((k) => !blockedOffered.has(k))
         .sort(),
-    ).toEqual(before.omissions.map(omissionKey).sort());
+    ).toEqual([...before.omissions.map(omissionKey), ...blockedOffered].sort());
+  });
+});
+
+/** Fixtures where named, offered, personal, pending and suspended names overlap, up to ~130 skills. */
+function clashFixture(seed: string): ResolveInput {
+  const rnd = seededRandom(seed);
+  const n = (max: number) => Math.floor(rnd() * (max + 1));
+  const names = (count: number, pool: number) => [
+    ...new Set(Array.from({ length: count }, () => `s-${n(pool)}`)),
+  ];
+  let h = 0;
+  const refs = (list: string[], source: "team" | "personal") =>
+    list.map((name): SkillRef => ({ name, hash: `${source}-${name}-${h++}`, source }));
+  const named = refs(names(n(8), 30), "team");
+  const offered = refs(names(n(60), 100), "team");
+  const personal = refs(names(n(60), 100), "personal");
+  const all = [...named, ...offered, ...personal];
+  return {
+    agent: {
+      modelAlias: null,
+      approvalMode: null,
+      skills: named,
+      builtinSkills: rnd() < 0.3 ? ["s-1"] : [],
+      unapprovedSkills: names(n(3), 30).filter((x) => !named.some((s) => s.name === x)),
+      suspendedSkills: rnd() < 0.3 ? ["s-2"].filter((x) => !named.some((s) => s.name === x)) : [],
+      exclusiveSkills: rnd() < 0.2,
+      connectors: [],
+    },
+    team: {
+      models: [{ alias: "fast", isDefault: true }],
+      connectors: [],
+      personalSkillsDisabled: rnd() < 0.15,
+      offeredSkills: offered,
+    },
+    user: { skills: personal, connectedConnectors: [] },
+    approvalFloor: "auto",
+    blockedHashes: all.filter(() => rnd() < 0.1).map((s) => s.hash),
+  };
+}
+
+/** The legacy result with D1–D4 applied (see the header). */
+function expectedNow(input: ResolveInput) {
+  const blocked = new Set(input.blockedHashes);
+  const { agent, team, user } = input;
+  const ex = agent.exclusiveSkills;
+  const claimed = new Set([...(agent.unapprovedSkills ?? []), ...(agent.suspendedSkills ?? [])]);
+  const agentNames = new Set([...agent.skills.map((s) => s.name), ...(agent.builtinSkills ?? [])]);
+  // D2: an offered skill named like a claimed skill no longer loads.
+  const offered = (team.offeredSkills ?? []).filter((s) => !claimed.has(s.name));
+  const offeredLoads = new Set(
+    ex
+      ? []
+      : offered.filter((s) => !blocked.has(s.hash) && !agentNames.has(s.name)).map((s) => s.name),
+  );
+  // D1 and D2: personal skills the legacy resolver loaded that are now shadowed.
+  const shadowed = new Map<string, string>();
+  for (const s of user.skills) {
+    if (ex || team.personalSkillsDisabled || blocked.has(s.hash) || agentNames.has(s.name))
+      continue;
+    if (claimed.has(s.name)) shadowed.set(s.name, "shadowed_by_agent");
+    else if (offeredLoads.has(s.name)) shadowed.set(s.name, "shadowed");
+  }
+  const legacy = legacySkills({
+    ...input,
+    team: { ...team, offeredSkills: offered },
+    user: { ...user, skills: user.skills.filter((s) => !shadowed.has(s.name)) },
+  });
+  // D4: the new order, then the cap.
+  const rank = (s: SkillRef) =>
+    agent.skills.includes(s) ? 0 : (team.offeredSkills ?? []).includes(s) ? 1 : 2;
+  const ordered = [...legacy.skills].sort((a, b) => rank(a) - rank(b));
+  const blockedOffered = ex ? [] : (team.offeredSkills ?? []).filter((s) => blocked.has(s.hash));
+  return {
+    skills: ordered.slice(0, RUN_SKILLS_MAX),
+    omissions: [
+      ...legacy.omissions,
+      ...[...shadowed].map(([name, reason]) => ({ name, reason })),
+      ...blockedOffered.map((s) => ({ name: s.name, reason: "blocklisted" })), // D3
+      ...ordered.slice(RUN_SKILLS_MAX).map((s) => ({ name: s.name, reason: "skill_limit" })),
+    ],
+  };
+}
+
+describe("resolver v2 parity with name clashes and the cap (D1–D4)", () => {
+  const seeds = Array.from({ length: 300 }, (_, i) => `clash-${i}`);
+
+  it.each(seeds)("%s", (seed) => {
+    const input = clashFixture(seed);
+    const want = expectedNow(input);
+    const after = resolveEffective(input);
+    if (!after.ok) throw new Error("resolve failed");
+    expect(after.value.skills.map(key)).toEqual(want.skills.map(key));
+    expect(
+      after.value.omissions
+        .filter((o) => o.kind === "skill")
+        .map(omissionKey)
+        .sort(),
+    ).toEqual(want.omissions.map(omissionKey).sort());
+  });
+
+  it("the fixtures reach every documented difference", () => {
+    const inputs = seeds.map(clashFixture);
+    const reasons = inputs.flatMap((i) => expectedNow(i).omissions.map((o) => o.reason));
+    for (const r of ["shadowed", "shadowed_by_agent", "blocklisted", "skill_limit"])
+      expect(reasons).toContain(r);
   });
 });

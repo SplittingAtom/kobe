@@ -62,6 +62,8 @@ const UPLOAD_ERRORS: Record<
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
   blocklisted: "This skill bundle is on the site's blocklist and can't be uploaded.",
+  name_clash:
+    "The team has installed a catalog skill with this name. Uninstall it or choose another name.",
 };
 
 const skillJson = (s: SkillRecord) => ({

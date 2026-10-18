@@ -53,7 +53,11 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     const errors = {
       not_found: [404, "No catalog skill with that id."],
       no_version: [404, "The skill has no version with that number."],
-      not_installable: [409, "That version was withdrawn or revoked, or is not approved."],
+      not_installable: [
+        409,
+        "That version was withdrawn, revoked or suspended by a rescan, or is not approved.",
+      ],
+      blocked: [409, "The team blocked this skill: unblock it first."],
       name_clash: [
         409,
         "One of this team's own skills has the same name: rename or archive it first.",
@@ -99,15 +103,12 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
           { code: "not_found", message: "That skill is not a removed default here." },
           404,
         );
-      return r.code === "blocked"
-        ? c.json(
-            { code: "blocked", message: "The team blocked this skill: unblock it first." },
-            409,
-          )
-        : c.json(
-            { code: "no_version", message: "The default has no approved version right now." },
-            409,
-          );
+      const messages = {
+        blocked: "The team blocked this skill: unblock it first.",
+        name_clash: "One of this team's own skills has the same name: rename or archive it first.",
+        no_version: "The default has no approved version right now.",
+      } as const;
+      return c.json({ code: r.code, message: messages[r.code] }, 409);
     },
   );
 

@@ -19,6 +19,8 @@ export interface TeamStepResult {
   readonly optedOut: number;
   /** The team blocked the skill (SK25): the sync never installs it there. */
   readonly blocked: number;
+  /** The team has its own unarchived skill of the same name (SK27): skipped there. */
+  readonly nameConflicts: number;
   readonly converted: number;
   readonly optoutsCleared: number;
   readonly moved: number;
@@ -31,6 +33,7 @@ export const NOTHING: TeamStepResult = {
   kept: 0,
   optedOut: 0,
   blocked: 0,
+  nameConflicts: 0,
   converted: 0,
   optoutsCleared: 0,
   moved: 0,
@@ -45,7 +48,9 @@ const installable = (versionId: string) => sql`
 /**
  * `add`: installs the skill On by default, Track within major, origin `default_tag` (SK6). A team
  * that opted out (SK7) or blocked the skill (SK25) is skipped; a team with its own install keeps
- * its settings (SK8).
+ * its settings (SK8). A team with its own unarchived skill of the same name is skipped too
+ * (coordinator decision, SK27's name-clash rule): its audit shows `name_conflict`, so the Team
+ * admin can rename or archive their skill and reinstall the default.
  */
 export async function addInTeam(
   tx: KobeTx,
@@ -61,6 +66,15 @@ export async function addInTeam(
   const optout = await tx.execute(sql`
     SELECT 1 FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
   if (optout.rows.length > 0) return { ...NOTHING, optedOut: 1 };
+  const clash = await tx.execute(sql`
+    SELECT 1 FROM team_skills t JOIN registry_skills s ON s.name = t.slug
+    WHERE t.team_id = ${teamId} AND s.id = ${skillId} AND t.archived_at IS NULL`);
+  if (clash.rows.length > 0) {
+    const has = await tx.execute(sql`
+      SELECT 1 FROM team_skill_installs WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    // An install made before the team skill (an archived one revived) is the team's to keep.
+    if (has.rows.length === 0) return { ...NOTHING, nameConflicts: 1 };
+  }
   const inserted = await tx.execute(sql`
     INSERT INTO team_skill_installs
       (team_id, skill_id, version_id, pin_mode, access, origin, installed_by)
@@ -129,7 +143,8 @@ export async function moveInTeam(
   return { ...NOTHING, moved: moved.rows.length };
 }
 
-export type AppliedChange = "installed" | "converted" | "optout_cleared" | "moved";
+export type AppliedChange =
+  "installed" | "converted" | "optout_cleared" | "moved" | "name_conflict";
 
 /** What a step changed in the team, for the team's audit (SK8, spec §421: installs, pin moves). */
 export function changesOf(step: TeamStepResult): AppliedChange[] {
@@ -138,6 +153,7 @@ export function changesOf(step: TeamStepResult): AppliedChange[] {
     ...(step.converted > 0 ? (["converted"] as const) : []),
     ...(step.optoutsCleared > 0 ? (["optout_cleared"] as const) : []),
     ...(step.moved > 0 ? (["moved"] as const) : []),
+    ...(step.nameConflicts > 0 ? (["name_conflict"] as const) : []),
   ];
 }
 

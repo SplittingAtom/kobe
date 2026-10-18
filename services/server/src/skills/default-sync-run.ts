@@ -75,6 +75,7 @@ const COUNTS = [
   "kept",
   "optedOut",
   "blocked",
+  "nameConflicts",
   "converted",
   "optoutsCleared",
   "moved",
@@ -87,8 +88,10 @@ const plus = (step: TeamStepResult) =>
   >;
 
 /** Team counts that the minimum-count rule (SK26) hides when they are 1 or 2. */
-export const isMasked = (j: Pick<Job, "optedOut" | "optoutsCleared" | "blocked">): boolean =>
-  [j.optedOut, j.optoutsCleared, j.blocked].some((n) => n > 0 && n < 3);
+export const isMasked = (
+  j: Pick<Job, "optedOut" | "optoutsCleared" | "blocked" | "nameConflicts">,
+): boolean =>
+  [j.optedOut, j.optoutsCleared, j.blocked, j.nameConflicts].some((n) => n > 0 && n < 3);
 
 /** Is the job's change still the tag's current state? Read under the shared Default-set lock. */
 async function stillCurrent(tx: KobeTx, job: Job): Promise<boolean> {
@@ -97,6 +100,18 @@ async function stillCurrent(tx: KobeTx, job: Job): Promise<boolean> {
   if (job.kind === "add") return isDefaultSkill(tx, job.skillId);
   const [target] = await defaultTargets(tx, job.skillId);
   return target?.major === job.major;
+}
+
+/**
+ * The major an `add` or `move_major` installs now. An `add` follows the Default's current major,
+ * not the one it was queued with (review N-314b): a backed-off add that runs after a major move
+ * installs the new major, like the move and the new-team hook. A `move_major` is only current while
+ * its major is the Default's ({@link stillCurrent}).
+ */
+async function majorNow(db: KobeDb, job: Job): Promise<number | null> {
+  if (job.kind !== "add") return job.major;
+  const [target] = await defaultTargets(db, job.skillId);
+  return target?.major ?? job.major;
 }
 
 async function teamStep(
@@ -214,8 +229,9 @@ async function start(db: KobeDb, job: Job): Promise<void> {
 
 /** The version `add`/`move_major` installs now (re-read per batch: it may be withdrawn). */
 async function versionOf(db: KobeDb, job: Job): Promise<TargetVersion | null> {
-  if (job.kind === "remove" || job.major === null) return null;
-  return newestApproved(db, job.skillId, job.major);
+  if (job.kind === "remove") return null;
+  const major = await majorNow(db, job);
+  return major === null ? null : newestApproved(db, job.skillId, major);
 }
 
 /** Runs one job to its end, or resumes it after its cursor. Throws on failure. */

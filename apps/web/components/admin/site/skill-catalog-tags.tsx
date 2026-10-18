@@ -230,12 +230,14 @@ function Status({ sync }: { readonly sync: DefaultSync }) {
 
 function Outcome({ sync }: { readonly sync: DefaultSync }) {
   const c = sync.counts;
-  if (!c) return <>Hidden: fewer than 3 teams opted out or blocked it</>;
+  if (!c && (sync.status === "queued" || sync.status === "running"))
+    return <>Counts show when the sync ends</>;
+  if (!c) return <>Hidden: fewer than 3 teams opted out, blocked it or have a skill of that name</>;
   if (sync.kind === "add")
     return (
       <>
         {c.installed} installed, {c.kept} kept their own, {c.optedOut} opted out, {c.blocked}{" "}
-        blocked
+        blocked, {c.nameConflicts} skipped for a name conflict
       </>
     );
   if (sync.kind === "remove")

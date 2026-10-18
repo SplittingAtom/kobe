@@ -81,6 +81,7 @@ export interface DefaultSyncCounts {
   readonly kept: number;
   readonly optedOut: number;
   readonly blocked: number;
+  readonly nameConflicts: number;
   readonly converted: number;
   readonly optoutsCleared: number;
   readonly moved: number;
@@ -109,6 +110,7 @@ export interface DefaultSyncRow {
 }
 
 const SHOWN_SYNCS = 20;
+const ENDED = new Set(["done", "failed"]);
 const iso = (v: unknown) => (v === null ? null : v instanceof Date ? v.toISOString() : String(v));
 
 /** The newest Default sync jobs with their progress; totals only, never team names. */
@@ -122,6 +124,7 @@ export async function listDefaultSyncs(db: KobeDb): Promise<DefaultSyncRow[]> {
       kept: Number(r.kept),
       optedOut: Number(r.opted_out),
       blocked: Number(r.blocked),
+      nameConflicts: Number(r.name_conflicts),
       converted: Number(r.converted),
       optoutsCleared: Number(r.optouts_cleared),
       moved: Number(r.moved),
@@ -138,7 +141,9 @@ export async function listDefaultSyncs(db: KobeDb): Promise<DefaultSyncRow[]> {
       finishedAt: iso(r.finished_at),
       teamsTotal: Number(r.teams_total),
       teamsDone: Number(r.teams_done),
-      counts: isMasked(counts) ? null : counts,
+      // While the job runs, its counts move one team at a time in id order, so a step in a team
+      // count would name that team (review N-314a): progress only, counts once it has ended.
+      counts: isMasked(counts) || !ENDED.has(String(r.status)) ? null : counts,
       attempts: Number(r.attempts),
       lastError: r.last_error === null ? null : String(r.last_error),
       nextAttemptAt: iso(r.next_attempt_at),

@@ -36,6 +36,8 @@ export interface DefaultSyncCounts {
   readonly kept: number;
   readonly optedOut: number;
   readonly blocked: number;
+  /** Teams skipped because they have their own skill of the same name. */
+  readonly nameConflicts: number;
   readonly converted: number;
   readonly optoutsCleared: number;
   readonly moved: number;
@@ -53,7 +55,10 @@ export interface DefaultSync {
   readonly finishedAt: string | null;
   readonly teamsTotal: number;
   readonly teamsDone: number;
-  /** Null when fewer than 3 teams opted out, cleared or blocked (the minimum-count rule). */
+  /**
+   * Null while the job runs, and when fewer than 3 teams opted out, cleared, blocked or had a
+   * name conflict (the minimum-count rule).
+   */
   readonly counts: DefaultSyncCounts | null;
   readonly attempts: number;
   /** The last failure's code (e.g. `no_version`), if any. */
