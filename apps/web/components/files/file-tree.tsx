@@ -468,8 +468,10 @@ export function FileTreeView({
     }
   };
 
+  // Never shrinks in the panel's scrolling column: the panel scrolls, and the inline dialogs
+  // after the tree (Delete, Rename, Move to…) sit below its last row, not under its rows.
   return (
-    <div className="@container flex min-h-0 flex-col">
+    <div className="@container flex shrink-0 flex-col">
       {header(drag)}
       <ul
         role="tree"
