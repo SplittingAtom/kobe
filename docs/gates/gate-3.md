@@ -99,8 +99,11 @@ live thread that had loaded it.
 | blocklisted: new thread and the live thread both get no bundle and `…:blocklisted`                                                    | A blocklisted hash never loads, not even where it was loaded.    |
 | re-upload of the same bytes: `422 skill_blocklisted` (team, and another member's personal)                                            | The hash is refused anywhere on the site.                        |
 
-`run.start` is read from `sandbox_commands` (what the server handed the sandbox); it is the list
-Pi is launched with (`--skill` per bundle, `services/sandbox-agent/src/pi/pi-launch.ts`).
+What `run.start` handed the sandbox is read from the run's own record, `runs.skill_refs` (KOBE-297:
+written in the run start's transaction from the same bundle list the `run.start` frame carries;
+the `sandbox_commands` row itself is deleted once the sandbox answers), with the run's
+`run.started` event. That list is what Pi is launched with (`--skill` per bundle,
+`services/sandbox-agent/src/pi/pi-launch.ts`).
 
 ## ac-3 Projects: read-only files, private until shared (U10, KOBE-162/163)
 
@@ -123,7 +126,7 @@ shares it with the project.
 | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `memory.updated` `user:<doc>:<path>:v1:none`, then `…:v2:1`                                                         | A `remember` write is announced with what Undo needs.                        |
 | restore version 1: `200`, the content is v1's again, `current_version=3`                                            | Undo reverts the doc (as a new version).                                     |
-| browser: the thread shows the "Memory updated" chip with Undo                                                       | The member sees it in the chat.                                              |
+| browser: a `remember` turn sent in the chat shows the "Memory updated" chip; one click on Undo says Undone          | The member sees it in the chat, live, and can undo it there.                 |
 | project write: `approval.requested` for `remember`, `doc_before_decision=absent`, then `memory.updated` `project:…` | A project-memory write waits for an approval and applies only once approved. |
 | a second project write denied: the doc never appears                                                                | Denial applies nothing.                                                      |
 

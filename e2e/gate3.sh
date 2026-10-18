@@ -74,10 +74,12 @@ chmod 700 "$WORK"
 PODS=()
 UNDO=()
 cleanup() {
+  local rc=$?
   local u
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   for u in "${UNDO[@]+"${UNDO[@]}"}"; do eval "$u" >/dev/null 2>&1 || true; done
   rm -rf "$WORK"
+  verdict_on_exit "$rc" "Gate 3 suite"
 }
 trap cleanup EXIT
 
@@ -315,6 +317,8 @@ if [[ "$STEPS" == *" memory "* ]] && sbx_need "ac-4 (memory)"; then
   m1=$(turn "$U_M1" "$(remember user "$MEM_PATH" "v1 $NONCE")" '"title":"gate3 memory"')
   show "remember v1" "$m1"
   T_MEMORY=$(field thread "$m1")
+  # The browser's own remember turn in that thread (its chip is a notice of the live run).
+  MEMORY_PROMPT=$(remember user "$MEM_PATH" "v-browser $NONCE")
   contains "remember creates the doc: memory.updated (version 1, nothing before)" "^memory_events=user:[0-9a-f-]{36}:$MEM_PATH:v1:none\$" "$m1"
   DOC=$(field memory_events "$m1" | cut -d: -f2)
   m2=$(turn "$U_M1" "$(remember user "$MEM_PATH" "v2 $NONCE")" "\"threadId\":\"$T_MEMORY\"")
@@ -401,11 +405,12 @@ if [[ "$STEPS" == *" data "* ]] && sbx_need "ac-5 (data)"; then
   state_of() { step state "\"user\":$U_M1,\"threadId\":\"$T_DATA\",\"artifacts\":[\"$ARTIFACT\"],\"files\":[\"$SHARED\"],\"uploads\":[\"$UPLOAD\"]"; }
   ask_history="$(if ((FAKE)); then echo "history?"; else echo "What did my earlier messages in this conversation ask you to do? One sentence."; fi)"
   pvc_uid() { $KUBECTL -n "$TNS" get pvc "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
+  pod_uid() { $KUBECTL -n "$TNS" get pod "$1" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
   claim_pods() { $KUBECTL -n "$TNS" get pods -l "agents.x-k8s.io/claim-uid=$(claim_uid)" -o name 2>/dev/null || true; }
   # U15: the sandbox is lost, and the next turn loses nothing. `deleted`: its pod and /workspace volume
   # are deleted while it runs (a node lost); `overnight`: it hibernated (idle) and its volume is gone.
   lose_sandbox() { # deleted|overnight
-    local how=$1 before after sbx_name pvc old_pvc old_pod lost_at next new_pod missing
+    local how=$1 before after sbx_name pvc old_pvc old_pod old_pod_uid lost_at next new_pod new_pod_uid missing
     echo "==> ac-5 ($how): the sandbox's pod and volume are lost; the next turn loses nothing"
     before=$(state_of)
     show "before the loss" "$(grep -v '^entries=' <<<"$before")"
@@ -413,6 +418,8 @@ if [[ "$STEPS" == *" data "* ]] && sbx_need "ac-5 (data)"; then
     pvc="workspace-${sbx_name:-none}"
     old_pvc=$(pvc_uid "$pvc")
     old_pod=$(sbx_pod)
+    # The pod's name is the claim's (u-<user>), the same for its replacement: compare pod UIDs.
+    old_pod_uid=$(pod_uid "${old_pod:-none}")
     contains "$how: the sandbox has a pod and a workspace volume" '^[^ ]+ [0-9a-f-]{36}$' "${old_pod:-none} ${old_pvc:-none}"
     lost_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     if [[ "$how" == deleted ]]; then
@@ -440,7 +447,9 @@ if [[ "$STEPS" == *" data "* ]] && sbx_need "ac-5 (data)"; then
     ((FAKE)) && contains "$how: Pi continued the conversation (the model got the earlier turns)" \
       'history said: .*(G3TOTALS|sales\.csv)' "$(said "$next")"
     new_pod=$(sbx_pod)
-    if [[ -n "$new_pod" && "$new_pod" != "$old_pod" ]]; then ok "$how: a new sandbox pod answered ($new_pod)"; else fail "$how: a new sandbox pod answered (got ${new_pod:-none})"; fi
+    new_pod_uid=$(pod_uid "${new_pod:-none}")
+    if [[ -n "$new_pod_uid" && "$new_pod_uid" != "$old_pod_uid" ]]; then ok "$how: a new sandbox pod answered ($new_pod, uid $new_pod_uid)"
+    else fail "$how: a new sandbox pod answered (got ${new_pod:-none}, uid ${new_pod_uid:-none}; before: uid ${old_pod_uid:-none})"; fi
     contains "$how: ...on a new, empty volume" '^[0-9a-f-]{36}$' "$(pvc_uid "$pvc" | grep -vx "$old_pvc" || true)"
     contains "$how: Pi's session file was rebuilt in the new sandbox" '^jsonl=[1-9][0-9]*$' \
       "$(in_sbx "f=/workspace/.kobe/sessions/$T_DATA.jsonl; if test -s \$f; then echo jsonl=\$(wc -l < \$f); else echo jsonl=missing; fi")"
@@ -469,7 +478,7 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
   PUBLIC_URL=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- printenv KOBE_PUBLIC_URL 2>/dev/null || true)
   if [[ "$BROWSER" != 1 ]]; then
     echo "skip browser checks (KOBE_GATE3_BROWSER=$BROWSER); run them where Chromium reaches $PUBLIC_URL:"
-    echo "     cd e2e/browser && npm ci && npx playwright install chromium && $(browser_env) KOBE_BROWSER_PASSWORD=<the fixtures' password> node scripts/gate3-browser.mjs"
+    echo "     cd e2e/browser && npm ci && npx playwright install chromium && $(browser_env) KOBE_BROWSER_MEMORY_PROMPT='<a remember turn>' KOBE_BROWSER_PASSWORD=<the fixtures' password> node scripts/gate3-browser.mjs"
   else
     echo "==> browser: the chart frame's CSP, the Memory updated chip, the version badge"
     map="${KOBE_GATE3_BROWSER_MAP:-}"
@@ -484,10 +493,11 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
       until_ok 30 ingress_up || echo "     the port-forward to the ingress did not answer: $(tail -2 "$WORK/port-forward.log")"
     fi
     # shellcheck disable=SC2046 # browser_env is a list of NAME=value words
-    br=$(env $(browser_env) KOBE_BROWSER_MAP="$map" KOBE_BROWSER_PASSWORD="$USER_PASSWORD" \
+    br=$(env $(browser_env) KOBE_BROWSER_MAP="$map" KOBE_BROWSER_PASSWORD="$USER_PASSWORD" KOBE_BROWSER_MEMORY_PROMPT="${MEMORY_PROMPT:-}" \
       node e2e/browser/scripts/gate3-browser.mjs 2>&1 || true)
     printf '%s\n' "$br" | sed 's/^/     /'
     contains "browser: m1 signs in" '^signin=ok$' "$br"
+    contains "browser: ...into the Gate 3 team (active team set)" '^active_team=200$' "$br"
     if [[ -n "${ARTIFACT:-}" ]]; then
       contains "ac-5 browser: the chart frame loads in a same-origin iframe (200)" '^frame_status=200$' "$br"
       contains "ac-5 browser: its inline script runs" '^frame_scripts=ran$' "$br"
@@ -500,6 +510,7 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
     if [[ -n "${T_MEMORY:-}" ]]; then
       contains "ac-4 browser: the thread shows the Memory updated chip" '^memory_chip=visible$' "$br"
       contains "ac-4 browser: ...with Undo" '^memory_undo=present$' "$br"
+      contains "ac-4 browser: one click on Undo undoes it" '^memory_undone=yes$' "$br"
     fi
     if [[ -n "${PINNED_THREAD:-}" ]]; then
       contains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br"
@@ -513,11 +524,11 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
 fi
 
 if ((failed)); then
-  echo "Gate 3 suite: FAILED"
+  verdict "Gate 3 suite: FAILED"
   exit 1
 fi
 if ((xfailed)); then
-  echo "Gate 3 suite: passed with $xfailed expected failures (filed product failures; KOBE_GATE_STRICT=1 fails them)"
+  verdict "Gate 3 suite: passed with $xfailed expected failures (filed product failures; KOBE_GATE_STRICT=1 fails them)"
 else
-  echo "Gate 3 suite: all checks passed"
+  verdict "Gate 3 suite: all checks passed"
 fi

@@ -5,14 +5,15 @@
 //         /v1/artifacts/:id/versions/:n/frame): its inline script runs, its origin is opaque, and
 //         its fetch() to an outside address is blocked by the CSP (the violation is reported and no
 //         request leaves the page; a request that did leave would be answered by the route below).
-//   ac-4  the thread with the `remember` call shows the "Memory updated" chip with Undo.
+//   ac-4  a `remember` turn sent in the chat shows the "Memory updated" chip, and its Undo works.
 //   ac-1  a thread pinned to an older agent version shows "v<N> available" with a switch; one
 //         click moves the thread to v<N> (gate3.sh then checks that its next run uses it).
 //
 // Environment (no secrets on the command line): KOBE_BROWSER_BASE (the public URL), optional
 // KOBE_BROWSER_MAP (host:port the browser connects to for the base's host, e.g. a port-forward to
 // the ingress), KOBE_BROWSER_EMAIL, KOBE_BROWSER_PASSWORD, KOBE_BROWSER_TEAM, and the targets
-// KOBE_BROWSER_ARTIFACT (id:version), KOBE_BROWSER_MEMORY_THREAD, KOBE_BROWSER_PINNED_THREAD.
+// KOBE_BROWSER_ARTIFACT (id:version), KOBE_BROWSER_MEMORY_THREAD with KOBE_BROWSER_MEMORY_PROMPT
+// (a message whose run calls `remember`), KOBE_BROWSER_PINNED_THREAD.
 // Uses @playwright/test from e2e/browser (npm ci there, then `npx playwright install chromium`).
 import { chromium } from "@playwright/test";
 
@@ -28,6 +29,8 @@ const TEAM = env("KOBE_BROWSER_TEAM");
 /** The artifact's script reports here; nothing may ever reach it (`.invalid` never resolves). */
 const BEACON = "https://gate3-beacon.invalid/";
 const SHELL_MS = 45_000;
+/** A run of the scripted model, sandbox awake: well under this. */
+const RUN_MS = 120_000;
 
 async function signIn(page) {
   await page.goto(`${BASE}/sign-in`);
@@ -36,6 +39,20 @@ async function signIn(page) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"), { timeout: SHELL_MS });
   out("signin", "ok");
+  // A new session has no active team until the chat picks one (`PUT /v1/me/teams/active`), and the
+  // frame below is loaded before any chat page is: pick the fixtures' team as the chat would.
+  const active = await page.evaluate(
+    async (team) =>
+      (
+        await fetch("/v1/me/teams/active", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ teamId: team }),
+        })
+      ).status,
+    TEAM,
+  );
+  out("active_team", active);
 }
 
 /** ac-5: the frame, embedded the way the chat embeds it (same-origin iframe of /frame). */
@@ -96,17 +113,38 @@ async function frameCheck(context, page) {
   out("beacon_hits", beaconHits);
 }
 
-/** ac-4: the "Memory updated" chip with Undo on the thread whose run called remember. */
+/**
+ * ac-4: the "Memory updated" chip with Undo. The chip is a notice of the live run (a thread opened
+ * later, on another device, shows its entries only), so the browser sends the `remember` turn
+ * itself in the memory thread and watches the chip appear; then one click on Undo.
+ */
 async function memoryChip(page) {
   await page.goto(`${BASE}/?thread=${env("KOBE_BROWSER_MEMORY_THREAD")}`);
+  const composer = page.getByRole("textbox", { name: "Message", exact: true });
+  await composer.waitFor({ timeout: SHELL_MS });
+  await composer.fill(env("KOBE_BROWSER_MEMORY_PROMPT"));
+  await composer.press("Enter");
   const chip = page.getByText(/Memory updated/).first();
-  const visible = await chip.waitFor({ timeout: SHELL_MS }).then(
+  const visible = await chip.waitFor({ timeout: RUN_MS }).then(
     () => true,
     () => false,
   );
   out("memory_chip", visible ? "visible" : "absent");
-  const undo = page.getByRole("button", { name: /Undo/ }).first();
-  out("memory_undo", (await undo.count()) > 0 ? "present" : "absent");
+  const undo = page.getByRole("button", { name: /^Undo memory update / }).first();
+  const present = (await undo.count()) > 0;
+  out("memory_undo", present ? "present" : "absent");
+  if (!present) return;
+  await undo.click();
+  const undone = await page
+    .getByRole("status")
+    .filter({ hasText: "Undone." })
+    .first()
+    .waitFor({ timeout: 20_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  out("memory_undone", undone ? "yes" : "no");
 }
 
 /** ac-1: a thread pinned to an older version says a newer one is available and offers a switch. */

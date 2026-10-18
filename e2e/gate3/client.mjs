@@ -6,7 +6,11 @@
 // It drives the product's API as the browser does; the database is only read, for evidence the
 // API does not expose (the skills a run.start handed the sandbox, a file's object key).
 
-const PROMPT_OUT_MAX = 2_000;
+/**
+ * What the model said and the tools returned, cut here. Large: the `system?` echo carries Pi's
+ * whole system prompt, and the agent's own prompt (and the skills list) come after Pi's ~2 KB.
+ */
+const PROMPT_OUT_MAX = 64_000;
 const code = (r) => `${r.status}:${r.json.code ?? "-"}`;
 const oneLine = (s) => String(s ?? "").replace(/\s+/g, " ");
 /**
@@ -349,16 +353,24 @@ async function blocklist() {
 
 /** The skill bundles the run's run.start handed the sandbox (what Pi was told to load). */
 async function runBundles() {
+  // The run.start command row itself is deleted once the sandbox answers (it carries content), so
+  // the durable record is read: `runs.skill_refs` (KOBE-297), written in the run start's own
+  // transaction from the same bundle list the run.start frame carries, and the run's
+  // `run.started` event.
   const database = await db();
   const { withTeam, sql } = await import("/app/node_modules/@kobe/db/dist/index.js");
   try {
     const rows = await withTeam(database.db, config.teamId, (tx) =>
       tx.execute(sql`
-        SELECT frame -> 'config' -> 'skill_bundles' AS bundles FROM sandbox_commands
-         WHERE team_id = ${config.teamId} AND run_id = ${config.runId} AND kind = 'run.start'`),
+        SELECT r.skill_refs AS refs,
+               (SELECT count(*)::int FROM run_events e
+                 WHERE e.team_id = r.team_id AND e.run_id = r.id AND e.type = 'run.started') AS started
+          FROM runs r
+         WHERE r.team_id = ${config.teamId} AND r.id = ${config.runId}`),
     );
-    out("run_start", rows.rows.length);
-    const hashes = rows.rows.flatMap((r) => (r.bundles ?? []).map((b) => b.sha256));
+    const row = rows.rows[0];
+    out("run_start", row ? Math.min(row.started, 1) : 0);
+    const hashes = (row?.refs ?? []).flatMap((r) => (r.sha256 ? [r.sha256] : []));
     out("bundles", hashes.join(",") || "-");
   } finally {
     await database.close();
