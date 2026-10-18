@@ -354,8 +354,10 @@ connect() { # key connector → connects that user (fake: automatically; real: a
     step u7-grant "\"user\":$(user_of "$key"),\"connectorId\":\"$cid\""
   fi
 }
+# On the gallery agent Kobe (`connectors: all`): connectors reach a run only through its agent's
+# list (resolver: agent list ∩ team-enabled ∩ user-connected); a thread without one gets none.
 mcp_call() { # key connector-name-segment tool args → a turn calling that tool
-  turn "$(user_of "$1")" "$(tool_prompt "mcp__$2__$3" "$4")" "\"title\":\"gate4 U7 $1\""
+  turn "$(user_of "$1")" "$(tool_prompt "mcp__$2__$3" "$4")" "\"title\":\"gate4 U7 $1\",\"agentId\":\"$KOBE_AGENT\""
 }
 if want U7 && ((MODELS)); then
   echo "==> U7: per-user grants of one OAuth connector; no token in a sandbox; revocation; drift"
@@ -441,7 +443,7 @@ if want U7 && ((MODELS)); then
     if until_ok 200 drift_seen; then ok "U7: the next re-probe marks create_thing drifted"; else fail "U7: the next re-probe marks create_thing drifted"; fi
     [[ "$CONNECTOR" != "$FAKE_CONNECTOR" ]] && c=$(connect m2 "$FAKE_CONNECTOR")
     if ((FAKE)); then
-      t1=$(turn "$U_M2" "tools?" '"title":"gate4 U7 drift"')
+      t1=$(turn "$U_M2" "tools?" "\"title\":\"gate4 U7 drift\",\"agentId\":\"$KOBE_AGENT\"")
       contains "U7: a new run still offers the unchanged tool" '^text=.*mcp__gate4_oauth__get_thing' "$t1"
       if grep -q 'mcp__gate4_oauth__create_thing' <<<"$(said "$t1")"; then fail "U7: ...and not the drifted one (disabled until re-approved)"
       else ok "U7: ...and not the drifted one (disabled until re-approved)"; fi
@@ -449,7 +451,7 @@ if want U7 && ((MODELS)); then
     contains "U7: a site admin re-approves it" '^reapprove=200:1$' "$(step u7-review "\"connectorId\":\"$FAKE_CONNECTOR\",\"approve\":true")"
     if ((FAKE)); then
       contains "U7: after re-approval the tool is offered again" '^text=.*mcp__gate4_oauth__create_thing' \
-        "$(turn "$U_M2" "tools?" '"title":"gate4 U7 re-approved"')"
+        "$(turn "$U_M2" "tools?" "\"title\":\"gate4 U7 re-approved\",\"agentId\":\"$KOBE_AGENT\"")"
     fi
   else
     notrun "U7: drift (needs the fake OAuth MCP server: KOBE_GATE4_FAKE_INFRA=1)"
