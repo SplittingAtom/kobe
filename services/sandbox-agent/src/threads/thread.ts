@@ -204,7 +204,7 @@ interface ActiveRun {
   readonly compaction: boolean;
   stopAfterStep: boolean;
   stopping: boolean;
-  /** Waiting for the workspace before its prompt (a message run): Pi has nothing of it yet. */
+  /** Started, its prompt not yet sent to Pi (a message run): Pi has nothing of it to abort. */
   preparing: boolean;
   readonly ended: Promise<void>;
   readonly resolveEnded: () => void;
@@ -806,13 +806,13 @@ export class Thread {
     if (run !== undefined) run.stopAfterStep = true;
   }
 
-  /** The active message run waits for the workspace (true) or goes on to its prompt (false). */
+  /** The active message run is being prepared (true) or its prompt goes to Pi now (false). */
   setPreparing(preparing: boolean): void {
     const run = this.#run;
     if (run !== undefined && !run.compaction) run.preparing = preparing;
   }
 
-  /** The active run waits for the workspace: Pi has nothing of it to abort or settle. */
+  /** The active run's prompt has not gone to Pi: there is nothing in Pi to abort or settle. */
   get runPreparing(): boolean {
     return this.#run?.preparing === true;
   }

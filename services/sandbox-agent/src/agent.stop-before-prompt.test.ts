@@ -78,6 +78,23 @@ describe("Stop before Pi has the run's prompt", () => {
     expect(warnings.some((w) => w.includes("stopped before Pi took its prompt"))).toBe(true);
   });
 
+  it("a Stop that arrives while the run's Pi is still starting is not lost", async () => {
+    // Pi takes 1.5 s to start: run.start has not begun the run when the Stop arrives.
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/kobe-policy-slow/index.js" },
+    });
+    const started = h.server.command(runStart("say:first"), 30_000);
+    const t0 = Date.now();
+    expect(await h.server.command(stop(RUN), 30_000)).toMatchObject({ ok: true });
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    // The start never begins the stopped run: it does not hold the thread, and Pi gets no prompt.
+    expect(await started).toMatchObject({ ok: false, error: { code: "run_not_active" } });
+    const second = await h.server.command({ ...runStart("say:second"), run_id: RUN_2 }, 30_000);
+    expect(second).toMatchObject({ ok: true });
+    const prompts = (await h.commandsLog()).filter((c) => c.type === "prompt");
+    expect(prompts.map((c) => c.message)).toEqual(["say:second"]);
+  }, 30_000);
+
   it("the next run starts while the stopped one's preparation is still pending, and keeps the thread", async () => {
     const pull = slowFirstPull();
     h = await startHarness({ workspace: pull.hooks });

@@ -157,7 +157,9 @@ function answerHello() {
   const message = policyPath.includes("refuse")
     ? { type: "channel.refused", nonce: policyNonce, reason: "fake refusal" }
     : { type: "channel.ready", nonce: policyNonce, extension: "kobe-policy", version: 1 };
-  policySocket.write(`${JSON.stringify(message)}\n`);
+  // "slow": a start that takes a while (Pi under gVisor), so a Stop can arrive meanwhile.
+  const delayMs = policyPath.includes("slow") ? 1500 : 0;
+  setTimeout(() => policySocket.write(`${JSON.stringify(message)}\n`), delayMs);
 }
 
 function start() {
