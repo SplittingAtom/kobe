@@ -12,6 +12,7 @@ import { ConsoleAccessContext } from "../admin/console-context";
 import { ErrorNotice } from "../admin/error-notice";
 import { MemoryPanel } from "../memory/memory-panel";
 import { ProjectPicker } from "../projects/project-picker";
+import { ensureConsolePortal } from "../ui/chat-portal";
 import { EmbeddedPage } from "../ui/console";
 import { MyApprovalsPage } from "./my-approvals-page";
 import { MyConnectorsPage } from "./my-connectors-page";
@@ -20,8 +21,8 @@ import { MySchedulesPage } from "./my-schedules-page";
 /*
  * A My area page in the chat, beside the thread (CE4, KOBE-424; the frame is
  * `components/shell/area-panel.tsx`). The console sheet loads with it: its rules are scoped to
- * `data-kobe-console` (the frame carries it), so nothing else in the chat changes
- * (app/console-css-guard.test.ts).
+ * `data-kobe-console`, which the page's wrapper carries (the frame stays the chat's), and the
+ * chat's own rules leave that subtree alone, both ways (app/console-css-guard.test.ts).
  */
 
 type Access =
@@ -34,7 +35,11 @@ function useTeamAccessState(fetchFn: typeof fetch | undefined): Access {
   const [state, setState] = useState<Access>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    const again = () => setAttempt((n) => n + 1);
+    // Another team: its page waits for that team's access (never the old team's ids meanwhile).
+    const again = () => {
+      setState({ status: "loading" });
+      setAttempt((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_TEAM_EVENT, again);
     return () => window.removeEventListener(ACTIVE_TEAM_EVENT, again);
   }, []);
@@ -99,13 +104,15 @@ export function AreaBeside({
   readonly fetchFn?: typeof fetch | undefined;
 }) {
   const access = useTeamAccessState(fetchFn);
+  // Confirm dialogs and row menus mount at the document's top, over the bar (not in the column).
+  useEffect(() => void ensureConsolePortal(), []);
   if (access.status === "loading") return <p role="status">Loading…</p>;
   if (access.status === "error") return <ErrorNotice error={access.error} />;
   return (
     <ConsoleAccessContext.Provider value={access.access}>
       <EmbeddedPage.Provider value={true}>
         {/* Keyed by team: a page never carries one team's state into another's. */}
-        <div key={access.access.team.id} className="flex flex-col gap-4">
+        <div key={access.access.team.id} data-kobe-console="" className="flex flex-col gap-4">
           <AreaContent area={area} access={access.access} />
         </div>
       </EmbeddedPage.Provider>

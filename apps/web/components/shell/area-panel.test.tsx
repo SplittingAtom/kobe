@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
+import { consolePortalContainer } from "../ui/chat-portal";
 import { composer, openApp } from "../chat/testing";
 
 /**
@@ -56,7 +57,14 @@ describe("My area pages beside the thread (KOBE-424 ac-1)", () => {
     await userEvent.setup().click(barLink("my-memory"));
     const panel = await screen.findByRole("region", { name: "My memory" });
     expect(panel.closest('[data-shell-region="artifact"]')).not.toBeNull();
-    expect(panel.hasAttribute("data-kobe-console")).toBe(true);
+    // The frame is the chat's; the page inside is a console root (the console's own styling).
+    expect(panel.hasAttribute("data-kobe-console")).toBe(false);
+    await waitFor(() => expect(panel.querySelector("[data-kobe-console]")).not.toBeNull());
+    // Its dialogs and menus mount at the document's top, outside the chat (over the bar).
+    const portal = must(consolePortalContainer());
+    expect(portal.parentElement).toBe(document.body);
+    expect(portal.closest("[data-kobe-chat]")).toBeNull();
+    expect(portal.hasAttribute("data-kobe-console")).toBe(true);
     expect(window.location.pathname).toBe("/");
     expect(params().get("thread")).toBe(t);
     expect(params().get("area")).toBe("memory");
@@ -141,6 +149,39 @@ describe("deep links and history (KOBE-424 ac-2)", () => {
     await waitFor(() => expect(area()).toBeNull());
   });
 
+  it("Close after an open from the thread goes back: Back then never reopens it", async () => {
+    await openThread();
+    const user = userEvent.setup();
+    const before = window.history.length;
+    await user.click(barLink("my-memory"));
+    // Another page from the open one takes its entry: still one step from the thread.
+    await user.click(barLink("my-schedules"));
+    const panel = await screen.findByRole("region", { name: "My schedules" });
+    expect(window.history.length).toBe(before + 1);
+    await user.click(within(panel).getByRole("button", { name: "Close My schedules" }));
+    await waitFor(() => expect(area()).toBeNull());
+    expect(params().get("area")).toBeNull();
+    act(() => window.history.back());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(params().get("area")).toBeNull();
+    expect(area()).toBeNull();
+  });
+
+  it("Close after a deep link replaces its entry: Back leaves, it doesn't reopen", async () => {
+    const t = fake.addThread("Forecast");
+    openApp(fake, t);
+    act(() => {
+      window.history.replaceState(null, "", `/?thread=${t}&area=memory`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    const panel = await screen.findByRole("region", { name: "My memory" });
+    const before = window.history.length;
+    await userEvent.setup().click(within(panel).getByRole("button", { name: "Close My memory" }));
+    await waitFor(() => expect(area()).toBeNull());
+    expect(window.history.length).toBe(before);
+    expect(window.location.search).toBe(`?thread=${t}`);
+  });
+
   it("an unknown ?area= opens nothing", async () => {
     const t = fake.addThread("Forecast");
     openApp(fake, t);
@@ -177,6 +218,38 @@ describe("on a phone (KOBE-424 ac-2)", () => {
     ).toBe(true);
     await user.click(within(sheet).getByRole("button", { name: "Back to the conversation" }));
     await waitFor(() => expect(area()).toBeNull());
+    expect(await composer()).toBeTruthy();
+    // The system Back right after the sheet's own Back doesn't bring the sheet back.
+    act(() => window.history.back());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(area()).toBeNull();
+    expect(params().get("area")).toBeNull();
+  });
+
+  it("opened from the profile menu, closing the sheet leaves focus in the conversation", async () => {
+    resizeWindow(390);
+    await openThread();
+    const user = userEvent.setup();
+    await user.click(barLink("thread-menu")); // the phone bar's Menu holds the profile menu
+    await user.click(barLink("profile"));
+    await user.click(screen.getByRole("link", { name: "My approvals" }));
+    const sheet = await screen.findByRole("dialog", { name: "My approvals" });
+    await user.click(within(sheet).getByRole("button", { name: "Back to the conversation" }));
+    await waitFor(() => expect(area()).toBeNull());
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+  });
+
+  it("from 768 to 820 px it is the column's sheet over the conversation", async () => {
+    resizeWindow(800);
+    await openThread();
+    await userEvent.setup().click(barLink("my-memory"));
+    const sheet = await screen.findByRole("region", { name: "My memory" });
+    expect(
+      must(document.querySelector('[data-shell-region="artifact"]')).hasAttribute(
+        "data-sheet-open",
+      ),
+    ).toBe(true);
+    expect(within(sheet).getByRole("button", { name: "Back to the conversation" })).toBeTruthy();
     expect(await composer()).toBeTruthy();
   });
 });

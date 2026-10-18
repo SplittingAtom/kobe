@@ -43,17 +43,62 @@ function currentSearch(): string {
 const AREA_EVENT = "popstate";
 
 /**
- * Opens `area` beside the thread, or closes it (undefined), as a new history entry, keeping the
- * thread and every other parameter. The chat follows the address (`popstate`), so this works from
- * outside the workspace too (the bar, the profile menu).
+ * Kept in the history entry of an opened page: the address it was opened from (the thread
+ * without the page). Next's own entry state is kept alongside (its `pushState` patch copies it).
+ */
+const OPENED_FROM = "kobeAreaOpenedFrom";
+
+function entryState(): Record<string, unknown> {
+  const state: unknown = window.history.state;
+  return state !== null && typeof state === "object"
+    ? { ...(state as Record<string, unknown>) }
+    : {};
+}
+
+function follow(): void {
+  window.dispatchEvent(new PopStateEvent(AREA_EVENT));
+}
+
+/**
+ * Opens `area` beside the thread, keeping the thread and every other parameter; the chat follows
+ * the address (`popstate`), so this works from outside the workspace too (the bar, the profile
+ * menu). From the conversation it is a new history entry (Back closes it); from another page
+ * beside the thread it takes that entry's place (Back still returns to the conversation).
+ * `undefined` closes it: see {@link closeArea}.
  */
 export function showArea(area: AreaId | undefined): void {
   const url = new URL(window.location.href);
-  if (areaFromUrl(url.search) === area) return;
-  if (area === undefined) url.searchParams.delete(AREA_PARAM);
-  else url.searchParams.set(AREA_PARAM, area);
-  window.history.pushState(null, "", url);
-  window.dispatchEvent(new PopStateEvent(AREA_EVENT));
+  const open = areaFromUrl(url.search);
+  if (open === area) return;
+  if (area === undefined) {
+    closeArea();
+    return;
+  }
+  url.searchParams.set(AREA_PARAM, area);
+  if (open === undefined) {
+    window.history.pushState({ ...entryState(), [OPENED_FROM]: window.location.href }, "", url);
+  } else {
+    window.history.replaceState(entryState(), "", url);
+  }
+  follow();
+}
+
+/**
+ * Closes the page beside the thread. Opened from the conversation in this tab, it goes Back to
+ * that entry, so the browser's Back never reopens what was just closed (a trap on phones, where
+ * the sheet has its own Back). Opened by a link or a refresh, its entry becomes the conversation.
+ */
+export function closeArea(): void {
+  const url = new URL(window.location.href);
+  if (areaFromUrl(url.search) === undefined) return;
+  url.searchParams.delete(AREA_PARAM);
+  const { [OPENED_FROM]: openedFrom, ...state } = entryState();
+  if (openedFrom === url.href) {
+    window.history.back(); // the browser's popstate updates the chat
+    return;
+  }
+  window.history.replaceState(state, "", url);
+  follow();
 }
 
 /** True on the chat page, where the areas open beside the thread instead of as pages. */

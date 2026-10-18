@@ -28,5 +28,29 @@ export function chatPortalContainer(): HTMLElement | undefined {
  */
 export function consolePortalContainer(): HTMLElement | undefined {
   if (typeof document === "undefined") return undefined;
-  return document.querySelector<HTMLElement>("[data-kobe-console]") ?? undefined;
+  return (
+    document.querySelector<HTMLElement>(`[${CONSOLE_PORTAL}]`) ??
+    document.querySelector<HTMLElement>("[data-kobe-console]") ??
+    undefined
+  );
+}
+
+/**
+ * A console root at the document's top for the portals of a My area page beside the thread
+ * (CE4, KOBE-424): outside the chat root and its stacking contexts (the column, its sheet), so a
+ * confirm dialog covers the whole window, bar included, with the console's scoped rules. Marked
+ * as portalled content for the chat's modal layers (`CHAT_PORTALLED`). Created once, kept.
+ */
+export const CONSOLE_PORTAL = "data-kobe-console-portal";
+
+export function ensureConsolePortal(): HTMLElement | undefined {
+  if (typeof document === "undefined") return undefined;
+  const found = document.querySelector<HTMLElement>(`[${CONSOLE_PORTAL}]`);
+  if (found) return found;
+  const root = document.createElement("div");
+  root.setAttribute("data-kobe-console", "");
+  root.setAttribute(CONSOLE_PORTAL, "");
+  root.setAttribute("data-kobe-portal", "");
+  document.body.append(root);
+  return root;
 }

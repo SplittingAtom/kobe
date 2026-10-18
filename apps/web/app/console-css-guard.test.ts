@@ -42,6 +42,11 @@ function generated(node: ChildNode): boolean {
   return false;
 }
 
+/** How the chat's rules leave a console root (a My area page beside the thread) alone. */
+const LEFT_OUT = ":where(:not([data-kobe-console], [data-kobe-console] *))";
+/** A selector on one line, without the formatter's spaces inside parentheses. */
+const flat = (s: string) => s.replace(/\s+/g, " ").replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");
+
 const own = (root: Root) => root.nodes.filter((n) => !generated(n));
 const layer = (root: Root, name: string) =>
   root.nodes.find((n) => n.type === "atrule" && n.name === "layer" && n.params === name);
@@ -108,8 +113,25 @@ describe("Tailwind on the consoles (KOBE-294)", () => {
     expect(sels.filter((s) => !s.includes("[data-kobe-console]"))).toEqual([]);
   });
 
-  it("the chat stylesheet never names the console root", () => {
-    expect(selectors(own(chat)).filter((s) => s.includes("data-kobe-console"))).toEqual([]);
+  it("the chat stylesheet names the console root only to leave it out", () => {
+    // A My area page beside the thread (KOBE-424) is a console root inside the chat root.
+    const named = selectors(own(chat))
+      .map(flat)
+      .filter((s) => s.includes("data-kobe-console"));
+    expect(named.length).toBeGreaterThan(0);
+    for (const s of named) {
+      expect(s.replaceAll(LEFT_OUT, ""), s).not.toContain("data-kobe-console");
+    }
+  });
+
+  it("no chat preflight rule reaches a console root inside the chat (KOBE-424)", () => {
+    const base = layer(chat, "base");
+    // The composer anchor names a chat-only element: nothing of a console page matches it.
+    const scoped = selectors(base && base.type === "atrule" ? (base.nodes ?? []) : [])
+      .map(flat)
+      .filter((s) => s.startsWith("[data-kobe-chat]") && !s.includes("[data-kobe-composer-box]"));
+    expect(scoped.length).toBeGreaterThan(5);
+    expect(scoped.filter((s) => !s.includes(LEFT_OUT))).toEqual([]);
   });
 
   it("the chat's own compiled rules are unchanged", async () => {
