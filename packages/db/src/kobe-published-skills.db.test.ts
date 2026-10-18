@@ -205,13 +205,22 @@ describe("Kobe-published rows carry no person", () => {
     });
   });
 
-  it("keeps built-in names Kobe's", async () => {
+  it("keeps built-in names Kobe's, and Kobe to them", async () => {
     await withClient(database().appUrl, async (c) => {
       await expect(
         c.query(`INSERT INTO registry_skills (name, summary) VALUES ('xlsx', 'Mine.')`),
       ).rejects.toMatchObject({ constraint: "registry_skills_kobe_names" });
       await expect(
         c.query(`UPDATE registry_skills SET publisher = 'maintainer' WHERE id = $1`, [kobeSkill]),
+      ).rejects.toMatchObject({ constraint: "registry_skills_kobe_names" });
+      // And Kobe publishes only those (review-317 S2): no other name, no rename away.
+      await expect(
+        c.query(
+          `INSERT INTO registry_skills (name, summary, publisher) VALUES ('my-tool', 'M.', 'kobe')`,
+        ),
+      ).rejects.toMatchObject({ constraint: "registry_skills_kobe_names" });
+      await expect(
+        c.query(`UPDATE registry_skills SET name = 'pdf-two' WHERE id = $1`, [kobeSkill]),
       ).rejects.toMatchObject({ constraint: "registry_skills_kobe_names" });
     });
   });

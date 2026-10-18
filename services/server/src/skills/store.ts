@@ -1,3 +1,4 @@
+import { isKobeSkillName } from "@kobe/protocol";
 import type { ScanResult } from "@kobe/skill-scanner";
 import {
   and,
@@ -100,7 +101,8 @@ export type UploadError =
   | "blocklisted"
   | "semver_not_increasing"
   | "semver_required"
-  | "name_clash";
+  | "name_clash"
+  | "reserved_name";
 export type UploadResult =
   | { readonly ok: true; readonly skill: SkillRecord; readonly version: SkillVersionRecord }
   | { readonly ok: false; readonly error: Exclude<UploadError, SemverError> }
@@ -162,6 +164,10 @@ export function uploadSkillVersion(
         return { ok: false, error: "unchanged" };
       if (existing.latestVersion >= MAX_SKILL_VERSIONS)
         return { ok: false, error: "version_limit" };
+    } else if (isKobeSkillName(input.slug)) {
+      // Kobe's own skills' names are reserved (KOBE-317, SK24, review S4): no new team or personal
+      // skill takes one. One made before the upgrade keeps its name and its new versions.
+      return { ok: false, error: "reserved_name" };
     } else if ((await countSkills(tx, location)) >= MAX_LIVE_SKILLS) {
       return { ok: false, error: "skill_limit" };
     } else if (location.scope === "team" && (await installedAs(tx, location.teamId, input.slug))) {

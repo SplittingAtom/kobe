@@ -11,6 +11,7 @@ import { catalogObjectKey, seedKobeSkills } from "./skills/kobe-seed.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
 import { sha256Hex } from "./skills/storage.js";
 import { RawBody } from "./testing/browser.js";
+import { catalogSeed } from "./testing/catalog-seed.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { MemoryMailer } from "./testing/mailer.js";
@@ -83,6 +84,14 @@ const omissionsOf = async (w: RunWorld, run: string) =>
 let upgraded: RunWorld;
 let optedOut: RunWorld;
 let ownPdf: RunWorld;
+let requiredPdf: RunWorld;
+let ownRequiredHash = "";
+
+const zipNamed = (name: string, note = "ours") =>
+  new RawBody(
+    zipSync({ "SKILL.md": strToU8(`---\nname: ${name}\ndescription: Ours\n---\n${note}\n`) }),
+    "application/zip",
+  );
 
 beforeAll(async () => {
   await f.setup({ blobs });
@@ -90,16 +99,13 @@ beforeAll(async () => {
   upgraded = await f.world();
   optedOut = await f.world();
   ownPdf = await f.world();
-  const res = await f
-    .on(0, ownPdf.owner)
-    .post(
-      "/v1/skills?scope=team",
-      new RawBody(
-        zipSync({ "SKILL.md": strToU8(`---\nname: pdf\ndescription: Our own pdf\n---\nours\n`) }),
-        "application/zip",
-      ),
-    );
-  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  requiredPdf = await f.world();
+  // Team skills named like a built-in, made before the names were reserved (review-317 S4).
+  const rows = catalogSeed(() => f.fx.admin);
+  const own = await rows.teamSkill(ownPdf.team, ownPdf.owner.id, "pdf", "default_on");
+  await rows.addVersion(ownPdf.team, ownPdf.owner.id, own, "pdf", 1);
+  const req = await rows.teamSkill(requiredPdf.team, requiredPdf.owner.id, "pdf", "required");
+  ownRequiredHash = await rows.addVersion(requiredPdf.team, requiredPdf.owner.id, req, "pdf", 1);
 }, 120_000);
 afterAll(async () => {
   await f.teardown();
@@ -283,6 +289,68 @@ describe("runs after the upgrade (ac-3)", () => {
     expect(await omissionsOf(optedOut, out.run)).toContainEqual(
       expect.objectContaining({ name: "pdf", reason: "not_installed" }),
     );
+  });
+});
+
+describe("reserved names in teams (review-317 S4)", () => {
+  it("no new team or personal skill takes a Kobe name; one made before keeps its versions", async () => {
+    const w = await f.world();
+    for (const scope of ["team", "personal"]) {
+      const res = await f.on(0, w.owner).post(`/v1/skills?scope=${scope}`, zipNamed("xlsx"));
+      expect(res.status, scope).toBe(409);
+      expect(res.json.code).toBe("reserved_name");
+    }
+    const next = await f.on(0, ownPdf.owner).post("/v1/skills?scope=team", zipNamed("pdf", "v2"));
+    expect(next.status, JSON.stringify(next.json)).toBe(201);
+  });
+
+  it("a team's own Required pdf wins over Kobe's, with a notice to an agent naming pdf", async () => {
+    const hashes = await runtimeHashes();
+    const { run, config } = await startOf(
+      requiredPdf,
+      await pinnedThread(requiredPdf.owner, ["pdf"]),
+    );
+    const pdfs = (config.skill_bundles ?? []).filter((b) => b.name === "pdf");
+    expect(pdfs.map((b) => b.sha256)).toEqual([ownRequiredHash]);
+    expect(pdfs[0]?.sha256).not.toBe(hashes.pdf);
+    expect(await omissionsOf(requiredPdf, run)).toContainEqual(
+      expect.objectContaining({ name: "pdf", reason: "shadowed" }),
+    );
+  });
+});
+
+describe("a run.start queued before the upgrade (review-317 S1)", () => {
+  it("still listing builtin_skills fails visibly instead of starting without them", async () => {
+    const w = await f.world();
+    const thread = await pinnedThread(w.owner, ["pdf"]);
+    // Queued with no sandbox connected yet, then rewritten as a pre-317 server stored it.
+    const run = await f.message(w.owner, thread, "hello");
+    await expect
+      .poll(
+        async () =>
+          (
+            await f.fx.admin.query(
+              `SELECT status::text FROM sandbox_commands WHERE run_id = $1 AND kind = 'run.start'`,
+              [run],
+            )
+          ).rows.map((r) => r.status),
+        { timeout: 10_000 },
+      )
+      .toEqual(["pending"]);
+    const queued = await f.fx.admin.query(
+      `UPDATE sandbox_commands
+         SET frame = jsonb_set(frame, '{config,builtin_skills}', '["pdf"]'::jsonb)
+       WHERE run_id = $1 AND kind = 'run.start' AND status = 'pending' RETURNING id`,
+      [run],
+    );
+    expect(queued.rowCount).toBe(1);
+    const ws = await f.connect(w, 0, ["skill_bundles", "builtin_skills"]);
+    await f.until(w.team, run, "failed");
+    expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
+      error: { code: "skills_unsupported" },
+    });
+    expect(ws.starts().map((x) => x.run_id)).not.toContain(run);
+    ws.kill();
   });
 });
 

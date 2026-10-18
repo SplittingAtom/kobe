@@ -171,8 +171,17 @@ export function resolveSkills(input: ResolveInput): {
 
   for (const s of input.team.requiredSkills ?? []) add(s, true);
   for (const o of input.team.requiredOmissions ?? []) omitClaimed(o.name, o.reason);
+  // A named skill whose name a different Required skill holds (a Team admin's deliberate choice,
+  // e.g. the team's own `pdf` over Kobe's, KOBE-317 review S4) is left out with a notice.
+  // Names are unique per source (catalog, team), so another source is another skill.
+  const required = new Map((input.team.requiredSkills ?? []).map((s) => [s.name, s.source]));
+  const shadowedByRequired = (s: SkillRef) =>
+    required.has(s.name) && required.get(s.name) !== s.source && !isBlocked(s);
 
-  for (const s of [...input.agent.skills, ...(input.agent.catalogSkills ?? [])]) add(s, true);
+  for (const s of [...input.agent.skills, ...(input.agent.catalogSkills ?? [])]) {
+    if (shadowedByRequired(s)) omitName(s.name, "shadowed");
+    else add(s, true);
+  }
   for (const name of input.agent.unapprovedSkills ?? []) omitClaimed(name, "not_approved");
   for (const name of input.agent.suspendedSkills ?? []) omitClaimed(name, "suspended");
   for (const o of input.agent.skillOmissions ?? []) omitClaimed(o.name, o.reason);

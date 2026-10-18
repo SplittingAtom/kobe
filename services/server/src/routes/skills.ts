@@ -64,6 +64,7 @@ const UPLOAD_ERRORS: Record<
   blocklisted: "This skill bundle is on the site's blocklist and can't be uploaded.",
   name_clash:
     "The team has installed a catalog skill with this name. Uninstall it or choose another name.",
+  reserved_name: "That name belongs to one of Kobe's own skills. Choose another name.",
 };
 
 const skillJson = (s: SkillRecord) => ({

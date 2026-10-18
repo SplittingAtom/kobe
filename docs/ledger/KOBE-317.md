@@ -77,16 +77,63 @@ materialization changes, removal of the image path, the image and e2e checks, an
   gallery agent's commands at `/run/kobe-skills/store/sk-<runtime hash>` and checks the seven are
   approved Kobe skills.
 
-## For KOBE-422 (startup seeds, not merged yet)
+## Review fixes (review-317)
 
-The seed writes at every start, so `STARTUP_SEEDED_ROWS` needs, at merge: `registry_skills`
-(`publisher = 'kobe'`), `registry_versions` (`publisher = 'kobe'`), `registry_skill_tags`
-(`by_kobe`), `skill_default_syncs` (`by_kobe`), `team_skill_installs` (`by_kobe`, only once teams
-exist), and `audit_log` rows `skill.kobe.published`, `skill.default.synced` and
-`skill.default.applied` with the system actor. Objects: `<prefix>skills/catalog/*` in the bucket.
+- **S1:** the legacy guard read the parsed frame, whose schema strips `builtin_skills`, so it
+  never fired. It now reads the stored JSON (`row.frame.config.builtin_skills`) and fails such a
+  run visibly on every agent (`skills_unsupported`, "queued before an upgrade… send it again"):
+  no frame can carry the field any more, so even an old agent would start without them. Test:
+  `kobe-skills.db.test.ts` "a run.start queued before the upgrade".
+- **S2 (0137 edited in place, own commit `ae8d95ad`):** `registry_skills_kobe_names` is two-way,
+  `(publisher = 'kobe') = (name IN the seven)`: Kobe rows are exactly the seven, and a Kobe skill
+  can't be renamed. Residual: the app role (which the seed runs as) can still insert a new Kobe
+  version of one of the seven; closing that needs a separate DB role (out of scope).
+- **S3:** `startKobeSeed` (`kobe-seed.ts`): the first attempt is awaited at start; while any
+  package `failed`, it retries with backoff (30 s doubling to 30 min) until one attempt gets
+  through; refusals are final. Stopped at shutdown. Test: `kobe-seed.test.ts`.
+- **S4:** no new team or personal skill may take one of the seven names (409 `reserved_name` at
+  upload, the only create and rename path: a skill's name is its SKILL.md name). Existing ones
+  made before the upgrade keep their name and new versions. Precedence: an agent naming `pdf`
+  gets Kobe's, except where the team made its own `pdf` Required (a Team admin's deliberate
+  choice): that one loads and the named one is omitted as `shadowed` (`resolve.ts`, for any
+  named skill whose name a Required skill of another source holds). The Default sync still skips
+  such teams (name conflict), so their own On by default `pdf` keeps loading for unnamed runs.
+  Tests: `resolve.test.ts`, `kobe-skills.db.test.ts` "reserved names in teams".
+- **S5:** `kobe-packages.test.ts` pins every published version by name and semver, append only
+  ("never edit or remove a line"); the shipped version must be the newest line, with that line's
+  bytes, so a version's bytes can't change without a visible edit of a published line.
+- **N3:** the seed's skill lookup also filters `publisher = 'kobe'`.
+
+## For the KOBE-422 merge (G5 branch, PR #314; can't be done here)
+
+KOBE-422 adds `packages/db/src/startup-seeds.ts` (`STARTUP_SEEDED_ROWS`) and moves start-up work
+into `services/server/src/startup/jobs.ts`, with the guard test `startup-seeds.db.test.ts`. The
+merge must:
+
+1. Add to `STARTUP_SEEDED_ROWS`:
+   - `registry_skills`: `publisher = 'kobe'`;
+   - `registry_versions`: `publisher = 'kobe'`;
+   - `registry_skill_tags`: `by_kobe`;
+   - `skill_default_syncs`: `by_kobe`;
+   - `team_skill_installs`: `by_kobe` (none on a fresh site: no teams; an RLS table, so the
+     restore check reads it under `withTeam` if it reads it at all);
+   - `audit_log`: `actor_kind = 'system' AND actor_id IS NULL AND team_id IS NULL AND action =
+'skill.kobe.published'`, and the sync events limited to Kobe skills: `actor_kind = 'system'
+AND action IN ('skill.default.synced', 'skill.default.sync_failed', 'skill.default.applied')
+AND target ->> 'skillId' IN (SELECT id::text FROM public.registry_skills WHERE publisher =
+'kobe')` (Site admins' Default jobs write the same system-actor events for their skills;
+     those are real data).
+   - Bucket objects: `<prefix>skills/catalog/*`.
+2. Move the 317 seed from `index.ts` into `startup/jobs.ts` as `startKobeSeed`, awaited before
+   `startDefaultSync` starts, stopped with the other jobs.
+3. Give the guard test a BlobStore (e.g. `MemoryObjects`), or the seed is skipped and the guard
+   sees no 317 rows.
 
 ## Open questions (for Chris or the coordinator)
 
+- Rolling upgrade (review N1): finish the server rollout before the team reconcile moves
+  SandboxTemplates to the new image; an old server's run on a new-image sandbox fails visibly
+  ("agent too old"). The other way round works.
 - Gate 1 cold start: a fresh sandbox's first run now fetches up to seven small bundles (~60 KB
   together, serially). Not measurable locally; KOBE-319 (Gate A) should read the k3d cold-start
   trial.
@@ -96,6 +143,11 @@ exist), and `audit_log` rows `skill.kobe.published`, `skill.default.synced` and
 
 - KOBE-333: rescans of catalog versions (Kobe's now have bytes) and maintainer package storage.
 - A Kobe skill dropped from a later package set is left as is (no retire step yet).
+- Review N2: the Required warning and the offer cap count team skills only; count installs (the
+  seven) in the team's meter. Review: maintainer acts (SK24) must refuse Kobe skills;
+  `by_kobe` on Default syncs is not tied to a Kobe skill in the DB.
+- The promotion ticket (Phase B): a promotion of a skill named like a Kobe skill must answer a clear 409 (the DB says
+  23514 `registry_skills_kobe_names`).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -109,7 +161,9 @@ exist), and `audit_log` rows `skill.kobe.published`, `skill.default.synced` and
   skills"; `images/sandbox/Dockerfile` has no skills; `kobe-packages.test.ts`.
 - ac-3: same db test "runs after the upgrade" and the pre-sync run; `resolver/parity.test.ts`
   (D5); `gallery/definitions.test.ts`; e2e gallery checks updated (CI).
-- Suites: `@kobe/server` test:db 130 files / 1730 tests; `@kobe/db` test:db 57 files (all green
-  after the rename-test entry); server, db, protocol, sandbox-agent unit suites; repo typecheck,
-  lint and format:check. The new image checks ran green against `kobe-sandbox:local-0d91bac618ab`
-  on the Docker host. `@kobe/cli` test:db's backup tests fail locally only for lack of pg_dump.
+- Suites (after the review fixes): `@kobe/server` test:db 130 files / 1733 tests (six files
+  timed out while the db and cli suites ran alongside; green when rerun alone); `@kobe/db` test:db
+  57 files / 1331; `@kobe/cli` test:db 28 with `KOBE_PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`
+  (the older-schema blob-ref test now expects the catalog key columns); server, db, protocol,
+  sandbox-agent unit suites; repo typecheck, lint, format:check. The image checks ran green
+  against `kobe-sandbox:local-0d91bac618ab` on the Docker host.

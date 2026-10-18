@@ -134,7 +134,7 @@ interface SkillRow {
 async function lockedSkill(tx: KobeTx, p: KobePackage): Promise<SkillRow> {
   const summary = p.manifest.summary;
   const found = await tx.execute<{ id: string }>(sql`
-    SELECT id FROM registry_skills WHERE name = ${p.name} FOR UPDATE`);
+    SELECT id FROM registry_skills WHERE name = ${p.name} AND publisher = 'kobe' FOR UPDATE`);
   const id = found.rows[0]?.id;
   if (id) return { id, created: false };
   const inserted = await tx.execute<{ id: string }>(sql`
@@ -293,4 +293,53 @@ export async function seedKobeSkills(deps: KobeSeedDeps): Promise<KobeSeedResult
       "skills: Kobe published",
     );
   return results;
+}
+
+/** First retry after a failed seed, doubling per attempt up to the cap (review-317 S3). */
+export const KOBE_SEED_RETRY = { firstMs: 30_000, maxMs: 30 * 60_000 } as const;
+
+export interface KobeSeedRunner {
+  /** The first attempt (the server awaits it at start, before the Default sync runs). */
+  readonly first: Promise<void>;
+  /** Resolves once an attempt published or kept every package (refusals are final, not retried). */
+  readonly settled: Promise<void>;
+  stop(): void;
+}
+
+/**
+ * Seeds now and, while any package `failed` (the object store or Postgres was briefly away at
+ * an upgrade), again with backoff until one attempt gets through: the former built-ins must not
+ * wait for the next restart. A refused package is logged once per attempt and not retried.
+ */
+export function startKobeSeed(
+  deps: KobeSeedDeps,
+  options: { readonly retry?: { firstMs: number; maxMs: number } } = {},
+  seed: (deps: KobeSeedDeps) => Promise<KobeSeedResult[]> = seedKobeSkills,
+): KobeSeedRunner {
+  const retry = options.retry ?? KOBE_SEED_RETRY;
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => (settle = resolve));
+  const attempt = async (delay: number): Promise<void> => {
+    let ok = false;
+    try {
+      ok = (await seed(deps)).every((r) => r.action !== "failed");
+    } catch (err) {
+      deps.log.error({ err }, "skills: Kobe skills could not be seeded");
+    }
+    if (ok) return settle();
+    if (stopped) return;
+    deps.log.warn({ retryInMs: delay }, "skills: Kobe skills seed incomplete; retrying");
+    timer = setTimeout(() => void attempt(Math.min(delay * 2, retry.maxMs)), delay);
+    timer.unref();
+  };
+  return {
+    first: attempt(retry.firstMs),
+    settled,
+    stop: () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
 }

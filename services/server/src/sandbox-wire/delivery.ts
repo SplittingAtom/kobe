@@ -42,17 +42,18 @@ import {
 } from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
-/** What delivery needs from its connection. */
-
-/** The capability pre-KOBE-317 agents advertised for image built-ins (now catalog skills). */
-const LEGACY_CAPABILITY_BUILTIN_SKILLS = "builtin_skills";
-
-/** Whether a stored frame still lists image built-ins (`config.builtin_skills`, before KOBE-317). */
-function legacyBuiltins(frame: RunStartFrame): boolean {
-  const listed = (frame.config as { builtin_skills?: unknown } | undefined)?.builtin_skills;
+/**
+ * Whether a stored command still lists image built-ins (`config.builtin_skills`, a run.start queued
+ * before KOBE-317). Read from the stored JSON: the frame schema no longer knows the field and
+ * parsing strips it (review-317 S1).
+ */
+function legacyBuiltins(row: CommandRow): boolean {
+  const config = (row.frame as { config?: unknown }).config;
+  const listed = (config as { builtin_skills?: unknown } | null | undefined)?.builtin_skills;
   return Array.isArray(listed) && listed.length > 0;
 }
 
+/** What delivery needs from its connection. */
 export interface DeliveryHost {
   readonly id: string;
   readonly target: SandboxTarget;
@@ -425,14 +426,10 @@ export class CommandDelivery {
       );
       return;
     }
-    if (
-      row.kind === "run.start" &&
-      legacyBuiltins(frame as RunStartFrame) &&
-      !this.#host.hasCapability(LEGACY_CAPABILITY_BUILTIN_SKILLS)
-    ) {
-      // A run.start queued before KOBE-317 may still list image built-ins: an agent from before
-      // the upgrade serves them from its image; a newer one has none, so the run fails visibly
-      // rather than starting without the skills it was resolved with.
+    if (row.kind === "run.start" && legacyBuiltins(row)) {
+      // A run.start queued before KOBE-317 lists image built-ins, which no frame carries any more
+      // (they are catalog bundles now): the run fails visibly rather than starting without the
+      // skills it was resolved with. Sending it again resolves them as Kobe's catalog skills.
       await this.#failRunStart(
         row,
         failure(

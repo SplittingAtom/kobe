@@ -125,6 +125,25 @@ describe("skills", () => {
     ]);
   });
 
+  it("a team's own Required skill of a Kobe name wins, and the named Kobe one says so (review S4)", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { catalogSkills: [kobe("pdf"), kobe("docx")] },
+        team: { requiredSkills: [{ ...sk("pdf", "team-pdf"), source: "team" }] },
+      }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.hash)).toEqual(["team-pdf", "kobe-docx"]);
+    expect(r.ok && r.value.omissions).toEqual([{ kind: "skill", name: "pdf", reason: "shadowed" }]);
+    // The same skill both Required and named is one skill, no notice.
+    const same = resolveEffective(
+      with_({
+        agent: { catalogSkills: [kobe("pdf")] },
+        team: { requiredSkills: [kobe("pdf")] },
+      }),
+    );
+    expect(same.ok && same.value.omissions).toEqual([]);
+  });
+
   it("an exclusive agent keeps the Kobe skills it names", () => {
     const excl = resolveEffective(
       with_({
