@@ -348,9 +348,10 @@ jobs:
           scripts/ci-docker-diagnostics.sh
 
   # Gate 4 (KOBE-232): one verdict per user story U1-U16 from the gate shards' output (no cluster).
+  # Skipped when the shards were (an image failed): there are no logs then, and `k3d` already fails.
   stories:
     needs: [changes, e2e]
-    if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' && needs.changes.outputs.code == 'true' }}
+    if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' && needs.changes.outputs.code == 'true' && needs.e2e.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -366,6 +367,10 @@ jobs:
         env:
           KOBE_GATE4_LOGS: ${{ runner.temp }}/gate-logs
         run: |
+          if [ ! -d "${KOBE_GATE4_LOGS}" ]; then
+            echo "::error::no gate-log-* artifacts: no gate shard kept its output"
+            exit 1
+          fi
           ls -l "${KOBE_GATE4_LOGS}"
           KOBE_GATE4_VERDICT_ONLY=1 e2e/gate4.sh | tee -a "$GITHUB_STEP_SUMMARY"
 
