@@ -2,6 +2,31 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+## Handoff (for the fresh agent doing KOBE-318)
+
+- **Branch state:** `group-skills-a` holds KOBE-307..317 and KOBE-423; 317 and its review fixes
+  are the last four commits. Migrations 0128..0138 are unreleased; the next free number is 0139.
+  Nothing is pushed. Read the 313, 315 and 316 handoffs too (conventions and traps there still
+  hold), BRIEF-318.md (untracked; never commit it) and SK28 in the spec.
+- **New traps from 317:**
+  - Kobe names (`isKobeSkillName`) never resolve to local skills: `resolver-input.ts` drops them
+    from `teamSkillStates` and routes them to the catalog, so a manifest of local skills must
+    leave them out too (they follow the team install, like every catalog skill).
+  - A named skill whose name a Required skill of another source holds is omitted `shadowed`
+    (`resolve.ts`): keep that for frozen local versions.
+  - Test worlds created after `seedKobeSkills` get seven installs (new-team hook), so their runs
+    carry seven extra skills: seed only in files that expect it (`kobe-skills.db.test.ts`).
+  - `@kobe/cli` test:db runs locally with `KOBE_PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`.
+  - Running the server db suite next to other db suites times files out; run it alone.
+- **For 318:** named local skills resolve in `loadSkillFacts` (`runs/resolver-input.ts`) through
+  `teamSkillStates` (team) and `personalSkillUsage` (personal, newest version only). Frozen
+  versions must still pass the blocklist (`blockedAmong`), the team review status and
+  `suspended_at` (313 ledger): a frozen version a rescan later suspended or blocked is omitted
+  with a notice, never swapped. Publish is `agents/versions.ts` (`publishAgent`,
+  `publishEvaluated`, rollback `republish`), next to `toolManifest` (`agents/manifest.ts`). The
+  backfill must freeze every existing agent version (team, site/gallery, personal) at what it
+  resolves to on migration day; gallery versions name only Kobe skills, which stay unfrozen.
+
 - **Status:** in review (group branch, Skills v1.2 Phase A)
 - **Branch / worktree:** `group-skills-a` in `../Kobe-skA`
 - **Depends on:** KOBE-310, 312, 314, 315 (same branch)
