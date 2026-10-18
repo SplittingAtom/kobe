@@ -32,8 +32,8 @@
   toggle's tooltip shows Mod+Shift+F.
 - **Saving** (`rail-state.tsx` `useRailPanels`, `lib/shell/rail-panels.ts`): the toggles are saved
   per member (debounced PUT, like `rail_width`). Show threads, Show files, Mod+Shift+F and a drop
-  turn the panel on for the page only, not saved, like their expansions. A drop with nothing
-  added still shows Files for its notice.
+  that turn a hidden panel on save it the same way (coordinator, after the gate1 run: one rule
+  for every path). A drop with nothing added still shows Files for its notice.
 - **Team console** moved: its command is `rail` scope, rendered on the line when the server opens
   the team console (`useOpenConsoles`); the bar's Administration links list Site console only. The
   palette still lists both (by href).

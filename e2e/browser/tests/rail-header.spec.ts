@@ -109,17 +109,10 @@ test("panel toggles: one panel fills the rail, the last stays on, the choice is 
     await chat.composer.press("ControlOrMeta+b");
     await page.getByRole("button", { name: "Show threads" }).click();
     await expect(threads).toBeVisible();
-    // Asking for a panel shows it for this page only: the member's saved choice stays.
-    expect(await storedPanels(page)).toBe("files");
+    // Turning a hidden panel on this way is saved exactly like its toggle.
+    await expect.poll(() => storedPanels(page)).toBe("both");
   } finally {
-    // Back to the default for the other specs (the toggles read "both" on this page already).
-    await page.evaluate(async () => {
-      await fetch("/v1/me/preferences", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rail_panels: "both" }),
-      });
-    });
+    await chat.showBothPanels();
     await expect.poll(() => storedPanels(page)).toBe("both");
   }
   await page.reload();

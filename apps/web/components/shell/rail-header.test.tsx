@@ -339,7 +339,7 @@ describe("the Threads and Files toggles (ac-3)", { timeout: 30_000 }, () => {
 });
 
 describe("existing paths turn a panel on (ac-4)", { timeout: 30_000 }, () => {
-  it("Mod+Shift+F shows Files when it is off and focuses it, without saving that", async () => {
+  it("Mod+Shift+F turns Files on, focuses it and saves that like the toggle", async () => {
     fake.preferences = { rail_panels: "threads" };
     openApp(fake);
     await composer();
@@ -349,8 +349,17 @@ describe("existing paths turn a panel on (ac-4)", { timeout: 30_000 }, () => {
     await waitFor(() => expect(section("kobe-rail-files").hidden).toBe(false));
     await waitFor(() => expect(document.activeElement?.id).toBe("kobe-rail-files"));
     expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(puts().at(-1)?.body).toEqual({ rail_panels: "both" }), WAIT);
+  });
+
+  it("a shown panel is not saved again: Mod+Shift+F with Files on sends nothing", async () => {
+    openApp(fake);
+    await composer();
+    await header();
+    act(() => void pressModShift("F"));
+    await waitFor(() => expect(document.activeElement?.id).toBe("kobe-rail-files"));
     await new Promise((r) => setTimeout(r, 900));
-    expect(puts()).toEqual([]);
+    expect(puts().filter((r) => "rail_panels" in (r.body as object))).toEqual([]);
   });
 
   it("the collapsed rail's Show threads expands it with Threads on", async () => {
@@ -362,6 +371,8 @@ describe("existing paths turn a panel on (ac-4)", { timeout: 30_000 }, () => {
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
     await waitFor(() => expect(section("kobe-rail-threads").hidden).toBe(false));
     await waitFor(() => expect(document.activeElement?.id).toBe("kobe-rail-threads"));
+    // Saved like the toggle: the next load (another device) shows both.
+    await waitFor(() => expect(fake.preferences["rail_panels"]).toBe("both"), WAIT);
   });
 });
 
