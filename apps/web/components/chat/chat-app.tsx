@@ -4,6 +4,7 @@ import "../../lib/security/zod-jitless";
 import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
+import { TeamActivation } from "../../app/team-switcher";
 import type { ApiError } from "../../lib/api/client";
 import { createChatApi } from "../../lib/chat/api";
 import { browserThreadListSync, type ThreadListSync } from "../../lib/chat/thread-list-sync";
@@ -22,7 +23,6 @@ import { CommandPalette } from "../shell/command-palette";
 import { ShortcutKeys } from "../shell/shortcut-keys";
 import { ShortcutSheet } from "../shell/shortcut-sheet";
 import { ThreadGroupsProvider } from "../shell/thread-groups";
-import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider, useRail } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
@@ -86,6 +86,8 @@ type TeamState =
   | { readonly status: "loading" }
   | { readonly status: "signedOut" }
   | { readonly status: "noTeam" }
+  /** Teams but none active yet: `TeamActivation` is choosing one (KOBE-419 review S3). */
+  | { readonly status: "choosing" }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly teamId: string; readonly teamName: string };
 
@@ -104,8 +106,9 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
       (my) => {
         if (!current) return;
         if (my === null) setState({ status: "signedOut" });
-        else if (my.activeTeamId === null) setState({ status: "noTeam" });
-        else {
+        else if (my.activeTeamId === null) {
+          setState({ status: my.teams.length > 0 ? "choosing" : "noTeam" });
+        } else {
           const active = my.teams.find((t) => t.id === my.activeTeamId);
           setState({ status: "ready", teamId: my.activeTeamId, teamName: active?.name ?? "" });
         }
@@ -240,11 +243,8 @@ function ChatWorkspace({
                         <ShellSlot name="search">
                           <ThreadSearch onOpenThread={setThreadId} />
                         </ShellSlot>
-                        <ShellSlot name="context">
-                          <ContextRow />
-                        </ShellSlot>
                         <ShellSlot name="nav">
-                          <RailDrawerButton />
+                          <RailDrawerButton teamName={teamName} />
                         </ShellSlot>
                         <WorkspaceGrid
                           rail={
@@ -257,7 +257,7 @@ function ChatWorkspace({
                           artifact={<ArtifactPanel filesApi={filesApi} />}
                           conversation={
                             <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                              <ThreadView onOpenThread={setThreadId} contextInBar />
+                              <ThreadView onOpenThread={setThreadId} inShell />
                             </main>
                           }
                         />
@@ -324,10 +324,10 @@ export function ChatApp({
   useViewportHeight(appEl);
 
   let body: ReactNode;
-  if (team.status === "loading")
+  if (team.status === "loading" || team.status === "choosing")
     body = (
       <p className={styles.empty} role="status">
-        Loading…
+        {team.status === "choosing" ? "Choosing your team…" : "Loading…"}
       </p>
     );
   else if (team.status === "signedOut") {
@@ -337,7 +337,9 @@ export function ChatApp({
       </p>
     );
   } else if (team.status === "noTeam") {
-    body = <p className={styles.empty}>Choose a team with the team switcher to start chatting.</p>;
+    body = (
+      <p className={styles.empty}>You are not in any team yet. Ask an admin to add you to one.</p>
+    );
   } else if (team.status === "error") {
     body = (
       <p className={styles.empty} role="alert">
@@ -369,6 +371,8 @@ export function ChatApp({
             </a>
             <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
             <TeamInvites />
+            {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
+            <TeamActivation />
             {body}
           </div>
         </ShellSlotsProvider>

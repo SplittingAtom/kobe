@@ -6,10 +6,13 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { command, commandsIn, type CommandId } from "../../lib/shell/commands";
 import { forgetLastThread, lastThreadHref, rememberLastThread } from "../../lib/shell/last-thread";
 import { must } from "../../lib/testing/must";
-import { composer, openApp } from "../chat/testing";
+import { composer, openApp, pressModShift } from "../chat/testing";
 import { ChatReturnLink } from "./chat-return-link";
 
-/** KOBE-197 (CE3, CE4, CE7): the two-row utility bar over the rail · artifact · conversation grid. */
+/**
+ * KOBE-197 (CE3, CE4, CE7): the utility bar (one row since KOBE-418) over the rail · artifact ·
+ * conversation grid.
+ */
 let fake: FakeKobe;
 
 beforeEach(() => {
@@ -45,16 +48,19 @@ function withAccess(siteRole: string | null, teamRole: string, permissions: stri
   });
 }
 
-const row = (n: 1 | 2) => must(document.querySelector<HTMLElement>(`[data-bar-row="${n}"]`));
+const row = (n: 1) => must(document.querySelector<HTMLElement>(`[data-bar-row="${n}"]`));
 const region = (name: string) =>
   must(document.querySelector<HTMLElement>(`[data-shell-region="${name}"]`), name);
 
 describe("utility bar", () => {
-  it("row one: team switcher, wordmark, thread search, area links and the profile menu", async () => {
+  it("row one: wordmark, thread search, area links and the profile menu; no team switcher", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     openApp(fake);
     await composer();
     const one = within(row(1));
-    expect(await one.findByRole("navigation", { name: "Teams" })).toBeTruthy();
+    // The team selector is on the rail's top line (KOBE-419).
+    expect(await screen.findByRole("navigation", { name: "Teams" })).toBeTruthy();
+    expect(one.queryByRole("navigation", { name: "Teams" })).toBeNull();
     expect(one.getByRole("heading", { level: 1, name: "Kobe" })).toBeTruthy();
     expect(await one.findByRole("search")).toBeTruthy();
     expect(one.getByLabelText("Search conversations")).toBeTruthy();
@@ -79,14 +85,23 @@ describe("utility bar", () => {
     expect(menu.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 
-  it("row two: the conversation's agent and model pickers and the Files toggle", async () => {
+  it("has one row: the agent and model pickers are in the composer, not the bar (KOBE-418)", async () => {
     fake.runnableAgents.push({ id: "a-1", scope: "team", name: "Ledger Bot", model: null });
     openApp(fake);
-    const two = within(row(2));
-    expect(await two.findByRole("button", { name: "Chat with: No agent" })).toBeTruthy();
-    expect(screen.getByRole("group", { name: "Conversation context" })).toBe(row(2));
-    expect(await two.findByRole("combobox", { name: "Model for this conversation" })).toBeTruthy();
-    expect(two.getByRole("button", { name: "Files" })).toBeTruthy();
+    const toolbar = await waitFor(() =>
+      must(document.querySelector<HTMLElement>("[data-composer-toolbar]")),
+    );
+    expect(
+      await within(toolbar).findByRole("button", { name: "Chat with: No agent" }),
+    ).toBeTruthy();
+    expect(
+      await within(toolbar).findByRole("combobox", { name: "Model for this conversation" }),
+    ).toBeTruthy();
+    const bar = must(row(1).closest("header"));
+    expect(bar.querySelectorAll("[data-bar-row]")).toHaveLength(1);
+    expect(within(bar).queryByRole("combobox")).toBeNull();
+    expect(within(bar).queryByRole("button", { name: /^Chat with:/ })).toBeNull();
+    expect(within(bar).queryByRole("button", { name: "Files" })).toBeNull();
   });
 
   it("shows no console link to a member", async () => {
@@ -97,16 +112,15 @@ describe("utility bar", () => {
     expect(within(row(1)).queryByRole("navigation", { name: "Administration" })).toBeNull();
   });
 
-  it("links the team console to a team admin and the Site console to a site Owner", async () => {
+  it("links the Site console to a site Owner; Team console is on the rail line (KOBE-419)", async () => {
     withAccess("owner", "team_admin", ["team.members.manage"]);
     openApp(fake);
     const admin = within(await within(row(1)).findByRole("navigation", { name: "Administration" }));
     expect(
       admin.getAllByRole("link").map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")]),
-    ).toEqual([
-      ["Team console", "/admin/team"],
-      ["Site console", "/admin/site"],
-    ]);
+    ).toEqual([["Site console", "/admin/site"]]);
+    const rail = screen.getByRole("complementary", { name: "Workspace" });
+    expect(await within(rail).findByRole("link", { name: "Team console" })).toBeTruthy();
   });
 
   it("renders every bar action through IconAction from the command registry (KOBE-203 ac-2)", async () => {
@@ -114,12 +128,10 @@ describe("utility bar", () => {
     fake.runnableAgents.push({ id: "a-1", scope: "team", name: "Ledger Bot", model: null });
     openApp(fake);
     await within(row(1)).findByRole("navigation", { name: "Administration" });
-    await within(row(2)).findByRole("button", { name: "Files" });
-    const bar = [row(1), row(2)];
-    // Icons, not content: the team switcher, the search, open menus and the context row's
-    // agent and model names stay text.
-    const content =
-      '[aria-label="Teams"], [role="search"], details ul, section, [data-bar-row="2"]';
+    await composer();
+    const bar = [row(1)];
+    // Icons, not content: the team switcher, the search and open menus stay text.
+    const content = '[aria-label="Teams"], [role="search"], details ul, section';
     const icons = bar
       .flatMap((r) => [...r.querySelectorAll<HTMLElement>("a, button, summary")])
       .filter((el) => el.closest(content) === null || el.hasAttribute("data-command"));
@@ -132,13 +144,12 @@ describe("utility bar", () => {
     }
   });
 
-  it("links only the team console to a team admin who has no site role", async () => {
+  it("gives a team admin with no site role no Administration links in the bar", async () => {
     withAccess(null, "team_admin", ["team.members.manage"]);
     openApp(fake);
-    const admin = within(await within(row(1)).findByRole("navigation", { name: "Administration" }));
-    expect(admin.getAllByRole("link").map((a) => a.getAttribute("aria-label"))).toEqual([
-      "Team console",
-    ]);
+    const rail = await screen.findByRole("complementary", { name: "Workspace" });
+    expect(await within(rail).findByRole("link", { name: "Team console" })).toBeTruthy();
+    expect(within(row(1)).queryByRole("navigation", { name: "Administration" })).toBeNull();
   });
 });
 
@@ -155,8 +166,9 @@ describe("grid", () => {
     // Empty: the conversation takes the remaining width (the column collapses on `:empty`).
     expect(region("artifact").childElementCount).toBe(0);
 
-    // Files live in the rail (KOBE-198): the bar's Files shows them there.
-    await userEvent.setup().click(within(row(2)).getByRole("button", { name: "Files" }));
+    // Files live in the rail (KOBE-198): Mod+Shift+F shows them there (the bar's button went in
+    // KOBE-418).
+    pressModShift("F");
     const files = within(region("rail")).getByRole("region", { name: "Files" });
     await waitFor(() => expect(document.activeElement).toBe(files));
     expect(region("artifact").childElementCount).toBe(0);
@@ -336,6 +348,7 @@ describe("bar menus", () => {
   });
 
   it("keeps at most one of the team switcher and the profile menu open", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     openApp(fake);
     await composer();
     const switcher = await teams();

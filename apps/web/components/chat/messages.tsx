@@ -32,7 +32,8 @@ import {
 import { MessageFooter } from "./message-footer";
 import { ForkAction } from "./fork-dialog";
 import { RegenerateWith } from "./regenerate-with";
-import { Disclosure, useDisclosure } from "./detail";
+import { AnswerDetailScope, AnswerDetailToggle, Disclosure, useDisclosure } from "./detail";
+import { CompactNowButton } from "./compact-now";
 import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
 import { UsedSkills } from "./skill-badge";
 import { Reasoning } from "./reasoning";
@@ -156,7 +157,7 @@ export function UserMessage() {
     <MessagePrimitive.Root
       data-role="user"
       className={cn(
-        "group/user animate-in fade-in slide-in-from-bottom-1 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2",
+        "group/user animate-in fade-in slide-in-from-bottom-1 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_fit-content(85%)] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2",
         waiting && "opacity-75",
       )}
     >
@@ -223,47 +224,52 @@ export function AssistantMessage() {
       className="group/answer animate-in fade-in slide-in-from-bottom-1 relative duration-150"
     >
       <AnswerFeedbackScope>
-        <h3 className="sr-only">The agent said</h3>
-        <MessageMarkers place="before" className="mb-2" />
-        <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
-          <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
-          <UsedSkills />
-          {running && (
-            <span className="text-muted-foreground animate-pulse text-sm motion-reduce:animate-none">
-              Working…
-            </span>
-          )}
-        </div>
-        <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
-          <ActionBarPrimitive.Root
-            hideWhenRunning
-            className="text-muted-foreground animate-in fade-in -ms-1 flex gap-1 duration-200"
-          >
-            <ActionBarPrimitive.Copy asChild>
-              <IconAction command="copy" size="sm">
-                <AuiIf condition={(s) => s.message.isCopied}>
-                  <CheckIcon aria-hidden />
-                </AuiIf>
-                <AuiIf condition={(s) => !s.message.isCopied}>
-                  <CopyIcon aria-hidden />
-                </AuiIf>
-              </IconAction>
-            </ActionBarPrimitive.Copy>
-            {!readOnly && canRegenerate && (
-              <>
-                <ActionBarPrimitive.Reload asChild>
-                  <IconAction command="regenerate" size="sm" />
-                </ActionBarPrimitive.Reload>
-                <RegenerateWith />
-              </>
+        <AnswerDetailScope>
+          <h3 className="sr-only">The agent said</h3>
+          <MessageMarkers place="before" className="mb-2" />
+          <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
+            <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+            <UsedSkills />
+            {running && (
+              <span className="text-muted-foreground animate-pulse text-sm motion-reduce:animate-none">
+                Working…
+              </span>
             )}
-            <ForkAction meta={meta} />
-            <AnswerFeedbackButtons />
-          </ActionBarPrimitive.Root>
-          {!running && <MessageFooter />}
-        </div>
-        {!running && <AnswerFeedbackDetails />}
-        <MessageMarkers place="after" className="mt-2" />
+          </div>
+          <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
+            <ActionBarPrimitive.Root
+              hideWhenRunning
+              data-kobe-answer-actions
+              className="text-muted-foreground animate-in fade-in -ms-1 flex gap-1 duration-200"
+            >
+              <ActionBarPrimitive.Copy asChild>
+                <IconAction command="copy" size="sm">
+                  <AuiIf condition={(s) => s.message.isCopied}>
+                    <CheckIcon aria-hidden />
+                  </AuiIf>
+                  <AuiIf condition={(s) => !s.message.isCopied}>
+                    <CopyIcon aria-hidden />
+                  </AuiIf>
+                </IconAction>
+              </ActionBarPrimitive.Copy>
+              {!readOnly && canRegenerate && (
+                <>
+                  <ActionBarPrimitive.Reload asChild>
+                    <IconAction command="regenerate" size="sm" />
+                  </ActionBarPrimitive.Reload>
+                  <RegenerateWith />
+                </>
+              )}
+              <ForkAction meta={meta} />
+              <AnswerDetailToggle />
+              <AnswerFeedbackButtons />
+              <CompactNowButton />
+            </ActionBarPrimitive.Root>
+            {!running && <MessageFooter />}
+          </div>
+          {!running && <AnswerFeedbackDetails />}
+          <MessageMarkers place="after" className="mt-2" />
+        </AnswerDetailScope>
       </AnswerFeedbackScope>
     </MessagePrimitive.Root>
   );

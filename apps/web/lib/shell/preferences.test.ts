@@ -61,6 +61,10 @@ describe("wire", () => {
     expect(readPreferences({ preferences: { railWidth: 360 } })).toEqual({ railWidth: 360 });
     expect(readPreferences({ preferences: { railWidth: null } })).toEqual({ railWidth: null });
     expect(readPreferences({ preferences: { railWidth: 9000 } })).toEqual({});
+    expect(readPreferences({ preferences: { railPanels: "files" } })).toEqual({
+      railPanels: "files",
+    });
+    expect(readPreferences({ preferences: { railPanels: "none" } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -72,6 +76,7 @@ describe("wire", () => {
     expect(toWire({ detailExpanded: false })).toEqual({ detail_expanded: false });
     expect(toWire({ railWidth: 400 })).toEqual({ rail_width: 400 });
     expect(toWire({ railWidth: null })).toEqual({ rail_width: null });
+    expect(toWire({ railPanels: "threads" })).toEqual({ rail_panels: "threads" });
     expect(toWire({})).toEqual({});
   });
 });

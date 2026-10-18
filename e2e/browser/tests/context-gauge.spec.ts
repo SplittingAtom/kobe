@@ -37,6 +37,11 @@ test("the context gauge shows the newest call's prompt against the model's windo
 
   await chat.ask("No tools. Summarise in three sentences what a lighthouse keeper does.");
   await expect(meter).toBeVisible({ timeout: 60_000 });
+  // Under the composer, at the end of its row (KOBE-418), not in the bar.
+  await expect(
+    page.locator("[data-composer-footer] [data-composer-gauge]").getByRole("meter"),
+  ).toBeVisible();
+  await expect(page.locator("header").getByRole("meter")).toHaveCount(0);
   await expect(meter).toHaveAttribute("aria-valuetext", /tokens/);
   const max = Number(await meter.getAttribute("aria-valuemax"));
   expect(max).toBeGreaterThan(0);

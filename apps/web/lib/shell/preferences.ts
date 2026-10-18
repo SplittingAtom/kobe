@@ -1,11 +1,11 @@
 /**
- * Layout preferences per user (CE8, KOBE-202): the rail's collapsed state and width (KOBE-305),
- * the Threads/Files divider and the artifact column's width follow the member across devices. The shell loads them
- * once at start (`GET /v1/me/preferences`) and applies them to the rail and the artifact column;
- * changes are debounced into one `PUT` of the keys that changed (callers commit on release or
- * toggle, never per pointer move), and what is still queued goes out when the page is hidden or
- * left. A failure is logged and never blocks the UI: the shell keeps its defaults and whatever the
- * member does on screen.
+ * Layout preferences per user (CE8, KOBE-202): the rail's collapsed state, width (KOBE-305) and
+ * panels (KOBE-419), the Threads/Files divider and the artifact column's width follow the member
+ * across devices. The shell loads them once at start (`GET /v1/me/preferences`) and applies them
+ * to the rail and the artifact column; changes are debounced into one `PUT` of the keys that
+ * changed (callers commit on release or toggle, never per pointer move), and what is still queued
+ * goes out when the page is hidden or left. A failure is logged and never blocks the UI: the shell
+ * keeps its defaults and whatever the member does on screen.
  *
  * Applying checks each value against this screen: a stored value that no longer fits (a width the
  * space right of the rail can't hold beside the conversation's floor, a share outside the rail's
@@ -17,7 +17,12 @@
  * as a sheet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { readUiPreferences, THREADS_SHARE_BOUNDS, type UiPreferences } from "@kobe/protocol";
+import {
+  readUiPreferences,
+  THREADS_SHARE_BOUNDS,
+  type RailPanels,
+  type UiPreferences,
+} from "@kobe/protocol";
 import { apiRequest } from "../api/client";
 import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs";
 
@@ -34,6 +39,8 @@ export interface LayoutPreferences {
   readonly detailExpanded?: boolean;
   /** The expanded rail's dragged width (KOBE-305); null: the default, 280 px. */
   readonly railWidth?: number | null;
+  /** Which rail panels show (KOBE-419): Threads, Files or both (the default). */
+  readonly railPanels?: RailPanels;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -45,6 +52,7 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.artifact_width !== undefined ? { artifactWidth: p.artifact_width } : {}),
   ...(p.detail_expanded !== undefined ? { detailExpanded: p.detail_expanded } : {}),
   ...(p.rail_width !== undefined ? { railWidth: p.rail_width } : {}),
+  ...(p.rail_panels !== undefined ? { railPanels: p.rail_panels } : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -55,6 +63,7 @@ export function toWire(change: LayoutPreferences): UiPreferences {
     ...(change.artifactWidth !== undefined ? { artifact_width: change.artifactWidth } : {}),
     ...(change.detailExpanded !== undefined ? { detail_expanded: change.detailExpanded } : {}),
     ...(change.railWidth !== undefined ? { rail_width: change.railWidth } : {}),
+    ...(change.railPanels !== undefined ? { rail_panels: change.railPanels } : {}),
   };
 }
 
@@ -71,6 +80,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       artifact_width: raw.artifactWidth,
       detail_expanded: raw.detailExpanded,
       rail_width: raw.railWidth,
+      rail_panels: raw.railPanels,
     }),
   );
 }

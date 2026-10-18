@@ -44,9 +44,13 @@ function conversation(title = "Report") {
   const first = fake.addSystemEntry(t, null, "model_change", { provider: "kobe", modelId: "kimi" });
   const root = fake.addSystemEntry(t, first, "thinking_level_change", { thinkingLevel: "off" });
   const q = fake.addEntry(t, root, { role: "user", content: "Sum the numbers" });
+  // A reasoning block, so the answer has a Show details toggle to watch (KOBE-418).
   fake.addEntry(t, q, {
     role: "assistant",
-    content: [{ type: "text", text: "They add up to 42." }],
+    content: [
+      { type: "thinking", thinking: "Adding up." },
+      { type: "text", text: "They add up to 42." },
+    ],
   });
   return { t, root };
 }
@@ -78,7 +82,7 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     const { t } = conversation();
     openApp(fake, t);
     await ready();
-    const before = screen.getByRole("button", { name: "Show all details" });
+    const before = screen.getByRole("button", { name: "Show details" });
     before.focus();
     const { dialog, input, list } = await openPalette();
     expect(document.activeElement).toBe(input);
@@ -123,7 +127,8 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     const { t } = conversation();
     openApp(fake, t);
     await ready();
-    const toggle = screen.getByRole("button", { name: "Show all details" });
+    // The answer's own Show details follows the conversation-wide toggle (KOBE-418).
+    const toggle = screen.getByRole("button", { name: "Show details" });
     const { dialog } = await openPalette();
     const user = userEvent.setup();
     await user.keyboard("details show");

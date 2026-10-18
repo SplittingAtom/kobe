@@ -21,12 +21,8 @@ async function checkPopups(chat: Chat, page: Page, theme: Theme): Promise<Paint>
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
 
-  // Compact (from the thread's actions menu) and its input.
-  await chat.openThreadActions();
-  await page
-    .locator("[data-thread-actions]")
-    .getByRole("button", { name: /^Compact now/ })
-    .click();
+  // Compact (the latest answer's Compact now, KOBE-418) and its input.
+  await chat.compactNow.click();
   const compact = page.getByRole("dialog", { name: "Compact this thread" });
   await expect(compact).toBeVisible();
   expectThemed("Compact dialog", await paintOf(compact), theme);

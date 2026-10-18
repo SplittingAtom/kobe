@@ -9,13 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { THREADS_SHARE_BOUNDS } from "@kobe/protocol";
+import { RAIL_PANELS, THREADS_SHARE_BOUNDS, type RailPanels } from "@kobe/protocol";
 import {
   applyThreadsShare,
   useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
+import { DEFAULT_RAIL_PANELS, shows, withPanel } from "../../lib/shell/rail-panels";
 import { applyRailWidth, railWidthWithin } from "../../lib/shell/rail-width";
 import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
@@ -37,6 +38,11 @@ import { useShellBand } from "./shell-band";
  *
  * The expanded rail's width (KOBE-305) is dragged on wide windows only and saved with the other
  * preferences (per user, server-side); collapsing keeps it, so expanding again restores it.
+ *
+ * Its panels (KOBE-419): Threads, Files or both, from the toggles on the rail's top line, saved per
+ * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop, and the phone's
+ * drawer button, which reveals Threads) turns it on for this page only, like those paths'
+ * expansions: the toggles then show both while the stored choice stays as it was.
  */
 export type RailSection = "threads" | "files";
 
@@ -81,7 +87,7 @@ export interface RailApi {
   /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
   readonly filesRequests: number;
   /**
-   * Expands the rail and moves focus to a section (the collapsed icons, the bar's Files).
+   * Expands the rail and moves focus to a section (the collapsed icons, Mod+Shift+F).
    * `toggle`: the member expanded the collapsed rail with its own icons (saved like `toggle`).
    */
   reveal(section: RailSection, options?: { readonly toggle?: boolean }): void;
@@ -93,6 +99,12 @@ export interface RailApi {
   setWidth(width: number): void;
   /** Back to the default width (double-click on the handle), saved as `null`. */
   resetWidth(): void;
+  /** Which panels show (KOBE-419): Threads, Files or both. */
+  readonly panels: RailPanels;
+  /** The member's toggle on the rail's top line: saved; the last panel on stays on. */
+  setPanel(section: RailSection, on: boolean): void;
+  /** Turns a panel on for this page (not saved): a drop's notice must be seen. */
+  showPanel(section: RailSection): void;
 }
 
 /**
@@ -119,6 +131,39 @@ function useRailWidth(
   );
   const resetWidth = useCallback(() => commit(null), [commit]);
   return { width: stored.value, setWidth, resetWidth };
+}
+
+/** A stored panels value this build knows, else null (the default applies). */
+function knownPanels(stored: RailPanels | undefined): RailPanels | null {
+  return stored !== undefined && RAIL_PANELS.includes(stored) ? stored : null;
+}
+
+/**
+ * The rail's panels (KOBE-419): the member's stored choice applied once loaded unless they already
+ * changed it on this page; their toggles are saved, a reveal is not.
+ */
+function useRailPanels(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const stored = useStoredPreference<RailPanels>({
+    initial: DEFAULT_RAIL_PANELS,
+    ready: preferences !== null,
+    resolve: () => knownPanels(preferences?.railPanels),
+    save: onSave && ((railPanels) => onSave({ railPanels })),
+  });
+  const { commit, set, current } = stored;
+  const setPanel = useCallback(
+    (section: RailSection, on: boolean) => commit(withPanel(current(), section, on)),
+    [commit, current],
+  );
+  const showPanel = useCallback(
+    (section: RailSection) => {
+      if (!shows(current(), section)) set(withPanel(current(), section, true));
+    },
+    [set, current],
+  );
+  return { panels: stored.value, setPanel, showPanel };
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -174,6 +219,7 @@ export function RailProvider({
     [docked, chosenNow, drawerOpen],
   );
   const { width, setWidth, resetWidth } = useRailWidth(preferences, onSave);
+  const { panels, setPanel, showPanel } = useRailPanels(preferences, onSave);
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
@@ -195,10 +241,11 @@ export function RailProvider({
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
       if (options?.toggle && collapsedNow()) toggle(false);
       else setCollapsed(false);
+      showPanel(section);
       setRevealed((prev) => ({ section, seq: (prev?.seq ?? 0) + 1 }));
       if (section === "files") setFilesRequests((n) => n + 1);
     },
-    [collapsedNow, toggle, setCollapsed],
+    [collapsedNow, toggle, setCollapsed, showPanel],
   );
   const api = useMemo(
     () => ({
@@ -217,6 +264,9 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      panels,
+      setPanel,
+      showPanel,
     }),
     [
       docked,
@@ -235,29 +285,40 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      panels,
+      setPanel,
+      showPanel,
     ],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;
 }
 
-/** Bar row two's Files (CE3): shows the rail's Files section. Nothing outside a rail. */
-export function FilesButton() {
-  const rail = useRail();
-  if (!rail) return null;
-  return <IconAction command="files" onClick={() => rail.reveal("files")} />;
-}
-
-/** Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). */
-export function RailDrawerButton() {
+/**
+ * Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). Beside the
+ * button, the active team's name (KOBE-419), so the team stays visible without opening the drawer
+ * (whose header holds the selector); it truncates, with all of it as the tooltip.
+ */
+export function RailDrawerButton({ teamName = "" }: { readonly teamName?: string }) {
   const rail = useRail();
   const single = useShellBand() === "single";
   if (!rail || !single) return null;
   return (
-    <IconAction
-      command="open-rail"
-      aria-haspopup="dialog"
-      aria-expanded={rail.drawer}
-      onClick={() => rail.reveal("threads", { toggle: true })}
-    />
+    <span data-rail-drawer-opener className="flex min-w-0 items-center gap-1">
+      <IconAction
+        command="open-rail"
+        aria-haspopup="dialog"
+        aria-expanded={rail.drawer}
+        onClick={() => rail.reveal("threads", { toggle: true })}
+      />
+      {teamName !== "" && (
+        <span
+          title={teamName}
+          className="max-w-[min(9rem,30vw)] min-w-0 truncate text-sm font-medium"
+          data-bar-team
+        >
+          {teamName}
+        </span>
+      )}
+    </span>
   );
 }

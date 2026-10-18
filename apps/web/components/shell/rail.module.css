@@ -87,16 +87,29 @@
   }
 }
 
+/* The top line (KOBE-419): the team selector, then the panel toggles, Team console and collapse.
+   At the rail's minimum width (200 px, KOBE-305) the name truncates; the buttons keep their size
+   and the line never wraps. */
 .header {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.25rem;
   align-items: center;
   min-height: 2.75rem;
   padding: 0.25rem 0.5rem 0.25rem 1rem;
 }
 
-.team {
+/* The slot clips (nothing paints over the buttons) and is a container, so the role can hide
+   when the slot is narrow (KOBE-419 review S1). */
+.teamSlot {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.team {
+  display: block;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -104,6 +117,129 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.headerActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.125rem;
+  align-items: center;
+}
+
+/* The team menu in the line: its summary holds the truncating name and the role. */
+.teamMenu {
+  min-width: 0;
+}
+
+.teamSummary {
+  display: flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.teamSummary::-webkit-details-marker {
+  display: none;
+}
+
+/* The name keeps a usable minimum and truncates; the role shrinks first, then hides. */
+.teamSummary .team {
+  flex: 0 1 auto;
+  min-width: 2.5rem;
+}
+
+.teamSummary small {
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--admin-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A menu, so it says so: a caret after the name and role. */
+.teamSummary::after {
+  flex-shrink: 0;
+  color: var(--admin-muted);
+  font-size: 0.7rem;
+  content: "▾";
+}
+
+@container (width < 7.5rem) {
+  .teamSummary small {
+    display: none;
+  }
+}
+
+.teamMenu .teamList {
+  right: auto;
+  left: 0;
+  min-width: 0;
+  max-width: min(18rem, 85vw);
+}
+
+/* The collapsed rail's team (review S2): its initials in a 32 px square, with a menu of teams
+   in a popover when the member has several. */
+.teamIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  color: var(--admin-fg);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--admin-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.375rem;
+  cursor: default;
+}
+
+button.teamIcon {
+  cursor: pointer;
+}
+
+.teamPopover {
+  z-index: 50;
+  min-width: 12rem;
+  max-width: min(18rem, 85vw);
+  padding: 0.25rem;
+  color: var(--admin-fg);
+  background: var(--admin-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.teamPopover ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teamPopover button {
+  display: block;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  color: inherit;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: 0.25rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.teamPopover button:hover:not(:disabled) {
+  background: var(--admin-panel);
+}
+
+.teamError {
+  margin: 0 0.5rem 0.25rem 1rem;
+  color: var(--admin-danger);
+  font-size: 0.8rem;
 }
 
 /* Threads, divider, Files; the rows' split is set inline from the divider's position. One column
@@ -122,6 +258,11 @@
   min-width: 0;
   min-height: 0;
   outline: none;
+}
+
+/* A panel turned off on the top line (KOBE-419): kept mounted, not shown. */
+.section[hidden] {
+  display: none;
 }
 
 .sectionBody {

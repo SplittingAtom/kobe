@@ -46,23 +46,37 @@ function modelBinding(
   };
 }
 
+/** What the composer's model and thinking selectors show and do (KOBE-418: one reading). */
+export interface ModelPickerData {
+  readonly id: string;
+  readonly models: TeamModels;
+  readonly choices: ModelChoices;
+  readonly disabled: boolean;
+  readonly thinkingChosen: ThinkingLevel | null;
+  readonly thinkingDisabled: boolean;
+  readonly choose: (value: string) => void;
+  readonly chooseThinking: (level: ThinkingLevel | null) => void;
+}
+
 /**
  * The conversation's model (D30; KOBE-41's open question): one of the team's enabled models, or
- * the team default. Sits in the composer's action bar, like assistant-ui's model selector, as a
- * native `<select>` (keyboard and screen readers for free). On a new conversation the choice is
- * kept until the first message creates the thread; on an existing one it is saved on the thread
- * and used by its next runs. A choice the team has since disabled stays selected, marked
- * unavailable, with the way out.
+ * the team default, and its thinking level (KOBE-260). On a new conversation the choice is kept
+ * until the first message creates the thread; on an existing one it is saved on the thread and
+ * used by its next runs. A choice the team has since disabled stays selected, marked unavailable,
+ * with the way out. Publishes `/model`; null until the team's models are read, and never on a
+ * conversation that can't run (`active` false: shared read-only, in Trash).
  */
-export function ModelPicker({
+export function useModelPicker({
   controller,
   state,
   isNew,
+  active = true,
 }: {
   readonly controller: ThreadController | null;
   readonly state: ThreadState;
   readonly isNew: boolean;
-}) {
+  readonly active?: boolean;
+}): ModelPickerData | null {
   const id = useId();
   const session = useChatSession();
   const loaded = useThreadTeamModels();
@@ -103,7 +117,7 @@ export function ModelPicker({
   // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
   const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
   const all =
-    loaded.status === "ready"
+    active && loaded.status === "ready"
       ? modelChoices(loaded.data, isNew ? draft : (state.summary?.model ?? null), agentModel)
       : undefined;
   useBindCommands(
@@ -118,31 +132,48 @@ export function ModelPicker({
         }
       : {},
   );
-
   if (loaded.status !== "ready" || all === undefined) return null;
-  const choices = all;
+  return {
+    id,
+    models: loaded.data,
+    choices: all,
+    disabled,
+    thinkingChosen,
+    thinkingDisabled,
+    choose,
+    chooseThinking,
+  };
+}
+
+/**
+ * The model and thinking `<select>`s, in the composer's toolbar (KOBE-418), like assistant-ui's
+ * model selector: native selects, so keyboard and screen readers come for free. The hints stay
+ * short there: a pinned model says so in its description and tooltip.
+ */
+export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
+  const { id, models, choices, disabled, thinkingChosen, thinkingDisabled } = picker;
   const { enabled, chosen, unavailable, pinned } = choices;
-  const chosenName = chosen === null ? null : aliasName(loaded.data, chosen);
 
   if (pinned !== null) {
-    const name = aliasName(loaded.data, pinned);
+    const name = aliasName(models, pinned);
+    const hint = `This agent always uses ${name}.`;
     return (
       <>
-        <label className={styles.modelPicker}>
+        <label className={styles.modelPicker} title={hint}>
           <span className={styles.visuallyHidden}>Model for this conversation</span>
           <select value={pinned} disabled aria-describedby={`${id}-pinned`}>
             <option value={pinned}>{name}</option>
           </select>
         </label>
-        <span id={`${id}-pinned`} className={styles.hint}>
-          This agent always uses {name}.
+        <span id={`${id}-pinned`} className={styles.visuallyHidden}>
+          {hint}
         </span>
         <ThinkingPicker
-          models={loaded.data}
+          models={models}
           alias={pinned}
           chosen={thinkingChosen}
           disabled={thinkingDisabled}
-          onChoose={chooseThinking}
+          onChoose={picker.chooseThinking}
         />
       </>
     );
@@ -150,12 +181,13 @@ export function ModelPicker({
 
   if (enabled.length === 0 && chosen === null) {
     return (
-      <span className={styles.hint} id={`${id}-none`}>
+      <span className={styles.pickerNote} id={`${id}-none`}>
         No models are enabled for your team yet.
       </span>
     );
   }
 
+  const chosenName = chosen === null ? null : aliasName(models, chosen);
   return (
     <>
       <label className={styles.modelPicker}>
@@ -165,7 +197,7 @@ export function ModelPicker({
           disabled={disabled}
           aria-invalid={unavailable || undefined}
           aria-describedby={unavailable ? `${id}-unavailable` : undefined}
-          onChange={(e) => choose(e.target.value)}
+          onChange={(e) => picker.choose(e.target.value)}
         >
           <option value={DEFAULT}>{teamDefaultLabel(choices)}</option>
           {enabled.map((m) => (
@@ -180,19 +212,29 @@ export function ModelPicker({
       </label>
       {!unavailable && (
         <ThinkingPicker
-          models={loaded.data}
+          models={models}
           alias={chosen}
           chosen={thinkingChosen}
           disabled={thinkingDisabled}
-          onChoose={chooseThinking}
+          onChoose={picker.chooseThinking}
         />
       )}
-      {unavailable && (
-        <p id={`${id}-unavailable`} role="alert" className={styles.modelWarning}>
-          {chosenName} isn&apos;t enabled for your team any more, so messages here can&apos;t run.
-          Pick another model, or ask a team admin to enable it.
-        </p>
-      )}
     </>
+  );
+}
+
+/**
+ * A model the team has since disabled (the select stays on it, marked): the way out, on its own
+ * line in the composer, outside the selectors so a folded menu never hides it.
+ */
+export function ModelWarning({ picker }: { readonly picker: ModelPickerData }) {
+  const { id, models, choices } = picker;
+  const { chosen, unavailable, pinned } = choices;
+  if (pinned !== null || !unavailable || chosen === null) return null;
+  return (
+    <p id={`${id}-unavailable`} role="alert" className={styles.modelWarning}>
+      {aliasName(models, chosen)} isn&apos;t enabled for your team any more, so messages here
+      can&apos;t run. Pick another model, or ask a team admin to enable it.
+    </p>
   );
 }

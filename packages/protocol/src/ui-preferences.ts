@@ -11,6 +11,8 @@ import { z } from "zod";
  *
  * `detail_expanded` (KOBE-208, CE12): the Detail toggle, all reasoning and tool cards open.
  * `rail_width` (KOBE-305): the expanded rail's dragged width; `null` goes back to the default.
+ * `rail_panels` (KOBE-419): which of the rail's panels show, Threads, Files or both (the default);
+ * never none, so the rail always has something to show.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -27,6 +29,10 @@ export const ARTIFACT_WIDTH_BOUNDS = { min: 360, max: 8192 } as const;
  * whether it fits beside the conversation is decided on the screen it is applied to.
  */
 export const RAIL_WIDTH_BOUNDS = { min: 200, max: 560 } as const;
+
+/** The rail's panels on screen (KOBE-419): one of them, or both. */
+export const RAIL_PANELS = ["both", "threads", "files"] as const;
+export type RailPanels = (typeof RAIL_PANELS)[number];
 
 /** Largest PUT body the server reads (bytes); the whole document is far smaller. */
 export const UI_PREFERENCES_MAX_BODY = 1024;
@@ -61,6 +67,7 @@ export const uiPreferencesSchema = z.strictObject({
     .max(RAIL_WIDTH_BOUNDS.max)
     .nullable()
     .optional(),
+  rail_panels: z.enum(RAIL_PANELS).optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 

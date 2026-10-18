@@ -171,17 +171,21 @@ function useDropStatus() {
 export function useRailDropZone(api: FilesApi, rail: RailApi) {
   const { status, setStatus, clear } = useDropStatus();
   const [showFolder, setShowFolder] = useState<{ path: string; seq: number } | null>(null);
-  const { reveal, setCollapsed } = rail;
+  const { reveal, setCollapsed, showPanel } = rail;
   const batch = useRef<Batch | null>(null);
   const queue = useRef<Promise<void>>(Promise.resolve());
 
   const finish = useCallback(
     (done: Batch) => {
-      if (done.added.length === 0) return setCollapsed(false); // the notice is in Files
+      if (done.added.length === 0) {
+        // The notice is in Files: shown, even when the member had turned that panel off.
+        setCollapsed(false);
+        return showPanel("files");
+      }
       setShowFolder((prev) => ({ path: WORKSPACE_DROP_FOLDER, seq: (prev?.seq ?? 0) + 1 }));
       reveal("files");
     },
-    [reveal, setCollapsed],
+    [reveal, setCollapsed, showPanel],
   );
 
   const enqueue = useCallback(

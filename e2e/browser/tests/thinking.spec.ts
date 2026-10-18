@@ -14,8 +14,12 @@ test("thinking off: the answer has no reasoning block and the run records off", 
   page,
 }) => {
   await chat.open();
-  const models = page.getByRole("combobox", { name: "Model for this conversation" });
-  const thinking = page.getByRole("combobox", { name: "Thinking level for this conversation" });
+  // In the composer's toolbar (KOBE-418), or its folded menu on a narrow window.
+  const selectors = await chat.selectors();
+  const models = selectors.getByRole("combobox", { name: "Model for this conversation" });
+  const thinking = selectors.getByRole("combobox", {
+    name: "Thinking level for this conversation",
+  });
   const values = await models
     .locator("option")
     .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value));

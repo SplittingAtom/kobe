@@ -69,7 +69,14 @@ function conversation(title: string, answer = "They add up to 42.") {
   const first = fake.addSystemEntry(t, null, "model_change", { provider: "kobe", modelId: "kimi" });
   const root = fake.addSystemEntry(t, first, "thinking_level_change", { thinkingLevel: "off" });
   const q = fake.addEntry(t, root, { role: "user", content: `About ${title}` });
-  fake.addEntry(t, q, { role: "assistant", content: [{ type: "text", text: answer }] });
+  // A reasoning block, so the answer has a Show details toggle to watch (KOBE-418).
+  fake.addEntry(t, q, {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "Adding up." },
+      { type: "text", text: answer },
+    ],
+  });
   return t;
 }
 
@@ -173,7 +180,8 @@ describe.each<Place>(["page", "composer"])(
 
     it("Mod+Shift+D opens and closes every detail", async () => {
       await opened(conversation("Report"));
-      const toggle = screen.getByRole("button", { name: "Show all details" });
+      // The answer's own Show details follows the conversation-wide toggle (KOBE-418).
+      const toggle = screen.getByRole("button", { name: "Show details" });
       expect(toggle.getAttribute("aria-pressed")).toBe("false");
       hit("D", { shiftKey: true });
       await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("true"));
@@ -281,7 +289,7 @@ describe("previous and next follow the rail's exact order (ac-2)", { timeout: 30
 describe("the ? sheet and tooltips list them (ac-2)", { timeout: 30_000 }, () => {
   it("? opens a sheet with the twelve, in the spec's order, and gives the focus back", async () => {
     await opened(conversation("Report"));
-    const before = screen.getByRole("button", { name: "Show all details" });
+    const before = screen.getByRole("button", { name: "Show details" });
     before.focus();
     fireEvent.keyDown(before, { key: "?", shiftKey: true });
     const sheet = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
@@ -318,8 +326,10 @@ describe("the ? sheet and tooltips list them (ac-2)", { timeout: 30_000 }, () =>
     // Mod+Shift+O first: browsers keep Mod+N for a new window outside an installed app.
     expect(keys("New conversation")).toContain("Control+Shift+O Meta+Shift+O Control+N Meta+N");
     expect(keys("Collapse the rail")).toEqual(["Control+B Meta+B"]);
-    expect(keys("Files")).toContain("Control+Shift+F Meta+Shift+F");
-    expect(keys("Show all details")).toEqual(["Control+Shift+D Meta+Shift+D"]);
+    // Files and Show all details left the bar (KOBE-418): their keys are on the ? sheet. An
+    // answer's own Show details is not Mod+Shift+D, which toggles every answer.
+    expect(screen.queryByRole("button", { name: "Files" })).toBeNull();
+    expect(keys("Show details")).toEqual([null]);
     // The last message's Edit names Mod+Shift+E.
     expect(keys("Edit")).toEqual(["Control+Shift+E Meta+Shift+E"]);
   });
@@ -340,9 +350,9 @@ describe("where shortcuts don't fire (ac-2)", { timeout: 30_000 }, () => {
     expect(press("n", {}, search)).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(rail().hasAttribute("data-collapsed")).toBe(false);
-    expect(
-      screen.getByRole("button", { name: "Show all details" }).getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(screen.getByRole("button", { name: "Show details" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(threadParam()).not.toBeNull();
     // The palette opens from any field.

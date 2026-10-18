@@ -26,7 +26,6 @@ import {
   EllipsisIcon,
   EllipsisVerticalIcon,
   ExternalLinkIcon,
-  FoldVerticalIcon,
   FolderIcon,
   FolderInputIcon,
   FolderKanbanIcon,
@@ -49,6 +48,8 @@ import {
   RefreshCwIcon,
   ServerCogIcon,
   Share2Icon,
+  ShrinkIcon,
+  SlidersHorizontalIcon,
   SquareIcon,
   SquarePenIcon,
   SunIcon,
@@ -135,7 +136,7 @@ export interface Command {
 export const SHORTCUTS_BOUND = true;
 
 const LIST = [
-  // Bar, row one: the member's areas, the consoles, notifications, profile.
+  // Bar: the member's areas, the consoles, notifications, profile.
   {
     id: "my-memory",
     group: "areas",
@@ -166,12 +167,13 @@ const LIST = [
     slash: "agents",
     readOnlySafe: true,
   },
+  // On the rail's top line since KOBE-419 (team admins only); the palette still lists it.
   {
     id: "team-console",
     group: "consoles",
     name: "Team console",
     icon: UsersIcon,
-    scope: "bar",
+    scope: "rail",
     href: consoleHref("team"),
     available: (ctx) => ctx.consoles.includes("team"),
   },
@@ -196,32 +198,34 @@ const LIST = [
     palette: true,
     readOnlySafe: true,
   },
-  // Bar, row two: the open thread's context. Files shows the rail's Files section.
+  // Shows the rail's Files section: its key, the palette and `/files`. The bar's Files button went
+  // with row two (KOBE-418); the rail itself shows the section.
   {
     id: "files",
     name: "Files",
     icon: FolderIcon,
-    scope: "bar",
+    scope: "app",
     shortcut: "Mod+Shift+F",
     slash: "files",
     readOnlySafe: true,
   },
-  // CE12 (KOBE-208): opens or closes every reasoning block and tool card; a toggle (aria-pressed).
+  // CE12 (KOBE-208): opens or closes every reasoning block and tool card: its key and the palette.
+  // On screen each answer has its own toggle (answer-detail, KOBE-418).
   {
     id: "detail",
     name: "Show all details",
     icon: ChevronsUpDownIcon,
-    scope: "bar",
+    scope: "app",
     shortcut: "Mod+Shift+D",
     readOnlySafe: true,
   },
-  // Compact now (CE15, B9 KOBE-213): beside the context gauge at red, and in the thread's actions
-  // menu; opens the dialog (optional focus). Enabled only while the thread is idle. It acts on the
-  // conversation, and the bar's scope lists only icons the bar always shows.
+  // Compact now (CE15, B9 KOBE-213): beside the context gauge at red, and beside the latest
+  // answer's thumbs down (KOBE-418, labelled "Compact now"); opens the dialog (optional focus).
+  // Enabled only while the thread is idle.
   {
     id: "compact-thread",
     name: "Compact this thread",
-    icon: FoldVerticalIcon,
+    icon: ShrinkIcon,
     scope: "thread",
     slash: "compact",
   },
@@ -234,8 +238,6 @@ const LIST = [
     slash: "model",
     arg: "model",
   },
-  // The open thread's actions menu in bar row two (on one column, inside the bar's Menu).
-  { id: "thread-actions", name: "Conversation actions", icon: EllipsisIcon, scope: "thread" },
   // Rail.
   {
     id: "new-thread",
@@ -255,6 +257,10 @@ const LIST = [
     shortcut: "Mod+B",
     readOnlySafe: true,
   },
+  // The rail's top line (KOBE-419): each panel on or off; a toggle (aria-pressed). The last one on
+  // stays on.
+  { id: "rail-threads", name: "Threads panel", icon: MessagesSquareIcon, scope: "rail" },
+  { id: "rail-files", name: "Files panel", icon: FolderIcon, scope: "rail" },
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
@@ -346,7 +352,7 @@ const LIST = [
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
   // Closes a notice banner (retention, a file that left the workspace).
   { id: "dismiss-notice", name: "Dismiss", icon: XIcon, scope: "thread" },
-  // Under 768 px the bar's one row ends in this menu: row two, search, areas, profile (CE8).
+  // Under 768 px the bar ends in this menu: search, areas, profile (CE8).
   { id: "thread-menu", name: "Menu", icon: EllipsisVerticalIcon, scope: "thread" },
   // Message actions.
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
@@ -373,12 +379,27 @@ const LIST = [
     scope: "message",
     readOnlySafe: true,
   },
+  // One answer's reasoning and tool cards (KOBE-418), beside Fork; a toggle (aria-pressed).
+  {
+    id: "answer-detail",
+    name: "Show details",
+    icon: ChevronsUpDownIcon,
+    scope: "message",
+    readOnlySafe: true,
+  },
   { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
   { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
   { id: "open-artifact", name: "Open artifact", icon: PanelRightOpenIcon, scope: "message" },
   // Composer.
   { id: "attach", name: "Attach files", icon: PaperclipIcon, scope: "composer" },
+  // A narrow composer folds its Agent, Model and Thinking selectors into this menu (KOBE-418).
+  {
+    id: "conversation-settings",
+    name: "Agent and model",
+    icon: SlidersHorizontalIcon,
+    scope: "composer",
+  },
   { id: "dictate", name: "Dictate", icon: MicIcon, scope: "composer" },
   { id: "send", name: "Send", icon: ArrowUpIcon, scope: "composer" },
   {

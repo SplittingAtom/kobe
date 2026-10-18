@@ -178,6 +178,24 @@ describe("read-only view (ac-1)", () => {
     expect(await screen.findByLabelText("Message")).toBeTruthy();
   });
 
+  it("names the thread's agent in the banner, and nothing when it has none (KOBE-418)", async () => {
+    const id = sharedWithMe("Agent plan", "team");
+    Object.assign(must(fake.threads.get(id)), {
+      agent_id: "a-ledger",
+      agent_name: "Ledger Bot",
+      agent_status: "suspended",
+    });
+    openApp(fake, id);
+    const banner = await screen.findByRole("note", { name: "Shared thread" });
+    expect(await within(banner).findByText("Agent: Ledger Bot")).toBeTruthy();
+    expect(within(banner).getByText("Suspended")).toBeTruthy();
+    cleanup();
+    const plain = sharedWithMe("Plain plan", "team");
+    openApp(fake, plain);
+    const again = await screen.findByRole("note", { name: "Shared thread" });
+    expect(within(again).queryByText(/^Agent: /)).toBeNull();
+  });
+
   it("says a former member shared it when the author left the team", async () => {
     const id = sharedWithMe("Old plan", "team");
     must(fake.threads.get(id)).owner_name = null;
