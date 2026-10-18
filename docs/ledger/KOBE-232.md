@@ -43,7 +43,8 @@ Docs: `docs/gates/gate-4.md`.
 
 ## Product failures found
 
-- None new yet (runs pending). KOBE-420 (no "vN available" badge or switch) shows as `XFAIL U8`.
+- None new yet (runs pending). KOBE-420 (no "vN available" badge or switch) showed as `XFAIL U8`;
+  fixed on this branch, so U8's gate3 browser part is ordinary checks again.
 
 ## Open questions (for Chris or the coordinator)
 

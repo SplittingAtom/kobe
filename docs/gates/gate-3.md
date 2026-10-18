@@ -81,7 +81,7 @@ rolling back to v1 publishes v3 with v1's definition.
 | new thread: version 2, `G3V2`                                             | New threads get the current version.                               |
 | `switch=200:2`, then `started_agent=<agent>:2`, `G3V2`                    | One call (`POST /v1/threads/:id/agent-version`) switches the pin.  |
 | rollback: `version=3`, `republished_from=1`, v1's prompt; `1:-,2:-,3:1`   | Rollback republishes v1 as a new version; history is kept.         |
-| browser: `v3 available` with a switch on the pinned thread                | The member sees it in the chat. **Expected failure** (see below).  |
+| browser: `v3 available` with a switch on the pinned thread                | The member sees it in the thread header (KOBE-420).                |
 
 ## ac-2 Skills: scan, team-admin review, hash blocklist (U9, KOBE-79/80/81/82)
 
@@ -167,7 +167,8 @@ A check of a product failure that is filed but not fixed prints `XFAIL <check>: 
 (<reason>)` and does not fail the run, so the merge queue stays green; `KOBE_GATE_STRICT=1` makes it
 an ordinary `FAIL` (use it for the sign-off run). When it starts passing it prints `XPASS` and
 fails, so the marker is removed with the fix. Current ones, with their evidence, are in
-[docs/ledger/KOBE-231.md](../ledger/KOBE-231.md) under "Product failures found".
+[docs/ledger/KOBE-231.md](../ledger/KOBE-231.md) under "Product failures found". None is open:
+the version badge (KOBE-420) was fixed on the same branch and its checks are ordinary ones.
 
 ## What this does not prove
 

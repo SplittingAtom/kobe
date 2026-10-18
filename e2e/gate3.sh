@@ -502,10 +502,8 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
       contains "ac-4 browser: ...with Undo" '^memory_undo=present$' "$br"
     fi
     if [[ -n "${PINNED_THREAD:-}" ]]; then
-      xcontains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br" \
-        "KOBE-420: apps/web drops agent_current_version and has no badge"
-      xcontains "ac-1 browser: ...with a one-click switch" '^version_switch=present$' "$br" \
-        "KOBE-420: no switch control in apps/web"
+      contains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br"
+      contains "ac-1 browser: ...with a one-click switch" '^version_switch=present$' "$br"
     fi
   fi
 fi

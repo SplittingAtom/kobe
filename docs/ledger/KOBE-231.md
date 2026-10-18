@@ -49,7 +49,8 @@ Gate 1 and Gate 2 clients' helpers). Browser checks in Chromium beside kubectl
    (none since KOBE-46). Check: `ac-1 browser: the pinned thread shows 'v3 available'` and
    `...with a one-click switch`, marked expected-fail in `e2e/gate3.sh`. Fix: render the badge
    with a switch in the thread header when `agent_current_version > agent_version`. Filed as
-   KOBE-420 (G5 lane, after KOBE-227); the XFAIL marks flip when it lands.
+   KOBE-420 (G5 lane, after KOBE-227). **Fixed** on this branch (docs/ledger/KOBE-420.md): the
+   two checks are ordinary `contains` again.
 
 ## Open questions (for Chris or the coordinator)
 
