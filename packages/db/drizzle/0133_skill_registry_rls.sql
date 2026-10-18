@@ -91,6 +91,65 @@ END;
 $function$;--> statement-breakpoint
 CREATE TRIGGER "registry_versions_immutable" BEFORE UPDATE ON "registry_versions"
   FOR EACH ROW EXECUTE FUNCTION public.registry_versions_immutable();--> statement-breakpoint
+-- Separation of duties (SK22): nobody reviews their own submission, except that a single-admin
+-- Site may self-approve, flagged, as with break-glass (D10, 0091). The database decides the flag:
+-- a review by the submitter must be an approval by an active Site admin while no other active
+-- Site admin and no other active skill reviewer exists. Both sets are read under the site
+-- admin-set lock, which site_roles, users.deactivated_at and site_grants changes also take, so a
+-- concurrent promotion or grant cannot slip past the check. Once approved, the review (reviewer,
+-- time and flag) is frozen. Invoker rights, pinned search_path.
+CREATE FUNCTION public.registry_versions_review_guard()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_catalog', 'public'
+AS $function$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.approved_at IS NOT NULL THEN
+    IF NEW.reviewed_by IS DISTINCT FROM OLD.reviewed_by
+        OR NEW.approved_at IS DISTINCT FROM OLD.approved_at
+        OR NEW.self_approved IS DISTINCT FROM OLD.self_approved THEN
+      RAISE EXCEPTION 'an approved catalog version''s review cannot be changed'
+        USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.reviewed_by IS NOT DISTINCT FROM OLD.reviewed_by THEN
+    NEW.self_approved := OLD.self_approved;
+    RETURN NEW;
+  END IF;
+  IF NEW.reviewed_by IS NULL OR NEW.reviewed_by <> NEW.submitted_by THEN
+    NEW.self_approved := false;
+    RETURN NEW;
+  END IF;
+  IF NEW.approved_at IS NULL THEN
+    RAISE EXCEPTION 'withdraw your own submission instead of reviewing it'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM "public"."break_glass_lock_admin_set"();
+  IF NOT "public"."break_glass_is_site_admin"(NEW.reviewed_by) THEN
+    RAISE EXCEPTION 'a second reviewer must approve this version' USING ERRCODE = '42501';
+  END IF;
+  PERFORM 1 FROM "public"."site_roles" r JOIN "public"."users" u ON u.id = r.user_id
+    WHERE r.user_id <> NEW.submitted_by AND u.deactivated_at IS NULL
+    FOR SHARE OF r, u;
+  IF FOUND THEN
+    RAISE EXCEPTION 'a second reviewer must approve this version' USING ERRCODE = '42501';
+  END IF;
+  PERFORM 1 FROM "public"."site_grants" g JOIN "public"."users" u ON u.id = g.user_id
+    WHERE g."grant" = 'skill_reviewer' AND g.user_id <> NEW.submitted_by
+      AND u.deactivated_at IS NULL
+    FOR SHARE OF u;
+  IF FOUND THEN
+    RAISE EXCEPTION 'a second reviewer must approve this version' USING ERRCODE = '42501';
+  END IF;
+  NEW.self_approved := true;
+  RETURN NEW;
+END;
+$function$;--> statement-breakpoint
+CREATE TRIGGER "registry_versions_review_guard" BEFORE INSERT OR UPDATE ON "registry_versions"
+  FOR EACH ROW EXECUTE FUNCTION public.registry_versions_review_guard();--> statement-breakpoint
+CREATE TRIGGER "site_grants_admin_set_lock" BEFORE INSERT OR UPDATE OR DELETE ON "site_grants"
+  FOR EACH STATEMENT EXECUTE FUNCTION public.break_glass_admin_set_changed();--> statement-breakpoint
 -- A Team admin's block of a catalog skill (SK25) refuses members' adds of it and removes the
 -- existing ones. Invoker rights: both run inside the team's own transaction, under its RLS.
 CREATE FUNCTION public.member_skill_enablements_blocked()

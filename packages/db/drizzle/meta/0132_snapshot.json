@@ -15662,6 +15662,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "self_approved": {
+          "name": "self_approved",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "mirror": {
           "name": "mirror",
           "type": "jsonb",
@@ -15834,7 +15841,11 @@
         },
         "registry_versions_review": {
           "name": "registry_versions_review",
-          "value": "\"registry_versions\".\"reviewed_by\" IS DISTINCT FROM \"registry_versions\".\"submitted_by\""
+          "value": "\"registry_versions\".\"reviewed_by\" IS NULL OR (\"registry_versions\".\"reviewed_by\" = \"registry_versions\".\"submitted_by\") = \"registry_versions\".\"self_approved\""
+        },
+        "registry_versions_self_approval": {
+          "name": "registry_versions_self_approval",
+          "value": "NOT \"registry_versions\".\"self_approved\" OR \"registry_versions\".\"approved_at\" IS NOT NULL"
         },
         "registry_versions_approval": {
           "name": "registry_versions_approval",

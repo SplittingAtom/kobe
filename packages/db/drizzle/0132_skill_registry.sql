@@ -83,6 +83,7 @@ CREATE TABLE "registry_versions" (
 	"claimed_at" timestamp with time zone,
 	"reviewed_by" uuid,
 	"approved_at" timestamp with time zone,
+	"self_approved" boolean DEFAULT false NOT NULL,
 	"mirror" jsonb,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "registry_versions_semver_unique" UNIQUE("skill_id","semver"),
@@ -96,7 +97,8 @@ CREATE TABLE "registry_versions" (
         AND ("registry_versions"."authoritative_scorecard" IS NULL OR jsonb_typeof("registry_versions"."authoritative_scorecard") = 'object')
         AND ("registry_versions"."mirror" IS NULL OR jsonb_typeof("registry_versions"."mirror") = 'object')),
 	CONSTRAINT "registry_versions_claim" CHECK (("registry_versions"."claimed_by" IS NULL) = ("registry_versions"."claimed_at" IS NULL)),
-	CONSTRAINT "registry_versions_review" CHECK ("registry_versions"."reviewed_by" IS DISTINCT FROM "registry_versions"."submitted_by"),
+	CONSTRAINT "registry_versions_review" CHECK ("registry_versions"."reviewed_by" IS NULL OR ("registry_versions"."reviewed_by" = "registry_versions"."submitted_by") = "registry_versions"."self_approved"),
+	CONSTRAINT "registry_versions_self_approval" CHECK (NOT "registry_versions"."self_approved" OR "registry_versions"."approved_at" IS NOT NULL),
 	CONSTRAINT "registry_versions_approval" CHECK (("registry_versions"."state" IN ('approved', 'deprecated', 'withdrawn', 'revoked'))
         = ("registry_versions"."approved_at" IS NOT NULL AND "registry_versions"."reviewed_by" IS NOT NULL))
 );
