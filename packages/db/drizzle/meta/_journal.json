@@ -981,6 +981,13 @@
       "when": 1792340295087,
       "tag": "0139_agent_skill_manifest",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1792340299359,
+      "tag": "0140_agent_skill_manifest_backfill",
+      "breakpoints": true
     }
   ]
 }
