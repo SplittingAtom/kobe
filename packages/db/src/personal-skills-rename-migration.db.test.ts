@@ -78,6 +78,19 @@ const LEFTOVER_OBJECTS = `
   UNION ALL
   SELECT 'index ' || indexname FROM pg_indexes
    WHERE schemaname = 'public' AND indexdef ILIKE '%site\\_skill%'
+  UNION ALL
+  SELECT 'view ' || c.relname FROM pg_class c
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('v', 'm')
+     AND pg_get_viewdef(c.oid) ILIKE '%site\\_skill%'
+  UNION ALL
+  SELECT 'default ' || c.relname || '.' || a.attname FROM pg_attrdef d
+    JOIN pg_class c ON c.oid = d.adrelid
+    JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+   WHERE c.relnamespace = 'public'::regnamespace
+     AND pg_get_expr(d.adbin, d.adrelid) ILIKE '%site\\_skill%'
+  UNION ALL
+  SELECT 'comment ' || d.objoid::text FROM pg_description d
+   WHERE d.description ILIKE '%site\\_skill%'
   ORDER BY 1`;
 
 let db: TestDatabase | undefined;
@@ -105,30 +118,30 @@ async function withClient<T>(url: string, fn: (c: pg.Client) => Promise<T>): Pro
  * role's grants follow this release's matrix, which names the new tables. Triggers run (no replica
  * mode), so the database hashes the audit rows into the chain.
  */
-async function seedPreRename(app: pg.Client): Promise<void> {
-  await app.query(`INSERT INTO users (id, name, email) VALUES ($1, 'Member', $2)`, [
+async function seedPreRename(admin: pg.Client): Promise<void> {
+  await admin.query(`INSERT INTO users (id, name, email) VALUES ($1, 'Member', $2)`, [
     ids.member,
     `member-${suffix}@example.test`,
   ]);
-  await app.query(
+  await admin.query(
     `INSERT INTO site_skills (id, owner_user_id, slug, description, latest_version)
      VALUES ($1, $2, 'pdf', 'PDF tools', 1)`,
     [ids.skill, ids.member],
   );
-  await app.query(
+  await admin.query(
     `INSERT INTO site_skill_versions (skill_id, version, frontmatter, source, content_hash,
        storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
      VALUES ($1, 1, '{}', 'zip', $2, 'skills/pdf/1.zip', 10, 1, 10, $3)`,
     [ids.skill, HASH, ids.member],
   );
-  await app.query(
+  await admin.query(
     `INSERT INTO site_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
      VALUES ($1, 1, false, '[]', '[]', '[]')`,
     [ids.skill],
   );
   const target = { skillId: ids.skill, scope: "personal", slug: "pdf", version: 1 };
   for (const action of ["skill.uploaded", "skill.personal_switch.changed"]) {
-    await app.query(
+    await admin.query(
       `INSERT INTO audit_log (actor_kind, actor_id, action, target) VALUES ('user', $1, $2, $3)`,
       [ids.member, action, JSON.stringify(target)],
     );

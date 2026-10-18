@@ -589,6 +589,19 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Personal skill tables (KOBE-307, migration `0128_personal_skills_rename`).** Personal skills
+  are no longer named after the Site: `site_skills`, `site_skill_versions` and `site_skill_scans`
+  become `personal_skills`, `personal_skill_versions` and `personal_skill_scans`, with their
+  constraints and the trigger `personal_skill_versions_immutable`. Everything is renamed in place
+  (catalog only: no table is rewritten, no row copied, no audit row changed). Server pods of the
+  previous release fail run starts and skill uploads and lists on the renamed tables from the end
+  of the migration Job until Helm replaces them, so expect errors for that short window. Queries,
+  dashboards or scripts of your own that read `site_skill*` tables must use the new names. A
+  backup taken before this release restores only on the release it was taken with
+  ([backup and restore](backup-restore.md#limits)).
+  **This upgrade cannot be undone with `helm rollback`:** the previous release fails on the
+  renamed tables. Take a `kobe backup` first. To go back, reinstall the previous release and
+  restore that backup (changes made after the upgrade are lost).
 - **Site names in the database (KOBE-256, migration `0091_site_rename`).** The `install_*` tables
   become `site_*` (`site_settings`, `site_roles`, `site_agents`, …), with their constraints,
   indexes and triggers; the types `install_role` and `install_agent_scope` become `site_role` and

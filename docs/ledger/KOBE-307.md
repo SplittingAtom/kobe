@@ -35,6 +35,12 @@ Drizzle and server identifiers that mirror them. No behaviour change.
   the blocklist names pass.
 - Web (`apps/web/app/me/skills`) and `routes/skills.ts` had no `site_skill` identifiers.
 
+- Review fixes: upgrade note in `docs/install.md` (not expand/contract: old pods fail run starts
+  until replaced; no `helm rollback`, back up first; no compatibility views). Guard regex now
+  also catches compound names (`site_skills_pkey`); the upgrade test also scans views, column
+  defaults and comments. Skipped N4 (`RAISE NOTICE` in 0128): it would put a non-migration
+  change on top of the migration-only commit; the install note covers the rename.
+
 ## Open questions (for Chris or the coordinator)
 
 - None.

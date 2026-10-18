@@ -35,7 +35,7 @@ const PATTERNS = [
     // KOBE-307 renamed personal skills' site_skill* tables to personal_skill*; the site skill
     // blocklist (skill_blocklist, siteSkillBlocklistRoutes) is the Site's and keeps its name.
     what: "personal skill name",
-    re: /\bsite_skill(?:s|_versions?|_scans?)\b|\b[sS]iteSkill(?:s|Versions?|Scans?)\b/g,
+    re: /\bsite_skill(?:s|_versions?|_scans?)(?:_\w+)?\b|\b[sS]iteSkill(?:s|Versions?|Scans?)\b/g,
     keep: () => true,
   },
   {
@@ -83,6 +83,8 @@ export function selfTestIdentifiers() {
     "JOIN install_agents a ON a.id = t.site_agent_id",
     "db.select().from(siteSkills).innerJoin(siteSkillVersions, on)",
     "INSERT INTO site_skill_scans (skill_id) VALUES ($1)",
+    'ALTER TABLE personal_skills DROP CONSTRAINT "site_skills_pkey"',
+    "DROP TRIGGER site_skill_versions_immutable ON personal_skill_versions",
   ];
   const good = [
     "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
@@ -91,6 +93,7 @@ export function selfTestIdentifiers() {
     "INSERT INTO site_tool_rules; scope: 'install'",
     'action: "memory.install_settings_changed", // historical',
     'db.select().from(personalSkills); api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(d))',
+    "SELECT value FROM site_skill_settings; db.select().from(siteSkillSettings)",
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);
