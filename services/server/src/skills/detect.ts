@@ -45,7 +45,7 @@ export function matchSkillRead(
  * What `run.start` lists, as recorded with the run: each bundle with the source of the effective
  * skill it was listed for (same name and hash), then the built-ins. Two skills with identical
  * bytes share one `sk-<hash>/` directory, so a read of it can only be told as one of them: the
- * first listed (named before personal before offered) keeps the path, the others are not recorded.
+ * first listed (in resolution order, KOBE-315) keeps the path, the others are not recorded.
  * A bundle with no matching effective skill is left out rather than guessed.
  */
 export function runSkillRefs(
@@ -59,7 +59,12 @@ export function runSkillRefs(
     const skill = effective.find((s) => s.name === b.name && s.hash === b.sha256);
     if (skill?.source === undefined || paths.has(b.sha256)) continue;
     paths.add(b.sha256);
-    refs.push({ name: b.name, source: skill.source, sha256: b.sha256 });
+    refs.push({
+      name: b.name,
+      source: skill.source,
+      sha256: b.sha256,
+      ...(skill.semver ? { semver: skill.semver } : {}),
+    });
   }
   for (const name of builtins) refs.push({ name, source: "builtin" });
   return refs;

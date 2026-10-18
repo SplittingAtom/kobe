@@ -1,0 +1,184 @@
+import { sql, type KobeTx } from "@kobe/db";
+import { PUBLISHED_VERSION_STATES } from "@kobe/protocol";
+import {
+  pickCatalogVersion,
+  type CatalogPin,
+  type CatalogVersion,
+} from "../resolver/catalog-pins.js";
+import type { SkillOmission, SkillRef } from "../resolver/resolve.js";
+
+/**
+ * Run-start inputs from the Site Skills Catalog (KOBE-315, SK25, SK27), inside `withTeam()`: the
+ * team's installs (pin mode, access), this member's enablements (turning installs on or off, and
+ * their own adds) and the published versions of those skills. Each install or add becomes a ref at
+ * the version its pin selects ({@link pickCatalogVersion}); one whose pin selects nothing runnable
+ * becomes an omission (`revoked`, `suspended`, `not_approved`).
+ */
+export interface CatalogFacts {
+  /** Step 2: catalog skills the agent names, at the team install's pin. */
+  readonly named: readonly SkillRef[];
+  readonly namedOmissions: readonly SkillOmission[];
+  /** Step 1: Required installs. */
+  readonly required: readonly SkillRef[];
+  readonly requiredOmissions: readonly SkillOmission[];
+  /** Step 3: On by default installs not turned off, Available ones turned on, member adds. */
+  readonly offered: readonly SkillRef[];
+  readonly offeredOmissions: readonly SkillOmission[];
+}
+
+type InstallRow = {
+  readonly skill_id: string;
+  readonly name: string;
+  readonly version_id: string;
+  readonly pin_mode: CatalogPin["pinMode"];
+  readonly access: "available" | "default_on" | "required" | "hidden";
+};
+
+type EnablementRow = {
+  readonly skill_id: string;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly version_id: string | null;
+  readonly pin_mode: CatalogPin["pinMode"] | null;
+};
+
+const byName = (a: { name: string }, b: { name: string }) =>
+  a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+
+async function versionsOf(
+  tx: KobeTx,
+  skillIds: readonly string[],
+): Promise<Map<string, CatalogVersion[]>> {
+  const out = new Map<string, CatalogVersion[]>();
+  if (skillIds.length === 0) return out;
+  const { rows } = await tx.execute<{
+    id: string;
+    skill_id: string;
+    semver: string;
+    seq: number;
+    state: string;
+    suspended: boolean;
+    runtime_hash: string;
+    package_hash: string;
+  }>(sql`
+    SELECT id, skill_id, semver, seq, state::text AS state, suspended_at IS NOT NULL AS suspended,
+      runtime_hash, package_hash
+    FROM registry_versions
+    WHERE skill_id IN (${sql.join(
+      skillIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      AND state::text IN (${sql.join(
+        PUBLISHED_VERSION_STATES.map((st) => sql`${st}`),
+        sql`, `,
+      )})`);
+  for (const r of rows) {
+    const list = out.get(r.skill_id) ?? [];
+    list.push({
+      id: r.id,
+      semver: r.semver,
+      seq: Number(r.seq),
+      state: r.state,
+      suspended: r.suspended,
+      runtimeHash: r.runtime_hash,
+      packageHash: r.package_hash,
+    });
+    out.set(r.skill_id, list);
+  }
+  return out;
+}
+
+export async function loadCatalogFacts(
+  tx: KobeTx,
+  args: {
+    readonly teamId: string;
+    readonly userId: string;
+    /** Names the agent lists that are not built-ins or team skills (those resolve locally). */
+    readonly namedCatalog: readonly string[];
+  },
+): Promise<CatalogFacts> {
+  const installs = (
+    await tx.execute<InstallRow>(sql`
+      SELECT i.skill_id, s.name, i.version_id, i.pin_mode::text AS pin_mode, i.access::text AS access
+      FROM team_skill_installs i JOIN registry_skills s ON s.id = i.skill_id
+      WHERE i.team_id = ${args.teamId}`)
+  ).rows;
+  const enablements = (
+    await tx.execute<EnablementRow>(sql`
+      SELECT e.catalog_skill_id AS skill_id, s.name, e.enabled, e.version_id,
+        e.pin_mode::text AS pin_mode
+      FROM member_skill_enablements e JOIN registry_skills s ON s.id = e.catalog_skill_id
+      WHERE e.team_id = ${args.teamId} AND e.user_id = ${args.userId}
+        AND e.catalog_skill_id IS NOT NULL`)
+  ).rows;
+  const versions = await versionsOf(tx, [
+    ...new Set([...installs.map((i) => i.skill_id), ...enablements.map((e) => e.skill_id)]),
+  ]);
+
+  const resolve = (skillId: string, name: string, pin: CatalogPin) => {
+    const pick = pickCatalogVersion(versions.get(skillId) ?? [], pin);
+    if (!pick.ok) return { omission: { name, reason: pick.reason } satisfies SkillOmission };
+    const v = pick.version;
+    const ref: SkillRef = {
+      name,
+      hash: v.runtimeHash,
+      source: "catalog",
+      semver: v.semver,
+      ...(v.packageHash !== v.runtimeHash ? { aliases: [v.packageHash] } : {}),
+    };
+    return { ref };
+  };
+  const out = {
+    named: [] as SkillRef[],
+    namedOmissions: [] as SkillOmission[],
+    required: [] as SkillRef[],
+    requiredOmissions: [] as SkillOmission[],
+    offered: [] as SkillRef[],
+    offeredOmissions: [] as SkillOmission[],
+  };
+  const into = (
+    refs: SkillRef[],
+    omissions: SkillOmission[],
+    r: { ref?: SkillRef; omission?: SkillOmission },
+  ) => {
+    if (r.ref) refs.push(r.ref);
+    if (r.omission) omissions.push(r.omission);
+  };
+  const installed = new Map(installs.map((i) => [i.name, i]));
+  const pinOf = (i: InstallRow): CatalogPin => ({ pinMode: i.pin_mode, versionId: i.version_id });
+
+  // Step 2: the agent's catalog names at the team's pin (a member add is not an install).
+  const named = new Set(args.namedCatalog);
+  for (const name of named) {
+    const i = installed.get(name);
+    if (!i) out.namedOmissions.push({ name, reason: "not_installed" });
+    else into(out.named, out.namedOmissions, resolve(i.skill_id, i.name, pinOf(i)));
+  }
+
+  // Steps 1 and 3, by name so a full run leaves out the same skills each time.
+  const choice = new Map(enablements.map((e) => [e.skill_id, e]));
+  for (const i of [...installs].sort(byName)) {
+    const mine = choice.get(i.skill_id);
+    if (i.access === "required") {
+      into(out.required, out.requiredOmissions, resolve(i.skill_id, i.name, pinOf(i)));
+      continue;
+    }
+    // A member add (own version and pin) of an installed skill is handled with the adds below.
+    if (mine?.version_id) continue;
+    const on =
+      (i.access === "default_on" && mine?.enabled !== false) ||
+      (i.access === "available" && mine?.enabled === true);
+    if (on && !named.has(i.name))
+      into(out.offered, out.offeredOmissions, resolve(i.skill_id, i.name, pinOf(i)));
+  }
+  for (const e of [...enablements].sort(byName)) {
+    if (!e.enabled || !e.version_id || !e.pin_mode) continue;
+    if (installed.get(e.name)?.access === "required" || named.has(e.name)) continue;
+    into(
+      out.offered,
+      out.offeredOmissions,
+      resolve(e.skill_id, e.name, { pinMode: e.pin_mode, versionId: e.version_id }),
+    );
+  }
+  return out;
+}

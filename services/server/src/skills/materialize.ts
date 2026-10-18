@@ -24,32 +24,52 @@ import { blockedAmong, isBlocked } from "./blocklist.js";
  *   run active on that sandbox, and never a blocklisted one.
  */
 
-/** Ref list for `run.start` from the resolver's effective skills, blocklist re-checked here. */
+/**
+ * Ref list for `run.start` from the resolver's effective skills, blocklist re-checked here.
+ * `unavailable` names the catalog skills (KOBE-315) whose runtime bundle this server does not hold
+ * (catalog bytes are stored from KOBE-317 on): the caller reports them as omitted, never silently.
+ */
 export async function bundleRefsFor(
   tx: KobeTx,
   who: { teamId: string; userId: string },
   skills: readonly SkillRef[],
 ): Promise<SkillBundleRef[]> {
-  if (skills.length === 0) return [];
-  const hashes = skills.map((s) => s.hash);
+  return (await bundleRefsWithGaps(tx, who, skills)).refs;
+}
+
+export async function bundleRefsWithGaps(
+  tx: KobeTx,
+  who: { teamId: string; userId: string },
+  skills: readonly SkillRef[],
+): Promise<{ refs: SkillBundleRef[]; unavailable: string[] }> {
+  if (skills.length === 0) return { refs: [], unavailable: [] };
+  const hashes = skills.flatMap((s) => [s.hash, ...(s.aliases ?? [])]);
   const blocked = new Set(await blockedAmong(tx, hashes));
+  const isBlocked = (s: SkillRef) =>
+    blocked.has(s.hash) || (s.aliases ?? []).some((a) => blocked.has(a));
   const sizes = await sizesByHash(
     tx,
     who,
-    hashes.filter((h) => !blocked.has(h)),
+    skills.filter((s) => !isBlocked(s)).map((s) => s.hash),
   );
   const refs: SkillBundleRef[] = [];
+  const unavailable: string[] = [];
   for (const skill of skills) {
-    if (blocked.has(skill.hash)) continue;
+    if (isBlocked(skill)) continue;
     const size = sizes.get(skill.hash);
     if (size === undefined) {
+      if (skill.source === "catalog") {
+        logger.warn({ name: skill.name, hash: skill.hash }, "skills: catalog bundle not stored");
+        unavailable.push(skill.name);
+        continue;
+      }
       // A version row can't vanish (immutable, no delete); log rather than start a run without it.
       logger.error({ name: skill.name, hash: skill.hash }, "skills: effective bundle has no row");
       continue;
     }
     refs.push({ name: skill.name, sha256: skill.hash, size });
   }
-  return refs;
+  return { refs, unavailable };
 }
 
 async function sizesByHash(
@@ -82,6 +102,29 @@ async function sizesByHash(
   return sizes;
 }
 
+/**
+ * A rescan suspended the version behind `hash` (KOBE-313) since the run started: a fetch is refused
+ * as for a blocklisted hash, so a suspended version never loads on any path (KOBE-315). A team's
+ * review row, a catalog version, or a personal version's own scan that this team has not approved
+ * since.
+ */
+async function isSuspended(tx: KobeTx, teamId: string, hash: string): Promise<boolean> {
+  const { rows } = await tx.execute(sql`
+    SELECT 1 FROM team_skill_reviews
+     WHERE team_id = ${teamId} AND content_hash = ${hash} AND suspended_at IS NOT NULL
+    UNION ALL
+    SELECT 1 FROM registry_versions WHERE runtime_hash = ${hash} AND suspended_at IS NOT NULL
+    UNION ALL
+    SELECT 1 FROM personal_skill_versions v
+      JOIN personal_skill_scans sc ON sc.skill_id = v.skill_id AND sc.version = v.version
+     WHERE v.content_hash = ${hash} AND sc.suspended_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM team_skill_reviews r
+         WHERE r.team_id = ${teamId} AND r.skill_id = v.skill_id AND r.version = v.version
+           AND r.status = 'approved')
+    LIMIT 1`);
+  return rows.length > 0;
+}
+
 export interface LocatedBundle {
   readonly storageKey: string;
   readonly size: number;
@@ -107,6 +150,7 @@ export async function locateBundle(
   hash: string,
 ): Promise<LocatedBundle | null> {
   if (await isBlocked(tx, hash)) return null;
+  if (await isSuspended(tx, who.teamId, hash)) return null;
   const bound = await tx.execute(sql`
     SELECT 1
       FROM sandbox_run_leases l

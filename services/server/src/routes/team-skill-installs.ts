@@ -1,14 +1,15 @@
-import { uninstallSkillSchema } from "@kobe/protocol";
+import { putTeamSkillInstallSchema, uninstallSkillSchema } from "@kobe/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
+  installCatalogSkill,
   listTeamInstalls,
   reinstallDefault,
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
-import { invalidRequest } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../teams/http.js";
 
 const idSchema = z.uuid();
 
@@ -36,6 +37,31 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   app.get("/installs", requireTeamPermission("team.read"), async (c) =>
     c.json(await listTeamInstalls(db, c.get("team").id)),
   );
+
+  app.put("/installs/:skillId", requireTeamPermission("team.skills.installs.manage"), async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    const body = await parseBody(c, putTeamSkillInstallSchema);
+    if (!id.success || !body)
+      return invalidRequest(c, "Send a version, a pin mode and an access mode.");
+    const r = await installCatalogSkill(db, {
+      teamId: c.get("team").id,
+      skillId: id.data,
+      userId: c.get("user").id,
+      ...body,
+    });
+    if (r.ok) return c.json({ semver: r.semver, deprecated: r.deprecated });
+    const errors = {
+      not_found: [404, "No catalog skill with that id."],
+      no_version: [404, "The skill has no version with that number."],
+      not_installable: [409, "That version was withdrawn or revoked, or is not approved."],
+      name_clash: [
+        409,
+        "One of this team's own skills has the same name: rename or archive it first.",
+      ],
+    } as const;
+    const [status, message] = errors[r.code];
+    return c.json({ code: r.code, message }, status);
+  });
 
   app.delete(
     "/installs/:skillId",

@@ -13,10 +13,20 @@ export const DEFAULT_REQUESTED_MODE: ApprovalMode = "ask-on-write";
 
 export interface SkillRef {
   readonly name: string;
-  /** Content hash of the skill bundle (the blocklist keys on it). */
+  /** Content hash of the skill bundle (the blocklist keys on it); a catalog version's runtime hash. */
   readonly hash: string;
   /** Where it comes from (KOBE-297: recorded with the run); absent = not said. */
-  readonly source?: "team" | "personal";
+  readonly source?: "team" | "personal" | "catalog";
+  /** The version's MAJOR.MINOR.PATCH (KOBE-315: recorded with the run, shown on the badge). */
+  readonly semver?: string;
+  /** Other hashes of the same version (a catalog version's package hash): blocked together. */
+  readonly aliases?: readonly string[];
+}
+
+/** A skill a loader already decided to leave out (KOBE-315), with its reason. */
+export interface SkillOmission {
+  readonly name: string;
+  readonly reason: OmissionReason;
 }
 
 export interface ResolveInput {
@@ -36,6 +46,10 @@ export interface ResolveInput {
     readonly unapprovedSkills?: readonly string[];
     /** Named skills whose approved version a rescan suspended (KOBE-313): `suspended`. */
     readonly suspendedSkills?: readonly string[];
+    /** Named catalog skills at the team install's pin (KOBE-315, step 2 after the local ones). */
+    readonly catalogSkills?: readonly SkillRef[];
+    /** Named catalog skills left out: `not_installed`, `revoked`, `suspended` (KOBE-315). */
+    readonly skillOmissions?: readonly SkillOmission[];
     /** Exclusive agents ignore the user's skills. */
     readonly exclusiveSkills: boolean;
     /** Named connectors, or `all`: the team's enabled list (agent file `connectors: all`, KOBE-254). */
@@ -47,12 +61,20 @@ export interface ResolveInput {
     /** Team-level switch (KOBE-80): when true, no user-enabled personal skill is used. */
     readonly personalSkillsDisabled: boolean;
     /**
-     * Team skills set to "Offer to all agents" (KOBE-297), each at its newest approved version:
-     * added to every non-exclusive agent's run after its own and the user's skills, unless a skill
-     * of that name is already there. Exclusive agents and blocklisted hashes leave them out
-     * without a notice (the agent never named them).
+     * Step 1 (KOBE-315, SK27): Required team skills and Required catalog installs. They load for
+     * every run in the team, `skills: exclusive` agents too, and count first against the cap.
+     */
+    readonly requiredSkills?: readonly SkillRef[];
+    /** Required installs left out (revoked, suspended): shown for every agent. */
+    readonly requiredOmissions?: readonly SkillOmission[];
+    /**
+     * Step 3: team skills and catalog installs On by default the member has not turned off,
+     * Available ones the member turned on (KOBE-297's "Offer to all agents" is On by default),
+     * and the member's own catalog adds. Exclusive agents leave them out without a notice.
      */
     readonly offeredSkills?: readonly SkillRef[];
+    /** Step-3 skills left out (revoked, suspended): shown unless the agent is exclusive. */
+    readonly offeredOmissions?: readonly SkillOmission[];
   };
   readonly user: {
     /** The user's enabled personal skills. */
@@ -80,7 +102,11 @@ export type OmissionReason =
   | "no_team_default"
   | "not_approved"
   | "skill_limit"
-  | "suspended";
+  | "suspended"
+  | "not_installed"
+  | "revoked"
+  | "shadowed"
+  | "unavailable";
 
 export interface Omission {
   readonly kind: "skill" | "connector" | "model";
@@ -105,65 +131,82 @@ export type ResolveResult =
 
 /**
  * Most skills one run may carry (KOBE-297): `run.start` refuses more (`SKILL_BUNDLES_MAX`), which
- * would fail the start. Named skills come first, then personal ones, then offered ones (sorted by
- * name by the caller); the rest are omitted as `skill_limit`.
+ * would fail the start. Skills count in resolution order (Required first); the rest are omitted
+ * as `skill_limit`.
  */
 export const RUN_SKILLS_MAX = SKILL_BUNDLES_MAX;
 
+/**
+ * The run's skills in the SK27 order (KOBE-315), deduplicated by name (earlier wins):
+ * 1. Required team skills and installs (also for `skills: exclusive` agents);
+ * 2. the agent's named skills: local ones, then catalog ones at the team install's pin;
+ * 3. installs and team skills on for this member, and the member's own adds;
+ * 4. the member's personal skills.
+ * Exclusive agents stop after step 2. A blocklisted hash (or alias) is omitted, never replaced.
+ */
 function resolveSkills(input: ResolveInput): {
   skills: SkillRef[];
   omissions: Omission[];
 } {
   const blocked = new Set(input.blockedHashes);
+  const isBlocked = (s: SkillRef) =>
+    blocked.has(s.hash) || (s.aliases ?? []).some((a) => blocked.has(a));
   const skills: SkillRef[] = [];
   const omissions: Omission[] = [];
-  const omit = (s: SkillRef, reason: OmissionReason) =>
-    omissions.push({ kind: "skill", name: s.name, reason });
+  const omitName = (name: string, reason: OmissionReason) =>
+    omissions.push({ kind: "skill", name, reason });
+  const taken = new Set<string>();
+  /**
+   * Steps 1–3: an omission for a block, silence for a name an earlier step already loads. A
+   * blocked Required or named skill still holds its name (`claim`): a later skill of that name
+   * never stands in for it.
+   */
+  const add = (s: SkillRef, claim = false) => {
+    if (isBlocked(s)) {
+      omitName(s.name, "blocklisted");
+      if (claim) taken.add(s.name);
+    } else if (!taken.has(s.name)) {
+      taken.add(s.name);
+      skills.push(s);
+    }
+  };
+  const exclusive = input.agent.exclusiveSkills;
 
-  for (const s of input.agent.skills) {
-    if (blocked.has(s.hash)) omit(s, "blocklisted");
-    else skills.push(s);
+  for (const s of input.team.requiredSkills ?? []) add(s, true);
+  for (const o of input.team.requiredOmissions ?? []) omitName(o.name, o.reason);
+
+  for (const s of [...input.agent.skills, ...(input.agent.catalogSkills ?? [])]) add(s, true);
+  for (const name of input.agent.unapprovedSkills ?? []) omitName(name, "not_approved");
+  for (const name of input.agent.suspendedSkills ?? []) omitName(name, "suspended");
+  for (const o of input.agent.skillOmissions ?? []) omitName(o.name, o.reason);
+  // Built-ins (KOBE-88) are the agent's too: a later skill of that name is shadowed by them.
+  for (const name of input.agent.builtinSkills ?? []) taken.add(name);
+  const steps12 = new Set(taken);
+
+  if (!exclusive) {
+    for (const s of input.team.offeredSkills ?? []) add(s);
+    for (const o of input.team.offeredOmissions ?? []) omitName(o.name, o.reason);
   }
-  for (const name of input.agent.unapprovedSkills ?? []) {
-    omissions.push({ kind: "skill", name, reason: "not_approved" });
-  }
-  for (const name of input.agent.suspendedSkills ?? []) {
-    omissions.push({ kind: "skill", name, reason: "suspended" });
-  }
-  const agentNames = new Set([
-    ...input.agent.skills.map((s) => s.name),
-    ...(input.agent.builtinSkills ?? []),
-  ]);
+
   for (const s of input.user.skills) {
-    if (input.agent.exclusiveSkills) omit(s, "agent_exclusive");
-    else if (input.team.personalSkillsDisabled) omit(s, "team_disabled");
-    else if (blocked.has(s.hash)) omit(s, "blocklisted");
-    else if (agentNames.has(s.name)) omit(s, "shadowed_by_agent");
-    else skills.push(s);
-  }
-  // A personal skill the team's switch or an exclusive agent hides is explained by that, not by
-  // its review state.
-  const userReason = (otherwise: OmissionReason): OmissionReason =>
-    input.agent.exclusiveSkills
-      ? "agent_exclusive"
-      : input.team.personalSkillsDisabled
-        ? "team_disabled"
-        : otherwise;
-  for (const name of input.user.unapprovedSkills ?? []) {
-    omissions.push({ kind: "skill", name, reason: userReason("not_approved") });
-  }
-  for (const name of input.user.suspendedSkills ?? []) {
-    omissions.push({ kind: "skill", name, reason: userReason("suspended") });
-  }
-  if (!input.agent.exclusiveSkills) {
-    const taken = new Set([...agentNames, ...skills.map((s) => s.name)]);
-    for (const s of input.team.offeredSkills ?? []) {
-      if (blocked.has(s.hash) || taken.has(s.name)) continue;
+    if (exclusive) omitName(s.name, "agent_exclusive");
+    else if (input.team.personalSkillsDisabled) omitName(s.name, "team_disabled");
+    else if (isBlocked(s)) omitName(s.name, "blocklisted");
+    else if (steps12.has(s.name)) omitName(s.name, "shadowed_by_agent");
+    else if (taken.has(s.name)) omitName(s.name, "shadowed");
+    else {
       taken.add(s.name);
       skills.push(s);
     }
   }
-  for (const s of skills.slice(RUN_SKILLS_MAX)) omit(s, "skill_limit");
+  // A personal skill the team's switch or an exclusive agent hides is explained by that, not by
+  // its review state.
+  const userReason = (otherwise: OmissionReason): OmissionReason =>
+    exclusive ? "agent_exclusive" : input.team.personalSkillsDisabled ? "team_disabled" : otherwise;
+  for (const name of input.user.unapprovedSkills ?? []) omitName(name, userReason("not_approved"));
+  for (const name of input.user.suspendedSkills ?? []) omitName(name, userReason("suspended"));
+
+  for (const s of skills.slice(RUN_SKILLS_MAX)) omitName(s.name, "skill_limit");
   return { skills: skills.slice(0, RUN_SKILLS_MAX), omissions };
 }
 

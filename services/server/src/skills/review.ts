@@ -462,15 +462,25 @@ export async function teamSkillStates(
   tx: KobeTx,
   teamId: string,
   names: readonly string[],
-): Promise<{ approved: { name: string; hash: string }[]; suspended: string[] }> {
+): Promise<{ approved: { name: string; hash: string; semver: string }[]; suspended: string[] }> {
   if (names.length === 0) return { approved: [], suspended: [] };
   const rows = await tx
     .select({
       slug: teamSkillReviews.slug,
       hash: teamSkillReviews.contentHash,
       suspendedAt: teamSkillReviews.suspendedAt,
+      semver: teamSkillVersions.semver,
+      version: teamSkillReviews.version,
     })
     .from(teamSkillReviews)
+    .leftJoin(
+      teamSkillVersions,
+      and(
+        eq(teamSkillVersions.teamId, teamSkillReviews.teamId),
+        eq(teamSkillVersions.skillId, teamSkillReviews.skillId),
+        eq(teamSkillVersions.version, teamSkillReviews.version),
+      ),
+    )
     .where(
       and(
         eq(teamSkillReviews.teamId, teamId),
@@ -484,7 +494,9 @@ export async function teamSkillStates(
   for (const r of rows) if (!newest.has(r.slug)) newest.set(r.slug, r);
   const all = [...newest.values()];
   return {
-    approved: all.filter((r) => !r.suspendedAt).map((r) => ({ name: r.slug, hash: r.hash })),
+    approved: all
+      .filter((r) => !r.suspendedAt)
+      .map((r) => ({ name: r.slug, hash: r.hash, semver: r.semver ?? legacySemver(r.version) })),
     suspended: all.filter((r) => r.suspendedAt).map((r) => r.slug),
   };
 }
@@ -494,7 +506,7 @@ export async function approvedTeamSkills(
   tx: KobeTx,
   teamId: string,
   names: readonly string[],
-): Promise<{ name: string; hash: string }[]> {
+): Promise<{ name: string; hash: string; semver: string }[]> {
   return (await teamSkillStates(tx, teamId, names)).approved;
 }
 
@@ -506,9 +518,15 @@ export async function approvedTeamSkills(
 export async function usablePersonalSkills(
   tx: KobeTx,
   args: { teamId: string; userId: string; ensureRows: boolean },
-): Promise<{ name: string; hash: string }[]> {
+): Promise<{ name: string; hash: string; semver: string }[]> {
   return (await personalSkillUsage(tx, args)).usable;
 }
+
+const usableRef = (r: { name: string; hash: string; semver: string | null; version: number }) => ({
+  name: r.name,
+  hash: r.hash,
+  semver: r.semver ?? legacySemver(r.version),
+});
 
 /**
  * Like `usablePersonalSkills`, plus the names blocked for lack of this team's approval, and those
@@ -518,13 +536,18 @@ export async function usablePersonalSkills(
 export async function personalSkillUsage(
   tx: KobeTx,
   args: { teamId: string; userId: string; ensureRows: boolean },
-): Promise<{ usable: { name: string; hash: string }[]; blocked: string[]; suspended: string[] }> {
+): Promise<{
+  usable: { name: string; hash: string; semver: string }[];
+  blocked: string[];
+  suspended: string[];
+}> {
   const rows = await tx
     .select({
       skillId: personalSkills.id,
       name: personalSkills.slug,
       version: personalSkillVersions.version,
       hash: personalSkillVersions.contentHash,
+      semver: personalSkillVersions.semver,
       scan: {
         flagged: personalSkillScans.flagged,
         findings: personalSkillScans.findings,
@@ -556,7 +579,7 @@ export async function personalSkillUsage(
     r.scan === null || r.scan.flagged || storedVerdict(r.scan) !== "pass";
   const needsApproval = rows.filter(needs);
   if (needsApproval.length === 0) {
-    return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [], suspended: [] };
+    return { usable: rows.map(usableRef), blocked: [], suspended: [] };
   }
   const decided = await tx
     .select({
@@ -614,7 +637,7 @@ export async function personalSkillUsage(
   };
   const unusable = rows.filter((r) => !isUsable(r));
   return {
-    usable: rows.filter(isUsable).map(({ name, hash }) => ({ name, hash })),
+    usable: rows.filter(isUsable).map(usableRef),
     blocked: unusable.filter((r) => !isSuspended(r)).map((r) => r.name),
     suspended: unusable.filter(isSuspended).map((r) => r.name),
   };

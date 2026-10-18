@@ -199,3 +199,92 @@ export async function changeTeamInstall(
     return r.rows.length > 0;
   });
 }
+
+export type InstallResult =
+  | { readonly ok: true; readonly semver: string; readonly deprecated: boolean }
+  | {
+      readonly ok: false;
+      readonly code: "not_found" | "no_version" | "not_installable" | "name_clash";
+    };
+
+/**
+ * Installs a catalog skill in the team, or changes its install (KOBE-315, SK25): a version by
+ * semver (approved; a deprecated one with a warning; never withdrawn or revoked), a pin mode and
+ * an access mode. Refused while one of the team's own (unarchived) skills has the same name (SK27:
+ * rename or archive it first). Installing clears a Default opt-out; changing an install marks it
+ * touched (the team's choice sticks, SK6). Audited.
+ */
+export async function installCatalogSkill(
+  db: KobeDb,
+  input: {
+    readonly teamId: string;
+    readonly skillId: string;
+    readonly userId: string;
+    readonly version: string;
+    readonly pinMode: InstallRow["pinMode"];
+    readonly access: InstallRow["access"];
+  },
+): Promise<InstallResult> {
+  const { teamId, skillId } = input;
+  return withTeam(db, teamId, async (tx): Promise<InstallResult> => {
+    await lockDefaultSet(tx, "shared");
+    await lockInstall(tx, teamId, skillId);
+    const skill = await tx.execute<{ name: string }>(
+      sql`SELECT name FROM registry_skills WHERE id = ${skillId}`,
+    );
+    const name = skill.rows[0]?.name;
+    if (!name) return { ok: false, code: "not_found" };
+    const clash = await tx.execute(sql`
+      SELECT 1 FROM team_skills
+      WHERE team_id = ${teamId} AND slug = ${name} AND archived_at IS NULL`);
+    if (clash.rows.length > 0) return { ok: false, code: "name_clash" };
+    const version = await tx.execute<{ id: string; state: string }>(sql`
+      SELECT id, state::text AS state FROM registry_versions
+      WHERE skill_id = ${skillId} AND semver = ${input.version}`);
+    const v = version.rows[0];
+    if (!v) return { ok: false, code: "no_version" };
+    if (v.state !== "approved" && v.state !== "deprecated")
+      return { ok: false, code: "not_installable" };
+    const before = await tx.execute<{ semver: string; pin_mode: string; access: string }>(sql`
+      SELECT rv.semver, i.pin_mode::text AS pin_mode, i.access::text AS access
+      FROM team_skill_installs i JOIN registry_versions rv ON rv.id = i.version_id
+      WHERE i.team_id = ${teamId} AND i.skill_id = ${skillId}`);
+    const previous = before.rows[0];
+    await tx.execute(sql`
+      INSERT INTO team_skill_installs
+        (team_id, skill_id, version_id, pin_mode, access, origin, installed_by)
+      VALUES (${teamId}, ${skillId}, ${v.id}, ${input.pinMode}::skill_pin_mode,
+        ${input.access}::skill_access, 'team', ${input.userId})
+      ON CONFLICT (team_id, skill_id) DO UPDATE SET
+        version_id = EXCLUDED.version_id, updated_at = now(),
+        pin_mode = EXCLUDED.pin_mode, access = EXCLUDED.access,
+        team_changed_at = CASE
+          WHEN team_skill_installs.pin_mode <> EXCLUDED.pin_mode
+            OR team_skill_installs.access <> EXCLUDED.access THEN now()
+          ELSE team_skill_installs.team_changed_at END`);
+    await tx.execute(sql`
+      DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    await recordAudit(tx, {
+      action: "skill.catalog.configured",
+      teamId,
+      target: {
+        skillId,
+        name,
+        semver: input.version,
+        pinMode: input.pinMode,
+        access: input.access,
+        deprecated: v.state === "deprecated",
+        ...(previous
+          ? {
+              previous: {
+                semver: previous.semver,
+                pinMode: previous.pin_mode as InstallRow["pinMode"],
+                access: previous.access as InstallRow["access"],
+              },
+            }
+          : {}),
+      },
+    });
+    return { ok: true, semver: input.version, deprecated: v.state === "deprecated" };
+  });
+}

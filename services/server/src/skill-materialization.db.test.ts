@@ -225,6 +225,22 @@ describe("sandbox bundle download", () => {
     expect((await app.request(`/${s.hash}`)).status).toBe(404);
   });
 
+  it("KOBE-315: a rescan suspending the version stops the fetch mid-run too", async () => {
+    const w = await f.world();
+    const name = `susp-${unique()}`;
+    const s = await upload(w.owner, "team", name);
+    await approve(w.owner, s.skillId);
+    const held = await heldRun(w, [name]);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
+    expect((await app.request(`/${s.hash}`)).status).toBe(200);
+    await f.fx.admin.query(
+      `UPDATE team_skill_reviews SET suspended_at = now(), status = 'pending', reviewed_by = NULL,
+         reviewed_at = NULL WHERE team_id = $1 AND skill_id = $2`,
+      [w.team, s.skillId],
+    );
+    expect((await app.request(`/${s.hash}`)).status).toBe(404);
+  });
+
   it("still serves a personal skill that was replaced after the run started", async () => {
     const w = await f.world();
     const name = `swap-${unique()}`;

@@ -1434,6 +1434,26 @@ export const AUDIT_EVENTS = {
     /** Whether the opt-out gave a reason (the reason itself is not recorded). */
     reasonGiven: z.boolean(),
   }),
+  /**
+   * A Team admin set the team's install of a catalog skill (KOBE-315, SK25): its version, pin
+   * mode and access (Required is audited here like every change). `previous` when it changed one.
+   */
+  "skill.catalog.configured": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    access: z.enum(["available", "default_on", "required", "hidden"]),
+    /** The version was deprecated: installed with a warning (SK31). */
+    deprecated: z.boolean(),
+    previous: z
+      .strictObject({
+        semver: z.string().max(32),
+        pinMode: z.enum(["pinned", "within_major", "latest"]),
+        access: z.enum(["available", "default_on", "required", "hidden"]),
+      })
+      .optional(),
+  }),
   /** A Team admin reinstalled a removed Default skill, clearing the team's opt-out (SK7). */
   "skill.default.restored": event("team", {
     skillId: id,

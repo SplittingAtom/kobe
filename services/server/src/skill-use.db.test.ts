@@ -149,7 +149,7 @@ describe("ac-1: the server records a skill use from the run's own SKILL.md read"
     const given = hashOf(`${w.team}:pretty-html`);
     expect(frame.config?.skill_bundles?.map((b) => b.sha256)).toEqual([given]);
     expect((await skillsUsed(w.team, run)).refs).toEqual([
-      { name: "pretty-html", source: "team", sha256: given },
+      { name: "pretty-html", source: "team", sha256: given, semver: "0.1.0" },
     ]);
 
     readCall(ws, frame, "forged", storePath(hashOf(`${w.team}:not-given`)));
@@ -173,6 +173,7 @@ describe("ac-1: the server records a skill use from the run's own SKILL.md read"
         tool_call_id: "real",
         name: "pretty-html",
         source: "team",
+        semver: "0.1.0",
       },
     ]);
   });
@@ -315,7 +316,7 @@ describe("ac-2: Offer to all agents", () => {
     );
     expect(resolved.ok && resolved.config?.skills).toEqual(["nightly"]);
     expect(resolved.ok && resolved.skillRefs).toEqual([
-      { name: "nightly", source: "team", sha256: hashOf(`${w.team}:nightly`) },
+      { name: "nightly", source: "team", sha256: hashOf(`${w.team}:nightly`), semver: "0.1.0" },
     ]);
   });
 

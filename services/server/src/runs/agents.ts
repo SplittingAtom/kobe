@@ -3,7 +3,7 @@ import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-flo
 import { resolveEffective } from "../resolver/resolve.js";
 import { isBuiltinSkillName } from "@kobe/protocol";
 import { agentSkills } from "@kobe/agent-file";
-import { bundleRefsFor } from "../skills/materialize.js";
+import { bundleRefsWithGaps } from "../skills/materialize.js";
 import { runSkillRefs } from "../skills/detect.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
@@ -99,11 +99,19 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // Materialization list (KOBE-82), in this same transaction: the blocklist is read once more, so
     // a hash listed since the facts were loaded never reaches a sandbox. These refs are the only
     // skills the sandbox makes present; `skills` (names) always equals their names.
-    const skillBundles = await bundleRefsFor(
+    const { refs: skillBundles, unavailable } = await bundleRefsWithGaps(
       tx,
       { teamId: input.teamId, userId: input.ownerUserId },
       value.skills,
     );
+    const omissions = [
+      ...value.omissions,
+      ...unavailable.map((name) => ({
+        kind: "skill" as const,
+        name,
+        reason: "unavailable" as const,
+      })),
+    ];
     const builtinSkills = value.builtinSkills.filter(isBuiltinSkillName);
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""
@@ -129,7 +137,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
           : {}),
       },
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
-      omissions: value.omissions,
+      omissions,
       mcp,
       ...(skillRefs.length > 0 ? { skillRefs } : {}),
       ...(Object.keys(config).length > 0 ? { config } : {}),

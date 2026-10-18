@@ -11,6 +11,7 @@ import {
   uuidSchema,
 } from "./common.js";
 import { skippedActionsSchema } from "./notifications.js";
+import { SEMVER_PATTERN as SKILL_SEMVER_PATTERN } from "./skill-package/layout.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
 import { thinkingLevelSchema } from "./thinking.js";
@@ -27,6 +28,8 @@ export const KOBE_EVENT_TYPES = [
   "run.started",
   "sandbox.waking",
   "context.omitted",
+  // KOBE-315 (CE12): skills whose version changed since the thread's previous run.
+  "thread.skill_updated",
   "text.delta",
   "reasoning.delta",
   "tool.call",
@@ -111,6 +114,13 @@ const contextOmissionSchema = z.strictObject({
     "skill_limit",
     // KOBE-313: a rescan on a scanner rule-set change turned the version Block; pending review.
     "suspended",
+    // KOBE-315 (SK27, SK31): an agent names a catalog skill the team has not installed; the
+    // install's version was revoked (no other in its range); an earlier step loaded a skill of
+    // the same name; the version's bundle is not stored on this server.
+    "not_installed",
+    "revoked",
+    "shadowed",
+    "unavailable",
   ]),
 });
 
@@ -315,6 +325,24 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     /** `install`: recorded before KOBE-256 renamed the scope; read it as `site`. Never sent now. */
     scope: z.enum(["site", "team", "user", "install"]),
     message: z.string().max(1000),
+  }),
+  /**
+   * CE12 (KOBE-315): right after `run.started`, the skills this run loads at a different version
+   * than the thread's previous run did ("Skill updated: xlsx 1.4.2 → 1.4.3"). Names and versions
+   * only.
+   */
+  "thread.skill_updated": z.strictObject({
+    thread_id: uuidSchema,
+    skills: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1).max(64),
+          from: z.string().regex(SKILL_SEMVER_PATTERN),
+          to: z.string().regex(SKILL_SEMVER_PATTERN),
+        }),
+      )
+      .min(1)
+      .max(64),
   }),
   /** CE18: the server titled the thread after its first run (never when `title_locked`). */
   "thread.updated": z.strictObject({

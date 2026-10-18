@@ -20,6 +20,10 @@ const REASON_TEXT: Readonly<Record<Item["reason"], string>> = {
   not_approved: "it is not available or approved in this team",
   suspended: "a scanner update flagged it and it waits for review",
   skill_limit: "this run already has the most skills one run can load",
+  not_installed: "your team has not installed it from the catalog",
+  revoked: "its version was revoked; ask your team admin to choose a version",
+  shadowed: "a team skill with this name loads instead",
+  unavailable: "its files are not available on this server yet",
 };
 
 const FALLBACK_REASON_TEXT = "it was left out of this run";

@@ -60,7 +60,7 @@ export function UsedSkills() {
     ...new Set(
       ids.split("\u0000").flatMap((id) => {
         const skill = lookup(data, where, id);
-        return skill ? [skill.name] : [];
+        return skill ? [skill.semver ? `${skill.name} ${skill.semver}` : skill.name] : [];
       }),
     ),
   ];

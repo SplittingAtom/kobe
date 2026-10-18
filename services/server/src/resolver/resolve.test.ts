@@ -250,13 +250,14 @@ describe("team skills offered to all agents (KOBE-297)", () => {
     return r.ok ? r.value.skills.map((s) => s.name) : [];
   };
 
-  it("a non-exclusive agent gets every offered skill, after its own and the user's", () => {
+  // KOBE-315 (SK27): offered (On by default) team skills are step 3, before personal skills.
+  it("a non-exclusive agent gets every offered skill, after its own and before the user's", () => {
     const input = with_({
       agent: { skills: [sk("named")] },
       user: { skills: [sk("mine")] },
       team: { offeredSkills: [sk("offered"), sk("also")] },
     });
-    expect(names(input)).toEqual(["named", "mine", "offered", "also"]);
+    expect(names(input)).toEqual(["named", "offered", "also", "mine"]);
     const r = resolveEffective(input);
     expect(r.ok && r.value.omissions).toEqual([]);
   });
@@ -295,7 +296,7 @@ describe("team skills offered to all agents (KOBE-297)", () => {
     ).toEqual(["same"]);
   });
 
-  it("caps the run at the run.start limit: named, then personal, then offered; the rest are skill_limit", () => {
+  it("caps the run at the run.start limit: named, then offered, then personal; the rest are skill_limit", () => {
     const many = (prefix: string, n: number) =>
       Array.from({ length: n }, (_, i) => sk(`${prefix}-${String(i).padStart(2, "0")}`));
     const r = resolveEffective(
@@ -308,13 +309,12 @@ describe("team skills offered to all agents (KOBE-297)", () => {
     expect(RUN_SKILLS_MAX).toBe(64);
     const names = r.ok ? r.value.skills.map((s) => s.name) : [];
     expect(names).toHaveLength(64);
-    expect(names.slice(0, 35)).toEqual([
+    expect(names.slice(0, 64)).toEqual([
       ...many("named", 32).map((s) => s.name),
-      ...many("mine", 3).map((s) => s.name),
+      ...many("offered", 32).map((s) => s.name),
     ]);
-    expect(names.at(-1)).toBe("offered-28");
     expect(r.ok && r.value.omissions).toEqual(
-      ["offered-29", "offered-30", "offered-31"].map((name) => ({
+      ["mine-00", "mine-01", "mine-02"].map((name) => ({
         kind: "skill",
         name,
         reason: "skill_limit",
