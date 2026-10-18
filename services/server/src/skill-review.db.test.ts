@@ -47,6 +47,7 @@ const queue = async (who: Person, status = "pending") =>
     version: number;
     status: string;
     flagged: boolean;
+    verdict: string;
     findings: { category: string; file: string }[];
   }[];
 
@@ -153,7 +154,14 @@ describe("review queue", () => {
     expect((await decide("alice", t.skillId, 9, { decision: "approved" })).status).toBe(404);
     expect((await decide("alice", "nope", 1, { decision: "approved" })).status).toBe(404);
 
-    const ok = await decide("alice", t.skillId, 1, { decision: "approved", note: "reviewed" });
+    // A Caution scan needs its findings acknowledged (KOBE-312).
+    const unread = await decide("alice", t.skillId, 1, { decision: "approved", note: "reviewed" });
+    expect(unread).toMatchObject({ status: 422, json: { code: "acknowledgement_required" } });
+    const ok = await decide("alice", t.skillId, 1, {
+      decision: "approved",
+      note: "reviewed",
+      acknowledged: true,
+    });
     expect(ok.status, JSON.stringify(ok.json)).toBe(200);
     expect(ok.json.review).toMatchObject({
       status: "approved",
@@ -237,9 +245,14 @@ describe("flagged personal skills (KOBE-80)", () => {
     expect((await queue("dave")).find((r) => r.slug === "risky")?.status).toBe("pending");
 
     const row = pending as unknown as { skillId: string; version: number };
-    expect((await decide("alice", row.skillId, row.version, { decision: "approved" })).status).toBe(
-      200,
-    );
+    expect(
+      (
+        await decide("alice", row.skillId, row.version, {
+          decision: "approved",
+          acknowledged: true,
+        })
+      ).status,
+    ).toBe(200);
     expect(await usable(finance, "carol")).toEqual(["risky", "tidy"]);
     expect(await usable(marketing, "carol")).toEqual(["tidy"]);
     // Rejected in team B stays blocked.
@@ -311,5 +324,61 @@ describe("queue paging", () => {
     expect(all.json.reviews).toHaveLength(200);
     expect(all.json.nextCursor).toBeTruthy();
     expect((await as.alice.get("/v1/team/skill-review?cursor=junk")).status).toBe(400);
+  });
+});
+
+describe("scan verdict tiers in review (KOBE-312)", () => {
+  it("shows the verdict; a Block scan needs a Site admin with a reason, audited", async () => {
+    const t = await team("bob", "blocked-tier", { "lib/mod.pyc": "\u0000compiled" });
+    const row = (await queue("alice")).find((r) => r.slug === "blocked-tier");
+    expect(row).toMatchObject({ verdict: "block", flagged: true });
+    const asAdmin = await decide("alice", t.skillId, 1, {
+      decision: "approved",
+      acknowledged: true,
+    });
+    expect(asAdmin).toMatchObject({ status: 409, json: { code: "scan_blocked" } });
+    // Rejecting stays open to the team admin.
+    expect((await decide("alice", t.skillId, 1, { decision: "rejected" })).status).toBe(200);
+
+    await h.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [ids.alice]);
+    try {
+      const noReason = await decide("alice", t.skillId, 1, {
+        decision: "approved",
+        acknowledged: true,
+      });
+      expect(noReason.status).toBe(400);
+      const override = await decide("alice", t.skillId, 1, {
+        decision: "approved",
+        acknowledged: true,
+        note: "Vendor-supplied wheel, checked by hand.",
+      });
+      expect(override.status, JSON.stringify(override.json)).toBe(200);
+      const { rows } = await h.admin.query(
+        `SELECT team_id, actor_id, target FROM audit_log
+          WHERE action = 'skill.scan.override' AND target->>'skillId' = $1`,
+        [t.skillId],
+      );
+      expect(rows).toEqual([
+        {
+          team_id: finance,
+          actor_id: ids.alice,
+          target: expect.objectContaining({ slug: "blocked-tier", version: 1, findings: 1 }),
+        },
+      ]);
+    } finally {
+      await h.admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [ids.alice]);
+    }
+  });
+
+  it("reads review rows stored before KOBE-312 (no severities) as Caution", async () => {
+    const t = await team("bob", "old-flags", FLAGGED);
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET findings = (
+         SELECT jsonb_agg(f - 'severity') FROM jsonb_array_elements(findings) f)
+        WHERE skill_id = $1`,
+      [t.skillId],
+    );
+    expect((await queue("alice")).find((r) => r.slug === "old-flags")?.verdict).toBe("caution");
+    expect((await decide("alice", t.skillId, 1, { decision: "approved" })).status).toBe(422);
   });
 });

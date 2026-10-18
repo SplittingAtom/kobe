@@ -34,6 +34,8 @@ export interface StoredFinding {
   readonly file: string;
   readonly line: number;
   readonly excerpt: string;
+  /** `caution` or `block` (KOBE-312); absent on findings stored before, which count as Caution. */
+  readonly severity?: string;
 }
 
 export const skillReviewScope = ["team", "personal"] as const;

@@ -28,6 +28,8 @@ export interface SkillReview {
   readonly unscanned: boolean;
   readonly status: ReviewStatus;
   readonly flagged: boolean;
+  /** Scan tier (KOBE-312): Caution findings need acknowledging; Block needs a Site admin. */
+  readonly verdict: "pass" | "caution" | "block";
   readonly findings: readonly SkillFinding[];
   readonly scripts: readonly string[];
   readonly skipped: readonly string[];
@@ -53,10 +55,11 @@ export async function decideSkillReview(
   teamId: string,
   review: Pick<SkillReview, "skillId" | "version">,
   decision: "approved" | "rejected",
+  options: { readonly acknowledged?: boolean; readonly note?: string } = {},
 ): Promise<ApiResult<SkillReview>> {
   const res = await apiRequest<{ review: SkillReview }>(
     `${BASE}/${enc(review.skillId)}/versions/${review.version}`,
-    { method: "POST", json: { decision }, teamId },
+    { method: "POST", json: { decision, ...options }, teamId },
   );
   return res.ok ? { ...res, data: res.data.review } : res;
 }

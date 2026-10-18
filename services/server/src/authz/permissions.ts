@@ -25,6 +25,8 @@ export const SITE_PERMISSIONS = {
   "site.connectors.manage": "admin",
   "site.gallery.manage": "admin",
   "site.blocklist.manage": "admin",
+  /** Approve a team skill version whose scan is Block (KOBE-312), with a reason; audited. */
+  "site.skills.override_scan": "admin",
   "site.egress.manage": "admin",
   "site.retention.manage": "admin",
   "site.legal_hold.manage": "admin",

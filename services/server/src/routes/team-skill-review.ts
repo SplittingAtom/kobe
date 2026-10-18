@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
+import { siteRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import {
   decideReview,
   decodeCursor,
+  reviewVerdict,
   listReviews,
   scanUnscanned,
   type ReviewRecord,
@@ -22,6 +24,8 @@ const filterSchema = z.enum(["pending", "approved", "rejected", "all"]);
 const decisionSchema = z.strictObject({
   decision: z.enum(["approved", "rejected"]),
   note: z.string().trim().max(2000).optional(),
+  /** The reviewer read and accepts the scan's findings (KOBE-312). */
+  acknowledged: z.boolean().optional(),
 });
 const settingsSchema = z.strictObject({ personalSkillsDisabled: z.boolean() });
 const idSchema = z.uuid();
@@ -38,6 +42,7 @@ const reviewJson = (r: ReviewRecord) => ({
   unscanned: r.unscanned,
   status: r.status,
   flagged: r.flagged,
+  verdict: reviewVerdict(r),
   findings: r.findings,
   scripts: r.scripts,
   skipped: r.skipped,
@@ -92,11 +97,36 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
         db,
         c.get("team").id,
         { skillId: skillId.data, version: version.data },
-        { status: body.decision, note: body.note || null, reviewerId: c.get("user").id },
+        {
+          status: body.decision,
+          note: body.note || null,
+          reviewerId: c.get("user").id,
+          acknowledged: body.acknowledged === true,
+          mayOverrideBlock: siteRoleAllows(c.get("siteRole"), "site.skills.override_scan"),
+        },
       );
       if (!result.ok) {
         if (result.error === "not_found")
           return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        if (result.error === "acknowledgement_required")
+          return c.json(
+            {
+              code: result.error,
+              message: "The scan has findings: read them and acknowledge them to approve.",
+            },
+            422,
+          );
+        if (result.error === "scan_blocked")
+          return c.json(
+            {
+              code: result.error,
+              message:
+                "The scan blocks this version: only a Site admin can approve it, with a reason.",
+            },
+            409,
+          );
+        if (result.error === "override_reason_required")
+          return invalidRequest(c, "Give a reason (note) to approve a version the scan blocks.");
         if (result.error === "blocklisted")
           return c.json(
             {

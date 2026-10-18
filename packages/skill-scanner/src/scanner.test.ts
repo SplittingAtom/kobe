@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { SCAN_LIMITS, scanSkillBundle, type FindingCategory, type ScanFile } from "./index.js";
+import {
+  RULE_SET_VERSION,
+  SCAN_LIMITS,
+  scanSkillBundle,
+  type FindingCategory,
+  type ScanFile,
+} from "./index.js";
 
 const enc = new TextEncoder();
 const file = (path: string, text: string): ScanFile => ({ path, bytes: enc.encode(text) });
@@ -21,7 +27,13 @@ describe("clean bundles", () => {
     expect(r.scripts).toEqual(["scripts/fmt.py", "scripts/run.sh"]);
   });
   it("handles an empty bundle", () => {
-    expect(scanSkillBundle([])).toEqual({ scripts: [], findings: [], skipped: [] });
+    expect(scanSkillBundle([])).toEqual({
+      verdict: "pass",
+      ruleSetVersion: RULE_SET_VERSION,
+      scripts: [],
+      findings: [],
+      skipped: [],
+    });
   });
 });
 
@@ -168,11 +180,12 @@ describe("secrets", () => {
 });
 
 describe("bounds", () => {
-  it("skips binary files and reports them", () => {
+  it("blocks an executable instead of skipping it (KOBE-312), and skips allowed binary assets", () => {
     const bytes = new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 1, 2, 3, 0, 0]);
     const r = scanSkillBundle([{ path: "bin/tool.sh", bytes }]);
-    expect(r.findings).toEqual([]);
-    expect(r.skipped).toEqual(["bin/tool.sh"]);
+    expect(r.findings.map((f) => [f.rule, f.severity])).toEqual([["executable", "block"]]);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0]);
+    expect(scanSkillBundle([{ path: "a.png", bytes: png }]).skipped).toEqual(["a.png"]);
   });
   it("skips files over the size cap", () => {
     const big = file("big.sh", "curl x\n".repeat(SCAN_LIMITS.maxFileBytes / 4));

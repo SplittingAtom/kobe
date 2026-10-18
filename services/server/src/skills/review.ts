@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 import { z } from "zod";
-import { scanSkillBundle, type ScanResult } from "@kobe/skill-scanner";
+import { scanSkillBundle, verdictOf, type ScanResult, type Verdict } from "@kobe/skill-scanner";
 import {
   and,
   asc,
@@ -89,6 +89,10 @@ export interface ReviewRecord {
   /** The bundle hash is on the site blocklist (KOBE-81): it can't be approved. */
   readonly blocked: boolean;
 }
+
+/** The scan verdict of a review row (KOBE-312): from its findings' severities. */
+export const reviewVerdict = (r: { readonly findings: readonly StoredFinding[] }): Verdict =>
+  verdictOf(r.findings);
 
 const QUEUE_LIMIT = 200;
 const SCAN_BATCH = 20;
@@ -276,16 +280,40 @@ export function reviewsOfSkill(
   });
 }
 
+export type DecideError =
+  | "not_found"
+  | "unchanged"
+  | "blocklisted"
+  /** The scan is Caution: the reviewer must acknowledge its findings (KOBE-312). */
+  | "acknowledgement_required"
+  /** The scan is Block: only a Site admin may approve, with a reason (KOBE-312). */
+  | "scan_blocked"
+  | "override_reason_required";
+
 export type DecideResult =
   | { readonly ok: true; readonly review: ReviewRecord }
-  | { readonly ok: false; readonly error: "not_found" | "unchanged" | "blocklisted" };
+  | { readonly ok: false; readonly error: DecideError };
 
-/** Approves or rejects a version; an earlier decision can be reversed. Audited. */
+export interface Decision {
+  readonly status: "approved" | "rejected";
+  readonly note: string | null;
+  readonly reviewerId: string;
+  /** The reviewer read and accepts the Caution findings (required to approve a Caution scan). */
+  readonly acknowledged?: boolean;
+  /** The reviewer may override a Block scan (a Site admin, `site.skills.override_scan`). */
+  readonly mayOverrideBlock?: boolean;
+}
+
+/**
+ * Approves or rejects a version; an earlier decision can be reversed. Audited. Approving needs the
+ * scan's tier cleared (KOBE-312, SK32): Caution findings acknowledged, and a Block scan only by a
+ * Site admin with a reason (audited `skill.scan.override`). Rejecting is always allowed.
+ */
 export function decideReview(
   db: KobeDb,
   teamId: string,
   at: { skillId: string; version: number },
-  decision: { status: "approved" | "rejected"; note: string | null; reviewerId: string },
+  decision: Decision,
 ): Promise<DecideResult> {
   const key = and(
     eq(teamSkillReviews.teamId, teamId),
@@ -299,6 +327,26 @@ export function decideReview(
     // A blocklisted bundle can still be rejected, never approved (KOBE-81).
     const blocked = await isBlocked(tx, current.contentHash);
     if (decision.status === "approved" && blocked) return { ok: false, error: "blocklisted" };
+    const verdict = reviewVerdict(current);
+    if (decision.status === "approved" && verdict === "block") {
+      if (!decision.mayOverrideBlock) return { ok: false, error: "scan_blocked" };
+      if (!decision.note) return { ok: false, error: "override_reason_required" };
+    }
+    if (decision.status === "approved" && verdict !== "pass" && !decision.acknowledged)
+      return { ok: false, error: "acknowledgement_required" };
+    if (decision.status === "approved" && verdict === "block") {
+      await recordAudit(tx, {
+        action: "skill.scan.override",
+        teamId,
+        target: {
+          skillId: at.skillId,
+          slug: current.slug,
+          version: at.version,
+          bundleHash: current.contentHash,
+          findings: current.findings.filter((f) => f.severity === "block").length,
+        },
+      });
+    }
     const reviewedAt = new Date();
     await tx
       .update(teamSkillReviews)
@@ -319,6 +367,8 @@ export function decideReview(
         decision: decision.status,
         previous: current.status,
         flagged: current.flagged,
+        verdict,
+        ...(decision.status === "approved" && verdict !== "pass" ? { acknowledged: true } : {}),
       },
     });
     const semvers = await semversOf(tx, teamId, [current]);

@@ -18,6 +18,7 @@ const review = (over: Record<string, unknown> = {}) => ({
   unscanned: false,
   status: "pending",
   flagged: false,
+  verdict: "pass",
   blocked: false,
   findings: [],
   scripts: [],
@@ -80,12 +81,15 @@ describe("Skill review (KOBE-80)", () => {
   it("shows the findings of a flagged version and asks before approving it", async () => {
     const calls = stubApi({
       [`GET ${SETTINGS}`]: [200, { personalSkillsDisabled: false }],
-      [`GET ${QUEUE}`]: [200, { reviews: [review({ flagged: true, findings: [FINDING] })] }],
+      [`GET ${QUEUE}`]: [
+        200,
+        { reviews: [review({ flagged: true, verdict: "caution", findings: [FINDING] })] },
+      ],
       [`POST ${DECIDE}`]: [200, { review: review({ status: "rejected" }) }],
     });
     renderTeam(<SkillReviewPage />);
     const item = await screen.findByRole("article", { name: "report-writer version 1.4.0" });
-    expect(within(item).getByText("Flagged: 1")).toBeTruthy();
+    expect(within(item).getByText("Caution: 1")).toBeTruthy();
     expect(within(item).getByText(FINDING.excerpt)).toBeTruthy();
     await userEvent.click(within(item).getByRole("button", { name: "Approve" }));
     const asked = await answerConfirm("Approve report-writer v1.4.0 anyway?", "Cancel");
@@ -101,7 +105,10 @@ describe("Skill review (KOBE-80)", () => {
   it("approves a flagged version once the admin confirms", async () => {
     const calls = stubApi({
       [`GET ${SETTINGS}`]: [200, { personalSkillsDisabled: false }],
-      [`GET ${QUEUE}`]: [200, { reviews: [review({ flagged: true, findings: [FINDING] })] }],
+      [`GET ${QUEUE}`]: [
+        200,
+        { reviews: [review({ flagged: true, verdict: "caution", findings: [FINDING] })] },
+      ],
       [`POST ${DECIDE}`]: [200, { review: review({ status: "approved" }) }],
     });
     renderTeam(<SkillReviewPage />);
@@ -109,8 +116,37 @@ describe("Skill review (KOBE-80)", () => {
     await userEvent.click(within(item).getByRole("button", { name: "Approve" }));
     await answerConfirm("Approve report-writer v1.4.0 anyway?", "Approve anyway");
     await screen.findByText("report-writer v1.4.0 approved.");
+    // Confirming is the acknowledgement the server requires (KOBE-312).
     expect(JSON.parse(String(must(calls.find((c) => c.method === "POST")).body))).toEqual({
       decision: "approved",
+      acknowledged: true,
+    });
+  });
+
+  it("asks a Site admin for a reason to approve over a Block scan", async () => {
+    const calls = stubApi({
+      [`GET ${SETTINGS}`]: [200, { personalSkillsDisabled: false }],
+      [`GET ${QUEUE}`]: [
+        200,
+        { reviews: [review({ flagged: true, verdict: "block", findings: [FINDING] })] },
+      ],
+      [`POST ${DECIDE}`]: [200, { review: review({ status: "approved" }) }],
+    });
+    renderTeam(<SkillReviewPage />);
+    const item = await screen.findByRole("article", { name: "report-writer version 1.4.0" });
+    expect(within(item).getByText("Blocked by scan")).toBeTruthy();
+    await userEvent.type(
+      within(item).getByLabelText("Reason for a Site admin override (audited)"),
+      "Checked by hand.",
+    );
+    await userEvent.click(within(item).getByRole("button", { name: "Approve" }));
+    const asked = await answerConfirm("Approve report-writer v1.4.0 anyway?", "Approve anyway");
+    expect(asked).toContain("Only a Site admin can approve it");
+    await screen.findByText("report-writer v1.4.0 approved.");
+    expect(JSON.parse(String(must(calls.find((c) => c.method === "POST")).body))).toEqual({
+      decision: "approved",
+      acknowledged: true,
+      note: "Checked by hand.",
     });
   });
 

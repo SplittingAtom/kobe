@@ -1309,6 +1309,21 @@ export const AUDIT_EVENTS = {
     decision: z.enum(["approved", "rejected"]),
     previous: z.enum(["pending", "approved", "rejected"]),
     flagged: z.boolean(),
+    /** The scan verdict (KOBE-312); absent on decisions recorded before. */
+    verdict: z.enum(["pass", "caution", "block"]).optional(),
+    /** The reviewer acknowledged the Caution or Block findings when approving (KOBE-312). */
+    acknowledged: z.literal(true).optional(),
+  }),
+  /**
+   * A Site admin approved a version whose scan is Block (KOBE-312, SK32); the reason is the review
+   * note, not recorded here. Counts the blocking findings only.
+   */
+  "skill.scan.override": event("team", {
+    skillId: id,
+    slug,
+    version,
+    bundleHash: z.string().regex(/^[0-9a-f]{64}$/),
+    findings: count,
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),

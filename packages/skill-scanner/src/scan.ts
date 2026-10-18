@@ -4,12 +4,17 @@ import {
   SECRET_RULES,
   plausibleSecret,
 } from "./rules.js";
+import { extensionOf, fileTypeRule } from "./files.js";
+import { INVISIBLE, PROSE_RULES } from "./prose.js";
 import {
+  RULE_SET_VERSION,
   SCAN_LIMITS,
   type Finding,
   type FindingCategory,
   type ScanFile,
   type ScanResult,
+  type Severity,
+  type Verdict,
 } from "./types.js";
 
 const SCRIPT_EXTENSIONS = new Set([
@@ -31,11 +36,7 @@ const SCRIPT_EXTENSIONS = new Set([
 ]);
 const BINARY_SNIFF_BYTES = 8000;
 
-function extension(path: string): string {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  const dot = base.lastIndexOf(".");
-  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
-}
+const extension = extensionOf;
 
 function isScript(file: ScanFile): boolean {
   if (SCRIPT_EXTENSIONS.has(extension(file.path))) return true;
@@ -77,9 +78,15 @@ function matchSecret(view: string): string | undefined {
   return undefined;
 }
 
-function scanLine(line: string, script: boolean): Array<[FindingCategory, string]> {
+function scanLine(line: string, script: boolean, first: boolean): Array<[FindingCategory, string]> {
   const view = line.slice(0, SCAN_LIMITS.maxScanChars);
   const hits = new Map<FindingCategory, string>();
+  // Prose rules run on every text file; one prose finding per line (the first rule that matches).
+  const visible = first ? view.replace(/^\ufeff/, "") : view;
+  const prose = INVISIBLE.test(visible)
+    ? "invisible-unicode"
+    : PROSE_RULES.find((r) => r.pattern.test(view))?.id;
+  if (prose) hits.set("prose", prose);
   if (script) {
     if (line.length > SCAN_LIMITS.maxLineLength) hits.set("obfuscation", "long-line");
     if (pipesDownloadToInterpreter(view)) hits.set("pipe-to-shell", "fetch-pipe-exec");
@@ -99,16 +106,36 @@ function scanFile(file: ScanFile, script: boolean, budget: number): Finding[] {
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length && findings.length < limit; i++) {
     const line = lines[i] ?? "";
-    for (const [category, rule] of scanLine(line, script)) {
+    for (const [category, rule] of scanLine(line, script, i === 0)) {
       if (findings.length >= limit) break;
       const view = line.slice(0, SCAN_LIMITS.maxScanChars);
-      findings.push({ category, rule, file: file.path, line: i + 1, excerpt: excerptOf(view) });
+      findings.push({
+        category,
+        rule,
+        file: file.path,
+        line: i + 1,
+        excerpt: excerptOf(view),
+        severity: "caution",
+      });
     }
   }
   return findings;
 }
 
-/** Statically scans a skill bundle. Pure: no I/O, bounded work per file and per bundle. */
+/**
+ * The verdict of a list of findings (stored ones too): Block if any blocks, Caution if any other,
+ * Pass if none. A finding without a severity (stored before KOBE-312) counts as Caution.
+ */
+export function verdictOf(findings: readonly { readonly severity?: Severity | string }[]): Verdict {
+  if (findings.length === 0) return "pass";
+  return findings.some((f) => f.severity === "block") ? "block" : "caution";
+}
+
+/**
+ * Statically scans a skill bundle, every file of it (hidden ones included). Pure: no I/O, bounded
+ * work per file and per bundle. File types are checked for every file; text rules run on text
+ * files within the size caps.
+ */
 export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
   const scripts = files
     .filter(isScript)
@@ -119,8 +146,21 @@ export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
   const findings: Finding[] = [];
   let total = 0;
   for (const file of files) {
+    const binary = isBinary(file.bytes);
+    const typeRule = fileTypeRule(file.path, file.bytes, binary);
+    if (typeRule && findings.length < SCAN_LIMITS.maxFindings) {
+      findings.push({
+        category: "file-type",
+        rule: typeRule,
+        file: file.path,
+        line: 0,
+        excerpt: "",
+        severity: "block",
+      });
+      continue;
+    }
     const tooBig = file.bytes.length > SCAN_LIMITS.maxFileBytes;
-    if (tooBig || total + file.bytes.length > SCAN_LIMITS.maxTotalBytes || isBinary(file.bytes)) {
+    if (tooBig || total + file.bytes.length > SCAN_LIMITS.maxTotalBytes || binary) {
       skipped.push(file.path);
       continue;
     }
@@ -129,5 +169,11 @@ export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
     if (budget <= 0) continue;
     findings.push(...scanFile(file, scriptSet.has(file.path), budget));
   }
-  return { scripts, findings, skipped };
+  return {
+    verdict: verdictOf(findings),
+    ruleSetVersion: RULE_SET_VERSION,
+    scripts,
+    findings,
+    skipped,
+  };
 }
