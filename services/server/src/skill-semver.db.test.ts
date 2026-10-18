@@ -22,6 +22,17 @@ const md = (name: string, body: string) => new RawBody(skillMd(name, body), "tex
 const upload = (who: TestBrowser, scope: string, body: RawBody, query = "") =>
   who.post(`/v1/skills?scope=${scope}${query}`, body);
 const q = (params: Record<string, string>) => `&${new URLSearchParams(params).toString()}`;
+/** A multipart upload: the SKILL.md as the `bundle` part, plus text fields. */
+async function form(name: string, body: string, fields: Record<string, string>): Promise<RawBody> {
+  const data = new FormData();
+  data.set("bundle", new File([skillMd(name, body)], "SKILL.md", { type: "text/markdown" }));
+  for (const [k, v] of Object.entries(fields)) data.set(k, v);
+  const req = new Request("http://form.test", { method: "POST", body: data });
+  return new RawBody(
+    new Uint8Array(await req.arrayBuffer()),
+    req.headers.get("content-type") ?? "",
+  );
+}
 
 beforeAll(async () => {
   h = await openHarness({ blobs: { objects, prefix: "kobe/" } });
@@ -55,8 +66,7 @@ describe("numbering uploads", () => {
     const v3 = await upload(
       member,
       "personal",
-      md("numbered", "Three."),
-      q({ semver: "1.0.0", changelog: "First stable release." }),
+      await form("numbered", "Three.", { semver: "1.0.0", changelog: "First stable release." }),
     );
     expect(v3.status, JSON.stringify(v3.json)).toBe(201);
     expect(v3.json.version).toMatchObject({
@@ -92,13 +102,52 @@ describe("numbering uploads", () => {
       q({ semver: "1.0" }),
       q({ semver: "v1.0.0" }),
       q({ semver: "1.0.0-beta" }),
-      q({ changelog: "x".repeat(1025) }),
-      q({ changelog: "  " }),
+      // Free text never travels in the URL (access logs): the changelog goes in the form.
+      q({ changelog: "Fixes." }),
     ]) {
       const res = await upload(member, "personal", md("malformed", "M."), query);
       expect(res.status, query).toBe(400);
       expect(res.json.code).toBe("invalid_request");
     }
+    for (const fields of [
+      { changelog: "x".repeat(1025) },
+      { changelog: "  " },
+      { semver: "1.0" },
+      { semver: "1000000000.0.0" },
+    ]) {
+      const res = await upload(member, "personal", await form("malformed", "M.", fields));
+      expect(res.status, JSON.stringify(fields)).toBe(400);
+      expect(res.json.code).toBe("invalid_request");
+    }
+    const conflicting = await upload(
+      member,
+      "personal",
+      await form("malformed", "M.", { semver: "1.0.0" }),
+      q({ semver: "2.0.0" }),
+    );
+    expect(conflicting.status).toBe(400);
+    const noBundle = await member.post(
+      "/v1/skills?scope=personal",
+      new RawBody("--x--\r\n", "multipart/form-data; boundary=x"),
+    );
+    expect(noBundle.status).toBe(415);
+    const list = await member.get("/v1/skills?scope=personal");
+    expect(list.json.skills.map((s: { slug: string }) => s.slug)).not.toContain("malformed");
+  });
+
+  it("asks for a number when the next minor would leave the nine-digit range", async () => {
+    const top = await upload(
+      member,
+      "personal",
+      md("crowded", "A."),
+      q({ semver: "1.999999999.0" }),
+    );
+    expect(top.status).toBe(201);
+    const next = await upload(member, "personal", md("crowded", "B."));
+    expect(next.status).toBe(400);
+    expect(next.json.code).toBe("semver_required");
+    const major = await upload(member, "personal", md("crowded", "B."), q({ semver: "2.0.0" }));
+    expect(major.json.version.semver).toBe("2.0.0");
   });
 });
 
@@ -107,7 +156,11 @@ describe("reading versions", () => {
     const v1 = await upload(admin, "team", md("ordered", "1."), q({ semver: "0.9.0" }));
     const id = v1.json.skill.id as string;
     await upload(admin, "team", md("ordered", "2."), q({ semver: "0.10.0" }));
-    await upload(admin, "team", md("ordered", "3."), q({ semver: "2.0.0", changelog: "Major." }));
+    await upload(
+      admin,
+      "team",
+      await form("ordered", "3.", { semver: "2.0.0", changelog: "Major." }),
+    );
     const list = await member.get(`/v1/skills/${id}/versions`);
     expect(
       list.json.versions.map((v: { seq: number; semver: string }) => [v.seq, v.semver]),
@@ -155,6 +208,29 @@ describe("team skill access", () => {
     expect((await member.get(`/v1/skills/${id}`)).json.skill.access).toBe("default_on");
     expect((await admin.put(`/v1/skills/${id}/offer`, { offerToAll: false })).status).toBe(200);
     expect((await member.get(`/v1/skills/${id}`)).json.skill.access).toBe("available");
+  });
+
+  it("repairs an access mode a rolled-back release left behind when the offer is saved again", async () => {
+    const res = await upload(admin, "team", md("drifted", "D."));
+    const id = res.json.skill.id as string;
+    // A release before KOBE-308 turned the offer on and wrote only offer_to_all.
+    await h.admin.query(
+      `UPDATE team_skills SET offer_to_all = true, access = 'available' WHERE id = $1`,
+      [id],
+    );
+    const before = await h.admin.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'skill.offer.changed' AND target->>'skillId' = $1`,
+      [id],
+    );
+    const save = await admin.put(`/v1/skills/${id}/offer`, { offerToAll: true });
+    expect(save.json).toEqual({ offerToAll: true });
+    expect((await member.get(`/v1/skills/${id}`)).json.skill.access).toBe("default_on");
+    // The offer itself did not change: no audit row.
+    const after = await h.admin.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'skill.offer.changed' AND target->>'skillId' = $1`,
+      [id],
+    );
+    expect(after.rows).toEqual(before.rows);
   });
 
   it("gives personal skills no access mode", async () => {

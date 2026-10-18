@@ -206,12 +206,27 @@ export function setOfferToAll(
       sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skill_offer:${teamId}`}, 0))`,
     );
     const [skill] = await tx
-      .select({ slug: teamSkills.slug, offerToAll: teamSkills.offerToAll })
+      .select({
+        slug: teamSkills.slug,
+        offerToAll: teamSkills.offerToAll,
+        access: teamSkills.access,
+      })
       .from(teamSkills)
       .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)))
       .for("update");
     if (!skill) return { ok: false, error: "not_found" };
-    if (skill.offerToAll === offerToAll) return { ok: true, offerToAll };
+    // The access mode follows the offer (KOBE-308) until the resolver reads `access` (SK27).
+    const access = offerToAll ? "default_on" : "available";
+    if (skill.offerToAll === offerToAll) {
+      // Not a change of the offer (no audit), but a save repairs an access mode left behind by
+      // a release that wrote only `offer_to_all` (a rollback across KOBE-308).
+      if (skill.access !== access)
+        await tx
+          .update(teamSkills)
+          .set({ access })
+          .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)));
+      return { ok: true, offerToAll };
+    }
     if (offerToAll) {
       const offered = await tx
         .select({ id: teamSkills.id })
@@ -221,8 +236,7 @@ export function setOfferToAll(
     }
     await tx
       .update(teamSkills)
-      // The access mode follows the offer (KOBE-308) until the resolver reads `access` (SK27).
-      .set({ offerToAll, access: offerToAll ? "default_on" : "available" })
+      .set({ offerToAll, access })
       .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)));
     await recordAudit(tx, {
       action: "skill.offer.changed",

@@ -87,11 +87,17 @@ export interface NewSkillVersion {
 }
 
 export type UploadError =
-  "unchanged" | "skill_limit" | "version_limit" | "blocklisted" | "semver_not_increasing";
+  | "unchanged"
+  | "skill_limit"
+  | "version_limit"
+  | "blocklisted"
+  | "semver_not_increasing"
+  | "semver_required";
 export type UploadResult =
   | { readonly ok: true; readonly skill: SkillRecord; readonly version: SkillVersionRecord }
-  | { readonly ok: false; readonly error: Exclude<UploadError, "semver_not_increasing"> }
-  | { readonly ok: false; readonly error: "semver_not_increasing"; readonly latest: string };
+  | { readonly ok: false; readonly error: Exclude<UploadError, SemverError> }
+  | { readonly ok: false; readonly error: SemverError; readonly latest: string };
+type SemverError = "semver_not_increasing" | "semver_required";
 
 function inLocation<T>(db: KobeDb, location: SkillLocation, fn: (tx: KobeTx) => Promise<T>) {
   return location.scope === "team"
@@ -147,7 +153,10 @@ export function uploadSkillVersion(
       return { ok: false, error: "skill_limit" };
     }
     const semver = nextSemver(latest?.semver ?? null, input.semver);
-    if (!semver.ok) return { ok: false, error: "semver_not_increasing", latest: semver.latest };
+    if (!semver.ok) {
+      const error = semver.reason === "no_default" ? "semver_required" : "semver_not_increasing";
+      return { ok: false, error, latest: semver.latest };
+    }
     const skill = existing
       ? await bumpSkill(tx, location, existing, input, semver.semver)
       : await insertSkill(tx, location, input, semver.semver);

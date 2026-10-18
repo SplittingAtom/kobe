@@ -15,7 +15,8 @@ import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
-import { changelogSchema, parseSemver, semverSchema } from "../skills/semver.js";
+import { parseSemver } from "../skills/semver.js";
+import { readUploadBody } from "../skills/upload-body.js";
 import {
   discardAttemptBundle,
   putSkillBundle,
@@ -37,12 +38,6 @@ import {
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
-const ZIP_TYPES = new Set([
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/octet-stream",
-]);
-const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown", "text/plain"]);
 const scopeSchema = z.enum(["team", "personal"]);
 const idSchema = z.uuid();
 const seqSchema = z.coerce.number().int().positive().max(2147483647);
@@ -52,11 +47,6 @@ const versionRef = (value: string | undefined): number | string | null => {
   const seq = seqSchema.safeParse(value);
   return seq.success ? seq.data : null;
 };
-/** Optional numbering of an upload (KOBE-308, SK14), in the query beside `scope`. */
-const numberingSchema = z.strictObject({
-  semver: semverSchema.optional(),
-  changelog: changelogSchema.optional(),
-});
 
 const error = (
   c: Ctx,
@@ -66,7 +56,7 @@ const error = (
 ) => c.json({ code, message }, status);
 
 const UPLOAD_ERRORS: Record<
-  Exclude<UploadError, "semver_not_increasing"> | "blocklisted_download",
+  Exclude<UploadError, "semver_not_increasing" | "semver_required"> | "blocklisted_download",
   string
 > = {
   blocklisted_download: "This skill version is on the site's blocklist and can't be opened.",
@@ -116,8 +106,9 @@ const versionJson = (v: SkillVersionRecord, review: ReviewState | null = null) =
 /**
  * Skill bundles (spec D19, §6.1, KOBE-78) from the active team's point of view: the team's skills
  * and the caller's personal ones. `POST /?scope=team|personal` takes a zip (or a bare SKILL.md as
- * text/markdown) and stores it as the next immutable version of the skill its frontmatter names,
- * numbered `semver` (query; default: the next minor) with an optional `changelog` (KOBE-308);
+ * text/markdown, or either as the `bundle` part of multipart/form-data) and stores it as the next
+ * immutable version of the skill its frontmatter names, numbered `semver` (query or form field;
+ * default: the next minor) with an optional `changelog` (form field only, KOBE-308);
  * `GET /`, `GET /:id`, `GET /:id/versions[/:n]` read them. Each upload is scanned (KOBE-80); a team
  * version starts `pending` review and is unusable until a team admin approves it.
  */
@@ -174,17 +165,6 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         scope.data === "team" ? "team.skills.publish" : "team.personal.create",
       );
       if (!allowed) return error(c, 403, "forbidden", "Your team role doesn't allow that upload.");
-      const numbering = numberingSchema.safeParse({
-        semver: c.req.query("semver"),
-        changelog: c.req.query("changelog"),
-      });
-      if (!numbering.success)
-        return error(
-          c,
-          400,
-          "invalid_request",
-          "Give semver as MAJOR.MINOR.PATCH (for example 1.2.0) and a changelog of 1 to 1024 characters.",
-        );
       if (!deps.blobs)
         return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
       if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
@@ -192,15 +172,11 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
           { code: "rate_limited", message: "Too many uploads. Wait a few minutes and try again." },
           429,
         );
-      const type = (c.req.header("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-      const bytes = new Uint8Array(await c.req.arrayBuffer());
-      const prepared = ZIP_TYPES.has(type)
-        ? prepareZip(bytes)
-        : MARKDOWN_TYPES.has(type)
-          ? prepareMarkdown(bytes)
-          : null;
-      if (!prepared)
-        return error(c, 415, "unsupported_media_type", "Send application/zip or text/markdown.");
+      const read = await readUploadBody(c.req.raw, new URL(c.req.url).searchParams);
+      if (!read.ok) return error(c, read.status, read.code, read.message);
+      const numbering = read.body;
+      const prepared =
+        numbering.kind === "zip" ? prepareZip(numbering.bytes) : prepareMarkdown(numbering.bytes);
       if (!prepared.ok) return bundleError(c, prepared.error);
       const { bundle, source } = prepared;
       const zip = bundle.zip;
@@ -224,8 +200,8 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         uncompressedBytes: bundle.uncompressedBytes,
         uploadedBy: c.get("user").id,
         scan,
-        ...(numbering.data.semver ? { semver: numbering.data.semver } : {}),
-        ...(numbering.data.changelog ? { changelog: numbering.data.changelog } : {}),
+        ...(numbering.semver ? { semver: numbering.semver } : {}),
+        ...(numbering.changelog ? { changelog: numbering.changelog } : {}),
       }).catch(async (err: unknown) => {
         await discard();
         throw err;
@@ -237,7 +213,14 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
             c,
             409,
             result.error,
-            `Version ${numbering.data.semver ?? ""} must be higher than the latest version, ${result.latest}.`,
+            `Version ${numbering.semver ?? ""} must be higher than the latest version, ${result.latest}.`,
+          );
+        if (result.error === "semver_required")
+          return error(
+            c,
+            400,
+            result.error,
+            `The next version after ${result.latest} can't be numbered automatically: give a semver (for example a new major).`,
           );
         return result.error === "blocklisted"
           ? error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted)

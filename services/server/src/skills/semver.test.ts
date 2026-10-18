@@ -46,13 +46,29 @@ describe("skill semver (KOBE-308, SK14)", () => {
     expect(nextSemver(null, undefined)).toEqual({ ok: true, semver: "0.1.0" });
     expect(nextSemver("0.3.0", undefined)).toEqual({ ok: true, semver: "0.4.0" });
     expect(nextSemver("1.4.2", undefined)).toEqual({ ok: true, semver: "1.5.0" });
+    expect(nextSemver("1.999999998.3", undefined)).toEqual({ ok: true, semver: "1.999999999.0" });
+    // The next minor would need ten digits: the uploader must give a number (e.g. 2.0.0).
+    expect(nextSemver("1.999999999.0", undefined)).toEqual({
+      ok: false,
+      reason: "no_default",
+      latest: "1.999999999.0",
+    });
+    expect(nextSemver("1.999999999.0", "2.0.0")).toEqual({ ok: true, semver: "2.0.0" });
   });
 
   it("takes a requested version only when it is above the latest", () => {
     expect(nextSemver(null, "1.0.0")).toEqual({ ok: true, semver: "1.0.0" });
     expect(nextSemver("0.3.0", "0.3.1")).toEqual({ ok: true, semver: "0.3.1" });
-    expect(nextSemver("0.3.0", "0.3.0")).toEqual({ ok: false, latest: "0.3.0" });
-    expect(nextSemver("0.10.0", "0.9.0")).toEqual({ ok: false, latest: "0.10.0" });
+    expect(nextSemver("0.3.0", "0.3.0")).toEqual({
+      ok: false,
+      reason: "not_increasing",
+      latest: "0.3.0",
+    });
+    expect(nextSemver("0.10.0", "0.9.0")).toEqual({
+      ok: false,
+      reason: "not_increasing",
+      latest: "0.10.0",
+    });
   });
 
   it("validates request values", () => {

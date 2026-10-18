@@ -6,6 +6,8 @@ import { z } from "zod";
  * digits, no leading zeros. Mirrors the `*_semver_format` checks of migration 0130.
  */
 const SEMVER = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
+/** The largest part SEMVER admits (nine digits). */
+const PART_MAX = 999_999_999;
 
 /** Mirrors `CHANGELOG_MAX` in @kobe/db's schema/skills.ts (the `*_changelog_size` checks). */
 export const CHANGELOG_MAX = 1024;
@@ -36,7 +38,14 @@ export function compareSemver(a: string, b: string): number {
 export const legacySemver = (version: number): string => `0.${version}.0`;
 
 export type NextSemver =
-  { readonly ok: true; readonly semver: string } | { readonly ok: false; readonly latest: string };
+  | { readonly ok: true; readonly semver: string }
+  /** `not_increasing`: the requested number is not above `latest`; `no_default`: the next
+   * minor of `latest` would leave the nine-digit range, so a number must be given. */
+  | {
+      readonly ok: false;
+      readonly reason: "not_increasing" | "no_default";
+      readonly latest: string;
+    };
 
 /**
  * The number of a new version: `requested` when it is above `latest` (refused otherwise), or by
@@ -47,9 +56,11 @@ export function nextSemver(latest: string | null, requested: string | undefined)
   if (requested !== undefined) {
     return latest === null || compareSemver(requested, latest) > 0
       ? { ok: true, semver: requested }
-      : { ok: false, latest };
+      : { ok: false, reason: "not_increasing", latest };
   }
   const base = latest === null ? null : parseSemver(latest);
+  if (latest !== null && base && base.minor >= PART_MAX)
+    return { ok: false, reason: "no_default", latest };
   return {
     ok: true,
     semver: base ? formatSemver({ ...base, minor: base.minor + 1, patch: 0 }) : "0.1.0",

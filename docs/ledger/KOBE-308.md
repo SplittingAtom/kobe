@@ -50,9 +50,16 @@ backfill, then SQL-only checks). Then server, web and tests.
 - The KOBE-307 upgrade test now checks its renamed constraints with `arrayContaining` (it
   migrates to the end, and 0129/0130 add constraints).
 
+- **Review fixes:** S1, saving the offer again (same value) repairs a stale `access` (no
+  audit row: the offer did not change). N2, when the default next minor would need ten digits
+  the upload gets 400 `semver_required` (give a number); a requested part over nine digits is 400. N3, the changelog travels only in a `multipart/form-data` field (`bundle` file part plus
+  `semver`, `changelog`; `skills/upload-body.ts`); `?changelog=` is refused with 400; raw
+  zip/markdown uploads with `?semver=` still work. N1 (CHECK vs NOT NULL) left as is: typing it
+  non-null in Drizzle needs a schema diff.
+
 ## Open questions (for Chris or the coordinator)
 
-- Default number for a new skill is 0.1.0 (matches the backfill); say if 1.0.0 is preferred.
+- None (new skills start at 0.1.0: confirmed).
 
 ## Evidence (acceptance criteria → test or command output)
 
