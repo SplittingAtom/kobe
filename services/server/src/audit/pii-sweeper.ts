@@ -93,12 +93,17 @@ export class AuditPiiSweeper {
     }
   }
 
+  /** One pass: the v1 seal (once), then the erasure sweep. */
+  async runOnce(): Promise<AuditPiiSweepResult> {
+    await this.seal();
+    return sweepAuditPii(this.db);
+  }
+
   start(): void {
     const run = () => {
       if (this.running) return;
       this.running = true;
-      this.seal()
-        .then(() => sweepAuditPii(this.db))
+      this.runOnce()
         .then(({ erased }) => {
           if (erased > 0) logger.info({ erased }, "audit IP and user agent erased");
         })

@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { STARTUP_SEEDED_ROWS } from "@kobe/db";
 import { isolationAuditor } from "./audit/isolation.js";
-import { sweepAuditPii } from "./audit/pii-sweeper.js";
-import { seedGalleryAgents } from "./gallery/seed.js";
 import { logger } from "./logger.js";
-import { RetentionJob } from "./retention/job.js";
+import { FakeBifrost } from "./models/testing/fake-bifrost.js";
+import { seedAtStart, serverJobs } from "./startup/jobs.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
@@ -16,7 +15,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 let h: Harness;
 
 beforeAll(async () => {
-  h = await openHarness();
+  h = await openHarness({ egressHeaderSecrets: ["e".repeat(48)] });
 });
 afterAll(async () => {
   await h.close();
@@ -42,10 +41,16 @@ async function snapshot(): Promise<Map<string, string[]>> {
   return out;
 }
 
-/** The server's start-up writers that run without a person (services/server/src/index.ts). */
+/**
+ * What a server replica runs at start (`startup/jobs.ts`, the same list `index.ts` starts), one
+ * pass each, with every optional job configured: SIEM forwarding to both destinations (nothing
+ * listens there, so the forwarder records a failure), the Bifrost sync (a fake admin), and the
+ * egress header re-seal. Plus the isolation auditor, which `index.ts` wires into the isolation
+ * gate, and the requests a load balancer and a first visitor make.
+ */
 async function start(): Promise<void> {
   const db = h.deps.database.db;
-  await seedGalleryAgents(db);
+  await seedAtStart(h.deps, logger);
   const isolation = isolationAuditor(db, "replica-1");
   await isolation({
     state: "verified",
@@ -59,8 +64,31 @@ async function start(): Promise<void> {
     message: "gone",
     checkedAt: new Date(),
   });
-  await new RetentionJob({ db, pool: h.deps.database.pool, hourUtc: 3, logger }).tick(true);
-  await sweepAuditPii(db);
+  const jobs = serverJobs({
+    deps: h.deps,
+    databaseUrl: h.appUrl,
+    logger,
+    auditForwarding: {
+      syslog: { host: "127.0.0.1", port: 9, tls: false },
+      otlp: { url: "http://127.0.0.1:9/v1/logs", headers: {} },
+    },
+    retention: { hourUtc: new Date().getUTCHours(), paused: false, uploadOrphanHours: 24 },
+    connectorRefreshSeconds: 3600,
+    models: {
+      admin: new FakeBifrost(),
+      config: {
+        bifrostUrl: "http://bifrost.invalid",
+        adminUsername: "admin",
+        adminPassword: "p".repeat(32),
+        providerKeySecrets: ["k".repeat(48)],
+        virtualKeySecrets: ["v".repeat(48)],
+        allowUnsafeEndpoints: false,
+        syncIntervalMs: 3_600_000,
+      },
+    },
+  });
+  expect(jobs.map((j) => j.name)).toContain("audit-forwarding");
+  for (const j of jobs) await j.once();
   const browser = h.browser();
   for (const path of ["/healthz", "/readyz", "/v1/setup"]) await browser.get(path);
 }
@@ -74,16 +102,27 @@ describe("rows a fresh site's start writes (KOBE-422)", () => {
     const written = [...after.keys()].filter(
       (t) => JSON.stringify(after.get(t)) !== JSON.stringify(before.get(t)),
     );
-    expect(written.sort()).toEqual(
-      ["audit_log", "site_agent_versions", "site_agents", "site_settings"].sort(),
-    );
     for (const table of written) {
       const seed = STARTUP_SEEDED_ROWS[table];
-      expect(seed, `${table} is written at start but is not in STARTUP_SEEDED_ROWS`).toBeDefined();
+      if (!seed) {
+        // A table a migration seeds (packages/cli/src/seeded.ts) may change, never grow: the
+        // restore replaces its rows whole. Anything else written at start must be listed.
+        expect(
+          before.has(table),
+          `${table} is written at start but is not in STARTUP_SEEDED_ROWS`,
+        ).toBe(true);
+        expect(after.get(table)?.length, table).toBe(before.get(table)?.length);
+        continue;
+      }
       const other = await h.admin.query(
-        `SELECT to_jsonb(t)::text AS r FROM public."${table}" t WHERE (${seed?.rows ?? "false"}) IS NOT TRUE`,
+        `SELECT to_jsonb(t)::text AS r FROM public."${table}" t WHERE (${seed.rows}) IS NOT TRUE`,
       );
       expect(other.rows, `${table} rows the restore would refuse`).toEqual([]);
     }
+    expect(written).toEqual(expect.arrayContaining(["audit_log", "site_agents", "site_settings"]));
+    const keys = await h.admin.query<{ key: string }>(`SELECT key FROM site_settings ORDER BY key`);
+    expect(keys.rows.map((r) => r.key)).toEqual(
+      expect.arrayContaining(["audit.forward.otlp", "audit.forward.syslog"]),
+    );
   });
 });

@@ -1,26 +1,18 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
-import { seedGalleryAgents } from "./gallery/seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
-import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
-import { destinationsOf, sinksFor } from "./audit/forward/index.js";
+import { destinationsOf } from "./audit/forward/index.js";
 import { forwardingSecrets } from "./audit/forward/redact.js";
-import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
-import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { createLangfuseScoreSink, initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
+import { seedAtStart, serverJobs, startServerJobs } from "./startup/jobs.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
-import { notifyDrift } from "./connectors/drift-notify.js";
-import { CONNECTOR_REFRESH_LOCK, startConnectorRefresh } from "./connectors/refresh.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
-import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
-import { resealTeamHeaders } from "./egress/header-store.js";
-import { EgressRequestSweeper } from "./egress/request-notify.js";
-import { NotificationEmailSweeper, deliverNotificationEmails } from "./notifications/email.js";
+import { deliverNotificationEmails } from "./notifications/email.js";
 import { EvalRunner } from "./agents/eval/service.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
@@ -28,10 +20,7 @@ import { logger } from "./logger.js";
 import { createSmtpMailer } from "./mail/mailer.js";
 import { createHttpBifrostAdmin } from "./models/bifrost-admin.js";
 import { loadModelsConfig } from "./models/config.js";
-import { ModelGatewaySync } from "./models/sync.js";
-import { OFFBOARDING_SWEEP_LOCK } from "./offboarding/index.js";
 import { createPgReconcileLock } from "./sandbox/reconcile-lock.js";
-import { RetentionJob } from "./retention/job.js";
 import { loadUploadSettings } from "./uploads/settings.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
@@ -44,14 +33,7 @@ import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-toke
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
-import {
-  KEY_FINGERPRINT_PURPOSE,
-  PROVIDER_KEY_PURPOSE,
-  SecretBox,
-  VIRTUAL_KEY_PURPOSE,
-  deriveKey,
-  loadEnvelope,
-} from "@kobe/db";
+import { loadEnvelope } from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
 import { createAttachmentStager } from "./uploads/attach.js";
 import {
@@ -63,7 +45,6 @@ import {
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const EVAL_SWEEP_MS = 60_000;
-const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
@@ -188,11 +169,7 @@ if (config.process === "scheduler") {
 
 // Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
 // upgrade alike. Idempotent; a failure is logged and never stops the server from starting.
-if (deps && config.process === "server") {
-  await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
-    logger.error({ err }, "gallery agents could not be seeded"),
-  );
-}
+if (deps && config.process === "server") await seedAtStart(deps, logger);
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
@@ -222,94 +199,29 @@ deps?.runs.useIsolation(() => {
 });
 // The scheduler only fires runs: the server's background jobs below run on server replicas.
 const serverDeps = isServer ? deps : undefined;
-// Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
-serverDeps?.auditAnchor.start();
-// Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
-const breakGlassSweeper = serverDeps ? new BreakGlassSweeper(serverDeps) : undefined;
-breakGlassSweeper?.start();
-// Audit rows lose their client IP and user agent after the retention period (KOBE-17).
-const auditPiiSweeper = serverDeps ? new AuditPiiSweeper(serverDeps.database.db) : undefined;
-auditPiiSweeper?.start();
-// Optional SIEM forwarding (syslog, OTLP; KOBE-19): a sweep, one replica forwards at a time.
-const auditForwarder =
-  serverDeps && destinationsOf(config.auditForwarding).length > 0
-    ? new AuditForwarder({
-        db: serverDeps.database.db,
-        sinks: sinksFor(config.auditForwarding),
-        lock: createPgReconcileLock(
-          serverDeps.database.pool,
-          (err) => logger.warn({ err }, "audit forwarding lock connection problem"),
-          AUDIT_FORWARD_LOCK,
-        ),
-        log: logger,
-        secrets: forwardingSecrets(config.auditForwarding),
-      })
-    : undefined;
-auditForwarder?.start();
-// Nightly retention (KOBE-18, D18): Trash and retention purges, run_events compaction, released
-// blobs. Every replica checks; an advisory lock lets one run a pass.
-const retentionJob = serverDeps
-  ? new RetentionJob({
-      db: serverDeps.database.db,
-      pool: serverDeps.database.pool,
-      blobs: serverDeps.blobs,
-      uploadOrphanHours: uploadSettings.orphanHours,
-      hourUtc: config.retentionHourUtc,
-      paused: config.retentionPaused,
-      logger,
-    })
+// The server replica's own background jobs (startup/jobs.ts, KOBE-422): audit anchor, PII erasure,
+// SIEM forwarding, break-glass, retention, approvals, budgets, email sweeps, egress relay,
+// offboarding, connector refresh, header re-seal and the Bifrost sync.
+const stopServerJobs = serverDeps
+  ? startServerJobs(
+      serverJobs({
+        deps: serverDeps,
+        databaseUrl: config.databaseUrl,
+        logger,
+        auditForwarding: config.auditForwarding,
+        retention: {
+          hourUtc: config.retentionHourUtc,
+          paused: config.retentionPaused,
+          uploadOrphanHours: uploadSettings.orphanHours,
+        },
+        connectorRefreshSeconds: config.connectorRefreshSeconds,
+        models:
+          modelsConfig && bifrostAdmin ? { config: modelsConfig, admin: bifrostAdmin } : undefined,
+      }),
+    )
   : undefined;
-retentionJob?.start();
-// Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
-serverDeps?.approvals.start();
-// Budgets: spend hints from the model gateway and a sweep over every team (KOBE-42).
-serverDeps?.budgets.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
-// Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
-const egressRelay =
-  deps && config.process === "server"
-    ? new EgressBlockedRelay({ db: deps.database.db, connectionString: config.databaseUrl })
-    : undefined;
-egressRelay?.start();
-// Request-access emails (KOBE-39): retries and anything a crashed replica left queued.
-const egressRequestSweeper =
-  deps && config.process === "server" ? new EgressRequestSweeper(deps) : undefined;
-egressRequestSweeper?.start();
-// Scheduled-run notification emails (KOBE-179): retries and anything a crashed replica left queued.
-const notificationEmailSweeper =
-  deps && config.process === "server" ? new NotificationEmailSweeper(deps) : undefined;
-notificationEmailSweeper?.start();
-// Header values sealed with a previous header secret are re-sealed with the current one (rotation).
-if (deps?.egressHeaders && config.process === "server") {
-  const box = deps.egressHeaders;
-  resealTeamHeaders(deps.database.db, box)
-    .then((n) => {
-      if (n > 0)
-        logger.info({ domains: n }, "egress header values re-sealed with the current secret");
-    })
-    .catch((err: unknown) => logger.error({ err }, "egress header re-seal failed"));
-}
-
-// Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
-const modelSync =
-  deps && modelsConfig && bifrostAdmin
-    ? new ModelGatewaySync({
-        db: deps.database.db,
-        connectionString: config.databaseUrl,
-        admin: bifrostAdmin,
-        providerKeys: new SecretBox(modelsConfig.providerKeySecrets, PROVIDER_KEY_PURPOSE),
-        virtualKeys: new SecretBox(modelsConfig.virtualKeySecrets, VIRTUAL_KEY_PURPOSE),
-        // Own HKDF purpose: the fingerprint secret never equals a sealing key.
-        fingerprintSecret: deriveKey(
-          modelsConfig.providerKeySecrets[0] ?? "",
-          KEY_FINGERPRINT_PURPOSE,
-        ).toString("hex"),
-        intervalMs: modelsConfig.syncIntervalMs,
-        logger,
-      })
-    : undefined;
-modelSync?.start();
 if (config.process === "server" && !egressHeaderSecrets) {
   logger.warn("KOBE_EGRESS_HEADER_SECRET is not set: egress header injection is off");
 }
@@ -515,37 +427,6 @@ const stopTeamReconciler =
         },
       })
     : undefined;
-// Offboarding (KOBE-28, D12): finishes departures that were missed, deletes volumes and workspace
-// copies 30 days after the member left (never under a legal hold). One replica at a time.
-const stopOffboarding =
-  deps && config.process === "server"
-    ? deps.offboarding.start({
-        lock: createPgReconcileLock(
-          deps.database.pool,
-          (err) => logger.warn({ err }, "offboarding sweep lock connection problem"),
-          OFFBOARDING_SWEEP_LOCK,
-        ),
-        everyMs: OFFBOARDING_SWEEP_MS,
-      })
-    : undefined;
-// Connector tool drift (KOBE-102, D27): re-probe pinned connectors; changed/new tools are disabled
-// until a site admin re-approves them. One replica at a time.
-const stopConnectorRefresh =
-  deps && config.process === "server"
-    ? startConnectorRefresh({
-        db: deps.database.db,
-        prober: deps.connectorProbe,
-        lock: createPgReconcileLock(
-          deps.database.pool,
-          (err) => logger.warn({ err }, "connector refresh lock connection problem"),
-          CONNECTOR_REFRESH_LOCK,
-        ),
-        intervalMs: config.connectorRefreshSeconds * 1000,
-        logger,
-        afterPass: () =>
-          notifyDrift({ db: deps.database.db, mailer: deps.mailer, publicUrl: deps.publicUrl }),
-      })
-    : undefined;
 const stopHibernation =
   isServer && lifecycle && sandbox?.settings.hibernation.enabled
     ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
@@ -594,26 +475,15 @@ function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
   schedulerRunner?.stop();
+  void stopServerJobs?.();
   stopRunHook?.();
   stopReconciler?.();
   stopTeamReconciler?.();
-  stopOffboarding?.();
-  stopConnectorRefresh?.();
   if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();
   sandboxServer?.close();
   internalServer?.close();
-  deps?.auditAnchor.stop();
-  void egressRelay?.close();
-  egressRequestSweeper?.stop();
-  notificationEmailSweeper?.stop();
-  void modelSync?.close();
-  breakGlassSweeper?.stop();
-  auditPiiSweeper?.stop();
-  auditForwarder?.stop();
-  void retentionJob?.stop();
-  deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {
