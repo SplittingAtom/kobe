@@ -946,6 +946,13 @@
       "when": 1792319989846,
       "tag": "0134_skill_rescans",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1792323327753,
+      "tag": "0135_skill_default_syncs",
+      "breakpoints": true
     }
   ]
 }

@@ -48,3 +48,4 @@ export * from "./registry.js";
 export * from "./grants.js";
 export * from "./installs.js";
 export * from "./skill-rescans.js";
+export * from "./skill-default-syncs.js";

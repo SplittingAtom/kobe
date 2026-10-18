@@ -40,6 +40,8 @@ export const agents = defineDomain({
     "site_skill_settings",
     // Rescans on a scanner rule-set change (KOBE-313).
     "skill_rescan_runs",
+    // Default sync jobs (KOBE-314).
+    "skill_default_syncs",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -74,6 +76,8 @@ export const agents = defineDomain({
     site_skill_settings: ["SELECT", "UPDATE"],
     // One row per rule set, updated as the rescan runs; kept as the record.
     skill_rescan_runs: ["SELECT", "INSERT", "UPDATE"],
+    // One row per Default sync job, updated as it runs; kept as the record.
+    skill_default_syncs: ["SELECT", "INSERT", "UPDATE"],
   },
   teamReferencing: {
     site_skill_settings:
