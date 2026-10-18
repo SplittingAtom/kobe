@@ -33,6 +33,7 @@ import {
   memoryLister,
   rowsOf,
   seed,
+  serverStarted,
   sql,
   trapBinDir,
 } from "./testing/fixtures.js";
@@ -429,6 +430,51 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       await expect(restore(dst)).rejects.toThrow(/already has data/);
       expect(await rowsOf(dst.adminUrl, "users")).toEqual(await rowsOf(src.adminUrl, "users"));
       expect(await forcedTables(dst.adminUrl)).toEqual(forcedBefore);
+    });
+
+    it("restores into a site whose server started: its startup seeds are replaced, never duplicated (KOBE-422)", async () => {
+      // A source whose server started too: its gallery agent has the same key as the target's.
+      const started = await createTestDatabase(server);
+      created.push(started);
+      await seed(started);
+      await serverStarted(started.adminUrl);
+      const url = new URL(started.adminUrl);
+      url.username = backupRole;
+      url.password = password;
+      const dir = join(work, "b-started");
+      await backup(dir, { databaseUrl: url.toString() });
+
+      const dst = await target();
+      const seeded = await serverStarted(dst.adminUrl);
+      await restore(dst, dir);
+      for (const t of ["site_agents", "site_agent_versions"]) {
+        expect(await rowsOf(dst.adminUrl, t), t).toEqual(await rowsOf(started.adminUrl, t));
+      }
+      expect(await sql(dst.adminUrl, `SELECT 1 FROM site_agents WHERE id = '${seeded}'`)).toEqual(
+        [],
+      );
+      const actions = (url: string) =>
+        sql<{ action: string }>(url, "SELECT action FROM audit_log ORDER BY seq").then((rows) =>
+          rows.map((r) => r.action),
+        );
+      expect(await actions(dst.adminUrl)).toEqual([
+        ...(await actions(started.adminUrl)),
+        "platform.restore.completed",
+      ]);
+      const settings = (url: string) =>
+        sql(
+          url,
+          `SELECT key, value FROM site_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
+        );
+      expect(await settings(dst.adminUrl)).toEqual(await settings(started.adminUrl));
+    });
+
+    it("still refuses a started site that holds real data (KOBE-422)", async () => {
+      const dst = await target();
+      await serverStarted(dst.adminUrl);
+      await sql(dst.adminUrl, "INSERT INTO users (name, email) VALUES ('Zed', 'zed@example.com')");
+      await expect(restore(dst)).rejects.toThrow(/already has data in: users\b/);
+      expect(await sql(dst.adminUrl, "SELECT slug FROM site_agents")).toEqual([{ slug: "kobe" }]);
     });
 
     it("refuses a backup whose audit chain was tampered with, and restores nothing (KOBE-15)", async () => {

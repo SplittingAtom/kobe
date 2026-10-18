@@ -36,6 +36,35 @@ describe("restore prelude: tables seeded by migrations", () => {
   });
 });
 
+describe("restore prelude: rows the server's start seeds (KOBE-422)", () => {
+  const sql = restorePrelude({
+    ...plan,
+    loadTables: [
+      ...plan.loadTables,
+      { name: "site_agents", rows: 1 },
+      { name: "audit_log", rows: 5 },
+    ],
+  });
+
+  it("refuses only rows a start would not have written", () => {
+    expect(sql).toContain(
+      'EXISTS (SELECT 1 FROM public."site_agents" WHERE (gallery_key IS NOT NULL) IS NOT TRUE)',
+    );
+    expect(sql).toMatch(/EXISTS \(SELECT 1 FROM public\."audit_log" WHERE \(actor_kind = 'system'/);
+    expect(sql).not.toContain('EXISTS (SELECT 1 FROM public."site_agents")');
+  });
+
+  it("replaces them after every check, so the backup's rows never meet duplicates", () => {
+    expect(sql).toContain('DELETE FROM public."site_agents";');
+    expect(sql).toContain('DELETE FROM public."audit_log";');
+    expect(sql.lastIndexOf("already has data")).toBeLessThan(sql.indexOf("DELETE FROM"));
+  });
+
+  it("checks startup-seeded tables not in the backup like any other: left alone", () => {
+    expect(restorePrelude(plan)).not.toContain("site_agents");
+  });
+});
+
 describe("restore prelude", () => {
   const sql = restorePrelude(plan);
 

@@ -1,4 +1,4 @@
-import { quoteIdent } from "@kobe/db";
+import { quoteIdent, startupSeed } from "@kobe/db";
 import { isSeeded } from "./seeded.js";
 
 export interface MigrationRecord {
@@ -78,11 +78,14 @@ export function restorePrelude(plan: RestorePlan): string {
   const lockKey = Math.trunc(plan.lockKey);
   const nonEmptyChecks = plan.loadTables
     .filter((t) => !isSeeded(t.name))
-    .map(
-      (t) =>
-        `  IF EXISTS (SELECT 1 FROM ${table(t.name)}) THEN found := found || ' ' || ${literal(t.name)}; END IF;`,
-    )
+    .map((t) => {
+      // Rows the server's start writes (KOBE-422) are allowed; anything else there is real data.
+      const startup = startupSeed(t.name);
+      const where = startup ? ` WHERE (${startup.rows}) IS NOT TRUE` : "";
+      return `  IF EXISTS (SELECT 1 FROM ${table(t.name)}${where}) THEN found := found || ' ' || ${literal(t.name)}; END IF;`;
+    })
     .join("\n");
+  const replaced = plan.loadTables.filter((t) => isSeeded(t.name) || startupSeed(t.name));
   return [
     "BEGIN;",
     "SET LOCAL lock_timeout = '10s';",
@@ -111,8 +114,10 @@ export function restorePrelude(plan: RestorePlan): string {
     doBlock(
       `DECLARE found text := '';\nBEGIN\n${nonEmptyChecks}\n  IF found <> '' THEN\n    RAISE EXCEPTION 'kobe restore: the target already has data in:%; restore only into a freshly installed Kobe. Nothing was restored', found;\n  END IF;\nEND`,
     ),
-    // Rows a migration seeded on the fresh target give way to the backup's (seeded.ts).
-    ...plan.loadTables.filter((t) => isSeeded(t.name)).map((t) => `DELETE FROM ${table(t.name)};`),
+    // Rows a migration or the server's start seeded on the fresh target give way to the backup's
+    // (seeded.ts, @kobe/db startup-seeds.ts). Triggers are off, so audit_log's rows go too: the
+    // restored chain is the backup's, and the restore's own event continues it.
+    ...replaced.map((t) => `DELETE FROM ${table(t.name)};`),
     "",
   ]
     .filter((line, i, all) => line !== "" || i === all.length - 1)
