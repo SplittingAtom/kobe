@@ -228,7 +228,7 @@ the member's first chat. (2) Gives it: a thread with an upload, an HTML artifact
 a workspace file synced to S3; a user memory doc; a project with a file; a team skill; an API-key
 connector grant (the connector row is inserted as Gate 2 does; the grant goes through `PUT
 /v1/connector-grants/:id`, sealed by the product). It records what the API returns for each and
-the audit chain head (`GET /v1/site/audit/integrity`). (3) Saves the auth and envelope Secrets,
+the audit chain head (`GET /v1/site/audit/integrity`). (3) Saves every Secret of backup-restore.md's "Secrets" table (auth, envelope key, model keys, egress headers, session keys, MCP proxy key),
 stops the server and scheduler, counts every team table's rows (superuser, `team_id NOT NULL` with
 RLS, minus the backup's documented exclusions), creates a `BYPASSRLS` + `pg_read_all_data` backup
 role and runs `kobe backup` with a fresh backup key. (4) Deletes the site: on k3d the whole

@@ -137,6 +137,11 @@ export class Envelope {
     return (this.#live()[0] as Kek).id;
   }
 
+  /** The ids of the KEKs this envelope holds, current first (not secret; KOBE-425). */
+  get keyIds(): readonly string[] {
+    return this.#live().map((k) => k.id);
+  }
+
   /** The key id a ciphertext names (for storage and rotation sweeps). */
   static keyIdOf(sealed: string): string {
     return parse(sealed).kid;

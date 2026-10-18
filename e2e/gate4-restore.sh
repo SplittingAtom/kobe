@@ -7,8 +7,8 @@
 #   restore   it gets threads, artifacts, an upload, a shared file, a workspace file, a skill, a
 #             memory doc, a project file and an API-key connector grant; its writers stop; `kobe
 #             backup` (docs/backup-restore.md, the operator CLI on this machine through a port-
-#             forward); the site is deleted; a fresh one is installed with the saved auth and
-#             envelope Secrets; `kobe restore`; then: every team table's row count matches the
+#             forward); the site is deleted; a fresh one is installed with the saved Secrets
+#             that hold key material (docs/backup-restore.md "Secrets"); `kobe restore`; then: every team table's row count matches the
 #             source and the signed manifest, every object key the database references resolves,
 #             the audit chain verifies (and contains the source's head), the grant opens with the
 #             install's envelope key (and not with another), artifacts, files, the memory doc, the
@@ -203,6 +203,14 @@ copy_secrets() { # namespace → copies of the Secrets the values file names (KO
   done
 }
 SITE_ARGS=() # the target's extra helm arguments (its restored Secrets), for its migration Job too
+# The chart's generated Secrets and the values key that reuses each (docs/backup-restore.md
+# "Secrets"; charts/kobe/tests/backup-secrets.test.ts keeps that table complete). The bundled
+# database's credentials are this harness's own (dev/postgres.yaml or the namespace's database).
+KEPT_SECRETS=(
+  auth:auth.existingSecret envelope-key:envelope.keySecret model-keys:bifrost.keysSecret
+  egress-headers:egressProxy.headerSecret sandbox-session-keys:sandbox.sessionKeysSecret
+  mcp-proxy-internal:mcpProxy.internalKeySecret
+)
 chart_args() { # → the helm arguments every site installs with (after -n <namespace>)
   local extra=()
   [[ -n "$TAG" ]] && extra+=(--set "global.imageTag=$TAG" --set global.imagePullPolicy=IfNotPresent)
@@ -373,11 +381,16 @@ echo "==> restore: the source's writers stop; kobe backup (Postgres + the object
 SERVER_REPLICAS=$(replicas_of server)
 SCHEDULER_REPLICAS=$(replicas_of scheduler)
 umask 077
-secret_key "$NS" "$RELEASE-auth" secret >"$WORK/auth-secret"
-secret_key "$NS" "$RELEASE-envelope-key" key >"$WORK/envelope-key"
-secret_key "$NS" "$RELEASE-envelope-key" key-previous >"$WORK/envelope-key-previous"
-contains "the auth and envelope Secrets are saved (the backup never holds them)" '^[1-9][0-9]* [1-9][0-9]*$' \
-  "$(wc -c <"$WORK/auth-secret" | tr -d ' ') $(wc -c <"$WORK/envelope-key" | tr -d ' ')"
+# Every Secret of docs/backup-restore.md's "Secrets" table (KOBE-425), saved whole (its data only),
+# as the docs say: the backup never holds them.
+saved=""
+for kept in "${KEPT_SECRETS[@]}"; do
+  s=${kept%%:*}
+  $KUBECTL -n "$NS" get secret "$RELEASE-$s" -o json 2>/dev/null \
+    | node -e 'let t="";process.stdin.on("data",(c)=>(t+=c)).on("end",()=>{const j=JSON.parse(t);if(!j.data||!Object.keys(j.data).length)process.exit(1);console.log(JSON.stringify({apiVersion:"v1",kind:"Secret",type:j.type,data:j.data}))})' \
+      >"$WORK/secret-$s.json" && saved+="$s "
+done
+contains "the Secrets holding key material are saved (the backup never holds them)" "^${KEPT_SECRETS[*]%%:*} \$" "$saved"
 writers 0
 if until_ok 120 writers_gone; then ok "server and scheduler stopped"; else fail "server and scheduler stopped"; fi
 psql_super "$SRC_DB" "$TEAM_COUNTS_SQL" >"$WORK/counts-source"
@@ -455,13 +468,16 @@ fi
 site_database "$NS" "$TGT_DB"
 use_site "$NS"
 $KUBECTL create namespace "$NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
-envelope_args=(--from-file=key="$WORK/envelope-key")
-[[ -s "$WORK/envelope-key-previous" ]] && envelope_args+=(--from-file=key-previous="$WORK/envelope-key-previous")
-$KUBECTL -n "$NS" create secret generic "$RELEASE-auth-restored" --from-file=secret="$WORK/auth-secret" \
-  --from-literal=setup-token="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')" >/dev/null
-$KUBECTL -n "$NS" create secret generic "$RELEASE-envelope-key-restored" "${envelope_args[@]}" >/dev/null
-SITE_ARGS=(--set "auth.existingSecret=$RELEASE-auth-restored" --set "envelope.keySecret=$RELEASE-envelope-key-restored")
-if out=$(helm_install "$NS" 2>&1); then ok "the fresh site is installed (auth and envelope Secrets restored)"
+# docs/backup-restore.md "Restore onto a fresh cluster", steps 1-2: each Secret under a new name,
+# its values key pointing at it.
+SITE_ARGS=()
+for kept in "${KEPT_SECRETS[@]}"; do
+  s=${kept%%:*}
+  node -e 'const j=require(process.argv[1]);j.metadata={name:process.argv[2]};console.log(JSON.stringify(j))' \
+    "$WORK/secret-$s.json" "$RELEASE-$s-restored" | $KUBECTL -n "$NS" apply -f - >/dev/null
+  SITE_ARGS+=(--set "${kept#*:}=$RELEASE-$s-restored")
+done
+if out=$(helm_install "$NS" 2>&1); then ok "the fresh site is installed (its key-material Secrets restored)"
 else
   fail "the fresh site is installed: $(tail -5 <<<"$out")"
   exit 1

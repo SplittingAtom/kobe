@@ -8,6 +8,7 @@ import { forwardingSecrets } from "./audit/forward/redact.js";
 import { createLangfuseScoreSink, initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { seedAtStart, serverJobs, startServerJobs } from "./startup/jobs.js";
+import { checkSealedKeys, sealedFamilies } from "./startup/sealed-keys.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
@@ -33,7 +34,13 @@ import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-toke
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
-import { loadEnvelope } from "@kobe/db";
+import {
+  PROVIDER_KEY_PURPOSE,
+  SecretBox,
+  VIRTUAL_KEY_PURPOSE,
+  headerBox,
+  loadEnvelope,
+} from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
 import { createAttachmentStager } from "./uploads/attach.js";
 import {
@@ -170,6 +177,25 @@ if (config.process === "scheduler") {
 // Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
 // upgrade alike. Idempotent; a failure is logged and never stops the server from starting.
 if (deps && config.process === "server") await seedAtStart(deps, logger);
+
+// KOBE-425: sealed values whose key this server does not hold (a restore with other Secrets) are
+// named at start, with the Secret to put back. Reads key ids only; never stops the start.
+if (deps && config.process === "server") {
+  const families = sealedFamilies({
+    ...(modelsConfig
+      ? {
+          providerKeyIds: new SecretBox(modelsConfig.providerKeySecrets, PROVIDER_KEY_PURPOSE)
+            .keyIds,
+          virtualKeyIds: new SecretBox(modelsConfig.virtualKeySecrets, VIRTUAL_KEY_PURPOSE).keyIds,
+        }
+      : {}),
+    ...(envelope ? { envelopeKeyIds: envelope.keyIds } : {}),
+    ...(egressHeaderSecrets ? { egressHeaderKeyIds: headerBox(egressHeaderSecrets).keyIds } : {}),
+  });
+  await checkSealedKeys(deps.database.db, families, logger).catch((err: unknown) =>
+    logger.error({ err }, "the sealed key check failed"),
+  );
+}
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.

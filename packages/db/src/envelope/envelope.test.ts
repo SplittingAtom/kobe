@@ -86,6 +86,15 @@ describe("Envelope", () => {
     expect(() => rotated.rewrap(sealed, { ...CTX, recordId: "x" })).toThrow(EnvelopeError);
   });
 
+  it("lists the ids of its keys, current first (KOBE-425)", () => {
+    const rotated = new Envelope([KEY, OTHER]);
+    expect(rotated.keyIds).toEqual([
+      new Envelope(KEY).currentKeyId,
+      new Envelope(OTHER).currentKeyId,
+    ]);
+    expect(Envelope.keyIdOf(new Envelope(OTHER).seal("s", CTX))).toBe(rotated.keyIds[1]);
+  });
+
   it("is unusable after destroy", () => {
     const e = new Envelope(KEY);
     e.destroy();
