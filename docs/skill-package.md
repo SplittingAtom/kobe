@@ -9,6 +9,8 @@ them (KOBE-309; spec Kobe v1.2 Skills System, SK14, SK19, SK29). The code is the
 
 ## Layout
 
+The eval suite's own format is in [skill-evals.md](skill-evals.md).
+
 ```text
 SKILL.md                 required; portable skill (Agent Skills format)   runtime payload
 scripts/ references/ assets/ (any other path too)                         runtime payload
@@ -169,8 +171,9 @@ optional `confirmedBy` (a Team admin confirming a Builder's request), `fromConve
 optional `origin {kind: git|zip, url, commit, fetchedSha256}` for governed imports (SK30), where
 `url` is `https` with no credentials (userinfo), query or fragment, so no token reaches an export,
 `scan {scanner {name, version, rulesVersion}, verdict: pass|caution|block, findings [{category,
-rule, file, line}]}` (locations only, no excerpts), optional `scorecard` (numbers only:
-`packageHash`, mode, case counts, pass rates, lift, trigger precision and recall, cost, `at`) and
+rule, file, line}]}` (locations only, no excerpts), optional `scorecard` (numbers only, from
+`scorecardForProvenance` ([skill-evals.md](skill-evals.md)): `packageHash`, mode, case counts, pass
+rates, lift, trigger precision and recall when defined, cost, `at`) and
 `createdAt`. Instants are `toISOString()` UTC. No transcripts, prompts, answers or thread ids:
 eval detail never leaves the team. `provenanceMismatches` checks it against the package beside
 it; a scorecard from another package hash is stale.
