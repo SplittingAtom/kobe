@@ -14,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { registrySkills, registryVersions } from "./registry.js";
-import { skillAccess, teamSkills } from "./skills.js";
+import { personalSkills, skillAccess, teamSkills } from "./skills.js";
 import { teamMembers } from "./team-members.js";
 import { teams } from "./teams.js";
 
@@ -114,11 +114,13 @@ export const teamSkillBlocks = pgTable(
 );
 
 /**
- * Team table: a member's own choice about one skill in one team (SK25): an Add for me of a
- * catalog skill (with its version and pin mode), or turning a team skill (On by default) off.
- * Exactly one of `catalog_skill_id` / `team_skill_id` names the skill, each with a real foreign
- * key: a version always belongs to the named catalog skill, and a team skill is this team's
- * (composite FK, cascade). Leaves with the membership (cascade from `team_members`). A Team
+ * Team table: a member's own choice about one skill in one team (SK25, SK27): an Add for me of a
+ * catalog skill (with its version and pin mode), turning a team skill or install (On by default)
+ * off or (Available) on, or turning one of their personal skills off or on in this team (KOBE-316;
+ * no row = on, D22). Exactly one of `catalog_skill_id` / `team_skill_id` / `personal_skill_id`
+ * names the skill, each with a real foreign key: a version always belongs to the named catalog
+ * skill, a team skill is this team's, and a personal skill is this member's own (composite FKs,
+ * cascade). Leaves with the membership (cascade from `team_members`). A Team
  * admin's block of a catalog skill removes the members' adds of it and refuses new ones
  * (triggers, migration 0133).
  */
@@ -132,6 +134,7 @@ export const memberSkillEnablements = pgTable(
     userId: uuid().notNull(),
     catalogSkillId: uuid().references(() => registrySkills.id),
     teamSkillId: uuid(),
+    personalSkillId: uuid(),
     enabled: boolean().notNull(),
     versionId: uuid(),
     pinMode: skillPinMode(),
@@ -145,6 +148,9 @@ export const memberSkillEnablements = pgTable(
     uniqueIndex("member_skill_enablements_team_unique")
       .on(t.teamId, t.userId, t.teamSkillId)
       .where(sql`${t.teamSkillId} IS NOT NULL`),
+    uniqueIndex("member_skill_enablements_personal_unique")
+      .on(t.teamId, t.userId, t.personalSkillId)
+      .where(sql`${t.personalSkillId} IS NOT NULL`),
     foreignKey({
       name: "member_skill_enablements_member_fk",
       columns: [t.teamId, t.userId],
@@ -155,6 +161,11 @@ export const memberSkillEnablements = pgTable(
       columns: [t.teamId, t.teamSkillId],
       foreignColumns: [teamSkills.teamId, teamSkills.id],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "member_skill_enablements_personal_skill_fk",
+      columns: [t.personalSkillId, t.userId],
+      foreignColumns: [personalSkills.id, personalSkills.ownerUserId],
+    }).onDelete("cascade"),
     // The pinned version is one of the named catalog skill's.
     foreignKey({
       name: "member_skill_enablements_version_fk",
@@ -163,7 +174,7 @@ export const memberSkillEnablements = pgTable(
     }),
     check(
       "member_skill_enablements_one_skill",
-      sql`num_nonnulls(${t.catalogSkillId}, ${t.teamSkillId}) = 1`,
+      sql`num_nonnulls(${t.catalogSkillId}, ${t.teamSkillId}, ${t.personalSkillId}) = 1`,
     ),
     // A version and pin mode come together, and only for a catalog skill.
     check(

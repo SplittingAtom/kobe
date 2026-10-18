@@ -196,6 +196,8 @@ export const personalSkills = pgTable(
   },
   (t): PgTableExtraConfigValue[] => [
     unique("personal_skills_slug_unique").on(t.ownerUserId, t.slug),
+    // The target of a member's per-team toggle (KOBE-316): the skill is that member's own.
+    unique("personal_skills_id_owner_unique").on(t.id, t.ownerUserId),
     ...skillChecks("personal_skills", t),
   ],
 );
