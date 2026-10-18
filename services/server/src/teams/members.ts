@@ -16,6 +16,7 @@ import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
 import { endSharesOf } from "../threads/share-scope.js";
+import { installDefaultsInNewTeam } from "../skills/default-sync-team.js";
 
 export interface TeamMember {
   readonly userId: string;
@@ -172,7 +173,8 @@ export async function removeMember(
 
 /**
  * Creates a team and its first team admin atomically (a team never exists without an admin).
- * The membership row is written under the new team's RLS context inside the same transaction.
+ * The membership row is written under the new team's RLS context inside the same transaction,
+ * with the team's installs of every Default skill.
  */
 export async function createTeamWithAdmin(
   db: KobeDb,
@@ -189,6 +191,8 @@ export async function createTeamWithAdmin(
       await inner
         .insert(teamMembers)
         .values({ teamId: team.id, userId: adminUserId, role: "team_admin" });
+      // Every Default skill is installed in a new team at creation (KOBE-314, SK8).
+      await installDefaultsInNewTeam(inner, team.id);
       await recordAudit(inner, {
         action: "identity.team.created",
         teamId: team.id,

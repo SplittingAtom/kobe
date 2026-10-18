@@ -8,6 +8,11 @@ import {
   SYSTEM_TAGS,
   putMemberSkillAddSchema,
   putSkillTagsSchema,
+  createTopicTagSchema,
+  updateTopicTagSchema,
+  moveDefaultMajorSchema,
+  uninstallSkillSchema,
+  DEFAULT_SYNC_KINDS,
   putTeamSkillInstallSchema,
   skillRefSchema,
   teamSkillInstallSchema,
@@ -55,6 +60,7 @@ describe("skill catalog contract (KOBE-311)", () => {
       origin: "default_tag",
       installedBy: ID,
       updatedAt: "2026-10-18T10:00:00.000Z",
+      isDefault: true,
     };
     expect(teamSkillInstallSchema.parse(install)).toEqual(install);
   });
@@ -72,5 +78,22 @@ describe("skill catalog contract (KOBE-311)", () => {
     );
     expect(putSkillTagsSchema.safeParse({ system: ["featured"], topic: [] }).success).toBe(false);
     expect(putSkillTagsSchema.safeParse({ system: [], topic: ["Finance"] }).success).toBe(false);
+  });
+
+  it("manages topic tags, Default moves and opt-out reasons (KOBE-314)", () => {
+    expect(createTopicTagSchema.safeParse({ name: "finance" }).success).toBe(true);
+    expect(createTopicTagSchema.safeParse({ name: "Finance" }).success).toBe(false);
+    expect(createTopicTagSchema.safeParse({ name: "finance", kind: "system" }).success).toBe(false);
+    expect(updateTopicTagSchema.safeParse({ status: "retired" }).success).toBe(true);
+    expect(updateTopicTagSchema.safeParse({ name: "money" }).success).toBe(true);
+    expect(updateTopicTagSchema.safeParse({}).success).toBe(false);
+    expect(moveDefaultMajorSchema.safeParse({ to: 2 }).success).toBe(true);
+    for (const to of [-1, 1.5, "2"])
+      expect(moveDefaultMajorSchema.safeParse({ to }).success).toBe(false);
+    expect(uninstallSkillSchema.safeParse({}).success).toBe(true);
+    expect(uninstallSkillSchema.safeParse({ reason: "We use our own." }).success).toBe(true);
+    expect(uninstallSkillSchema.safeParse({ reason: "x".repeat(501) }).success).toBe(false);
+    expect(uninstallSkillSchema.safeParse({ reason: "  " }).success).toBe(false);
+    expect(DEFAULT_SYNC_KINDS).toEqual(["add", "remove", "move_major"]);
   });
 });

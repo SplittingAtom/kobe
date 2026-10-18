@@ -36,6 +36,7 @@ import { clientMetadataDocument, kobeOrigin } from "./connectors/oauth/client.js
 import { siteConnectorsRoutes } from "./routes/site-connectors.js";
 import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
+import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { siteWebSearchRoutes } from "./routes/site-web-search.js";
@@ -62,6 +63,7 @@ import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamOffboardedRoutes } from "./routes/team-offboarded.js";
 import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
+import { teamSkillInstallRoutes } from "./routes/team-skill-installs.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
@@ -167,6 +169,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/eval-settings", teamEvalSettingsRoutes(deps));
   api.route("/team/settings", teamSettingsRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
+  api.route("/team/skills", teamSkillInstallRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
@@ -221,6 +224,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/connectors", siteConnectorsRoutes(deps));
   api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));
   api.route("/site/skill-rescans", siteSkillRescanRoutes(deps));
+  api.route("/site/skills", siteSkillTagRoutes(deps));
   if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;

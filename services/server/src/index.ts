@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { startSkillHashRecompute } from "./skills/hash-checks.js";
 import { startSkillRescan } from "./skills/rescan.js";
+import { startDefaultSync } from "./skills/default-sync.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
@@ -212,6 +213,18 @@ const stopSkillRescan =
     ? startSkillRescan({
         database: deps.database,
         blobs: deps.blobs,
+        log: logger,
+        mailer: deps.mailer,
+        publicUrl: deps.publicUrl,
+      })
+    : undefined;
+
+// Default sync jobs (KOBE-314, SK8): queued by Default tag changes, run one at a time by the
+// replica holding the lease (advisory lock); checked every 10 seconds, resumed after a crash.
+const stopDefaultSync =
+  deps && config.process === "server"
+    ? startDefaultSync({
+        database: deps.database,
         log: logger,
         mailer: deps.mailer,
         publicUrl: deps.publicUrl,
@@ -621,6 +634,7 @@ function shutdown(signal: string): void {
   stopRunHook?.();
   stopSkillHashRecompute?.();
   stopSkillRescan?.();
+  stopDefaultSync?.();
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();

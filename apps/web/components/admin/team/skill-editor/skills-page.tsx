@@ -16,6 +16,7 @@ import {
 } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { skillPaths, type SkillArea } from "./area";
+import { CatalogInstallsSection } from "./catalog-installs-section";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 
@@ -77,6 +78,7 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
           )
         }
       </ResourceView>
+      {area === "team" && <CatalogInstallsSection />}
     </>
   );
 }

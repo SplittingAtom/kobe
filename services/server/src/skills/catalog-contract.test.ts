@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SYNC_KINDS as DB_SYNC_KINDS,
+  DEFAULT_SYNC_STATUSES as DB_SYNC_STATUSES,
   registryPublisher,
   registryReviewAction,
   registrySkillStatus,
@@ -14,6 +16,8 @@ import {
   SYSTEM_TAG_NAMES,
 } from "@kobe/db";
 import {
+  DEFAULT_SYNC_KINDS,
+  DEFAULT_SYNC_STATUSES,
   REGISTRY_PUBLISHERS,
   REGISTRY_REVIEW_ACTIONS,
   REGISTRY_SKILL_STATUSES,
@@ -44,6 +48,9 @@ describe("catalog enums match the protocol contract", () => {
     ["site_grant", siteGrant.enumValues, SITE_GRANTS],
     // The registry_tags_system_set check is built from SYSTEM_TAG_NAMES.
     ["system tags", SYSTEM_TAG_NAMES, SYSTEM_TAGS],
+    // The skill_default_syncs checks (KOBE-314).
+    ["default sync kinds", DB_SYNC_KINDS, DEFAULT_SYNC_KINDS],
+    ["default sync statuses", DB_SYNC_STATUSES, DEFAULT_SYNC_STATUSES],
   ] as const)("%s", (_name, db, protocol) => {
     expect([...db]).toEqual([...protocol]);
   });

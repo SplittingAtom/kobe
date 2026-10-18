@@ -119,6 +119,8 @@ export const teamSkillInstallSchema = z.strictObject({
   origin: z.enum(SKILL_INSTALL_ORIGINS),
   installedBy: uuid,
   updatedAt: z.string(),
+  /** The skill carries the Default tag: the "Site default" badge (KOBE-314). */
+  isDefault: z.boolean(),
 });
 export type TeamSkillInstall = z.infer<typeof teamSkillInstallSchema>;
 
@@ -149,3 +151,38 @@ export const putSkillTagsSchema = z.strictObject({
   system: z.array(z.enum(SYSTEM_TAGS)).max(SYSTEM_TAGS.length),
   topic: z.array(z.string().regex(REGISTRY_TAG_PATTERN)).max(10),
 });
+
+/** `POST /v1/site/skills/tags`: a new topic tag (KOBE-314, SK5). */
+export const createTopicTagSchema = z.strictObject({
+  name: z.string().regex(REGISTRY_TAG_PATTERN),
+});
+
+/** `PATCH /v1/site/skills/tags/{id}`: rename, retire or restore a topic tag. */
+export const updateTopicTagSchema = z
+  .strictObject({
+    name: z.string().regex(REGISTRY_TAG_PATTERN).optional(),
+    status: z.enum(REGISTRY_TAG_STATUSES).optional(),
+  })
+  .refine((b) => b.name !== undefined || b.status !== undefined, {
+    message: "Send a name, a status or both.",
+  });
+
+/** `POST /v1/site/skills/catalog/{skillId}/default/move-major` (spec §8, SK6). */
+export const moveDefaultMajorSchema = z.strictObject({
+  to: z.number().int().min(0).max(999_999_999),
+});
+
+/** `DELETE /v1/team/skills/installs/{skillId}`: an optional reason for a Default opt-out (SK7). */
+export const uninstallSkillSchema = z.strictObject({
+  reason: z.string().trim().min(1).max(500).optional(),
+});
+
+/**
+ * Default sync jobs (KOBE-314, SK8): `add` puts a skill in every team, `remove` turns tag-made
+ * installs into team installs and clears opt-outs, `move_major` moves untouched Default installs.
+ * Mirrors `@kobe/db` schema/skill-default-syncs.ts.
+ */
+export const DEFAULT_SYNC_KINDS = ["add", "remove", "move_major"] as const;
+export type DefaultSyncKind = (typeof DEFAULT_SYNC_KINDS)[number];
+export const DEFAULT_SYNC_STATUSES = ["queued", "running", "done"] as const;
+export type DefaultSyncStatus = (typeof DEFAULT_SYNC_STATUSES)[number];

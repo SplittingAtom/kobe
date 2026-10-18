@@ -27,6 +27,8 @@ export const SITE_PERMISSIONS = {
   "site.blocklist.manage": "admin",
   /** Approve a team skill version whose scan is Block (KOBE-312), with a reason; audited. */
   "site.skills.override_scan": "admin",
+  /** Catalog tags: the topic vocabulary, the Default system tag and Default moves (KOBE-314). */
+  "site.skills.catalog.manage": "admin",
   "site.egress.manage": "admin",
   "site.retention.manage": "admin",
   "site.legal_hold.manage": "admin",
@@ -64,6 +66,8 @@ export const TEAM_PERMISSIONS = {
   "team.policy.manage": "team_admin",
   "team.egress.manage": "team_admin",
   "team.skills.review": "team_admin",
+  /** Uninstall catalog skills (a Default one records an opt-out) and reinstall defaults (SK7). */
+  "team.skills.installs.manage": "team_admin",
   "team.retention.manage": "team_admin",
   // The pre-publish Orbit eval gate: switch and threshold (KOBE-93).
   "team.eval.manage": "team_admin",

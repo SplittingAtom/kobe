@@ -52,6 +52,8 @@ const label = z
   .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
 const role = z.enum(teamRole.enumValues);
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
+/** A catalog skill or tag name (KOBE-311): lowercase, hyphens inside, at most 64 characters. */
+const catalogName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/);
 /** Machine-readable reason (e.g. a Better Auth error code), never a free-text message. */
 const reasonCode = z.string().regex(/^[A-Za-z0-9_]{1,64}$/);
 
@@ -1361,6 +1363,62 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */
   "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
+
+  // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
+  /** A Site admin added a topic tag to the vocabulary. */
+  "skill.tag.created": event("site", { tagId: id, name: catalogName }),
+  /** A Site admin renamed, retired or restored a topic tag. */
+  "skill.tag.updated": event("site", {
+    tagId: id,
+    name: catalogName,
+    status: z.enum(["active", "retired"]),
+    previousName: catalogName.optional(),
+  }),
+  /** A Site admin changed a catalog skill's tags; system tag changes are the Default sync's start. */
+  "skill.catalog.tags_changed": event("site", {
+    skillId: id,
+    name: catalogName,
+    systemAdded: z.array(catalogName).max(8),
+    systemRemoved: z.array(catalogName).max(8),
+    topicAdded: z.array(catalogName).max(16),
+    topicRemoved: z.array(catalogName).max(64),
+  }),
+  /** A Site admin moved untouched Default installs of a skill to a new major (SK6). */
+  "skill.default.major_moved": event("site", {
+    skillId: id,
+    name: catalogName,
+    fromMajor: z.number().int().min(0),
+    toMajor: z.number().int().min(0),
+    semver: z.string().max(32),
+  }),
+  /** A Default sync job finished across every team (counts only, never team names). */
+  "skill.default.synced": event("site", {
+    skillId: id,
+    name: catalogName,
+    kind: z.enum(["add", "remove", "move_major"]),
+    teams: count,
+    installed: count,
+    kept: count,
+    optedOut: count,
+    converted: count,
+    optoutsCleared: count,
+    moved: count,
+  }),
+  /** A Team admin uninstalled a catalog skill; for a Default skill that records an opt-out (SK7). */
+  "skill.catalog.removed": event("team", {
+    skillId: id,
+    name: catalogName,
+    origin: z.enum(["team", "default_tag"]),
+    optedOut: z.boolean(),
+    /** Whether the opt-out gave a reason (the reason itself is not recorded). */
+    reasonGiven: z.boolean(),
+  }),
+  /** A Team admin reinstalled a removed Default skill, clearing the team's opt-out (SK7). */
+  "skill.default.restored": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+  }),
 
   // ── connectors: the site registry (KOBE-100); ids, names and field names, never URLs or credentials ──
   /** A site admin registered an MCP server. */
