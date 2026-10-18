@@ -225,6 +225,25 @@ const LEFTOVER_OBJECTS = `
  */
 const KEPT = ["constraint runs.runs_budget_stop_scope", "function kobe_reserve_budget"];
 
+/** KOBE-311's objects named after installing a catalog skill (a noun, not the scope). */
+const SKILL_INSTALL_OBJECTS = [
+  "column team_skill_installs.installed_by",
+  "constraint team_skill_installs.team_skill_installs_installed_by_users_id_fk",
+  "constraint team_skill_installs.team_skill_installs_skill_id_registry_skills_id_fk",
+  "constraint team_skill_installs.team_skill_installs_team_id_skill_id_pk",
+  "constraint team_skill_installs.team_skill_installs_team_id_teams_id_fk",
+  "constraint team_skill_installs.team_skill_installs_version_fk",
+  "index team_skill_installs_skill_idx",
+  "index team_skill_installs_team_id_skill_id_pk",
+  "relation team_skill_installs",
+  "relation team_skill_installs_skill_idx",
+  "relation team_skill_installs_team_id_skill_id_pk",
+  "type _skill_install_origin",
+  "type _team_skill_installs",
+  "type skill_install_origin",
+  "type team_skill_installs",
+];
+
 let before: Relation[] = [];
 let after: Relation[] = [];
 
@@ -253,7 +272,7 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
       c.query<{ hit: string }>(LEFTOVER_OBJECTS).then((r) => r.rows.map((row) => row.hit)),
     );
     // KOBE-311's skill installs use "install" as a noun (installing a skill), not the old scope.
-    expect(hits.filter((hit) => !/skill_install/.test(hit))).toEqual(KEPT);
+    expect(hits).toEqual([...KEPT, ...SKILL_INSTALL_OBJECTS].sort());
   });
 
   it("renames in place: same relations, same data files, same row counts", () => {

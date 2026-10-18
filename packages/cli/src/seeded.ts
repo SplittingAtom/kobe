@@ -9,6 +9,10 @@ export const SEEDED_TABLES: Readonly<Record<string, string>> = {
     "egress presets seeded by migration 0027_egress_rls (KOBE-38); the backup carries the site's own ceiling",
   site_model_limits:
     "the site budget and default request rate seeded by migration 0046_budgets_rls (KOBE-42); the backup carries the site's own",
+  site_skill_settings:
+    "the Registry settings row seeded by migration 0133_skill_registry_rls (KOBE-311); the backup carries the site's own",
+  registry_tags:
+    "the code-defined Default system tag seeded by migration 0133_skill_registry_rls (KOBE-311); the backup carries it with its original id, which registry_skill_tags reference",
   model_gateway_state:
     "the gateway sync's progress row seeded by migration 0040_models_rls (KOBE-40); the backup carries the site's own",
 };

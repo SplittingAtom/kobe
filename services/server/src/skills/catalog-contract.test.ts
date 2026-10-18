@@ -11,6 +11,7 @@ import {
   skillAccess,
   skillInstallOrigin,
   skillPinMode,
+  SYSTEM_TAG_NAMES,
 } from "@kobe/db";
 import {
   REGISTRY_PUBLISHERS,
@@ -24,6 +25,7 @@ import {
   SKILL_ACCESS_MODES,
   SKILL_INSTALL_ORIGINS,
   SKILL_PIN_MODES,
+  SYSTEM_TAGS,
 } from "@kobe/protocol";
 
 /** KOBE-311: the database enums of the catalog are exactly the protocol's closed sets. */
@@ -40,6 +42,8 @@ describe("catalog enums match the protocol contract", () => {
     ["registry_review_action", registryReviewAction.enumValues, REGISTRY_REVIEW_ACTIONS],
     ["scan_verdict", scanVerdict.enumValues, SCAN_VERDICTS],
     ["site_grant", siteGrant.enumValues, SITE_GRANTS],
+    // The registry_tags_system_set check is built from SYSTEM_TAG_NAMES.
+    ["system tags", SYSTEM_TAG_NAMES, SYSTEM_TAGS],
   ] as const)("%s", (_name, db, protocol) => {
     expect([...db]).toEqual([...protocol]);
   });

@@ -53,7 +53,11 @@ async function probeSkill(tx: Parameters<ProbeFixture>[0], teamId: string) {
 /** A catalog skill with one approved version (site-wide rows, KOBE-311). */
 async function probeCatalogSkill(tx: Parameters<ProbeFixture>[0]) {
   const userId = randomUUID();
-  await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  const reviewerId = randomUUID();
+  await tx.insert(users).values([
+    { id: userId, name: "Probe", email: `${userId}@probe.test` },
+    { id: reviewerId, name: "Reviewer", email: `${reviewerId}@probe.test` },
+  ]);
   const [skill] = await tx
     .insert(registrySkills)
     .values({ name: `probe-${userId.slice(0, 8)}`, summary: "Probe." })
@@ -74,7 +78,7 @@ async function probeCatalogSkill(tx: Parameters<ProbeFixture>[0]) {
       verdict: "pass",
       state: "approved",
       submittedBy: userId,
-      reviewedBy: userId,
+      reviewedBy: reviewerId,
       approvedAt: new Date(),
     })
     .returning({ id: registryVersions.id });
@@ -185,7 +189,7 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
     await tx.insert(memberSkillEnablements).values({
       teamId,
       userId,
-      skillRef: { kind: "catalog", skillId },
+      catalogSkillId: skillId,
       enabled: true,
       versionId,
       pinMode: "pinned",

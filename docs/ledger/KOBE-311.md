@@ -36,16 +36,34 @@ the Drizzle schema (`schema/registry.ts`, `grants.ts`, `installs.ts`), tenancy r
 - **System tags (ac-3):** `default` seeded in 0133. A CHECK limits system tags to the code-defined
   set (`default`, active); an invoker-rights trigger (`registry_tags_system_guard`, pinned
   search_path, not SECURITY DEFINER) refuses deleting, renaming or changing the kind/status of a
-  system tag, even as the owner. The app role has no DELETE on tags anyway.
+  system tag (the app role, and the owner outside restore and migrations). The app role has no DELETE on tags anyway.
 - **Contract (ac-4):** `packages/protocol/src/skill-catalog.ts`: pin modes, access modes,
   origins, tag kinds/statuses, `SYSTEM_TAGS`, publishers, skill statuses, version states (plus
   published/installable subsets), review actions, site grants, `skillRefSchema`, install and tag
   request/response schemas. A server unit test keeps every DB enum equal to its protocol list.
 - No views, no SECURITY DEFINER; no backfill (new tables), so no FORCE lifting.
 
+- **Review fixes (B1, S1-S3):** `registry_tags` and `site_skill_settings` are listed in
+  `packages/cli/src/seeded.ts`, and `seeded.db.test.ts` (Postgres only, no pg_dump) checks that
+  a fresh install has rows in exactly the listed tables. `registry_versions_immutable` freezes a
+  version's identity (package, hashes, manifest, provenance, source, submission) and keeps a
+  published version out of review; review state, claim, scan/verdict (rescans), scorecards and
+  mirror stay mutable. `member_skill_enablements` now has typed `catalog_skill_id` /
+  `team_skill_id` with real FKs (team skill composite, cascade; version composite with the catalog
+  skill), exactly one set, partial uniques; a team block deletes members' adds of the skill and a
+  trigger refuses new ones. `registry_versions_review`: reviewer is never the submitter.
+  Team-private `source` and aggregate-only scorecards are documented in schema and protocol.
+  Nits: the tag guard also refuses id changes and TRUNCATE (owner outside restore/migrations);
+  `SYSTEM_TAG_NAMES` builds the check and a test ties it to `SYSTEM_TAGS`; the KOBE-256 test
+  pins the exact skill-install objects; the identifier exception is anchored; indexes on
+  `registry_versions(package_hash)` and `registry_review_events(actor_id)`. 0132/0133 edited in
+  place (unreleased).
+
 ## Open questions (for Chris or the coordinator)
 
-- None.
+- SK22 allows a single-admin Site to self-approve with a flag (as break-glass); the
+  `registry_versions_review` CHECK forbids it outright. If that flag is wanted, the flow must
+  record a second actor or the check gets an explicit exception column.
 
 ## Evidence (acceptance criteria → test or command output)
 

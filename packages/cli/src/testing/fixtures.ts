@@ -133,6 +133,14 @@ export async function seed(db: TestDatabase): Promise<void> {
        ($1, '${THREAD}', 'e1', NULL, 'message', '{"message":{"role":"user","content":"${SEARCH_WORD} forecast"}}', NULL),
        ($1, '${THREAD}', 'e2', 'e1', 'message', '{}', 'teams/a2/artifacts/chart.html');
      UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';
+     -- The Skills Catalog (KOBE-311): migration-seeded rows (the Default tag, the settings row)
+     -- the backup must bring back with their own ids and values, and rows that reference them.
+     INSERT INTO registry_tags (name, kind) VALUES ('finance', 'topic');
+     INSERT INTO registry_skills (id, name, summary)
+       VALUES ('5e6f7a8b-0000-4000-8000-0000000000c1', 'tagged', 'Tagged.');
+     INSERT INTO registry_skill_tags (skill_id, tag_id, added_by)
+       SELECT '5e6f7a8b-0000-4000-8000-0000000000c1', id, $3 FROM registry_tags;
+     UPDATE site_skill_settings SET registry_team_id = $1, judge_alias = 'smart';
      -- Audit events (KOBE-15): the trigger chains them; the restore must keep the chain intact.
      -- Both carry a client address (salted commitment, KOBE-17); the first one's IP and user agent
      -- were erased since, as the retention sweep does (here directly, bypassing its age check).

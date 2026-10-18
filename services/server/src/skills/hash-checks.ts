@@ -231,6 +231,7 @@ export async function recomputeOnce(deps: {
   readonly log: Pick<Logger, "info" | "warn" | "error">;
 }): Promise<RecomputeReport | null> {
   const client = await deps.database.pool.connect();
+  let destroy = false;
   try {
     const { rows } = await client.query<{ locked: boolean }>(
       `SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`,
@@ -240,10 +241,16 @@ export async function recomputeOnce(deps: {
     try {
       return await recomputeSkillHashes({ db: deps.database.db, blobs: deps.blobs, log: deps.log });
     } finally {
-      await client.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [RECOMPUTE_LOCK]);
+      await client
+        .query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [RECOMPUTE_LOCK])
+        .catch(() => {
+          // A session that can't unlock must not go back to the pool still holding the lock:
+          // destroying it drops the lock (and every replica can run again).
+          destroy = true;
+        });
     }
   } finally {
-    client.release();
+    client.release(destroy);
   }
 }
 

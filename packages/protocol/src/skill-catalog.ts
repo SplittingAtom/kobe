@@ -46,7 +46,14 @@ export const REGISTRY_SKILL_STATUSES = [
 ] as const;
 export type RegistrySkillStatus = (typeof REGISTRY_SKILL_STATUSES)[number];
 
-/** A catalog version's life (SK23, SK31). Only an approved-or-later version was ever published. */
+/**
+ * A catalog version's life (SK23, SK31). Only an approved-or-later version was ever published, and
+ * a published one never goes back into review. Nobody reviews their own submission.
+ *
+ * Team-private data in catalog rows: a version's `source` (the originating team's ids) is shown
+ * only to site reviewers and the submitting team, never to catalog browsers; its scorecards hold
+ * aggregate numbers only, never eval case inputs, outputs or transcripts.
+ */
 export const REGISTRY_VERSION_STATES = [
   "submitted",
   "in_review",
@@ -91,8 +98,9 @@ export type SiteGrant = (typeof SITE_GRANTS)[number];
 const uuid = z.string().regex(UUID_PATTERN);
 
 /**
- * Which skill a member enablement is about (`member_skill_enablements.skill_ref`): a catalog skill
- * (a member's Add for me, SK25) or a team skill (a member turning an On by default one off).
+ * Which skill a member enablement is about, on the wire: a catalog skill (a member's Add for me,
+ * SK25) or a team skill (a member turning an On by default one off). Stored as two typed columns
+ * with real foreign keys (`member_skill_enablements.catalog_skill_id` / `team_skill_id`).
  */
 export const skillRefSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("catalog"), skillId: uuid }),

@@ -30,6 +30,8 @@ const SEMVER_FORMAT = "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9
 /** Mirrors `REGISTRY_TAG_PATTERN`. */
 const TAG_FORMAT = "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$";
 const SUMMARY_MAX = 280;
+/** The code-defined system tags (SK5); mirrors `SYSTEM_TAGS` (@kobe/protocol, a test ties them). */
+export const SYSTEM_TAG_NAMES = ["default"] as const;
 const NOTE_MAX = 4000;
 
 export const registryPublisher = pgEnum("registry_publisher", ["kobe", "maintainer"]);
@@ -126,6 +128,15 @@ export const registryMaintainers = pgTable(
  * SK31). `semver` keeps the local number at promotion; `seq` orders versions; the hashes name the
  * stored bytes. `source` (team, skill, version), `manifest`, `provenance`, `scan`, the scorecards
  * and `mirror` are JSON documents whose shapes the protocol owns.
+ *
+ * Its identity is immutable once written (trigger `registry_versions_immutable`, migration 0133):
+ * only the review state, claim, review, scorecards and mirror change; a new package is a new
+ * version that a human reviews. Nobody approves their own submission (`registry_versions_review`).
+ * Team-private data stays team-private: `source` (the originating team's ids) is shown only to
+ * site reviewers and the submitting team, never to catalog browsers; `scorecard` and
+ * `authoritative_scorecard` hold aggregate numbers only, never case inputs, outputs or
+ * transcripts ("eval transcripts never leave the team"). A rejected or withdrawn submission keeps
+ * its manifest and summary in the Registry: submitting is the act of promotion (SK19).
  */
 export const registryVersions = pgTable(
   "registry_versions",
@@ -167,6 +178,7 @@ export const registryVersions = pgTable(
     unique("registry_versions_id_skill_unique").on(t.id, t.skillId),
     index("registry_versions_state_idx").on(t.state, t.submittedAt),
     index("registry_versions_runtime_idx").on(t.runtimeHash),
+    index("registry_versions_package_idx").on(t.packageHash),
     check("registry_versions_semver_format", sql`${t.semver} ~ ${sql.raw(`'${SEMVER_FORMAT}'`)}`),
     check("registry_versions_seq_positive", sql`${t.seq} > 0`),
     check(
@@ -181,6 +193,8 @@ export const registryVersions = pgTable(
         AND (${t.mirror} IS NULL OR ${jsonObject(t.mirror)})`,
     ),
     check("registry_versions_claim", sql`(${t.claimedBy} IS NULL) = (${t.claimedAt} IS NULL)`),
+    // Separation of duties (SK22): nobody approves (or rejects) their own submission.
+    check("registry_versions_review", sql`${t.reviewedBy} IS DISTINCT FROM ${t.submittedBy}`),
     // A version that was ever published carries its approval; one that wasn't, none.
     check(
       "registry_versions_approval",
@@ -208,6 +222,7 @@ export const registryReviewEvents = pgTable(
   },
   (t) => [
     index("registry_review_events_version_idx").on(t.versionId, t.at),
+    index("registry_review_events_actor_idx").on(t.actorId, t.at),
     check(
       "registry_review_events_note_size",
       sql`${t.note} IS NULL OR char_length(${t.note}) BETWEEN 1 AND ${sql.raw(String(NOTE_MAX))}`,
@@ -221,8 +236,9 @@ export const registryReviewEvents = pgTable(
 
 /**
  * Site-wide (†): the tag vocabulary (SK5). System tags are a fixed, code-defined set (v1.2:
- * `default`, seeded by migration 0133; the check refuses any other system name, a trigger refuses
- * deleting or renaming one); topic tags are managed by Site admins and retired, never deleted.
+ * `default`, seeded by migration 0133; the check refuses any other system name; a trigger refuses
+ * the app role, and the owner outside restore and migrations, deleting, truncating or changing
+ * one); topic tags are managed by Site admins and retired, never deleted.
  */
 export const registryTags = pgTable(
   "registry_tags",
@@ -238,7 +254,7 @@ export const registryTags = pgTable(
     check("registry_tags_name_format", sql`${t.name} ~ ${sql.raw(`'${TAG_FORMAT}'`)}`),
     check(
       "registry_tags_system_set",
-      sql`${t.kind} <> 'system' OR (${t.name} IN ('default') AND ${t.status} = 'active')`,
+      sql`${t.kind} <> 'system' OR (${t.name} IN (${sql.raw(SYSTEM_TAG_NAMES.map((n) => `'${n}'`).join(", "))}) AND ${t.status} = 'active')`,
     ),
   ],
 );

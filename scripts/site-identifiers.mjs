@@ -11,7 +11,7 @@ const SOURCE = /\.(ts|tsx|mts|mjs|js|sh)$/;
 /** Identifiers that mean installing something (a verb), not the scope. */
 const ALLOWED = new Set(["installMemoryHooks"]);
 /** KOBE-311: a team's install of a catalog skill (a noun), not the scope. */
-const SKILL_INSTALL = /[sS]killInstall|SKILL_INSTALL/;
+const SKILL_INSTALL = /^(put|get|list)?(team|Team)?[sS]killInstall\w*$|^SKILL_INSTALL_\w+$/;
 
 /** Audit actions recorded before the rename (HISTORICAL_AUDIT_ACTIONS); readers accept them. */
 const HISTORICAL = /^(?:install\.settings\.updated|identity\.install_role\.(?:granted|revoked))$/;

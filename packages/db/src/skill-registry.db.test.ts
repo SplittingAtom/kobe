@@ -139,6 +139,8 @@ describe("system tags are code-defined (ac-3)", () => {
         `DELETE FROM registry_tags WHERE name = 'default'`,
         `UPDATE registry_tags SET name = 'defaults' WHERE name = 'default'`,
         `UPDATE registry_tags SET kind = 'topic' WHERE name = 'default'`,
+        `UPDATE registry_tags SET id = gen_random_uuid() WHERE name = 'default'`,
+        `TRUNCATE registry_tags CASCADE`,
       ])
         await expect(c.query(statement), statement).rejects.toMatchObject({ code: "55000" });
     });
@@ -216,6 +218,45 @@ describe("registry invariants", () => {
     });
   });
 
+  it("freezes a version's identity; review fields still move (S1)", async () => {
+    await withClient(database().appUrl, async (c) => {
+      for (const set of [
+        "runtime_hash = repeat('d', 64)",
+        "package_hash = repeat('d', 64)",
+        "manifest = '{\"x\": 1}'",
+        "provenance = '{}'::jsonb || '{\"y\": 1}'",
+        "source = '{\"team\": 1}'",
+        "semver = '9.9.9'",
+        "submitted_by = reviewed_by",
+        "state = 'in_review', approved_at = NULL, reviewed_by = NULL",
+      ])
+        await expect(
+          c.query(`UPDATE registry_versions SET ${set} WHERE id = $1`, [versionId]),
+          set,
+        ).rejects.toMatchObject({ code: "55000" });
+      await c.query(
+        `UPDATE registry_versions SET state = 'deprecated', scorecard = '{"cases": 3}',
+           scan = '{"rules": "2"}', verdict = 'caution', mirror = '{}' WHERE id = $1`,
+        [versionId],
+      );
+      await c.query(`UPDATE registry_versions SET state = 'approved' WHERE id = $1`, [versionId]);
+    });
+  });
+
+  it("refuses a review by the submitter (S3)", async () => {
+    await withClient(database().appUrl, async (c) => {
+      await expect(
+        c.query(
+          `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
+             provenance, source, scan, verdict, state, submitted_by, reviewed_by, approved_at)
+           VALUES ($1, '3.0.0', 3, repeat('e', 64), repeat('e', 64), '{}', '{}', '{}', '{}', 'pass',
+             'approved', $2, $2, now())`,
+          [skillId, ids.user],
+        ),
+      ).rejects.toMatchObject({ constraint: "registry_versions_review" });
+    });
+  });
+
   it("installs only a version of the installed skill, inside the team", async () => {
     await inTeam(async (c) => {
       expect(
@@ -243,29 +284,95 @@ describe("registry invariants", () => {
     });
   });
 
-  it("checks member enablements and drops them with the membership", async () => {
-    await inTeam(async (c) => {
-      const add = (ref: unknown, version: string | null, pin: string | null) =>
-        c.query(
-          `INSERT INTO member_skill_enablements (team_id, user_id, skill_ref, enabled, version_id, pin_mode)
-           VALUES ($1, $2, $3, true, $4, $5)`,
-          [ids.team, ids.user, JSON.stringify(ref), version, pin],
-        );
-      for (const [ref, version, pin, constraint] of [
-        [{ kind: "personal", skillId }, null, null, "member_skill_enablements_ref"],
-        [{ kind: "catalog", skillId, extra: 1 }, null, null, "member_skill_enablements_ref"],
-        [{ kind: "catalog", skillId }, versionId, null, "member_skill_enablements_pin"],
-        [{ kind: "team", skillId }, versionId, "pinned", "member_skill_enablements_pin"],
-      ] as const)
-        expect(await refused(c, () => add(ref, version, pin)), JSON.stringify(ref)).toMatchObject({
-          constraint,
-        });
-      await add({ kind: "catalog", skillId }, versionId, "pinned");
-      expect(await refused(c, () => add({ kind: "catalog", skillId }, null, null))).toMatchObject({
-        constraint: "member_skill_enablements_ref_unique",
-      });
-      await add({ kind: "team", skillId: randomUUID() }, null, null);
+  it("names exactly one real skill per member enablement, with real versions (S2)", async () => {
+    const otherTeam = randomUUID();
+    const ownSkill = randomUUID();
+    const foreignSkill = randomUUID();
+    let otherVersion = "";
+    await withClient(database().adminUrl, async (c) => {
+      await c.query(`INSERT INTO teams (id, slug, name) VALUES ($1, $2, 'Other')`, [
+        otherTeam,
+        `other-${suffix}`,
+      ]);
+      await c.query(
+        `INSERT INTO team_skills (team_id, id, owner_user_id, slug, description)
+         VALUES ($1, $2, $4, 'own', 'd'), ($3, $5, $4, 'foreign', 'd')`,
+        [ids.team, ownSkill, otherTeam, ids.other, foreignSkill],
+      );
+      const v = await c.query<{ id: string }>(
+        `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
+           provenance, source, scan, verdict, state, submitted_by, reviewed_by, approved_at)
+         VALUES ($1, '1.0.0', 1, repeat('c', 64), repeat('c', 64), '{}', '{}', '{}', '{}', 'pass',
+           'approved', $2, $3, now()) RETURNING id`,
+        [otherSkill, ids.user, ids.other],
+      );
+      otherVersion = v.rows[0]?.id as string;
     });
+    await inTeam(async (c) => {
+      const add = (
+        catalog: string | null,
+        team: string | null,
+        version: string | null,
+        pin: string | null,
+      ) =>
+        c.query(
+          `INSERT INTO member_skill_enablements (team_id, user_id, catalog_skill_id, team_skill_id,
+             enabled, version_id, pin_mode) VALUES ($1, $2, $3, $4, true, $5, $6)`,
+          [ids.team, ids.user, catalog, team, version, pin],
+        );
+      for (const [catalog, team, version, pin, expected] of [
+        [null, null, null, null, { constraint: "member_skill_enablements_one_skill" }],
+        [skillId, ownSkill, null, null, { constraint: "member_skill_enablements_one_skill" }],
+        [skillId, null, versionId, null, { constraint: "member_skill_enablements_pin" }],
+        [null, ownSkill, versionId, "pinned", { constraint: "member_skill_enablements_pin" }],
+        // A version of another catalog skill, an unknown catalog skill, another team's skill.
+        [
+          skillId,
+          null,
+          otherVersion,
+          "pinned",
+          { constraint: "member_skill_enablements_version_fk" },
+        ],
+        [randomUUID(), null, null, null, { code: "23503" }],
+        [null, foreignSkill, null, null, { constraint: "member_skill_enablements_team_skill_fk" }],
+      ] as const)
+        expect(
+          await refused(c, () => add(catalog, team, version, pin)),
+          JSON.stringify({ catalog, team, version }),
+        ).toMatchObject(expected);
+      await add(skillId, null, versionId, "pinned");
+      expect(await refused(c, () => add(skillId, null, null, null))).toMatchObject({
+        constraint: "member_skill_enablements_catalog_unique",
+      });
+      await add(null, ownSkill, null, null);
+      await add(otherSkill, null, otherVersion, "latest");
+    });
+  });
+
+  it("removes members' adds of a skill the team blocks, and refuses new ones (S2)", async () => {
+    await inTeam(async (c) => {
+      await c.query(
+        `INSERT INTO team_skill_blocks (team_id, skill_id, blocked_by) VALUES ($1, $2, $3)`,
+        [ids.team, otherSkill, ids.other],
+      );
+      const left = await c.query(
+        `SELECT count(*)::int AS n FROM member_skill_enablements WHERE catalog_skill_id = $1`,
+        [otherSkill],
+      );
+      expect(left.rows).toEqual([{ n: 0 }]);
+      expect(
+        await refused(c, () =>
+          c.query(
+            `INSERT INTO member_skill_enablements (team_id, user_id, catalog_skill_id, enabled)
+             VALUES ($1, $2, $3, true)`,
+            [ids.team, ids.user, otherSkill],
+          ),
+        ),
+      ).toMatchObject({ code: "23514", message: expect.stringMatching(/blocked/) });
+    });
+  });
+
+  it("drops a member's enablements with the membership", async () => {
     await withClient(database().adminUrl, async (c) => {
       await c.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
         ids.team,

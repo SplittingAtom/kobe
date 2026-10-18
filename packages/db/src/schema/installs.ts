@@ -4,18 +4,17 @@ import {
   check,
   foreignKey,
   index,
-  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
   text,
   timestamp,
-  unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { registrySkills, registryVersions } from "./registry.js";
-import { skillAccess } from "./skills.js";
+import { skillAccess, teamSkills } from "./skills.js";
 import { teamMembers } from "./team-members.js";
 import { teams } from "./teams.js";
 
@@ -110,8 +109,12 @@ export const teamSkillBlocks = pgTable(
 
 /**
  * Team table: a member's own choice about one skill in one team (SK25): an Add for me of a
- * catalog skill (with its version and pin mode), or turning an On by default skill off. Leaves
- * with the membership (cascade from `team_members`).
+ * catalog skill (with its version and pin mode), or turning a team skill (On by default) off.
+ * Exactly one of `catalog_skill_id` / `team_skill_id` names the skill, each with a real foreign
+ * key: a version always belongs to the named catalog skill, and a team skill is this team's
+ * (composite FK, cascade). Leaves with the membership (cascade from `team_members`). A Team
+ * admin's block of a catalog skill removes the members' adds of it and refuses new ones
+ * (triggers, migration 0133).
  */
 export const memberSkillEnablements = pgTable(
   "member_skill_enablements",
@@ -121,33 +124,46 @@ export const memberSkillEnablements = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     id: uuid().notNull().defaultRandom(),
     userId: uuid().notNull(),
-    /** `{kind: "catalog" | "team", skillId}` (`skillRefSchema`, @kobe/protocol). */
-    skillRef: jsonb().$type<{ kind: "catalog" | "team"; skillId: string }>().notNull(),
+    catalogSkillId: uuid().references(() => registrySkills.id),
+    teamSkillId: uuid(),
     enabled: boolean().notNull(),
-    versionId: uuid().references(() => registryVersions.id),
+    versionId: uuid(),
     pinMode: skillPinMode(),
     updatedAt: ts().notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
-    unique("member_skill_enablements_ref_unique").on(t.teamId, t.userId, t.skillRef),
+    uniqueIndex("member_skill_enablements_catalog_unique")
+      .on(t.teamId, t.userId, t.catalogSkillId)
+      .where(sql`${t.catalogSkillId} IS NOT NULL`),
+    uniqueIndex("member_skill_enablements_team_unique")
+      .on(t.teamId, t.userId, t.teamSkillId)
+      .where(sql`${t.teamSkillId} IS NOT NULL`),
     foreignKey({
       name: "member_skill_enablements_member_fk",
       columns: [t.teamId, t.userId],
       foreignColumns: [teamMembers.teamId, teamMembers.userId],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "member_skill_enablements_team_skill_fk",
+      columns: [t.teamId, t.teamSkillId],
+      foreignColumns: [teamSkills.teamId, teamSkills.id],
+    }).onDelete("cascade"),
+    // The pinned version is one of the named catalog skill's.
+    foreignKey({
+      name: "member_skill_enablements_version_fk",
+      columns: [t.versionId, t.catalogSkillId],
+      foreignColumns: [registryVersions.id, registryVersions.skillId],
+    }),
     check(
-      "member_skill_enablements_ref",
-      sql`jsonb_typeof(${t.skillRef}) = 'object'
-        AND ${t.skillRef} ->> 'kind' IN ('catalog', 'team')
-        AND (${t.skillRef} ->> 'skillId') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-        AND ${t.skillRef} - 'kind' - 'skillId' = '{}'::jsonb`,
+      "member_skill_enablements_one_skill",
+      sql`num_nonnulls(${t.catalogSkillId}, ${t.teamSkillId}) = 1`,
     ),
     // A version and pin mode come together, and only for a catalog skill.
     check(
       "member_skill_enablements_pin",
       sql`(${t.versionId} IS NULL) = (${t.pinMode} IS NULL)
-        AND (${t.versionId} IS NULL OR ${t.skillRef} ->> 'kind' = 'catalog')`,
+        AND (${t.versionId} IS NULL OR ${t.catalogSkillId} IS NOT NULL)`,
     ),
   ],
 );
