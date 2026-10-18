@@ -12,6 +12,7 @@ import {
 import type pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
+import { sweepOrphanDraftBundles } from "../skills/drafts/test-bundle.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
@@ -96,6 +97,8 @@ export interface TeamPassResult {
   readonly skillDrafts: DraftPurgeCounts;
   /** Copies of drafts and draft files kept for a released hold, deleted (KOBE-320). */
   readonly skillDraftHistory: { readonly rows: number };
+  /** Test bundles of drafts that are gone, deleted (KOBE-323). */
+  readonly skillDraftBundles: { readonly drafts: number };
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -313,6 +316,13 @@ async function teamPass(
     : await step("skill_draft_history", { rows: 0 }, () =>
         purgeReleasedDraftHistory(db, teamId, { stop }),
       );
+  // After the draft purge, so a purged draft's test bundles (KOBE-323) go in the same pass.
+  const skillDraftBundles =
+    deps.blobs && !stop()
+      ? await step("skill_draft_bundles", { drafts: 0 }, () =>
+          sweepOrphanDraftBundles(db, deps.blobs as BlobStore, teamId),
+        )
+      : { drafts: 0 };
   return {
     teamId,
     trash,
@@ -327,6 +337,7 @@ async function teamPass(
     workspaceHoldHistory,
     skillDrafts,
     skillDraftHistory,
+    skillDraftBundles,
     failed,
   };
 }

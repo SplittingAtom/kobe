@@ -167,11 +167,7 @@ export async function promoteInTx(
               type: "run.failed",
               payload: { error: resolved.error },
             })
-          : await fail(
-              thread,
-              next,
-              resolved.error.code === "agent_suspended" ? "agent_suspended" : "agent_unavailable",
-            );
+          : await fail(thread, next, startFailureCode(resolved.error.code));
       continue;
     }
     const requested = requestedModel(thread, resolved);
@@ -273,6 +269,14 @@ export async function promoteInTx(
 
 type Resolved = Extract<AgentResolution, { ok: true }>;
 
+/** Resolution errors that keep their own code and message; any other is `agent_unavailable`. */
+const OWN_START_CODES = new Set([
+  "agent_suspended",
+  "skill_draft_unavailable",
+  "skill_draft_changed",
+]);
+const startFailureCode = (code: string) => (OWN_START_CODES.has(code) ? code : "agent_unavailable");
+
 /** Where a run's model came from (KOBE-44), recorded in `run.started.model_source`. */
 export type ModelSource = "agent" | "thread" | "default";
 
@@ -310,6 +314,7 @@ export async function resolveForStart(
       agentId: thread.agentId,
       agentVersion: thread.agentVersion,
       approvalMode: run.approvalMode,
+      ...(thread.skillTest ? { skillTest: { draftId: thread.skillDraftId ?? null } } : {}),
     })
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
   if (!resolved.ok) return resolved;

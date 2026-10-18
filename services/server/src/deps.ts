@@ -40,6 +40,7 @@ import { createWebSearchService } from "./web-search/service.js";
 import {
   DbRunOrchestrator,
   PINNED_AGENTS,
+  withDraftTests,
   type RunOrchestratorOptions,
   type ServerRunOrchestrator,
 } from "./runs/index.js";
@@ -326,7 +327,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   };
   const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
-  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
+  // Workbench test chats (KOBE-323) run their draft alone, whatever resolver runs the rest.
+  const runAgents = withDraftTests(options.runs?.agents ?? PINNED_AGENTS, options.blobs);
   // Titles (KOBE-219) and follow-ups (KOBE-222) after a completed run, off its path.
   const serverCalls = options.serverCalls
     ? createServerCalls({

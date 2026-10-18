@@ -16,7 +16,7 @@ export interface SkillRef {
   /** Content hash of the skill bundle (the blocklist keys on it); a catalog version's runtime hash. */
   readonly hash: string;
   /** Where it comes from (KOBE-297: recorded with the run); absent = not said. */
-  readonly source?: "team" | "personal" | "catalog";
+  readonly source?: "team" | "personal" | "catalog" | "draft";
   /** The version's MAJOR.MINOR.PATCH (KOBE-315: recorded with the run, shown on the badge). */
   readonly semver?: string;
   /** Other hashes of the same version (a catalog version's package hash): blocked together. */

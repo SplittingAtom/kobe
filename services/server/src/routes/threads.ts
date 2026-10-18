@@ -63,6 +63,7 @@ import { listThreadActivity } from "../threads/activity.js";
 import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { moveThread, setArchived, setPinned } from "../threads/organize.js";
+import { testChatStart } from "../skills/drafts/test-chat.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
 
@@ -88,6 +89,8 @@ const ERRORS = {
   ],
   no_agent: [409, "This thread uses the default agent, which has no versions to switch."],
   project_not_found: [404, "No project with that id is available to you."],
+  draft_not_found: [404, "No draft with that id is available to you."],
+  test_chat_agent: [400, "A Workbench test chat runs the Kobe agent: leave agent_id out."],
   read_only: [403, "This thread is shared with you read-only."],
   thread_busy: [
     409,
@@ -253,16 +256,27 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (test && (!body.agent_id || body.project_id)) {
       return invalidRequest(c, "A test thread needs an agent_id and has no project.");
     }
+    const draftId = body.skill_draft_id;
+    if (draftId !== undefined && (test || body.project_id)) {
+      return invalidRequest(c, "A Workbench test chat is not a builder test and has no project.");
+    }
     const actor = { userId: c.get("user").id, role: c.get("team").role };
     const result = await asViewer(c, async (tx, viewer) => {
       const projectId = body.project_id ?? null;
       if (projectId !== null && !(await canCreateInProject(tx, viewer, projectId))) {
         return "project_not_found" as const;
       }
+      // KOBE-323: a Workbench test chat talks to the Kobe agent about a draft the caller can see.
+      const chat =
+        draftId === undefined
+          ? null
+          : await testChatStart(tx, { ...viewer, role: actor.role }, draftId, body.agent_id);
+      if (chat && !chat.ok) return chat.error;
       // D19: the thread pins the agent's current published version.
       // A test thread (KOBE-85) pins the agent's draft instead: only for those who can edit it.
-      const pin =
-        test && body.agent_id
+      const pin = chat
+        ? await resolveAgentPin(tx, viewer, chat.agentId)
+        : test && body.agent_id
           ? await resolveDraftPin(tx, viewer, actor, body.agent_id)
           : await resolveAgentPin(
               tx,
@@ -280,6 +294,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         projectId,
         agent: pin.value,
         isTest: test,
+        ...(draftId === undefined ? {} : { skillDraftId: draftId }),
         title: body.title ?? null,
         modelAlias: model,
         thinkingLevel: body.thinking_level ?? null,

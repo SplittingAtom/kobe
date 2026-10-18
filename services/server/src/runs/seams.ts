@@ -4,9 +4,10 @@ import type {
   PiThreadConfig,
   RunMcpContext,
   RunTrigger,
+  SkillBundleRef,
 } from "@kobe/protocol";
 import type { AgentScope, KobeTx, RunSkillRef } from "@kobe/db";
-import type { Omission } from "../resolver/resolve.js";
+import type { Omission, SkillRef } from "../resolver/resolve.js";
 
 /**
  * Seams the orchestrator calls on the run-start path, filled in by later tickets. Each runs inside
@@ -26,6 +27,13 @@ export interface AgentResolutionInput {
   readonly agentVersion: number | null;
   /** The run's mode as fixed at creation (already clamped to the site/team floor). */
   readonly approvalMode: ApprovalMode;
+  /** A Workbench test chat (KOBE-323): its draft, null once deleted. */
+  readonly skillTest?: { readonly draftId: string | null };
+  /**
+   * Set by `withDraftTests` for a test chat: the run's only skill (no Required, agent-named,
+   * offered or personal ones). Every other part of the resolution is the agent's as usual.
+   */
+  readonly onlySkill?: { readonly ref: SkillRef; readonly bundle: SkillBundleRef };
 }
 
 export type AgentResolution =

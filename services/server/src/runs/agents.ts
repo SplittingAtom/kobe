@@ -1,6 +1,11 @@
 import { resolveDraftAgent, resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
-import { resolveEffective, resolveSkills, type Omission } from "../resolver/resolve.js";
+import {
+  resolveEffective,
+  resolveSkills,
+  type Omission,
+  type SkillRef,
+} from "../resolver/resolve.js";
 import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsWithGaps } from "../skills/materialize.js";
 import { runSkillRefs } from "../skills/detect.js";
@@ -9,6 +14,7 @@ import {
   loadRequiredSkillFacts,
   loadSkillFacts,
   loadTeamFacts,
+  type SkillFacts,
 } from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
 import {
@@ -18,6 +24,23 @@ import {
   loadUserGrantFacts,
 } from "./run-mcp.js";
 import type { AgentResolution, AgentResolutionInput, RunAgentResolver } from "./seams.js";
+
+/** The skill facts of a test chat's run: its draft as the agent's only skill, nothing else. */
+const onlySkillFacts = (ref: SkillRef): SkillFacts => ({
+  agent: [ref],
+  agentCatalog: [],
+  agentOmissions: [],
+  user: [],
+  agentUnapproved: [],
+  agentSuspended: [],
+  userUnapproved: [],
+  userSuspended: [],
+  required: [],
+  requiredOmissions: [],
+  offered: [],
+  offeredOmissions: [],
+  blockedHashes: [],
+});
 
 const unavailableOmissions = (names: readonly string[]): Omission[] =>
   names.map((name) => ({ kind: "skill", name, reason: "unavailable" }));
@@ -113,14 +136,17 @@ export const PINNED_AGENTS: RunAgentResolver = {
     }
     const { frontmatter } = pinned.version.definition;
     const team = await loadTeamFacts(tx, input.teamId);
-    const skills = await loadSkillFacts(tx, {
-      teamId: input.teamId,
-      userId: input.ownerUserId,
-      agentSkillNames: agentSkills(frontmatter).names,
-      personalSkillsDisabled: team.personalSkillsDisabled,
-      // A published team version runs the local skill versions it froze (KOBE-318).
-      ...(pinned.version.skillManifest ? { frozen: pinned.version.skillManifest.skills } : {}),
-    });
+    // A Workbench test chat (KOBE-323) runs its draft alone: no other skill's facts are read.
+    const skills = input.onlySkill
+      ? onlySkillFacts(input.onlySkill.ref)
+      : await loadSkillFacts(tx, {
+          teamId: input.teamId,
+          userId: input.ownerUserId,
+          agentSkillNames: agentSkills(frontmatter).names,
+          personalSkillsDisabled: team.personalSkillsDisabled,
+          // A published team version runs the local skill versions it froze (KOBE-318).
+          ...(pinned.version.skillManifest ? { frozen: pinned.version.skillManifest.skills } : {}),
+        });
     const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
     const connectedConnectors = connectedConnectorNames(
       connectorRows,
@@ -150,11 +176,15 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // Materialization list (KOBE-82), in this same transaction: the blocklist is read once more, so
     // a hash listed since the facts were loaded never reaches a sandbox. These refs are the only
     // skills the sandbox makes present; `skills` (names) always equals their names.
-    const { refs: skillBundles, unavailable } = await bundleRefsWithGaps(
-      tx,
-      { teamId: input.teamId, userId: input.ownerUserId },
-      value.skills,
-    );
+    // A test chat's draft bundle has no version row: its ref comes from `withDraftTests`, which
+    // checked the blocklist and the scanned object in this same transaction.
+    const { refs: skillBundles, unavailable } = input.onlySkill
+      ? { refs: [input.onlySkill.bundle], unavailable: [] }
+      : await bundleRefsWithGaps(
+          tx,
+          { teamId: input.teamId, userId: input.ownerUserId },
+          value.skills,
+        );
     const omissions = [...value.omissions, ...unavailableOmissions(unavailable)];
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""

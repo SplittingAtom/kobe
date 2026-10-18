@@ -5,7 +5,7 @@ import {
   idSchema,
   uuidSchema as wireUuidSchema,
 } from "@kobe/protocol";
-import { sql, withTeam, type KobeTx, type RunSkillRef } from "@kobe/db";
+import { RUN_SKILL_SOURCES, sql, withTeam, type KobeTx, type RunSkillRef } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { skillUpdatesOf } from "../skills/usage.js";
@@ -49,7 +49,7 @@ const skillMarkerSchema = z.strictObject({
   tool_call_id: z.string(),
   /** The skill's name as the server listed it in the run's `run.start`. */
   name: z.string(),
-  source: z.enum(["team", "personal", "builtin", "catalog"]),
+  source: z.enum(RUN_SKILL_SOURCES),
   /** The version the run loaded (KOBE-315); absent for built-ins and runs recorded before. */
   semver: z.string().optional(),
 });

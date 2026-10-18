@@ -18,3 +18,4 @@ export {
 } from "./seams.js";
 export type { RunSweepResult } from "./sweeper.js";
 export { PINNED_AGENTS } from "./agents.js";
+export { withDraftTests } from "./draft-tests.js";

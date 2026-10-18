@@ -213,6 +213,9 @@ export interface ThreadRow {
   readonly projectId: string | null;
   /** The conversation's thinking level (KOBE-260); null or absent = the model's default. */
   readonly thinkingLevel?: ThinkingLevel | null;
+  /** A Workbench test chat (KOBE-323) and its draft (null once deleted); absent = ordinary. */
+  readonly skillTest?: boolean;
+  readonly skillDraftId?: string | null;
 }
 
 /** Fail fast instead of queueing behind a long-held thread row (KOBE-29/34: status writers). */
@@ -248,9 +251,11 @@ export async function lockThreadRow(
     model_alias: string | null;
     project_id: string | null;
     thinking_level: ThinkingLevel | null;
+    skill_test: boolean;
+    skill_draft_id: string | null;
   }>(sql`
     SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
-           deleted_at, model_alias, project_id, thinking_level
+           deleted_at, model_alias, project_id, thinking_level, skill_test, skill_draft_id
       FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const r = res.rows[0];
   return r
@@ -266,6 +271,8 @@ export async function lockThreadRow(
         modelAlias: r.model_alias,
         projectId: r.project_id,
         thinkingLevel: r.thinking_level,
+        skillTest: r.skill_test,
+        skillDraftId: r.skill_draft_id,
       }
     : undefined;
 }

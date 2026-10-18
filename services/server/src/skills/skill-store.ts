@@ -19,6 +19,7 @@ import {
 import type { BlobStore } from "../retention/blobs.js";
 import { openVerified, readVerified } from "./blob-read.js";
 import { checkStoredZip, hashOutcome } from "./hash-checks.js";
+import { draftBundleKey } from "./drafts/test-bundle.js";
 import { locateBundle, type BundleCaller } from "./materialize.js";
 import { decideReview, type DecideResult } from "./review.js";
 import { discardAttemptBundle, putSkillBundle, sha256Hex, skillBundleKey } from "./storage.js";
@@ -232,8 +233,15 @@ export class PostgresSkillStore implements SkillStore {
   async openSandboxBundle(caller: BundleCaller, hash: string): Promise<SandboxBundle> {
     const found = await withTeam(this.db, caller.teamId, (tx) => locateBundle(tx, caller, hash));
     if (!found) return { ok: false, error: "not_found" };
-    const opened = await openVerified(this.blobs, found.storageKey, hash, found.size);
-    return opened ? { ok: true, ...opened } : { ok: false, error: "unavailable" };
+    const keys =
+      "storageKey" in found
+        ? [found.storageKey]
+        : found.draftIds.map((d) => draftBundleKey(this.blobs.prefix, caller.teamId, d, hash));
+    for (const key of keys) {
+      const opened = await openVerified(this.blobs, key, hash, found.size);
+      if (opened) return { ok: true, ...opened };
+    }
+    return { ok: false, error: "unavailable" };
   }
 
   recordApproval(

@@ -118,6 +118,8 @@ export const summaryColumns = {
   createdAt: threads.createdAt,
   deletedAt: threads.deletedAt,
   isTest: threads.isTest,
+  skillTest: threads.skillTest,
+  skillDraftId: threads.skillDraftId,
   scheduleId: threads.scheduleId,
   forkedFromThreadId: threads.forkedFromThreadId,
   forkedAtEntryId: threads.forkedAtEntryId,
@@ -144,6 +146,9 @@ export type SummaryRow = {
   createdAt: Date;
   deletedAt: Date | null;
   isTest: boolean;
+  /** KOBE-323; absent in rows read without it. */
+  skillTest?: boolean;
+  skillDraftId?: string | null;
   scheduleId?: string | null;
   forkedFromThreadId?: string | null;
   forkedAtEntryId?: string | null;
@@ -172,6 +177,9 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     last_activity_at: row.lastActivityAt.toISOString(),
     created_at: row.createdAt.toISOString(),
     is_test: row.isTest,
+    ...(row.skillTest
+      ? { skill_test: true as const, skill_draft_id: row.skillDraftId ?? null }
+      : {}),
     schedule_id: row.scheduleId ?? null,
     forked_from_thread_id: null,
     forked_from_title: null,
@@ -524,6 +532,8 @@ export async function createThread(
      */
     agent: AgentPin | DraftPin | null;
     isTest?: boolean;
+    /** A Workbench test chat's draft (KOBE-323): the caller checked the creator can see it. */
+    skillDraftId?: string;
     /** The schedule that started the thread (KOBE-174): it sits in the user's Scheduled folder. */
     scheduleId?: string;
     title: string | null;
@@ -538,7 +548,7 @@ export async function createThread(
     forkedFrom?: { readonly threadId: string; readonly entryId: string };
   },
 ): Promise<ThreadSummary> {
-  const { agent, modelAlias, isTest, forkedFrom, ...rest } = input;
+  const { agent, modelAlias, isTest, forkedFrom, skillDraftId, ...rest } = input;
   const [row] = await tx
     .insert(threads)
     .values({
@@ -547,6 +557,8 @@ export async function createThread(
       forkedAtEntryId: forkedFrom?.entryId ?? null,
       modelAlias: modelAlias ?? null,
       isTest: isTest ?? false,
+      skillTest: skillDraftId !== undefined,
+      skillDraftId: skillDraftId ?? null,
       agentScope: agent?.agentScope ?? null,
       agentId: agent?.agentId ?? null,
       agentVersion: agent?.agentVersion ?? null,

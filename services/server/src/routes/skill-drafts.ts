@@ -28,6 +28,8 @@ import {
   type DraftContext,
   type DraftFailure,
 } from "../skills/drafts/service.js";
+import { deleteDraftBundles } from "../skills/drafts/test-bundle.js";
+import { logger } from "../logger.js";
 import {
   listVisibleDrafts,
   readFile,
@@ -344,8 +346,14 @@ export function skillDraftRoutes(
   app.delete("/:id", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
-    const result = await removeDraft(ctxOf(c), id.data);
+    const ctx = ctxOf(c);
+    const result = await removeDraft(ctx, id.data);
     if (!result.ok) return failure(c, result);
+    // Its test bundles (KOBE-323) go too; the retention pass sweeps any a failure here left.
+    if (deps.blobs)
+      await deleteDraftBundles(deps.blobs, ctx.teamId, id.data).catch((err: unknown) =>
+        logger.warn({ err, draftId: id.data }, "skill drafts: test bundles not deleted yet"),
+      );
     return c.body(null, 204);
   });
 
