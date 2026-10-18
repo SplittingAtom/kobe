@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS } from "../support/constants.js";
 import { expect, test } from "../support/chat.js";
-import { allowApproval, longAnswer, toolTurn } from "../support/gate5.js";
+import { allowApproval, bashTurn, longAnswer, shareTurn } from "../support/gate5.js";
 
 /**
  * Gate 5, U19 (KOBE-227): "The steering panel walks idle → active → queued → waiting →
@@ -69,13 +69,8 @@ test("U19: idle → active → queued → waiting; a queued message is edited; S
   );
 
   // waiting: a write tool asks for an approval.
-  await chat.send(
-    toolTurn("create_artifact", {
-      kind: "html",
-      title: "G5 waiting",
-      content: "<!doctype html><html><body>w</body></html>",
-    }),
-  );
+  await chat.ask(bashTurn("echo w > /workspace/g5-waiting.txt"));
+  await chat.send(shareTurn("g5-waiting.txt", "G5 waiting"));
   await expect(panel).toHaveAttribute("data-state", "waiting", { timeout: RUN_TIMEOUT_MS });
   await allowApproval(page);
   await chat.waitForIdle();

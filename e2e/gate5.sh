@@ -207,8 +207,8 @@ done
 PUBLIC_URL=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- printenv KOBE_PUBLIC_URL 2>/dev/null || true)
 KILL_CMD="$KUBECTL -n $TNS delete pod -l agents.x-k8s.io/claim-uid=\$($KUBECTL -n $TNS get sandboxclaim u-$AD -o jsonpath='{.metadata.uid}') --wait=false"
 browser_env() { # the variables the specs read, except the passwords
-  printf 'KOBE_BASE_URL=%s KOBE_USER=gate5-ad@gate5.test KOBE_USER2=gate5-m2@gate5.test KOBE_FAKE_MODEL=%s KOBE_GATE5_PINNED_THREAD=%s' \
-    "$PUBLIC_URL" "$FAKE" "${PINNED_THREAD:-}"
+  printf 'KOBE_BASE_URL=%s KOBE_USER=gate5-ad@gate5.test KOBE_USER2=gate5-m2@gate5.test KOBE_FAKE_MODEL=%s KOBE_GATE5_PINNED_THREAD=%s KOBE_GATE5_MODEL2=%s' \
+    "$PUBLIC_URL" "$FAKE" "${PINNED_THREAD:-}" "${MODEL2:-}"
 }
 RESULTS="${KOBE_GATE5_RESULTS:-}"
 if [[ "$BROWSER" == 1 ]]; then

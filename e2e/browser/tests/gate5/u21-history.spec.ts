@@ -10,7 +10,7 @@ import {
   preferences,
   putPreferences,
   secondBrowser,
-  toolTurn,
+  shareTurn,
 } from "../support/gate5.js";
 
 /**
@@ -31,15 +31,9 @@ test("U21: reasoning, a tool card, the hover footer and the run's markers render
   if (REASONS) {
     await chat.ask(FAKE_MODEL ? "think?" : "Think it through first, then reply: what is 17 × 23?");
   }
-  await chat.ask(bashTurn("echo g5-tool-card"));
+  await chat.ask(bashTurn("echo g5-tool-card | tee /workspace/g5-markers.txt"));
   // An approval and a stopped run leave their markers in the thread's record.
-  await chat.send(
-    toolTurn("create_artifact", {
-      kind: "html",
-      title: "G5 markers",
-      content: "<!doctype html><html><body>m</body></html>",
-    }),
-  );
+  await chat.send(shareTurn("g5-markers.txt", "G5 markers"));
   await allowApproval(page);
   await chat.waitForIdle();
   await chat.send(longAnswer("No tools. Write a 2000-word story about the sea."));

@@ -57,12 +57,14 @@ test("U22: Regenerate with another model switches the conversation's model picke
   const picker = (await chat.selectors()).getByRole("combobox", {
     name: "Model for this conversation",
   });
-  const before = (await picker.textContent())?.trim() ?? "";
+  // The picker is a <select>: its text is every option's; the choice is the checked option.
+  const chosen = picker.locator("option:checked");
+  const before = (await chosen.textContent())?.trim() ?? "";
   await (await chat.messageAction(chat.answers.last(), "Regenerate with…")).click();
   const menu = page.getByRole("menu", { name: "Regenerate with…" });
   const items = (await menu.getByRole("menuitem").allInnerTexts()).map((t) => t.trim());
   const other = items.find(
-    (t) => !t.startsWith("Team default") && !t.endsWith("(current)") && !before.includes(t),
+    (t) => !t.startsWith("Team default") && !t.endsWith("(current)") && t !== before,
   );
   test.skip(other === undefined, "the team needs a second enabled model");
   await menu.getByRole("menuitem", { name: other, exact: true }).click();
@@ -71,9 +73,9 @@ test("U22: Regenerate with another model switches the conversation's model picke
   });
   await chat.waitForIdle();
   const after = await chat.selectors();
-  await expect(after.getByRole("combobox", { name: "Model for this conversation" })).toContainText(
-    other ?? "",
-  );
+  await expect(
+    after.getByRole("combobox", { name: "Model for this conversation" }).locator("option:checked"),
+  ).toHaveText(other ?? "");
 });
 
 test("U22: Regenerate with is hidden for an agent that pins its model", async ({ chat, page }) => {

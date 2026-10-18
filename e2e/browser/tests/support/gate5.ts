@@ -29,6 +29,15 @@ export function toolTurn(tool: string, args: Record<string, unknown>): string {
     : `Call the ${tool} tool exactly once with exactly these arguments (JSON): ${JSON.stringify(args)}. Then reply DONE.`;
 }
 
+/**
+ * A turn whose write asks for an approval in ask-on-write: share_file (a Kobe write) of a file in
+ * the member's workspace, made first with a {@link bashTurn}. create_artifact never asks (the
+ * server's PROMPT_EXEMPT_KOBE_TOOLS, a decision of 2026-10-06).
+ */
+export function shareTurn(path: string, description: string): string {
+  return toolTurn("share_file", { path, description });
+}
+
 /** The team the chat recorded, for API calls made from the page. */
 const TEAM_KEY = "kobe.lastTeamId";
 
