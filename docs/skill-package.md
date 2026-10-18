@@ -175,6 +175,16 @@ rule, file, line}]}` (locations only, no excerpts), optional `scorecard` (number
 eval detail never leaves the team. `provenanceMismatches` checks it against the package beside
 it; a scorecard from another package hash is stale.
 
+### Kobe-published versions
+
+Kobe's own catalog skills (KOBE-317, SK4: the former built-ins) are published by the server
+itself from the package set it ships (`services/server/builtin-skills/<name>/`, each with a
+`kobe.skill.yaml` whose `version` is the catalog semver). Nobody promotes them, so their
+provenance (stored with the version) has `publisher: "kobe"` instead of `source`, `submitter`,
+`confirmedBy`, `origin` and `scorecard`; the rest is as above. Their versions only rise: changing a
+skill's files means raising its `version` (`kobe-packages.test.ts` holds each version's hashes),
+and a Site refuses new bytes under a semver it holds or below its newest.
+
 ## Scan limits
 
 The scanner (`@kobe/skill-scanner`) reads every text file of the package, `evals/` and

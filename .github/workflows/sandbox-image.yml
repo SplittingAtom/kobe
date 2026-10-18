@@ -7,6 +7,8 @@ on:
     paths:
       - images/sandbox/**
       - services/sandbox-agent/**
+      # test-image.sh runs the Kobe skills' scripts on the image (KOBE-317).
+      - services/server/builtin-skills/**
       - packages/**
       - tools/license-check/**
       - scripts/assert-image-licenses.sh

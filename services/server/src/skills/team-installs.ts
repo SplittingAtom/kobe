@@ -25,7 +25,8 @@ export interface InstallRow {
   readonly pinMode: "pinned" | "within_major" | "latest";
   readonly access: "available" | "default_on" | "required" | "hidden";
   readonly origin: "team" | "default_tag";
-  readonly installedBy: string;
+  /** Null when Kobe's own Default sync installed it (KOBE-317). */
+  readonly installedBy: string | null;
   readonly updatedAt: string;
   /** The skill carries the Default tag (the "Site default" badge). */
   readonly isDefault: boolean;
@@ -97,7 +98,7 @@ export async function listTeamInstalls(
         pinMode: r.pin_mode as InstallRow["pinMode"],
         access: r.access as InstallRow["access"],
         origin: r.origin as InstallRow["origin"],
-        installedBy: String(r.installed_by),
+        installedBy: r.installed_by === null ? null : String(r.installed_by),
         updatedAt: iso(r.updated_at),
         isDefault: Boolean(r.is_default),
       })),

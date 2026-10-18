@@ -224,17 +224,17 @@ check "agent accepts the baked egress script" '^ok$' run node --input-type=modul
 check "a tool shell gets HTTPS_PROXY from the token file through BASH_ENV (KOBE-39)" \
   '^http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-1@egress-proxy.kobe.internal:80$' run sh -c \
   'printf "image.token-1\n" > /tmp/egress-token && env -i PATH=/usr/bin:/bin BASH_ENV=/opt/kobe/egress-env.sh KOBE_EGRESS_TOKEN_FILE=/tmp/egress-token KOBE_EGRESS_PROXY=http://egress-proxy.kobe.internal:80 KOBE_THREAD_ID=9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d bash -c '"'"'printf "%s\n" "$HTTPS_PROXY"'"'"' < /dev/null'
-check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
-# KOBE-88: built-in gallery skills. Baked read-only (root-owned, no write bit anywhere, so neither
-# the agent, Pi nor a tool uid can change them) and every sample script works with no network.
-SK=/opt/kobe/skills
-check "built-in skills: the seven bundles with a matching SKILL.md name" '^ok$' run sh -c \
-  'for n in data-analysis charts docx pdf xlsx code-review skill-creator; do grep -q "^name: $n\$" '$SK'/$n/SKILL.md || { echo "bad $n"; exit 1; }; done; echo ok'
-check "built-in skills: root-owned, no write bit, nothing writable by uid 1000" '^none$' run sh -c \
-  'f=$(find '$SK' \( -not -user 0 -o -not -group 0 -o -perm /222 -o -writable \) | head -3); [ -z "$f" ] && echo none || echo "$f"'
-offline() { docker run "${HARDENED[@]}" --network none --workdir /tmp --entrypoint "$1" "$IMAGE" "${@:2}"; }
-check "built-in skills: no skill script needs the network or a writable skills dir (--network none)" '^ok$' offline sh -c '
-set -e; S='$SK'; cd /tmp; export PYTHONDONTWRITEBYTECODE=1
+# KOBE-317: the former built-in skills are catalog skills the server ships; the image bakes none.
+check "no skills baked into the image (they arrive as bundles)" '^none$' run sh -c \
+  '[ -e /opt/kobe/skills ] && echo baked || echo none'
+# Their sample scripts still run on the image's stack with no network and a read-only copy: the
+# package set (services/server/builtin-skills) is streamed in as a tar, as a run's bundle would be.
+SKILLS_SRC="$(cd "$(dirname "$0")/../../services/server/builtin-skills" && pwd)"
+offline_skills() { tar -C "$SKILLS_SRC" -cf - . | docker run -i "${HARDENED[@]}" --network none --workdir /tmp --entrypoint "$1" "$IMAGE" "${@:2}"; }
+check "Kobe skills: the seven packages with a matching SKILL.md name" '^ok$' offline_skills sh -c \
+  'mkdir /tmp/sk && tar -xf - -C /tmp/sk && for n in data-analysis charts docx pdf xlsx code-review skill-creator; do grep -q "^name: $n\$" /tmp/sk/$n/SKILL.md || { echo "bad $n"; exit 1; }; done; echo ok'
+check "Kobe skills: no skill script needs the network or a writable skill dir (--network none)" '^ok$' offline_skills sh -c '
+set -e; mkdir /tmp/sk; tar -xf - -C /tmp/sk; chmod -R a-w /tmp/sk; S=/tmp/sk; mkdir /tmp/w; cd /tmp/w; export PYTHONDONTWRITEBYTECODE=1
 python $S/data-analysis/scripts/describe.py $S/data-analysis/scripts/sample.csv | grep -q "rows: 6"
 python $S/data-analysis/scripts/sql.py "select region, sum(amount) a from s group by 1 order by 1" --table s=$S/data-analysis/scripts/sample.csv --out r.csv | grep -q "310.35"
 python $S/charts/scripts/chart.py $S/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null
@@ -244,9 +244,9 @@ python $S/docx/scripts/docx_text.py s.docx | grep -q "^| south | 310.35 |"
 python $S/pdf/scripts/md_to_pdf.py $S/pdf/scripts/sample.md s.pdf --title T >/dev/null
 python $S/pdf/scripts/pdf_text.py s.pdf | grep -q "Sample report"
 python $S/pdf/scripts/pdf_pages.py m.pdf s.pdf s.pdf:1 | grep -q "2 pages"
-python $S/skill-creator/scripts/init_skill.py demo --dir /tmp/sk --scripts | grep -q "created /tmp/sk/demo/SKILL.md"
-python $S/skill-creator/scripts/validate.py /tmp/sk/demo | grep -q "0 errors"
-python $S/skill-creator/scripts/package.py /tmp/sk/demo --out d.zip | grep -q "Name:         demo"
+python $S/skill-creator/scripts/init_skill.py demo --dir /tmp/w/sk --scripts | grep -q "created /tmp/w/sk/demo/SKILL.md"
+python $S/skill-creator/scripts/validate.py /tmp/w/sk/demo | grep -q "0 errors"
+python $S/skill-creator/scripts/package.py /tmp/w/sk/demo --out d.zip | grep -q "Name:         demo"
 python -c "import zipfile; assert zipfile.ZipFile(\"d.zip\").namelist() == [\"SKILL.md\"]"
 python $S/xlsx/scripts/csv_to_xlsx.py $S/xlsx/scripts/sample.csv s.xlsx --total-row >/dev/null
 python $S/xlsx/scripts/xlsx_dump.py s.xlsx --formulas | grep -q "=SUM(D2:D7)"

@@ -15,8 +15,42 @@ import { RUN_SKILLS_MAX, resolveEffective, type ResolveInput, type SkillRef } fr
  * - D2 (review S2): a named skill that is not approved or suspended keeps its name, so neither a
  *   personal (`shadowed_by_agent`) nor an offered skill of that name stands in;
  * - D3: a blocklisted offered skill gets a `blocklisted` notice (it was left out silently);
- * - D4: the cap of 64 counts in the new order (named, offered, personal).
+ * - D4: the cap of 64 counts in the new order (named, offered, personal);
+ * - D5 (KOBE-317): a built-in the agent names is a named Kobe catalog skill (step 2, after the
+ *   local named ones): it is in `skills` with its catalog hash and counts against the cap. It holds
+ *   its name exactly as the built-in did, and a Kobe name never resolves to a local skill, so the
+ *   fixtures' named, pending and suspended entries of that name are the team's own and dropped
+ *   from both sides ({@link split}).
  */
+
+/** The KOBE-313 input: built-ins were names beside the skills (KOBE-88). */
+type LegacyInput = Omit<ResolveInput, "agent"> & {
+  readonly agent: ResolveInput["agent"] & { readonly builtinSkills?: readonly string[] };
+};
+
+const kobeRef = (name: string): SkillRef => ({ name, hash: `kobe-${name}`, source: "catalog" });
+
+/**
+ * The same site before and after KOBE-317: the legacy input without local entries under a
+ * built-in name (D5), and the new input where each built-in is a named Kobe catalog skill.
+ */
+function split(input: LegacyInput): { legacy: LegacyInput; now: ResolveInput; kobe: SkillRef[] } {
+  const builtins = [...new Set(input.agent.builtinSkills ?? [])];
+  const local = (n: string) => !builtins.includes(n);
+  const agent = {
+    ...input.agent,
+    skills: input.agent.skills.filter((s) => local(s.name)),
+    unapprovedSkills: (input.agent.unapprovedSkills ?? []).filter(local),
+    suspendedSkills: (input.agent.suspendedSkills ?? []).filter(local),
+  };
+  const kobe = builtins.map(kobeRef);
+  const { builtinSkills: _gone, ...nowAgent } = agent;
+  return {
+    legacy: { ...input, agent },
+    now: { ...input, agent: { ...nowAgent, catalogSkills: kobe } },
+    kobe,
+  };
+}
 
 /**
  * A generator seeded by the fixture's label (mulberry32), so each label is its own fixture and a
@@ -35,7 +69,7 @@ function seededRandom(label: string): () => number {
 }
 
 /** The KOBE-313 skill resolution, verbatim but for types (git 2e4ac678 resolve.ts). */
-function legacySkills(input: ResolveInput) {
+function legacySkills(input: LegacyInput) {
   const blocked = new Set(input.blockedHashes);
   const skills: SkillRef[] = [];
   const omissions: { kind: "skill"; name: string; reason: string }[] = [];
@@ -82,7 +116,7 @@ function legacySkills(input: ResolveInput) {
 }
 
 /** A seeded fixture: named, personal and offered skills, some blocked, approved or suspended. */
-function fixture(seed: string): ResolveInput {
+function fixture(seed: string): LegacyInput {
   const rnd = seededRandom(seed);
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)] as T;
   const n = (max: number) => Math.floor(rnd() * (max + 1));
@@ -141,11 +175,12 @@ const omissionKey = (o: { name: string; reason: string }) => `${o.name}:${o.reas
 
 describe("resolver v2 parity with today's runs (ac-4)", () => {
   it.each(Array.from({ length: 200 }, (_, i) => `parity-${i}`))("%s", (seed) => {
-    const input = fixture(seed);
+    const { legacy: input, now, kobe } = split(fixture(seed));
     const before = legacySkills(input);
-    const after = resolveEffective(input);
+    const after = resolveEffective(now);
     if (!after.ok) throw new Error("resolve failed");
-    expect(after.value.skills.map(key).sort()).toEqual(before.skills.map(key).sort());
+    // D5: the built-in now loads as a skill of the run.
+    expect(after.value.skills.map(key).sort()).toEqual([...before.skills, ...kobe].map(key).sort());
     // A blocklisted offered skill now says so (it was left out silently before), one notice each.
     const blockedOffered = (input.team.offeredSkills ?? [])
       .filter((s) => input.blockedHashes.includes(s.hash) && !input.agent.exclusiveSkills)
@@ -160,7 +195,7 @@ describe("resolver v2 parity with today's runs (ac-4)", () => {
 });
 
 /** Fixtures where named, offered, personal, pending and suspended names overlap, up to ~130 skills. */
-function clashFixture(seed: string): ResolveInput {
+function clashFixture(seed: string): LegacyInput {
   const rnd = seededRandom(seed);
   const n = (max: number) => Math.floor(rnd() * (max + 1));
   const names = (count: number, pool: number) => [
@@ -196,8 +231,8 @@ function clashFixture(seed: string): ResolveInput {
   };
 }
 
-/** The legacy result with D1–D4 applied (see the header). */
-function expectedNow(input: ResolveInput) {
+/** The legacy result with D1–D5 applied (see the header). */
+function expectedNow(input: LegacyInput, kobe: readonly SkillRef[]) {
   const blocked = new Set(input.blockedHashes);
   const { agent, team, user } = input;
   const ex = agent.exclusiveSkills;
@@ -223,10 +258,16 @@ function expectedNow(input: ResolveInput) {
     team: { ...team, offeredSkills: offered },
     user: { ...user, skills: user.skills.filter((s) => !shadowed.has(s.name)) },
   });
-  // D4: the new order, then the cap.
+  // D4 and D5: the new order (Kobe's named after the local named), then the cap.
   const rank = (s: SkillRef) =>
-    agent.skills.includes(s) ? 0 : (team.offeredSkills ?? []).includes(s) ? 1 : 2;
-  const ordered = [...legacy.skills].sort((a, b) => rank(a) - rank(b));
+    agent.skills.includes(s)
+      ? 0
+      : kobe.includes(s)
+        ? 0.5
+        : (team.offeredSkills ?? []).includes(s)
+          ? 1
+          : 2;
+  const ordered = [...legacy.skills, ...kobe].sort((a, b) => rank(a) - rank(b));
   const blockedOffered = ex ? [] : (team.offeredSkills ?? []).filter((s) => blocked.has(s.hash));
   return {
     skills: ordered.slice(0, RUN_SKILLS_MAX),
@@ -239,13 +280,13 @@ function expectedNow(input: ResolveInput) {
   };
 }
 
-describe("resolver v2 parity with name clashes and the cap (D1–D4)", () => {
+describe("resolver v2 parity with name clashes and the cap (D1–D5)", () => {
   const seeds = Array.from({ length: 300 }, (_, i) => `clash-${i}`);
 
   it.each(seeds)("%s", (seed) => {
-    const input = clashFixture(seed);
-    const want = expectedNow(input);
-    const after = resolveEffective(input);
+    const { legacy, now, kobe } = split(clashFixture(seed));
+    const want = expectedNow(legacy, kobe);
+    const after = resolveEffective(now);
     if (!after.ok) throw new Error("resolve failed");
     expect(after.value.skills.map(key)).toEqual(want.skills.map(key));
     expect(
@@ -257,8 +298,10 @@ describe("resolver v2 parity with name clashes and the cap (D1–D4)", () => {
   });
 
   it("the fixtures reach every documented difference", () => {
-    const inputs = seeds.map(clashFixture);
-    const reasons = inputs.flatMap((i) => expectedNow(i).omissions.map((o) => o.reason));
+    const inputs = seeds.map((seed) => split(clashFixture(seed)));
+    const reasons = inputs.flatMap((i) =>
+      expectedNow(i.legacy, i.kobe).omissions.map((o) => o.reason),
+    );
     for (const r of ["shadowed", "shadowed_by_agent", "blocklisted", "skill_limit"])
       expect(reasons).toContain(r);
   });

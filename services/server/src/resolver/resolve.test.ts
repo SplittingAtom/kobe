@@ -107,38 +107,45 @@ describe("skills", () => {
     expect(r.ok && r.value.omissions).toEqual([]);
   });
 
-  it("built-in skills resolve from the agent's list, deduplicated, with no hash or omission (KOBE-88)", () => {
+  // KOBE-317: the former built-ins are Kobe's catalog skills: an agent naming one gets it as a named
+  // catalog skill (step 2), with a hash, blocklistable, and holding its name like the built-in did.
+  const kobe = (name: string) => ({ ...sk(name, `kobe-${name}`), source: "catalog" as const });
+
+  it("a former built-in the agent names resolves as a named catalog skill (KOBE-317)", () => {
     const r = resolveEffective(
-      with_({
-        agent: { builtinSkills: ["charts", "docx", "charts"] },
-        blockedHashes: ["h-charts"],
-      }),
+      with_({ agent: { catalogSkills: [kobe("charts"), kobe("docx"), kobe("charts")] } }),
     );
-    expect(r.ok && r.value.builtinSkills).toEqual(["charts", "docx"]);
-    expect(r.ok && r.value.skills).toEqual([]);
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["charts", "docx"]);
     expect(r.ok && r.value.omissions).toEqual([]);
+    const blocked = resolveEffective(
+      with_({ agent: { catalogSkills: [kobe("charts")] }, blockedHashes: ["kobe-charts"] }),
+    );
+    expect(blocked.ok && blocked.value.omissions).toEqual([
+      { kind: "skill", name: "charts", reason: "blocklisted" },
+    ]);
   });
 
-  it("no built-ins unless the agent lists them, and an exclusive agent keeps its built-ins", () => {
-    const none = resolveEffective(with_({ user: { skills: [sk("charts")] } }));
-    expect(none.ok && none.value.builtinSkills).toEqual([]);
+  it("an exclusive agent keeps the Kobe skills it names", () => {
     const excl = resolveEffective(
       with_({
-        agent: { builtinSkills: ["pdf"], exclusiveSkills: true },
+        agent: { catalogSkills: [kobe("pdf")], exclusiveSkills: true },
         user: { skills: [sk("u")] },
       }),
     );
-    expect(excl.ok && excl.value.builtinSkills).toEqual(["pdf"]);
+    expect(excl.ok && excl.value.skills.map((s) => s.name)).toEqual(["pdf"]);
     expect(excl.ok && excl.value.omissions).toEqual([
       { kind: "skill", name: "u", reason: "agent_exclusive" },
     ]);
   });
 
-  it("a personal skill named like a listed built-in is shadowed by it", () => {
+  it("a personal skill named like a named Kobe skill is shadowed by it", () => {
     const r = resolveEffective(
-      with_({ agent: { builtinSkills: ["xlsx"] }, user: { skills: [sk("xlsx"), sk("mine")] } }),
+      with_({
+        agent: { catalogSkills: [kobe("xlsx")] },
+        user: { skills: [sk("xlsx"), sk("mine")] },
+      }),
     );
-    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["mine"]);
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["xlsx", "mine"]);
     expect(r.ok && r.value.omissions).toEqual([
       { kind: "skill", name: "xlsx", reason: "shadowed_by_agent" },
     ]);
@@ -273,16 +280,19 @@ describe("team skills offered to all agents (KOBE-297)", () => {
     expect(r.ok && r.value.omissions).toEqual([]);
   });
 
-  it("is deduplicated with the agent's named skills, built-ins and the user's skills", () => {
+  it("is deduplicated with the agent's named skills, Kobe skills and the user's skills", () => {
     expect(
       names(
         with_({
-          agent: { skills: [sk("dup")], builtinSkills: ["pdf"] },
+          agent: {
+            skills: [sk("dup")],
+            catalogSkills: [{ ...sk("pdf", "kobe-pdf"), source: "catalog" }],
+          },
           user: { skills: [sk("mine", "h-personal")] },
           team: { offeredSkills: [sk("dup"), sk("pdf"), sk("mine"), sk("fresh"), sk("fresh")] },
         }),
       ),
-    ).toEqual(["dup", "mine", "fresh"]);
+    ).toEqual(["dup", "pdf", "mine", "fresh"]);
   });
 
   it("an offered skill fills in for a personal one the team switch hides", () => {

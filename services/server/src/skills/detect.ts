@@ -2,12 +2,12 @@ import path from "node:path";
 import type { SkillBundleRef } from "@kobe/protocol";
 import type { RunSkillRef, RunSkillUse } from "@kobe/db";
 import type { SkillRef } from "../resolver/resolve.js";
-import { BUILTIN_SKILLS_DIR, SKILLS_DIR, SKILLS_STORE_SUBDIR } from "../sandbox/constants.js";
+import { SKILLS_DIR, SKILLS_STORE_SUBDIR } from "../sandbox/constants.js";
 
 /**
  * Skill use, seen by the server (KOBE-297). Pi uses a skill by `read`-ing its SKILL.md from the
  * directory it was given with `--skill`: `<SKILLS_DIR>/store/sk-<sha256>/` for a bundle
- * (sandbox-agent skills/store.ts) or `<BUILTIN_SKILLS_DIR>/<name>/` for a built-in. A call counts
+ * (sandbox-agent skills/store.ts; Kobe's own skills too since KOBE-317). A call counts
  * only when its normalized absolute path is exactly the SKILL.md of a skill in the run's own list
  * (`runs.skill_refs`, written with `run.start`), and only once its result came back without error.
  * The name is the server's, from that list: nothing the sandbox labels a call with is read, a
@@ -21,7 +21,7 @@ const STORE = path.posix.join(SKILLS_DIR, SKILLS_STORE_SUBDIR);
 
 /** The SKILL.md path of a skill the run was given. */
 function skillMdPath(ref: RunSkillRef): string | undefined {
-  if (ref.source === "builtin") return path.posix.join(BUILTIN_SKILLS_DIR, ref.name, SKILL_MD);
+  // `builtin` refs belong to runs from before KOBE-317, whose tool calls were matched long ago.
   return ref.sha256 === undefined
     ? undefined
     : path.posix.join(STORE, `sk-${ref.sha256}`, SKILL_MD);
@@ -43,7 +43,7 @@ export function matchSkillRead(
 
 /**
  * What `run.start` lists, as recorded with the run: each bundle with the source of the effective
- * skill it was listed for (same name and hash), then the built-ins. Two skills with identical
+ * skill it was listed for (same name and hash). Two skills with identical
  * bytes share one `sk-<hash>/` directory, so a read of it can only be told as one of them: the
  * first listed (in resolution order, KOBE-315) keeps the path, the others are not recorded.
  * A bundle with no matching effective skill is left out rather than guessed.
@@ -51,7 +51,6 @@ export function matchSkillRead(
 export function runSkillRefs(
   bundles: readonly SkillBundleRef[],
   effective: readonly SkillRef[],
-  builtins: readonly string[],
 ): RunSkillRef[] {
   const refs: RunSkillRef[] = [];
   const paths = new Set<string>();
@@ -66,7 +65,6 @@ export function runSkillRefs(
       ...(skill.semver ? { semver: skill.semver } : {}),
     });
   }
-  for (const name of builtins) refs.push({ name, source: "builtin" });
   return refs;
 }
 

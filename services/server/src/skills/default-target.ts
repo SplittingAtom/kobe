@@ -88,8 +88,11 @@ export interface DefaultTarget {
   readonly name: string;
   /** The major Default installs follow (the newest `add` or `move_major` job's, by `seq`). */
   readonly major: number;
-  /** Who tagged it (or last moved its major): the installer a Default install names. */
-  readonly requestedBy: string;
+  /**
+   * Who tagged it (or last moved its major): the installer a Default install names. Null when
+   * Kobe tagged its own skill (KOBE-317).
+   */
+  readonly requestedBy: string | null;
 }
 
 /**
@@ -105,7 +108,7 @@ export async function defaultTargets(
     skill_id: string;
     name: string;
     major: number;
-    requested_by: string;
+    requested_by: string | null;
   }>(sql`
     SELECT DISTINCT ON (s.id) s.id AS skill_id, s.name, j.major, j.requested_by
     FROM registry_skills s

@@ -1,7 +1,6 @@
 import { resolveDraftAgent, resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { resolveEffective, resolveSkills, type Omission } from "../resolver/resolve.js";
-import { isBuiltinSkillName } from "@kobe/protocol";
 import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsWithGaps } from "../skills/materialize.js";
 import { runSkillRefs } from "../skills/detect.js";
@@ -55,7 +54,7 @@ async function requiredOnly(
   });
   const { refs, unavailable } = await bundleRefsWithGaps(tx, owner, resolved.skills);
   const omissions = [...resolved.omissions, ...unavailableOmissions(unavailable)];
-  const skillRefs = runSkillRefs(refs, resolved.skills, []);
+  const skillRefs = runSkillRefs(refs, resolved.skills);
   return {
     ...(omissions.length > 0 ? { omissions } : {}),
     ...(refs.length > 0
@@ -155,7 +154,6 @@ export const PINNED_AGENTS: RunAgentResolver = {
       value.skills,
     );
     const omissions = [...value.omissions, ...unavailableOmissions(unavailable)];
-    const builtinSkills = value.builtinSkills.filter(isBuiltinSkillName);
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""
         ? {}
@@ -165,11 +163,9 @@ export const PINNED_AGENTS: RunAgentResolver = {
       ...(skillBundles.length > 0
         ? { skills: skillBundles.map((s) => s.name), skill_bundles: skillBundles }
         : {}),
-      // Built-ins (KOBE-88) come from the sandbox image: no bundle, nothing to fetch or block.
-      ...(value.builtinSkills.length > 0 ? { builtin_skills: builtinSkills } : {}),
     };
     // KOBE-297: what this run.start lists, kept with the run so a SKILL.md read can be matched.
-    const skillRefs = runSkillRefs(skillBundles, value.skills, builtinSkills);
+    const skillRefs = runSkillRefs(skillBundles, value.skills);
     return {
       ok: true,
       agent: {

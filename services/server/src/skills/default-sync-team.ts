@@ -58,7 +58,8 @@ export async function addInTeam(
   teamId: string,
   skillId: string,
   version: TargetVersion,
-  installedBy: string,
+  /** Null: Kobe's own Default sync (a Kobe-published skill, KOBE-317); the row says `by_kobe`. */
+  installedBy: string | null,
 ): Promise<TeamStepResult> {
   await lockInstall(tx, teamId, skillId);
   await lockTeamSkillNames(tx, teamId);
@@ -79,9 +80,9 @@ export async function addInTeam(
   }
   const inserted = await tx.execute(sql`
     INSERT INTO team_skill_installs
-      (team_id, skill_id, version_id, pin_mode, access, origin, installed_by)
+      (team_id, skill_id, version_id, pin_mode, access, origin, installed_by, by_kobe)
     SELECT ${teamId}, ${skillId}, ${version.id}, 'within_major', 'default_on', 'default_tag',
-      ${installedBy}
+      ${installedBy}::uuid, ${installedBy === null}
     WHERE EXISTS (${installable(version.id)})
     ON CONFLICT (team_id, skill_id) DO NOTHING
     RETURNING 1`);

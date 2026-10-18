@@ -232,6 +232,7 @@ const SKILL_INSTALL_OBJECTS = [
   "constraint skill_default_syncs.skill_default_syncs_counts",
   "column team_skill_installs.installed_by",
   "column team_skill_settings.builders_may_install_catalog",
+  "constraint team_skill_installs.team_skill_installs_by_kobe",
   "constraint team_skill_installs.team_skill_installs_installed_by_users_id_fk",
   "constraint team_skill_installs.team_skill_installs_skill_id_registry_skills_id_fk",
   "constraint team_skill_installs.team_skill_installs_team_id_skill_id_pk",

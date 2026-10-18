@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: charts
+version: 1.0.0
+summary: "Bar, line, scatter and pie charts from CSV or Excel data with matplotlib, offline."
+license: Apache-2.0
+changelog: Published by Kobe from the built-in skill of the same name.

@@ -46,7 +46,8 @@ export interface QueueDefaultSync {
   readonly kind: DefaultSyncKind;
   /** `add` and `move_major`: the major Default installs follow, and its newest version. */
   readonly target?: TargetVersion;
-  readonly requestedBy: string;
+  /** Who asked; null when Kobe itself did (its own skills' seed, KOBE-317). */
+  readonly requestedBy: string | null;
 }
 
 /**
@@ -63,6 +64,7 @@ export async function queueDefaultSync(tx: KobeTx, job: QueueDefaultSync): Promi
       major: job.kind === "remove" ? null : (job.target?.major ?? null),
       versionId: job.kind === "remove" ? null : (job.target?.id ?? null),
       requestedBy: job.requestedBy,
+      byKobe: job.requestedBy === null,
     })
     .returning({ id: skillDefaultSyncs.id });
   if (!row) throw new Error("skills: Default sync insert returned no row");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentConnectors, agentSkills } from "@kobe/agent-file";
-import { BUILTIN_SKILL_NAMES, BUILTIN_TOOLS } from "@kobe/protocol";
+import { BUILTIN_TOOLS, KOBE_SKILL_NAMES } from "@kobe/protocol";
 import { computeToolManifest, manifestAllowsTool } from "../agents/manifest.js";
 import { KOBE_NO_SEARCH_NOTICE } from "./agents/kobe.js";
 import { GALLERY_DEFINITIONS, KOBE_GALLERY_KEY, parseGalleryDefinitions } from "./definitions.js";
@@ -54,10 +54,8 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
     }
   });
 
-  it("lists every built-in skill, and only built-ins", () => {
-    expect([...agentSkills(kobe.frontmatter).names].sort()).toEqual(
-      [...BUILTIN_SKILL_NAMES].sort(),
-    );
+  it("lists every Kobe skill (the former built-ins), and only those", () => {
+    expect([...agentSkills(kobe.frontmatter).names].sort()).toEqual([...KOBE_SKILL_NAMES].sort());
   });
 
   it("keeps the prompt general-purpose and concise", () => {

@@ -6,6 +6,7 @@ import {
   type CatalogVersion,
 } from "../resolver/catalog-pins.js";
 import type { SkillOmission, SkillRef } from "../resolver/resolve.js";
+import { defaultTargets, majorOf } from "../skills/default-target.js";
 import { readCatalogSwitches } from "../skills/settings.js";
 
 /**
@@ -21,6 +22,12 @@ import { readCatalogSwitches } from "../skills/settings.js";
  * - a member add loads only while the team setting "Members may add catalog skills for
  *   themselves" is on, and never for a skill the team installed Hidden (Hidden means "only for
  *   agents that name it"). An add that doesn't load is ignored as if it weren't there.
+ *
+ * Kobe's own skills (KOBE-317, the former built-ins) never pause on an upgrade: an agent naming one
+ * in a team the Default sync has not reached yet (or that it skipped for a name conflict) gets it
+ * as the Default install will be, On by default at Track within major, provided the skill is
+ * still Default and the team neither opted out nor blocked it. That is what the built-in gave the
+ * same run before the upgrade.
  */
 export interface CatalogFacts {
   /** Step 2: catalog skills the agent names, at the team install's pin. */
@@ -96,6 +103,37 @@ async function versionsOf(
   return out;
 }
 
+/**
+ * Named Kobe skills the team has no install of yet, as their Default install would be (see the
+ * header): skill id and the Default's major, for those still tagged Default and neither opted out
+ * nor blocked in this team.
+ */
+async function pendingKobeDefaults(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+): Promise<Map<string, { skillId: string; major: number }>> {
+  const out = new Map<string, { skillId: string; major: number }>();
+  if (names.length === 0) return out;
+  const { rows } = await tx.execute<{ id: string; name: string }>(sql`
+    SELECT s.id, s.name FROM registry_skills s
+    WHERE s.publisher = 'kobe' AND s.name IN (${sql.join(
+      names.map((n) => sql`${n}`),
+      sql`, `,
+    )})
+      AND EXISTS (SELECT 1 FROM registry_skill_tags st JOIN registry_tags t ON t.id = st.tag_id
+        WHERE st.skill_id = s.id AND t.kind = 'system' AND t.name = 'default')
+      AND NOT EXISTS (SELECT 1 FROM team_skill_optouts o
+        WHERE o.team_id = ${teamId} AND o.skill_id = s.id)
+      AND NOT EXISTS (SELECT 1 FROM team_skill_blocks b
+        WHERE b.team_id = ${teamId} AND b.skill_id = s.id)`);
+  for (const r of rows) {
+    const [target] = await defaultTargets(tx, r.id);
+    if (target) out.set(r.name, { skillId: r.id, major: target.major });
+  }
+  return out;
+}
+
 export async function loadCatalogFacts(
   tx: KobeTx,
   args: {
@@ -123,8 +161,18 @@ export async function loadCatalogFacts(
       WHERE e.team_id = ${args.teamId} AND e.user_id = ${args.userId}
         AND e.catalog_skill_id IS NOT NULL AND ${notBlocked(sql`e.catalog_skill_id`)}`)
   ).rows.filter((e) => e.version_id === null || (membersMayAdd && !hidden.has(e.skill_id)));
+  const installedNames = new Set(installs.map((i) => i.name));
+  const pending = await pendingKobeDefaults(
+    tx,
+    args.teamId,
+    args.namedCatalog.filter((n) => !installedNames.has(n)),
+  );
   const versions = await versionsOf(tx, [
-    ...new Set([...installs.map((i) => i.skill_id), ...enablements.map((e) => e.skill_id)]),
+    ...new Set([
+      ...installs.map((i) => i.skill_id),
+      ...enablements.map((e) => e.skill_id),
+      ...[...pending.values()].map((p) => p.skillId),
+    ]),
   ]);
 
   const resolve = (skillId: string, name: string, pin: CatalogPin) => {
@@ -163,8 +211,19 @@ export async function loadCatalogFacts(
   const named = new Set(args.namedCatalog);
   for (const name of named) {
     const i = installed.get(name);
-    if (!i) out.namedOmissions.push({ name, reason: "not_installed" });
-    else into(out.named, out.namedOmissions, resolve(i.skill_id, i.name, pinOf(i)));
+    const kobe = pending.get(name);
+    // Any version of the Default's major anchors Track within major (the pin picks the newest).
+    const anchor = kobe
+      ? (versions.get(kobe.skillId) ?? []).find((v) => majorOf(v.semver) === kobe.major)
+      : undefined;
+    if (i) into(out.named, out.namedOmissions, resolve(i.skill_id, i.name, pinOf(i)));
+    else if (kobe && anchor)
+      into(
+        out.named,
+        out.namedOmissions,
+        resolve(kobe.skillId, name, { pinMode: "within_major", versionId: anchor.id }),
+      );
+    else out.namedOmissions.push({ name, reason: "not_installed" });
   }
 
   // Steps 1 and 3, by name so a full run leaves out the same skills each time.

@@ -1437,6 +1437,18 @@ export const AUDIT_EVENTS = {
     optoutsCleared: count.optional(),
     moved: count.optional(),
   }),
+  /**
+   * Kobe published a version of one of its own catalog skills (KOBE-317, SK4) from the package set
+   * the server ships, at a server start (system actor). `created`: the skill is new to this Site
+   * (it was also tagged Default).
+   */
+  "skill.kobe.published": event("site", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    runtimeHash: z.string().regex(/^[0-9a-f]{64}$/),
+    created: z.boolean(),
+  }),
   /** A Default sync job failed too often and was parked; the queue moved on (error code only). */
   "skill.default.sync_failed": event("site", {
     skillId: id,

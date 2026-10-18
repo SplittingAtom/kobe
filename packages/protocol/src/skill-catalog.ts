@@ -38,6 +38,27 @@ export const REGISTRY_TAG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 /** Who publishes a catalog skill: Kobe (built-ins, reserved names) or its maintainers (SK24). */
 export const REGISTRY_PUBLISHERS = ["kobe", "maintainer"] as const;
 export type RegistryPublisher = (typeof REGISTRY_PUBLISHERS)[number];
+
+/**
+ * The skills Kobe publishes (KOBE-317, SK4): the former built-ins, from the package set the
+ * server ships. Their catalog names are reserved for publisher `kobe` (SK24; a database check
+ * mirrors this list), and an agent naming one always gets the Kobe skill, never a team or
+ * personal skill of that name.
+ */
+export const KOBE_SKILL_NAMES = [
+  "data-analysis",
+  "charts",
+  "docx",
+  "pdf",
+  "xlsx",
+  "code-review",
+  "skill-creator",
+] as const;
+export type KobeSkillName = (typeof KOBE_SKILL_NAMES)[number];
+
+export function isKobeSkillName(name: string): name is KobeSkillName {
+  return (KOBE_SKILL_NAMES as readonly string[]).includes(name);
+}
 export const REGISTRY_SKILL_STATUSES = [
   "active",
   "deprecated",
@@ -117,7 +138,8 @@ export const teamSkillInstallSchema = z.strictObject({
   pinMode: z.enum(SKILL_PIN_MODES),
   access: z.enum(SKILL_ACCESS_MODES),
   origin: z.enum(SKILL_INSTALL_ORIGINS),
-  installedBy: uuid,
+  /** Who installed it; null when Kobe's own Default sync did (a Kobe-published skill, KOBE-317). */
+  installedBy: uuid.nullable(),
   updatedAt: z.string(),
   /** The skill carries the Default tag: the "Site default" badge (KOBE-314). */
   isDefault: z.boolean(),

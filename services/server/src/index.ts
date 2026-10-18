@@ -5,6 +5,7 @@ import { seedGalleryAgents } from "./gallery/seed.js";
 import { startSkillHashRecompute } from "./skills/hash-checks.js";
 import { startSkillRescan } from "./skills/rescan.js";
 import { startDefaultSync } from "./skills/default-sync.js";
+import { seedKobeSkills } from "./skills/kobe-seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
@@ -195,6 +196,19 @@ if (deps && config.process === "server") {
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
   );
+}
+
+// Kobe's own catalog skills (KOBE-317, SK4: the former built-ins) from the package set the server
+// ships: published at every start, so install and upgrade alike, before the Default sync starts
+// below. Idempotent; a failure is logged and never stops the server from starting.
+if (deps && config.process === "server") {
+  if (deps.blobs) {
+    await seedKobeSkills({ db: deps.database.db, blobs: deps.blobs, log: logger }).catch(
+      (err: unknown) => logger.error({ err }, "Kobe skills could not be seeded"),
+    );
+  } else {
+    logger.warn("no object storage (s3.*): Kobe's catalog skills are not published");
+  }
 }
 
 // Stored skill hashes against the package contract (KOBE-310, docs/skill-package.md "Identity"):

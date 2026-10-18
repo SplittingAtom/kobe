@@ -4,7 +4,6 @@ import {
   parseTraceparent,
   runTraceId,
   type WireTraceContext,
-  CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
@@ -44,6 +43,16 @@ import {
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
 /** What delivery needs from its connection. */
+
+/** The capability pre-KOBE-317 agents advertised for image built-ins (now catalog skills). */
+const LEGACY_CAPABILITY_BUILTIN_SKILLS = "builtin_skills";
+
+/** Whether a stored frame still lists image built-ins (`config.builtin_skills`, before KOBE-317). */
+function legacyBuiltins(frame: RunStartFrame): boolean {
+  const listed = (frame.config as { builtin_skills?: unknown } | undefined)?.builtin_skills;
+  return Array.isArray(listed) && listed.length > 0;
+}
+
 export interface DeliveryHost {
   readonly id: string;
   readonly target: SandboxTarget;
@@ -418,15 +427,17 @@ export class CommandDelivery {
     }
     if (
       row.kind === "run.start" &&
-      (frame as RunStartFrame).config?.builtin_skills?.length &&
-      !this.#host.hasCapability(CAPABILITY_BUILTIN_SKILLS)
+      legacyBuiltins(frame as RunStartFrame) &&
+      !this.#host.hasCapability(LEGACY_CAPABILITY_BUILTIN_SKILLS)
     ) {
-      // Same rule as bundles: never start without the built-in skills the run was resolved with.
+      // A run.start queued before KOBE-317 may still list image built-ins: an agent from before
+      // the upgrade serves them from its image; a newer one has none, so the run fails visibly
+      // rather than starting without the skills it was resolved with.
       await this.#failRunStart(
         row,
         failure(
           COMMAND_FAILURES.skillsUnsupported,
-          "this sandbox's agent is too old to load built-in skills; it must be upgraded",
+          "this run was queued before an upgrade and lists skills this sandbox no longer has; send it again",
         ),
       );
       return;

@@ -15,7 +15,8 @@ export interface CatalogInstall {
   readonly pinMode: "pinned" | "within_major" | "latest";
   readonly access: "available" | "default_on" | "required" | "hidden";
   readonly origin: "team" | "default_tag";
-  readonly installedBy: string;
+  /** Null when Kobe's own Default sync installed it (a Kobe skill, KOBE-317). */
+  readonly installedBy: string | null;
   readonly updatedAt: string;
   /** The skill carries the Site's Default tag. */
   readonly isDefault: boolean;

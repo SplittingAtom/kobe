@@ -1,5 +1,5 @@
 import { agentConnectors, agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
-import { PUBLISHED_VERSION_STATES, isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
+import { PUBLISHED_VERSION_STATES, isKobeSkillName, type ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, sql, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillOmission, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
@@ -30,8 +30,6 @@ export interface SkillFacts {
   readonly agentCatalog: readonly SkillRef[];
   /** Named catalog skills left out (`not_installed`, `revoked`, `suspended`). */
   readonly agentOmissions: readonly SkillOmission[];
-  /** Built-in names the agent lists (KOBE-88): site-provided, never looked up or reviewed. */
-  readonly agentBuiltin: readonly string[];
   readonly user: readonly SkillRef[];
   /** Agent skill names with no approved team version (KOBE-99). */
   readonly agentUnapproved: readonly string[];
@@ -134,7 +132,8 @@ async function installedNamesAmong(
  * of is the catalog's. A name both have is the team's own, unless the team installed the catalog
  * skill and its own skill is archived or has never been approved: a draft never hides an
  * installed, Site-reviewed skill, and archiving a skill to install the catalog one (the name-clash
- * rule) hands the name over.
+ * rule) hands the name over. A Kobe skill's name is always the catalog's (KOBE-317, SK24): it was
+ * reserved for the built-in before, so an agent naming `pdf` keeps getting Kobe's.
  */
 async function catalogNamed(
   tx: KobeTx,
@@ -143,7 +142,9 @@ async function catalogNamed(
   access: { local: Set<string>; archived: Set<string> },
   localStates: { approved: readonly { name: string }[]; suspended: readonly string[] },
 ): Promise<string[]> {
-  const catalog = await catalogNamesAmong(tx, listed);
+  const found = new Set(await catalogNamesAmong(tx, listed));
+  // In the agent's own order, like its local skills.
+  const catalog = listed.filter((n) => found.has(n));
   const installed = await installedNamesAmong(
     tx,
     teamId,
@@ -152,7 +153,9 @@ async function catalogNamed(
   const reviewed = new Set([...localStates.approved.map((s) => s.name), ...localStates.suspended]);
   return catalog.filter(
     (n) =>
-      !access.local.has(n) || (installed.has(n) && (access.archived.has(n) || !reviewed.has(n))),
+      isKobeSkillName(n) ||
+      !access.local.has(n) ||
+      (installed.has(n) && (access.archived.has(n) || !reviewed.has(n))),
   );
 }
 
@@ -189,16 +192,15 @@ export async function loadSkillFacts(
     personalSkillsDisabled: boolean;
   },
 ): Promise<SkillFacts> {
-  // Built-in names are reserved (KOBE-88): they come from the image, not from a team skill of that
-  // name, so they are neither looked up nor reported as unapproved.
-  const agentBuiltin = [...new Set(args.agentSkillNames.filter(isBuiltinSkillName))];
-  const listed = [...new Set(args.agentSkillNames.filter((n) => !isBuiltinSkillName(n)))];
+  // Kobe's skills (the former built-ins, KOBE-317) are catalog names like any other: they resolve
+  // through the team's install (or the Default install still on its way, catalog-facts.ts).
+  const listed = [...new Set(args.agentSkillNames)];
   const access = await teamSkillAccess(tx, args.teamId, args.userId);
   // One transaction, one connection: these reads run one after the other.
   const localStates = await teamSkillStates(
     tx,
     args.teamId,
-    listed.filter((n) => access.local.has(n)),
+    listed.filter((n) => access.local.has(n) && !isKobeSkillName(n)),
   );
   const namedCatalog = await catalogNamed(tx, args.teamId, listed, access, localStates);
   const teamNames = listed.filter((n) => !namedCatalog.includes(n));
@@ -236,7 +238,6 @@ export async function loadSkillFacts(
     agent,
     agentCatalog: catalog.named,
     agentOmissions: catalog.namedOmissions,
-    agentBuiltin,
     user: usable,
     required,
     requiredOmissions: [...requiredLocal.omissions, ...catalog.requiredOmissions],
@@ -328,7 +329,6 @@ export function buildResolveInput(args: {
       skills: args.skills.agent,
       catalogSkills: args.skills.agentCatalog,
       skillOmissions: args.skills.agentOmissions,
-      builtinSkills: args.skills.agentBuiltin,
       unapprovedSkills: args.skills.agentUnapproved,
       suspendedSkills: args.skills.agentSuspended,
       exclusiveSkills: agentSkills(frontmatter).exclusive,

@@ -170,7 +170,8 @@ async function syncTeam(
     await auditApplied(tx, team.id, skill, changesOf(result), version?.semver ?? null);
     return result;
   });
-  const notice = noticeOf(job.kind, step);
+  // Kobe's own skills (KOBE-317) were there before the upgrade as built-ins: nothing to tell.
+  const notice = job.byKobe ? null : noticeOf(job.kind, step);
   if (notice && deps.mailer && deps.publicUrl) {
     await notifyTeamAdmins(
       { db: deps.db, mailer: deps.mailer, publicUrl: deps.publicUrl },

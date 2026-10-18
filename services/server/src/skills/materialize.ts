@@ -26,8 +26,9 @@ import { blockedAmong, isBlocked } from "./blocklist.js";
 
 /**
  * Ref list for `run.start` from the resolver's effective skills, blocklist re-checked here.
- * `unavailable` names the catalog skills (KOBE-315) whose runtime bundle this server does not hold
- * (catalog bytes are stored from KOBE-317 on): the caller reports them as omitted, never silently.
+ * `unavailable` names the catalog skills (KOBE-315) whose runtime bundle this server does not hold:
+ * Kobe's own versions always have theirs (KOBE-317), maintainer submissions until their packages
+ * are stored (KOBE-333) do not. The caller reports them as omitted, never silently.
  */
 export async function bundleRefsFor(
   tx: KobeTx,
@@ -98,7 +99,16 @@ async function sizesByHash(
         inArray(personalSkillVersions.contentHash, [...hashes]),
       ),
     );
+  // Catalog versions with stored bytes (KOBE-317): site-wide, like the catalog itself; which ones
+  // a run lists is the resolver's decision (the team's installs).
+  const catalog = await tx.execute<{ hash: string; size: number }>(sql`
+    SELECT DISTINCT runtime_hash AS hash, runtime_size_bytes AS size FROM registry_versions
+    WHERE runtime_hash IN (${sql.join(
+      hashes.map((h) => sql`${h}`),
+      sql`, `,
+    )}) AND runtime_storage_key IS NOT NULL`);
   for (const row of [...team, ...personal]) sizes.set(row.hash, row.size);
+  for (const row of catalog.rows) if (!sizes.has(row.hash)) sizes.set(row.hash, Number(row.size));
   return sizes;
 }
 
@@ -181,5 +191,12 @@ export async function locateBundle(
       and(eq(personalSkills.ownerUserId, who.userId), eq(personalSkillVersions.contentHash, hash)),
     )
     .limit(1);
-  return own ? { storageKey: own.key, size: own.size } : null;
+  if (own) return { storageKey: own.key, size: own.size };
+  // A catalog version's bytes (KOBE-317): the run.start check above is what scopes it.
+  const catalog = await tx.execute<{ key: string; size: number }>(sql`
+    SELECT runtime_storage_key AS key, runtime_size_bytes AS size FROM registry_versions
+    WHERE runtime_hash = ${hash} AND runtime_storage_key IS NOT NULL
+    ORDER BY seq DESC LIMIT 1`);
+  const row = catalog.rows[0];
+  return row ? { storageKey: row.key, size: Number(row.size) } : null;
 }
