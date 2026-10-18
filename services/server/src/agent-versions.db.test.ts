@@ -372,6 +372,28 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     expect(pin.ok && pin.version.definition.prompt).toBe("You are Pinned.");
   });
 
+  it("reports the model the pinned version pins (agent_model), so the chat locks its model (U22)", async () => {
+    // KOBE-44: the thread read's `agent_model` comes from the run resolver's pinnedModel seam; the
+    // chat hides "Regenerate with…" and locks the picker when it is set.
+    const id = await create("bob", "team", "Pins a model", { model: "pinned-alias" });
+    await published("bob", id);
+    const pinnedThread = await newThread("carol", id);
+    expect((await as.carol.get(`/v1/threads/${pinnedThread.thread_id}`)).json).toMatchObject({
+      agent_version: 1,
+      agent_model: "pinned-alias",
+    });
+    // v2 drops the pin: the v1 thread keeps v1's, a v2 thread has none.
+    expect((await edit("bob", id, "no model now")).status).toBe(200);
+    await published("bob", id);
+    expect((await as.carol.get(`/v1/threads/${pinnedThread.thread_id}`)).json.agent_model).toBe(
+      "pinned-alias",
+    );
+    const free = await newThread("carol", id);
+    expect((await as.carol.get(`/v1/threads/${free.thread_id}`)).json.agent_model).toBeNull();
+    const plain = await newThread("carol", null);
+    expect((await as.carol.get(`/v1/threads/${plain.thread_id}`)).json.agent_model).toBeNull();
+  });
+
   it("switches a thread to the current version in one click, or to a chosen one", async () => {
     const id = await create("bob", "team", "Switchy");
     await published("bob", id);

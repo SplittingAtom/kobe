@@ -44,6 +44,22 @@ function resolveRunAgent(
  * Per-call `versionAllowsCall` gating is KOBE-47.
  */
 export const PINNED_AGENTS: RunAgentResolver = {
+  /**
+   * The model alias the thread's pinned version pins (KOBE-44), the alias `resolve` hands the run:
+   * the thread read reports it as `agent_model`, and the chat locks its picker and hides
+   * "Regenerate with…" (U22). Reads Postgres only; an unavailable version pins nothing here (its
+   * run fails `agent_unavailable` anyway).
+   */
+  async pinnedModel(tx, input) {
+    if (input.agentId === null || input.agentScope === null) return undefined;
+    const { agentScope, agentId, agentVersion } = input;
+    const pinned = await resolveRunAgent(
+      tx,
+      { teamId: input.teamId, userId: input.ownerUserId },
+      { agentScope, agentId, agentVersion },
+    );
+    return pinned.ok ? pinned.version.definition.frontmatter.model : undefined;
+  },
   async resolve(tx, input) {
     const floor = await readApprovalFloor(tx);
     if (input.agentId === null || input.agentScope === null) {
