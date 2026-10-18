@@ -15582,7 +15582,7 @@
         },
         "registry_skills_kobe_names": {
           "name": "registry_skills_kobe_names",
-          "value": "\"registry_skills\".\"publisher\" = 'kobe' OR \"registry_skills\".\"name\" NOT IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator')"
+          "value": "(\"registry_skills\".\"publisher\" = 'kobe') = (\"registry_skills\".\"name\" IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator'))"
         }
       },
       "isRLSEnabled": false

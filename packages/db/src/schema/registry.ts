@@ -117,10 +117,12 @@ export const registrySkills = pgTable(
       sql`char_length(${t.summary}) BETWEEN 1 AND ${sql.raw(String(SUMMARY_MAX))}`,
     ),
     check("registry_skills_replacement_not_self", sql`${t.replacementId} <> ${t.id}`),
-    // Built-in names stay Kobe's (SK4, SK24): no maintainer skill can take one.
+    // Built-in names stay Kobe's and Kobe publishes only them (SK4, SK24, review-317 S2): no
+    // maintainer skill takes one, and `kobe` (approved without a reviewer) can't carry any other
+    // name or be renamed away from one.
     check(
       "registry_skills_kobe_names",
-      sql`${t.publisher} = 'kobe' OR ${t.name} NOT IN (${quoted(KOBE_SKILL_NAMES)})`,
+      sql`(${t.publisher} = 'kobe') = (${t.name} IN (${quoted(KOBE_SKILL_NAMES)}))`,
     ),
   ],
 );

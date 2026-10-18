@@ -13,7 +13,7 @@ ALTER TABLE "skill_default_syncs" ADD COLUMN "by_kobe" boolean DEFAULT false NOT
 ALTER TABLE "registry_skills" ADD CONSTRAINT "registry_skills_id_publisher_unique" UNIQUE("id","publisher");--> statement-breakpoint
 ALTER TABLE "registry_versions" ADD CONSTRAINT "registry_versions_publisher_fk" FOREIGN KEY ("skill_id","publisher") REFERENCES "public"."registry_skills"("id","publisher") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "registry_skill_tags" ADD CONSTRAINT "registry_skill_tags_by_kobe" CHECK ("registry_skill_tags"."by_kobe" = ("registry_skill_tags"."added_by" IS NULL));--> statement-breakpoint
-ALTER TABLE "registry_skills" ADD CONSTRAINT "registry_skills_kobe_names" CHECK ("registry_skills"."publisher" = 'kobe' OR "registry_skills"."name" NOT IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator'));--> statement-breakpoint
+ALTER TABLE "registry_skills" ADD CONSTRAINT "registry_skills_kobe_names" CHECK (("registry_skills"."publisher" = 'kobe') = ("registry_skills"."name" IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator')));--> statement-breakpoint
 ALTER TABLE "registry_versions" ADD CONSTRAINT "registry_versions_kobe_publisher" CHECK (("registry_versions"."publisher" = 'kobe') = ("registry_versions"."submitted_by" IS NULL)
         AND ("registry_versions"."publisher" <> 'kobe' OR ("registry_versions"."reviewed_by" IS NULL AND "registry_versions"."claimed_by" IS NULL
           AND NOT "registry_versions"."self_approved" AND "registry_versions"."runtime_storage_key" IS NOT NULL)));--> statement-breakpoint
