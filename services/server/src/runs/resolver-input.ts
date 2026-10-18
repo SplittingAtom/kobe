@@ -3,7 +3,7 @@ import { isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, teamSkills, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
-import { approvedTeamSkills, personalSkillUsage } from "../skills/review.js";
+import { approvedTeamSkills, personalSkillUsage, teamSkillStates } from "../skills/review.js";
 import { readPersonalSkillsDisabled } from "../skills/settings.js";
 
 /**
@@ -30,8 +30,12 @@ export interface SkillFacts {
   readonly user: readonly SkillRef[];
   /** Agent skill names with no approved team version (KOBE-99). */
   readonly agentUnapproved: readonly string[];
+  /** Agent skill names whose approved version a rescan suspended (KOBE-313). */
+  readonly agentSuspended: readonly string[];
   /** Personal skills blocked for lack of this team's approval (KOBE-99). */
   readonly userUnapproved: readonly string[];
+  /** Personal skills a rescan suspended, pending this team's review (KOBE-313). */
+  readonly userSuspended: readonly string[];
   /** The team's skills offered to all agents (KOBE-297), at their newest approved versions. */
   readonly offered: readonly SkillRef[];
   /** Hashes among the three lists that the site blocklist holds (read at this run start, KOBE-81). */
@@ -85,7 +89,8 @@ export async function loadSkillFacts(
   const agentBuiltin = [...new Set(args.agentSkillNames.filter(isBuiltinSkillName))];
   const teamNames = args.agentSkillNames.filter((n) => !isBuiltinSkillName(n));
   // One transaction, one connection: these reads run one after the other.
-  const agent = (await approvedTeamSkills(tx, args.teamId, teamNames)).map(fromTeam);
+  const named = await teamSkillStates(tx, args.teamId, teamNames);
+  const agent = named.approved.map(fromTeam);
   const user = await personalSkillUsage(tx, {
     teamId: args.teamId,
     userId: args.userId,
@@ -99,7 +104,7 @@ export async function loadSkillFacts(
   )
     .map(fromTeam)
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const approved = new Set(agent.map((s) => s.name));
+  const decided = new Set([...agent.map((s) => s.name), ...named.suspended]);
   // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
   const blockedHashes = await blockedAmong(
     tx,
@@ -111,8 +116,10 @@ export async function loadSkillFacts(
     user: usable,
     offered,
     blockedHashes,
-    agentUnapproved: [...new Set(teamNames)].filter((n) => !approved.has(n)),
+    agentUnapproved: [...new Set(teamNames)].filter((n) => !decided.has(n)),
+    agentSuspended: named.suspended,
     userUnapproved: user.blocked,
+    userSuspended: user.suspended,
   };
 }
 
@@ -137,6 +144,7 @@ export function buildResolveInput(args: {
       skills: args.skills.agent,
       builtinSkills: args.skills.agentBuiltin,
       unapprovedSkills: args.skills.agentUnapproved,
+      suspendedSkills: args.skills.agentSuspended,
       exclusiveSkills: agentSkills(frontmatter).exclusive,
       // `connectors: all` (KOBE-254) stays a request: the resolver intersects it like a list.
       connectors: connectors.all ? "all" : connectors.names,
@@ -150,6 +158,7 @@ export function buildResolveInput(args: {
     user: {
       skills: args.skills.user,
       unapprovedSkills: args.skills.userUnapproved,
+      suspendedSkills: args.skills.userSuspended,
       connectedConnectors: args.connectedConnectors,
     },
     approvalFloor: args.floor,

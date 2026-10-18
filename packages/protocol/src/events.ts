@@ -109,6 +109,8 @@ const contextOmissionSchema = z.strictObject({
     "not_approved",
     // KOBE-297: over the run.start cap (`SKILL_BUNDLES_MAX`); offered skills go first.
     "skill_limit",
+    // KOBE-313: a rescan on a scanner rule-set change turned the version Block; pending review.
+    "suspended",
   ]),
 });
 

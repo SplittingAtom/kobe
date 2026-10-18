@@ -57,6 +57,8 @@ const reviewJson = (r: ReviewRecord) => ({
   skipped: r.skipped,
   scannedAt: r.scannedAt,
   blocked: r.blocked,
+  /** A rescan on a scanner rule-set change turned the approved version Block (KOBE-313). */
+  suspended: r.suspendedAt !== null,
   reviewedBy: r.reviewedBy,
   reviewedAt: r.reviewedAt,
   reviewNote: r.reviewNote,

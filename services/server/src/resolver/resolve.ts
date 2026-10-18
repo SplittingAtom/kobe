@@ -34,6 +34,8 @@ export interface ResolveInput {
     readonly builtinSkills?: readonly string[];
     /** Named skills with no approved version for the team (KOBE-99): omitted as `not_approved`. */
     readonly unapprovedSkills?: readonly string[];
+    /** Named skills whose approved version a rescan suspended (KOBE-313): `suspended`. */
+    readonly suspendedSkills?: readonly string[];
     /** Exclusive agents ignore the user's skills. */
     readonly exclusiveSkills: boolean;
     /** Named connectors, or `all`: the team's enabled list (agent file `connectors: all`, KOBE-254). */
@@ -57,6 +59,8 @@ export interface ResolveInput {
     readonly skills: readonly SkillRef[];
     /** Personal skills blocked for lack of this team's approval (KOBE-99). */
     readonly unapprovedSkills?: readonly string[];
+    /** Personal skills a rescan suspended (KOBE-313), pending this team's review. */
+    readonly suspendedSkills?: readonly string[];
     /** A mode the user prefers; can only tighten. */
     readonly approvalMode?: ApprovalMode | null;
     /** Connectors the user has connected (KOBE-76 decides what to pass until KOBE-61). */
@@ -75,7 +79,8 @@ export type OmissionReason =
   | "not_user_connected"
   | "no_team_default"
   | "not_approved"
-  | "skill_limit";
+  | "skill_limit"
+  | "suspended";
 
 export interface Omission {
   readonly kind: "skill" | "connector" | "model";
@@ -122,6 +127,9 @@ function resolveSkills(input: ResolveInput): {
   for (const name of input.agent.unapprovedSkills ?? []) {
     omissions.push({ kind: "skill", name, reason: "not_approved" });
   }
+  for (const name of input.agent.suspendedSkills ?? []) {
+    omissions.push({ kind: "skill", name, reason: "suspended" });
+  }
   const agentNames = new Set([
     ...input.agent.skills.map((s) => s.name),
     ...(input.agent.builtinSkills ?? []),
@@ -135,13 +143,17 @@ function resolveSkills(input: ResolveInput): {
   }
   // A personal skill the team's switch or an exclusive agent hides is explained by that, not by
   // its review state.
-  for (const name of input.user.unapprovedSkills ?? []) {
-    const reason = input.agent.exclusiveSkills
+  const userReason = (otherwise: OmissionReason): OmissionReason =>
+    input.agent.exclusiveSkills
       ? "agent_exclusive"
       : input.team.personalSkillsDisabled
         ? "team_disabled"
-        : "not_approved";
-    omissions.push({ kind: "skill", name, reason });
+        : otherwise;
+  for (const name of input.user.unapprovedSkills ?? []) {
+    omissions.push({ kind: "skill", name, reason: userReason("not_approved") });
+  }
+  for (const name of input.user.suspendedSkills ?? []) {
+    omissions.push({ kind: "skill", name, reason: userReason("suspended") });
   }
   if (!input.agent.exclusiveSkills) {
     const taken = new Set([...agentNames, ...skills.map((s) => s.name)]);

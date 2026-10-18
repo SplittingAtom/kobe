@@ -9,6 +9,8 @@ import {
   eq,
   getTableColumns,
   inArray,
+  isNotNull,
+  or,
   sql,
   personalSkillScans,
   personalSkills,
@@ -44,11 +46,13 @@ export function scanCanonicalZip(zip: Uint8Array): ScanResult {
   return scanSkillBundle(Object.entries(entries).map(([path, bytes]) => ({ path, bytes })));
 }
 
-const storedScan = (scan: ScanResult) => ({
+/** The columns a scan fills in a review row or personal scan row. */
+export const storedScan = (scan: ScanResult) => ({
   flagged: scan.verdict !== "pass",
   findings: scan.findings.map((f) => ({ ...f })),
   scripts: [...scan.scripts],
   skipped: [...scan.skipped],
+  ruleSetVersion: scan.ruleSetVersion,
 });
 
 /** Creates the pending review row of a just-inserted team version (inside its transaction). */
@@ -89,6 +93,8 @@ export interface ReviewRecord {
   readonly reviewNote: string | null;
   /** The bundle hash is on the site blocklist (KOBE-81): it can't be approved. */
   readonly blocked: boolean;
+  /** A rescan turned this approved version Block (KOBE-313): it waits for a new decision. */
+  readonly suspendedAt: Date | null;
 }
 
 /**
@@ -408,6 +414,8 @@ export function decideReview(
         reviewedBy: decision.reviewerId,
         reviewedAt,
         reviewNote: decision.note,
+        // A decision answers a suspension (KOBE-313).
+        suspendedAt: null,
       })
       .where(key);
     await recordAudit(tx, {
@@ -435,39 +443,56 @@ export function decideReview(
       reviewedAt,
       reviewNote: decision.note,
       blocked,
+      suspendedAt: null,
     };
     return { ok: true, review };
   });
 }
 
 /**
- * The newest approved version of each named team skill, for the resolver. A newer pending or
- * rejected version never hides an older approved one; a skill with no approved version is absent.
+ * The newest approved version of each named team skill, for the resolver, and the names whose
+ * newest approved version a rescan suspended (KOBE-313: omitted as `suspended`, never replaced by
+ * an older version). A newer pending or rejected version never hides an older approved one; a
+ * skill with no approved version is in neither list.
  */
-export async function approvedTeamSkills(
+export async function teamSkillStates(
   tx: KobeTx,
   teamId: string,
   names: readonly string[],
-): Promise<{ name: string; hash: string }[]> {
-  if (names.length === 0) return [];
+): Promise<{ approved: { name: string; hash: string }[]; suspended: string[] }> {
+  if (names.length === 0) return { approved: [], suspended: [] };
   const rows = await tx
     .select({
       slug: teamSkillReviews.slug,
       hash: teamSkillReviews.contentHash,
+      suspendedAt: teamSkillReviews.suspendedAt,
     })
     .from(teamSkillReviews)
     .where(
       and(
         eq(teamSkillReviews.teamId, teamId),
         eq(teamSkillReviews.scope, "team"),
-        eq(teamSkillReviews.status, "approved"),
+        or(eq(teamSkillReviews.status, "approved"), isNotNull(teamSkillReviews.suspendedAt)),
         inArray(teamSkillReviews.slug, [...names]),
       ),
     )
     .orderBy(desc(teamSkillReviews.version));
-  const newest = new Map<string, string>();
-  for (const r of rows) if (!newest.has(r.slug)) newest.set(r.slug, r.hash);
-  return [...newest].map(([name, hash]) => ({ name, hash }));
+  const newest = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) if (!newest.has(r.slug)) newest.set(r.slug, r);
+  const all = [...newest.values()];
+  return {
+    approved: all.filter((r) => !r.suspendedAt).map((r) => ({ name: r.slug, hash: r.hash })),
+    suspended: all.filter((r) => r.suspendedAt).map((r) => r.slug),
+  };
+}
+
+/** The newest approved, not suspended, version of each named team skill (see teamSkillStates). */
+export async function approvedTeamSkills(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+): Promise<{ name: string; hash: string }[]> {
+  return (await teamSkillStates(tx, teamId, names)).approved;
 }
 
 /**
@@ -482,11 +507,15 @@ export async function usablePersonalSkills(
   return (await personalSkillUsage(tx, args)).usable;
 }
 
-/** Like `usablePersonalSkills`, plus the names blocked for lack of this team's approval. */
+/**
+ * Like `usablePersonalSkills`, plus the names blocked for lack of this team's approval, and those
+ * blocked because a rescan suspended them (KOBE-313: the version turned Block, in its own scan or
+ * in this team's approved review row).
+ */
 export async function personalSkillUsage(
   tx: KobeTx,
   args: { teamId: string; userId: string; ensureRows: boolean },
-): Promise<{ usable: { name: string; hash: string }[]; blocked: string[] }> {
+): Promise<{ usable: { name: string; hash: string }[]; blocked: string[]; suspended: string[] }> {
   const rows = await tx
     .select({
       skillId: personalSkills.id,
@@ -498,6 +527,8 @@ export async function personalSkillUsage(
         findings: personalSkillScans.findings,
         scripts: personalSkillScans.scripts,
         skipped: personalSkillScans.skipped,
+        ruleSetVersion: personalSkillScans.ruleSetVersion,
+        suspendedAt: personalSkillScans.suspendedAt,
       },
     })
     .from(personalSkills)
@@ -522,13 +553,14 @@ export async function personalSkillUsage(
     r.scan === null || r.scan.flagged || storedVerdict(r.scan) !== "pass";
   const needsApproval = rows.filter(needs);
   if (needsApproval.length === 0) {
-    return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [] };
+    return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [], suspended: [] };
   }
   const decided = await tx
     .select({
       skillId: teamSkillReviews.skillId,
       version: teamSkillReviews.version,
       status: teamSkillReviews.status,
+      suspendedAt: teamSkillReviews.suspendedAt,
     })
     .from(teamSkillReviews)
     .where(
@@ -541,6 +573,9 @@ export async function personalSkillUsage(
       ),
     );
   const status = new Map(decided.map((d) => [`${d.skillId}:${d.version}`, d.status]));
+  const suspendedHere = new Set(
+    decided.filter((d) => d.suspendedAt).map((d) => `${d.skillId}:${d.version}`),
+  );
   if (args.ensureRows) {
     const missing = needsApproval.filter((r) => !status.has(`${r.skillId}:${r.version}`));
     if (missing.length > 0) {
@@ -559,6 +594,7 @@ export async function personalSkillUsage(
             findings: r.scan?.findings ?? [],
             scripts: r.scan?.scripts ?? [],
             skipped: r.scan?.skipped ?? [],
+            ruleSetVersion: r.scan?.ruleSetVersion ?? null,
           })),
         )
         .onConflictDoNothing();
@@ -566,9 +602,18 @@ export async function personalSkillUsage(
   }
   const isUsable = (r: (typeof rows)[number]) =>
     !needs(r) || status.get(`${r.skillId}:${r.version}`) === "approved";
+  const isSuspended = (r: (typeof rows)[number]) => {
+    const key = `${r.skillId}:${r.version}`;
+    // Suspended in its own scan: until this team decides it (an approval makes it usable).
+    return (
+      suspendedHere.has(key) || (r.scan?.suspendedAt != null && status.get(key) !== "rejected")
+    );
+  };
+  const unusable = rows.filter((r) => !isUsable(r));
   return {
     usable: rows.filter(isUsable).map(({ name, hash }) => ({ name, hash })),
-    blocked: rows.filter((r) => !isUsable(r)).map((r) => r.name),
+    blocked: unusable.filter((r) => !isSuspended(r)).map((r) => r.name),
+    suspended: unusable.filter(isSuspended).map((r) => r.name),
   };
 }
 

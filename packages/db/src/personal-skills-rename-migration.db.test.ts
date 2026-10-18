@@ -230,7 +230,7 @@ describe("personal skills rename migration on an existing database (KOBE-307)", 
     });
   });
 
-  it("keeps the app role's grants: skills read-write, versions and scans append-only", async () => {
+  it("keeps the app role's grants: skills read-write, versions append-only, scans rescannable", async () => {
     const { adminUrl, appRole } = database();
     await withClient(adminUrl, async (c) => {
       const privileges = async (table: string) => {
@@ -243,7 +243,8 @@ describe("personal skills rename migration on an existing database (KOBE-307)", 
       };
       expect(await privileges("personal_skills")).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
       expect(await privileges("personal_skill_versions")).toEqual(["INSERT", "SELECT"]);
-      expect(await privileges("personal_skill_scans")).toEqual(["INSERT", "SELECT"]);
+      // KOBE-313: rescans on a rule-set change update a scan in place.
+      expect(await privileges("personal_skill_scans")).toEqual(["INSERT", "SELECT", "UPDATE"]);
     });
   });
 

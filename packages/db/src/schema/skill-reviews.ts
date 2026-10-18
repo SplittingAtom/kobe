@@ -51,6 +51,13 @@ export const personalSkillScans = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** The scanner rule set of this scan (KOBE-313); null: an older one, so it is rescanned. */
+    ruleSetVersion: text(),
+    /**
+     * A rescan turned this unreviewed (Pass) version Block (KOBE-313, SK32): it now needs each
+     * team's approval, and runs omit it as `suspended` until then.
+     */
+    suspendedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.skillId, t.version] }),
@@ -88,6 +95,13 @@ export const teamSkillReviews = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** The scanner rule set of this scan (KOBE-313); null: an older one, so it is rescanned. */
+    ruleSetVersion: text(),
+    /**
+     * A rescan turned this approved version Block (KOBE-313, SK32): it went back to `pending` and
+     * runs omit the skill as `suspended` until it is decided again (the decision clears this).
+     */
+    suspendedAt: timestamp({ withTimezone: true }),
     // Users are deactivated, never deleted (NO ACTION).
     reviewedBy: uuid().references(() => users.id),
     reviewedAt: timestamp({ withTimezone: true }),

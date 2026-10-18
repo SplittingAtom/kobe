@@ -47,3 +47,4 @@ export * from "./skill-hash-checks.js";
 export * from "./registry.js";
 export * from "./grants.js";
 export * from "./installs.js";
+export * from "./skill-rescans.js";

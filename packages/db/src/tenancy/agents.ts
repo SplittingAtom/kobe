@@ -38,6 +38,8 @@ export const agents = defineDomain({
     "registry_skill_tags",
     "site_grants",
     "site_skill_settings",
+    // Rescans on a scanner rule-set change (KOBE-313).
+    "skill_rescan_runs",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -49,7 +51,8 @@ export const agents = defineDomain({
     personal_skills: ALL_PRIVILEGES,
     personal_skill_versions: ["SELECT", "INSERT"],
     // Scans of personal versions (KOBE-80): written with the version, read at run start.
-    personal_skill_scans: ["SELECT", "INSERT"],
+    // Rescans on a rule-set change (KOBE-313) update them in place.
+    personal_skill_scans: ["SELECT", "INSERT", "UPDATE"],
     // Published gallery scores (KOBE-94): append and read only.
     gallery_agent_scores: ["SELECT", "INSERT"],
     // The blocklist (KOBE-81): the server lets only site admins add or remove rows (no UPDATE).
@@ -69,6 +72,8 @@ export const agents = defineDomain({
     site_grants: ["SELECT", "INSERT", "DELETE"],
     // One seeded row: read and changed, never added or removed.
     site_skill_settings: ["SELECT", "UPDATE"],
+    // One row per rule set, updated as the rescan runs; kept as the record.
+    skill_rescan_runs: ["SELECT", "INSERT", "UPDATE"],
   },
   teamReferencing: {
     site_skill_settings:

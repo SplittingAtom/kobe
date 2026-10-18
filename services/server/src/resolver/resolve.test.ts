@@ -183,6 +183,29 @@ describe("skills", () => {
     ]);
   });
 
+  it("KOBE-313: versions a rescan suspended are omitted as suspended, agent's and user's", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: [sk("a")], suspendedSkills: ["held"] },
+        user: { skills: [], suspendedSkills: ["mine"] },
+      }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["a"]);
+    expect(r.ok && r.value.omissions).toEqual([
+      { kind: "skill", name: "held", reason: "suspended" },
+      { kind: "skill", name: "mine", reason: "suspended" },
+    ]);
+    const off = resolveEffective(
+      with_({
+        team: { personalSkillsDisabled: true },
+        user: { skills: [], suspendedSkills: ["mine"] },
+      }),
+    );
+    expect(off.ok && off.value.omissions).toEqual([
+      { kind: "skill", name: "mine", reason: "team_disabled" },
+    ]);
+  });
+
   it("KOBE-99: an exclusive agent or the team switch explains personal skills first", () => {
     const user = { skills: [], unapprovedSkills: ["risky"] };
     const exclusive = resolveEffective(with_({ agent: { exclusiveSkills: true }, user }));

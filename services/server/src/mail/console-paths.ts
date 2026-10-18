@@ -13,6 +13,8 @@ export const CONSOLE_PATHS = {
   teamBreakGlass: `${TEAM_CONSOLE}/break-glass`,
   teamBudgets: `${TEAM_CONSOLE}/budgets`,
   teamEgress: `${TEAM_CONSOLE}/egress`,
+  teamSkillReview: `${TEAM_CONSOLE}/skill-review`,
+  mySkills: "/me/skills",
   /** The chat: members see their own budget there (the budget banner); no admin console needed. */
   chat: "/",
 } as const;

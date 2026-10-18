@@ -176,6 +176,11 @@ export const registryVersions = pgTable(
      * reviewer. Set by the database only (`registry_versions_review_guard`).
      */
     selfApproved: boolean().notNull().default(false),
+    /**
+     * A rescan on a rule-set change turned this published version Block (KOBE-313, SK32): it is
+     * suspended (omitted at resolve) pending review. The scan's `rulesVersion` names the rule set.
+     */
+    suspendedAt: ts(),
     /** Git mirror status of an approved version (SK29, optional). */
     mirror: jsonb().$type<Record<string, unknown>>(),
     updatedAt: ts().notNull().defaultNow(),

@@ -1341,6 +1341,18 @@ export const AUDIT_EVENTS = {
       .regex(/^[0-9a-f]{64}$/)
       .optional(),
   }),
+  /**
+   * A rescan on a scanner rule-set change (KOBE-313, SK32) turned a version Block and suspended
+   * it pending review: in a team (its review row) or site-wide (a personal version's own scan).
+   * Ids, slug and rule set only.
+   */
+  "skill.rescan.suspended": event("any", {
+    skillId: id,
+    slug,
+    version,
+    scope: z.enum(["team", "personal"]),
+    ruleSetVersion: z.string().min(1).max(64),
+  }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
   /** A team admin turned a team skill's "Offer to all agents" on or off (KOBE-297). */

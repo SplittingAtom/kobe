@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { startSkillHashRecompute } from "./skills/hash-checks.js";
+import { startSkillRescan } from "./skills/rescan.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
@@ -202,6 +203,19 @@ if (deps && config.process === "server") {
 const stopSkillHashRecompute =
   deps?.blobs && config.process === "server"
     ? startSkillHashRecompute({ database: deps.database, blobs: deps.blobs, log: logger })
+    : undefined;
+
+// Rescans on a scanner rule-set change (KOBE-313, SK32): at start and every 10 minutes, one
+// replica at a time (advisory lock), once per rule set (skill_rescan_runs); a no-op once done.
+const stopSkillRescan =
+  deps?.blobs && config.process === "server"
+    ? startSkillRescan({
+        database: deps.database,
+        blobs: deps.blobs,
+        log: logger,
+        mailer: deps.mailer,
+        publicUrl: deps.publicUrl,
+      })
     : undefined;
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
@@ -606,6 +620,7 @@ function shutdown(signal: string): void {
   schedulerRunner?.stop();
   stopRunHook?.();
   stopSkillHashRecompute?.();
+  stopSkillRescan?.();
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();
