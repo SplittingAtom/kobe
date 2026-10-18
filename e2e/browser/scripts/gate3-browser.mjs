@@ -122,6 +122,9 @@ async function memoryChip(page) {
   await page.goto(`${BASE}/?thread=${env("KOBE_BROWSER_MEMORY_THREAD")}`);
   const composer = page.getByRole("textbox", { name: "Message", exact: true });
   await composer.waitFor({ timeout: SHELL_MS });
+  // The composer shows before the thread has loaded; a message sent then may start a new thread.
+  // Type once the thread's earlier turns (gate3.sh's remember v1 and v2) are on screen.
+  await page.locator('[data-role="assistant"]').first().waitFor({ timeout: SHELL_MS });
   await composer.fill(env("KOBE_BROWSER_MEMORY_PROMPT"));
   await composer.press("Enter");
   const chip = page.getByText(/Memory updated/).first();
@@ -138,6 +141,7 @@ async function memoryChip(page) {
       .innerText()
       .catch(() => "-");
     out("memory_page", oneLine(said).slice(-400));
+    out("memory_url_thread", new URL(page.url()).searchParams.get("thread") ?? "-");
     const alerts = await page
       .getByRole("alert")
       .allInnerTexts()

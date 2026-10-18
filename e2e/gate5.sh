@@ -205,7 +205,10 @@ for s in $STORIES; do
   files+=($(specs_of "$s"))
 done
 PUBLIC_URL=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- printenv KOBE_PUBLIC_URL 2>/dev/null || true)
-KILL_CMD="$KUBECTL -n $TNS delete pod -l agents.x-k8s.io/claim-uid=\$($KUBECTL -n $TNS get sandboxclaim u-$AD -o jsonpath='{.metadata.uid}') --wait=false"
+# U19's interrupt deletes the member's sandbox pod mid-run; its agent log (Pi starts, exits,
+# refusals) goes with it, so the command keeps a copy first (printed below when U19 fails).
+SBX_SELECTOR="agents.x-k8s.io/claim-uid=\$($KUBECTL -n $TNS get sandboxclaim u-$AD -o jsonpath='{.metadata.uid}')"
+KILL_CMD="$KUBECTL -n $TNS logs -l $SBX_SELECTOR --all-containers --tail=-1 >\"$WORK/sandbox-killed-\$(date +%s).log\" 2>&1; $KUBECTL -n $TNS delete pod -l $SBX_SELECTOR --wait=false"
 browser_env() { # the variables the specs read, except the passwords
   printf 'KOBE_BASE_URL=%s KOBE_USER=gate5-ad@gate5.test KOBE_USER2=gate5-m2@gate5.test KOBE_FAKE_MODEL=%s KOBE_GATE5_PINNED_THREAD=%s KOBE_GATE5_MODEL2=%s' \
     "$PUBLIC_URL" "$FAKE" "${PINNED_THREAD:-}" "${MODEL2:-}"
@@ -260,6 +263,12 @@ for s in $STORIES; do
   esac
 done
 n=$(wc -w <<<"$STORIES" | tr -d ' ')
+# Evidence for a failed U19: what the killed sandboxes' agents logged before the pod went.
+for f in "$WORK"/sandbox-killed-*.log; do
+  [[ -f "$f" && "$failed" == 1 ]] || continue
+  echo "     --- the sandbox agent's log before U19 deleted its pod ($(basename "$f")):"
+  tail -150 "$f" | cut -c1-500 | sed 's/^/     /' || true
+done
 if ((failed)); then
   verdict "Gate 5: FAILED ($proven of $n stories proven; the API checks above count too)"
   exit 1
