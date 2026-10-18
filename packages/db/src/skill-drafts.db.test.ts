@@ -365,6 +365,34 @@ describe("legal hold (D18): held content is copied aside, never refused", () => 
     await release(h);
   });
 
+  it("keeps a held co-editor's attribution when someone re-saves the same content (R1)", async () => {
+    const t = await team();
+    const author = await user("Author");
+    const coEditor = await user("CoEditor");
+    const id = await newDraft(t, "resave", author);
+    await put(file(id, "scripts/x.py", "by co-editor", coEditor, t), t);
+    const h = await hold(t, coEditor);
+    await put(file(id, "scripts/x.py", "by co-editor", author, t), t);
+    const [row] = (
+      await admin.query<{ updated_by: string }>(
+        `SELECT updated_by FROM skill_draft_files WHERE draft_id = $1`,
+        [id],
+      )
+    ).rows;
+    expect(row?.updated_by).toBe(coEditor);
+    expect(await fileHistory(id)).toEqual([]);
+    await withTeam(app.db, t, (tx) => tx.delete(skillDrafts).where(eq(skillDrafts.id, id)));
+    expect(await fileHistory(id)).toEqual([
+      {
+        path: "scripts/x.py",
+        text_content: "by co-editor",
+        change: "deleted",
+        written_by: coEditor,
+      },
+    ]);
+    await release(h);
+  });
+
   it("keeps a held draft's sharing change and leaves unheld drafts alone", async () => {
     const t = await team();
     const held = await user("Held");

@@ -152,13 +152,17 @@ CREATE FUNCTION "public"."skill_draft_held"(team uuid, owner uuid, writer uuid) 
 $$;--> statement-breakpoint
 
 -- A file's content overwritten: the old content is kept while a hold covers the draft's author or
--- its writer. An unchanged write (a retry) keeps nothing.
+-- its writer. An unchanged write (a retry, or someone saving the same bytes) keeps nothing and
+-- keeps the content's writer and time: the content is still theirs, so a hold on them still covers
+-- it (re-review R1).
 CREATE FUNCTION "public"."skill_draft_files_keep_overwritten"() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 DECLARE
   owner uuid;
 BEGIN
   IF (NEW.path, NEW.text_content, NEW.bytes) IS NOT DISTINCT FROM (OLD.path, OLD.text_content, OLD.bytes) THEN
+    NEW.updated_by := OLD.updated_by;
+    NEW.updated_at := OLD.updated_at;
     RETURN NEW;
   END IF;
   PERFORM "public"."legal_hold_lock_shared"();
