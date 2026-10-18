@@ -308,6 +308,12 @@
   border-inline-start: 0;
 }
 
+/* A My area page beside the thread (CE4, KOBE-424) takes the column over; the artifact tabs stay
+   mounted behind it (their previews keep their state) and come back when it closes. */
+.artifact:has(> [data-kobe-area]) > :not([data-kobe-area]) {
+  display: none;
+}
+
 .artifact > * + * {
   border-top: 1px solid var(--admin-border);
 }

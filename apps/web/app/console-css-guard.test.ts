@@ -207,14 +207,17 @@ function moduleImports(file: string): string[] {
 }
 
 /**
- * The global stylesheets console code may import: the two layouts load the console sheet, and the
- * agent builder's test pane the chat's (it renders the chat).
+ * The global stylesheets console code may import: the two layouts load the console sheet, the
+ * agent builder's test pane the chat's (it renders the chat), and the My area pages beside the
+ * thread the console's (the chat renders them).
  */
 const CSS_IMPORTS: Readonly<Record<string, string>> = {
   [join("app", "admin", "layout.tsx")]: "./admin-global.css",
   [join("app", "me", "layout.tsx")]: "../admin/admin-global.css",
   [join("components", "admin", "team", "agent-builder", "test-pane.tsx")]:
     "../../../../app/chat-global.css",
+  // My area pages beside the thread in the chat (CE4, KOBE-424): the chat page gets the sheet.
+  [join("components", "me", "area-beside.tsx")]: "../../app/admin/admin-global.css",
 };
 
 /** Pages that render a component built on the primitives and add no markup of their own. */

@@ -814,6 +814,20 @@ export class FakeKobe {
       this.failNext.delete(key);
       return forced;
     }
+    // The member and their access in the active team (the My area pages beside the thread, KOBE-424).
+    if (url.pathname === "/v1/me" && method === "GET") {
+      return json(200, {
+        user: { id: uuid(3, 1), name: "Ann", email: "ann@example.com" },
+        site_role: null,
+      });
+    }
+    if (url.pathname === "/v1/team" && method === "GET") {
+      return json(200, {
+        team: { id: this.teamId, slug: "fin", name: "Finance" },
+        role: this.teamRole,
+        permissions: ["team.chat"],
+      });
+    }
     if (url.pathname === "/v1/me/teams") {
       return json(200, {
         activeTeamId: this.activeTeamId,

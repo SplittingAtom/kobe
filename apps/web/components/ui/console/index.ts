@@ -26,7 +26,7 @@ export { FOCUS_RING } from "./focus";
 export { Checkbox, ChoiceGroup, Radio, Select, Switch, Textarea, TextInput } from "./inputs";
 export { ConsoleLayout, ConsoleMain, ConsoleWho } from "./layout";
 export { Notice, type NoticeTone } from "./notice";
-export { PageHeader } from "./page-header";
+export { EmbeddedPage, PageHeader } from "./page-header";
 export { RowMenu, type RowMenuItem } from "./row-menu";
 export { Card, Section } from "./section";
 export { SideNav, SideNavGroup, SideNavLink } from "./side-nav";
