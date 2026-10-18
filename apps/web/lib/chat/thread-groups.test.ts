@@ -38,9 +38,29 @@ describe("thread groups (CE5)", () => {
       "project",
       "ungrouped",
       "scheduled",
+      "workbench",
       "shared",
       "archived",
       "trash",
+    ]);
+  });
+
+  it("keeps Workbench test chats in their own group, after Scheduled (KOBE-323)", () => {
+    const groups = groupThreads(
+      [
+        listed("a", { projectId: null }),
+        listed("w1", { projectId: null, workbench: true }),
+        listed("s", { projectId: null, scheduled: true }),
+        listed("w2", { projectId: null, workbench: true, pinned: true }),
+      ],
+      [],
+      () => undefined,
+    );
+    expect(groups.map((g) => [g.kind, g.label, g.threads.map((t) => t.id)])).toEqual([
+      ["pinned", "Pinned", ["w2"]],
+      ["ungrouped", "Your threads", ["a"]],
+      ["scheduled", "Scheduled", ["s"]],
+      ["workbench", "Workbench", ["w1"]],
     ]);
   });
 
@@ -79,11 +99,12 @@ describe("thread groups (CE5)", () => {
       null,
       "x",
       3,
-      { projectId: 7, scheduled: "yes", shared: 1, pinned: "true", archived: 1 },
+      { projectId: 7, scheduled: "yes", shared: 1, pinned: "true", archived: 1, workbench: 1 },
     ]) {
       expect(placementOf(custom)).toEqual({
         projectId: null,
         scheduled: false,
+        workbench: false,
         shared: false,
         visibility: "private",
         pinned: false,

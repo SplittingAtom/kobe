@@ -65,7 +65,8 @@ export interface SkillMarker {
   readonly userEntryId: string | null;
   readonly toolCallId: string;
   readonly name: string;
-  readonly source: "team" | "personal" | "builtin" | "catalog";
+  /** `draft`: a Workbench test chat's draft (KOBE-323). */
+  readonly source: "team" | "personal" | "builtin" | "catalog" | "draft";
   /** The version the run loaded (KOBE-315); absent for built-ins and older runs. */
   readonly semver?: string | undefined;
 }

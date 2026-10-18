@@ -30,6 +30,8 @@ interface FakeThread {
   agent_model?: string | null;
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
   is_test?: boolean;
+  /** A Workbench test chat (KOBE-323): listed, runs only this draft. */
+  skill_draft_id?: string;
   agent_id?: string | null;
   /** What the thread detail says of the pinned agent (KOBE-122). */
   agent_name?: string | null;
@@ -757,6 +759,9 @@ export class FakeKobe {
       agent_id: thread.agent_id ?? null,
       agent_version: null,
       is_test: thread.is_test ?? false,
+      ...(thread.skill_draft_id === undefined
+        ? {}
+        : { skill_test: true, skill_draft_id: thread.skill_draft_id }),
       shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
       // KOBE-301: an approval waits for the caller (the fake has one member: the run's user).
@@ -1292,6 +1297,8 @@ export class FakeKobe {
       }
       if (body?.test === true) {
         Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
+      } else if (typeof body?.skill_draft_id === "string") {
+        Object.assign(this.#thread(threadId), { skill_draft_id: body.skill_draft_id });
       } else if (typeof body?.agent_id === "string") {
         const agent = this.runnableAgents.find((a) => a.id === body.agent_id);
         if (!agent) return error(404, "agent_not_found", "No agent with that id.");

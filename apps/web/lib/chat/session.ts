@@ -29,6 +29,8 @@ export interface ChatSessionOptions {
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
   /** Builder test pane (KOBE-85): new threads are test threads on this agent's draft. */
   readonly testAgentId?: string | undefined;
+  /** Workbench test pane (KOBE-323): new threads are test chats of this skill draft. */
+  readonly testSkillDraftId?: string | undefined;
   /** Tests replace the files API behind the chips of sent messages (KOBE-194). */
   readonly fetchFn?: typeof fetch | undefined;
   /** Tests replace the XHR upload transport (KOBE-145). */
@@ -85,9 +87,13 @@ export class ChatSession {
   get testAgentId(): string | undefined {
     return this.#options.testAgentId;
   }
-  /** The agent picker is for the chat; the builder's test pane is fixed on its draft agent. */
+  /** Set for the Workbench test pane: threads it creates run only this skill draft. */
+  get testSkillDraftId(): string | undefined {
+    return this.#options.testSkillDraftId;
+  }
+  /** The agent picker is for the chat; the test panes are fixed on their agent. */
   get canChooseAgent(): boolean {
-    return this.#options.testAgentId === undefined;
+    return this.#options.testAgentId === undefined && this.#options.testSkillDraftId === undefined;
   }
   /** What the threads held open here are doing, live (KOBE-301: the rail's dots, the tab title). */
   readonly activity = new ThreadActivityStore();

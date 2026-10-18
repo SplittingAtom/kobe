@@ -24,6 +24,7 @@ import { LintPanel, ScanPanel } from "./feedback";
 import { FileTree } from "./file-tree";
 import { SaveVersionDialog } from "./save-version-dialog";
 import { SkillMdEditor } from "./skill-md-editor";
+import { SkillTestPane } from "./test-pane";
 import { useDraftEditor, type DraftEditor, type SaveStatus } from "./use-draft-editor";
 
 export const WORKBENCH_HREF = "/me/skills?tab=workbench";
@@ -140,12 +141,16 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
         </Notice>
       )}
       {draft.mine && <DraftSettings editor={editor} teamId={teamId} confirm={confirm} />}
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[14rem_minmax(0,1fr)] 2xl:grid-cols-[14rem_minmax(0,1fr)_minmax(0,28rem)]">
         <FileTree files={files} selected={selected} onSelect={select} onAdd={editor.addFile} />
         <div className="min-w-0">
           <FilePane editor={editor} path={selected} onRemove={remove} />
           <LintPanel items={lint} />
           <ScanPanel state={scan} />
+        </div>
+        {/* Beside the editor on wide screens, below it otherwise (KOBE-323). */}
+        <div className="min-w-0 md:col-span-2 2xl:col-span-1">
+          <SkillTestPane teamId={teamId} draftId={draft.id} flush={editor.flush} />
         </div>
       </div>
       <SaveVersionDialog

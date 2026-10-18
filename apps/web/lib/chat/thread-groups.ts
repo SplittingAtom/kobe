@@ -1,22 +1,23 @@
 /**
  * The rail's thread groups (CE5, KOBE-198) in their fixed order: Pinned → projects → ungrouped →
- * Scheduled → Shared with me → Archived → Trash. A group shows only when it has threads. Pinned and
- * Archived are the owner's organization (CE19, KOBE-220: `pinned_at`, `archived_at`); "archived"
- * in the thread list adapter's own status is Trash (D18), not CE19's Archive. Shared with me holds
- * others' threads shared with the member (CE20, KOBE-221); one shared to a project is also listed
- * in that project's group.
+ * Scheduled → Workbench (skill drafts' test chats, KOBE-323) → Shared with me → Archived → Trash.
+ * A group shows only when it has threads. Pinned and Archived are the owner's organization (CE19,
+ * KOBE-220: `pinned_at`, `archived_at`); "archived" in the thread list adapter's own status is
+ * Trash (D18), not CE19's Archive. Shared with me holds others' threads shared with the member
+ * (CE20, KOBE-221); one shared to a project is also listed in that project's group.
  */
 import { visibilityOf } from "./share";
 import type { ThreadSummary, ThreadVisibility } from "./types";
 
 export type GroupKind =
-  "pinned" | "project" | "ungrouped" | "scheduled" | "shared" | "archived" | "trash";
+  "pinned" | "project" | "ungrouped" | "scheduled" | "workbench" | "shared" | "archived" | "trash";
 
 export const GROUP_ORDER: readonly GroupKind[] = [
   "pinned",
   "project",
   "ungrouped",
   "scheduled",
+  "workbench",
   "shared",
   "archived",
   "trash",
@@ -26,6 +27,7 @@ const LABELS: Readonly<Record<Exclude<GroupKind, "project">, string>> = {
   pinned: "Pinned",
   ungrouped: "Your threads",
   scheduled: "Scheduled",
+  workbench: "Workbench",
   shared: "Shared with me",
   archived: "Archived",
   trash: "Trash",
@@ -35,6 +37,8 @@ const LABELS: Readonly<Record<Exclude<GroupKind, "project">, string>> = {
 export interface ThreadPlacement {
   readonly projectId: string | null;
   readonly scheduled: boolean;
+  /** A Workbench test chat (KOBE-323): the Workbench group. */
+  readonly workbench: boolean;
   /** Shared to the caller by someone else (KOBE-163): read-only. */
   readonly shared: boolean;
   /** The share scope (CE20): a project-scoped shared thread is also in its project's group. */
@@ -48,6 +52,7 @@ export function placementCustom(thread: ThreadSummary): Record<string, unknown> 
   return {
     projectId: thread.projectId,
     scheduled: thread.scheduleId != null,
+    workbench: thread.skillTest === true,
     shared: thread.readOnly === true,
     visibility: visibilityOf(thread),
     pinned: thread.pinnedAt != null,
@@ -62,6 +67,7 @@ export function placementOf(custom: unknown): ThreadPlacement {
   return {
     projectId: typeof c.projectId === "string" ? c.projectId : null,
     scheduled: c.scheduled === true,
+    workbench: c.workbench === true,
     shared: c.shared === true,
     visibility: c.visibility === "project" || c.visibility === "team" ? c.visibility : "private",
     pinned: c.pinned === true,
@@ -75,6 +81,7 @@ function kindOf(p: ThreadPlacement): GroupKind {
   if (p.archived) return "archived";
   if (p.pinned) return "pinned";
   if (p.projectId !== null) return "project";
+  if (p.workbench) return "workbench";
   return p.scheduled ? "scheduled" : "ungrouped";
 }
 

@@ -209,13 +209,14 @@ function moduleImports(file: string): string[] {
 
 /**
  * The global stylesheets console code may import: the two layouts load the console sheet, and the
- * agent builder's test pane the chat's (it renders the chat).
+ * test panes (the agent builder's, the Workbench's, KOBE-323) the chat's (they render the chat).
  */
 const CSS_IMPORTS: Readonly<Record<string, string>> = {
   [join("app", "admin", "layout.tsx")]: "./admin-global.css",
   [join("app", "me", "layout.tsx")]: "../admin/admin-global.css",
   [join("components", "admin", "team", "agent-builder", "test-pane.tsx")]:
     "../../../../app/chat-global.css",
+  [join("components", "skills", "test-pane.tsx")]: "../../app/chat-global.css",
 };
 
 /** Pages that render a component built on the primitives and add no markup of their own. */

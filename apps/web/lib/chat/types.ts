@@ -71,6 +71,12 @@ export interface ThreadSummary {
   readonly pendingApproval?: boolean;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
+  /**
+   * A Workbench test chat (KOBE-323): listed in the rail's Workbench group; its runs load only the
+   * draft `skillDraftId` (null once the draft is deleted).
+   */
+  readonly skillTest?: boolean;
+  readonly skillDraftId?: string | null;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   readonly model?: string | null;
   /** The thinking level chosen for the thread (KOBE-260); null or absent = the model's default. */
