@@ -1,4 +1,19 @@
-import { Inflate, zipSync } from "fflate";
+import { createHash } from "node:crypto";
+import { Inflate } from "fflate";
+import { parse as parseYaml } from "yaml";
+import {
+  canonicalZip,
+  checkPackagePaths,
+  hashedPackageFiles,
+  kobeSkillManifestSchema,
+  MANIFEST_MAX_BYTES,
+  MANIFEST_PATH,
+  MANIFEST_YAML_OPTIONS,
+  manifestMismatches,
+  runtimeFiles,
+  type KobeSkillManifest,
+  type PackageProblem,
+} from "@kobe/protocol";
 import { SKILL_LIMITS, type SkillLimits } from "./limits.js";
 import { parseSkillMd, type SkillMd } from "./skill-md.js";
 import { readZipEntries, ZipFormatError, type ZipEntry } from "./zip-entries.js";
@@ -13,7 +28,12 @@ export type BundleErrorCode =
   | "duplicate_path"
   | "symlink_not_allowed"
   | "skill_md_missing"
-  | "invalid_skill_md";
+  | "invalid_skill_md"
+  /** A reserved root name in the wrong case, a file named `evals`, or an authored provenance.json. */
+  | "reserved_path"
+  /** A path that is both a file and a folder (KOBE-309). */
+  | "path_conflict"
+  | "invalid_manifest";
 
 export interface BundleError {
   readonly code: BundleErrorCode;
@@ -25,10 +45,18 @@ export type Result<T> =
 
 export interface ValidBundle extends SkillMd {
   /**
-   * The bytes to store and hash: the upload itself when SKILL.md sits at its root, otherwise a
-   * deterministic zip of the same files with the single wrapper directory stripped.
+   * The runtime zip (KOBE-309 contract): the canonical zip of the payload, without `evals/` and
+   * `kobe.skill.yaml`, the single wrapper directory stripped. What is stored as the version's
+   * bundle, hashed as its `content_hash` (= runtime hash) and served to sandboxes.
    */
   readonly zip: Uint8Array;
+  /** The canonical package zip when it differs from `zip` (it has `evals/` or a manifest). */
+  readonly packageZip: Uint8Array | null;
+  /** SHA-256 of `packageZip`, or of `zip` when there is none. */
+  readonly packageHash: string;
+  /** The parsed `kobe.skill.yaml`, if the package has one (its name matches SKILL.md). */
+  readonly manifest: KobeSkillManifest | null;
+  /** Files and bytes of the runtime payload (what a sandbox unpacks). */
   readonly fileCount: number;
   readonly uncompressedBytes: number;
 }
@@ -39,14 +67,7 @@ const fail = (code: BundleErrorCode, message: string): Result<never> => ({
 });
 
 const SKILL_MD_PATH = "SKILL.md";
-/** Fixed timestamp so wrapping the same SKILL.md always gives the same bytes (and hash). */
-/**
- * fflate encodes the timestamp from the Date's *local* fields, so a UTC instant would change the
- * bytes with the server's timezone. Built from local fields, it encodes the same DOS date and
- * time (2020-01-01 12:00:00) in every timezone. A function, so the timezone in force at call time
- * is the one used.
- */
-const fixedMtime = (): Date => new Date(2020, 0, 1, 12, 0, 0);
+const sha256Hex = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 /**
  * Validates an uploaded skill zip without extracting it to disk (KOBE-78): size, file-count and
@@ -79,6 +100,8 @@ export function validateZipBundle(
   if (pathProblem) return pathProblem;
   const sizeProblem = checkSizes(files, limits);
   if (sizeProblem) return sizeProblem;
+  const contractProblem = checkContract(files.map((f) => f.name));
+  if (contractProblem) return contractProblem;
 
   const contents = new Map<string, Uint8Array>();
   const budget = { remaining: limits.maxUncompressedBytes };
@@ -95,11 +118,77 @@ export function validateZipBundle(
     );
   const parsed = parseSkillMd(skillMd);
   if (typeof parsed === "string") return fail("invalid_skill_md", parsed);
-  const zip = repack(contents);
+  const manifest = readManifest(contents.get(MANIFEST_PATH), parsed.name);
+  if (!manifest.ok) return manifest;
+  return { ok: true, value: { ...parsed, ...packageZips(contents), manifest: manifest.value } };
+}
+
+/** The runtime and package zips of a checked file set (KOBE-309 hashing rules). */
+function packageZips(contents: ReadonlyMap<string, Uint8Array>) {
+  const runtime = runtimeFiles(contents);
+  const hashed = hashedPackageFiles(contents);
+  const zip = canonicalZip(runtime);
+  const packageZip = hashed.size === runtime.size ? null : canonicalZip(hashed);
+  let uncompressedBytes = 0;
+  for (const bytes of runtime.values()) uncompressedBytes += bytes.length;
   return {
-    ok: true,
-    value: { ...parsed, zip, fileCount: files.length, uncompressedBytes: totalSize(files) },
+    zip,
+    packageZip,
+    packageHash: sha256Hex(packageZip ?? zip),
+    fileCount: runtime.size,
+    uncompressedBytes,
   };
+}
+
+const PROBLEM_CODES: Partial<Record<PackageProblem["problem"], BundleErrorCode>> = {
+  duplicate: "duplicate_path",
+  file_and_directory: "path_conflict",
+  reserved_name_case: "reserved_path",
+  reserved_directory: "reserved_path",
+  provenance_not_allowed: "reserved_path",
+};
+
+/**
+ * The KOBE-309 path rules for authored content (no provenance.json), after the upload's own
+ * checks: what they add is refused here with the first problem. A missing SKILL.md is reported
+ * later, with its own message.
+ */
+function checkContract(names: readonly string[]): Result<never> | null {
+  const problem = checkPackagePaths(names).find((p) => p.problem !== "skill_md_missing");
+  if (!problem) return null;
+  const code = PROBLEM_CODES[problem.problem] ?? "unsafe_path";
+  const why =
+    code === "reserved_path"
+      ? `${printable(problem.path)} is reserved: only SKILL.md, evals/ and kobe.skill.yaml, spelled exactly so, are special, and Kobe writes provenance.json itself.`
+      : code === "path_conflict"
+        ? `${printable(problem.path)} is both a file and a folder.`
+        : `Unsafe path in bundle: ${printable(problem.path)} (${problem.problem.replaceAll("_", " ")})`;
+  return fail(code, why);
+}
+
+/** Parses and checks `kobe.skill.yaml` by the contract's text rules; null when absent. */
+function readManifest(
+  bytes: Uint8Array | undefined,
+  skillName: string,
+): Result<KobeSkillManifest | null> {
+  if (!bytes) return { ok: true, value: null };
+  const bad = (why: string) => fail("invalid_manifest", `kobe.skill.yaml: ${why}`);
+  if (bytes.length > MANIFEST_MAX_BYTES) return bad(`larger than ${MANIFEST_MAX_BYTES} bytes.`);
+  let value: unknown;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^\uFEFF/, "");
+    value = parseYaml(text, MANIFEST_YAML_OPTIONS);
+  } catch {
+    return bad("not valid UTF-8 YAML (one document, unique keys, no aliases).");
+  }
+  const parsed = kobeSkillManifestSchema.safeParse(value);
+  if (!parsed.success) {
+    const where = parsed.error.issues[0]?.path.join(".") || "(root)";
+    return bad(`invalid at ${where}.`);
+  }
+  if (manifestMismatches(parsed.data, { name: skillName, semver: parsed.data.version }).length)
+    return bad(`name must be the SKILL.md name, ${skillName}.`);
+  return { ok: true, value: parsed.data };
 }
 
 /**
@@ -124,22 +213,6 @@ function unwrap(entry: ZipEntry, prefix: string): ZipEntry[] {
   return entry.name === prefix ? [] : [{ ...entry, name: entry.name.slice(prefix.length) }];
 }
 
-/**
- * The canonical bundle: the only bytes ever stored and hashed (KOBE-81 blocklist, KOBE-82
- * materialization). Regular files only, in sorted NFC order, stored without compression (so the
- * bytes never depend on a deflate implementation), fixed timestamp, no extra fields, comments or
- * attributes, no directory entries. Whatever the uploader's tool added is gone.
- */
-function repack(contents: ReadonlyMap<string, Uint8Array>): Uint8Array {
-  const sorted = [...contents.keys()].sort();
-  // fflate takes an object: build it without a prototype, and `isSafePath` refuses `__proto__`
-  // segments, so no file can be dropped or alias an inherited key.
-  const files: Record<string, [Uint8Array, { mtime: Date; level: 0 }]> = Object.create(null);
-  for (const name of sorted)
-    files[name] = [contents.get(name) as Uint8Array, { mtime: fixedMtime(), level: 0 }];
-  return zipSync(files);
-}
-
 /** Wraps a bare SKILL.md upload into a one-file zip, so every stored bundle is a zip. */
 export function bundleFromSkillMd(
   bytes: Uint8Array,
@@ -149,8 +222,10 @@ export function bundleFromSkillMd(
     return fail("file_too_large", `SKILL.md may be at most ${limits.maxSkillMdBytes} bytes.`);
   const parsed = parseSkillMd(bytes);
   if (typeof parsed === "string") return fail("invalid_skill_md", parsed);
-  const zip = repack(new Map([[SKILL_MD_PATH, bytes]]));
-  return { ok: true, value: { ...parsed, fileCount: 1, uncompressedBytes: bytes.length, zip } };
+  return {
+    ok: true,
+    value: { ...parsed, ...packageZips(new Map([[SKILL_MD_PATH, bytes]])), manifest: null },
+  };
 }
 
 function zipFailure(err: unknown): Result<never> {
@@ -224,8 +299,6 @@ function checkSizes(files: readonly ZipEntry[], limits: SkillLimits): Result<nev
 
 const expansive = (size: number, packed: number, limits: SkillLimits): boolean =>
   size > limits.ratioFloorBytes && size > Math.max(packed, 1) * limits.maxRatio;
-
-const totalSize = (files: readonly ZipEntry[]): number => files.reduce((n, f) => n + f.size, 0);
 
 const INFLATE_CHUNK = 16 * 1024;
 

@@ -23,7 +23,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
-import { isBlocked } from "./blocklist.js";
+import { blockedAmong, isBlocked } from "./blocklist.js";
 import { legacySemver } from "./semver.js";
 
 /**
@@ -183,11 +183,8 @@ export function listReviews(
           })
         : null;
     if (pageKeys.length === 0) return { reviews: [], nextCursor };
-    const rows = await tx
-      .select({
-        ...getTableColumns(teamSkillReviews),
-        blocked: sql<boolean>`EXISTS (SELECT 1 FROM skill_blocklist b WHERE b.content_hash = "team_skill_reviews"."content_hash")`,
-      })
+    const reviewRows = await tx
+      .select(getTableColumns(teamSkillReviews))
       .from(teamSkillReviews)
       .where(
         and(
@@ -195,6 +192,14 @@ export function listReviews(
           inArray(teamSkillReviews.skillId, [...new Set(pageKeys.map((k) => k.skillId))]),
         ),
       );
+    // Blocked through any member of the hash's alias group (KOBE-310).
+    const blocked = new Set(
+      await blockedAmong(
+        tx,
+        reviewRows.map((r) => r.contentHash),
+      ),
+    );
+    const rows = reviewRows.map((r) => ({ ...r, blocked: blocked.has(r.contentHash) }));
     const semvers = await semversOf(tx, teamId, rows);
     const byKey = new Map(
       rows.map((r) => {

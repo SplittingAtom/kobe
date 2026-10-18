@@ -23,6 +23,7 @@ export const agents = defineDomain({
     "personal_skill_versions",
     "personal_skill_scans",
     "gallery_agent_scores",
+    "skill_hash_checks",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -39,6 +40,9 @@ export const agents = defineDomain({
     gallery_agent_scores: ["SELECT", "INSERT"],
     // The blocklist (KOBE-81): the server lets only site admins add or remove rows (no UPDATE).
     skill_blocklist: ["SELECT", "INSERT", "DELETE"],
+    // What each stored skill hash is under the package contract (KOBE-310): written once, never
+    // changed (the recompute is idempotent: ON CONFLICT DO NOTHING).
+    skill_hash_checks: ["SELECT", "INSERT"],
   },
   teamReferencing: {},
 });

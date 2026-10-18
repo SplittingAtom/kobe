@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
+import { recomputeSkillHashes } from "./skills/hash-checks.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
@@ -191,6 +192,15 @@ if (config.process === "scheduler") {
 if (deps && config.process === "server") {
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
+  );
+}
+
+// Stored skill hashes against the package contract (KOBE-310, docs/skill-package.md "Identity"):
+// in the background at every start; it checks only hashes not recorded yet, so after the first
+// run it is a quick no-op. A failure is logged; the next start retries.
+if (deps?.blobs && config.process === "server") {
+  void recomputeSkillHashes({ db: deps.database.db, blobs: deps.blobs, log: logger }).catch(
+    (err: unknown) => logger.error({ err }, "skills: stored hash recompute failed"),
   );
 }
 

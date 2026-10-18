@@ -73,8 +73,9 @@ describe("numbering uploads", () => {
       seq: 3,
       semver: "1.0.0",
       changelog: "First stable release.",
-      packageHash: null,
     });
+    // A package with no evals/ or manifest: its package hash is its runtime hash (KOBE-310).
+    expect(v3.json.version.packageHash).toBe(v3.json.version.contentHash);
     expect(v3.json.skill).toMatchObject({ latestVersion: 3, latestSemver: "1.0.0" });
     const v4 = await upload(member, "personal", md("numbered", "Four."));
     expect(v4.json.version.semver).toBe("1.1.0");

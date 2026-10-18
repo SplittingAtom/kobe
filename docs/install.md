@@ -589,6 +589,17 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Skill packages (KOBE-310, migration `0131_skill_store`).** Additive: a site-wide
+  `skill_hash_checks` table and a nullable `package_storage_key` on the skill version tables, so
+  the previous release keeps working and `helm rollback` is safe. After the upgrade every server
+  checks, in the background, each stored skill version against the package contract
+  ([skill packages](skill-package.md#identity-one-hash-per-payload)) and logs
+  `skills: stored hashes checked against the package contract` with the counts: `aliased` versions
+  held `evals/` or `kobe.skill.yaml` (they share one blocklist identity with their runtime
+  payload), `legacy` ones use paths today's rules refuse (they keep running, but can't be
+  promoted or exported until re-saved), `unreadable` ones are retried at the next start. Uploads
+  from now on refuse such paths (`reserved_path`, `path_conflict`, `unsafe_path`), and a
+  package's `evals/` and `kobe.skill.yaml` no longer reach the sandbox.
 - **Skill version numbers (KOBE-308, migrations `0129_skill_semver` and
   `0130_skill_semver_backfill`).** Every team and personal skill version gets a semver: version
   n uploaded before becomes `0.n.0` (with `seq` n), and the Job log says how many

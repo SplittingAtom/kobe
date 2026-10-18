@@ -77,6 +77,12 @@ const versionColumns = () => ({
   changelog: text(),
   /** SHA-256 of the whole package (KOBE-309); null until package builds record it. */
   packageHash: text(),
+  /**
+   * The package zip (KOBE-310) when it differs from the runtime zip in `storage_key` (the version
+   * has `evals/` or `kobe.skill.yaml`); null when the two are the same bytes, and for versions
+   * stored before KOBE-310 (their `storage_key` zip is the whole upload).
+   */
+  packageStorageKey: text(),
   /** SKILL.md frontmatter as uploaded (name, description and any other keys). */
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
   source: skillSource().notNull(),
@@ -112,6 +118,7 @@ const versionChecks = (
     | "frontmatter"
     | "contentHash"
     | "packageHash"
+    | "packageStorageKey"
     | "changelog"
     | "sizeBytes"
     | "fileCount"
@@ -128,6 +135,10 @@ const versionChecks = (
   check(
     `${prefix}_package_hash_format`,
     sql`${t.packageHash} IS NULL OR ${t.packageHash} ~ '^[0-9a-f]{64}$'`,
+  ),
+  check(
+    `${prefix}_package_storage`,
+    sql`${t.packageStorageKey} IS NULL OR ${t.packageHash} IS NOT NULL`,
   ),
   check(
     `${prefix}_changelog_size`,

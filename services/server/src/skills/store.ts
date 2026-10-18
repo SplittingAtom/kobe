@@ -18,6 +18,7 @@ import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
 import { isBlocked } from "./blocklist.js";
 import { recordPendingReview, recordPersonalScan } from "./review.js";
+import { recordRuntimeHash } from "./hash-checks.js";
 import { legacySemver, nextSemver, parseSemver } from "./semver.js";
 
 /**
@@ -61,6 +62,8 @@ export interface SkillVersionRecord {
   readonly source: SkillSource;
   readonly contentHash: string;
   readonly storageKey: string;
+  /** The package zip when it differs from the runtime zip (KOBE-310); null otherwise. */
+  readonly packageStorageKey: string | null;
   readonly sizeBytes: number;
   readonly fileCount: number;
   readonly uncompressedBytes: number;
@@ -73,8 +76,12 @@ export interface NewSkillVersion {
   readonly description: string;
   readonly frontmatter: Record<string, unknown>;
   readonly source: SkillSource;
+  /** Runtime hash (KOBE-309) of the runtime zip at `storageKey`. */
   readonly contentHash: string;
   readonly storageKey: string;
+  /** Package hash (KOBE-309): of the package zip, or `contentHash` when there is none. */
+  readonly packageHash: string;
+  readonly packageStorageKey: string | null;
   readonly sizeBytes: number;
   readonly fileCount: number;
   readonly uncompressedBytes: number;
@@ -146,7 +153,11 @@ export function uploadSkillVersion(
       ? await versionOf(tx, location, existing.id, existing.latestVersion)
       : null;
     if (existing) {
-      if (latest?.contentHash === input.contentHash) return { ok: false, error: "unchanged" };
+      // Unchanged = the same package (KOBE-310): an evals-only change is a new version with the
+      // same runtime hash. Versions stored before KOBE-310 have no package hash: their bundle was
+      // the whole upload, so its content hash stands in.
+      if (latest && (latest.packageHash ?? latest.contentHash) === input.packageHash)
+        return { ok: false, error: "unchanged" };
       if (existing.latestVersion >= MAX_SKILL_VERSIONS)
         return { ok: false, error: "version_limit" };
     } else if ((await countSkills(tx, location)) >= MAX_LIVE_SKILLS) {
@@ -165,6 +176,8 @@ export function uploadSkillVersion(
       ...input,
       semver: semver.semver,
     });
+    // The stored zip is its own runtime payload (KOBE-310): its hash needs no recompute.
+    await recordRuntimeHash(tx, input.contentHash);
     if (location.scope === "team") {
       await recordPendingReview(
         tx,
@@ -320,6 +333,8 @@ async function insertVersion(
     source: input.source,
     contentHash: input.contentHash,
     storageKey: input.storageKey,
+    packageHash: input.packageHash,
+    packageStorageKey: input.packageStorageKey,
     sizeBytes: input.sizeBytes,
     fileCount: input.fileCount,
     uncompressedBytes: input.uncompressedBytes,
@@ -348,6 +363,7 @@ function toVersion(row: typeof personalSkillVersions.$inferSelect): SkillVersion
     source: row.source,
     contentHash: row.contentHash,
     storageKey: row.storageKey,
+    packageStorageKey: row.packageStorageKey,
     sizeBytes: row.sizeBytes,
     fileCount: row.fileCount,
     uncompressedBytes: row.uncompressedBytes,
