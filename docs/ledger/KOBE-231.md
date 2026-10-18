@@ -20,7 +20,8 @@ Gate 1 and Gate 2 clients' helpers). Browser checks in Chromium beside kubectl
   `/v1/artifacts/:id/versions/:n/frame`, which sends the CSP as a header (with `sandbox`, which a
   meta tag cannot set). The checks assert the header and, in Chromium, that the frame's `fetch` is
   blocked by a `connect-src` violation with no request leaving the page. Same criterion (U3 "under
-  a strict CSP"), stronger mechanism; not a product failure. Question for Chris below.
+  a strict CSP"), stronger mechanism; not a product failure. Accepted by the coordinator
+  (2026-10-18), recorded in docs/gates/gate-3.md; on Chris's gate-review list as a wording difference.
 - **Data Analyst → Kobe.** KOBE-254 retired the Data Analyst gallery agent; its skills
   (data-analysis, charts) belong to the gallery agent Kobe, which ac-5 uses.
 - **Two losses for U15.** `deleted` (pod + PVC deleted while running, the brief's wording) and
@@ -41,17 +42,17 @@ Gate 1 and Gate 2 clients' helpers). Browser checks in Chromium beside kubectl
 
 ## Product failures found
 
-1. **ac-1 (U8): the chat has no "v<N> available" badge and no one-click switch.** The API has both
+1. **KOBE-420, ac-1 (U8): the chat has no "v<N> available" badge and no one-click switch.** The API has both
    (`GET /v1/threads/:id` → `agent_version`, `agent_current_version`; `POST
 /v1/threads/:id/agent-version`), but `apps/web/lib/chat/thread-controller.ts` drops
    `agentCurrentVersion` (`agentCurrentVersion: _v`) and no component renders a badge or switch
    (none since KOBE-46). Check: `ac-1 browser: the pinned thread shows 'v3 available'` and
    `...with a one-click switch`, marked expected-fail in `e2e/gate3.sh`. Fix: render the badge
-   with a switch in the thread header when `agent_current_version > agent_version`.
+   with a switch in the thread header when `agent_current_version > agent_version`. Filed as
+   KOBE-420 (G5 lane, after KOBE-227); the XFAIL marks flip when it lands.
 
 ## Open questions (for Chris or the coordinator)
 
-- Accept the header CSP (+ browser proof) for "srcdoc carries the injected CSP"? (see Decisions)
 - Real-cluster run needs a quiet gate1 and the go-ahead: it creates team `gate3-a` there and
   deletes gate3-m1's sandbox volume twice.
 

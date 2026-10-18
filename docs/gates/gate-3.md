@@ -148,6 +148,19 @@ while it runs, as when a node goes) and **overnight** (it hibernates, then its v
 The browser checks' control: against the same page served without the CSP header, the same script
 reports `fetch=allowed`, `origin=http://…` and one beacon hit (checked when the script was written).
 
+### Why a CSP response header satisfies "srcdoc carries the injected CSP"
+
+The KOBE-231 brief asks for a CSP `<meta>` tag injected into the artifact's `srcdoc`. The product
+does not build artifacts that way: the chat embeds `/v1/artifacts/:id/versions/:n/frame` in an
+`<iframe>`, and the server sends the CSP as a **response header** on that frame. The criterion is
+what the CSP enforces (U3: the HTML artifact renders "under a strict CSP"), and the header enforces
+more than a meta tag could: a meta CSP cannot set `sandbox` (no same-origin access, an opaque
+origin) or `frame-ancestors`, and it applies only from the point the parser reaches it. The gate
+therefore asserts the header's directives over HTTP and, in Chromium, that the embedded frame's
+script runs while its `fetch()` is blocked by a `connect-src` violation and no request leaves the
+page. Accepted by the coordinator (2026-10-18); on Chris's gate-review list as a wording difference
+between the brief and the product.
+
 ## Expected failures
 
 A check of a product failure that is filed but not fixed prints `XFAIL <check>: got [...]

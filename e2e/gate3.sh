@@ -530,9 +530,9 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
     fi
     if [[ -n "${PINNED_THREAD:-}" ]]; then
       xcontains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br" \
-        "product failure: apps/web drops agent_current_version and has no badge (docs/ledger/KOBE-231.md)"
+        "KOBE-420: apps/web drops agent_current_version and has no badge"
       xcontains "ac-1 browser: ...with a one-click switch" '^version_switch=present$' "$br" \
-        "product failure: no switch control in apps/web (docs/ledger/KOBE-231.md)"
+        "KOBE-420: no switch control in apps/web"
     fi
   fi
 fi
