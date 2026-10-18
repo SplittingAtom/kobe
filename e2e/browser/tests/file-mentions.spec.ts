@@ -1,6 +1,10 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
+import { FAKE_MODEL } from "./support/gate5.js";
+
+/** The fake model (CI) runs `bash: <command>`; a real one is asked to read the file. */
+const LEAD = FAKE_MODEL ? "bash: cat" : "Use a tool to read";
 
 /**
  * KOBE-223 (CE22): a file dropped into the member's workspace (`uploads/`, the rail's drop
@@ -46,18 +50,19 @@ test("@file mention: pick a workspace file, the agent reads it by its absolute p
   expect(await workspace(page, "POST", name, `mention-check ${stamp}\n`)).toBe(201);
   try {
     await chat.composer.fill("");
-    await chat.composer.pressSequentially(`Use a tool to read @kobe-223-${stamp}`);
+    await chat.composer.pressSequentially(`${LEAD} @kobe-223-${stamp}`);
     const list = page.getByRole("listbox", { name: "Workspace files" });
     await expect(list).toBeVisible();
     await expect(list.getByRole("option").first()).toContainText(name);
     await expect(chat.composer).toHaveAttribute("aria-expanded", "true");
     await chat.composer.press("Enter");
     await expect(list).toBeHidden();
-    await expect(chat.composer).toHaveValue(`Use a tool to read @file(uploads/${name}) `);
+    await expect(chat.composer).toHaveValue(`${LEAD} @file(uploads/${name}) `);
     await expect(
       page.getByRole("list", { name: "Mentioned files" }).getByText(`@uploads/${name}`),
     ).toBeVisible();
-    await chat.composer.pressSequentially("and quote its one line. Do nothing else.");
+    if (!FAKE_MODEL)
+      await chat.composer.pressSequentially("and quote its one line. Do nothing else.");
     await chat.composer.press("Enter");
     await chat.threadId();
 

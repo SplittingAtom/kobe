@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
+import { FAKE_MODEL } from "./support/gate5.js";
 
 /**
  * KOBE-418: the chat without the bar's row two. The Agent, Model and Thinking selectors sit in the
@@ -11,7 +12,9 @@ import { expect, test } from "./support/chat.js";
  */
 const PROMPT = "No tools. Reply with one short sentence about lighthouses.";
 /** A turn with a tool step, so the answer has blocks to open (Show details shows only then). */
-const TOOL_PROMPT = "Use the bash tool to run `echo kobe-418`, then reply with the single word OK.";
+const TOOL_PROMPT = FAKE_MODEL
+  ? "bash: echo kobe-418"
+  : "Use the bash tool to run `echo kobe-418`, then reply with the single word OK.";
 const COLUMN_MAX_PX = 1280;
 /** At 1920 px the column is 80rem less its padding: far wider than the old 44rem (704 px). */
 const COLUMN_MIN_AT_1920_PX = 1200;
