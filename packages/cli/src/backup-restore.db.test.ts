@@ -25,6 +25,9 @@ import {
   OAUTH_TOKENS,
   SEARCH_WORD,
   T1,
+  T2,
+  U1,
+  U3,
   allBackupBytes,
   copyWithManifest,
   dumpScript,
@@ -481,6 +484,40 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
           `SELECT key, value FROM site_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
         );
       expect(await settings(dst.adminUrl)).toEqual(await settings(started.adminUrl));
+    });
+
+    it("restores every awake sandbox as hibernated, so the first turn wakes it visibly (KOBE-426)", async () => {
+      const withSandboxes = await createTestDatabase(server);
+      created.push(withSandboxes);
+      await seed(withSandboxes);
+      // U1's sandbox was awake (with a live wire connection) at backup time, U3's offboarded.
+      await sql(
+        withSandboxes.adminUrl,
+        `INSERT INTO sandboxes (team_id, user_id, sandbox_id, state, pvc) VALUES
+           ('${T1}', '${U1}', gen_random_uuid(), 'running', 'workspace-u-${U1}');
+         INSERT INTO sandboxes (team_id, user_id, state, retain_until) VALUES
+           ('${T2}', '${U3}', 'destroyed', now() + interval '30 days');
+         INSERT INTO sandbox_connections (team_id, user_id, sandbox_id, connection_id, replica_id)
+           VALUES ('${T1}', '${U1}', gen_random_uuid(), gen_random_uuid(), 'replica-1');`,
+      );
+      const url = new URL(withSandboxes.adminUrl);
+      url.username = backupRole;
+      url.password = password;
+      const dir = join(work, "b-sandboxes");
+      await backup(dir, { databaseUrl: url.toString() });
+      const dst = await target();
+      await restore(dst, dir);
+      const states = await sql<{ user_id: string; state: string; pvc: string | null }>(
+        dst.adminUrl,
+        "SELECT user_id, state, pvc FROM sandboxes ORDER BY user_id",
+      );
+      expect(states).toEqual([
+        { user_id: U1, state: "hibernated", pvc: `workspace-u-${U1}` },
+        { user_id: U3, state: "destroyed", pvc: null },
+      ]);
+      expect(await rowsOf(dst.adminUrl, "sandbox_connections")).toEqual(
+        await rowsOf(withSandboxes.adminUrl, "sandbox_connections"),
+      );
     });
 
     it("still refuses a started site that holds real data (KOBE-422)", async () => {

@@ -317,6 +317,9 @@ How restore works:
    - re-checks the migrations and that the target holds no data but the seeded rows above, then
      deletes those;
    - loads the data and verifies every table's row count against the manifest;
+   - marks every awake sandbox (`sandboxes.state = 'running'`) `hibernated`: none of them exists
+     where the backup lands, so each member's next turn shows "Waking your workspace…" while a new
+     sandbox starts, and Pi's session is rebuilt from Postgres (KOBE-426);
    - restores the triggers and FORCE RLS;
    - verifies the restored audit hash chain, that it ends at the head the signed manifest
      recorded and, with `--expect-audit-head <seq>:<hash>`, that it contains a head you recorded

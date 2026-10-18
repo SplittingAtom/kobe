@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { restorePostlude, restorePrelude, type RestorePlan } from "./restore-sql.js";
+import {
+  SANDBOXES_NOT_PRESENT,
+  restorePostlude,
+  restorePrelude,
+  type RestorePlan,
+} from "./restore-sql.js";
 
 const plan: RestorePlan = {
   lockKey: 42,
@@ -151,6 +156,26 @@ describe("restore postlude", () => {
     expect(sql).toContain('ALTER TABLE public."team_members" FORCE ROW LEVEL SECURITY;');
     expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
     expect(sql.indexOf("count(*)")).toBeLessThan(sql.indexOf("FORCE ROW LEVEL SECURITY"));
+  });
+
+  it("marks every awake sandbox hibernated: none of them exists where the backup lands (KOBE-426)", () => {
+    const post = restorePostlude({
+      ...plan,
+      loadTables: [...plan.loadTables, { name: "sandboxes", rows: 2 }],
+      forcedRls: [...plan.forcedRls, "sandboxes"],
+    });
+    expect(SANDBOXES_NOT_PRESENT).toBe(
+      "UPDATE public.sandboxes SET state = 'hibernated', state_changed_at = now() WHERE state = 'running';",
+    );
+    const at = post.indexOf(SANDBOXES_NOT_PRESENT);
+    // After the row counts are checked, while the owner still bypasses RLS and triggers are off.
+    expect(at).toBeGreaterThan(post.indexOf("count(*)"));
+    expect(at).toBeLessThan(
+      post.indexOf('ALTER TABLE public."sandboxes" FORCE ROW LEVEL SECURITY;'),
+    );
+    expect(at).toBeLessThan(post.indexOf("ENABLE TRIGGER"));
+    expect(at).toBeLessThan(post.indexOf("COMMIT;"));
+    expect(restorePostlude(plan)).not.toContain("public.sandboxes"); // no sandboxes table loaded
   });
 
   it("pauses the audit IP erasure for 24 h, inside the transaction (KOBE-17)", () => {

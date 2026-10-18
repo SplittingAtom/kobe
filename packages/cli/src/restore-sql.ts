@@ -191,6 +191,17 @@ function auditRestore(audit: RestoreAudit): string {
   );
 }
 
+/**
+ * KOBE-426: no sandbox of the backup exists where it is restored (a new cluster, or a site whose
+ * sandboxes were never these). A `running` row would make the first turn's cold start look like a
+ * reconnect (the lifecycle announces no `sandbox.waking` for a `running` row), so every awake row
+ * becomes `hibernated`: the next turn wakes it visibly, and a wake creates a sandbox that is
+ * missing (SandboxProvider.wakeSandbox). Runs before FORCE RLS and the triggers come back, as the
+ * load does; offboarded (`destroyed`) rows stay as they are.
+ */
+export const SANDBOXES_NOT_PRESENT =
+  "UPDATE public.sandboxes SET state = 'hibernated', state_changed_at = now() WHERE state = 'running';";
+
 /** SQL sent after the data script: verify, restore triggers and FORCE RLS, record, commit. */
 export function restorePostlude(plan: RestorePlan): string {
   const countChecks = plan.loadTables
@@ -204,6 +215,7 @@ export function restorePostlude(plan: RestorePlan): string {
   return [
     "",
     doBlock(`DECLARE n bigint;\nBEGIN\n${countChecks}\nEND`),
+    ...(plan.loadTables.some((t) => t.name === "sandboxes") ? [SANDBOXES_NOT_PRESENT] : []),
     // Checks every deferred foreign key now (a violation aborts), then restores them as they were.
     "SET CONSTRAINTS ALL IMMEDIATE;",
     ...plan.immediateForeignKeys.map(
