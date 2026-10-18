@@ -67,6 +67,8 @@ export const PI_REQUEST_TIMEOUT_MS = 60_000;
 export const BEFORE_RUN_TIMEOUT_MS = 5 * 60_000;
 export const PI_SLOW_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const ABORT_SETTLE_GRACE_MS = 5000;
+/** A run.start that takes longer than this before Pi has its prompt is logged with its stages. */
+const SLOW_START_WARN_MS = 5000;
 const SLOW_COMMANDS = new Set(["compact", "abort"]);
 
 /**
@@ -146,12 +148,21 @@ export class ThreadManager {
     if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
 
     thread.beginRun(frame.run_id);
+    // A Stop while the workspace is prepared ends the run at once (#abort), and another run may
+    // then hold the thread: from here on this start ends (and stops Pi for) its own run only.
+    const own = () => thread.runId === frame.run_id;
+    const endOwn = () => {
+      if (own()) thread.endRun();
+    };
+    const began = Date.now();
+    const stages: string[] = [];
+    const mark = (stage: string) => stages.push(`${stage} ${Date.now() - began} ms`);
     try {
       // The tripwire first (before the run's own write to the model file would hide a rewrite).
       const tampered = await thread.verifyRuntime();
       if (tampered !== undefined) {
-        await thread.withLock(() => thread.stopProcess());
-        thread.endRun();
+        if (own()) await thread.withLock(() => thread.stopProcess());
+        endOwn();
         return fail("runtime_tampered", tampered);
       }
       try {
@@ -168,32 +179,43 @@ export class ThreadManager {
           this.#options.projectTools ? frame.project : undefined,
         );
       } catch (error) {
-        thread.endRun();
+        endOwn();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
       }
       // And once more with the run's file in place: the prompt goes out right after this.
       const tamperedAfter = await thread.verifyRuntime();
       if (tamperedAfter !== undefined) {
-        await thread.withLock(() => thread.stopProcess());
-        thread.endRun();
+        if (own()) await thread.withLock(() => thread.stopProcess());
+        endOwn();
         return fail("runtime_tampered", tamperedAfter);
       }
+      mark("attached");
       if (this.#options.beforeRun !== undefined) {
+        // The pull can take a while; a Stop meanwhile has nothing in Pi to abort (#abort).
+        thread.setPreparing(true);
         const timedOut = await withTimeout(
           this.#options.beforeRun(frame),
           this.#options.beforeRunTimeoutMs ?? BEFORE_RUN_TIMEOUT_MS,
-        );
+        ).finally(() => {
+          if (own()) thread.setPreparing(false);
+        });
         if (timedOut) {
-          thread.endRun();
+          this.#warn(thread.id, `run ${frame.run_id}: workspace preparation timed out`);
+          endOwn();
           return fail("internal", "workspace preparation timed out");
         }
       }
+      mark("workspace ready");
       // The files are in place now: confine them again (the model can write symlinks into the
       // workspace) and read the images Pi gets inline.
       const media = await this.#promptMedia(frame);
       if (typeof media === "string") {
-        thread.endRun();
+        endOwn();
         return fail("pi_rejected", media);
+      }
+      if (!own()) {
+        this.#warn(thread.id, `run ${frame.run_id} was stopped before Pi took its prompt`);
+        return stoppedBeforePrompt;
       }
       const response = await thread.request(
         {
@@ -205,16 +227,21 @@ export class ThreadManager {
         PI_REQUEST_TIMEOUT_MS,
       );
       if (!response.success) {
-        thread.endRun();
+        endOwn();
         return fail("pi_rejected", response.error);
       }
+      mark("prompt taken");
+      // A start this slow is what a Stop or a second message meets as a busy thread: say where.
+      if (Date.now() - began > SLOW_START_WARN_MS) {
+        this.#warn(thread.id, `run ${frame.run_id} started slowly: ${stages.join(", ")}`);
+      }
       const disposition = dispositionOf(response.data);
-      if (disposition === "handled") thread.endRun();
+      if (disposition === "handled") endOwn();
       return ok({ disposition });
     } catch (error) {
       // Pi may still act on the prompt: stop it rather than leave it working without a run.
-      if (thread.runId === frame.run_id) await thread.withLock(() => thread.stopProcess());
-      thread.endRun();
+      if (own()) await thread.withLock(() => thread.stopProcess());
+      endOwn();
       return piFailure(error);
     }
   }
@@ -241,8 +268,9 @@ export class ThreadManager {
     const thread = this.#threads.get(frame.thread_id);
     if (thread?.runId !== frame.run_id) return fail("unknown_run", "run is not active here");
     const ended = thread.runEnded();
-    // A compaction has no step to finish (no turn_end ever comes): after_step aborts it too.
-    if (frame.mode === "after_step" && !thread.compacting) {
+    // A compaction has no step to finish (no turn_end ever comes): after_step aborts it too; nor
+    // has a run still waiting for its workspace.
+    if (frame.mode === "after_step" && !thread.compacting && !thread.runPreparing) {
       thread.onStopDue = () => void this.#abort(thread);
       thread.markStopAfterStep();
     } else {
@@ -733,6 +761,12 @@ export class ThreadManager {
   /** Stop: drop Pi's steering/follow-up queue first (else abort continues it), then abort. */
   async #abort(thread: Thread): Promise<void> {
     if (!thread.beginStopping()) return;
+    // Still waiting for its workspace, so Pi has none of it: end it now; its start sees that and
+    // never sends the prompt.
+    if (thread.runPreparing) {
+      thread.endRun();
+      return;
+    }
     const ended = thread.runEnded();
     try {
       await thread.request({ type: "clear_queue" }, PI_REQUEST_TIMEOUT_MS).catch(() => undefined);
@@ -744,12 +778,21 @@ export class ThreadManager {
         await raceTimeout(ended, ABORT_SETTLE_GRACE_MS);
       }
       if (thread.runId !== undefined) throw new Error("run did not settle after abort");
-    } catch {
+    } catch (error) {
       // Pi did not abort cleanly: stop the process (ends the run; tools in its group die too).
+      this.#warn(thread.id, `stopping Pi: ${(error as Error).message}`);
       await thread.withLock(() => thread.stopProcess());
     }
   }
+
+  #warn(threadId: string, message: string): void {
+    const hooks = this.#options.hooks;
+    (hooks.warning ?? hooks.diagnostic)(threadId, message);
+  }
 }
+
+/** A run.start whose run was stopped before its prompt went to Pi (the server ended it already). */
+const stoppedBeforePrompt = fail("run_not_active", "the run was stopped before Pi took its prompt");
 
 /** The run's gateway model from `run.start.config` (both fields, else no model) and its limits. */
 function runModelOf(frame: RunStartFrame | undefined): RunModel | null {
