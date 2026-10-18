@@ -51,6 +51,10 @@ test("remember for this conversation, run without a card, list, revoke, ask agai
 }) => {
   test.setTimeout(4 * RUN_TIMEOUT_MS);
   await chat.open();
+  // A share_file rule the member already has (any scope, made by hand or by an earlier run) would
+  // let the first share run without a card: revoke them first.
+  await revokeAll(page);
+  expect((await myRules(page)).filter((r) => r.tool_glob === "share_file")).toEqual([]);
   try {
     await chat.send(
       `Use the write tool to create ${FILE} containing the word hi, then use the share_file tool to share ${FILE}. Then reply DONE.`,

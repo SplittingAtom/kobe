@@ -80,9 +80,18 @@ test("panel toggles: one panel fills the rail, the last stays on, the choice is 
     await expect(threads).toBeHidden();
     await expect(divider).toHaveCount(0);
     await expect(files).toBeVisible();
+    // The last panel on stays on. Playwright won't click an aria-disabled control, so this
+    // activates it as a keyboard user would, then asks for Files through its command.
     await expect(filesToggle).toHaveAttribute("aria-disabled", "true");
-    await filesToggle.click();
+    await filesToggle.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
     await expect(files).toBeVisible();
+    await expect(filesToggle).toHaveAttribute("aria-pressed", "true");
+    await chat.composer.focus();
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(files).toBeVisible();
+    await expect(threads).toBeHidden();
     await expect.poll(() => storedPanels(page)).toBe("files");
     await shoot(page, "rail-files-only", page.locator('[data-shell-region="rail"]'));
 
@@ -100,10 +109,20 @@ test("panel toggles: one panel fills the rail, the last stays on, the choice is 
     await chat.composer.press("ControlOrMeta+b");
     await page.getByRole("button", { name: "Show threads" }).click();
     await expect(threads).toBeVisible();
+    // Asking for a panel shows it for this page only: the member's saved choice stays.
+    expect(await storedPanels(page)).toBe("files");
   } finally {
-    await chat.showBothPanels();
+    // Back to the default for the other specs (the toggles read "both" on this page already).
+    await page.evaluate(async () => {
+      await fetch("/v1/me/preferences", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rail_panels: "both" }),
+      });
+    });
     await expect.poll(() => storedPanels(page)).toBe("both");
   }
+  await page.reload();
   await expect(divider).toBeVisible();
 });
 
