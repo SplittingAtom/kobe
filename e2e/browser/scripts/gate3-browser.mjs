@@ -6,7 +6,8 @@
 //         its fetch() to an outside address is blocked by the CSP (the violation is reported and no
 //         request leaves the page; a request that did leave would be answered by the route below).
 //   ac-4  the thread with the `remember` call shows the "Memory updated" chip with Undo.
-//   ac-1  a thread pinned to an older agent version shows "v<N> available" with a switch.
+//   ac-1  a thread pinned to an older agent version shows "v<N> available" with a switch; one
+//         click moves the thread to v<N> (gate3.sh then checks that its next run uses it).
 //
 // Environment (no secrets on the command line): KOBE_BROWSER_BASE (the public URL), optional
 // KOBE_BROWSER_MAP (host:port the browser connects to for the base's host, e.g. a port-forward to
@@ -118,8 +119,20 @@ async function versionBadge(page) {
     () => false,
   );
   out("version_badge", visible ? `visible:${oneLine(await badge.textContent())}` : "absent");
-  const switcher = page.getByRole("button", { name: /switch|use v\d+/i }).first();
+  const switcher = page.getByRole("button", { name: /^Switch this thread to v\d+$/ }).first();
   out("version_switch", (await switcher.count()) > 0 ? "present" : "absent");
+  if ((await switcher.count()) === 0) return;
+  // One click (KOBE-420): the offer goes once the server moved the thread to that version.
+  const target = (await switcher.getAttribute("aria-label"))?.match(/v(\d+)$/)?.[1] ?? "?";
+  await switcher.click();
+  const gone = await page
+    .locator("[data-kobe-agent-version]")
+    .waitFor({ state: "detached", timeout: 10_000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  out("version_switched", gone ? target : "no");
 }
 
 const oneLine = (s) =>

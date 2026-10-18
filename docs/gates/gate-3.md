@@ -82,6 +82,7 @@ rolling back to v1 publishes v3 with v1's definition.
 | `switch=200:2`, then `started_agent=<agent>:2`, `G3V2`                    | One call (`POST /v1/threads/:id/agent-version`) switches the pin.  |
 | rollback: `version=3`, `republished_from=1`, v1's prompt; `1:-,2:-,3:1`   | Rollback republishes v1 as a new version; history is kept.         |
 | browser: `v3 available` with a switch on the pinned thread                | The member sees it in the thread header (KOBE-420).                |
+| browser: one click on Switch (`version_switched=3`); next run `:3`        | The click moves the thread; its next run uses v3 (KOBE-420).       |
 
 ## ac-2 Skills: scan, team-admin review, hash blocklist (U9, KOBE-79/80/81/82)
 

@@ -504,6 +504,10 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
     if [[ -n "${PINNED_THREAD:-}" ]]; then
       contains "ac-1 browser: the pinned thread shows 'v3 available'" '^version_badge=visible:.*v3 available' "$br"
       contains "ac-1 browser: ...with a one-click switch" '^version_switch=present$' "$br"
+      contains "ac-1 browser: one click on Switch moves the thread to v3" '^version_switched=3$' "$br"
+      after=$(turn "$U_M1" "$(ask_code)" "\"threadId\":\"$PINNED_THREAD\"")
+      contains "ac-1: the thread's next run after the click uses v3" "^started_agent=$AGENT:3\$" "$after"
+      contains "...with v3's prompt (v1's, rolled back)" "$(code_of 1)" "$(said "$after")"
     fi
   fi
 fi
