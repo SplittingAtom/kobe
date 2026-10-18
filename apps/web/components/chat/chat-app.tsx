@@ -241,7 +241,7 @@ function ChatWorkspace({
                           <ThreadSearch onOpenThread={setThreadId} />
                         </ShellSlot>
                         <ShellSlot name="nav">
-                          <RailDrawerButton />
+                          <RailDrawerButton teamName={teamName} />
                         </ShellSlot>
                         <WorkspaceGrid
                           rail={

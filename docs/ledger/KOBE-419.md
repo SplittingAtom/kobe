@@ -38,12 +38,12 @@
   the team console (`useOpenConsoles`); the bar's Administration links list Site console only. The
   palette still lists both (by href).
 
-## Open questions (for Chris or the coordinator)
+## Follow-up (coordinator answers, 2026-10-18)
 
-- On a phone the bar shows no team name; the drawer button opens the drawer headed by it (the
-  AC's "or opens the drawer"). Want the name on the phone bar too?
-- The name says "Team console" (the registry's name), as the bar did; the ticket calls it Team
-  admin. Rename?
+- Under 768 px the bar shows the active team's name beside the drawer button (truncated, full
+  name as tooltip; `RailDrawerButton`), so the team is visible without opening the drawer
+  (`rail-header.test.tsx`). Wide windows show the rail itself and no name in the bar.
+- The button keeps the product's name, "Team console".
 
 ## Evidence (acceptance criteria → test or command output)
 

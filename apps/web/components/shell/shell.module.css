@@ -193,6 +193,11 @@
 
 /* --- one-row bar (CE8, KOBE-201) ----------------------------------------------------------- */
 
+/* Under 768 px: the drawer button and the active team's name, which truncates (KOBE-419). */
+.nav {
+  min-width: 0;
+}
+
 .nav:empty {
   display: none;
 }

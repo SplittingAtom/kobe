@@ -158,6 +158,21 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     expect(line.querySelector("details")).toBeNull();
   });
 
+  it("under 768 px the bar names the active team beside the drawer button", async () => {
+    resizeWindow(390);
+    openApp(fake);
+    await composer();
+    const open = await screen.findByRole("button", { name: "Show the workspace" });
+    const name = await within(bar()).findByText("Finance");
+    expect(name.getAttribute("title")).toBe("Finance");
+    expect(name.closest("[data-rail-drawer-opener]")).toBe(
+      open.closest("[data-rail-drawer-opener]"),
+    );
+    // Wide windows show the rail itself: the bar names no team.
+    resizeWindow(DESKTOP_WIDTH);
+    await waitFor(() => expect(within(bar()).queryByText("Finance")).toBeNull());
+  });
+
   it("under 768 px it heads the drawer, which the bar opens", async () => {
     fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     resizeWindow(390);

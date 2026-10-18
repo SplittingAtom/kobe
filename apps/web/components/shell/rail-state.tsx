@@ -292,17 +292,32 @@ export function RailProvider({
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;
 }
 
-/** Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). */
-export function RailDrawerButton() {
+/**
+ * Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). Beside the
+ * button, the active team's name (KOBE-419), so the team stays visible without opening the drawer
+ * (whose header holds the selector); it truncates, with all of it as the tooltip.
+ */
+export function RailDrawerButton({ teamName = "" }: { readonly teamName?: string }) {
   const rail = useRail();
   const single = useShellBand() === "single";
   if (!rail || !single) return null;
   return (
-    <IconAction
-      command="open-rail"
-      aria-haspopup="dialog"
-      aria-expanded={rail.drawer}
-      onClick={() => rail.reveal("threads", { toggle: true })}
-    />
+    <span data-rail-drawer-opener className="flex min-w-0 items-center gap-1">
+      <IconAction
+        command="open-rail"
+        aria-haspopup="dialog"
+        aria-expanded={rail.drawer}
+        onClick={() => rail.reveal("threads", { toggle: true })}
+      />
+      {teamName !== "" && (
+        <span
+          title={teamName}
+          className="max-w-[9rem] min-w-0 truncate text-sm font-medium"
+          data-bar-team
+        >
+          {teamName}
+        </span>
+      )}
+    </span>
   );
 }
