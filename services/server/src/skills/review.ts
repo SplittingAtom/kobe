@@ -26,7 +26,7 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { blockedAmong, isBlocked } from "./blocklist.js";
-import { scanPool } from "./scan-pool.js";
+import { scanPool, type ScanOptions } from "./scan-pool.js";
 import { legacySemver } from "./semver.js";
 
 /**
@@ -44,8 +44,8 @@ import { legacySemver } from "./semver.js";
  * Scans the files of a canonical zip (the exact bytes that are stored and hashed), in a worker
  * thread off the event loop (KOBE-313 review A-S2); a scan that runs out of time is Block.
  */
-export function scanCanonicalZip(zip: Uint8Array): Promise<ScanResult> {
-  return scanPool().scan(zip);
+export function scanCanonicalZip(zip: Uint8Array, options: ScanOptions = {}): Promise<ScanResult> {
+  return scanPool().scan(zip, options);
 }
 
 /** The columns a scan fills in a review row or personal scan row. */
@@ -681,7 +681,8 @@ export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string
     try {
       const bytes = await readBytes(blobs, row.key);
       if (!bytes) continue;
-      const scan = storedScan(await scanCanonicalZip(bytes));
+      // Late scans are turned away like uploads when the queue is full (retried on the next list).
+      const scan = storedScan(await scanCanonicalZip(bytes, { owner: `team:${teamId}` }));
       await withTeam(db, teamId, (tx) =>
         tx
           .update(teamSkillReviews)

@@ -7,6 +7,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { withTeam } from "@kobe/db";
 import { usablePersonalSkills } from "./skills/review.js";
+import { ScanBusyError, setScanPool } from "./skills/scan-pool.js";
 
 /**
  * Skill scan and team-admin review (KOBE-80, D22): every new team version is scanned at upload and
@@ -482,5 +483,24 @@ describe("review gating holes (KOBE-312 review)", () => {
       flagged: true,
       verdict: "caution",
     });
+  });
+});
+
+describe("upload while the scan queue is full (KOBE-313 re-review)", () => {
+  it("answers 429 for the caller's own share and 503 for a full queue, with Retry-After", async () => {
+    for (const [kind, status] of [
+      ["owner", 429],
+      ["global", 503],
+    ] as const) {
+      const previous = setScanPool({ scan: () => Promise.reject(new ScanBusyError(kind)) });
+      try {
+        const res = await as.bob.post("/v1/skills?scope=team", zipOf(`busy-${kind}`));
+        expect(res.status, JSON.stringify(res.json)).toBe(status);
+        expect(res.json.code).toBe("scan_busy");
+        expect(res.headers.get("retry-after")).toBe("10");
+      } finally {
+        setScanPool(previous);
+      }
+    }
   });
 });

@@ -15,6 +15,8 @@ import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
+import { SCAN_RETRY_AFTER_SECONDS, ScanBusyError } from "../skills/scan-pool.js";
+import type { ScanResult } from "@kobe/skill-scanner";
 import { parseSemver } from "../skills/semver.js";
 import { readUploadBody } from "../skills/upload-body.js";
 import { IntegrityError } from "../skills/blob-read.js";
@@ -46,7 +48,7 @@ const versionRef = (value: string | undefined): number | string | null => {
 
 const error = (
   c: Ctx,
-  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 503,
+  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 429 | 503,
   code: string,
   message: string,
 ) => c.json({ code, message }, status);
@@ -183,7 +185,21 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       const requested = numberingFrom(numbering, bundle);
       if (!requested.ok) return error(c, 400, "invalid_request", requested.message);
       // The whole tree is scanned (SK32), evals/ fixtures included.
-      const scan = await scanCanonicalZip(bundle.packageZip ?? bundle.zip);
+      let scan: ScanResult;
+      try {
+        scan = await scanCanonicalZip(bundle.packageZip ?? bundle.zip, { owner: c.get("user").id });
+      } catch (err) {
+        if (!(err instanceof ScanBusyError)) throw err;
+        c.header("Retry-After", String(SCAN_RETRY_AFTER_SECONDS));
+        return err.kind === "owner"
+          ? error(
+              c,
+              429,
+              "scan_busy",
+              "Your earlier uploads are still being scanned. Try again shortly.",
+            )
+          : error(c, 503, "scan_busy", "Skill scanning is busy. Try again shortly.");
+      }
       const location = locationFor(c, scope.data);
       const result = await store.putPackage(location, {
         bundle,

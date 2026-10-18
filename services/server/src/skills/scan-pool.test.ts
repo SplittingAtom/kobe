@@ -1,7 +1,7 @@
 import { scanSkillBundle } from "@kobe/skill-scanner";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { createScanPool } from "./scan-pool.js";
+import { ScanBusyError, createScanPool, type ScanPool } from "./scan-pool.js";
 
 /** KOBE-313 review A-S2: scans run in worker threads, capped, with a timeout that blocks. */
 const bundle = (extra: Record<string, string> = {}) =>
@@ -43,5 +43,26 @@ describe("scan pool", () => {
     const results = await Promise.all([1, 2, 3].map(() => pool.scan(bundle())));
     expect(results.map((r) => r.verdict)).toEqual(["pass", "pass", "pass"]);
     await expect(pool.scan(Uint8Array.from([1, 2, 3]))).rejects.toThrow(/skill scan failed/);
+  });
+
+  it("blocks a bundle whose scan runs out of memory, never throws (KOBE-313 re-review)", async () => {
+    const zip = bundle({ "references/big.txt": "a b c\n".repeat(1_500_000) });
+    const r = await createScanPool({ resourceLimits: { maxOldGenerationSizeMb: 4 } }).scan(zip);
+    expect(r.verdict).toBe("block");
+    expect(r.findings.map((f) => f.rule)).toEqual(["scan-resources-exceeded"]);
+  });
+
+  it("turns callers away when their share or the whole queue is full", async () => {
+    const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+    const pool: ScanPool = createScanPool({ concurrency: 1, maxQueued: 1, perOwner: 2 });
+    const running = [pool.scan(big, { owner: "u1" }), pool.scan(big, { owner: "u1" })];
+    await expect(pool.scan(big, { owner: "u1" })).rejects.toMatchObject({ kind: "owner" });
+    await expect(pool.scan(big, { owner: "u2" })).rejects.toBeInstanceOf(ScanBusyError);
+    await expect(pool.scan(big, { owner: "u2" })).rejects.toMatchObject({ kind: "global" });
+    // Background rescans (no owner) still queue.
+    const background = pool.scan(bundle());
+    await Promise.all([...running, background]);
+    // Once drained, the owner may scan again.
+    expect((await pool.scan(bundle(), { owner: "u1" })).verdict).toBe("pass");
   });
 });

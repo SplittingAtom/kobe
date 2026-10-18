@@ -84,6 +84,11 @@ Migration alone (`0134_skill_rescans`, generated, no backfill), then the rescan 
   - Scanner (rule set 4, `2026.10.18.4`): script rules on every non-Markdown text file; run
     references (for Markdown) are case-insensitive, strip trailing punctuation and doubled
     slashes, and read long lines in windows; the two unbounded `[^|\n]*` gaps are `{0,500}`.
+- **Re-review must-fix (memory):** scan workers run with `resourceLimits` (192 MiB old, 32 MiB
+  young generation); a worker that runs out of memory or crashes gives Block
+  `scan-resources-exceeded`, never a 500. The queue is bounded: at most 8 waiting and 2 per owner
+  (user, or `team:<id>` for late scans); over it an upload answers 429 (own share) or 503 (full),
+  with `Retry-After: 10`. Background rescans pass no owner and queue (they run one at a time).
 - **Follow-ups recorded for later tickets:**
   - **KOBE-318 (A12, frozen versions):** a frozen local version in a published agent must still
     check the team review status and `suspended_at`, not only the frozen hash; otherwise a
@@ -92,6 +97,9 @@ Migration alone (`0134_skill_rescans`, generated, no backfill), then the rescan 
   - **KOBE-333 (C4, catalog packages):** store catalog packages and add them to the rescan, with a
     `rule_set` on `registry_versions`; KOBE-315/337 must omit `suspended_at` catalog versions as
     `suspended` and notify maintainers and installers.
+  - **Prose rules, "code run from .md files":** fenced code in Markdown that the agent is told to
+    run (a skill's own commands) gets only the prose and pipe-to-shell rules today; a later
+    rule-set bump should run the script rules on fenced code blocks in `.md` files too.
   - Nits not done: suspension when an already-Block approved row gains new Block rules (N1);
     personal-scope rows rescanned right after their personal scan (N2); run-row copies of slugs
     on team/user erasure (N3); an UPDATE guard trigger on `personal_skill_scans` (N6); offered
