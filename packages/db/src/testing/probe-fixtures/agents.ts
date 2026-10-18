@@ -3,6 +3,8 @@ import {
   memberSkillEnablements,
   registrySkills,
   registryVersions,
+  skillDraftFiles,
+  skillDrafts,
   teamMembers,
   teamSkillBlocks,
   teamSkillInstalls,
@@ -252,4 +254,27 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       sharedAt: new Date(),
     });
   },
+  skill_drafts: async (tx, teamId) => {
+    await probeDraft(tx, teamId);
+  },
+  skill_draft_files: async (tx, teamId) => {
+    // One text file and one binary file of a draft (KOBE-320).
+    const draftId = await probeDraft(tx, teamId);
+    await tx.insert(skillDraftFiles).values([
+      { teamId, draftId, path: "SKILL.md", textContent: "probe", size: 5 },
+      { teamId, draftId, path: "assets/x.bin", bytes: Buffer.from([0, 1, 2]), size: 3 },
+    ]);
+  },
 };
+
+/** A Workbench draft (KOBE-320), shared with the team's builders. */
+async function probeDraft(tx: Parameters<ProbeFixture>[0], teamId: string): Promise<string> {
+  const userId = randomUUID();
+  await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  const [draft] = await tx
+    .insert(skillDrafts)
+    .values({ teamId, ownerUserId: userId, updatedBy: userId, name: "probe", shared: true })
+    .returning({ id: skillDrafts.id });
+  if (!draft) throw new Error("probe draft insert returned no row");
+  return draft.id;
+}
