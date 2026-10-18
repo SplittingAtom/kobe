@@ -129,8 +129,9 @@ export const provenanceSchema = z.strictObject({
       passRateWith: ratio,
       passRateWithout: ratio.optional(),
       lift: z.number().min(-1).max(1).optional(),
-      triggerPrecision: ratio,
-      triggerRecall: ratio,
+      /** Absent when the eval had nothing to measure them on (KOBE-324: null in the scorecard). */
+      triggerPrecision: ratio.optional(),
+      triggerRecall: ratio.optional(),
       costUsd: z.number().min(0).max(1_000_000),
       at: instant,
     })

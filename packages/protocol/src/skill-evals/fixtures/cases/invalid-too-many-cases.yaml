@@ -1,0 +1,27 @@
+cases:
+  - { id: c1, prompt: p, expect: { triggers: true } }
+  - { id: c2, prompt: p, expect: { triggers: true } }
+  - { id: c3, prompt: p, expect: { triggers: true } }
+  - { id: c4, prompt: p, expect: { triggers: true } }
+  - { id: c5, prompt: p, expect: { triggers: true } }
+  - { id: c6, prompt: p, expect: { triggers: true } }
+  - { id: c7, prompt: p, expect: { triggers: true } }
+  - { id: c8, prompt: p, expect: { triggers: true } }
+  - { id: c9, prompt: p, expect: { triggers: true } }
+  - { id: c10, prompt: p, expect: { triggers: true } }
+  - { id: c11, prompt: p, expect: { triggers: true } }
+  - { id: c12, prompt: p, expect: { triggers: true } }
+  - { id: c13, prompt: p, expect: { triggers: true } }
+  - { id: c14, prompt: p, expect: { triggers: true } }
+  - { id: c15, prompt: p, expect: { triggers: true } }
+  - { id: c16, prompt: p, expect: { triggers: true } }
+  - { id: c17, prompt: p, expect: { triggers: true } }
+  - { id: c18, prompt: p, expect: { triggers: true } }
+  - { id: c19, prompt: p, expect: { triggers: true } }
+  - { id: c20, prompt: p, expect: { triggers: true } }
+  - { id: c21, prompt: p, expect: { triggers: true } }
+  - { id: c22, prompt: p, expect: { triggers: true } }
+  - { id: c23, prompt: p, expect: { triggers: true } }
+  - { id: c24, prompt: p, expect: { triggers: true } }
+  - { id: c25, prompt: p, expect: { triggers: true } }
+  - { id: c26, prompt: p, expect: { triggers: true } }

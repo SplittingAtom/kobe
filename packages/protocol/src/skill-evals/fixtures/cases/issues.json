@@ -1,0 +1,38 @@
+{
+  "invalid-api-version.yaml": [{ "code": "invalid_value", "path": "apiVersion", "line": 1 }],
+  "invalid-case-id.yaml": [{ "code": "invalid_value", "path": "cases[0].id", "line": 2 }],
+  "invalid-cost.yaml": [
+    { "code": "out_of_range", "path": "cases[0].expect.max_cost_usd", "line": 6 }
+  ],
+  "invalid-duplicate-id.yaml": [{ "code": "duplicate", "path": "cases[1].id", "line": 5 }],
+  "invalid-empty-cases.yaml": [{ "code": "out_of_range", "path": "cases", "line": 1 }],
+  "invalid-fixture-hidden.yaml": [
+    { "code": "invalid_value", "path": "cases[0].files[0]", "line": 4 }
+  ],
+  "invalid-fixture-missing.yaml": [
+    { "code": "fixture_missing", "path": "cases[0].files[1]", "line": 6 }
+  ],
+  "invalid-fixture-path.yaml": [
+    { "code": "invalid_value", "path": "cases[0].files[0]", "line": 4 }
+  ],
+  "invalid-max-turns.yaml": [
+    { "code": "out_of_range", "path": "cases[0].expect.max_turns", "line": 4 }
+  ],
+  "invalid-missing-prompt.yaml": [{ "code": "missing", "path": "cases[0].prompt", "line": 2 }],
+  "invalid-model.yaml": [{ "code": "invalid_value", "path": "model", "line": 1 }],
+  "invalid-no-expectation.yaml": [
+    { "code": "no_expectation", "path": "cases[0].expect", "line": 5 }
+  ],
+  "invalid-output-glob.yaml": [
+    { "code": "invalid_value", "path": "cases[0].expect.outputs[0]", "line": 5 }
+  ],
+  "invalid-regex.yaml": [{ "code": "bad_pattern", "path": "cases[0].expect.matches", "line": 5 }],
+  "invalid-too-many-cases.yaml": [{ "code": "out_of_range", "path": "cases", "line": 2 }],
+  "invalid-unknown-expectation.yaml": [
+    { "code": "unknown_key", "path": "cases[0].expect.judge_model", "line": 6 }
+  ],
+  "yaml-alias.yaml": [{ "code": "yaml_alias", "path": "", "line": 6 }],
+  "yaml-duplicate-key.yaml": [{ "code": "yaml_duplicate_key", "path": "", "line": 4 }],
+  "yaml-not-a-mapping.yaml": [{ "code": "not_a_mapping", "path": "", "line": 1 }],
+  "yaml-syntax.yaml": [{ "code": "yaml_syntax", "path": "", "line": 3 }]
+}

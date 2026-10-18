@@ -1,0 +1,3 @@
+cases:
+  - id: q3
+    expect: { triggers: true }

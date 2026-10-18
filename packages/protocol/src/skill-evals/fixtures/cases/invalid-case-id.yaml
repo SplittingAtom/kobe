@@ -1,0 +1,4 @@
+cases:
+  - id: Q3 Workbook
+    prompt: "Build the workbook"
+    expect: { triggers: true }

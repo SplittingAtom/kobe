@@ -1,0 +1,7 @@
+cases:
+  - id: q3
+    prompt: &p "Build the workbook"
+    expect: { triggers: true }
+  - id: q4
+    prompt: *p
+    expect: { triggers: false }

@@ -1,0 +1,25 @@
+# The spec's example (SK15), with every expectation.
+apiVersion: kobe.dev/skill-evals/v1
+model: smart
+cases:
+  - id: q3-workbook
+    prompt: "Build the Q3 revenue workbook from sales.csv"
+    files: [fixtures/sales.csv]
+    expect:
+      triggers: true
+      outputs: ["outputs/*.xlsx"]
+      judge: "One sheet per region and a totals row on each sheet."
+      max_cost_usd: 0.40
+  - id: totals-in-answer
+    prompt: |
+      Summarize the regional totals in sales.csv.
+      Use regions/map.json for the region names.
+    files: [fixtures/sales.csv, fixtures/regions/map.json]
+    expect:
+      contains: Total
+      matches: ['\$[0-9,]+', { pattern: "north|south", flags: i }]
+      max_turns: 8
+      no_denied_tools: true
+  - id: unrelated-question
+    prompt: "What is the capital of France?"
+    expect: { triggers: false }
