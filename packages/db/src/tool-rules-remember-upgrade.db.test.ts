@@ -21,7 +21,12 @@ const MARKER = "KOBE-289: remember scopes on user rules";
 let db: TestDatabase | undefined;
 let older = "";
 const ids = { team: randomUUID(), user: randomUUID() };
-const rules = { forever: randomUUID(), day: randomUUID(), month: randomUUID() };
+const rules = {
+  forever: randomUUID(),
+  day: randomUUID(),
+  month: randomUUID(),
+  team: randomUUID(),
+};
 
 async function withClient<T>(url: string, fn: (c: pg.Client) => Promise<T>): Promise<T> {
   const c = new pg.Client({ connectionString: url });
@@ -71,6 +76,12 @@ beforeAll(async () => {
         [id, ids.team, ids.user, expiry],
       );
     }
+    // A team rule: no remember scope, before the upgrade and after it.
+    await c.query(
+      `INSERT INTO tool_rules (id, team_id, scope, user_id, effect, tool_glob, created_by)
+       VALUES ($1, $2, 'team', NULL, 'allow', 'bash', $3)`,
+      [rules.team, ids.team, ids.user],
+    );
     await c.query("COMMIT");
   });
 }, 120_000);
@@ -93,6 +104,7 @@ describe("tool_rules remember scopes on upgrade (KOBE-289)", () => {
         [rules.forever]: "forever",
         [rules.day]: "day",
         [rules.month]: "month",
+        [rules.team]: null,
       });
       const rls = await c.query<{ enabled: boolean; forced: boolean }>(
         `SELECT relrowsecurity AS enabled, relforcerowsecurity AS forced
