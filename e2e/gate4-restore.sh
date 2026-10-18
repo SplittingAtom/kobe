@@ -98,11 +98,13 @@ stop_forwards() {
   PF_PIDS=()
 }
 cleanup() {
+  local rc=$?
   local u p
   stop_forwards
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   for u in "${UNDO[@]+"${UNDO[@]}"}"; do eval "$u" >/dev/null 2>&1 || true; done
   rm -rf "$WORK"
+  verdict_on_exit "$rc" "Gate 4 restore"
 }
 trap cleanup EXIT
 use_site() { # namespace → NS, SERVER and BASE name that release (the client runs in its server pod)
@@ -334,8 +336,9 @@ show "artifact" "$art"
 contains "the agent makes an HTML artifact (artifact.created)" '^artifact_events=artifact.created:[0-9a-f-]{36}:v1$' "$art"
 ARTIFACT=$(field artifact_events "$art" | cut -d: -f2)
 REPORT="gate4r-report-$NONCE.csv"
-contains "the agent copies the CSV into its workspace" '^terminal=run.completed$' \
-  "$(turn "$U_M1" "$(bash_prompt "cp /workspace/uploads/$T_DATA/sales.csv /workspace/$REPORT && echo copied")" "\"threadId\":\"$T_DATA\"")"
+# The message carries the upload (fileIds), which puts it at /workspace/uploads/<thread>/ (U3).
+cp_turn=$(turn "$U_M1" "$(bash_prompt "cp /workspace/uploads/$T_DATA/sales.csv /workspace/$REPORT && echo copied")" "\"threadId\":\"$T_DATA\",\"fileIds\":[\"$UPLOAD\"]")
+contains "the agent copies the CSV into its workspace" '^tool_output=.*"preview":"copied' "$cp_turn"
 sf=$(turn "$U_M1" "$(tool_prompt share_file "$(printf '{"path":"%s","description":"Gate 4 restore report"}' "$REPORT")")" "\"threadId\":\"$T_DATA\"")
 show "share_file" "$sf"
 contains "the agent shares it (file.shared)" "^file_events=[0-9a-f-]{36}:$REPORT:${#CSV}\$" "$sf"
@@ -349,7 +352,7 @@ contains "the member stores an API key for a connector (sealed grant)" '^grant=2
   "$(step connector "\"user\":$U_M1,\"connectorId\":\"$CONNECTOR_ID\",\"name\":\"gate4r-$NONCE\",\"url\":\"http://gate4r.invalid/mcp\",\"apiKey\":\"$API_KEY\"")"
 
 snapshot() { # → the evidence a restore must reproduce, as key=value lines
-  step state "\"user\":$U_M1,\"threadId\":\"$T_DATA\",\"artifacts\":[\"$ARTIFACT\"],\"files\":[\"$SHARED\",\"$UPLOAD\"],\"uploads\":[\"$UPLOAD\"]"
+  step state "\"user\":$U_M1,\"threadId\":\"$T_DATA\",\"artifacts\":[\"$ARTIFACT\"],\"files\":[\"$SHARED\"],\"uploads\":[\"$UPLOAD\"]"
   step memory-doc "\"user\":$U_M1,\"docId\":\"$DOC\"" | grep '^doc_content='
   step project-files "\"user\":$U_M1,\"projectId\":\"$PROJECT\""
   step skill-bundle "\"user\":$U_AD,\"skillId\":\"$SKILL_ID\",\"version\":1"
@@ -357,7 +360,7 @@ snapshot() { # → the evidence a restore must reproduce, as key=value lines
 }
 before=$(snapshot)
 show "before" "$(grep -v '^entries=' <<<"$before")"
-contains "the source thread has history" '^entries=[0-9a-f-]{36},' "$before"
+contains "the source thread has history (entries)" '^entries=[^,-][^,]*,[^,]+' "$before"
 contains "the skill bundle is served (its bytes hash to the recorded content hash)" "^bundle=200:$SKILL_HASH\$" "$before"
 contains "the grant opens with the source's envelope key" "^grant_sha=$API_KEY_SHA\$" "$before"
 src_integrity=$(step integrity '"check":1')
@@ -404,8 +407,8 @@ backup_out=$(env KOBE_BACKUP_KEY_FILE="$WORK/backup.key" \
   KOBE_BACKUP_DATABASE_URL="postgres://kobe_gate4_backup:$BACKUP_PW@127.0.0.1:$pg_port/$SRC_DB" \
   "${s3_env[@]}" $CLI backup --out "$BACKUP_DIR" 2>&1) || true
 sed 's/^/     /' <<<"$backup_out"
-contains "kobe backup writes an encrypted, signed backup" 'manifest fingerprint [0-9a-f]{64}' "$backup_out"
-FINGERPRINT=$(sed -nE 's/.*manifest fingerprint ([0-9a-f]{64}).*/\1/p' <<<"$backup_out" | head -1)
+contains "kobe backup writes an encrypted, signed backup" 'manifest fingerprint sha256:[0-9a-f]{64}' "$backup_out"
+FINGERPRINT=$(sed -nE 's/.*manifest fingerprint (sha256:[0-9a-f]{64}).*/\1/p' <<<"$backup_out" | head -1)
 contains "...with its files (dump, object listing, manifest, signature)" '^database.dump.enc manifest.json manifest.json.sig objects.jsonl.enc $' \
   "$(ls "$BACKUP_DIR" 2>/dev/null | sort | tr '\n' ' ')"
 manifest_rows() { # → name=rows of every table in the signed manifest
@@ -518,10 +521,24 @@ mdiffs=$(join -t= "$WORK/counts-target" "$WORK/counts-manifest" | awk -F= '$2 !=
 contains "...and the signed manifest's counts" '^$' "$mdiffs"
 contains "the restore is in the audit log (platform.restore.completed)" '^1$' \
   "$(psql_super "$TGT_DB" "SELECT count(*) FROM audit_log WHERE action = 'platform.restore.completed'")"
+back_at=$(psql_super "$TGT_DB" "SELECT now()::text")
 $KUBECTL -n "$NS" scale "deploy/$RELEASE-server" --replicas="${SERVER_REPLICAS:-2}" >/dev/null
 $KUBECTL -n "$NS" scale "deploy/$RELEASE-scheduler" --replicas="${SCHEDULER_REPLICAS:-1}" >/dev/null
 if $KUBECTL -n "$NS" rollout status "$SERVER" --timeout=300s >/dev/null 2>&1; then ok "the restored site's server is back"
 else fail "the restored site's server is back"; fi
+# The fresh site's Bifrost knows nothing of the restored providers, catalog and team keys: the
+# server's gateway sync (a full pass when a replica becomes its leader, KOBE-40) must push them
+# before a run can reach a model. `model_gateway_state` came back with the source's progress.
+gateway_state() { psql_super "$TGT_DB" "SELECT desired_version || ':' || synced_version || ':' || coalesce(last_synced_at::text, '-') || ':' || coalesce(last_error, '-') FROM model_gateway_state"; }
+echo "     model gateway state after the restore (desired:synced:last synced:last error): $(gateway_state)"
+gateway_pushed() { [[ "$(psql_super "$TGT_DB" "SELECT last_synced_at > '$back_at'::timestamptz AND last_error IS NULL FROM model_gateway_state")" == t ]]; }
+if until_ok 180 gateway_pushed; then ok "the restored site's server syncs the gateway (a pass since it started)"
+else
+  fail "the restored site's server syncs the gateway (a pass since it started; state: $(gateway_state))"
+  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=10m --tail=-1 2>/dev/null \
+    | grep -E 'model gateway' | tail -5 | cut -c1-300 | sed 's/^/     server: /' || true
+fi
+echo "     m1's sandbox row after the restore: $(psql_super "$TGT_DB" "SELECT state FROM sandboxes WHERE team_id = '$TEAM' AND user_id = '$M1'")"
 
 # ---- restore: the restored site ---------------------------------------------------------------------------
 echo "==> restore: the restored site has the same data, the grant opens, the thread continues"
@@ -530,7 +547,9 @@ show "after" "$(grep -v '^entries=' <<<"$after")"
 missing=$(comm -23 <(field entries "$before" | tr ',' '\n' | sort) <(field entries "$after" | tr ',' '\n' | sort) | grep -c . || true)
 contains "the users sign in again with their passwords; the thread has every entry" '^0 [1-9]' "$missing $(field thread_get "$after")"
 contains "the artifacts are the same" "^artifacts=$(field artifacts "$before")\$" "$after"
-for k in "artifact_content $ARTIFACT" "file_content $SHARED" "file_content $UPLOAD"; do
+# Uploads are private to their uploader and not served by /v1/files (routes/files.ts): the upload's
+# object is checked in the bucket below; the shared file's bytes here.
+for k in "artifact_content $ARTIFACT" "file_content $SHARED"; do
   contains "...$k: the same bytes" "^$k=$(sed -n "s/^$k=//p" <<<"$before" | grep '^200:')\$" "$after"
 done
 contains "the upload's object is in the bucket" "^upload_object $UPLOAD=present:${#CSV}\$" "$after"
@@ -574,7 +593,11 @@ echo "==> install: timing"
 echo "     cluster with gVisor and agent-sandbox (scripts/dev-cluster.sh): ${CLUSTER_SECONDS:-not measured here} s"
 echo "     helm install → first assistant token: ${took:-not measured} s; budget ${SETUP_BUDGET} s (spec §8)"
 if ((failed)); then
-  echo "Gate 4 restore: FAILED"
+  verdict "Gate 4 restore: FAILED"
   exit 1
 fi
-echo "Gate 4 restore: backup → fresh site → restore round-trips${xfailed:+ ($xfailed expected failures)}"
+if ((xfailed)); then
+  verdict "Gate 4 restore: backup → fresh site → restore round-trips, with $xfailed expected failures (filed; KOBE_GATE_STRICT=1 fails them)"
+else
+  verdict "Gate 4 restore: backup → fresh site → restore round-trips"
+fi
