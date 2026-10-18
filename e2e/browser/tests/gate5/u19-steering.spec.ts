@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS } from "../support/constants.js";
 import { expect, test } from "../support/chat.js";
-import { allowApproval, bashTurn, longAnswer, shareTurn } from "../support/gate5.js";
+import { allowApproval, bashTurn, FAKE_MODEL, longAnswer, shareTurn } from "../support/gate5.js";
 
 /**
  * Gate 5, U19 (KOBE-227): "The steering panel walks idle → active → queued → waiting →
@@ -89,9 +89,18 @@ test("U19: interrupted (the sandbox lost mid-run): Retry, then Continue, from th
   const panel = chat.steering;
   const button = (name: string) => panel.getByRole("button", { name, exact: true });
   const interrupt = async () => {
+    const answered = await chat.answers.count();
     await chat.send(LONG);
     await chat.threadId();
     await expect(panel).toHaveAttribute("data-state", "active", { timeout: RUN_START_TIMEOUT_MS });
+    // Mid-run: the answer is streaming (the panel is active as soon as the server starts the run,
+    // while the sandbox may still be starting Pi for it).
+    await expect(chat.answers.nth(answered)).toContainText(
+      FAKE_MODEL ? "fake line 2 " : /\w+ \w+/,
+      {
+        timeout: RUN_START_TIMEOUT_MS,
+      },
+    );
     execFileSync("sh", ["-c", KILL ?? "false"], { stdio: "inherit", timeout: 120_000 });
     await expect(panel).toHaveAttribute("data-state", "interrupted", { timeout: RUN_TIMEOUT_MS });
   };

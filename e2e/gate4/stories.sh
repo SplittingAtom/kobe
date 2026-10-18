@@ -195,11 +195,16 @@ if ((FAKE_INFRA)) && ((MODELS)); then
   mcp_egress=$(merged mcpProxy.networkPolicy.extraEgress "$infra_rule")
   cidrs=$(merged mcpProxy.allowedInternalCidrs "\"$OAUTH_IP/32\"")
   ports=$(merged mcpProxy.allowedPorts 80 '[443]')
+  # The upgrade rolls the server (connectorRefreshSeconds): the steps below go through the Service,
+  # so they wait until the old server pods are gone, not only until the new ones are ready.
+  old_servers=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=server -o name 2>/dev/null || true)
   if out=$($HELM upgrade "$RELEASE" "$CHART" -n "$NS" -f "$saved" --reset-values --wait --timeout 8m \
       --set mcpProxy.allowInsecureHttp=true --set-json "mcpProxy.allowedPorts=$ports" \
       --set-json "mcpProxy.allowedInternalCidrs=$cidrs" --set-json "mcpProxy.networkPolicy.extraEgress=$mcp_egress" \
       --set-json "bifrost.networkPolicy.extraEgress=$bifrost_egress" --set server.connectorRefreshSeconds=60 2>&1); then
     ok "the MCP proxy may reach the fake OAuth server, connectors are re-probed every 60 s, Bifrost may reach the test model"
+    # shellcheck disable=SC2086 # a list of pod/<name> words
+    [[ -z "$old_servers" ]] || $KUBECTL -n "$NS" wait --for=delete $old_servers --timeout=180s >/dev/null 2>&1 || true
   else
     fail "the chart upgrade for the test servers: $(printf '%s' "$out" | tail -3)"
   fi
@@ -225,7 +230,8 @@ mail_token() { # address → the invitation token from the newest mail to it
   $KUBECTL -n "$INFRA_NS" run "$name" --restart=Never --image=busybox:1.37 --env="Q=$q" --env="M=$MAILPIT" \
     --command -- sh -c "$MAIL_SCRIPT" >/dev/null
   $KUBECTL -n "$INFRA_NS" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$name" --timeout=120s >/dev/null 2>&1 || true
-  $KUBECTL -n "$INFRA_NS" logs "$name" 2>/dev/null | grep -o 'invite#token=[A-Za-z0-9_-]*' | head -1 | sed 's/invite#token=//'
+  # No mail is a failed check below, not the end of the gate (pipefail: grep finds nothing).
+  $KUBECTL -n "$INFRA_NS" logs "$name" 2>/dev/null | grep -o 'invite#token=[A-Za-z0-9_-]*' | head -1 | sed 's/invite#token=//' || true
 }
 if want U1; then
   echo "==> U1: invite email → account with password and passkey; 2FA when required; only invited teams"
