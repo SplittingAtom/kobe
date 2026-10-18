@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   check,
   foreignKey,
   index,
@@ -56,9 +57,9 @@ export const skillDefaultSyncs = pgTable(
     /** The version new Default installs get (`add`) or moved installs move to (`move_major`). */
     versionId: uuid(),
     status: text().$type<DefaultSyncStatus>().notNull().default("queued"),
-    requestedBy: uuid()
-      .notNull()
-      .references(() => users.id),
+    /** Null exactly when Kobe queued it (`by_kobe`, KOBE-317: the built-in seed). */
+    requestedBy: uuid().references(() => users.id),
+    byKobe: boolean().notNull().default(false),
     createdAt: ts().notNull().defaultNow(),
     startedAt: ts(),
     finishedAt: ts(),
@@ -116,6 +117,7 @@ export const skillDefaultSyncs = pgTable(
         AND ${t.moved} >= 0 AND ${t.blocked} >= 0 AND ${t.nameConflicts} >= 0
         AND ${t.attempts} >= 0`,
     ),
+    check("skill_default_syncs_by_kobe", sql`${t.byKobe} = (${t.requestedBy} IS NULL)`),
     check(
       "skill_default_syncs_last_error",
       sql`${t.lastError} IS NULL OR ${t.lastError} ~ '^[a-z0-9_]{1,64}$'`,

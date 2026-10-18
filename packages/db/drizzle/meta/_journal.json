@@ -960,6 +960,13 @@
       "when": 1792330275072,
       "tag": "0136_member_personal_enablements",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1792334855504,
+      "tag": "0137_kobe_published_skills",
+      "breakpoints": true
     }
   ]
 }

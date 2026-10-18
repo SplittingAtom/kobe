@@ -41,4 +41,6 @@ export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "team_skill_versions", column: "package_storage_key" }, // its package zip (KOBE-310)
   { table: "personal_skill_versions", column: "storage_key", site: true }, // personal skill (KOBE-79)
   { table: "personal_skill_versions", column: "package_storage_key", site: true }, // (KOBE-310)
+  { table: "registry_versions", column: "runtime_storage_key", site: true }, // catalog runtime zip (KOBE-317)
+  { table: "registry_versions", column: "package_storage_key", site: true }, // its package zip (KOBE-317)
 ];

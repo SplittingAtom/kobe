@@ -45,10 +45,10 @@ export const teamSkillInstalls = pgTable(
     access: skillAccess().notNull(),
     /** `default_tag`: made by the Default tag (SK6); the team's later changes stick. */
     origin: skillInstallOrigin().notNull().default("team"),
-    // Users are deactivated, never deleted (NO ACTION); a Default install names who tagged it.
-    installedBy: uuid()
-      .notNull()
-      .references(() => users.id),
+    // Users are deactivated, never deleted (NO ACTION); a Default install names who tagged it,
+    // or no one when Kobe's own Default sync made it (`by_kobe`, KOBE-317).
+    installedBy: uuid().references(() => users.id),
+    byKobe: boolean().notNull().default(false),
     /**
      * When the team last changed the install's pin mode, access or origin (KOBE-314): set, the
      * install is "touched" and a Site admin's move of Default installs to a new major skips it;
@@ -67,6 +67,7 @@ export const teamSkillInstalls = pgTable(
       foreignColumns: [registryVersions.id, registryVersions.skillId],
     }),
     index("team_skill_installs_skill_idx").on(t.skillId),
+    check("team_skill_installs_by_kobe", sql`${t.byKobe} = (${t.installedBy} IS NULL)`),
   ],
 );
 

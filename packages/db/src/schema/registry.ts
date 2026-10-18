@@ -33,7 +33,21 @@ const TAG_FORMAT = "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$";
 const SUMMARY_MAX = 280;
 /** The code-defined system tags (SK5); mirrors `SYSTEM_TAGS` (@kobe/protocol, a test ties them). */
 export const SYSTEM_TAG_NAMES = ["default"] as const;
+/**
+ * The catalog names Kobe publishes (KOBE-317, SK4, SK24): reserved for publisher `kobe`. Mirrors
+ * `KOBE_SKILL_NAMES` (@kobe/protocol, a server test ties them).
+ */
+export const KOBE_SKILL_NAMES = [
+  "data-analysis",
+  "charts",
+  "docx",
+  "pdf",
+  "xlsx",
+  "code-review",
+  "skill-creator",
+] as const;
 const NOTE_MAX = 4000;
+const quoted = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
 export const registryPublisher = pgEnum("registry_publisher", ["kobe", "maintainer"]);
 export const registrySkillStatus = pgEnum("registry_skill_status", [
@@ -90,6 +104,8 @@ export const registrySkills = pgTable(
   },
   (t) => [
     unique("registry_skills_name_unique").on(t.name),
+    // A version names its skill with its publisher (registry_versions_publisher_fk).
+    unique("registry_skills_id_publisher_unique").on(t.id, t.publisher),
     foreignKey({
       name: "registry_skills_replacement_fk",
       columns: [t.replacementId],
@@ -101,6 +117,11 @@ export const registrySkills = pgTable(
       sql`char_length(${t.summary}) BETWEEN 1 AND ${sql.raw(String(SUMMARY_MAX))}`,
     ),
     check("registry_skills_replacement_not_self", sql`${t.replacementId} <> ${t.id}`),
+    // Built-in names stay Kobe's (SK4, SK24): no maintainer skill can take one.
+    check(
+      "registry_skills_kobe_names",
+      sql`${t.publisher} = 'kobe' OR ${t.name} NOT IN (${quoted(KOBE_SKILL_NAMES)})`,
+    ),
   ],
 );
 
@@ -149,10 +170,24 @@ export const registryVersions = pgTable(
     skillId: uuid()
       .notNull()
       .references(() => registrySkills.id),
+    /**
+     * `kobe`: published by Kobe itself (KOBE-317, SK4), from the package set the server ships:
+     * no submitter and no reviewer (no person submits or approves it, and no stand-in user is
+     * recorded). Always its skill's publisher (registry_versions_publisher_fk).
+     */
+    publisher: registryPublisher().notNull().default("maintainer"),
     semver: text().notNull(),
     seq: integer().notNull(),
     runtimeHash: text().notNull(),
     packageHash: text().notNull(),
+    /**
+     * Where the version's bytes are (KOBE-317): the runtime zip (what sandboxes fetch, with its
+     * size) and the package zip when it differs. Null for a version whose package is not stored
+     * yet (maintainer submissions until KOBE-333); a Kobe version always has its runtime zip.
+     */
+    runtimeStorageKey: text(),
+    runtimeSizeBytes: integer(),
+    packageStorageKey: text(),
     manifest: jsonb().$type<Record<string, unknown>>().notNull(),
     provenance: jsonb().$type<Record<string, unknown>>().notNull(),
     state: registryVersionState().notNull().default("submitted"),
@@ -162,9 +197,8 @@ export const registryVersions = pgTable(
     scorecard: jsonb().$type<Record<string, unknown>>(),
     /** The Registry team's re-run with the Site judge (SK23): the catalog's scorecard. */
     authoritativeScorecard: jsonb().$type<Record<string, unknown>>(),
-    submittedBy: uuid()
-      .notNull()
-      .references(() => users.id),
+    /** Null exactly for a Kobe-published version (registry_versions_kobe_publisher). */
+    submittedBy: uuid().references(() => users.id),
     submittedAt: ts().notNull().defaultNow(),
     /** The reviewer holding the item (SK23); null when unclaimed. */
     claimedBy: uuid().references(() => users.id),
@@ -193,6 +227,24 @@ export const registryVersions = pgTable(
     index("registry_versions_state_idx").on(t.state, t.submittedAt),
     index("registry_versions_runtime_idx").on(t.runtimeHash),
     index("registry_versions_package_idx").on(t.packageHash),
+    foreignKey({
+      name: "registry_versions_publisher_fk",
+      columns: [t.skillId, t.publisher],
+      foreignColumns: [registrySkills.id, registrySkills.publisher],
+    }),
+    // Kobe publishes without a person (KOBE-317): no submitter, reviewer or claim, never flagged.
+    check(
+      "registry_versions_kobe_publisher",
+      sql`(${t.publisher} = 'kobe') = (${t.submittedBy} IS NULL)
+        AND (${t.publisher} <> 'kobe' OR (${t.reviewedBy} IS NULL AND ${t.claimedBy} IS NULL
+          AND NOT ${t.selfApproved} AND ${t.runtimeStorageKey} IS NOT NULL))`,
+    ),
+    check(
+      "registry_versions_storage",
+      sql`(${t.runtimeStorageKey} IS NULL) = (${t.runtimeSizeBytes} IS NULL)
+        AND (${t.runtimeSizeBytes} IS NULL OR ${t.runtimeSizeBytes} > 0)
+        AND (${t.packageStorageKey} IS NULL OR ${t.runtimeStorageKey} IS NOT NULL)`,
+    ),
     check("registry_versions_semver_format", sql`${t.semver} ~ ${sql.raw(`'${SEMVER_FORMAT}'`)}`),
     check("registry_versions_seq_positive", sql`${t.seq} > 0`),
     check(
@@ -217,11 +269,12 @@ export const registryVersions = pgTable(
       "registry_versions_self_approval",
       sql`NOT ${t.selfApproved} OR ${t.approvedAt} IS NOT NULL`,
     ),
-    // A version that was ever published carries its approval; one that wasn't, none.
+    // A version that was ever published carries its approval (a reviewer's, or Kobe's own
+    // publication); one that wasn't, none.
     check(
       "registry_versions_approval",
       sql`(${t.state} IN ('approved', 'deprecated', 'withdrawn', 'revoked'))
-        = (${t.approvedAt} IS NOT NULL AND ${t.reviewedBy} IS NOT NULL)`,
+        = (${t.approvedAt} IS NOT NULL AND (${t.reviewedBy} IS NOT NULL OR ${t.publisher} = 'kobe'))`,
     ),
   ],
 );
@@ -291,14 +344,15 @@ export const registrySkillTags = pgTable(
     tagId: uuid()
       .notNull()
       .references(() => registryTags.id),
-    addedBy: uuid()
-      .notNull()
-      .references(() => users.id),
+    /** Null exactly when Kobe added it (`by_kobe`, KOBE-317: the seed's Default tag). */
+    addedBy: uuid().references(() => users.id),
+    byKobe: boolean().notNull().default(false),
     addedAt: ts().notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.skillId, t.tagId] }),
     index("registry_skill_tags_tag_idx").on(t.tagId),
+    check("registry_skill_tags_by_kobe", sql`${t.byKobe} = (${t.addedBy} IS NULL)`),
   ],
 );
 
