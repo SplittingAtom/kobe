@@ -228,8 +228,12 @@ transaction:
   `packages/cli/src/seeded.ts`);
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
   with their published versions and the system's audit events for seeding them, and where the
-  retention pass and the audit PII sweep stand (`site_settings`). The started site's own audit
-  events go with them: the restored audit chain is the backup's, continued by the restore's event.
+  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`). The started
+  site's own audit events go with them: the restored audit chain is the backup's, continued by
+  the restore's event, which records the replaced chain's head and size
+  (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the
+  freshly installed server logged before the restore name that replaced head: they are superseded
+  by the restore event, not a sign of tampering.
 
 Any other row (a user, a personal agent, a person's audit event, a setting) is real data, and the
 restore refuses the target.

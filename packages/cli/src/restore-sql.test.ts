@@ -48,7 +48,7 @@ describe("restore prelude: rows the server's start seeds (KOBE-422)", () => {
 
   it("refuses only rows a start would not have written", () => {
     expect(sql).toContain(
-      'EXISTS (SELECT 1 FROM public."site_agents" WHERE (gallery_key IS NOT NULL) IS NOT TRUE)',
+      `EXISTS (SELECT 1 FROM public."site_agents" WHERE (gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed')) IS NOT TRUE)`,
     );
     expect(sql).toMatch(/EXISTS \(SELECT 1 FROM public\."audit_log" WHERE \(actor_kind = 'system'/);
     expect(sql).not.toContain('EXISTS (SELECT 1 FROM public."site_agents")');
@@ -58,6 +58,24 @@ describe("restore prelude: rows the server's start seeds (KOBE-422)", () => {
     expect(sql).toContain('DELETE FROM public."site_agents";');
     expect(sql).toContain('DELETE FROM public."audit_log";');
     expect(sql.lastIndexOf("already has data")).toBeLessThan(sql.indexOf("DELETE FROM"));
+  });
+
+  it("records the replaced audit chain's head before deleting it, for the restore's event", () => {
+    const at = sql.indexOf("set_config('kobe.restore.replaced_audit'");
+    expect(at).toBeGreaterThan(sql.lastIndexOf("already has data"));
+    expect(at).toBeLessThan(sql.indexOf('DELETE FROM public."audit_log";'));
+    const post = restorePostlude({
+      ...plan,
+      audit: {
+        backupCreatedAt: "2026-10-18T00:00:00Z",
+        tables: 1,
+        rows: 1,
+        operator: "op",
+        expectHeads: [],
+      },
+    });
+    expect(post).toContain("'replacedAuditHeadSeq'");
+    expect(post).toContain("current_setting('kobe.restore.replaced_audit', true)");
   });
 
   it("checks startup-seeded tables not in the backup like any other: left alone", () => {

@@ -153,7 +153,8 @@ export async function seed(db: TestDatabase): Promise<void> {
 /**
  * What the server's start writes into a site before anyone signs up (KOBE-422, the rows
  * `@kobe/db` STARTUP_SEEDED_ROWS covers): the gallery agent `kobe` and its published version,
- * the seed's two audit events, and the retention pass's and PII sweep's bookkeeping.
+ * the seed's two audit events, and the retention pass's, PII sweep's and SIEM forwarder's
+ * bookkeeping.
  */
 export async function serverStarted(url: string, agentId = randomUUID()): Promise<string> {
   await sql(
@@ -169,7 +170,8 @@ export async function serverStarted(url: string, agentId = randomUUID()): Promis
      INSERT INTO site_settings (key, value) VALUES
        ('retention.pass_started_at', '2026-10-18T03:00:00.000Z'),
        ('retention.last_pass_at', '2026-10-18T03:00:00.000Z'), ('retention.cursor', ''),
-       ('audit.pii_sweep_seq', '2');`,
+       ('audit.pii_sweep_seq', '2'),
+       ('audit.forward.syslog', '{"seq":2,"failures":1}');`,
   );
   return agentId;
 }

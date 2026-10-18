@@ -27,7 +27,7 @@ async function started(): Promise<TestDatabase> {
 }
 
 /** Runs the prelude as the owner; returns the startup-seeded tables' row counts inside it. */
-async function prelude(db: TestDatabase): Promise<Record<string, number>> {
+async function prelude(db: TestDatabase): Promise<Record<string, number | string>> {
   const client = new pg.Client({ connectionString: db.ownerUrl });
   await client.connect();
   try {
@@ -42,7 +42,11 @@ async function prelude(db: TestDatabase): Promise<Record<string, number>> {
       immediateForeignKeys: await listImmediateForeignKeys(client),
     };
     await client.query(restorePrelude(plan));
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number | string> = {};
+    const replaced = await client.query<{ v: string | null }>(
+      "SELECT current_setting('kobe.restore.replaced_audit', true) AS v",
+    );
+    counts.replacedAudit = replaced.rows[0]?.v ?? "";
     for (const name of Object.keys(STARTUP_SEEDED_ROWS)) {
       const { rows } = await client.query<{ n: number }>(
         `SELECT count(*)::int AS n FROM public."${name}"`,
@@ -59,11 +63,17 @@ async function prelude(db: TestDatabase): Promise<Record<string, number>> {
 describe("kobe restore's target check on a started site (KOBE-422)", () => {
   it("accepts the rows the server's start wrote and replaces them before the load", async () => {
     const db = await started();
+    const [head] = await sql<{ hash: string }>(
+      db.adminUrl,
+      "SELECT hash FROM audit_log WHERE seq = 2",
+    );
     expect(await prelude(db)).toEqual({
       site_agents: 0,
       site_agent_versions: 0,
       audit_log: 0,
       site_settings: 0,
+      // The replaced chain's head and size, for the restore's event (KOBE-422).
+      replacedAudit: `2:${head?.hash ?? ""}:2`,
     });
     // Rolled back: the started site is as it was.
     expect(await sql(db.adminUrl, "SELECT slug FROM site_agents")).toEqual([{ slug: "kobe" }]);

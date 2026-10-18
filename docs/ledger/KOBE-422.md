@@ -31,13 +31,22 @@ gate4-restore.sh's expected-fail; fix docs.
 - **The started site's audit rows are dropped**, only system gallery-seed events. The restored
   chain is the backup's and `platform.restore.completed` continues it; keeping the target's rows
   would fork the chain. Anything a person did (or `platform.isolation.changed`) still refuses.
+- **Review fixes (2026-10-18):** SIEM forwarding's `audit.forward.<destination>` keys are startup
+  seeds too (the forwarder writes them on its first sweep, before setup). The guard test now runs
+  exactly what a server replica starts: the background jobs moved from `index.ts` into
+  `services/server/src/startup/jobs.ts` (`seedAtStart`, `serverJobs`, `startServerJobs`), and the
+  test runs one pass of each with forwarding, the Bifrost sync (fake admin) and the header
+  re-seal configured. Jobs that need the sandbox provider stay in `index.ts` (team reconcile,
+  hibernation, pod reconciler, workspace collector, Orbit evals): they act on teams' sandboxes.
+  `platform.restore.completed` records the replaced chain (`replacedAuditHeadSeq`, `…Hash`,
+  `replacedAuditRows`), so anchors the fresh site logged are explained; a gallery agent archived
+  by a person is no seed.
 - The gate4-restore fallback (an empty, chart-migrated database) stays but runs only after the
   check fails, so the later checks still run.
 
 ## Open questions (for Chris or the coordinator)
 
-- None. The full backup → restore round-trip tests need pg_dump/psql 17 (none on this Mac): they
-  run in CI's `db` job.
+- None.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -51,5 +60,6 @@ gate4-restore.sh's expected-fail; fix docs.
 - ac-3: `e2e/gate4-restore.sh` check is `contains` now (CI shard `restore` pending);
   docs/backup-restore.md, docs/install.md ("Backup and restore": recovery steps; First run says to
   skip setup on a site to be restored), docs/gates/gate-4.md.
-- Local: `@kobe/cli` unit 88/88, typecheck, lint; `@kobe/db` unit 533/533; server typecheck;
-  db suites restore-target 5/5, startup-seeds 1/1.
+- Local: `@kobe/cli` unit 89/89 and test:db 34/34 (round trips with libpq 17 from
+  `/opt/homebrew/opt/libpq/bin` as `KOBE_PG_BIN_DIR`), typecheck, lint; `@kobe/db` unit;
+  server typecheck, startup-seeds db test.

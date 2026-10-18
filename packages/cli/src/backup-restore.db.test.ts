@@ -446,7 +446,21 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
 
       const dst = await target();
       const seeded = await serverStarted(dst.adminUrl);
+      const [replaced] = await sql<{ hash: string }>(
+        dst.adminUrl,
+        "SELECT hash FROM audit_log WHERE seq = 2",
+      );
       await restore(dst, dir);
+      // The started site's own chain is named in the restore's event (anchors it logged).
+      const [event] = await sql<{ target: Record<string, unknown> }>(
+        dst.adminUrl,
+        "SELECT target FROM audit_log WHERE action = 'platform.restore.completed'",
+      );
+      expect(event?.target).toMatchObject({
+        replacedAuditHeadSeq: 2,
+        replacedAuditHeadHash: replaced?.hash,
+        replacedAuditRows: 2,
+      });
       for (const t of ["site_agents", "site_agent_versions"]) {
         expect(await rowsOf(dst.adminUrl, t), t).toEqual(await rowsOf(started.adminUrl, t));
       }

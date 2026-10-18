@@ -41,6 +41,12 @@ project move (KOBE-220). Then flip gate3's two U8 browser checks from expected-f
   run starts on v3 with v3's prompt.
 - The fake server (`fake-kobe.ts`) answers the switch like the server (owner only, idle threads).
 
+- **Rolling upgrade (accepted, review nit):** runs that pods of the previous release start after
+  0129 ran and before the rollout ends keep `agent_version` NULL (their `run.started` has it).
+  They are skipped like compacted runs; a change on one is still marked, on the next run with a
+  known version. Not backfilled again: the window is the rollout's minutes, and a lazy write on
+  the markers GET would add a `runs` row lock on a read path.
+
 ## Open questions (for Chris or the coordinator)
 
 - Light, dark and phone screenshots (ac-1) are not taken here (no browser run against a site from

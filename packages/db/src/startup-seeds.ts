@@ -1,15 +1,17 @@
 /**
  * Rows the server writes into a fresh site when it starts, before anyone signs up (KOBE-422):
  * the gallery agents (`services/server/src/gallery/seed.ts`, at every start), the audit events
- * of that seeding, and the background jobs' own bookkeeping in `site_settings`. `kobe restore`
+ * of that seeding, and the background jobs' own bookkeeping in `site_settings` (retention, PII
+ * erasure, SIEM forwarding). `kobe restore`
  * accepts a target holding only these and replaces them with the backup's rows, in its one
  * transaction; any other row in these tables (a personal agent, a person's audit event, a setting
  * someone chose) is real data and the target is refused.
  *
  * `rows` is a SQL condition over one row of the table (unqualified column names), true for a
- * startup-seeded row. `services/server/src/startup-seeds.db.test.ts` runs the server's start-up
- * writers on a fresh database and fails when one writes a row these conditions don't cover, so a
- * new start-up writer must be added here.
+ * startup-seeded row. `services/server/src/startup-seeds.db.test.ts` runs one pass of the
+ * server's start-up jobs (`services/server/src/startup/jobs.ts`, the list `index.ts` starts) on
+ * a fresh database and fails when one writes a row these conditions don't cover, so a new
+ * start-up writer must be added here.
  */
 export interface StartupSeed {
   readonly why: string;
@@ -34,12 +36,16 @@ export const JOB_SETTING_KEYS = [
   "audit.pii_sweep_resume_at",
 ] as const;
 
+/** Per destination (`audit.forward.syslog`, `audit.forward.otlp`): the forwarder's position. */
+export const FORWARD_STATE_PREFIX = "audit.forward.";
+
 const list = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(", ");
 
 export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
   site_agents: {
     why: "gallery agents seeded at every server start (KOBE-87)",
-    rows: "gallery_key IS NOT NULL",
+    // Archived only by the seed itself (a person's archive is real data).
+    rows: "gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed')",
   },
   site_agent_versions: {
     why: "the versions the gallery seed publishes (no person publishes them)",
@@ -50,8 +56,8 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
     rows: `actor_kind = 'system' AND actor_id IS NULL AND team_id IS NULL AND action IN (${list(GALLERY_AUDIT_ACTIONS)}) AND target ->> 'scope' = 'gallery'`,
   },
   site_settings: {
-    why: "where the retention pass and the audit PII sweep stand (KOBE-18, KOBE-17)",
-    rows: `key IN (${list(JOB_SETTING_KEYS)})`,
+    why: "where the retention pass, the audit PII sweep and SIEM forwarding stand (KOBE-18, KOBE-17, KOBE-19)",
+    rows: `key IN (${list(JOB_SETTING_KEYS)}) OR key LIKE '${FORWARD_STATE_PREFIX}%'`,
   },
 };
 

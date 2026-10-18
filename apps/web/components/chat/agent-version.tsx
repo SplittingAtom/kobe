@@ -40,8 +40,7 @@ export function agentVersionOffer(state: ThreadState): AgentVersionOffer | undef
 }
 
 /** After a switch the offer (and its focused button) goes: the composer is where the member goes next. */
-function focusComposer(from: HTMLElement | null): void {
-  const root = from?.closest("[data-kobe-thread-root]") ?? document;
+function focusComposer(root: ParentNode): void {
   root.querySelector<HTMLTextAreaElement>("[data-kobe-composer] textarea")?.focus();
 }
 
@@ -60,8 +59,9 @@ export function AgentVersionBadge({ extras }: { readonly extras: KobeThreadExtra
   const controller = extras.controller;
   const onSwitch = async (event: React.MouseEvent<HTMLButtonElement>) => {
     if (blocker !== undefined || !controller) return;
-    const button = event.currentTarget;
-    if (await controller.switchAgentVersion()) focusComposer(button);
+    // Found before the await: the button is gone (detached) once the switch is done.
+    const root = event.currentTarget.closest("[data-kobe-thread-root]") ?? document;
+    if (await controller.switchAgentVersion()) focusComposer(root);
   };
   return (
     <span
