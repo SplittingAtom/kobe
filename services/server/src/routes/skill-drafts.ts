@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
+import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_UPLOAD_RATE } from "../skills/limits.js";
@@ -11,6 +11,7 @@ import { DRAFT_LIMITS, DRAFT_WRITE_RATE, pathFromUrl } from "../skills/drafts/fi
 import type { DraftFileInfo, DraftRecord } from "../skills/drafts/records.js";
 import { saveDraftVersion } from "../skills/drafts/save.js";
 import {
+  writeRoom,
   createBlankDraft,
   deleteDraftFile,
   readDraft,
@@ -20,7 +21,12 @@ import {
   type DraftContext,
   type DraftFailure,
 } from "../skills/drafts/service.js";
-import { listVisibleDrafts, readFile, visibleDraft } from "../skills/drafts/records.js";
+import {
+  listVisibleDrafts,
+  readFile,
+  visibleDraft,
+  type DraftCursor,
+} from "../skills/drafts/records.js";
 import { withTeam } from "@kobe/db";
 import { skillJson, versionJson } from "./skill-json.js";
 
@@ -49,7 +55,8 @@ const draftJson = (d: DraftRecord, viewerId: string) => ({
   ownerUserId: d.ownerUserId,
   startedFrom: d.startedFrom,
   parentRef: d.parentRef,
-  fromConversation: d.fromThreadId !== null,
+  fromConversation: d.startedFrom === "thread",
+  coEdited: d.coEdited,
   rev: d.rev,
   sizeBytes: d.sizeBytes,
   fileCount: d.fileCount,
@@ -137,6 +144,8 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   const json = async (c: Ctx): Promise<unknown> => c.req.json().catch(() => undefined);
 
   app.post("/", async (c) => {
+    if (!teamRoleAllows(c.get("team").role, "team.personal.create"))
+      return error(c, 403, "forbidden", "Your team role doesn't allow drafts.");
     const body = createSchema.safeParse(await json(c));
     if (!body.success)
       return error(c, 400, "invalid_request", "Give a name: lowercase letters, digits, hyphens.");
@@ -147,10 +156,16 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
 
   app.get("/", async (c) => {
     const ctx = ctxOf(c);
-    const drafts = await withTeam(db, ctx.teamId, (tx) =>
-      listVisibleDrafts(tx, ctx.teamId, ctx.viewer),
+    const raw = c.req.query("cursor");
+    const cursor = raw === undefined ? null : decodeCursor(raw);
+    if (cursor === undefined) return error(c, 400, "invalid_request", "That cursor is not valid.");
+    const page = await withTeam(db, ctx.teamId, (tx) =>
+      listVisibleDrafts(tx, ctx.teamId, ctx.viewer, cursor),
     );
-    return c.json({ drafts: drafts.map((d) => draftJson(d, ctx.viewer.userId)) });
+    return c.json({
+      drafts: page.drafts.map((d) => draftJson(d, ctx.viewer.userId)),
+      next: page.next ? encodeCursor(page.next) : null,
+    });
   });
 
   app.get("/:id", async (c) => {
@@ -209,7 +224,12 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     });
   });
 
-  const fileChange = async (c: Ctx, write: Uint8Array | null) => {
+  /**
+   * A file write or delete. Everything that can refuse it (path, If-Match, the rate, whether the
+   * caller may edit the draft, the room left) is checked before a byte of the body is read, and the
+   * body is read only up to that room (review S3); the write checks again under the draft's lock.
+   */
+  const fileChange = async (c: Ctx, mode: "put" | "delete") => {
     const id = idSchema.safeParse(c.req.param("id"));
     const path = id.success ? filePath(c, id.data) : null;
     if (!id.success) return error(c, 404, "not_found", "No such draft.");
@@ -218,32 +238,39 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     if (rev === null) return error(c, 428, "precondition_required", "Send If-Match: <rev>.");
     if (!(await hitRateLimit(db, `skill-draft-write:${c.get("user").id}`, DRAFT_WRITE_RATE)))
       return error(c, 429, "rate_limited", "Too many changes. Wait a few minutes and try again.");
-    const result =
-      write === null
-        ? await deleteDraftFile(ctxOf(c), id.data, rev, path)
-        : await writeDraftFile(ctxOf(c), id.data, rev, path, write);
+    const ctx = ctxOf(c);
+    if (mode === "delete") return changed(c, await deleteDraftFile(ctx, id.data, rev, path));
+    const room = await writeRoom(ctx, id.data, path);
+    if (!room.ok) return failure(c, room);
+    const body = await readBounded(c.req.raw, Math.max(room.room, 0));
+    if (body === null)
+      return room.skillMd
+        ? error(
+            c,
+            413,
+            "file_too_large",
+            `SKILL.md may be at most ${DRAFT_LIMITS.maxSkillMdBytes} bytes.`,
+          )
+        : error(
+            c,
+            413,
+            "draft_too_large",
+            `A draft may hold at most ${DRAFT_LIMITS.maxDraftBytes} bytes in all.`,
+          );
+    return changed(c, await writeDraftFile(ctx, id.data, rev, path, body));
+  };
+
+  const changed = (
+    c: Ctx,
+    result: Awaited<ReturnType<typeof writeDraftFile>>,
+  ): Response | Promise<Response> => {
     if (!result.ok) return failure(c, result);
     c.header("ETag", `"${result.draft.rev}"`);
     return c.json({ rev: result.draft.rev, draft: draftJson(result.draft, c.get("user").id) });
   };
 
-  app.put(
-    "/:id/files/*",
-    bodyLimit({
-      maxSize: DRAFT_LIMITS.maxDraftBytes,
-      onError: (c) =>
-        c.json(
-          {
-            code: "draft_too_large",
-            message: `A draft may hold at most ${DRAFT_LIMITS.maxDraftBytes} bytes in all.`,
-          },
-          413,
-        ),
-    }),
-    async (c) => fileChange(c, new Uint8Array(await c.req.arrayBuffer())),
-  );
-
-  app.delete("/:id/files/*", (c) => fileChange(c, null));
+  app.put("/:id/files/*", (c) => fileChange(c, "put"));
+  app.delete("/:id/files/*", (c) => fileChange(c, "delete"));
 
   app.post("/:id/versions", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
@@ -256,9 +283,9 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
         "invalid_request",
         "Give destination (team or personal), semver (MAJOR.MINOR.PATCH) and a changelog line.",
       );
-    const header = c.req.header("if-match");
-    const rev = header === undefined ? undefined : ifMatch(c);
-    if (rev === null) return error(c, 400, "invalid_request", "If-Match must be a revision.");
+    // Saves carry the revision the author saw (SK11): nobody ships a co-editor's unseen change.
+    const rev = ifMatch(c);
+    if (rev === null) return error(c, 428, "precondition_required", "Send If-Match: <rev>.");
     const store = skillStore();
     if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
     if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
@@ -272,7 +299,7 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
         semver: body.data.semver,
         changelog: body.data.changelog,
         confirmPersonal: body.data.confirmPersonal ?? false,
-        ...(rev === undefined ? {} : { rev }),
+        rev,
       },
     );
     if (!result.ok) {
@@ -297,4 +324,49 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   });
 
   return app;
+}
+
+/** Reads the body up to `max` bytes; null when it (or its declared length) is longer. */
+async function readBounded(req: Request, max: number): Promise<Uint8Array | null> {
+  const declared = req.headers.get("content-length");
+  if (declared !== null && !(Number(declared) <= max)) return null;
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+const encodeCursor = (c: DraftCursor): string =>
+  Buffer.from(`${c.updatedAt}|${c.id}`).toString("base64url");
+
+/** The cursor of `GET /?cursor=`; undefined when malformed. */
+function decodeCursor(raw: string): DraftCursor | undefined {
+  const [at, id, extra] = Buffer.from(raw, "base64url").toString("utf8").split("|");
+  const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+  if (
+    extra !== undefined ||
+    !at ||
+    !instant.test(at) ||
+    Number.isNaN(Date.parse(at)) ||
+    !idSchema.safeParse(id).success
+  )
+    return undefined;
+  return { updatedAt: at, id: id as string };
 }

@@ -31,6 +31,8 @@ export interface DraftRecord {
   readonly startedFrom: SkillDraftStart;
   readonly parentRef: Record<string, unknown> | null;
   readonly fromThreadId: string | null;
+  /** Someone besides the author changed it (sticky, kept by the database). */
+  readonly coEdited: boolean;
   readonly rev: number;
   readonly sizeBytes: number;
   readonly fileCount: number;
@@ -66,6 +68,7 @@ const columns = {
   startedFrom: skillDrafts.startedFrom,
   parentRef: skillDrafts.parentRef,
   fromThreadId: skillDrafts.fromThreadId,
+  coEdited: skillDrafts.coEdited,
   rev: skillDrafts.rev,
   sizeBytes: skillDrafts.sizeBytes,
   fileCount: skillDrafts.fileCount,
@@ -90,24 +93,57 @@ export async function visibleDraft(
   return row && canEdit(row, viewer) ? row : null;
 }
 
-/** The viewer's own drafts and, for co-editors, the team's shared ones; newest change first. */
+/** A page of the list: drafts changed before this point (newest change first). */
+export interface DraftCursor {
+  /** `updated_at` to the microsecond, as Postgres prints it in UTC (a Date would round it). */
+  readonly updatedAt: string;
+  readonly id: string;
+}
+
+export const DRAFT_PAGE = 100;
+
+/**
+ * The viewer's own drafts and, for co-editors, the team's shared ones; newest change first, one
+ * page of {@link DRAFT_PAGE} after `cursor` (one more row read to tell whether there is a next).
+ */
 export async function listVisibleDrafts(
   tx: KobeTx,
   teamId: string,
   viewer: DraftViewer,
-): Promise<DraftRecord[]> {
+  cursor: DraftCursor | null = null,
+): Promise<{ readonly drafts: DraftRecord[]; readonly next: DraftCursor | null }> {
   const mine = eq(skillDrafts.ownerUserId, viewer.userId);
-  return tx
-    .select(columns)
+  const after = cursor
+    ? sql`(${skillDrafts.updatedAt}, ${skillDrafts.id}) < (${cursor.updatedAt}::timestamptz, ${cursor.id}::uuid)`
+    : undefined;
+  const rows = await tx
+    .select({
+      ...columns,
+      at: sql<string>`to_char(${skillDrafts.updatedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    })
     .from(skillDrafts)
     .where(
-      and(eq(skillDrafts.teamId, teamId), coEditor(viewer) ? or(mine, skillDrafts.shared) : mine),
+      and(
+        eq(skillDrafts.teamId, teamId),
+        coEditor(viewer) ? or(mine, skillDrafts.shared) : mine,
+        after,
+      ),
     )
-    .orderBy(desc(skillDrafts.updatedAt), asc(skillDrafts.id))
-    .limit(500);
+    .orderBy(desc(skillDrafts.updatedAt), desc(skillDrafts.id))
+    .limit(DRAFT_PAGE + 1);
+  const page = rows.slice(0, DRAFT_PAGE);
+  const last = page.at(-1);
+  return {
+    drafts: page.map(({ at: _at, ...draft }) => draft),
+    next: rows.length > DRAFT_PAGE && last ? { updatedAt: last.at, id: last.id } : null,
+  };
 }
 
+/** The author's drafts in the team, under a lock per (team, author) so creates don't race the cap. */
 export async function countOwnDrafts(tx: KobeTx, teamId: string, userId: string): Promise<number> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skill_drafts:${teamId}:${userId}`}, 0))`,
+  );
   const { rows } = await tx.execute<{ n: number }>(sql`
     SELECT count(*)::int AS n FROM skill_drafts
      WHERE team_id = ${teamId} AND owner_user_id = ${userId}`);
@@ -142,7 +178,8 @@ export async function insertDraft(
     })
     .returning({ id: skillDrafts.id });
   if (!row) throw new Error("draft insert returned no row");
-  for (const [path, bytes] of files) await putFile(tx, draft.teamId, row.id, path, bytes);
+  for (const [path, bytes] of files)
+    await putFile(tx, draft.teamId, row.id, path, bytes, draft.ownerUserId);
   const [saved] = await tx.select(columns).from(skillDrafts).where(byId(draft.teamId, row.id));
   if (!saved) throw new Error("draft vanished after insert");
   return saved;
@@ -222,6 +259,7 @@ export async function putFile(
   draftId: string,
   path: string,
   bytes: Uint8Array,
+  writer: string,
 ): Promise<void> {
   const parsed = draftContent(bytes);
   const content =
@@ -230,10 +268,10 @@ export async function putFile(
       : { textContent: null, bytes: parsed.bytes };
   await tx
     .insert(skillDraftFiles)
-    .values({ teamId, draftId, path, size: bytes.length, ...content })
+    .values({ teamId, draftId, path, size: bytes.length, updatedBy: writer, ...content })
     .onConflictDoUpdate({
       target: [skillDraftFiles.teamId, skillDraftFiles.draftId, skillDraftFiles.path],
-      set: { ...content, size: bytes.length, updatedAt: sql`now()` },
+      set: { ...content, size: bytes.length, updatedBy: writer, updatedAt: sql`now()` },
     });
 }
 

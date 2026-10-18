@@ -11,7 +11,14 @@ import {
 import { listOffboarded, startExport, type ExportStart, type OffboardedMember } from "./export.js";
 import { departedNotOffboarded, dueForPurge, purgeDeparted } from "./purge.js";
 import { reinstateReturning } from "./reinstate.js";
-import type { Departed, OffboardProvider, OffboardTrigger, OffboardingContext } from "./types.js";
+import { sweepDepartedDrafts } from "../retention/skill-drafts.js";
+import {
+  RETAIN_DAYS,
+  type Departed,
+  type OffboardProvider,
+  type OffboardTrigger,
+  type OffboardingContext,
+} from "./types.js";
 
 export { RETAIN_DAYS, type OffboardTrigger } from "./types.js";
 export type { ExportStart, OffboardedMember, OffboardOutcome };
@@ -27,6 +34,11 @@ export interface SweepSummary {
   readonly purged: number;
   /** Past retention but under a legal hold (kept). */
   readonly held: number;
+  /**
+   * Workbench drafts deleted 30 days after their author stopped being an active member of the
+   * team (KOBE-320), whether or not the author ever had a sandbox there.
+   */
+  readonly drafts: number;
   readonly failed: number;
 }
 
@@ -87,10 +99,11 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     let offboarded = 0;
     let purged = 0;
     let held = 0;
+    let drafts = 0;
     let failed = 0;
     // After a restore from an older backup, "departed" and "due" are judged from stale rows: a
     // member re-added since would look long gone and lose their live volume (KOBE-243).
-    if (ctx.paused) return { offboarded, purged, held, failed };
+    if (ctx.paused) return { offboarded, purged, held, drafts, failed };
     for (const departed of await departedNotOffboarded(ctx, SWEEP_LIMIT)) {
       try {
         if ((await offboardSandbox(ctx, departed, "reconciled")) === "offboarded") offboarded += 1;
@@ -112,7 +125,13 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
         log.error({ err, team_id: due.teamId, user_id: due.userId }, "volume purge failed");
       }
     }
-    return { offboarded, purged, held, failed };
+    try {
+      drafts = await sweepDepartedDrafts(ctx.db, RETAIN_DAYS);
+    } catch (err) {
+      failed += 1;
+      log.error({ err }, "departed authors' drafts purge failed");
+    }
+    return { offboarded, purged, held, drafts, failed };
   };
 
   return {
@@ -143,7 +162,8 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
           .then((outcome) => {
             if (!outcome.ran) return log.debug("offboarding sweep: another replica runs it");
             const s = outcome.value;
-            if (s.offboarded + s.purged + s.held + s.failed > 0) log.info(s, "offboarding sweep");
+            if (s.offboarded + s.purged + s.held + s.drafts + s.failed > 0)
+              log.info(s, "offboarding sweep");
           })
           .catch((err: unknown) => log.warn({ err }, "offboarding sweep failed"))
           .finally(() => {

@@ -829,10 +829,14 @@ export const AUDIT_EVENTS = {
     rows: count,
   }),
   /**
-   * Workbench drafts unchanged for longer than the team's window, purged (system, count only,
-   * KOBE-320); a departed author's drafts go with offboarding, not audited on their own.
+   * Workbench drafts purged (system, counts only, KOBE-320): unchanged for longer than the team's
+   * window (`retention`), 30 days after their author left the team (`offboarding`), or a legal
+   * hold's copies once no hold covers them (`hold_released`).
    */
-  "retention.skill_drafts_purged": event("team", { rows: count }),
+  "retention.skill_drafts_purged": event("team", {
+    reason: z.enum(["retention", "offboarding", "hold_released"]),
+    rows: count,
+  }),
   /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
    * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
@@ -1522,14 +1526,17 @@ export const AUDIT_EVENTS = {
   /** A draft's author deleted it (its saved versions stay). */
   "skill.draft.deleted": event("team", { draftId: id }),
   /**
-   * A draft started from a team conversation was saved as its author's personal skill, after the
-   * author confirmed that personal skills go with them to every team (SK11).
+   * A draft was saved as its author's personal skill, which goes with them to every team (SK11):
+   * recorded in the draft's team for every personal save. `fromConversation` / `coEdited`: the
+   * author confirmed it although it was started from a team conversation or changed by others.
    */
   "skill.draft.personalized": event("team", {
     draftId: id,
     skillId: id,
     slug,
     semver: z.string().max(32),
+    fromConversation: z.boolean(),
+    coEdited: z.boolean(),
   }),
 
   // ── connectors: the site registry (KOBE-100); ids, names and field names, never URLs or credentials ──

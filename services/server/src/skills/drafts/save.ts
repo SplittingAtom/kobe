@@ -7,16 +7,22 @@ import { numberingFrom, publishBundle, type PublishResult } from "../publish.js"
 import type { SkillStore } from "../skill-store.js";
 import type { SkillLocation } from "../store.js";
 import { DRAFT_LIMITS, SKILL_MD_PATH } from "./files.js";
-import { changedBy, readAllFiles, visibleDraft } from "./records.js";
+import { changedBy, readAllFiles, visibleDraft, type DraftRecord } from "./records.js";
 import type { DraftContext } from "./service.js";
 
 /**
  * Save version (KOBE-320, SK11, SK14): the draft's files become the next version of a team skill
  * (pending D22 review, Builders and Team admins) or of the author's personal skill. The package
  * goes through the upload's validation (KOBE-78, KOBE-309 path rules), its scan and the store,
- * exactly as an uploaded zip would; the draft stays for the next version. A personal save of a
- * draft started from a team conversation needs `confirmPersonal` and is audited
- * (`skill.draft.personalized`) with the version.
+ * exactly as an uploaded zip would; the draft stays for the next version. The save names the
+ * revision the author saw (a stale one is refused, so nobody ships a co-editor's unseen change).
+ *
+ * Personal skills load in every team of their author (D5: teams are walls), so a personal save:
+ *  - is refused for a draft holding the team's content: a fork of a team (or another member's)
+ *    version; the way out of the team for that is promotion, or a team save;
+ *  - needs `confirmPersonal` for a draft started from a team conversation (SK11) or changed by
+ *    team members (co-edited);
+ *  - is always recorded in the team's audit log (`skill.draft.personalized`), with the version.
  */
 
 export interface SaveRequest {
@@ -24,8 +30,8 @@ export interface SaveRequest {
   readonly semver: string;
   readonly changelog: string;
   readonly confirmPersonal: boolean;
-  /** The revision the author saw (`If-Match`); the draft as it is now when absent. */
-  readonly rev?: number;
+  /** The revision the author saw (`If-Match`). */
+  readonly rev: number;
 }
 
 export type SaveResult =
@@ -53,7 +59,7 @@ export async function saveDraftVersion(
   const loaded = await withTeam(ctx.db, ctx.teamId, async (tx) => {
     const draft = await visibleDraft(tx, ctx.teamId, id, ctx.viewer);
     if (!draft) return null;
-    const by = request.rev !== undefined && draft.rev !== request.rev;
+    const by = draft.rev !== request.rev;
     return {
       draft,
       stale: by ? await changedBy(tx, draft.updatedBy) : null,
@@ -68,17 +74,13 @@ export async function saveDraftVersion(
       changedBy: loaded.stale,
     });
   const personal = request.destination === "personal";
-  if (personal && draft.ownerUserId !== ctx.viewer.userId)
-    return refuse(403, "forbidden", "Only the draft's author can save it as their personal skill.");
-  if (!personal && !teamRoleAllows(ctx.viewer.role, "team.skills.publish"))
-    return refuse(403, "forbidden", "Your team role doesn't allow saving team skills.");
-  const fromConversation = draft.fromThreadId !== null;
-  if (personal && fromConversation && !request.confirmPersonal)
-    return refuse(
-      409,
-      "confirm_personal_required",
-      `This draft was started from a ${ctx.teamName} conversation; personal skills go with you to every team. Confirm to save it as your personal skill.`,
-    );
+  const refused = personal
+    ? personalRefusal(ctx, draft, request.confirmPersonal)
+    : teamRoleAllows(ctx.viewer.role, "team.skills.publish")
+      ? null
+      : refuse(403, "forbidden", "Your team role doesn't allow saving team skills.");
+  if (refused) return refused;
+  const fromConversation = draft.startedFrom === "thread" || draft.fromThreadId !== null;
   if (!files.has(SKILL_MD_PATH))
     return refuse(400, "skill_md_missing", "The draft needs a SKILL.md at its root.");
   const valid = validateZipBundle(canonicalZip(files), DRAFT_BUNDLE_LIMITS);
@@ -93,8 +95,57 @@ export async function saveDraftVersion(
     source: "zip",
     uploadedBy: ctx.viewer.userId,
     ...numbering.value,
-    draft: { id, teamId: ctx.teamId, personalized: personal && fromConversation },
+    draft: {
+      id,
+      teamId: ctx.teamId,
+      personal: personal ? { fromConversation, coEdited: draft.coEdited } : null,
+    },
   });
+}
+
+/**
+ * Whether a fork's parent is content of the team (or of another member): only a catalog version,
+ * already Site-wide, or the author's own personal version may become the author's personal skill.
+ * Unknown shapes count as team content (fail closed). KOBE-322 writes `parent_ref` as
+ * `{kind: "catalog" | "team" | "personal", skillId, semver, hash, ownerUserId?}`.
+ */
+export function parentIsTeamContent(
+  parentRef: Readonly<Record<string, unknown>> | null,
+  ownerUserId: string,
+): boolean {
+  if (parentRef === null) return false;
+  if (parentRef.kind === "catalog") return false;
+  return !(parentRef.kind === "personal" && parentRef.ownerUserId === ownerUserId);
+}
+
+function personalRefusal(
+  ctx: DraftContext & { readonly teamName: string },
+  draft: DraftRecord,
+  confirmed: boolean,
+): SaveResult | null {
+  if (draft.ownerUserId !== ctx.viewer.userId)
+    return refuse(403, "forbidden", "Only the draft's author can save it as their personal skill.");
+  if (!teamRoleAllows(ctx.viewer.role, "team.personal.create"))
+    return refuse(403, "forbidden", "Your team role doesn't allow personal skills.");
+  if (draft.startedFrom === "fork" && parentIsTeamContent(draft.parentRef, draft.ownerUserId))
+    return refuse(
+      409,
+      "team_content",
+      `This draft was forked from a ${ctx.teamName} skill, so it holds the team's content and can't become a personal skill. Promote it, or save it as a team skill.`,
+    );
+  const reasons = [
+    ...(draft.startedFrom === "thread" || draft.fromThreadId !== null
+      ? [`was started from a ${ctx.teamName} conversation`]
+      : []),
+    ...(draft.coEdited ? [`has changes by other ${ctx.teamName} members`] : []),
+  ];
+  if (reasons.length > 0 && !confirmed)
+    return refuse(
+      409,
+      "confirm_personal_required",
+      `This draft ${reasons.join(" and ")}; personal skills go with you to every team. Confirm to save it as your personal skill.`,
+    );
+  return null;
 }
 
 function refuse(

@@ -97,14 +97,15 @@ export interface NewSkillVersion {
 }
 
 /**
- * A draft's Save version (KOBE-320): its id goes into the `skill.uploaded` audit, and a personal
- * save of a draft started from a team conversation also records `skill.draft.personalized` (SK11)
- * in the version's transaction.
+ * A draft's Save version (KOBE-320): its id goes into the `skill.uploaded` audit, and every
+ * personal save also records `skill.draft.personalized` in the draft's team (SK11, D5: content
+ * leaving the team shows in its audit log), in the version's transaction.
  */
 export interface UploadDraft {
   readonly id: string;
   readonly teamId: string;
-  readonly personalized: boolean;
+  /** Set for a personal save: what the author confirmed, if anything. */
+  readonly personal: { readonly fromConversation: boolean; readonly coEdited: boolean } | null;
 }
 
 export type UploadError =
@@ -238,7 +239,7 @@ export function uploadSkillVersion(
         ...(input.draft ? { draftId: input.draft.id } : {}),
       },
     });
-    if (input.draft?.personalized)
+    if (input.draft?.personal)
       await recordAudit(tx, {
         action: "skill.draft.personalized",
         teamId: input.draft.teamId,
@@ -247,6 +248,8 @@ export function uploadSkillVersion(
           skillId: skill.id,
           slug: skill.slug,
           semver: version.semver,
+          fromConversation: input.draft.personal.fromConversation,
+          coEdited: input.draft.personal.coEdited,
         },
       });
     return { ok: true, skill, version };

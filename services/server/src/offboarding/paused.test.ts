@@ -9,7 +9,7 @@ const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 describe("paused offboarding", () => {
   it("the sweep does nothing", async () => {
     const off = createOffboarding({ db: boom as never, blobs: undefined, log, paused: true });
-    expect(await off.sweep()).toEqual({ offboarded: 0, purged: 0, held: 0, failed: 0 });
+    expect(await off.sweep()).toEqual({ offboarded: 0, purged: 0, held: 0, drafts: 0, failed: 0 });
   });
 
   it("the purge deletes nothing", async () => {

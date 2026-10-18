@@ -24,9 +24,8 @@
   store + refusal mapping, now shared by the upload route and Save version); `routes/skill-json.ts`
   (the skill and version JSON both routes return).
 - **Retention / offboarding:** `retention/skill-drafts.ts`: the nightly pass purges drafts unchanged
-  for longer than the team's window (step 9, audited `retention.skill_drafts_purged` with a count);
-  offboarding purges a departed author's drafts, shared ones too (step 6, before `finish`). Both
-  skip drafts whose author a legal hold covers.
+  for longer than the team's window and released hold copies (step 9); the offboarding sweep purges
+  departed authors' drafts (see Review round 1).
 - **Audit:** `skill.draft.created`, `.shared`, `.deleted`, `.personalized`;
   `retention.skill_drafts_purged`; `skill.uploaded` gains optional `draftId`. In `docs/audit-log.md`.
 
@@ -37,8 +36,8 @@
   Save to team needs `team.skills.publish` (Builder), as an upload does.
 - **Revisions:** one `rev` per draft; every change (file write or delete, share) needs
   `If-Match: <rev>` (428 without), runs under the draft's row lock and bumps `rev`; stale is
-  409 `stale_revision` with `rev` and `changedBy {id, name}`. Save version takes an optional
-  If-Match (stale: 409). Two co-editors on different files also conflict (whole-draft rev).
+  409 `stale_revision` with `rev` and `changedBy {id, name}`. Save version requires
+  If-Match too (428 / 409). Two co-editors on different files also conflict (whole-draft rev).
 - **Files:** path rules are the package contract's for authored content (`checkPackagePaths`,
   segment-wise URL decoding, a decoded `/` refused); at most 200 files, SKILL.md at most 100 KiB
   (the upload's limits), 5 MiB in all (413 `draft_too_large`). Valid UTF-8 without NUL is stored
@@ -48,30 +47,50 @@
 - **Save version** builds the canonical zip of the files and runs the upload's own validation
   (`validateZipBundle`, limits raised only for the stored zip's size), `numberingFrom`, the scan
   and `putPackage` (source `zip`); a team save is a pending D22 review. `semver` and `changelog`
-  are required here (the upload keeps its defaults). The draft stays after a save. A personal save
-  of a draft with `from_thread_id` needs `confirmPersonal: true` (409
-  `confirm_personal_required`, message names the team) and records `skill.draft.personalized` in
-  the version's transaction.
+  are required here (the upload keeps its defaults). The draft stays after a save. Personal saves: see Review round 1
+  (B2).
 - **Limits:** 50 drafts per author per team; file writes share a 1,200 per 10 min per-user rate;
   Save version shares the upload rate.
-- **No break-glass read policy:** drafts are skill sources like `team_skills`, not thread or memory
-  content.
 - **`from_thread_id` has no key:** a purged thread must not clear it (the personal-save
   confirmation would silently stop applying).
 
+## Review round 1 (security/DB review, coordinator decisions)
+
+- **B1 legal hold (silent history pattern):** 0141 adds `skill_draft_history` and
+  `skill_draft_file_history`; files record their writer (`updated_by`). 0142's triggers copy what a
+  change would lose while a hold covers the author **or the writer** (`skill_draft_held`): a file
+  overwritten or deleted, a draft renamed or (un)shared, a draft deleted (its files copied before
+  the cascade). Nothing is refused: edits, deletes and both purges go through, so a held draft past
+  its window looks purged. Copies are immutable, their deletion refused (KH001) while held,
+  TRUNCATE of all four tables refused under any hold; the retention pass purges released copies
+  (`reason: hold_released`). No `hidden_at` needed: held rows never stay in the live tables.
+- **B2 team wall:** a personal save of a fork whose parent is a team version (or another member's,
+  or an unknown shape: fail closed) is refused, 409 `team_content` ("Promote it, or save it as a
+  team skill"); a catalog fork or a fork of the author's own personal version is allowed. A draft
+  started from a conversation or co-edited (`co_edited`, set by the database once anyone else
+  writes, never cleared) needs `confirmPersonal`. Provenance is immutable and must fit the start
+  (`skill_drafts_provenance` check). Every personal save records `skill.draft.personalized` in the
+  team (`fromConversation`, `coEdited`). Personal saves and draft creation check
+  `team.personal.create` (S5).
+- **B3 offboarding:** independent of sandboxes. The offboarding sweep marks drafts whose author is
+  no longer an active member (`owner_departed_at`), clears the mark when they return, and deletes
+  them 30 days on (held content to history; audited `reason: offboarding`). The sandbox purge no
+  longer touches drafts. Tested: no sandbox, a destroyed sandbox, deactivation, a return, and
+  leaving again after a return.
+- **S1** break-glass reads on all four tables (team grant all; user grant by author or writer;
+  thread grant none). **S2** Save version requires `If-Match` (428). **S3** file writes check path,
+  If-Match, rate, visibility and room before reading the body, and read it only up to that room.
+- **Nits:** N1 advisory lock per (team, author) around the draft cap; N2 `file_count <= 200` in the
+  DB check; N3 noted in the schema (`from_thread_id` writers check the team); N4 offboarding draft
+  purges are now audited as counts; N5 the list pages (100, `?cursor=`, microsecond-exact); N6 file
+  writes stay unaudited (autosave), saves and sharing are audited.
+
 ## Open questions (for Chris or the coordinator)
 
-1. **Legal hold vs. the author's own edits:** purges skip held authors' drafts, but the author can
-   still edit or delete a held draft (drafts are mutable; keeping every revision for a hold would
-   need a history table like eval cases'). Also a held draft past the window stays visible (shows
-   nothing about the hold beyond "not purged yet"). Accept for v1.2?
-2. **Fork of a team version saved as personal** also takes team content to every team; the spec's
-   confirmation covers only drafts started from a conversation. KOBE-322 (fork) may want the same
-   confirmation for forks of team skills.
-3. **Offboarding reach:** the purge runs per departed member's `sandboxes` row (existing design, as
-   for memory and eval cases), so a member who left without ever having a sandbox keeps their
-   drafts until the retention window takes them. Fine, or should the sweep also find departed
-   authors of drafts?
+1. `parent_ref` shape is now a contract for KOBE-322: `{kind: catalog|team|personal, skillId,
+semver, hash, ownerUserId?}`; anything else counts as team content.
+2. A co-edited draft that is later unshared stays co-edited (by design: the content is still the
+   team's). Fine?
 
 ## Evidence (acceptance criteria → test or command output)
 

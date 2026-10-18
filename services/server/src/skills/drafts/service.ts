@@ -97,6 +97,30 @@ export async function readDraft(ctx: DraftContext, id: string) {
   });
 }
 
+/**
+ * How many bytes a write of `path` may send, judged before the body is read (review S3): the
+ * draft must be one the viewer may edit, and the body at most the draft's room (5 MiB less its
+ * other files) and SKILL.md's cap. The write itself checks again under the draft's lock.
+ */
+export async function writeRoom(
+  ctx: DraftContext,
+  id: string,
+  path: string,
+): Promise<DraftOutcome<{ room: number; skillMd: boolean }>> {
+  return withTeam(ctx.db, ctx.teamId, async (tx) => {
+    const draft = await visibleDraft(tx, ctx.teamId, id, ctx.viewer);
+    if (!draft) return fail({ error: "not_found" });
+    const existing = (await fileInfos(tx, ctx.teamId, id)).find((f) => f.path === path);
+    const room = DRAFT_LIMITS.maxDraftBytes - draft.sizeBytes + (existing?.size ?? 0);
+    const skillMd = path === SKILL_MD_PATH;
+    return {
+      ok: true,
+      room: skillMd ? Math.min(room, DRAFT_LIMITS.maxSkillMdBytes) : room,
+      skillMd,
+    };
+  });
+}
+
 /** Writes one file at `rev`; a SKILL.md whose frontmatter parses renames the draft. */
 export async function writeDraftFile(
   ctx: DraftContext,
@@ -127,7 +151,7 @@ export async function writeDraftFile(
         error: "draft_too_large",
         message: `A draft may hold at most ${DRAFT_LIMITS.maxDraftBytes} bytes in all.`,
       });
-    await putFile(tx, ctx.teamId, id, path, bytes);
+    await putFile(tx, ctx.teamId, id, path, bytes, ctx.viewer.userId);
     const name = path === SKILL_MD_PATH ? nameOf(bytes) : undefined;
     const next = await bumpRevision(tx, draft, ctx.viewer.userId, name ? { name } : {});
     return { ok: true, draft: next };
