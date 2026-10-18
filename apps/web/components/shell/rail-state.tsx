@@ -9,13 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { THREADS_SHARE_BOUNDS } from "@kobe/protocol";
+import { RAIL_PANELS, THREADS_SHARE_BOUNDS, type RailPanels } from "@kobe/protocol";
 import {
   applyThreadsShare,
   useStoredPreference,
   type LayoutPreferences,
 } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
+import { DEFAULT_RAIL_PANELS, shows, withPanel } from "../../lib/shell/rail-panels";
 import { applyRailWidth, railWidthWithin } from "../../lib/shell/rail-width";
 import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
@@ -37,6 +38,10 @@ import { useShellBand } from "./shell-band";
  *
  * The expanded rail's width (KOBE-305) is dragged on wide windows only and saved with the other
  * preferences (per user, server-side); collapsing keeps it, so expanding again restores it.
+ *
+ * Its panels (KOBE-419): Threads, Files or both, from the toggles on the rail's top line, saved per
+ * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop) turns it on for
+ * this page only, like those paths' expansions.
  */
 export type RailSection = "threads" | "files";
 
@@ -93,6 +98,12 @@ export interface RailApi {
   setWidth(width: number): void;
   /** Back to the default width (double-click on the handle), saved as `null`. */
   resetWidth(): void;
+  /** Which panels show (KOBE-419): Threads, Files or both. */
+  readonly panels: RailPanels;
+  /** The member's toggle on the rail's top line: saved; the last panel on stays on. */
+  setPanel(section: RailSection, on: boolean): void;
+  /** Turns a panel on for this page (not saved): a drop's notice must be seen. */
+  showPanel(section: RailSection): void;
 }
 
 /**
@@ -119,6 +130,39 @@ function useRailWidth(
   );
   const resetWidth = useCallback(() => commit(null), [commit]);
   return { width: stored.value, setWidth, resetWidth };
+}
+
+/** A stored panels value this build knows, else null (the default applies). */
+function knownPanels(stored: RailPanels | undefined): RailPanels | null {
+  return stored !== undefined && RAIL_PANELS.includes(stored) ? stored : null;
+}
+
+/**
+ * The rail's panels (KOBE-419): the member's stored choice applied once loaded unless they already
+ * changed it on this page; their toggles are saved, a reveal is not.
+ */
+function useRailPanels(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const stored = useStoredPreference<RailPanels>({
+    initial: DEFAULT_RAIL_PANELS,
+    ready: preferences !== null,
+    resolve: () => knownPanels(preferences?.railPanels),
+    save: onSave && ((railPanels) => onSave({ railPanels })),
+  });
+  const { commit, set, current } = stored;
+  const setPanel = useCallback(
+    (section: RailSection, on: boolean) => commit(withPanel(current(), section, on)),
+    [commit, current],
+  );
+  const showPanel = useCallback(
+    (section: RailSection) => {
+      if (!shows(current(), section)) set(withPanel(current(), section, true));
+    },
+    [set, current],
+  );
+  return { panels: stored.value, setPanel, showPanel };
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -174,6 +218,7 @@ export function RailProvider({
     [docked, chosenNow, drawerOpen],
   );
   const { width, setWidth, resetWidth } = useRailWidth(preferences, onSave);
+  const { panels, setPanel, showPanel } = useRailPanels(preferences, onSave);
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
@@ -195,10 +240,11 @@ export function RailProvider({
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
       if (options?.toggle && collapsedNow()) toggle(false);
       else setCollapsed(false);
+      showPanel(section);
       setRevealed((prev) => ({ section, seq: (prev?.seq ?? 0) + 1 }));
       if (section === "files") setFilesRequests((n) => n + 1);
     },
-    [collapsedNow, toggle, setCollapsed],
+    [collapsedNow, toggle, setCollapsed, showPanel],
   );
   const api = useMemo(
     () => ({
@@ -217,6 +263,9 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      panels,
+      setPanel,
+      showPanel,
     }),
     [
       docked,
@@ -235,6 +284,9 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      panels,
+      setPanel,
+      showPanel,
     ],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;

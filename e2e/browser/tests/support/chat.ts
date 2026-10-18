@@ -42,10 +42,28 @@ export class Chat {
     return this.page.locator('[data-role="assistant"]');
   }
 
-  /** A new conversation: the chat's root opens an empty draft. */
+  /** A new conversation: the chat's root opens an empty draft, with both rail panels on. */
   async open(): Promise<void> {
     await this.page.goto("/");
     await expect(this.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+    await this.showBothPanels();
+  }
+
+  /** The rail's top line (KOBE-419): team selector, panel toggles, Team console, collapse. */
+  get railHeader(): Locator {
+    return this.page.locator("[data-rail-header]");
+  }
+
+  /**
+   * Turns both rail panels on (KOBE-419 saves the choice per member, so another spec or device may
+   * have left one off). Nothing to do where the rail is not on screen (a phone, collapsed).
+   */
+  async showBothPanels(): Promise<void> {
+    for (const name of ["Threads panel", "Files panel"]) {
+      const toggle = this.railHeader.getByRole("button", { name, exact: true });
+      if (!(await toggle.isVisible())) continue;
+      if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
+    }
   }
 
   async send(text: string): Promise<void> {

@@ -50,11 +50,14 @@ const region = (name: string) =>
   must(document.querySelector<HTMLElement>(`[data-shell-region="${name}"]`), name);
 
 describe("utility bar", () => {
-  it("row one: team switcher, wordmark, thread search, area links and the profile menu", async () => {
+  it("row one: wordmark, thread search, area links and the profile menu; no team switcher", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     openApp(fake);
     await composer();
     const one = within(row(1));
-    expect(await one.findByRole("navigation", { name: "Teams" })).toBeTruthy();
+    // The team selector is on the rail's top line (KOBE-419).
+    expect(await screen.findByRole("navigation", { name: "Teams" })).toBeTruthy();
+    expect(one.queryByRole("navigation", { name: "Teams" })).toBeNull();
     expect(one.getByRole("heading", { level: 1, name: "Kobe" })).toBeTruthy();
     expect(await one.findByRole("search")).toBeTruthy();
     expect(one.getByLabelText("Search conversations")).toBeTruthy();
@@ -106,16 +109,15 @@ describe("utility bar", () => {
     expect(within(row(1)).queryByRole("navigation", { name: "Administration" })).toBeNull();
   });
 
-  it("links the team console to a team admin and the Site console to a site Owner", async () => {
+  it("links the Site console to a site Owner; Team console is on the rail line (KOBE-419)", async () => {
     withAccess("owner", "team_admin", ["team.members.manage"]);
     openApp(fake);
     const admin = within(await within(row(1)).findByRole("navigation", { name: "Administration" }));
     expect(
       admin.getAllByRole("link").map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")]),
-    ).toEqual([
-      ["Team console", "/admin/team"],
-      ["Site console", "/admin/site"],
-    ]);
+    ).toEqual([["Site console", "/admin/site"]]);
+    const rail = screen.getByRole("complementary", { name: "Workspace" });
+    expect(await within(rail).findByRole("link", { name: "Team console" })).toBeTruthy();
   });
 
   it("renders every bar action through IconAction from the command registry (KOBE-203 ac-2)", async () => {
@@ -139,13 +141,12 @@ describe("utility bar", () => {
     }
   });
 
-  it("links only the team console to a team admin who has no site role", async () => {
+  it("gives a team admin with no site role no Administration links in the bar", async () => {
     withAccess(null, "team_admin", ["team.members.manage"]);
     openApp(fake);
-    const admin = within(await within(row(1)).findByRole("navigation", { name: "Administration" }));
-    expect(admin.getAllByRole("link").map((a) => a.getAttribute("aria-label"))).toEqual([
-      "Team console",
-    ]);
+    const rail = await screen.findByRole("complementary", { name: "Workspace" });
+    expect(await within(rail).findByRole("link", { name: "Team console" })).toBeTruthy();
+    expect(within(row(1)).queryByRole("navigation", { name: "Administration" })).toBeNull();
   });
 });
 
@@ -344,6 +345,7 @@ describe("bar menus", () => {
   });
 
   it("keeps at most one of the team switcher and the profile menu open", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     openApp(fake);
     await composer();
     const switcher = await teams();

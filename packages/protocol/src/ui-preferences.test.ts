@@ -18,6 +18,9 @@ describe("uiPreferencesSchema", () => {
     expect(uiPreferencesSchema.parse({ detail_expanded: true })).toEqual({ detail_expanded: true });
     expect(uiPreferencesSchema.parse({ rail_width: 360 })).toEqual({ rail_width: 360 });
     expect(uiPreferencesSchema.parse({ rail_width: null })).toEqual({ rail_width: null });
+    for (const panels of ["both", "threads", "files"] as const) {
+      expect(uiPreferencesSchema.parse({ rail_panels: panels })).toEqual({ rail_panels: panels });
+    }
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -50,6 +53,9 @@ describe("uiPreferencesSchema", () => {
     { artifact_width: "400" },
     { rail_collapsed: 1 },
     { detail_expanded: "yes" },
+    { rail_panels: "none" },
+    { rail_panels: null },
+    { rail_panels: ["threads"] },
   ])("refuses %o", (body) => {
     expect(uiPreferencesSchema.safeParse(body).success).toBe(false);
   });

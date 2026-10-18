@@ -167,12 +167,13 @@ const LIST = [
     slash: "agents",
     readOnlySafe: true,
   },
+  // On the rail's top line since KOBE-419 (team admins only); the palette still lists it.
   {
     id: "team-console",
     group: "consoles",
     name: "Team console",
     icon: UsersIcon,
-    scope: "bar",
+    scope: "rail",
     href: consoleHref("team"),
     available: (ctx) => ctx.consoles.includes("team"),
   },
@@ -256,6 +257,10 @@ const LIST = [
     shortcut: "Mod+B",
     readOnlySafe: true,
   },
+  // The rail's top line (KOBE-419): each panel on or off; a toggle (aria-pressed). The last one on
+  // stays on.
+  { id: "rail-threads", name: "Threads panel", icon: MessagesSquareIcon, scope: "rail" },
+  { id: "rail-files", name: "Files panel", icon: FolderIcon, scope: "rail" },
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },

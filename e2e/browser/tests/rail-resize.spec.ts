@@ -131,6 +131,20 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   await page.keyboard.press("Home");
   await expectWidth(rail, 200);
   await expect(handle).toHaveAttribute("aria-valuenow", "200");
+  // At the minimum the rail's top line still fits (KOBE-419): one line, every button inside.
+  const railBox = await rail.boundingBox();
+  const buttons = await chat.railHeader
+    .getByRole("button")
+    .or(chat.railHeader.getByRole("link"))
+    .all();
+  const ys: number[] = [];
+  for (const b of buttons) {
+    const box = await b.boundingBox();
+    if (!box || !railBox) continue;
+    expect(box.x + box.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+    ys.push(Math.round(box.y + box.height / 2));
+  }
+  expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
   await page.keyboard.press("End");
   await expectWidth(rail, 560);
   expect(await width(conversation)).toBeGreaterThanOrEqual(400);

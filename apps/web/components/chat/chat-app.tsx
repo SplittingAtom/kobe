@@ -4,6 +4,7 @@ import "../../lib/security/zod-jitless";
 import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
+import { TeamActivation } from "../../app/team-switcher";
 import type { ApiError } from "../../lib/api/client";
 import { createChatApi } from "../../lib/chat/api";
 import { browserThreadListSync, type ThreadListSync } from "../../lib/chat/thread-list-sync";
@@ -333,7 +334,9 @@ export function ChatApp({
       </p>
     );
   } else if (team.status === "noTeam") {
-    body = <p className={styles.empty}>Choose a team with the team switcher to start chatting.</p>;
+    body = (
+      <p className={styles.empty}>You are not in any team yet. Ask an admin to add you to one.</p>
+    );
   } else if (team.status === "error") {
     body = (
       <p className={styles.empty} role="alert">
@@ -365,6 +368,8 @@ export function ChatApp({
             </a>
             <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
             <TeamInvites />
+            {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
+            <TeamActivation />
             {body}
           </div>
         </ShellSlotsProvider>

@@ -176,6 +176,10 @@ export class FakeKobe {
   readonly teamModels: FakeTeamModel[] = [];
   /** The member's stored layout preferences (KOBE-202), wire casing; PUTs merge into it. */
   preferences: Json = {};
+  /** The caller's role in the active team, as `GET /v1/me/teams` lists it. */
+  teamRole: "team_admin" | "builder" | "member" = "member";
+  /** The caller's other teams (KOBE-419's team selector); `PUT /v1/me/teams/active` is recorded. */
+  readonly otherTeams: { id: string; slug: string; name: string; role: string }[] = [];
   /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
   readonly runnableAgents: FakeRunnableAgent[] = [];
   runnablePageSize = 200;
@@ -800,9 +804,13 @@ export class FakeKobe {
     if (url.pathname === "/v1/me/teams") {
       return json(200, {
         activeTeamId: this.teamId,
-        teams: [{ id: this.teamId, slug: "fin", name: "Finance", role: "member" }],
+        teams: [
+          { id: this.teamId, slug: "fin", name: "Finance", role: this.teamRole },
+          ...this.otherTeams,
+        ],
       });
     }
+    if (url.pathname === "/v1/me/teams/active" && method === "PUT") return json(200, {});
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });
     if (url.pathname === "/v1/me/preferences") {
       if (method === "PUT") this.preferences = { ...this.preferences, ...(body as Json) };

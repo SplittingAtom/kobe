@@ -191,10 +191,13 @@ describe("command registry", () => {
   });
 
   it("offers the consoles only where the server opens them", () => {
-    const bar = (consoles: ("site" | "team")[]) => commandsIn("bar", { consoles }).map((c) => c.id);
-    expect(bar([])).not.toContain("team-console");
-    expect(bar(["team"])).toContain("team-console");
-    expect(bar(["team"])).not.toContain("site-console");
-    expect(bar(["site", "team"])).toContain("site-console");
+    const ids = (scope: "bar" | "rail", consoles: ("site" | "team")[]) =>
+      commandsIn(scope, { consoles }).map((c) => c.id);
+    // Team console sits on the rail's top line (KOBE-419), Site console in the bar.
+    expect(ids("rail", [])).not.toContain("team-console");
+    expect(ids("rail", ["team"])).toContain("team-console");
+    expect(ids("bar", ["team"])).not.toContain("team-console");
+    expect(ids("bar", ["team"])).not.toContain("site-console");
+    expect(ids("bar", ["site", "team"])).toContain("site-console");
   });
 });

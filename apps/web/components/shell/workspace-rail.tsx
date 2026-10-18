@@ -8,6 +8,10 @@ import { useArtifactPanel } from "../chat/artifact-state";
 import { ChatSessionContext } from "../chat/kobe-runtime";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
+import { useMyTeams } from "../../app/team-switcher";
+import { useOpenConsoles } from "../admin/console-links";
+import { isLastPanel, LAST_PANEL_REASON, shows } from "../../lib/shell/rail-panels";
+import { shortcutOf } from "../../lib/shell/shortcuts";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
 import {
@@ -18,9 +22,10 @@ import {
 } from "./rail-drop-zone";
 import { railDocked } from "../../lib/shell/layout";
 import { RAIL_ID, RailResizeHandle } from "./rail-resize";
-import { sectionRows, useRail, type RailApi } from "./rail-state";
+import { sectionRows, useRail, type RailApi, type RailSection } from "./rail-state";
 import { useShellBand } from "./shell-band";
 import { useModalLayer } from "./use-modal-layer";
+import { RailTeam } from "./rail-team";
 import { RailThreads } from "./rail-threads";
 import styles from "./rail.module.css";
 
@@ -71,6 +76,68 @@ function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
   );
 }
 
+/** A panel's toggle on the rail's top line (KOBE-419); the last panel on says why it stays. */
+function PanelToggle({ rail, section }: { readonly rail: RailApi; readonly section: RailSection }) {
+  const on = shows(rail.panels, section);
+  const last = isLastPanel(rail.panels, section);
+  return (
+    <IconAction
+      command={section === "threads" ? "rail-threads" : "rail-files"}
+      size="sm"
+      side="bottom"
+      className="size-7"
+      shortcut={section === "files" ? shortcutOf("files") : null}
+      aria-pressed={on}
+      aria-controls={SECTION_IDS[section]}
+      aria-disabled={last || undefined}
+      description={last ? LAST_PANEL_REASON : undefined}
+      onClick={() => rail.setPanel(section, !on)}
+    />
+  );
+}
+
+/** Team console, for the members the server lets in (team admins; KOBE-419: from the bar). */
+function TeamConsoleLink() {
+  const consoles = useOpenConsoles();
+  if (!consoles.includes("team")) return null;
+  return <IconAction command="team-console" size="sm" side="bottom" className="size-7" />;
+}
+
+/**
+ * The rail's top line (KOBE-419): the team selector, the Threads and Files panel toggles, Team
+ * console for team admins, then collapse. The name truncates; the buttons never shrink or wrap.
+ */
+function RailHeader({ rail, teamName }: { readonly rail: RailApi; readonly teamName: string }) {
+  const teams = useMyTeams(false);
+  return (
+    <>
+      <div className={styles.header} data-rail-header>
+        <RailTeam teams={teams} teamName={teamName} />
+        <div className={styles.headerActions}>
+          <PanelToggle rail={rail} section="threads" />
+          <PanelToggle rail={rail} section="files" />
+          <TeamConsoleLink />
+          <IconAction
+            command="toggle-rail"
+            label={rail.drawer ? "Close the workspace" : undefined}
+            side="right"
+            size="sm"
+            className="size-7"
+            aria-expanded
+            aria-controls="kobe-rail-sections"
+            onClick={() => rail.toggle(true)}
+          />
+        </div>
+      </div>
+      {teams.error !== null && (
+        <p role="alert" className={styles.teamError}>
+          {teams.error}
+        </p>
+      )}
+    </>
+  );
+}
+
 /**
  * The Files section: nothing is listed or woken until the member asks (Open files, Show files,
  * Mod+Shift+F, `/files`); each ask, and Refresh, wakes the sandbox and lists again.
@@ -81,6 +148,7 @@ function RailFiles({
   drop,
   showFolder,
   clearDrop,
+  hidden,
 }: {
   readonly rail: RailApi;
   readonly api: FilesApi;
@@ -88,6 +156,8 @@ function RailFiles({
   readonly showFolder: { readonly path: string; readonly seq: number } | null;
   /** A Files action (open, refresh) clears the last drop's notice and errors. */
   clearDrop(): void;
+  /** Turned off on the rail's top line: kept mounted (its tree and listing), not shown. */
+  hidden: boolean;
 }) {
   const request = () => {
     clearDrop();
@@ -117,6 +187,7 @@ function RailFiles({
       aria-labelledby="kobe-rail-files-title"
       tabIndex={-1}
       className={styles.section}
+      hidden={hidden}
     >
       <div className={styles.sectionHeader}>
         <h3 id="kobe-rail-files-title" className={styles.sectionTitle}>
@@ -148,8 +219,9 @@ function RailFiles({
 }
 
 /**
- * The workspace rail (CE2, CE5, KOBE-198): the active team's name, then Threads over Files with a
- * draggable divider, each scrolling on its own; 280 px, or 48 px collapsed to three icons. The
+ * The workspace rail (CE2, CE5, KOBE-198): its top line (KOBE-419: team selector, panel toggles,
+ * Team console, collapse), then Threads over Files with a draggable divider, each scrolling on its
+ * own (one panel alone fills the rail, without the divider); 280 px, or 48 px collapsed to three icons. The
  * sections stay mounted (hidden) while collapsed, so their state survives and nothing re-wakes.
  * The whole rail is the drop zone for files (A3, KOBE-199, `rail-drop-zone.tsx`).
  *
@@ -173,7 +245,7 @@ export function WorkspaceRail({
   if (!rail) throw new Error("WorkspaceRail needs a RailProvider");
   useFoldOnThreadChange(rail);
   const aside = useRef<HTMLElement>(null);
-  const { collapsed, drawer, toggle } = rail;
+  const { collapsed, drawer } = rail;
   useModalLayer(aside, drawer, rail.closeDrawer, { modal: true, escape: true });
   useRevealFocus(rail);
   const sections = useRef<HTMLDivElement>(null);
@@ -181,6 +253,7 @@ export function WorkspaceRail({
   const single = band === "single";
   const resizable = railDocked(band) && !collapsed && !drawer;
   const drop = useRailDropZone(filesApi, rail);
+  const both = rail.panels === "both";
 
   return (
     <>
@@ -196,45 +269,37 @@ export function WorkspaceRail({
         {drop.active && <RailDropOverlay />}
         {!single && <CollapsedIcons rail={rail} />}
         <div className={styles.expanded} hidden={collapsed}>
-          <div className={styles.header}>
-            <h2 className={styles.team} title={teamName}>
-              {teamName}
-            </h2>
-            <IconAction
-              command="toggle-rail"
-              label={drawer ? "Close the workspace" : undefined}
-              side="right"
-              aria-expanded
-              aria-controls="kobe-rail-sections"
-              onClick={() => toggle(true)}
-            />
-          </div>
+          <RailHeader rail={rail} teamName={teamName} />
           <div
             id="kobe-rail-sections"
             ref={sections}
             className={styles.sections}
-            style={{ gridTemplateRows: sectionRows(rail.threadsShare) }}
+            style={{ gridTemplateRows: both ? sectionRows(rail.threadsShare) : "minmax(0, 1fr)" }}
           >
             <section
               id={SECTION_IDS.threads}
               aria-labelledby="kobe-rail-threads-title"
               tabIndex={-1}
               className={styles.section}
+              hidden={!shows(rail.panels, "threads")}
             >
               <RailThreads listError={listError} />
             </section>
-            <RailDivider
-              share={rail.threadsShare}
-              onChange={rail.setThreadsShare}
-              container={sections}
-              controls={SECTION_IDS.threads}
-            />
+            {both && (
+              <RailDivider
+                share={rail.threadsShare}
+                onChange={rail.setThreadsShare}
+                container={sections}
+                controls={SECTION_IDS.threads}
+              />
+            )}
             <RailFiles
               rail={rail}
               api={filesApi}
               drop={drop.status}
               showFolder={drop.showFolder}
               clearDrop={drop.clear}
+              hidden={!shows(rail.panels, "files")}
             />
           </div>
         </div>
