@@ -38,12 +38,18 @@ function client(ip) {
   };
   const self = {
     team: undefined,
-    async call(method, path, body) {
-      const res = await fetch(BASE + path, {
-        method,
-        headers: headers(self.team),
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
+    /** A JSON request; `extra` adds or overrides headers (e.g. If-Match, KOBE-231). */
+    async call(method, path, body, extra) {
+      return self.raw(method, path, body === undefined ? undefined : JSON.stringify(body), extra);
+    },
+    /**
+     * A request with a body sent as is (a zip, a Markdown file, FormData). FormData sets its own
+     * multipart content type, so the JSON default is dropped for it.
+     */
+    async raw(method, path, body, extra) {
+      const h = headers(self.team, extra);
+      if (body instanceof FormData) delete h["content-type"];
+      const res = await fetch(BASE + path, { method, headers: h, body });
       keep(res);
       const text = await res.text();
       let json = {};
@@ -52,7 +58,7 @@ function client(ip) {
       } catch {
         // not JSON
       }
-      return { status: res.status, json, text };
+      return { status: res.status, json, text, headers: res.headers };
     },
     /** Opens a run's event stream; `lastEventId` resumes like EventSource after a reconnect. */
     async stream(runId, { lastEventId, signal } = {}) {

@@ -1,13 +1,14 @@
 # k3d end-to-end suite (KOBE-7): k3s clusters with gVisor and agent-sandbox, the chart installed
 # from images built for this commit, then e2e/run.sh and the Gate 1 and 2 suites (e2e/gate1.sh,
-# e2e/gate2.sh). Runs on pull requests to main, in the merge queue, nightly, and on demand — not on
+# e2e/gate2.sh, e2e/gate3.sh). Runs on pull requests to main, in the merge queue, nightly, and on demand — not on
 # every push.
 #
 # The images are built once (one job per image, Docker layers from the GitHub Actions cache that
 # publish.yml fills on main) and shared as artifacts. The suite then runs as parallel shards, each
 # on its own fresh cluster: `suite` (every e2e/run.sh section but the KOBE-25 cold-start trials),
 # `cold-start` (the sections up to KOBE-25, with its trials), `gate1` (the install plus the
-# KOBE-40 model setup, then e2e/gate1.sh), `gate2` (the same install, then e2e/gate2.sh) and
+# KOBE-40 model setup, then e2e/gate1.sh), `gate2` (the same install, then e2e/gate2.sh), `gate3`
+# (the same install, then e2e/gate3.sh with its browser checks in Playwright's Chromium) and
 # `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/).
 # Branch protection and the merge queue require the check named `k3d`: the last job, which passes
 # only when every image build and every shard passed.
@@ -162,7 +163,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [suite, cold-start, gate1, gate2, executor]
+        shard: [suite, cold-start, gate1, gate2, gate3, executor]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +174,18 @@ jobs:
       - uses: azure/setup-kubectl@bda439f5f36b99b262ebdcd3613869bddb064c8e # v5.2.0
         with:
           version: v1.34.6
+      # KOBE-231: Gate 3's browser checks (e2e/browser/scripts/gate3-browser.mjs) run beside kubectl
+      # in Playwright's Chromium, pinned by e2e/browser/package-lock.json.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: matrix.shard == 'gate3'
+        with:
+          node-version-file: .nvmrc
+      - name: Playwright and Chromium for the browser checks
+        if: matrix.shard == 'gate3'
+        run: |
+          cd e2e/browser
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
       - name: Runner prerequisites
         # The self-hosted runner image (ci/runners) is minimal; gVisor ships as .tar.bz2.
         run: command -v bzip2 >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends bzip2; }
@@ -244,6 +257,10 @@ jobs:
             # Gate 2 (KOBE-2) on its own cluster, in parallel with the other shards: budget stop,
             # request access, tampered kobe-policy, break-glass, secret scan (docs/gates/gate-2.md).
             gate2) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate2.sh ;;
+            # Gate 3 (KOBE-3, KOBE-231) on its own cluster: agent versions, skills review and
+            # blocklist, projects, memory with Undo and approvals, CSV to chart under CSP and the
+            # lost sandbox (docs/gates/gate-3.md). KOBE_GATE3_BROWSER: the Chromium checks too.
+            gate3) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && KOBE_GATE3_BROWSER=1 e2e/gate3.sh ;;
             *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
           esac
       - name: Diagnostics
@@ -257,6 +274,7 @@ jobs:
           kubectl -n kobe-team-e2e describe pods | tail -120 || true
           for t in a b; do kubectl -n kobe-team-gate1-$t describe pods | tail -60 || true; done
           kubectl -n kobe-team-gate2-a describe pods | tail -60 || true
+          kubectl -n kobe-team-gate3-a describe pods,pvc | tail -80 || true
           kubectl -n kobe-gate2-infra get pods -o wide || true
           df -h /
           scripts/ci-docker-diagnostics.sh

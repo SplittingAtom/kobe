@@ -1,4 +1,5 @@
-# Helpers shared by the gate harnesses (e2e/gate1.sh, e2e/gate2.sh); sourced, not run.
+# shellcheck shell=bash disable=SC2034 # `failed` and `xfailed` belong to the sourcing harness
+# Helpers shared by the gate harnesses (e2e/gate1.sh, gate2.sh, gate3.sh); sourced, not run.
 # Expects: KUBECTL, NS, RELEASE, SERVER, CLIENT_JS (the harness client's source), `failed` and PODS.
 ok() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; failed=1; }
@@ -8,6 +9,22 @@ contains() { # name, regex, actual output: passes when some line matches regex
   if grep -Eq "$2" <<<"$3"; then ok "$1"; else fail "$1: got [$(tail -3 <<<"$3")]"; fi
 }
 field() { sed -n "s/^$1=//p" <<<"$2" | sed -n 1p; } # key, output → value
+# An expected failure (KOBE-231): a check of a criterion the product does not meet yet, filed as a
+# product failure. It stays and runs. While the product fails it, it prints XFAIL with the reason
+# and does not fail the run (CI stays green), except under KOBE_GATE_STRICT=1 (a sign-off run),
+# where it is an ordinary FAIL. Once it passes it prints XPASS and fails, so the marker goes.
+xfailed=0
+xcontains() { # name, regex, actual output, reason (the filed failure)
+  if grep -Eq "$2" <<<"$3"; then
+    echo "XPASS $1: passes now, remove its expected-fail marker ($4)"
+    failed=1
+  elif [[ "${KOBE_GATE_STRICT:-0}" == 1 ]]; then
+    fail "$1: got [$(tail -3 <<<"$3")] ($4)"
+  else
+    echo "XFAIL $1: got [$(tail -3 <<<"$3")] ($4)"
+    xfailed=$((xfailed + 1))
+  fi
+}
 until_ok() { # seconds command... → succeeds as soon as the command does, fails after `seconds`
   local deadline=$((SECONDS + $1))
   shift
