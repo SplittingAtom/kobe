@@ -86,6 +86,10 @@ test("U21: a tool output over 64 KB is read in full when its card opens", async 
   );
   const trimmed = (thread.json.entries ?? []).some((e) => e.payload_truncated === true);
   expect(trimmed, "the stored output is over 64 KB, so the chat lists only its preview").toBe(true);
+  // The recorded thread (U21), not this tab's live stream (whose tool.result carries its own
+  // preview): reload, so the card is built from the listed, trimmed entry.
+  await page.reload();
+  await expect(chat.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   const card = page.getByRole("region", { name: "Tool call bash" }).last();
   await expect(card).not.toContainText("G5-OUTPUT-END");
   await toggleOf(card).click();

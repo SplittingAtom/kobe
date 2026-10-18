@@ -92,8 +92,9 @@ test("U18: while scrolled up, the Jump pill counts the messages that arrive", as
   // (Enter while it works, CE10) that runs once it ends. An open thread does not follow runs
   // another tab or device starts (it reads them when opened again), so they are not the source.
   await chat.open();
-  await chat.ask("No tools. Reply with the single word FIRST.");
-  await chat.send(longAnswer("No tools. Write a numbered list of 80 short lines about fruit."));
+  // A full long answer first, so the list has room to scroll up at all.
+  await chat.ask(longAnswer("No tools. Write a numbered list of 80 short lines about fruit."));
+  await chat.send(longAnswer("No tools. Write a numbered list of 80 short lines about rivers."));
   await expect(chat.steering).toHaveAttribute("data-state", "active", {
     timeout: RUN_START_TIMEOUT_MS,
   });
