@@ -159,9 +159,11 @@ describe("run.start records and the Skill updated marker (ac-2, ac-3)", () => {
   it("records name, semver and hash; the next run after a version change marks it", async () => {
     const w = await f.world();
     await models(w.team, w.owner.id);
-    const skill = await teamSkill(w.team, w.owner.id, "pretty-v2");
+    // On by default, not named: a named team skill is frozen at publish (KOBE-318) and moves
+    // only on republish, while an On by default one follows its newest approved version.
+    const skill = await teamSkill(w.team, w.owner.id, "pretty-v2", "default_on");
     const h1 = await addVersion(w.team, w.owner.id, skill, "pretty-v2", 1);
-    const agent = await publishAgent(w.owner, { skills: ["pretty-v2"] });
+    const agent = await publishAgent(w.owner, {});
     const created = await f.on(0, w.owner).post("/v1/threads", { agent_id: agent });
     const thread = created.json.thread_id as string;
     const ws = await f.connect(w, 0);

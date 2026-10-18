@@ -171,3 +171,26 @@ export const getTeamAgentEval = (
   evalId: string,
 ): Promise<ApiResult<{ eval: AgentEvalDetail }>> =>
   apiRequest(`/v1/agents/${enc(id)}/evals/${enc(evalId)}`, { teamId });
+
+/** One named team skill of the current version and its frozen version (KOBE-318, SK28). */
+export interface AgentSkillUpdate {
+  readonly name: string;
+  /** The version the agent version froze; null: none was usable at publish. */
+  readonly frozen: { readonly version: number; readonly semver: string } | null;
+  /** Whether runs load the frozen version, or why they leave it out. */
+  readonly status: "ok" | "blocklisted" | "suspended" | "not_approved";
+  /** A valid version a republish would freeze instead ("skill update available"). */
+  readonly update: { readonly version: number; readonly semver: string } | null;
+}
+
+export interface AgentSkillUpdates {
+  readonly version: number | null;
+  readonly skills: readonly AgentSkillUpdate[];
+}
+
+/** `GET /v1/agents/{id}/skill-updates`: personal and gallery agents list none. */
+export const listAgentSkillUpdates = (
+  teamId: string,
+  id: string,
+): Promise<ApiResult<AgentSkillUpdates>> =>
+  apiRequest(`/v1/agents/${enc(id)}/skill-updates`, { teamId });

@@ -3,6 +3,7 @@ import { PUBLISHED_VERSION_STATES, isKobeSkillName, type ApprovalMode } from "@k
 import { and, connectors, eq, sql, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillOmission, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
+import { frozenStates, type FrozenSkill } from "../skills/frozen.js";
 import { personalSkillUsage, teamSkillStates } from "../skills/review.js";
 import { readPersonalSkillsDisabled } from "../skills/settings.js";
 import { loadCatalogFacts } from "./catalog-facts.js";
@@ -62,7 +63,8 @@ export interface SkillFacts {
 async function teamSkillAccess(
   tx: KobeTx,
   teamId: string,
-  userId: string,
+  /** Null: no member's toggles (publish, KOBE-318, reads only which names are local). */
+  userId: string | null,
 ): Promise<{ required: string[]; on: string[]; local: Set<string>; archived: Set<string> }> {
   const { rows } = await tx.execute<{
     slug: string;
@@ -76,7 +78,8 @@ async function teamSkillAccess(
       s.archived_at IS NOT NULL AS archived, e.enabled AS mine
     FROM team_skills s
     LEFT JOIN member_skill_enablements e
-      ON e.team_id = s.team_id AND e.team_skill_id = s.id AND e.user_id = ${userId}
+      ON e.team_id = s.team_id AND e.team_skill_id = s.id
+        AND ${userId === null ? sql`false` : sql`e.user_id = ${userId}`}
     WHERE s.team_id = ${teamId}`);
   const live = rows.filter((r) => !r.archived);
   return {
@@ -178,6 +181,77 @@ export async function loadTeamFacts(tx: KobeTx, teamId: string): Promise<TeamRes
 }
 
 /**
+ * How the agent's named skills split (SK27 step 2): catalog names (through the team install),
+ * and the team's own skills with their usable and suspended versions. Unfrozen (drafts, personal
+ * and gallery agents), a team skill resolves to its newest approved or suspended version. Frozen
+ * (KOBE-318), a name in the manifest resolves to that exact version, even if its skill was since
+ * archived and its name installed from the catalog (SK31: archive keeps frozen agents working);
+ * a team name left out of the manifest has no version for this agent (`not_approved`) until a
+ * republish, whatever was approved since. Kobe's names are never frozen.
+ */
+async function namedLocalSkills(
+  tx: KobeTx,
+  teamId: string,
+  listed: readonly string[],
+  access: { local: Set<string>; archived: Set<string> },
+  frozen: readonly FrozenSkill[] | undefined,
+): Promise<{
+  namedCatalog: string[];
+  teamNames: string[];
+  approved: { name: string; hash: string; semver: string }[];
+  suspended: string[];
+}> {
+  const pinned = new Map(
+    (frozen ?? [])
+      .filter((f) => listed.includes(f.name) && !isKobeSkillName(f.name))
+      .map((f) => [f.name, f]),
+  );
+  const routed = listed.filter((n) => !pinned.has(n));
+  // One transaction, one connection: these reads run one after the other.
+  const localStates = await teamSkillStates(
+    tx,
+    teamId,
+    routed.filter((n) => access.local.has(n) && !isKobeSkillName(n)),
+  );
+  const namedCatalog = await catalogNamed(tx, teamId, routed, access, localStates);
+  const teamNames = listed.filter((n) => !namedCatalog.includes(n));
+  if (frozen === undefined) {
+    return {
+      namedCatalog,
+      teamNames,
+      approved: localStates.approved.filter((s) => teamNames.includes(s.name)),
+      suspended: localStates.suspended.filter((n) => teamNames.includes(n)),
+    };
+  }
+  const states = await frozenStates(tx, teamId, [...pinned.values()]);
+  return {
+    namedCatalog,
+    teamNames,
+    approved: states.flatMap((s) =>
+      s.state === "approved" && s.hash !== null
+        ? [{ name: s.entry.name, hash: s.hash, semver: s.semver }]
+        : [],
+    ),
+    suspended: states.filter((s) => s.state === "suspended").map((s) => s.entry.name),
+  };
+}
+
+/**
+ * The agent-named skills that are the team's own (SK27 step 2, local), as a publish freezes them
+ * (KOBE-318): the same split as run start, unfrozen, in the agent's order.
+ */
+export async function localNamedSkills(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+): Promise<string[]> {
+  const listed = [...new Set(names)];
+  const access = await teamSkillAccess(tx, teamId, null);
+  const { teamNames } = await namedLocalSkills(tx, teamId, listed, access, undefined);
+  return teamNames.filter((n) => access.local.has(n) && !isKobeSkillName(n));
+}
+
+/**
  * Skill refs for run start (inside `withTeam`). `agentSkillNames` are the names in the agent's
  * frontmatter; only approved team versions come back. Personal skills are loaded even when the
  * team switch is on: the resolver omits them with a visible `team_disabled` notice.
@@ -190,24 +264,20 @@ export async function loadSkillFacts(
     agentSkillNames: readonly string[];
     /** The team switch: personal skills are then not even queued for review. */
     personalSkillsDisabled: boolean;
+    /**
+     * A published team agent version's frozen local skill versions (KOBE-318, SK28). Absent for
+     * drafts and for personal and gallery agents (no team to freeze in): named team skills then
+     * resolve to their newest approved version, as before.
+     */
+    frozen?: readonly FrozenSkill[];
   },
 ): Promise<SkillFacts> {
   // Kobe's skills (the former built-ins, KOBE-317) are catalog names like any other: they resolve
   // through the team's install (or the Default install still on its way, catalog-facts.ts).
   const listed = [...new Set(args.agentSkillNames)];
   const access = await teamSkillAccess(tx, args.teamId, args.userId);
-  // One transaction, one connection: these reads run one after the other.
-  const localStates = await teamSkillStates(
-    tx,
-    args.teamId,
-    listed.filter((n) => access.local.has(n) && !isKobeSkillName(n)),
-  );
-  const namedCatalog = await catalogNamed(tx, args.teamId, listed, access, localStates);
-  const teamNames = listed.filter((n) => !namedCatalog.includes(n));
-  const named = {
-    approved: localStates.approved.filter((s) => teamNames.includes(s.name)),
-    suspended: localStates.suspended.filter((n) => teamNames.includes(n)),
-  };
+  const named = await namedLocalSkills(tx, args.teamId, listed, access, args.frozen);
+  const { namedCatalog, teamNames } = named;
   // In the agent's own order: which named skills a full run keeps does not depend on a query plan.
   const agent = named.approved
     .map(fromTeam)

@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import type { KobeDb } from "@kobe/db";
+import { withTeam, type KobeDb } from "@kobe/db";
 import type { AgentAccess } from "./access.js";
 import {
   agentDetail,
@@ -39,7 +39,9 @@ import { versionScores } from "./eval/store.js";
 import { logger } from "../logger.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { parseBody } from "../teams/http.js";
-import { agentWarnings } from "@kobe/agent-file";
+import { agentSkills, agentWarnings } from "@kobe/agent-file";
+import { EMPTY_SKILL_MANIFEST } from "../skills/frozen.js";
+import { skillUpdates } from "./skill-freeze.js";
 
 /**
  * Runs `fn`; a stored version whose manifest doesn't parse answers 500 `version_unreadable` (fail
@@ -169,6 +171,37 @@ export function mountVersionRoutes<E extends { Variables: object }>(
       const record = await getVersion(db, found.location, found.agent.id, version.data);
       if (!record) return publishError(c, "version_not_found");
       return c.json({ version: redact(found, versionDetail(record)) });
+    });
+  });
+
+  /**
+   * "Skill update available" (KOBE-318, SK28): per named team skill of the current version, the
+   * version it froze and whether runs load it, and a newer valid version a republish would
+   * freeze. Personal and gallery agents freeze nothing, so they list none.
+   */
+  app.get("/:id/skill-updates", async (c) => {
+    const found = await resolve(c);
+    if (!found) return notFound(c);
+    if (!found.access.readDefinition) {
+      return forbidden(c, "Your team role doesn't allow reading team agent definitions.");
+    }
+    const { location } = found;
+    const current = found.agent.currentVersion;
+    if (location.scope !== "team" || current === null) {
+      return c.json({ version: current, skills: [] });
+    }
+    return guardUnreadable(c, async () => {
+      const record = await getVersion(db, location, found.agent.id, current);
+      if (!record) return publishError(c, "version_not_found");
+      const skills = await withTeam(db, location.teamId, (tx) =>
+        skillUpdates(
+          tx,
+          location.teamId,
+          agentSkills(record.definition.frontmatter).names,
+          record.skillManifest ?? EMPTY_SKILL_MANIFEST,
+        ),
+      );
+      return c.json({ version: current, skills });
     });
   });
 

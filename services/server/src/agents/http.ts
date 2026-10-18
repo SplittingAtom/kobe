@@ -223,6 +223,8 @@ export function versionDetail(v: AgentVersionRecord) {
     frontmatter: v.definition.frontmatter,
     prompt: v.definition.prompt,
     toolManifest: v.toolManifest,
+    // Team versions: the local skill versions frozen at publish (KOBE-318).
+    ...(v.skillManifest ? { skillManifest: v.skillManifest } : {}),
   };
 }
 
@@ -239,7 +241,7 @@ const PUBLISH_ERRORS = {
   unchanged: [
     409,
     "unchanged",
-    "Nothing to publish: the draft (and its tool manifest) equals the current version.",
+    "Nothing to publish: the draft, its tool manifest and its skill versions equal the current version.",
   ],
   version_limit: [
     409,

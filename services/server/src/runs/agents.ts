@@ -118,6 +118,8 @@ export const PINNED_AGENTS: RunAgentResolver = {
       userId: input.ownerUserId,
       agentSkillNames: agentSkills(frontmatter).names,
       personalSkillsDisabled: team.personalSkillsDisabled,
+      // A published team version runs the local skill versions it froze (KOBE-318).
+      ...(pinned.version.skillManifest ? { frozen: pinned.version.skillManifest.skills } : {}),
     });
     const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
     const connectedConnectors = connectedConnectorNames(

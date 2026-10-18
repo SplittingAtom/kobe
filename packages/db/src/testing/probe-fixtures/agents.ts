@@ -99,6 +99,7 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       frontmatter: { name: "Probe" },
       prompt: "",
       toolManifest: {},
+      skillManifest: { skills: [] },
       publishedBy: userId,
       draftRevision: 1,
     });

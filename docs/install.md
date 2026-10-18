@@ -589,6 +589,19 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Agents freeze their skill versions (KOBE-318, migrations `0139_agent_skill_manifest` and
+  `0140_agent_skill_manifest_backfill`).** A published team agent version now runs the exact team
+  skill versions it named at publish, not the newest approved one: approving a newer version
+  changes the agent at its next publish (the agent builder says "Skill update available").
+  Every existing team agent version is frozen at the versions it resolved to on upgrade day, so
+  nothing changes on upgrade; the Job log says how many (`kobe: … team agent versions frozen at …
+local skill versions`). Catalog skills (Kobe's included) still follow the team's install;
+  personal and gallery agents freeze nothing. A frozen version that is later blocklisted,
+  suspended by a rescan or no longer approved is left out of runs with a notice until the agent
+  is published again. Server pods of the previous release can't publish team agents once the Job
+  has run (a version without a skill manifest is refused), from the end of the Job until Helm
+  replaces them and for as long as a `helm rollback` keeps the previous release running; run
+  starts and reads keep working, though a rolled-back release ignores the freeze.
 - **Skill packages (KOBE-310, migration `0131_skill_store`).** Additive: a site-wide
   `skill_hash_checks` table and a nullable `package_storage_key` on the skill version tables, so
   the previous release keeps working and `helm rollback` is safe. After the upgrade the servers check, in the background (at start and every 10 minutes, one replica at a time), each stored skill version against the package contract

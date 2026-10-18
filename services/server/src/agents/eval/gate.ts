@@ -1,4 +1,4 @@
-import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
+import { agentSkills, validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import { withTeam, type KobeDb } from "@kobe/db";
 import { acceptedCases, caseReviewerPresent } from "../../eval-cases/review.js";
 import { EVAL_CASES_MAX_BYTES, casesFile } from "./cases.js";
@@ -6,6 +6,7 @@ import type { BackgroundTasks } from "../../background.js";
 import type { TeamRef } from "../../sandbox/manifests.js";
 import { readPublishFloor } from "../floor.js";
 import { computeToolManifest } from "../manifest.js";
+import { freezeLocalSkills } from "../skill-freeze.js";
 import { gatewayModelId, listOrbitModelOptions, pickOrbitModel } from "../orbit/model.js";
 import { orbitMcpToolNames } from "../orbit/mcp-tools.js";
 import { mapAgentVersionToOrbit, orbitExportToYaml } from "../orbit/orbit-export.js";
@@ -104,9 +105,17 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     const current = await getVersion(db, location, agent.id, agent.currentVersion).catch(
       () => null,
     );
+    // A republish that only picks up newer local skill versions is not unchanged (KOBE-318).
+    const skills =
+      location.scope === "team"
+        ? await withTeam(db, location.teamId, (tx) =>
+            freezeLocalSkills(tx, location.teamId, agentSkills(definition.frontmatter).names),
+          )
+        : null;
     if (
       current &&
-      contentKey(current.definition, current.toolManifest) === contentKey(definition, toolManifest)
+      contentKey(current.definition, current.toolManifest, current.skillManifest) ===
+        contentKey(definition, toolManifest, skills)
     ) {
       return { kind: "publish_error", error: "unchanged" };
     }
