@@ -1,5 +1,5 @@
 {
-  "id": "ac3cc0b4-eac5-42b8-b10c-b11c62fecce0",
+  "id": "2bd1fd39-55ea-4fff-9d48-9d2010ca8410",
   "prevId": "5b63c210-ee45-46ce-a0e1-14ebe77e3ff6",
   "version": "7",
   "dialect": "postgresql",
@@ -16479,6 +16479,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "team_changed_at": {
+          "name": "team_changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -16801,6 +16807,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
         "skill_id": {
           "name": "skill_id",
           "type": "uuid",
@@ -16918,6 +16930,32 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "blocked": {
+          "name": "blocked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -16931,7 +16969,7 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "seq",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -16952,7 +16990,7 @@
               "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "seq",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -17008,7 +17046,15 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "skill_default_syncs_seq_unique": {
+          "name": "skill_default_syncs_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "seq"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "skill_default_syncs_kind": {
@@ -17017,7 +17063,7 @@
         },
         "skill_default_syncs_status": {
           "name": "skill_default_syncs_status",
-          "value": "\"skill_default_syncs\".\"status\" IN ('queued', 'running', 'done')"
+          "value": "\"skill_default_syncs\".\"status\" IN ('queued', 'running', 'done', 'failed')"
         },
         "skill_default_syncs_target": {
           "name": "skill_default_syncs_target",
@@ -17025,11 +17071,15 @@
         },
         "skill_default_syncs_times": {
           "name": "skill_default_syncs_times",
-          "value": "(\"skill_default_syncs\".\"status\" = 'queued') = (\"skill_default_syncs\".\"started_at\" IS NULL)\n        AND (\"skill_default_syncs\".\"status\" = 'done') = (\"skill_default_syncs\".\"finished_at\" IS NOT NULL)"
+          "value": "(\"skill_default_syncs\".\"status\" = 'queued') = (\"skill_default_syncs\".\"started_at\" IS NULL)\n        AND (\"skill_default_syncs\".\"status\" IN ('done', 'failed')) = (\"skill_default_syncs\".\"finished_at\" IS NOT NULL)"
         },
         "skill_default_syncs_counts": {
           "name": "skill_default_syncs_counts",
-          "value": "\"skill_default_syncs\".\"teams_total\" >= 0 AND \"skill_default_syncs\".\"teams_done\" >= 0 AND \"skill_default_syncs\".\"installed\" >= 0 AND \"skill_default_syncs\".\"kept\" >= 0\n        AND \"skill_default_syncs\".\"opted_out\" >= 0 AND \"skill_default_syncs\".\"converted\" >= 0 AND \"skill_default_syncs\".\"optouts_cleared\" >= 0\n        AND \"skill_default_syncs\".\"moved\" >= 0"
+          "value": "\"skill_default_syncs\".\"teams_total\" >= 0 AND \"skill_default_syncs\".\"teams_done\" >= 0 AND \"skill_default_syncs\".\"installed\" >= 0 AND \"skill_default_syncs\".\"kept\" >= 0\n        AND \"skill_default_syncs\".\"opted_out\" >= 0 AND \"skill_default_syncs\".\"converted\" >= 0 AND \"skill_default_syncs\".\"optouts_cleared\" >= 0\n        AND \"skill_default_syncs\".\"moved\" >= 0 AND \"skill_default_syncs\".\"blocked\" >= 0 AND \"skill_default_syncs\".\"attempts\" >= 0"
+        },
+        "skill_default_syncs_last_error": {
+          "name": "skill_default_syncs_last_error",
+          "value": "\"skill_default_syncs\".\"last_error\" IS NULL OR \"skill_default_syncs\".\"last_error\" ~ '^[a-z0-9_]{1,64}$'"
         }
       },
       "isRLSEnabled": false

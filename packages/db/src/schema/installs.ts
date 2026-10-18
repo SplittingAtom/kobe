@@ -49,6 +49,12 @@ export const teamSkillInstalls = pgTable(
     installedBy: uuid()
       .notNull()
       .references(() => users.id),
+    /**
+     * When the team last changed the install's pin mode, access or origin (KOBE-314): set, the
+     * install is "touched" and a Site admin's move of Default installs to a new major skips it;
+     * the team's choice sticks (SK6). Null: as the Default tag made it.
+     */
+    teamChangedAt: ts(),
     createdAt: ts().notNull().defaultNow(),
     updatedAt: ts().notNull().defaultNow(),
   },
