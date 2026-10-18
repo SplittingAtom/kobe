@@ -897,6 +897,13 @@
       "when": 1792263668424,
       "tag": "0127_thinking_lowest",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792305642000,
+      "tag": "0128_personal_skills_rename",
+      "breakpoints": true
     }
   ]
 }
