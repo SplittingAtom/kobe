@@ -59,34 +59,55 @@ always the runtime hash: Kobe stores the runtime zip for the sandbox and `conten
 runtimeHash`. The resolver and the Pi `--skill` directory are unchanged.
 
 Before KOBE-310 the server hashes the whole upload. For a bundle without the reserved root names
-(every bundle seen so far is expected to be one) the stored `content_hash` already is its runtime
-hash (the server test in `services/server/src/skills/package-hash.test.ts` proves the bytes are
-equal). A stored bundle that does hold `evals/`, `kobe.skill.yaml` or `provenance.json` at its
-root has a `content_hash` that is **not** its runtime hash, and its sandboxes receive those files
-today. KOBE-310 must therefore:
+the stored `content_hash` already is its runtime hash (the server test in
+`services/server/src/skills/package-hash.test.ts` proves the bytes are equal). Two kinds of stored
+bundle are different: one that holds `evals/` or `kobe.skill.yaml` at its root has a
+`content_hash` that is **not** its runtime hash (its sandboxes receive those files today), and one
+that today's path rules refuse (a root `provenance.json`, invisible or bidi characters, a
+file/folder clash, a case variant such as `Evals/`) has no runtime hash at all. KOBE-310 therefore:
 
-1. Recompute the runtime hash of every stored version from its zip (a one-off on upgrade), and
-   report how many differ.
-2. For each that differs, record the runtime hash beside the stored one (an alias of the same
-   version) and treat the two as one identity: blocking either blocks both, and `isBlocked`
-   matches both. The stored row and its bytes are never rewritten.
-3. Store new uploads, saves and promotions as runtime zips, so no new version gets a second
-   hash.
+1. **Stops making them.** The upload path applies `checkPackagePaths` (authored content: no
+   `provenance.json`) before anything is stored, and stores new uploads, saves and promotions as
+   runtime zips, so `content_hash = runtimeHash` for every new version.
+2. **Recomputes every stored hash once** (on upgrade, in the background), from the stored zip:
+   - valid under today's rules and equal: nothing to do;
+   - valid but different (`evals/`, `kobe.skill.yaml`): an **alias** from the stored hash to the
+     runtime hash;
+   - refused by today's rules: **legacy**. Its stored hash stays its only identity (no alias);
+     it keeps running exactly as before, but is never promotable or exportable until re-saved,
+     and the re-save goes through today's rules and gets a runtime hash. (A root
+     `provenance.json` is legacy, never hashed with `kobeProvenance`.)
+     Every checked hash is recorded with its outcome, so the recompute is **idempotent and
+     re-runnable**: a later run skips what is recorded and checks only what is new. It reports how
+     many hashes were aliased and how many are legacy. The stored rows and bytes are never
+     rewritten.
+3. **Treats an alias group as one identity.** The alias map is site-wide, and many stored hashes
+   can share one runtime hash (the same payload uploaded with different `evals/`, in one team or
+   several). A hash's group is its runtime hash plus every stored hash aliased to it (a legacy
+   hash is a group of one). The blocklist works on groups: a hash is blocked when any member of
+   its group is listed, adding a hash whose group is already blocked is a no-op, and removing one
+   unblocks the whole group (every listed member is removed).
 
 ### Canonical zip
 
 The bytes the server's repack has always written (fflate `zipSync`, stored), now specified so any
 tool can reproduce them:
 
-- Entries in order: names that are JavaScript array indices (`0`, `9`, `10`, `4294967294`; not
-  `01`, `-1` or `4294967295`; only root names without a dot or slash can be one) first, in numeric
-  order; then all other names compared as **UTF-16 code units: NOT code points and NOT UTF-8
-  bytes**. They differ for U+E000..U+FFFF against characters above U+FFFF: `😀.txt` (U+1F600, first
-  unit 0xD83D) sorts before `～.txt` (U+FF5E), although its code point and its bytes are larger.
-  Go's `sort.Strings`, Python's `sorted` and `git ls-tree` order by bytes or code points, so an
-  implementation in those languages must compare UTF-16 units explicitly; the last golden vector
-  fails otherwise. (Both rules are what the KOBE-78 repack wrote, kept so existing hashes stay
-  valid: fflate takes an object, whose index keys enumerate first, and JavaScript sorts by UTF-16.)
+- Entries in order: first the **numeric names**, then all others.
+  - A name is numeric when it matches `^(0|[1-9][0-9]*)$` (ASCII digits, no leading zero) and its
+    value is at most 4294967294 (2³²−2). So `0`, `9`, `10` and `4294967294` are numeric; `01`,
+    `-1`, `1.5` and `4294967295` are not. Only root names can be numeric (a `/` is not a digit).
+    Numeric names are ordered by value.
+  - All other names are ordered lexicographically over the full path, comparing **UTF-16 code
+    units: NOT code points and NOT UTF-8 bytes**; a proper prefix sorts first. The two differ for
+    U+E000..U+FFFF against characters above U+FFFF: `😀.txt` (U+1F600, first unit 0xD83D) sorts
+    before `～.txt` (U+FF5E), although its code point and its bytes are larger. Go's
+    `sort.Strings`, Python's `sorted` and `git ls-tree` order by bytes or code points, so an
+    implementation in those languages must compare UTF-16 units explicitly; the last golden
+    vector fails otherwise.
+  - Both rules are what the KOBE-78 repack wrote, kept so existing hashes stay valid: fflate
+    takes an object, whose array-index keys (exactly the numeric names) enumerate first, and
+    JavaScript sorts strings by UTF-16 code units.
 - Each entry: local file header (version needed 20, method 0 stored, DOS time 0x6000 = 12:00:00,
   date 0x5021 = 2020-01-01, CRC-32, size twice, no extra field), the UTF-8 name, the bytes.
   General-purpose flags 0x0800 when the name has a non-ASCII character, else 0.
