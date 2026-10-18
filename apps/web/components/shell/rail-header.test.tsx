@@ -429,6 +429,13 @@ describe("one look for the rail's icon actions", () => {
     }
   });
 
+  it("icon-action links keep the text colour over the chat's unlayered link blue (CSS contract)", () => {
+    // `.app a { color: var(--admin-accent) }` is unlayered and beats utilities; the rail's own
+    // rule is more specific (KOBE-421: the first fix kept the blue on gate1).
+    expect(RAIL_CSS).toMatch(/\.rail a\[data-slot\] \{\s*color: var\(--foreground\);/);
+    expect(RAIL_CSS).toMatch(/\.rail a\[data-slot\]:hover \{\s*color: var\(--accent-foreground\);/);
+  });
+
   it("a pressed panel toggle shows the accent", async () => {
     openApp(fake);
     await composer();
