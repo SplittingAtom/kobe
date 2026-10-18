@@ -7,7 +7,14 @@ import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import { PostgresSkillStore, type SkillStore } from "../skills/skill-store.js";
 import { changelogSchema, semverSchema } from "../skills/semver.js";
-import { DRAFT_LIMITS, DRAFT_WRITE_RATE, pathFromUrl } from "../skills/drafts/files.js";
+import {
+  DRAFT_LIMITS,
+  DRAFT_PREVIEW_RATE,
+  DRAFT_WRITE_RATE,
+  pathFromUrl,
+} from "../skills/drafts/files.js";
+import { previewDraftScan, suggestDraftBump } from "../skills/drafts/preview.js";
+import { SCAN_RETRY_AFTER_SECONDS } from "../skills/scan-pool.js";
 import type { DraftFileInfo, DraftRecord } from "../skills/drafts/records.js";
 import { saveDraftVersion } from "../skills/drafts/save.js";
 import {
@@ -40,6 +47,7 @@ const idSchema = z.uuid();
 const NAME = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 const createSchema = z.strictObject({ name: z.string().regex(NAME) });
 const patchSchema = z.strictObject({ shared: z.boolean() });
+const destinationSchema = z.enum(["team", "personal"]);
 const saveSchema = z.strictObject({
   destination: z.enum(["team", "personal"]),
   semver: semverSchema,
@@ -94,7 +102,9 @@ function filePath(c: Ctx, id: string): string | null {
  * `GET /:id` and `GET /:id/files/<path>` read; `PUT` and `DELETE /:id/files/<path>` and
  * `PATCH /:id` (`shared`) change it under `If-Match: <rev>` (missing: 428; stale: 409 with who
  * changed it); `DELETE /:id` removes it (author only); `POST /:id/versions` saves it as a version
- * (destination team or personal, semver, changelog). A draft the caller may not see is a 404.
+ * (destination team or personal, semver, changelog). `GET /:id/scan` is the live scan preview
+ * and `GET /:id/bump?destination=` the suggested semver bump (KOBE-321). A draft the caller may
+ * not see is a 404.
  */
 export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
@@ -271,6 +281,47 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
 
   app.put("/:id/files/*", (c) => fileChange(c, "put"));
   app.delete("/:id/files/*", (c) => fileChange(c, "delete"));
+
+  const previewAllowed = (c: Ctx) =>
+    hitRateLimit(db, `skill-draft-preview:${c.get("user").id}`, DRAFT_PREVIEW_RATE);
+
+  // The live scan preview (SK12): the verdict tier and findings of the draft as stored now.
+  app.get("/:id/scan", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return error(c, 404, "not_found", "No such draft.");
+    if (!(await previewAllowed(c)))
+      return error(c, 429, "rate_limited", "Too many scans. Wait a few minutes and try again.");
+    const result = await previewDraftScan(ctxOf(c), id.data);
+    if (!result.ok) {
+      if (result.error === "not_found") return error(c, 404, "not_found", "No such draft.");
+      c.header("Retry-After", String(SCAN_RETRY_AFTER_SECONDS));
+      return error(c, 429, "scan_busy", "The scan preview is busy. It runs again shortly.");
+    }
+    c.header("ETag", `"${result.rev}"`);
+    c.header("cache-control", "private, no-store");
+    const { verdict, findings, scripts, skipped, ruleSetVersion } = result.scan;
+    return c.json({ rev: result.rev, verdict, findings, scripts, skipped, ruleSetVersion });
+  });
+
+  // The bump Save version suggests (SK14) against the destination's latest version.
+  app.get("/:id/bump", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return error(c, 404, "not_found", "No such draft.");
+    const destination = destinationSchema.safeParse(c.req.query("destination"));
+    if (!destination.success)
+      return error(c, 400, "invalid_request", "Give destination=team or destination=personal.");
+    const store = skillStore();
+    if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    if (!(await previewAllowed(c)))
+      return error(c, 429, "rate_limited", "Too many requests. Wait a few minutes and try again.");
+    const result = await suggestDraftBump(ctxOf(c), store, id.data, destination.data);
+    if (!result.ok)
+      return result.error === "not_found"
+        ? error(c, 404, "not_found", "No such draft.")
+        : error(c, 503, "skills_unavailable", "The latest version can't be read right now.");
+    const { rev, latest, kind, suggested, reasons } = result;
+    return c.json({ rev, latest, kind, suggested, reasons });
+  });
 
   app.post("/:id/versions", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));

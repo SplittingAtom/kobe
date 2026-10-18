@@ -20,6 +20,9 @@ export const DRAFT_LIMITS = {
 /** File writes per user across drafts (autosave included); over it: 429. */
 export const DRAFT_WRITE_RATE = { windowMs: 10 * 60_000, max: 1200 } as const;
 
+/** Scan previews and bump suggestions per user (KOBE-321): one a second on average; over it: 429. */
+export const DRAFT_PREVIEW_RATE = { windowMs: 10 * 60_000, max: 600 } as const;
+
 export const SKILL_MD_PATH = "SKILL.md";
 
 const PROBLEM_TEXT: Partial<Record<PackageProblemCode, string>> = {

@@ -202,3 +202,32 @@ export function setScanPool(pool: ScanPool | undefined): ScanPool | undefined {
   shared = pool;
   return previous;
 }
+
+/**
+ * Workbench scan previews (KOBE-321, SK12): their own pool, so live previews never queue behind
+ * or ahead of uploads, saves and rescans. One worker with a smaller heap (a draft holds at most
+ * 5 MiB), few waiting, one preview per user at a time, a shorter deadline: a preview that can't
+ * finish is Block `scan-incomplete`, and the save scans again in the main pool. With the main
+ * pool's two workers the pod's worker heaps stay well under its 1 GiB limit.
+ */
+export const PREVIEW_SCAN_POOL = {
+  concurrency: 1,
+  maxQueued: 2,
+  perOwner: 1,
+  timeoutMs: 10_000,
+  resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 16 },
+} as const;
+
+let preview: ScanPool | undefined;
+/** The process-wide preview pool. */
+export function previewScanPool(): ScanPool {
+  preview ??= createScanPool(PREVIEW_SCAN_POOL);
+  return preview;
+}
+
+/** Replaces the preview pool (tests); returns the previous one. */
+export function setPreviewScanPool(pool: ScanPool | undefined): ScanPool | undefined {
+  const previous = preview;
+  preview = pool;
+  return previous;
+}
