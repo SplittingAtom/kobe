@@ -1,5 +1,38 @@
 # KOBE-320: B1: Workbench drafts: storage and API
 
+## Handoff (for the agent doing KOBE-321 onward)
+
+- **Branch:** `group-skills-b` in `../Kobe-skB`, from main 5d60abd7; KOBE-320 approved, committed,
+  nothing pushed (one PR for Phase B at the end; never push, don't touch Hadron). Briefs are
+  `BRIEF-<N>.md` (untracked; never commit them). Ledgers: `docs/ledger/KOBE-<N>.md`.
+- **Migrations so far:** 0141 `skill_drafts` (generated), 0142 `skill_drafts_rls` (custom: RLS,
+  break-glass, size/co-edit/provenance triggers, hold history). Both were edited in place while
+  unreleased, each edit alone in its own commit. **G5 (PR #314) lands 0141/0142 on main first:**
+  at merge run `pnpm --filter @kobe/db db:rebase` (expected; it renumbers ours after G5's, the
+  custom one keeps its SQL), then fix text naming migrations by number (schema comments, ledgers).
+  Keep generated and custom SQL in separate migrations; new team tables need probe fixtures
+  (`testing/probe-fixtures/agents.ts`), `tenancy/agents.ts`, and if readable under break-glass,
+  `break-glass/tables.ts` + `catalog.db.test.ts` quals + the count in server
+  `threads-plans.db.test.ts`; key-like columns (`*_ref`, `*_key`) need `blob-refs.test.ts`.
+- **API to build on:** `/v1/skills/drafts` (`routes/skill-drafts.ts`): every change needs
+  `If-Match: <rev>` (428 / 409 `stale_revision` with `changedBy`), Save version too; files are
+  `GET|PUT|DELETE /:id/files/<path>` (segment-encoded); list pages with `?cursor=` (`next`).
+  Draft JSON has `rev`, `shared`, `mine`, `coEdited`, `fromConversation`, `startedFrom`,
+  `parentRef`. `skills/publish.ts` is the shared scan+store path; `routes/skill-json.ts` the
+  skill/version JSON.
+- **Traps:** run DB suites one at a time (the shared dev Postgres times out under load; another
+  agent's `Kobe-g5` vitest may run too: rerun failures alone before believing them). Build deps
+  before typechecking the server (`turbo run build --filter=@kobe/server^...`). Audit events are
+  strict allowlists (`packages/db/src/audit/events.ts` + `docs/audit-log.md`; keep rows short or
+  prettier re-pads the whole table). Web: also run `pnpm --filter @kobe/web build`.
+- **For KOBE-322 (starts), the fork-parent contract:** set `parent_ref.kind` from the version
+  actually copied (`catalog` | `team` | `personal`, with `ownerUserId` for personal), never from the
+  request; Save version allows a personal save only for `catalog` or the author's own `personal`
+  parent (`parentIsTeamContent`, fail closed). `thread` starts must set `from_thread_id` to a
+  thread of the same team (no key; the check `skill_drafts_provenance` ties it to the start).
+  Known gap: downloading a team version and uploading it as a new draft bypasses the parent link;
+  the 312 scanner and the review still apply.
+
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
 - **Status:** in review (group branch `group-skills-b`, one PR for Phase B)
