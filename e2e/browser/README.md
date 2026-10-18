@@ -67,7 +67,8 @@ tokens: `npx playwright test rail-resize`.
 share_file approval for "this conversation", checks the next share runs without a card and its
 tool card says "Allowed by your rule (this conversation)", finds the rule on My area, Approvals and
 on the team Policy page, revokes it there and checks the next share asks again (denied). It
-revokes any share_file rule it left at the end. `KOBE_USER` must be a team admin, with the team's
+revokes the signed-in member's share_file rules at the start (any scope: one made by hand would
+skip the first card) and any it left at the end. `KOBE_USER` must be a team admin, with the team's
 remember limits allowing "this conversation"; a few short model turns:
 `npx playwright test remember-approvals`.
 

@@ -41,8 +41,8 @@ import { useShellBand } from "./shell-band";
  *
  * Its panels (KOBE-419): Threads, Files or both, from the toggles on the rail's top line, saved per
  * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop, and the phone's
- * drawer button, which reveals Threads) turns it on for this page only, like those paths'
- * expansions: the toggles then show both while the stored choice stays as it was.
+ * drawer button, which reveals Threads) turns it on and saves that exactly as its toggle would, so
+ * what the toggles show is always what the member has stored.
  */
 export type RailSection = "threads" | "files";
 
@@ -103,7 +103,7 @@ export interface RailApi {
   readonly panels: RailPanels;
   /** The member's toggle on the rail's top line: saved; the last panel on stays on. */
   setPanel(section: RailSection, on: boolean): void;
-  /** Turns a panel on for this page (not saved): a drop's notice must be seen. */
+  /** Turns a hidden panel on, saved like its toggle (a reveal, a drop's notice). */
   showPanel(section: RailSection): void;
 }
 
@@ -140,7 +140,7 @@ function knownPanels(stored: RailPanels | undefined): RailPanels | null {
 
 /**
  * The rail's panels (KOBE-419): the member's stored choice applied once loaded unless they already
- * changed it on this page; their toggles are saved, a reveal is not.
+ * changed it on this page; their toggles and the reveals that turn a hidden panel on are saved.
  */
 function useRailPanels(
   preferences: LayoutPreferences | null,
@@ -152,16 +152,16 @@ function useRailPanels(
     resolve: () => knownPanels(preferences?.railPanels),
     save: onSave && ((railPanels) => onSave({ railPanels })),
   });
-  const { commit, set, current } = stored;
+  const { commit, current } = stored;
   const setPanel = useCallback(
     (section: RailSection, on: boolean) => commit(withPanel(current(), section, on)),
     [commit, current],
   );
   const showPanel = useCallback(
     (section: RailSection) => {
-      if (!shows(current(), section)) set(withPanel(current(), section, true));
+      if (!shows(current(), section)) commit(withPanel(current(), section, true));
     },
-    [set, current],
+    [commit, current],
   );
   return { panels: stored.value, setPanel, showPanel };
 }

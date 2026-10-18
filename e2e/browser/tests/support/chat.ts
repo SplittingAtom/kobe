@@ -11,6 +11,9 @@ const THREAD_PARAM = "thread";
 /** The active team, recorded by the chat in local storage; the API wants it as a header. */
 const TEAM_KEY = "kobe.lastTeamId";
 const TEAM_HEADER = "x-kobe-team";
+/** How long clean-up waits for a busy thread (its run or title call) to settle before Trash. */
+const TRASH_SETTLE_MS = 60_000;
+const TRASH_RETRY_MS = 2_000;
 
 /**
  * One conversation in the chat, driven through roles, labels and `data-kobe-*` attributes. Every
@@ -153,26 +156,49 @@ export class Chat {
 
   /**
    * Moves every thread this test opened to Trash with the chat's own API call, made from the page
-   * so the browser sends the session cookie and the Origin the server's CSRF check wants.
+   * so the browser sends the session cookie and the Origin the server's CSRF check wants. A thread
+   * whose run (or its title call after the run) has not settled answers 409 `thread_busy`: that
+   * one is asked again a moment later, for up to `TRASH_SETTLE_MS`, so no thread is left behind
+   * for the next run's specs to find.
    */
   async trashAll(): Promise<void> {
     if (this.seen.length === 0) return;
     const failures = await this.page
       .evaluate(
-        async ({ ids, teamKey, teamHeader }) => {
+        async ({ ids, teamKey, teamHeader, settleMs, retryMs }) => {
           const team = window.localStorage.getItem(teamKey);
           const headers: Record<string, string> = team ? { [teamHeader]: team } : {};
           const failed: string[] = [];
+          const trash = async (id: string): Promise<string | null> => {
+            const deadline = Date.now() + settleMs;
+            for (;;) {
+              const res = await fetch(`/v1/threads/${encodeURIComponent(id)}`, {
+                method: "DELETE",
+                headers,
+              }).catch(() => null);
+              if (res?.ok) return null;
+              const code = res
+                ? ((await res.json().catch(() => null)) as { code?: string } | null)?.code
+                : undefined;
+              if (code !== "thread_busy" || Date.now() > deadline) {
+                return `${res?.status ?? "network error"}${code ? ` ${code}` : ""}`;
+              }
+              await new Promise((r) => setTimeout(r, retryMs));
+            }
+          };
           for (const id of ids) {
-            const res = await fetch(`/v1/threads/${encodeURIComponent(id)}`, {
-              method: "DELETE",
-              headers,
-            }).catch(() => null);
-            if (!res?.ok) failed.push(`${id}: ${res?.status ?? "network error"}`);
+            const failure = await trash(id);
+            if (failure !== null) failed.push(`${id}: ${failure}`);
           }
           return failed;
         },
-        { ids: this.seen, teamKey: TEAM_KEY, teamHeader: TEAM_HEADER },
+        {
+          ids: this.seen,
+          teamKey: TEAM_KEY,
+          teamHeader: TEAM_HEADER,
+          settleMs: TRASH_SETTLE_MS,
+          retryMs: TRASH_RETRY_MS,
+        },
       )
       .catch((e: unknown) => [`all: ${String(e)}`]);
     for (const failure of failures) console.warn(`could not move thread to Trash (${failure})`);

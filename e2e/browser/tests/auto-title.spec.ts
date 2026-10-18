@@ -39,10 +39,11 @@ test("a new thread gets its title after the first answer, in the rail and the he
     { id: threadId, teamKey: TEAM_KEY },
   );
   expect(saved).toBe(title);
-  const row = page.getByRole("list", { name: "Your threads" }).getByRole("button", {
-    name: title,
-    exact: true,
-  });
+  // This thread's own row, by its id: an older thread may carry the same title.
+  const row = page
+    .getByRole("list", { name: "Your threads" })
+    .locator(`li[data-kobe-thread="${threadId}"]`)
+    .getByRole("button", { name: title, exact: true });
   await expect(row).toBeVisible();
 
   // The row's hover card: the first message and the counts, read when it opens.
