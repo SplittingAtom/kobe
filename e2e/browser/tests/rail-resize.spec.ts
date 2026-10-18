@@ -114,7 +114,8 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   const files = page.getByRole("region", { name: "Files" });
   const openFiles = files.getByRole("button", { name: "Open files" });
   if (await openFiles.isVisible()) await openFiles.click();
-  await expect(files.getByRole("tree", { name: "Files in your workspace" })).toBeVisible();
+  // Attached, not visible: an empty workspace's tree has no rows, so no height.
+  await expect(files.getByRole("tree", { name: "Files in your workspace" })).toBeAttached();
   for (const theme of ["light", "dark"] as const) {
     await context.addCookies([{ name: THEME_COOKIE, value: theme, url: baseURL ?? "" }]);
     await page.reload();
