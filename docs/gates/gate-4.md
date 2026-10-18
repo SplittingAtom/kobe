@@ -39,7 +39,10 @@ Run on the real cluster this way, `e2e/gate4.sh` runs Gate 1 (steps `probe chat-
 interrupt`, no cold-start trials), Gate 2 (`mcp budget replicas egress break-glass`), Gate 3 (all
 five) and the stories script, each once, into `KOBE_GATE4_OUT` (or a temporary directory), then the
 verdict. `KOBE_GATE4_LOGS=<dir>` reuses runs already made (a log present there is not run again).
-Each gate takes its own `KOBE_GATE<N>_*` variables from the `KOBE_GATE4_*` ones.
+Each gate takes its own `KOBE_GATE<N>_*` variables from the `KOBE_GATE4_*` ones. U16's `restore`
+part is `e2e/gate4-restore.sh`: on k3d `e2e/gate4.sh` runs it last (it deletes the cluster); on a
+real cluster it is a run of its own (see [Backup → fresh site → restore](#backup--fresh-site--restore-u16-kobe-233)),
+whose log goes into `KOBE_GATE4_LOGS` as `restore.log`.
 
 | Variable                                           | Default                | Meaning                                                                                                                                                                                      |
 | -------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -176,6 +179,125 @@ real server's tools cannot be changed on demand.
   same WebAuthn JSON a browser does, against Kobe's real endpoints.
 - U6's real hour: the TTL is read from the row and the expiry moved to now.
 - U14's real Monday: the next run is pulled forward, as in the KOBE-181 e2e.
+
+## Backup → fresh site → restore (U16, KOBE-233)
+
+`e2e/gate4-restore.sh` proves KOBE-4 ac-3 (_backup → fresh cluster → restore round-trips_) and
+U16's "kobe backup/restore round-trips Postgres + S3". Its sections `==> restore: …` are U16's
+`restore` part; its `==> install: …` sections time the clean install (below). CI runs it as the
+shard `restore`; `e2e/gate4.sh` runs it last on k3d (it deletes the cluster).
+
+```bash
+# CI (shard `restore`), or k3d by hand: needs the images (KOBE_IMAGE_ARCHIVES=<dir of *.tar>, or a
+# Docker engine to build them), the CLI built (pnpm --filter '@kobe/cli...' run build) and the
+# PostgreSQL 17.6+ client tools on PATH (or KOBE_PG_BIN_DIR)
+KOBE_IMAGE_TAG=<tag> e2e/gate4-restore.sh
+
+# a real cluster, into fresh namespaces (not run yet: needs the go-ahead and a quiet cluster)
+KUBECTL='sudo k3s kubectl' HELM='sudo -E helm --kubeconfig /etc/rancher/k3s/k3s.yaml' \
+KOBE_GATE4_RESTORE_TARGET=namespace KOBE_GATE4_RESTORE_CONTEXT=<context name> \
+KOBE_GATE4_RESTORE_NS=kobe-restore KOBE_GATE4_RESTORE_DEPS_NS=<namespace of deploy/pg> \
+KOBE_GATE4_RESTORE_DB_SECRET=<namespace>/<Secret with app-url and migrate-url on that Postgres> \
+KOBE_GATE4_RESTORE_VALUES=<a values file: images, S3 bucket and Secret, SMTP, ingress TLS> \
+KOBE_GATE4_RESTORE_COPY_SECRETS='<namespace>/<each Secret the values file names>' \
+KOBE_GATE4_RESTORE_HOST=<a host name of its own> KOBE_IMAGE_TAG=<the images' tag> \
+KOBE_S3_ENDPOINT=<S3 URL> KOBE_S3_BUCKET=<bucket> KOBE_S3_ACCESS_KEY_ID=<id> KOBE_S3_SECRET_ACCESS_KEY=<key> \
+  e2e/gate4-restore.sh
+```
+
+| Variable                               | Default                           | Meaning                                                                                                    |
+| -------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `KOBE_GATE4_RESTORE_TARGET`            | `k3d` on a k3d context            | `k3d`: delete this cluster and restore into a new one. `namespace`: source `<ns>-src`, target `<ns>`.      |
+| `KOBE_GATE4_RESTORE_NS` / `_RELEASE`   | `kobe-dev` / `kobe`               | The target namespace (`namespace`: required, new) and the release name.                                    |
+| `KOBE_GATE4_RESTORE_CHART` / `_VALUES` | `charts/kobe` / `dev/values.yaml` | The chart and the values both sites install with.                                                          |
+| `KOBE_GATE4_RESTORE_DEPS_NS`           | `kobe-deps`                       | Where `deploy/pg` runs (superuser `postgres`): row counts, the backup role, (namespace) the new databases. |
+| `KOBE_GATE4_RESTORE_DB_SECRET`         | none                              | `namespace` only: app and owner URLs on that Postgres; each site gets a new database with those roles.     |
+| `KOBE_GATE4_RESTORE_COPY_SECRETS`      | none                              | `namespace` only: Secrets (`ns/name`) copied into both namespaces.                                         |
+| `KOBE_GATE4_RESTORE_HOST`              | the values file's                 | `namespace` only: the ingress host of both sites (one after the other; same host, as passkeys need).       |
+| `KOBE_GATE4_RESTORE_CLI`               | `node packages/cli/dist/cli.js`   | The operator CLI, run on this machine through `kubectl port-forward`.                                      |
+| `KOBE_GATE4_INSTALL_BUDGET`            | `1200`                            | Seconds allowed from `helm install` to the first assistant token (spec §8: 20 minutes).                    |
+
+**What it does.** (1) Installs a source site from clean state (k3d: `dev/postgres.yaml`,
+`dev/s3.yaml`, `dev/mailpit.yaml` as the external Postgres, S3 and SMTP; the chart with
+`dev/values.yaml`), runs first-run setup with the setup token, adds a model provider (the e2e fake
+upstream) and the `fast` catalog entry, creates team `gate4-r` with an admin and a member, and times
+the member's first chat. (2) Gives it: a thread with an upload, an HTML artifact, a shared file and
+a workspace file synced to S3; a user memory doc; a project with a file; a team skill; an API-key
+connector grant (the connector row is inserted as Gate 2 does; the grant goes through `PUT
+/v1/connector-grants/:id`, sealed by the product). It records what the API returns for each and
+the audit chain head (`GET /v1/site/audit/integrity`). (3) Saves the auth and envelope Secrets,
+stops the server and scheduler, counts every team table's rows (superuser, `team_id NOT NULL` with
+RLS, minus the backup's documented exclusions), creates a `BYPASSRLS` + `pg_read_all_data` backup
+role and runs `kobe backup` with a fresh backup key. (4) Deletes the site: on k3d the whole
+cluster, after copying the bucket's objects out (`e2e/lib/s3-mirror.mjs`; the k3d S3 fixture lives
+in the cluster, and a real site's bucket survives a lost cluster); in `namespace` mode the release,
+its namespace and its team namespace. (5) Creates a fresh site (k3d: `scripts/dev-cluster.sh`,
+images, the same fixtures; the objects copied back, keys, sizes and ETags checked) with the Secrets
+restored under new names (`auth.existingSecret`, `envelope.keySecret`, as docs/backup-restore.md
+says), stops its writers and runs `kobe restore --expect-audit-head <source head>` as the owner
+role. (6) Checks the restored site.
+
+**The documented order, then an empty database.** The restore is first tried exactly as
+docs/backup-restore.md orders it: install, stop the writers, `kobe restore`. Read in the code, that
+cannot work today: the server seeds the gallery agents (`site_agents`, with their audit events)
+when it starts (`services/server/src/gallery/seed.ts`), and the restore refuses a target with rows
+outside `packages/cli/src/seeded.ts` ("the target already has data"). That check is an expected
+failure (`XFAIL`, KOBE-233 failure 1; `XPASS` once fixed). The run then empties the target's
+database and migrates it with the chart's own migration Job (`helm template --show-only
+templates/migrate-job.yaml`, the server never started) and restores into that, so every later
+check still runs against a real restore.
+
+**The checks** (`==> restore:` sections): the backup has its four files and a fingerprint; the
+restore names the same fingerprint, finds every S3 object present and unchanged, and verifies the
+audit chain containing the source's head; every team table's row count equals the source's and the
+signed manifest's; `platform.restore.completed` is logged once; users sign in again with their
+passwords; the thread has every entry; the artifact, the shared file and the upload are the same
+bytes; the memory doc, the project's file list and the skill bundle (bytes hashed against the
+recorded content hash) are the same; the connector grant opens with the restored envelope key to
+the stored API key, and not with a random key; the audit chain verifies through the API and runs
+past the source's head; every object key in a `BLOB_REF_COLUMNS` column (and the skill bundles'
+`storage_key`) resolves in the bucket; the thread's next turn completes in a new sandbox that wakes
+for it, the model gets the earlier turns (`history?`), Pi's session file is in the new sandbox and
+the server logged rebuilding it from Postgres; the workspace file is back in the new sandbox with
+the same content; the project file is mounted there.
+
+**Why `namespace` mode refuses while other Kobe servers run.** Every Kobe server converges every
+namespace labelled `kobe.splittingatom.io/team-namespace=true` in the cluster
+(`services/server/src/sandbox/team-reconcile.ts`), with its own release namespace in the sandbox
+NetworkPolicies and RoleBindings. A second site in the same cluster therefore rewrites the first
+site's team namespaces (its sandboxes lose their path to their own server until that server's next
+reconcile). On the real cluster, run it only with `kobe-gate1`'s server scaled to 0 (and scale it
+back afterwards: its reconcile at start and every `server.teamReconcileSeconds` puts its policies
+back). The two sites here never run at once: the source is deleted before the target is
+installed. The deps namespace's Postgres NetworkPolicy must admit both new namespaces.
+
+**What this does not prove.** A restore onto a site of another version (not supported,
+docs/backup-restore.md "Limits"); a backup taken while writers run (the CLI's snapshot makes that
+consistent, but this run stops the writers so the counts can be compared exactly); objects deleted
+or overwritten in the bucket after the backup (bucket versioning's job, D31); the 24-hour IP-erasure
+pause and the legal-hold warning the restore prints. On k3d the "same bucket" is a copy made with
+the S3 API (single-part objects, so ETags compare); on a real cluster it is the same bucket.
+
+## Clean install timing (KOBE-233 ac-3)
+
+The spec's install metric (§8) is _a clean single-node k3s with gVisor → first chat in ≤ 20
+minutes following the docs_. The restore shard measures the chart path: from the start of
+`helm install` (dependencies already up) to the first `text.delta` of the first member's first
+chat, through first-run setup, a provider and catalog entry, a team and its default model, all
+through the API as docs/install.md describes them; and, separately, the cluster
+(`scripts/dev-cluster.sh`: k3s, gVisor, agent-sandbox). The manual path on the real cluster is
+timed once by hand.
+
+| Run                                 | Cluster with gVisor + agent-sandbox | `helm install` → first assistant token | Total     |
+| ----------------------------------- | ----------------------------------- | -------------------------------------- | --------- |
+| CI, k3d (shard `restore`)           | _pending the group CI run_          | _pending_                              | _pending_ |
+| Real cluster, by hand (manual docs) | _pending_                           | _pending_                              | _pending_ |
+
+**Doc fixes from walking docs/install.md to a first chat.** The install section ended at
+`helm install`; the steps to the first chat (open `/setup` with the setup token from
+`<release>-auth`, add a provider and a catalog model, create a team, enable a team default model,
+start a chat) were only in the chart's NOTES and scattered over the Models section. Added
+"First run: to the first chat" to docs/install.md.
 
 ## Verdict
 

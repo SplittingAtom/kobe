@@ -56,7 +56,7 @@ Docs: `docs/gates/gate-4.md`.
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1 (U1–U16, one selectable check per story, passes in CI): pending the group CI run (`stories`
-  job). U16's restore part comes with KOBE-233 (same branch).
+  job). U16's restore part is KOBE-233's `e2e/gate4-restore.sh` (shard `restore`, same branch).
 - ac-2 (real cluster): command in docs/gates/gate-4.md "Running it"; not run (needs the go-ahead).
 - ac-3 (each story names its criteria; nothing weakened): the verdict prints each story's spec text
   and its parts; product failures stay as checks (XFAIL with the filed ticket).
