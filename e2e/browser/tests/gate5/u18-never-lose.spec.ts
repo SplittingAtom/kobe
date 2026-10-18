@@ -77,12 +77,13 @@ test("U18: memory and the member's settings open beside the thread (CE4)", async
   });
   await expect(chat.composer).toBeInViewport();
   expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
-  // Back returns to My memory, then to the thread alone.
-  await page.goBack();
-  await expect(artifact.getByRole("region", { name: "My memory" })).toBeVisible();
+  await expect(artifact.getByRole("heading", { name: "Remembered approvals" })).toBeVisible();
+  // One page replaces the other: Back returns to the thread alone, and Forward reopens it.
   await page.goBack();
   await expect(page.locator("[data-kobe-area]")).toHaveCount(0);
   await expect(chat.composer).toBeVisible();
+  await page.goForward();
+  await expect(artifact.getByRole("region", { name: "My approvals" })).toBeVisible();
 });
 
 test("U18: while scrolled up, the Jump pill counts the messages that arrive", async ({

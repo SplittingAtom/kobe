@@ -73,8 +73,8 @@ What the `gate5/` specs add, per criterion:
   and the artifact width set in one browser are stored (`/v1/me/preferences`) and applied in a
   second browser that signs in on its own.
 - **U18** an artifact and a workspace file open as tabs beside the thread with the composer and the
-  answer on screen; My memory and My approvals beside the thread (`?area=`), Back returning to
-  each in turn;
+  answer on screen; My memory and My approvals beside the thread (`?area=`; one replaces the
+  other, Back returns to the thread alone);
   scrolled up, two messages sent from another tab make the pill say "2 new messages" while the
   view holds; the composer in view and no page scroll at 1920, 1280, 960, 800 and 390 px.
 - **U19** one run of the panel through idle (zero height), active, queued (paused queue after

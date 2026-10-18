@@ -22,23 +22,33 @@ sheet on narrow screens. Flip gate5's U18 `test.fail()`.
   on close). A column the member hid shows again for it. Under 820 px it is the column's sheet (from
   768 px over the conversation, below 768 px full screen and modal) with Back to the conversation;
   Close (or Escape) beside the thread, focus back to the conversation.
-- **Address:** `?area=memory|approvals|schedules|connectors` beside `?thread=`, a new history entry
-  per open and close, followed through `popstate`: a link or refresh reopens it, Back/Forward
-  step through it, an unknown value opens nothing. The `/me/...` routes stay: a modifier click
+- **Address:** `?area=memory|approvals|schedules|connectors` beside `?thread=`, followed through
+  `popstate`: a link or refresh reopens it, an unknown value opens nothing. Opening from the
+  thread is one history entry (marked in its `history.state` with the address it came from,
+  beside Next's own state); another page from an open one replaces it. Close (and Escape, and
+  the sheet's Back) goes `history.back()` when the entry came from the thread in this tab, so the
+  browser's Back never reopens it (review S1: a trap on phones); after a deep link it replaces
+  the entry instead. The `/me/...` routes stay: a modifier click
   (new tab) or a link from a console still opens the full page.
 - **Entry points:** the bar's links (`IconAction`), the profile menu (closes on the click), the
   palette and the `/` menu (`useNavigate`), all through `openBeside()`; only on the chat page.
 - **The pages themselves are the My area's**, embedded by `components/me/area-beside.tsx` (team
-  access from `/v1/me` + `/v1/team`, console primitives, the console sheet scoped by
-  `data-kobe-console`; `app/console-css-guard.test.ts` allows that import). Their page title
+  access from `/v1/me` + `/v1/team`, back to loading on a team switch; console primitives; the
+  console sheet scoped by `data-kobe-console`, which only the page's wrapper carries, not the
+  frame). Styling is kept apart both ways (review S2): the chat's preflight slice
+  (`app/chat-global.css`) leaves any `[data-kobe-console]` subtree out, and
+  `app/console-css-guard.test.ts` checks that every chat base rule does. Console confirm dialogs
+  and row menus mount in a console root at the document's top (`ensureConsolePortal`), outside
+  the column's and the sheet's stacking contexts, so they cover the bar. Their page title
   (`PageHeader` h1) is left out under the panel's h2 (`EmbeddedPage`). Memory beside the thread
   keeps its project choice in the panel, not in `?project=` (which the chat reads as the draft's
   project).
 
 ## Open questions (for Chris or the coordinator)
 
-- Light, dark and phone screenshots (ac-3) are not taken here (no browser run against a site);
-  the frame uses the theme tokens of the artifact column, the pages their console primitives.
+- Light, dark and phone screenshots (ac-3): `e2e/browser/tests/my-area-beside.spec.ts` attaches
+  them (1280, 800, 390; both themes) when run against gate1 after the deploy (the coordinator
+  runs it).
 - The schedules page's "agents" link and the agents page's connector link still go to full pages
   (they are inside the pages, unchanged).
 
