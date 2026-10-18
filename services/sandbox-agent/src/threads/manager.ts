@@ -128,12 +128,19 @@ export class ThreadManager {
   startRun(frame: RunStartFrame): Promise<CommandOutcome> {
     // Known from the moment it arrives, so a Stop that overtakes it (Pi still starting) is kept.
     const existing = this.#starting.get(frame.run_id);
-    const pending = existing ?? { threadId: frame.thread_id, stopped: false };
+    let settle: () => void = () => undefined;
+    const pending: PendingStart = existing ?? {
+      threadId: frame.thread_id,
+      stopped: false,
+      done: new Promise<void>((resolve) => (settle = resolve)),
+    };
     if (existing === undefined) this.#starting.set(frame.run_id, pending);
     return this.#claimed(frame.thread_id, (thread) =>
       this.#startRun(thread, frame, pending),
     ).finally(() => {
-      if (existing === undefined) this.#starting.delete(frame.run_id);
+      if (existing !== undefined) return;
+      this.#starting.delete(frame.run_id);
+      settle();
     });
   }
 
@@ -256,6 +263,9 @@ export class ThreadManager {
   }
 
   async steerRun(frame: Frame<"run.steer">): Promise<CommandOutcome> {
+    // Its run.start is still starting Pi: the steer goes to Pi once the prompt is there.
+    const pending = this.#starting.get(frame.run_id);
+    if (pending?.threadId === frame.thread_id && !pending.stopped) await pending.done;
     const thread = this.#threads.get(frame.thread_id);
     if (thread?.runId !== frame.run_id) return fail("unknown_run", "run is not active here");
     // A compaction has no turn to steer (Pi would queue the message for after it).
@@ -807,6 +817,8 @@ export class ThreadManager {
 interface PendingStart {
   readonly threadId: string;
   stopped: boolean;
+  /** Settles when the start has answered (its prompt is in Pi, or it failed). */
+  readonly done: Promise<void>;
 }
 
 /** A run.start whose run was stopped before its prompt went to Pi (the server ended it already). */

@@ -95,6 +95,18 @@ describe("Stop before Pi has the run's prompt", () => {
     expect(prompts.map((c) => c.message)).toEqual(["say:second"]);
   }, 30_000);
 
+  it("a Steer that arrives while the run's Pi is still starting reaches Pi after the prompt", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/kobe-policy-slow/index.js" },
+    });
+    const started = h.server.command(runStart("hang"), 30_000);
+    const steer = { type: "run.steer", run_id: RUN, thread_id: THREAD, message: "steer early" };
+    expect(await h.server.command(steer, 30_000)).toMatchObject({ ok: true });
+    expect(await started).toMatchObject({ ok: true });
+    const types = (await h.commandsLog()).map((c) => c.type).filter(Boolean);
+    expect(types.indexOf("steer")).toBeGreaterThan(types.indexOf("prompt"));
+  }, 30_000);
+
   it("the next run starts while the stopped one's preparation is still pending, and keeps the thread", async () => {
     const pull = slowFirstPull();
     h = await startHarness({ workspace: pull.hooks });
