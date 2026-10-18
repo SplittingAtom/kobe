@@ -24,7 +24,7 @@ export type Verdict = "pass" | Severity;
  * The rule set the findings come from. Bump it whenever a rule, its severity or a limit changes:
  * stored scans from another rule set are rescanned (SK32).
  */
-export const RULE_SET_VERSION = "2026.10.18.2";
+export const RULE_SET_VERSION = "2026.10.18.3";
 
 export interface ScanFile {
   readonly path: string;
@@ -57,8 +57,11 @@ export interface ScanResult {
 }
 
 export const SCAN_LIMITS = {
-  /** A text file larger than this is not read: Block `oversized-file`. */
-  maxFileBytes: 1024 * 1024,
+  /**
+   * A text file larger than this is not read: Block `oversized-file`. Equal to the upload's
+   * per-file limit (KOBE-78), so no file an upload accepts is Block for its size alone.
+   */
+  maxFileBytes: 10 * 1024 * 1024,
   /** Bundle text bytes read in total; later files are not read: Block `scan-incomplete`. */
   maxTotalBytes: 20 * 1024 * 1024,
   /** A script line longer than this is itself flagged as obfuscation. */

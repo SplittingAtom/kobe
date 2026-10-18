@@ -109,7 +109,7 @@ export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
     total += file.bytes.length;
     texts.set(file.path, decode(file.bytes));
   }
-  const refs = runReferences(texts.values());
+  const refs = runReferences(texts.values(), [...texts.keys()]);
   const scripts = files
     .filter((f) => texts.has(f.path) && isScript(f, refs))
     .map((f) => f.path)

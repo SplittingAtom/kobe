@@ -174,3 +174,14 @@ rule, file, line}]}` (locations only, no excerpts), optional `scorecard` (number
 `createdAt`. Instants are `toISOString()` UTC. No transcripts, prompts, answers or thread ids:
 eval detail never leaves the team. `provenanceMismatches` checks it against the package beside
 it; a scorecard from another package hash is stale.
+
+## Scan limits
+
+The scanner (`@kobe/skill-scanner`) reads every text file of the package, `evals/` and
+`kobe.skill.yaml` included, up to the upload's per-file limit (10 MiB): no file an upload accepts
+is refused or blocked for its size alone. A server test ties the two limits together. The scanner
+reads at most 20 MiB of text per package. A package with more text than that (the upload allows
+25 MiB uncompressed) gets one Block finding, `scan-incomplete`, so bulk never buys a Pass. A file
+over the per-file cap (which upload refuses anyway) is Block `oversized-file`. Long lines are read
+in overlapping windows. Block findings are never dropped by the 500-finding cap, and a cut adds
+`findings-truncated`.

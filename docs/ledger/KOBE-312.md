@@ -57,6 +57,12 @@
     `acknowledgedFindings` equal to it (409 `findings_changed`); `acknowledged` is gone from the
     body; `skill.reviewed` records `findingsSha256`.
 
+- **Re-review follow-ups (rule set `2026.10.18.3`):** R1: a bundle file named on a line that runs
+  something (interpreter, `< f`, `cat f |`, `-c "$(cat f)"`, `source`/`.` at command position,
+  `exec(open(f))`, `/skills/<name>/f`) is a script. R2: the text cap equals the upload's 10 MiB
+  per-file limit (server test ties them; `docs/skill-package.md` "Scan limits"); the 20 MiB text
+  budget stays, so a 20–25 MiB text package is Block `scan-incomplete`.
+
 ## Open questions (for Chris or the coordinator)
 
 - Rescans on a rule-set change (SK32) need the rule-set version stored per scan (a column):
