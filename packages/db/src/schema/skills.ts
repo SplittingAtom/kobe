@@ -22,7 +22,7 @@ import { teams } from "./teams.js";
 // scope because a team table's team_id is NOT NULL (D5):
 //   - team skills live in the team table `team_skills` (RLS on team_id);
 //   - personal skills (they follow the user into every team, D9) live in site-wide
-//     `site_skills`; the server confines them to their owner.
+//     `personal_skills`; the server confines them to their owner.
 // Each upload creates an immutable numbered version (`*_skill_versions`): the bundle is a zip in
 // object storage (`storage_key`) with its SHA-256 (`content_hash`, what the blocklist and
 // materialization use). A trigger refuses UPDATE and direct DELETE of versions. Scan results and
@@ -125,8 +125,8 @@ export const teamSkills = pgTable(
 );
 
 /** Site-wide (†): personal skills, owned by one user and usable in any of their teams (D9). */
-export const siteSkills = pgTable(
-  "site_skills",
+export const personalSkills = pgTable(
+  "personal_skills",
   {
     id: uuid().primaryKey().defaultRandom(),
     ownerUserId: uuid()
@@ -135,8 +135,8 @@ export const siteSkills = pgTable(
     ...skillColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
-    unique("site_skills_slug_unique").on(t.ownerUserId, t.slug),
-    ...skillChecks("site_skills", t),
+    unique("personal_skills_slug_unique").on(t.ownerUserId, t.slug),
+    ...skillChecks("personal_skills", t),
   ],
 );
 
@@ -163,8 +163,8 @@ export const teamSkillVersions = pgTable(
 );
 
 /** Site-wide (†): immutable versions of personal skills (app role: SELECT and INSERT only). */
-export const siteSkillVersions = pgTable(
-  "site_skill_versions",
+export const personalSkillVersions = pgTable(
+  "personal_skill_versions",
   {
     skillId: uuid().notNull(),
     ...versionColumns(),
@@ -172,10 +172,10 @@ export const siteSkillVersions = pgTable(
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.skillId, t.version] }),
     foreignKey({
-      name: "site_skill_versions_skill_fk",
+      name: "personal_skill_versions_skill_fk",
       columns: [t.skillId],
-      foreignColumns: [siteSkills.id],
+      foreignColumns: [personalSkills.id],
     }),
-    ...versionChecks("site_skill_versions", t),
+    ...versionChecks("personal_skill_versions", t),
   ],
 );

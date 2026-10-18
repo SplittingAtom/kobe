@@ -27,9 +27,10 @@ const RENAMED_TABLES = {
   install_tool_rules: "site_tool_rules",
   install_agents: "site_agents",
   install_agent_versions: "site_agent_versions",
-  install_skills: "site_skills",
-  install_skill_versions: "site_skill_versions",
-  install_skill_scans: "site_skill_scans",
+  // KOBE-307 renamed these again (site_skill* -> personal_skill*); the test migrates to the end.
+  install_skills: "personal_skills",
+  install_skill_versions: "personal_skill_versions",
+  install_skill_scans: "personal_skill_scans",
 } as const;
 
 /** The first statement of the rename migration: the release before it has the old names. */
@@ -291,7 +292,9 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
         ]),
       ).toEqual({ prompt: "Help." });
       expect(
-        await one(`SELECT storage_key FROM site_skill_versions WHERE skill_id = $1`, [ids.skill]),
+        await one(`SELECT storage_key FROM personal_skill_versions WHERE skill_id = $1`, [
+          ids.skill,
+        ]),
       ).toEqual({ storage_key: "skills/pdf/1.zip" });
       expect(await one(`SELECT site_agent_id FROM threads WHERE id = $1`, [ids.thread])).toEqual({
         site_agent_id: ids.personalAgent,

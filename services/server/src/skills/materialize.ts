@@ -3,9 +3,9 @@ import {
   and,
   eq,
   inArray,
-  siteSkills,
+  personalSkills,
   sql,
-  siteSkillVersions,
+  personalSkillVersions,
   teamSkillVersions,
   type KobeTx,
 } from "@kobe/db";
@@ -69,13 +69,13 @@ async function sizesByHash(
       ),
     );
   const personal = await tx
-    .select({ hash: siteSkillVersions.contentHash, size: siteSkillVersions.sizeBytes })
-    .from(siteSkillVersions)
-    .innerJoin(siteSkills, eq(siteSkills.id, siteSkillVersions.skillId))
+    .select({ hash: personalSkillVersions.contentHash, size: personalSkillVersions.sizeBytes })
+    .from(personalSkillVersions)
+    .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
     .where(
       and(
-        eq(siteSkills.ownerUserId, who.userId),
-        inArray(siteSkillVersions.contentHash, [...hashes]),
+        eq(personalSkills.ownerUserId, who.userId),
+        inArray(personalSkillVersions.contentHash, [...hashes]),
       ),
     );
   for (const row of [...team, ...personal]) sizes.set(row.hash, row.size);
@@ -130,10 +130,12 @@ export async function locateBundle(
     .limit(1);
   if (team) return { storageKey: team.key, size: team.size };
   const [own] = await tx
-    .select({ key: siteSkillVersions.storageKey, size: siteSkillVersions.sizeBytes })
-    .from(siteSkillVersions)
-    .innerJoin(siteSkills, eq(siteSkills.id, siteSkillVersions.skillId))
-    .where(and(eq(siteSkills.ownerUserId, who.userId), eq(siteSkillVersions.contentHash, hash)))
+    .select({ key: personalSkillVersions.storageKey, size: personalSkillVersions.sizeBytes })
+    .from(personalSkillVersions)
+    .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
+    .where(
+      and(eq(personalSkills.ownerUserId, who.userId), eq(personalSkillVersions.contentHash, hash)),
+    )
     .limit(1);
   return own ? { storageKey: own.key, size: own.size } : null;
 }

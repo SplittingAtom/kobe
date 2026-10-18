@@ -9,9 +9,9 @@ import {
   getTableColumns,
   inArray,
   sql,
-  siteSkillScans,
-  siteSkills,
-  siteSkillVersions,
+  personalSkillScans,
+  personalSkills,
+  personalSkillVersions,
   teamSkillReviews,
   teamSkillVersions,
   withTeam,
@@ -64,7 +64,7 @@ export async function recordPersonalScan(
   at: { skillId: string; version: number },
   scan: ScanResult,
 ): Promise<void> {
-  await tx.insert(siteSkillScans).values({ ...at, ...storedScan(scan) });
+  await tx.insert(personalSkillScans).values({ ...at, ...storedScan(scan) });
 }
 
 export interface ReviewRecord {
@@ -325,33 +325,33 @@ export async function personalSkillUsage(
 ): Promise<{ usable: { name: string; hash: string }[]; blocked: string[] }> {
   const rows = await tx
     .select({
-      skillId: siteSkills.id,
-      name: siteSkills.slug,
-      version: siteSkillVersions.version,
-      hash: siteSkillVersions.contentHash,
+      skillId: personalSkills.id,
+      name: personalSkills.slug,
+      version: personalSkillVersions.version,
+      hash: personalSkillVersions.contentHash,
       scan: {
-        flagged: siteSkillScans.flagged,
-        findings: siteSkillScans.findings,
-        scripts: siteSkillScans.scripts,
-        skipped: siteSkillScans.skipped,
+        flagged: personalSkillScans.flagged,
+        findings: personalSkillScans.findings,
+        scripts: personalSkillScans.scripts,
+        skipped: personalSkillScans.skipped,
       },
     })
-    .from(siteSkills)
+    .from(personalSkills)
     .innerJoin(
-      siteSkillVersions,
+      personalSkillVersions,
       and(
-        eq(siteSkillVersions.skillId, siteSkills.id),
-        eq(siteSkillVersions.version, siteSkills.latestVersion),
+        eq(personalSkillVersions.skillId, personalSkills.id),
+        eq(personalSkillVersions.version, personalSkills.latestVersion),
       ),
     )
     .leftJoin(
-      siteSkillScans,
+      personalSkillScans,
       and(
-        eq(siteSkillScans.skillId, siteSkillVersions.skillId),
-        eq(siteSkillScans.version, siteSkillVersions.version),
+        eq(personalSkillScans.skillId, personalSkillVersions.skillId),
+        eq(personalSkillScans.version, personalSkillVersions.version),
       ),
     )
-    .where(eq(siteSkills.ownerUserId, args.userId));
+    .where(eq(personalSkills.ownerUserId, args.userId));
   const needsApproval = rows.filter((r) => r.scan === null || r.scan.flagged);
   if (needsApproval.length === 0) {
     return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [] };
@@ -445,12 +445,12 @@ export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string
                   ),
                 )
             : await tx
-                .select({ key: siteSkillVersions.storageKey })
-                .from(siteSkillVersions)
+                .select({ key: personalSkillVersions.storageKey })
+                .from(personalSkillVersions)
                 .where(
                   and(
-                    eq(siteSkillVersions.skillId, r.skillId),
-                    eq(siteSkillVersions.version, r.version),
+                    eq(personalSkillVersions.skillId, r.skillId),
+                    eq(personalSkillVersions.version, r.version),
                   ),
                 );
         return { ...r, key: v?.key };

@@ -36,7 +36,7 @@ const asMd = (text: string) => new RawBody(text, "text/markdown");
 async function keyOf(contentHash: string): Promise<string> {
   const { rows } = await h.admin.query<{ storage_key: string }>(
     `SELECT storage_key FROM team_skill_versions WHERE content_hash = $1
-     UNION ALL SELECT storage_key FROM site_skill_versions WHERE content_hash = $1`,
+     UNION ALL SELECT storage_key FROM personal_skill_versions WHERE content_hash = $1`,
     [contentHash],
   );
   expect(rows.length).toBeGreaterThan(0);

@@ -32,6 +32,13 @@ const PATTERNS = [
     keep: () => true,
   },
   {
+    // KOBE-307 renamed personal skills' site_skill* tables to personal_skill*; the site skill
+    // blocklist (skill_blocklist, siteSkillBlocklistRoutes) is the Site's and keeps its name.
+    what: "personal skill name",
+    re: /\bsite_skill(?:s|_versions?|_scans?)\b|\b[sS]iteSkill(?:s|Versions?|Scans?)\b/g,
+    keep: () => true,
+  },
+  {
     what: "identifier",
     re: /[\w$]*(?:install|Install|INSTALL)[\w$]*/g,
     keep: (t) => IDENTIFIER.test(t),
@@ -74,6 +81,8 @@ export function selfTestIdentifiers() {
     "db.select().from(installRoles)",
     "SELECT value FROM install_settings WHERE key = $1",
     "JOIN install_agents a ON a.id = t.site_agent_id",
+    "db.select().from(siteSkills).innerJoin(siteSkillVersions, on)",
+    "INSERT INTO site_skill_scans (skill_id) VALUES ($1)",
   ];
   const good = [
     "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
@@ -81,6 +90,7 @@ export function selfTestIdentifiers() {
     "helm install kobe charts/kobe; installMemoryHooks(pi)",
     "INSERT INTO site_tool_rules; scope: 'install'",
     'action: "memory.install_settings_changed", // historical',
+    'db.select().from(personalSkills); api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(d))',
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);

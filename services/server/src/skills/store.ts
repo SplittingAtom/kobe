@@ -4,8 +4,8 @@ import {
   desc,
   eq,
   sql,
-  siteSkills,
-  siteSkillVersions,
+  personalSkills,
+  personalSkillVersions,
   teamSkills,
   teamSkillVersions,
   withTeam,
@@ -85,9 +85,9 @@ const lockKey = (l: SkillLocation) =>
   l.scope === "team" ? `kobe.skills.team:${l.teamId}` : `kobe.skills.personal:${l.ownerUserId}`;
 
 type TeamRow = typeof teamSkills.$inferSelect;
-type SiteRow = typeof siteSkills.$inferSelect;
+type PersonalRow = typeof personalSkills.$inferSelect;
 
-function toRecord(scope: SkillScope, row: TeamRow | SiteRow): SkillRecord {
+function toRecord(scope: SkillScope, row: TeamRow | PersonalRow): SkillRecord {
   return {
     id: row.id,
     scope,
@@ -168,8 +168,10 @@ async function findBySlug(
   }
   const [row] = await tx
     .select()
-    .from(siteSkills)
-    .where(and(eq(siteSkills.ownerUserId, location.ownerUserId), eq(siteSkills.slug, slug)));
+    .from(personalSkills)
+    .where(
+      and(eq(personalSkills.ownerUserId, location.ownerUserId), eq(personalSkills.slug, slug)),
+    );
   return row ? toRecord("personal", row) : null;
 }
 
@@ -178,9 +180,9 @@ async function countSkills(tx: KobeTx, location: SkillLocation): Promise<number>
     location.scope === "team"
       ? await tx.select({ id: teamSkills.id }).from(teamSkills)
       : await tx
-          .select({ id: siteSkills.id })
-          .from(siteSkills)
-          .where(eq(siteSkills.ownerUserId, location.ownerUserId));
+          .select({ id: personalSkills.id })
+          .from(personalSkills)
+          .where(eq(personalSkills.ownerUserId, location.ownerUserId));
   return rows.length;
 }
 
@@ -197,7 +199,7 @@ async function insertSkill(
           .values({ ...values, teamId: location.teamId, ownerUserId: input.uploadedBy })
           .returning()
       : await tx
-          .insert(siteSkills)
+          .insert(personalSkills)
           .values({ ...values, ownerUserId: location.ownerUserId })
           .returning();
   if (!row) throw new Error("skill insert returned no row");
@@ -219,9 +221,14 @@ async function bumpSkill(
     location.scope === "team"
       ? await tx.update(teamSkills).set(set).where(eq(teamSkills.id, skill.id)).returning()
       : await tx
-          .update(siteSkills)
+          .update(personalSkills)
           .set(set)
-          .where(and(eq(siteSkills.id, skill.id), eq(siteSkills.ownerUserId, location.ownerUserId)))
+          .where(
+            and(
+              eq(personalSkills.id, skill.id),
+              eq(personalSkills.ownerUserId, location.ownerUserId),
+            ),
+          )
           .returning();
   if (!row) throw new Error("skill update returned no row");
   return toRecord(location.scope, row);
@@ -252,12 +259,12 @@ async function insertVersion(
           .insert(teamSkillVersions)
           .values({ ...values, teamId: location.teamId })
           .returning()
-      : await tx.insert(siteSkillVersions).values(values).returning();
+      : await tx.insert(personalSkillVersions).values(values).returning();
   if (!row) throw new Error("skill version insert returned no row");
   return toVersion(row);
 }
 
-function toVersion(row: typeof siteSkillVersions.$inferSelect): SkillVersionRecord {
+function toVersion(row: typeof personalSkillVersions.$inferSelect): SkillVersionRecord {
   return {
     version: row.version,
     frontmatter: row.frontmatter,
@@ -279,9 +286,9 @@ export function listSkills(db: KobeDb, location: SkillLocation): Promise<SkillRe
         ? await tx.select().from(teamSkills).orderBy(teamSkills.slug)
         : await tx
             .select()
-            .from(siteSkills)
-            .where(eq(siteSkills.ownerUserId, location.ownerUserId))
-            .orderBy(siteSkills.slug);
+            .from(personalSkills)
+            .where(eq(personalSkills.ownerUserId, location.ownerUserId))
+            .orderBy(personalSkills.slug);
     return rows.map((r) => toRecord(location.scope, r));
   });
 }
@@ -301,8 +308,8 @@ async function findById(tx: KobeTx, location: SkillLocation, id: string) {
   }
   const [row] = await tx
     .select()
-    .from(siteSkills)
-    .where(and(eq(siteSkills.id, id), eq(siteSkills.ownerUserId, location.ownerUserId)));
+    .from(personalSkills)
+    .where(and(eq(personalSkills.id, id), eq(personalSkills.ownerUserId, location.ownerUserId)));
   return row ? toRecord("personal", row) : null;
 }
 
@@ -323,9 +330,9 @@ export function listSkillVersions(
             .orderBy(desc(teamSkillVersions.version))
         : await tx
             .select()
-            .from(siteSkillVersions)
-            .where(eq(siteSkillVersions.skillId, skillId))
-            .orderBy(desc(siteSkillVersions.version));
+            .from(personalSkillVersions)
+            .where(eq(personalSkillVersions.skillId, skillId))
+            .orderBy(desc(personalSkillVersions.version));
     return rows.map(toVersion);
   });
 }
@@ -357,9 +364,12 @@ async function versionOf(
           )
       : await tx
           .select()
-          .from(siteSkillVersions)
+          .from(personalSkillVersions)
           .where(
-            and(eq(siteSkillVersions.skillId, skillId), eq(siteSkillVersions.version, version)),
+            and(
+              eq(personalSkillVersions.skillId, skillId),
+              eq(personalSkillVersions.version, version),
+            ),
           );
   return row ? toVersion(row) : null;
 }

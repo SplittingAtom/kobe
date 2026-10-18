@@ -19,9 +19,9 @@ export const agents = defineDomain({
     "skill_blocklist",
     "site_agents",
     "site_agent_versions",
-    "site_skills",
-    "site_skill_versions",
-    "site_skill_scans",
+    "personal_skills",
+    "personal_skill_versions",
+    "personal_skill_scans",
     "gallery_agent_scores",
   ],
   grants: {
@@ -31,10 +31,10 @@ export const agents = defineDomain({
     // Published versions (KOBE-46) are immutable: append and read only (a trigger backs this up).
     site_agent_versions: ["SELECT", "INSERT"],
     // Personal skills (KOBE-78): the server confines rows to their owner. Versions are immutable.
-    site_skills: ALL_PRIVILEGES,
-    site_skill_versions: ["SELECT", "INSERT"],
+    personal_skills: ALL_PRIVILEGES,
+    personal_skill_versions: ["SELECT", "INSERT"],
     // Scans of personal versions (KOBE-80): written with the version, read at run start.
-    site_skill_scans: ["SELECT", "INSERT"],
+    personal_skill_scans: ["SELECT", "INSERT"],
     // Published gallery scores (KOBE-94): append and read only.
     gallery_agent_scores: ["SELECT", "INSERT"],
     // The blocklist (KOBE-81): the server lets only site admins add or remove rows (no UPDATE).

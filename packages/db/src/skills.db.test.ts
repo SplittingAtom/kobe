@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import {
-  siteSkills,
-  siteSkillVersions,
+  personalSkills,
+  personalSkillVersions,
   teams,
   teamSkills,
   teamSkillVersions,
@@ -78,11 +78,11 @@ async function teamSkillWithVersion(teamId: string): Promise<string> {
 
 async function personalSkillWithVersion(): Promise<string> {
   const [skill] = await app.db
-    .insert(siteSkills)
+    .insert(personalSkills)
     .values({ ownerUserId: alice, slug: `p-${randomUUID().slice(0, 8)}`, description: "d" })
-    .returning({ id: siteSkills.id });
+    .returning({ id: personalSkills.id });
   if (!skill) throw new Error("no skill");
-  await app.db.insert(siteSkillVersions).values({ skillId: skill.id, ...version(1) });
+  await app.db.insert(personalSkillVersions).values({ skillId: skill.id, ...version(1) });
   return skill.id;
 }
 
@@ -107,15 +107,15 @@ describe("skill versions are immutable", () => {
 
   it("gives the app role no UPDATE or DELETE on personal versions; the trigger stops the owner", async () => {
     const skillId = await personalSkillWithVersion();
-    const where = eq(siteSkillVersions.skillId, skillId);
+    const where = eq(personalSkillVersions.skillId, skillId);
     expect(
-      await sqlState(app.db.update(siteSkillVersions).set({ storageKey: "x" }).where(where)),
+      await sqlState(app.db.update(personalSkillVersions).set({ storageKey: "x" }).where(where)),
     ).toBe("42501");
-    expect(await sqlState(app.db.delete(siteSkillVersions).where(where))).toBe("42501");
+    expect(await sqlState(app.db.delete(personalSkillVersions).where(where))).toBe("42501");
     expect(
-      await sqlState(owner.db.update(siteSkillVersions).set({ storageKey: "x" }).where(where)),
+      await sqlState(owner.db.update(personalSkillVersions).set({ storageKey: "x" }).where(where)),
     ).toBe("55000");
-    expect(await sqlState(owner.db.delete(siteSkillVersions).where(where))).toBe("55000");
+    expect(await sqlState(owner.db.delete(personalSkillVersions).where(where))).toBe("55000");
   });
 
   it("refuses a duplicate version number and a malformed hash", async () => {
@@ -176,11 +176,11 @@ describe("catalog: skill version triggers", () => {
     const triggers = await owner.pool.query<{ rel: string; name: string }>(
       `SELECT tgrelid::regclass::text AS rel, tgname AS name FROM pg_trigger
        WHERE NOT tgisinternal
-         AND tgrelid IN ('team_skill_versions'::regclass, 'site_skill_versions'::regclass)
+         AND tgrelid IN ('team_skill_versions'::regclass, 'personal_skill_versions'::regclass)
        ORDER BY 1, 2`,
     );
     expect(triggers.rows).toEqual([
-      { rel: "site_skill_versions", name: "site_skill_versions_immutable" },
+      { rel: "personal_skill_versions", name: "personal_skill_versions_immutable" },
       { rel: "team_skill_versions", name: "team_skill_versions_immutable" },
     ]);
     const functions = await owner.pool.query<{ name: string }>(

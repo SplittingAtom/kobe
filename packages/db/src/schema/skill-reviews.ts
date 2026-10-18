@@ -14,7 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
-import { siteSkillVersions } from "./skills.js";
+import { personalSkillVersions } from "./skills.js";
 import { teams } from "./teams.js";
 
 // Scan results and review state of team skill versions (KOBE-80, spec D22). They live beside the
@@ -22,7 +22,7 @@ import { teams } from "./teams.js";
 // usable only with an `approved` row. A flagged (or not yet scanned) personal skill version is
 // unusable in a team until that team's admin approves it there: its row is keyed by team and
 // version and made when a member's run first meets the version. Unflagged personal versions need
-// no row (their scan is in `site_skill_scans`).
+// no row (their scan is in `personal_skill_scans`).
 
 export const skillReviewStatus = pgEnum("skill_review_status", ["pending", "approved", "rejected"]);
 export type SkillReviewStatus = (typeof skillReviewStatus.enumValues)[number];
@@ -39,8 +39,8 @@ export interface StoredFinding {
 export const skillReviewScope = ["team", "personal"] as const;
 
 /** Site-wide: the scan of a personal skill version, made with the (immutable) version. */
-export const siteSkillScans = pgTable(
-  "site_skill_scans",
+export const personalSkillScans = pgTable(
+  "personal_skill_scans",
   {
     skillId: uuid().notNull(),
     version: integer().notNull(),
@@ -53,9 +53,9 @@ export const siteSkillScans = pgTable(
   (t) => [
     primaryKey({ columns: [t.skillId, t.version] }),
     foreignKey({
-      name: "site_skill_scans_version_fk",
+      name: "personal_skill_scans_version_fk",
       columns: [t.skillId, t.version],
-      foreignColumns: [siteSkillVersions.skillId, siteSkillVersions.version],
+      foreignColumns: [personalSkillVersions.skillId, personalSkillVersions.version],
     }),
   ],
 );
