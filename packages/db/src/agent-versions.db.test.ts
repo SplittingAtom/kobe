@@ -58,6 +58,7 @@ const version = (n: number, extra: Partial<typeof teamAgentVersions.$inferInsert
   frontmatter: { name: `v${n}` },
   prompt: `prompt ${n}`,
   toolManifest: { format: 1 },
+  skillManifest: { skills: [] },
   publishedBy: alice,
   draftRevision: n,
   ...extra,
@@ -197,6 +198,8 @@ describe("agent versions are immutable (D19)", () => {
     ["a rollback from a later version", { draftRevision: null, republishedFrom: 3 }],
     ["version 0", { version: 0 }],
     ["a non-object manifest", { toolManifest: [] as unknown as Record<string, unknown> }],
+    // KOBE-318: every team version freezes its local skill versions (SQL-only check).
+    ["no skill manifest", { skillManifest: null }],
   ])("rejects %s", async (_name, extra) => {
     const agentId = await publishedTeamAgent(teamA, 0);
     const insert = withTeam(app.db, teamA, (tx) =>

@@ -27,9 +27,10 @@ const RENAMED_TABLES = {
   install_tool_rules: "site_tool_rules",
   install_agents: "site_agents",
   install_agent_versions: "site_agent_versions",
-  install_skills: "site_skills",
-  install_skill_versions: "site_skill_versions",
-  install_skill_scans: "site_skill_scans",
+  // KOBE-307 renamed these again (site_skill* -> personal_skill*); the test migrates to the end.
+  install_skills: "personal_skills",
+  install_skill_versions: "personal_skill_versions",
+  install_skill_scans: "personal_skill_scans",
 } as const;
 
 /** The first statement of the rename migration: the release before it has the old names. */
@@ -224,6 +225,30 @@ const LEFTOVER_OBJECTS = `
  */
 const KEPT = ["constraint runs.runs_budget_stop_scope", "function kobe_reserve_budget"];
 
+/** KOBE-311's objects named after installing a catalog skill (a noun, not the scope). */
+const SKILL_INSTALL_OBJECTS = [
+  // The Default sync's count of new installs and the check over its counts (KOBE-314).
+  "column skill_default_syncs.installed",
+  "constraint skill_default_syncs.skill_default_syncs_counts",
+  "column team_skill_installs.installed_by",
+  "column team_skill_settings.builders_may_install_catalog",
+  "constraint team_skill_installs.team_skill_installs_by_kobe",
+  "constraint team_skill_installs.team_skill_installs_installed_by_users_id_fk",
+  "constraint team_skill_installs.team_skill_installs_skill_id_registry_skills_id_fk",
+  "constraint team_skill_installs.team_skill_installs_team_id_skill_id_pk",
+  "constraint team_skill_installs.team_skill_installs_team_id_teams_id_fk",
+  "constraint team_skill_installs.team_skill_installs_version_fk",
+  "index team_skill_installs_skill_idx",
+  "index team_skill_installs_team_id_skill_id_pk",
+  "relation team_skill_installs",
+  "relation team_skill_installs_skill_idx",
+  "relation team_skill_installs_team_id_skill_id_pk",
+  "type _skill_install_origin",
+  "type _team_skill_installs",
+  "type skill_install_origin",
+  "type team_skill_installs",
+];
+
 let before: Relation[] = [];
 let after: Relation[] = [];
 
@@ -251,7 +276,8 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
     const hits = await withClient(database().adminUrl, (c) =>
       c.query<{ hit: string }>(LEFTOVER_OBJECTS).then((r) => r.rows.map((row) => row.hit)),
     );
-    expect(hits).toEqual(KEPT);
+    // KOBE-311's skill installs use "install" as a noun (installing a skill), not the old scope.
+    expect(hits).toEqual([...KEPT, ...SKILL_INSTALL_OBJECTS].sort());
   });
 
   it("renames in place: same relations, same data files, same row counts", () => {
@@ -291,7 +317,9 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
         ]),
       ).toEqual({ prompt: "Help." });
       expect(
-        await one(`SELECT storage_key FROM site_skill_versions WHERE skill_id = $1`, [ids.skill]),
+        await one(`SELECT storage_key FROM personal_skill_versions WHERE skill_id = $1`, [
+          ids.skill,
+        ]),
       ).toEqual({ storage_key: "skills/pdf/1.zip" });
       expect(await one(`SELECT site_agent_id FROM threads WHERE id = $1`, [ids.thread])).toEqual({
         site_agent_id: ids.personalAgent,

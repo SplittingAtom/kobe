@@ -65,7 +65,21 @@ export interface SkillMarker {
   readonly userEntryId: string | null;
   readonly toolCallId: string;
   readonly name: string;
-  readonly source: "team" | "personal" | "builtin";
+  readonly source: "team" | "personal" | "builtin" | "catalog";
+  /** The version the run loaded (KOBE-315); absent for built-ins and older runs. */
+  readonly semver?: string | undefined;
+}
+
+/**
+ * "Skill updated: xlsx 1.4.2 → 1.4.3" (KOBE-315, CE12): the run loaded a skill at another version
+ * than the thread's last run with it. Shown above that run's prompt.
+ */
+export interface SkillUpdateMarker {
+  readonly runId: string;
+  readonly userEntryId: string | null;
+  readonly name: string;
+  readonly from: string;
+  readonly to: string;
 }
 
 /**
@@ -93,6 +107,8 @@ export interface ThreadMarkers {
   readonly approvals: readonly ApprovalMarker[];
   /** Absent from servers before KOBE-297. */
   readonly skills?: readonly SkillMarker[] | undefined;
+  /** Absent from servers before KOBE-315. */
+  readonly skillUpdates?: readonly SkillUpdateMarker[] | undefined;
   /** Older markers were left out (the server returns the newest 500 of each). */
   readonly truncated?: boolean | undefined;
 }
@@ -223,11 +239,11 @@ export function placeRunMarkers(
  * Where each project move shows, by message id: above the prompt of the run it marks. A run whose
  * prompt is not in the loaded tree (never mirrored, another page) is left out.
  */
-export function placeProjectMarkers(
-  moves: readonly ProjectMarker[],
+export function placeProjectMarkers<T extends { readonly userEntryId: string | null }>(
+  moves: readonly T[],
   projection: Projection,
-): ReadonlyMap<string, readonly ProjectMarker[]> {
-  const placed = new Map<string, ProjectMarker[]>();
+): ReadonlyMap<string, readonly T[]> {
+  const placed = new Map<string, T[]>();
   for (const move of moves) {
     const at = move.userEntryId === null ? undefined : projection.nodeOfEntry.get(move.userEntryId);
     if (at === undefined) continue;

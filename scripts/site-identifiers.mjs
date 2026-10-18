@@ -10,6 +10,25 @@ const SOURCE = /\.(ts|tsx|mts|mjs|js|sh)$/;
 
 /** Identifiers that mean installing something (a verb), not the scope. */
 const ALLOWED = new Set(["installMemoryHooks"]);
+/**
+ * KOBE-311..318: a team's install of a catalog skill (a noun) or installing one (the verb), not the
+ * scope. Every name says which install it means: "SkillInstall" with at most a lowercase verb and
+ * Team or Default before it (teamSkillInstalls, lockSkillInstall, seedDefaultSkillInstalls),
+ * SKILL_INSTALL constants, a catalog install (CatalogInstall*), installCatalogSkill, and the team's
+ * catalog switch buildersMayInstall(Catalog). A bare Install*, installSettings or installId still
+ * fails.
+ */
+const SKILL_INSTALL = new RegExp(
+  [
+    /^[a-z]*(?:Team|Default)?[sS]killInstall\w*$/,
+    /^(?:TEAM_)?SKILL_INSTALL(?:_\w+)?$/,
+    /^Catalog(?:Skill)?Install\w*$/,
+    /^installCatalogSkill$/,
+    /^buildersMayInstall(?:Catalog)?$/,
+  ]
+    .map((re) => re.source)
+    .join("|"),
+);
 
 /** Audit actions recorded before the rename (HISTORICAL_AUDIT_ACTIONS); readers accept them. */
 const HISTORICAL = /^(?:install\.settings\.updated|identity\.install_role\.(?:granted|revoked))$/;
@@ -29,6 +48,13 @@ const PATTERNS = [
     // KOBE-256 renamed the tables, types and columns: SQL in code must use the site_* names.
     what: "database name",
     re: /\binstall_(?:settings|roles|role(?![.\w])|model_\w+|budget_\w+|tool_rules|agent\w*|skill\w*)\b/g,
+    keep: () => true,
+  },
+  {
+    // KOBE-307 renamed personal skills' site_skill* tables to personal_skill*; the site skill
+    // blocklist (skill_blocklist, siteSkillBlocklistRoutes) is the Site's and keeps its name.
+    what: "personal skill name",
+    re: /\bsite_skill(?:s|_versions?|_scans?)(?:_\w+)?\b|\b[sS]iteSkill(?:s|Versions?|Scans?)\b/g,
     keep: () => true,
   },
   {
@@ -53,7 +79,13 @@ export function identifierFindings(source) {
   return PATTERNS.flatMap(({ what, re, keep }) =>
     [...code.matchAll(re)]
       .map((m) => m[0])
-      .filter((token) => keep(token) && !ALLOWED.has(token) && !HISTORICAL.test(token))
+      .filter(
+        (token) =>
+          keep(token) &&
+          !ALLOWED.has(token) &&
+          !SKILL_INSTALL.test(token) &&
+          !HISTORICAL.test(token),
+      )
       .map((token) => `${what} ${token}`),
   );
 }
@@ -74,6 +106,22 @@ export function selfTestIdentifiers() {
     "db.select().from(installRoles)",
     "SELECT value FROM install_settings WHERE key = $1",
     "JOIN install_agents a ON a.id = t.site_agent_id",
+    "db.select().from(siteSkills).innerJoin(siteSkillVersions, on)",
+    "INSERT INTO site_skill_scans (skill_id) VALUES ($1)",
+    'ALTER TABLE personal_skills DROP CONSTRAINT "site_skills_pkey"',
+    "DROP TRIGGER site_skill_versions_immutable ON personal_skill_versions",
+    // KOBE-311..318: the skill-install exception does not cover the old scope.
+    "const installSettings = s",
+    "requireInstallAdmin(c)",
+    "const installId = site.id",
+    "export function InstallCatalogPage() {}",
+    "lockInstall(tx, teamId)",
+    "type InstallRow = {}",
+    "const NOT_INSTALLED = {}",
+    "const INSTALL_SKILL_LIMIT = 64",
+    "installSkillBlocklist(db)",
+    "buildersMayInstallSettings",
+    "skillCatalogFor(InstallScope)",
   ];
   const good = [
     "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
@@ -81,6 +129,13 @@ export function selfTestIdentifiers() {
     "helm install kobe charts/kobe; installMemoryHooks(pi)",
     "INSERT INTO site_tool_rules; scope: 'install'",
     'action: "memory.install_settings_changed", // historical',
+    'db.select().from(personalSkills); api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(d))',
+    "SELECT value FROM site_skill_settings; db.select().from(siteSkillSettings)",
+    "db.insert(teamSkillInstalls); z.enum(SKILL_INSTALL_ORIGINS); putTeamSkillInstallSchema",
+    "lockSkillInstall(tx); type SkillInstallRow = {}; changeTeamSkillInstall(db); skillInstallOf(t)",
+    "listTeamSkillInstalls(); TeamSkillInstalls; const TEAM_SKILL_INSTALL = {}; SKILL_INSTALL_MISSING",
+    "<CatalogInstallsSection />; CatalogInstall['access']; installCatalogSkill(tx, teamId, skill)",
+    "{ buildersMayInstall: s.buildersMayInstallCatalog }; seedDefaultSkillInstalls(tx, team.id)",
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);
@@ -89,6 +144,9 @@ export function selfTestIdentifiers() {
     isInstallPath("apps/web/components/admin/install/users-page.tsx"),
     !isInstallPath("scripts/install-gvisor-k3s.sh"),
     !isInstallPath("services/server/src/routes/site-users.ts"),
+    isInstallPath("apps/web/components/admin/team/skill-editor/install-change.tsx"),
+    !isInstallPath("apps/web/components/admin/team/skill-editor/skill-install-change.tsx"),
+    !isInstallPath("services/server/src/routes/team-skill-installs.ts"),
   ];
   if (missed.length || flagged.length || paths.includes(false)) {
     console.error("site identifiers: self-test failed", { missed, flagged, paths });

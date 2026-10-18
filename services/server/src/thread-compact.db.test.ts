@@ -21,12 +21,7 @@ import type { TestResponse } from "./testing/browser.js";
  * threads, Stop, budgets, other teams and users, and sandbox errors (never relayed) are covered.
  */
 const f = new RunFixture();
-const CAPABLE = [
-  "skill_bundles",
-  "builtin_skills",
-  CAPABILITY_RUN_TOKEN,
-  CAPABILITY_THREAD_COMPACT,
-];
+const CAPABLE = ["skill_bundles", CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPACT];
 
 beforeAll(async () => {
   await f.setup({ runTokenKey: deriveRunTokenKey(new TextEncoder().encode("c".repeat(40))) });
@@ -298,11 +293,7 @@ describe("POST /v1/threads/{id}/compact (KOBE-213)", () => {
   );
 
   it("never sends thread.compact to an agent that can't take it", async () => {
-    const { w, ws, threadId } = await world([
-      "skill_bundles",
-      "builtin_skills",
-      CAPABILITY_RUN_TOKEN,
-    ]);
+    const { w, ws, threadId } = await world(["skill_bundles", CAPABILITY_RUN_TOKEN]);
     expectError(await compact(w, threadId), "compaction_failed", 502);
     expect(ws.compactions()).toEqual([]);
     expect((await compactionRuns(w.team, threadId))[0]?.status).toBe("failed");

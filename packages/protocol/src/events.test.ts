@@ -26,6 +26,7 @@ describe("Kobe Event Stream types", () => {
       "run.started",
       "sandbox.waking",
       "context.omitted",
+      "thread.skill_updated",
       "text.delta",
       "reasoning.delta",
       "tool.call",
@@ -86,6 +87,11 @@ describe("context.omitted", () => {
       "not_user_connected",
       "no_team_default",
       "not_approved",
+      // KOBE-315
+      "not_installed",
+      "revoked",
+      "shadowed",
+      "unavailable",
     ]) {
       expect(schema.safeParse({ items: [{ ...item, reason }] }).success).toBe(true);
     }
@@ -100,6 +106,25 @@ describe("context.omitted", () => {
 
   it("is not terminal", () => {
     expect(isTerminalEventType("context.omitted")).toBe(false);
+  });
+});
+
+describe("thread.skill_updated (KOBE-315, CE12)", () => {
+  const schema = EVENT_PAYLOAD_SCHEMAS["thread.skill_updated"];
+  const change = { name: "xlsx", from: "1.4.2", to: "1.4.3" };
+
+  it("lists the skills whose version changed since the thread's previous run", () => {
+    expect(schema.safeParse({ thread_id: EXAMPLE_IDS.thread, skills: [change] }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an empty list, non-semver versions and extra keys", () => {
+    const ok = { thread_id: EXAMPLE_IDS.thread };
+    expect(schema.safeParse({ ...ok, skills: [] }).success).toBe(false);
+    expect(schema.safeParse({ ...ok, skills: [{ ...change, to: "latest" }] }).success).toBe(false);
+    expect(schema.safeParse({ ...ok, skills: [{ ...change, hash: "x" }] }).success).toBe(false);
+    expect(isTerminalEventType("thread.skill_updated")).toBe(false);
   });
 });
 

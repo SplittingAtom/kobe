@@ -120,37 +120,16 @@ describe("run.start lists only effective skills", () => {
   });
 });
 
-describe("built-in skills (KOBE-88)", () => {
-  it("an agent listing built-in names gets exactly those as builtin_skills, no bundle, no notice", async () => {
+describe("former built-in names (KOBE-317)", () => {
+  it("never resolve to a team skill of that name: without Kobe's catalog skill they are omitted", async () => {
     const w = await f.world();
     const team = `team-${unique()}`;
     const s = await upload(w.owner, "team", team);
     await approve(w.owner, s.skillId);
-    // `charts` is not looked up as a team skill (reserved name).
-    const thread = await pinnedThread(w.owner, ["charts", team, "docx"]);
+    const thread = await pinnedThread(w.owner, ["charts", team]);
     const config = await startConfig(w, thread);
-    expect(config.builtin_skills).toEqual(["charts", "docx"]);
     expect(config.skills).toEqual([team]);
-    expect(config.skill_bundles?.map((b: { name: string }) => b.name)).toEqual([team]);
-  });
-
-  it("carries no builtin_skills for an agent that lists none", async () => {
-    const w = await f.world();
-    const config = await startConfig(w, await pinnedThread(w.owner, []));
-    expect(config.builtin_skills).toBeUndefined();
-  });
-
-  it("fails the run on an agent that does not advertise builtin_skills", async () => {
-    const w = await f.world();
-    const thread = await pinnedThread(w.owner, ["pdf"]);
-    const old = await f.connect(w, 0, ["skill_bundles"]);
-    const run = await f.message(w.owner, thread, "hello");
-    await f.until(w.team, run, "failed");
-    expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
-      error: { code: "skills_unsupported" },
-    });
-    expect(old.starts().map((x) => x.run_id)).not.toContain(run);
-    old.kill();
+    expect(config).not.toHaveProperty("builtin_skills");
   });
 });
 
@@ -222,6 +201,22 @@ describe("sandbox bundle download", () => {
     expect(res.headers.get("content-length")).toBe(String(bytes.length));
 
     await blockAs(w.owner, s.hash);
+    expect((await app.request(`/${s.hash}`)).status).toBe(404);
+  });
+
+  it("KOBE-315: a rescan suspending the version stops the fetch mid-run too", async () => {
+    const w = await f.world();
+    const name = `susp-${unique()}`;
+    const s = await upload(w.owner, "team", name);
+    await approve(w.owner, s.skillId);
+    const held = await heldRun(w, [name]);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
+    expect((await app.request(`/${s.hash}`)).status).toBe(200);
+    await f.fx.admin.query(
+      `UPDATE team_skill_reviews SET suspended_at = now(), status = 'pending', reviewed_by = NULL,
+         reviewed_at = NULL WHERE team_id = $1 AND skill_id = $2`,
+      [w.team, s.skillId],
+    );
     expect((await app.request(`/${s.hash}`)).status).toBe(404);
   });
 

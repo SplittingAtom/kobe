@@ -14,7 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
-import { siteSkillVersions } from "./skills.js";
+import { personalSkillVersions } from "./skills.js";
 import { teams } from "./teams.js";
 
 // Scan results and review state of team skill versions (KOBE-80, spec D22). They live beside the
@@ -22,7 +22,7 @@ import { teams } from "./teams.js";
 // usable only with an `approved` row. A flagged (or not yet scanned) personal skill version is
 // unusable in a team until that team's admin approves it there: its row is keyed by team and
 // version and made when a member's run first meets the version. Unflagged personal versions need
-// no row (their scan is in `site_skill_scans`).
+// no row (their scan is in `personal_skill_scans`).
 
 export const skillReviewStatus = pgEnum("skill_review_status", ["pending", "approved", "rejected"]);
 export type SkillReviewStatus = (typeof skillReviewStatus.enumValues)[number];
@@ -34,13 +34,15 @@ export interface StoredFinding {
   readonly file: string;
   readonly line: number;
   readonly excerpt: string;
+  /** `caution` or `block` (KOBE-312); absent on findings stored before, which count as Caution. */
+  readonly severity?: string;
 }
 
 export const skillReviewScope = ["team", "personal"] as const;
 
 /** Site-wide: the scan of a personal skill version, made with the (immutable) version. */
-export const siteSkillScans = pgTable(
-  "site_skill_scans",
+export const personalSkillScans = pgTable(
+  "personal_skill_scans",
   {
     skillId: uuid().notNull(),
     version: integer().notNull(),
@@ -49,13 +51,26 @@ export const siteSkillScans = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The scanner rule set's ordinal (`RULE_SET`, KOBE-313); null: before KOBE-313. A scan under
+     * an older rule set is rescanned; rescans only move it forward.
+     */
+    ruleSet: integer(),
+    /**
+     * A rescan turned this unreviewed (Pass) version Block (KOBE-313, SK32): it now needs each
+     * team's approval, and runs omit it as `suspended` until then.
+     */
+    suspendedAt: timestamp({ withTimezone: true }),
+    /** The suspension's emails went out (the outbox: null while `suspended_at` is set = to send). */
+    suspensionNotifiedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.skillId, t.version] }),
+    index("personal_skill_scans_rule_set_idx").on(t.ruleSet),
     foreignKey({
-      name: "site_skill_scans_version_fk",
+      name: "personal_skill_scans_version_fk",
       columns: [t.skillId, t.version],
-      foreignColumns: [siteSkillVersions.skillId, siteSkillVersions.version],
+      foreignColumns: [personalSkillVersions.skillId, personalSkillVersions.version],
     }),
   ],
 );
@@ -86,6 +101,18 @@ export const teamSkillReviews = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * The scanner rule set's ordinal (`RULE_SET`, KOBE-313); null: before KOBE-313. A scan under
+     * an older rule set is rescanned; rescans only move it forward.
+     */
+    ruleSet: integer(),
+    /**
+     * A rescan turned this approved version Block (KOBE-313, SK32): it went back to `pending` and
+     * runs omit the skill as `suspended` until it is decided again (the decision clears this).
+     */
+    suspendedAt: timestamp({ withTimezone: true }),
+    /** The suspension's emails went out (the outbox: null while `suspended_at` is set = to send). */
+    suspensionNotifiedAt: timestamp({ withTimezone: true }),
     // Users are deactivated, never deleted (NO ACTION).
     reviewedBy: uuid().references(() => users.id),
     reviewedAt: timestamp({ withTimezone: true }),
@@ -95,6 +122,8 @@ export const teamSkillReviews = pgTable(
     primaryKey({ columns: [t.teamId, t.skillId, t.version] }),
     // The review queue: one status, flagged first, oldest scan first.
     index("team_skill_reviews_queue_idx").on(t.teamId, t.status, t.flagged.desc(), t.scannedAt),
+    // Rescans (KOBE-313): rows under an older rule set, per team.
+    index("team_skill_reviews_rule_set_idx").on(t.teamId, t.ruleSet),
     check("team_skill_reviews_scope", sql`${t.scope} IN ('team', 'personal')`),
     check(
       "team_skill_reviews_decided",
@@ -115,6 +144,10 @@ export const teamSkillSettings = pgTable("team_skill_settings", {
     .references(() => teams.id, { onDelete: "cascade" }),
   /** Members' personal skills are left out of this team's runs (spec D22). */
   personalSkillsDisabled: boolean().notNull().default(false),
+  /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
+  membersMayAddCatalog: boolean().notNull().default(true),
+  /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
+  buildersMayInstallCatalog: boolean().notNull().default(true),
   updatedBy: uuid()
     .notNull()
     .references(() => users.id),

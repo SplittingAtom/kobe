@@ -94,3 +94,33 @@ describe("skill use badges (KOBE-297)", () => {
     expect(screen.queryByText("Read skill")).toBeNull();
   });
 });
+
+describe("skill versions (KOBE-315)", () => {
+  it("shows the version on the badge and marks a version change before the run's prompt", async () => {
+    const thread = skillThread();
+    const markers = fake.threadMarkers.get(thread);
+    const use = markers?.skills?.[0] as Record<string, string>;
+    fake.threadMarkers.set(thread, {
+      runs: [],
+      approvals: [],
+      skills: [{ ...use, source: "catalog", semver: "1.4.3" }],
+      skill_updates: [
+        {
+          run_id: "run-1",
+          user_entry_id: use.user_entry_id as string,
+          name: "pretty-html",
+          from: "1.4.2",
+          to: "1.4.3",
+        },
+      ],
+    });
+    openApp(fake, thread);
+    expect(
+      await screen.findByText("Used skill: pretty-html 1.4.3", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    const note = await screen.findByText(/Skill updated/, {}, { timeout: 4_000 });
+    expect(note.closest("[data-kobe-marker]")?.textContent).toContain(
+      "Skill updated: pretty-html 1.4.2 → 1.4.3",
+    );
+  });
+});

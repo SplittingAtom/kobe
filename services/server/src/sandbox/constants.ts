@@ -112,8 +112,6 @@ export const SKILLS_SIZE = "128Mi";
  * skills/store.ts `STORE_DIR`, `dirOf`). KOBE-297 matches SKILL.md reads against it.
  */
 export const SKILLS_STORE_SUBDIR = "store";
-/** Built-in skills baked into the sandbox image, `<dir>/<name>/` (Dockerfile `KOBE_BUILTIN_SKILLS_DIR`). */
-export const BUILTIN_SKILLS_DIR = "/opt/kobe/skills";
 /** The helper that starts Pi under its identity (images/sandbox/runas). */
 export const PI_RUNAS_HELPER = "/opt/kobe/bin/kobe-runas";
 /** The only capabilities a sandbox container adds (after dropping ALL), for kobe-runas. */

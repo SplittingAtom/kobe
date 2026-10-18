@@ -82,8 +82,11 @@ export type RunKind = (typeof RUN_KINDS)[number];
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
 export const RUN_INPUT_MAX_CHARS = 200_000;
 
-/** Where a skill a run loaded comes from (KOBE-297): a team skill, a personal one, the image. */
-export const RUN_SKILL_SOURCES = ["team", "personal", "builtin"] as const;
+/**
+ * Where a skill a run loaded comes from (KOBE-297): a team skill, a personal one, the image, or a
+ * Site Skills Catalog install or member add (KOBE-315).
+ */
+export const RUN_SKILL_SOURCES = ["team", "personal", "builtin", "catalog"] as const;
 export type RunSkillSource = (typeof RUN_SKILL_SOURCES)[number];
 
 /**
@@ -94,6 +97,8 @@ export interface RunSkillRef {
   readonly name: string;
   readonly source: RunSkillSource;
   readonly sha256?: string;
+  /** The version's MAJOR.MINOR.PATCH (KOBE-315); absent for built-ins and runs recorded before. */
+  readonly semver?: string;
 }
 
 /** A skill the run used (KOBE-297): the server saw its SKILL.md read by this tool call. */

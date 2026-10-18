@@ -285,7 +285,7 @@ describe("move to project", () => {
 
   it("gives the next run the new project's context and marks that run once", async () => {
     const w = await f.world();
-    const ws = await f.connect(w, 0, ["skill_bundles", "builtin_skills", "projects"]);
+    const ws = await f.connect(w, 0, ["skill_bundles", "projects"]);
     const q3 = await project(w.owner, "Q3", { instructions: "Use Q3 numbers." });
     const q4 = await project(w.owner, "Q4", { instructions: "Use Q4 numbers." });
     const made = await as(w.owner).post("/v1/threads", { project_id: q3, title: "x" });

@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: docx
+version: 1.0.0
+summary: "Create Word documents from Markdown-style text and read existing .docx files, offline."
+license: Apache-2.0
+changelog: Published by Kobe from the built-in skill of the same name.

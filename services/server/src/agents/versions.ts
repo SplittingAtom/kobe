@@ -1,5 +1,5 @@
 import { suspendedInTeam } from "./inventory.js";
-import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
+import { agentSkills, validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import {
   and,
   desc,
@@ -20,6 +20,8 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
+import { freezeLocalSkills, type SkillLeftOut } from "./skill-freeze.js";
+import { skillManifestSchema, type SkillManifest } from "../skills/frozen.js";
 import {
   computeToolManifest,
   toolManifestSchema,
@@ -65,6 +67,11 @@ export interface AgentVersionRecord extends AgentVersionSummary {
   readonly agentId: string;
   readonly definition: AgentDefinition;
   readonly toolManifest: ToolManifest;
+  /**
+   * Team versions: the local skill versions frozen at publish (KOBE-318, SK28). Null for
+   * personal and gallery versions, which have no team to freeze in.
+   */
+  readonly skillManifest: SkillManifest | null;
 }
 
 export type PublishError =
@@ -91,6 +98,11 @@ export const DEFAULT_VERSION_LIMITS: VersionLimits = { maxVersions: 1000 };
 export interface Published {
   readonly agent: AgentRecord;
   readonly version: AgentVersionRecord;
+  /**
+   * Named team skills this publish left out of the frozen manifest: none of their versions can
+   * load (KOBE-318, review-318 B-S2). A publish warning; runs omit them until a republish.
+   */
+  readonly skillsLeftOut: readonly SkillLeftOut[];
 }
 
 const SUMMARY_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) => ({
@@ -108,14 +120,21 @@ const FULL_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) =>
   toolManifest: t.toolManifest,
 });
 
+/** Team versions also carry their frozen skill versions (KOBE-318). */
+const TEAM_FULL_COLUMNS = {
+  ...FULL_COLUMNS(teamAgentVersions),
+  skillManifest: teamAgentVersions.skillManifest,
+};
+
 type FullRow = AgentVersionSummary & {
   agentId: string;
   frontmatter: Record<string, unknown>;
   prompt: string;
   toolManifest: Record<string, unknown>;
+  skillManifest?: unknown;
 };
 
-/** A stored version whose tool manifest doesn't parse (manual SQL, a future format). */
+/** A stored version whose tool or skill manifest doesn't parse (manual SQL, a future format). */
 export class UnreadableVersionError extends Error {
   readonly code = "version_unreadable";
   constructor(
@@ -132,14 +151,18 @@ export class UnreadableVersionError extends Error {
  * parse throws `UnreadableVersionError` rather than run with an unknown tool set (fail closed).
  */
 function toVersion(row: FullRow): AgentVersionRecord {
-  const { frontmatter, prompt, toolManifest, ...rest } = row;
+  const { frontmatter, prompt, toolManifest, skillManifest, ...rest } = row;
   const manifest = toolManifestSchema.safeParse(withSiteNames(toolManifest));
   if (!manifest.success) throw new UnreadableVersionError(row.agentId, row.version);
+  // Only team rows select the column; a team row without a readable one fails closed.
+  const skills = "skillManifest" in row ? skillManifestSchema.safeParse(skillManifest) : undefined;
+  if (skills && !skills.success) throw new UnreadableVersionError(row.agentId, row.version);
   return {
     ...rest,
     // Copied from a validated draft at publish time.
     definition: { frontmatter, prompt } as AgentDefinition,
     toolManifest: manifest.data,
+    skillManifest: skills ? skills.data : null,
   };
 }
 
@@ -193,11 +216,20 @@ async function readVersion(
   agentId: string,
   version: number,
 ): Promise<AgentVersionRecord | null> {
-  const t = scope === "team" ? teamAgentVersions : siteAgentVersions;
-  const [row] = await tx
-    .select(FULL_COLUMNS(t))
-    .from(t)
-    .where(and(eq(t.agentId, agentId), eq(t.version, version)));
+  const [row]: FullRow[] =
+    scope === "team"
+      ? await tx
+          .select(TEAM_FULL_COLUMNS)
+          .from(teamAgentVersions)
+          .where(
+            and(eq(teamAgentVersions.agentId, agentId), eq(teamAgentVersions.version, version)),
+          )
+      : await tx
+          .select(FULL_COLUMNS(siteAgentVersions))
+          .from(siteAgentVersions)
+          .where(
+            and(eq(siteAgentVersions.agentId, agentId), eq(siteAgentVersions.version, version)),
+          );
   return row ? toVersion(row) : null;
 }
 
@@ -209,11 +241,26 @@ interface NewVersion {
   readonly republishedFrom: number | null;
   /** The manifest an eval scored; a different one now (the floor changed) refuses the publish. */
   readonly expectedManifest?: ToolManifest;
+  /** A rollback restores the frozen skill versions of the version it republishes (KOBE-318). */
+  readonly skillManifest?: SkillManifest | null;
 }
 
-/** Content that makes two versions the same: definition and frozen manifest. */
-export const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
-  canonicalJson({ frontmatter: definition.frontmatter, prompt: definition.prompt, manifest });
+/**
+ * Content that makes two versions the same: definition, frozen tool manifest and, for team
+ * versions, the frozen skill versions (KOBE-318): a republish that only picks up a newer skill
+ * version is a new version.
+ */
+export const contentKey = (
+  definition: AgentDefinition,
+  manifest: ToolManifest,
+  skills: SkillManifest | null = null,
+): string =>
+  canonicalJson({
+    frontmatter: definition.frontmatter,
+    prompt: definition.prompt,
+    manifest,
+    ...(skills ? { skills } : {}),
+  });
 
 /** Whether `definition` + `manifest` equal the agent's current version (an unreadable one never does). */
 async function sameAsCurrent(
@@ -222,13 +269,15 @@ async function sameAsCurrent(
   agent: AgentRecord,
   definition: AgentDefinition,
   manifest: ToolManifest,
+  skills: SkillManifest | null,
 ): Promise<boolean> {
   if (agent.currentVersion === null) return false;
   try {
     const current = await readVersion(tx, location.scope, agent.id, agent.currentVersion);
     return (
       current !== null &&
-      contentKey(current.definition, current.toolManifest) === contentKey(definition, manifest)
+      contentKey(current.definition, current.toolManifest, current.skillManifest) ===
+        contentKey(definition, manifest, skills)
     );
   } catch (err) {
     if (err instanceof UnreadableVersionError) return false;
@@ -253,7 +302,18 @@ async function insertVersion(
   if (input.expectedManifest && canonicalJson(input.expectedManifest) !== canonicalJson(manifest)) {
     return { ok: false, error: "eval_stale" };
   }
-  if (await sameAsCurrent(tx, location, agent, input.definition, manifest)) {
+  // Team versions freeze their named local skills at publish (KOBE-318); a rollback restores
+  // the frozen versions of the version it republishes.
+  const frozen =
+    location.scope !== "team" || input.skillManifest
+      ? { manifest: input.skillManifest ?? null, leftOut: [] }
+      : await freezeLocalSkills(
+          tx,
+          location.teamId,
+          agentSkills(input.definition.frontmatter).names,
+        );
+  const skillManifest = frozen.manifest;
+  if (await sameAsCurrent(tx, location, agent, input.definition, manifest, skillManifest)) {
     return { ok: false, error: "unchanged" };
   }
   if ((agent.currentVersion ?? 0) >= input.limits.maxVersions) {
@@ -276,8 +336,13 @@ async function insertVersion(
     if (values.publishedBy === null) throw new Error("team agent versions need a publisher");
     [row] = await tx
       .insert(teamAgentVersions)
-      .values({ ...values, publishedBy: values.publishedBy, teamId: location.teamId })
-      .returning(FULL_COLUMNS(teamAgentVersions));
+      .values({
+        ...values,
+        publishedBy: values.publishedBy,
+        teamId: location.teamId,
+        skillManifest: skillManifest ?? { skills: [] },
+      })
+      .returning(TEAM_FULL_COLUMNS);
     [updated] = await tx
       .update(teamAgents)
       .set({ currentVersion: values.version, updatedAt: now })
@@ -295,7 +360,14 @@ async function insertVersion(
       .returning(SITE);
   }
   if (!row || !updated) throw new Error("agent version insert returned no row");
-  return { ok: true, value: { agent: toRecord(location.scope, updated), version: toVersion(row) } };
+  return {
+    ok: true,
+    value: {
+      agent: toRecord(location.scope, updated),
+      version: toVersion(row),
+      skillsLeftOut: frozen.leftOut,
+    },
+  };
 }
 
 const ref = (location: AgentLocation, agent: AgentRecord) => ({
@@ -430,6 +502,7 @@ export async function rollbackAgent(
       publishedBy: input.publishedBy,
       draftRevision: null,
       republishedFrom: source.version,
+      skillManifest: source.skillManifest,
       ...(input.expectedManifest ? { expectedManifest: input.expectedManifest } : {}),
     });
     if (!inserted.ok) return inserted;
@@ -796,6 +869,8 @@ export async function resolveDraftAgent(
       republishedFrom: null,
       definition: draft.definition,
       toolManifest: computeToolManifest(draft.definition.frontmatter, floor, now),
+      // A draft freezes nothing: the test pane runs today's newest approved versions.
+      skillManifest: null,
     },
   };
 }

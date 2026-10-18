@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Sandbox-facing MCP proxy: grants, exposure, policy re-check, tool pinning",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/lib.d.ts",

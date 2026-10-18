@@ -5,9 +5,10 @@ import {
   idSchema,
   uuidSchema as wireUuidSchema,
 } from "@kobe/protocol";
-import { sql, withTeam, type KobeTx } from "@kobe/db";
+import { sql, withTeam, type KobeTx, type RunSkillRef } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { skillUpdatesOf } from "../skills/usage.js";
 import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
@@ -48,7 +49,19 @@ const skillMarkerSchema = z.strictObject({
   tool_call_id: z.string(),
   /** The skill's name as the server listed it in the run's `run.start`. */
   name: z.string(),
-  source: z.enum(["team", "personal", "builtin"]),
+  source: z.enum(["team", "personal", "builtin", "catalog"]),
+  /** The version the run loaded (KOBE-315); absent for built-ins and runs recorded before. */
+  semver: z.string().optional(),
+});
+
+/** CE12 (KOBE-315): a run loaded a skill at another version than the thread's previous run. */
+const skillUpdateMarkerSchema = z.strictObject({
+  run_id: wireUuidSchema,
+  /** The run's prompt entry: the marker goes before its answer. */
+  user_entry_id: idSchema.nullable(),
+  name: z.string(),
+  from: z.string(),
+  to: z.string(),
 });
 
 export const threadMarkersSchema = z.strictObject({
@@ -56,6 +69,8 @@ export const threadMarkersSchema = z.strictObject({
   approvals: z.array(approvalMarkerSchema),
   /** Skills the thread's runs used (KOBE-297): "Used skill" on the answer, "Read skill" on the step. */
   skills: z.array(skillMarkerSchema),
+  /** "Skill updated: xlsx 1.4.2 → 1.4.3" (KOBE-315, CE12), on the first run with the new version. */
+  skill_updates: z.array(skillUpdateMarkerSchema),
   /**
    * Moves to another project (CE19, KOBE-220), each on the first run that started after it: the
    * project's context applies from there. At most one per run, at most 20.
@@ -139,13 +154,14 @@ async function approvalMarkers(tx: KobeTx, teamId: string, threadId: string, use
   };
 }
 
-type SkillSource = z.infer<typeof skillMarkerSchema>["source"];
-
 /** Skill uses the server recorded on the thread's runs (`runs.skills_used`, KOBE-297). */
 async function skillMarkers(tx: KobeTx, teamId: string, threadId: string) {
   const res = await tx.execute<Row>(sql`
     SELECT r.id, r.user_entry_id, u.use ->> 'tool_call_id' AS tool_call_id,
-           u.use ->> 'name' AS name, u.use ->> 'source' AS source
+           u.use ->> 'name' AS name, u.use ->> 'source' AS source,
+           (SELECT ref ->> 'semver' FROM jsonb_array_elements(r.skill_refs) AS ref
+             WHERE ref ->> 'name' = u.use ->> 'name' AND ref ->> 'source' = u.use ->> 'source'
+             LIMIT 1) AS semver
       FROM runs r
       CROSS JOIN LATERAL jsonb_array_elements(r.skills_used) WITH ORDINALITY AS u(use, n)
      WHERE r.team_id = ${teamId}::uuid AND r.thread_id = ${threadId}::uuid
@@ -157,19 +173,47 @@ async function skillMarkers(tx: KobeTx, teamId: string, threadId: string) {
     skills: rows.flatMap((r) => {
       const toolCallId = text(r.tool_call_id);
       const name = text(r.name);
-      const source = text(r.source);
-      if (toolCallId === null || name === null) return [];
-      if (source !== "team" && source !== "personal" && source !== "builtin") return [];
+      const source = skillMarkerSchema.shape.source.safeParse(r.source);
+      const semver = text(r.semver);
+      if (toolCallId === null || name === null || !source.success) return [];
       return [
         {
           run_id: String(r.id),
           user_entry_id: text(r.user_entry_id),
           tool_call_id: toolCallId,
           name,
-          source: source as SkillSource,
+          source: source.data,
+          ...(semver === null ? {} : { semver }),
         },
       ];
     }),
+  };
+}
+
+/**
+ * "Skill updated" markers (KOBE-315, CE12), derived from the runs' recorded skills
+ * (`runs.skill_refs`, durable unlike the event stream): walking the thread's started runs oldest
+ * first, a run that loads a skill at another version than the last run that loaded it.
+ */
+async function skillUpdateMarkers(tx: KobeTx, teamId: string, threadId: string) {
+  const res = await tx.execute<{ id: string; user_entry_id: string | null; refs: RunSkillRef[] }>(
+    sql`
+    SELECT r.id, r.user_entry_id, r.skill_refs AS refs
+      FROM runs r
+     WHERE r.team_id = ${teamId}::uuid AND r.thread_id = ${threadId}::uuid
+       AND r.started_at IS NOT NULL AND jsonb_array_length(r.skill_refs) > 0
+     ORDER BY r.started_at, r.created_at, r.id`,
+  );
+  const markers: z.infer<typeof skillUpdateMarkerSchema>[] = [];
+  const earlier: RunSkillRef[][] = [];
+  for (const run of res.rows) {
+    for (const u of skillUpdatesOf(earlier, run.refs))
+      markers.push({ run_id: run.id, user_entry_id: run.user_entry_id, ...u });
+    earlier.unshift(run.refs);
+  }
+  return {
+    truncated: markers.length > MAX_MARKERS,
+    skillUpdates: markers.slice(-MAX_MARKERS),
   };
 }
 
@@ -200,12 +244,14 @@ export function threadMarkerRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
       const runs = await runMarkers(tx, teamId, threadId);
       const approvals = await approvalMarkers(tx, teamId, threadId, userId);
       const skills = await skillMarkers(tx, teamId, threadId);
+      const updates = await skillUpdateMarkers(tx, teamId, threadId);
       return {
         runs: runs.runs,
         approvals: approvals.approvals,
         skills: skills.skills,
+        skill_updates: updates.skillUpdates,
         projects: await projectMarkers(tx, viewer, threadId),
-        truncated: runs.truncated || approvals.truncated || skills.truncated,
+        truncated: runs.truncated || approvals.truncated || skills.truncated || updates.truncated,
       } satisfies ThreadMarkers;
     });
     if (!body) return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);

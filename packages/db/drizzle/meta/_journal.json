@@ -897,6 +897,97 @@
       "when": 1792263668424,
       "tag": "0127_thinking_lowest",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792305642000,
+      "tag": "0128_personal_skills_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792306875725,
+      "tag": "0129_skill_semver",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792306881370,
+      "tag": "0130_skill_semver_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792310486772,
+      "tag": "0131_skill_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792315068471,
+      "tag": "0132_skill_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792315069416,
+      "tag": "0133_skill_registry_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792319989846,
+      "tag": "0134_skill_rescans",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1792323327753,
+      "tag": "0135_skill_default_syncs",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1792330275072,
+      "tag": "0136_member_personal_enablements",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1792334855504,
+      "tag": "0137_kobe_published_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792334868027,
+      "tag": "0138_kobe_published_skills_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792340295087,
+      "tag": "0139_agent_skill_manifest",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1792340299359,
+      "tag": "0140_agent_skill_manifest_backfill",
+      "breakpoints": true
     }
   ]
 }

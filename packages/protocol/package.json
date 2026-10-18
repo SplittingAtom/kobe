@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Kobe contracts: event stream, sandbox wire, run orchestrator, policy and approvals",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,5 +30,8 @@
   },
   "dependencies": {
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.1"
   }
 }

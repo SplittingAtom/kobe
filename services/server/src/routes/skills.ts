@@ -15,18 +15,18 @@ import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
-import {
-  discardAttemptBundle,
-  putSkillBundle,
-  sha256Hex,
-  skillBundleKey,
-} from "../skills/storage.js";
+import { SCAN_RETRY_AFTER_SECONDS, ScanBusyError } from "../skills/scan-pool.js";
+import type { ScanResult } from "@kobe/skill-scanner";
+import { parseSemver } from "../skills/semver.js";
+import { readUploadBody } from "../skills/upload-body.js";
+import { IntegrityError } from "../skills/blob-read.js";
+import { PostgresSkillStore, type SkillStore } from "../skills/skill-store.js";
+import { logger } from "../logger.js";
 import {
   findSkill,
   getSkillVersion,
   listSkills,
   listSkillVersions,
-  uploadSkillVersion,
   type SkillLocation,
   type SkillRecord,
   type SkillScope,
@@ -36,29 +36,35 @@ import {
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
-const ZIP_TYPES = new Set([
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/octet-stream",
-]);
-const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown", "text/plain"]);
 const scopeSchema = z.enum(["team", "personal"]);
 const idSchema = z.uuid();
-const versionSchema = z.coerce.number().int().positive().max(2147483647);
+const seqSchema = z.coerce.number().int().positive().max(2147483647);
+/** A version in a path: its number (seq) or its semver (KOBE-308). */
+const versionRef = (value: string | undefined): number | string | null => {
+  if (value !== undefined && parseSemver(value)) return value;
+  const seq = seqSchema.safeParse(value);
+  return seq.success ? seq.data : null;
+};
 
 const error = (
   c: Ctx,
-  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 503,
+  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 429 | 503,
   code: string,
   message: string,
 ) => c.json({ code, message }, status);
 
-const UPLOAD_ERRORS: Record<UploadError | "blocklisted_download", string> = {
+const UPLOAD_ERRORS: Record<
+  Exclude<UploadError, "semver_not_increasing" | "semver_required"> | "blocklisted_download",
+  string
+> = {
   blocklisted_download: "This skill version is on the site's blocklist and can't be opened.",
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
   blocklisted: "This skill bundle is on the site's blocklist and can't be uploaded.",
+  name_clash:
+    "The team has installed a catalog skill with this name. Uninstall it or choose another name.",
+  reserved_name: "That name belongs to one of Kobe's own skills. Choose another name.",
 };
 
 const skillJson = (s: SkillRecord) => ({
@@ -67,6 +73,9 @@ const skillJson = (s: SkillRecord) => ({
   slug: s.slug,
   description: s.description,
   latestVersion: s.latestVersion,
+  latestSemver: s.latestSemver,
+  access: s.access,
+  archivedAt: s.archivedAt,
   ownerUserId: s.ownerUserId,
   createdAt: s.createdAt,
   updatedAt: s.updatedAt,
@@ -80,6 +89,10 @@ interface ReviewState {
 
 const versionJson = (v: SkillVersionRecord, review: ReviewState | null = null) => ({
   version: v.version,
+  seq: v.seq,
+  semver: v.semver,
+  changelog: v.changelog,
+  packageHash: v.packageHash,
   frontmatter: v.frontmatter,
   source: v.source,
   contentHash: v.contentHash,
@@ -94,13 +107,20 @@ const versionJson = (v: SkillVersionRecord, review: ReviewState | null = null) =
 /**
  * Skill bundles (spec D19, §6.1, KOBE-78) from the active team's point of view: the team's skills
  * and the caller's personal ones. `POST /?scope=team|personal` takes a zip (or a bare SKILL.md as
- * text/markdown) and stores it as the next immutable version of the skill its frontmatter names;
+ * text/markdown, or either as the `bundle` part of multipart/form-data) and stores it as the next
+ * immutable version of the skill its frontmatter names, numbered `semver` (query or form field;
+ * default: the next minor) with an optional `changelog` (form field only, KOBE-308);
  * `GET /`, `GET /:id`, `GET /:id/versions[/:n]` read them. Each upload is scanned (KOBE-80); a team
  * version starts `pending` review and is unusable until a team admin approves it.
  */
 export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
+  // Records in Postgres, bytes in the object store (KOBE-310); none without an object store.
+  // Made on first use: building the routes touches no dependency.
+  let made: SkillStore | null | undefined;
+  const skillStore = (): SkillStore | null =>
+    (made ??= deps.blobs ? new PostgresSkillStore(db, deps.blobs) : null);
   app.use(requireTeam(deps));
 
   const locationFor = (c: Ctx, scope: SkillScope): SkillLocation =>
@@ -151,51 +171,61 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         scope.data === "team" ? "team.skills.publish" : "team.personal.create",
       );
       if (!allowed) return error(c, 403, "forbidden", "Your team role doesn't allow that upload.");
-      if (!deps.blobs)
-        return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+      const store = skillStore();
+      if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
       if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
         return c.json(
           { code: "rate_limited", message: "Too many uploads. Wait a few minutes and try again." },
           429,
         );
-      const type = (c.req.header("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-      const bytes = new Uint8Array(await c.req.arrayBuffer());
-      const prepared = ZIP_TYPES.has(type)
-        ? prepareZip(bytes)
-        : MARKDOWN_TYPES.has(type)
-          ? prepareMarkdown(bytes)
-          : null;
-      if (!prepared)
-        return error(c, 415, "unsupported_media_type", "Send application/zip or text/markdown.");
+      const read = await readUploadBody(c.req.raw, new URL(c.req.url).searchParams);
+      if (!read.ok) return error(c, read.status, read.code, read.message);
+      const numbering = read.body;
+      const prepared =
+        numbering.kind === "zip" ? prepareZip(numbering.bytes) : prepareMarkdown(numbering.bytes);
       if (!prepared.ok) return bundleError(c, prepared.error);
       const { bundle, source } = prepared;
-      const zip = bundle.zip;
-      const scan = scanCanonicalZip(zip);
-
+      const requested = numberingFrom(numbering, bundle);
+      if (!requested.ok) return error(c, 400, "invalid_request", requested.message);
+      // The whole tree is scanned (SK32), evals/ fixtures included.
+      let scan: ScanResult;
+      try {
+        scan = await scanCanonicalZip(bundle.packageZip ?? bundle.zip, { owner: c.get("user").id });
+      } catch (err) {
+        if (!(err instanceof ScanBusyError)) throw err;
+        c.header("Retry-After", String(SCAN_RETRY_AFTER_SECONDS));
+        return err.kind === "owner"
+          ? error(
+              c,
+              429,
+              "scan_busy",
+              "Your earlier uploads are still being scanned. Try again shortly.",
+            )
+          : error(c, 503, "scan_busy", "Skill scanning is busy. Try again shortly.");
+      }
       const location = locationFor(c, scope.data);
-      const contentHash = sha256Hex(zip);
-      const storageKey = skillBundleKey(deps.blobs.prefix, location, contentHash);
-      await putSkillBundle(deps.blobs, storageKey, zip);
-      const blobs = deps.blobs;
-      const discard = () => discardAttemptBundle(blobs, storageKey);
-      const result = await uploadSkillVersion(db, location, {
-        slug: bundle.name,
-        description: bundle.description,
-        frontmatter: bundle.frontmatter,
+      const result = await store.putPackage(location, {
+        bundle,
         source,
-        contentHash,
-        storageKey,
-        sizeBytes: zip.length,
-        fileCount: bundle.fileCount,
-        uncompressedBytes: bundle.uncompressedBytes,
         uploadedBy: c.get("user").id,
         scan,
-      }).catch(async (err: unknown) => {
-        await discard();
-        throw err;
+        ...requested.value,
       });
       if (!result.ok) {
-        await discard();
+        if (result.error === "semver_not_increasing")
+          return error(
+            c,
+            409,
+            result.error,
+            `Version ${requested.value.semver ?? ""} must be higher than the latest version, ${result.latest}.`,
+          );
+        if (result.error === "semver_required")
+          return error(
+            c,
+            400,
+            result.error,
+            `The next version after ${result.latest} can't be numbered automatically: give a semver (for example a new major).`,
+          );
         return result.error === "blocklisted"
           ? error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted)
           : error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
@@ -218,7 +248,10 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
   app.get("/:id/versions", async (c) => {
     const found = await visible(c);
     if (!found) return error(c, 404, "not_found", "No such skill.");
-    const versions = await listSkillVersions(db, found.location, found.skill.id);
+    const store = skillStore();
+    const versions = store
+      ? await store.listVersions(found.location, found.skill.id)
+      : await listSkillVersions(db, found.location, found.skill.id);
     const reviews = await reviewsFor(c, found);
     return c.json({
       versions: versions.map((v) => versionJson(v, reviews?.get(v.version) ?? null)),
@@ -227,9 +260,9 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
 
   app.get("/:id/versions/:version", async (c) => {
     const found = await visible(c);
-    const n = versionSchema.safeParse(c.req.param("version"));
-    if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
-    const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
+    const ref = versionRef(c.req.param("version"));
+    if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, ref);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
     const reviews = await reviewsFor(c, found);
     return c.json({
@@ -241,21 +274,29 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
   /** The stored canonical zip of one version, for the browser editor (KOBE-83). Reads are not audited. */
   app.get("/:id/versions/:version/bundle", async (c) => {
     const found = await visible(c);
-    const n = versionSchema.safeParse(c.req.param("version"));
-    if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
-    const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
+    const ref = versionRef(c.req.param("version"));
+    if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, ref);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
     if (await db.transaction((tx) => isBlocked(tx, version.contentHash)))
       return error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted_download);
-    if (!deps.blobs) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
-    const object = await deps.blobs.objects.get(version.storageKey);
-    if (!object) return error(c, 404, "not_found", "That version's bundle is not available.");
-    return new Response(Readable.toWeb(object.body) as ReadableStream, {
+    const store = skillStore();
+    if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    const opened = await store.openVersion(found.location, found.skill.id, version.version);
+    if (!opened) return error(c, 404, "not_found", "That version's bundle is not available.");
+    opened.body.on("error", (err) => {
+      if (err instanceof IntegrityError)
+        logger.error(
+          { hash: version.contentHash, reason: err.reason },
+          "skills: stored package is corrupt",
+        );
+    });
+    return new Response(Readable.toWeb(opened.body) as ReadableStream, {
       status: 200,
       headers: {
         "content-type": "application/zip",
-        "content-length": String(object.size),
-        "content-disposition": `attachment; filename="${found.skill.slug}-v${version.version}.zip"`,
+        "content-length": String(opened.size),
+        "content-disposition": `attachment; filename="${found.skill.slug}-v${version.semver}.zip"`,
         "x-content-type-options": "nosniff",
         "cache-control": "private, no-store",
       },
@@ -285,6 +326,35 @@ function prepareMarkdown(bytes: Uint8Array): Prepared {
   return result.ok
     ? { ok: true, source: "skill_md", bundle: result.value }
     : { ok: false, error: result.error };
+}
+
+/**
+ * The number and changelog of an upload: from the request, or from the package's
+ * `kobe.skill.yaml` (KOBE-309). When both give one, they must agree: the manifest never
+ * renumbers a version behind the uploader's back.
+ */
+function numberingFrom(
+  given: { readonly semver?: string | undefined; readonly changelog?: string | undefined },
+  bundle: ValidBundle,
+): { ok: true; value: { semver?: string; changelog?: string } } | { ok: false; message: string } {
+  const manifest = bundle.manifest;
+  if (manifest && given.semver !== undefined && given.semver !== manifest.version)
+    return {
+      ok: false,
+      message: `semver ${given.semver} differs from kobe.skill.yaml's version ${manifest.version}.`,
+    };
+  if (
+    manifest?.changelog &&
+    given.changelog !== undefined &&
+    given.changelog !== manifest.changelog
+  )
+    return { ok: false, message: "The changelog differs from kobe.skill.yaml's changelog." };
+  const semver = given.semver ?? manifest?.version;
+  const changelog = given.changelog ?? manifest?.changelog;
+  return {
+    ok: true,
+    value: { ...(semver ? { semver } : {}), ...(changelog ? { changelog } : {}) },
+  };
 }
 
 function bundleError(c: Ctx, err: BundleError) {

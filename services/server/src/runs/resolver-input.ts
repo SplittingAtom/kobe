@@ -1,10 +1,12 @@
 import { agentConnectors, agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
-import { isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
-import { and, connectors, eq, teamConnectors, teamModels, teamSkills, type KobeTx } from "@kobe/db";
-import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
+import { PUBLISHED_VERSION_STATES, isKobeSkillName, type ApprovalMode } from "@kobe/protocol";
+import { and, connectors, eq, sql, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
+import type { ResolveInput, SkillOmission, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
-import { approvedTeamSkills, personalSkillUsage } from "../skills/review.js";
+import { frozenStates, type FrozenSkill } from "../skills/frozen.js";
+import { personalSkillUsage, teamSkillStates } from "../skills/review.js";
 import { readPersonalSkillsDisabled } from "../skills/settings.js";
+import { loadCatalogFacts } from "./catalog-facts.js";
 
 /**
  * Run-start inputs of the effective-config resolver (KOBE-76, 47b), gathered inside `withTeam()`.
@@ -22,29 +24,142 @@ export interface TeamResolverFacts {
   readonly personalSkillsDisabled: boolean;
 }
 
-/** The skills of a run: the agent's approved team skills and the user's personal ones. */
+/** The skills of a run in SK27 order (KOBE-315): Required, named, installs and adds, personal. */
 export interface SkillFacts {
   readonly agent: readonly SkillRef[];
-  /** Built-in names the agent lists (KOBE-88): site-provided, never looked up or reviewed. */
-  readonly agentBuiltin: readonly string[];
+  /** Named catalog skills at the team install's pin (KOBE-315). */
+  readonly agentCatalog: readonly SkillRef[];
+  /** Named catalog skills left out (`not_installed`, `revoked`, `suspended`). */
+  readonly agentOmissions: readonly SkillOmission[];
   readonly user: readonly SkillRef[];
   /** Agent skill names with no approved team version (KOBE-99). */
   readonly agentUnapproved: readonly string[];
+  /** Agent skill names whose approved version a rescan suspended (KOBE-313). */
+  readonly agentSuspended: readonly string[];
   /** Personal skills blocked for lack of this team's approval (KOBE-99). */
   readonly userUnapproved: readonly string[];
-  /** The team's skills offered to all agents (KOBE-297), at their newest approved versions. */
+  /** Personal skills a rescan suspended, pending this team's review (KOBE-313). */
+  readonly userSuspended: readonly string[];
+  /** Step 1: Required team skills, then Required installs. */
+  readonly required: readonly SkillRef[];
+  readonly requiredOmissions: readonly SkillOmission[];
+  /**
+   * Step 3: team skills On by default (KOBE-297's "Offer to all agents") the member did not turn
+   * off and Available ones they turned on, then catalog installs and adds likewise.
+   */
   readonly offered: readonly SkillRef[];
-  /** Hashes among the three lists that the site blocklist holds (read at this run start, KOBE-81). */
+  readonly offeredOmissions: readonly SkillOmission[];
+  /** Hashes among the lists that the site blocklist holds (read at this run start, KOBE-81). */
   readonly blockedHashes: readonly string[];
 }
 
-/** Slugs of the team skills set to "Offer to all agents" (KOBE-297; RLS: inside `withTeam`). */
-export async function offeredSkillNames(tx: KobeTx, teamId: string): Promise<string[]> {
-  const rows = await tx
-    .select({ slug: teamSkills.slug })
-    .from(teamSkills)
-    .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.offerToAll, true)));
-  return rows.map((r) => r.slug);
+/**
+ * The team's own skills by access mode for one member (KOBE-315, SK25): Required ones, and the
+ * ones on for this member (On by default unless turned off, Available if turned on). Archived
+ * skills are hidden from new use (SK33) and only resolve when an agent names them. "Offer to all
+ * agents" (KOBE-297) reads as On by default even where only `offer_to_all` was written (a
+ * rollback across KOBE-308), until KOBE-316 retires it.
+ */
+async function teamSkillAccess(
+  tx: KobeTx,
+  teamId: string,
+  /** Null: no member's toggles (publish, KOBE-318, reads only which names are local). */
+  userId: string | null,
+): Promise<{ required: string[]; on: string[]; local: Set<string>; archived: Set<string> }> {
+  const { rows } = await tx.execute<{
+    slug: string;
+    access: string;
+    archived: boolean;
+    mine: boolean | null;
+  }>(sql`
+    SELECT s.slug,
+      CASE WHEN s.offer_to_all AND s.access = 'available' THEN 'default_on' ELSE s.access::text END
+        AS access,
+      s.archived_at IS NOT NULL AS archived, e.enabled AS mine
+    FROM team_skills s
+    LEFT JOIN member_skill_enablements e
+      ON e.team_id = s.team_id AND e.team_skill_id = s.id
+        AND ${userId === null ? sql`false` : sql`e.user_id = ${userId}`}
+    WHERE s.team_id = ${teamId}`);
+  const live = rows.filter((r) => !r.archived);
+  return {
+    required: live.filter((r) => r.access === "required").map((r) => r.slug),
+    on: live
+      .filter(
+        (r) =>
+          (r.access === "default_on" && r.mine !== false) ||
+          (r.access === "available" && r.mine === true),
+      )
+      .map((r) => r.slug),
+    local: new Set(rows.map((r) => r.slug)),
+    archived: new Set(rows.filter((r) => r.archived).map((r) => r.slug)),
+  };
+}
+
+const inList = (names: readonly string[]) =>
+  sql.join(
+    names.map((n) => sql`${n}`),
+    sql`, `,
+  );
+
+/**
+ * Which of `names` are catalog skills (registry_skills is site-wide): only skills with a published
+ * version, so a name that exists only as another team's submission in review is not revealed
+ * (review N7: it reads as `not_approved`, like any unknown name).
+ */
+async function catalogNamesAmong(tx: KobeTx, names: readonly string[]): Promise<string[]> {
+  if (names.length === 0) return [];
+  const { rows } = await tx.execute<{ name: string }>(sql`
+    SELECT s.name FROM registry_skills s
+    WHERE s.name IN (${inList(names)}) AND EXISTS (
+      SELECT 1 FROM registry_versions v
+      WHERE v.skill_id = s.id AND v.state::text IN (${inList(PUBLISHED_VERSION_STATES)}))`);
+  return rows.map((r) => r.name);
+}
+
+/** Which of `names` the team installed from the catalog (RLS: inside `withTeam`). */
+async function installedNamesAmong(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+): Promise<Set<string>> {
+  if (names.length === 0) return new Set();
+  const { rows } = await tx.execute<{ name: string }>(sql`
+    SELECT s.name FROM team_skill_installs i JOIN registry_skills s ON s.id = i.skill_id
+    WHERE i.team_id = ${teamId} AND s.name IN (${inList(names)})`);
+  return new Set(rows.map((r) => r.name));
+}
+
+/**
+ * Which named skills resolve through the catalog (SK27, review S4). A name the team has no skill
+ * of is the catalog's. A name both have is the team's own, unless the team installed the catalog
+ * skill and its own skill is archived or has never been approved: a draft never hides an
+ * installed, Site-reviewed skill, and archiving a skill to install the catalog one (the name-clash
+ * rule) hands the name over. A Kobe skill's name is always the catalog's (KOBE-317, SK24): it was
+ * reserved for the built-in before, so an agent naming `pdf` keeps getting Kobe's.
+ */
+async function catalogNamed(
+  tx: KobeTx,
+  teamId: string,
+  listed: readonly string[],
+  access: { local: Set<string>; archived: Set<string> },
+  localStates: { approved: readonly { name: string }[]; suspended: readonly string[] },
+): Promise<string[]> {
+  const found = new Set(await catalogNamesAmong(tx, listed));
+  // In the agent's own order, like its local skills.
+  const catalog = listed.filter((n) => found.has(n));
+  const installed = await installedNamesAmong(
+    tx,
+    teamId,
+    catalog.filter((n) => access.local.has(n)),
+  );
+  const reviewed = new Set([...localStates.approved.map((s) => s.name), ...localStates.suspended]);
+  return catalog.filter(
+    (n) =>
+      isKobeSkillName(n) ||
+      !access.local.has(n) ||
+      (installed.has(n) && (access.archived.has(n) || !reviewed.has(n))),
+  );
 }
 
 /** The team's enabled models and connectors (RLS: inside `withTeam`). */
@@ -66,6 +181,77 @@ export async function loadTeamFacts(tx: KobeTx, teamId: string): Promise<TeamRes
 }
 
 /**
+ * How the agent's named skills split (SK27 step 2): catalog names (through the team install),
+ * and the team's own skills with their usable and suspended versions. Unfrozen (drafts, personal
+ * and gallery agents), a team skill resolves to its newest approved or suspended version. Frozen
+ * (KOBE-318), a name in the manifest resolves to that exact version, even if its skill was since
+ * archived and its name installed from the catalog (SK31: archive keeps frozen agents working);
+ * a team name left out of the manifest has no version for this agent (`not_approved`) until a
+ * republish, whatever was approved since. Kobe's names are never frozen.
+ */
+async function namedLocalSkills(
+  tx: KobeTx,
+  teamId: string,
+  listed: readonly string[],
+  access: { local: Set<string>; archived: Set<string> },
+  frozen: readonly FrozenSkill[] | undefined,
+): Promise<{
+  namedCatalog: string[];
+  teamNames: string[];
+  approved: { name: string; hash: string; semver: string }[];
+  suspended: string[];
+}> {
+  const pinned = new Map(
+    (frozen ?? [])
+      .filter((f) => listed.includes(f.name) && !isKobeSkillName(f.name))
+      .map((f) => [f.name, f]),
+  );
+  const routed = listed.filter((n) => !pinned.has(n));
+  // One transaction, one connection: these reads run one after the other.
+  const localStates = await teamSkillStates(
+    tx,
+    teamId,
+    routed.filter((n) => access.local.has(n) && !isKobeSkillName(n)),
+  );
+  const namedCatalog = await catalogNamed(tx, teamId, routed, access, localStates);
+  const teamNames = listed.filter((n) => !namedCatalog.includes(n));
+  if (frozen === undefined) {
+    return {
+      namedCatalog,
+      teamNames,
+      approved: localStates.approved.filter((s) => teamNames.includes(s.name)),
+      suspended: localStates.suspended.filter((n) => teamNames.includes(n)),
+    };
+  }
+  const states = await frozenStates(tx, teamId, [...pinned.values()]);
+  return {
+    namedCatalog,
+    teamNames,
+    approved: states.flatMap((s) =>
+      s.state === "approved" && s.hash !== null
+        ? [{ name: s.entry.name, hash: s.hash, semver: s.semver }]
+        : [],
+    ),
+    suspended: states.filter((s) => s.state === "suspended").map((s) => s.entry.name),
+  };
+}
+
+/**
+ * The agent-named skills that are the team's own (SK27 step 2, local), as a publish freezes them
+ * (KOBE-318): the same split as run start, unfrozen, in the agent's order.
+ */
+export async function localNamedSkills(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+): Promise<string[]> {
+  const listed = [...new Set(names)];
+  const access = await teamSkillAccess(tx, teamId, null);
+  const { teamNames } = await namedLocalSkills(tx, teamId, listed, access, undefined);
+  return teamNames.filter((n) => access.local.has(n) && !isKobeSkillName(n));
+}
+
+/**
  * Skill refs for run start (inside `withTeam`). `agentSkillNames` are the names in the agent's
  * frontmatter; only approved team versions come back. Personal skills are loaded even when the
  * team switch is on: the resolver omits them with a visible `team_disabled` notice.
@@ -78,45 +264,121 @@ export async function loadSkillFacts(
     agentSkillNames: readonly string[];
     /** The team switch: personal skills are then not even queued for review. */
     personalSkillsDisabled: boolean;
+    /**
+     * A published team agent version's frozen local skill versions (KOBE-318, SK28). Absent for
+     * drafts and for personal and gallery agents (no team to freeze in): named team skills then
+     * resolve to their newest approved version, as before.
+     */
+    frozen?: readonly FrozenSkill[];
   },
 ): Promise<SkillFacts> {
-  // Built-in names are reserved (KOBE-88): they come from the image, not from a team skill of that
-  // name, so they are neither looked up nor reported as unapproved.
-  const agentBuiltin = [...new Set(args.agentSkillNames.filter(isBuiltinSkillName))];
-  const teamNames = args.agentSkillNames.filter((n) => !isBuiltinSkillName(n));
-  // One transaction, one connection: these reads run one after the other.
-  const agent = (await approvedTeamSkills(tx, args.teamId, teamNames)).map(fromTeam);
+  // Kobe's skills (the former built-ins, KOBE-317) are catalog names like any other: they resolve
+  // through the team's install (or the Default install still on its way, catalog-facts.ts).
+  const listed = [...new Set(args.agentSkillNames)];
+  const access = await teamSkillAccess(tx, args.teamId, args.userId);
+  const named = await namedLocalSkills(tx, args.teamId, listed, access, args.frozen);
+  const { namedCatalog, teamNames } = named;
+  // In the agent's own order: which named skills a full run keeps does not depend on a query plan.
+  const agent = named.approved
+    .map(fromTeam)
+    .sort((a, b) => teamNames.indexOf(a.name) - teamNames.indexOf(b.name));
   const user = await personalSkillUsage(tx, {
     teamId: args.teamId,
     userId: args.userId,
     ensureRows: !args.personalSkillsDisabled,
   });
-  const usable = user.usable.map((s) => ({ ...s, source: "personal" as const }));
-  // Only approved versions, like named team skills: an offer never widens what review allows.
-  // Sorted by name: which offered skills a full run leaves out (`skill_limit`) is stable.
-  const offered = (
-    await approvedTeamSkills(tx, args.teamId, await offeredSkillNames(tx, args.teamId))
-  )
-    .map(fromTeam)
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const approved = new Set(agent.map((s) => s.name));
+  const usable = user.usable.map((s): SkillRef => ({ ...s, source: "personal" }));
+  const catalog = await loadCatalogFacts(tx, {
+    teamId: args.teamId,
+    userId: args.userId,
+    namedCatalog,
+  });
+  const requiredLocal = await localByAccess(tx, args.teamId, access.required, true);
+  const offeredLocal = await localByAccess(tx, args.teamId, access.on, false);
+  const required = [...requiredLocal.refs, ...catalog.required];
+  const offered = [...offeredLocal.refs, ...catalog.offered];
+  const decided = new Set([...agent.map((s) => s.name), ...named.suspended]);
+  const all = [...required, ...agent, ...catalog.named, ...offered, ...usable];
   // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
   const blockedHashes = await blockedAmong(
     tx,
-    [...agent, ...usable, ...offered].map((s) => s.hash),
+    all.flatMap((s) => [s.hash, ...(s.aliases ?? [])]),
   );
   return {
     agent,
-    agentBuiltin,
+    agentCatalog: catalog.named,
+    agentOmissions: catalog.namedOmissions,
     user: usable,
+    required,
+    requiredOmissions: [...requiredLocal.omissions, ...catalog.requiredOmissions],
     offered,
+    offeredOmissions: [...offeredLocal.omissions, ...catalog.offeredOmissions],
     blockedHashes,
-    agentUnapproved: [...new Set(teamNames)].filter((n) => !approved.has(n)),
+    agentUnapproved: teamNames.filter((n) => !decided.has(n)),
+    agentSuspended: named.suspended,
     userUnapproved: user.blocked,
+    userSuspended: user.suspended,
   };
 }
 
-const fromTeam = (s: { name: string; hash: string }): SkillRef => ({ ...s, source: "team" });
+/**
+ * Step 1 alone, for a run with no agent (the site default agent, review S6): the team's Required
+ * skills and Required installs load "for each run" (SK27), and their omissions show. Nothing else:
+ * such runs carry no named, offered or personal skills, as before.
+ */
+export async function loadRequiredSkillFacts(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+): Promise<Pick<SkillFacts, "required" | "requiredOmissions" | "blockedHashes">> {
+  const access = await teamSkillAccess(tx, teamId, userId);
+  const local = await localByAccess(tx, teamId, access.required, true);
+  const catalog = await loadCatalogFacts(tx, { teamId, userId, namedCatalog: [] });
+  const required = [...local.refs, ...catalog.required];
+  return {
+    required,
+    requiredOmissions: [...local.omissions, ...catalog.requiredOmissions],
+    blockedHashes: await blockedAmong(
+      tx,
+      required.flatMap((s) => [s.hash, ...(s.aliases ?? [])]),
+    ),
+  };
+}
+
+const byName = (a: SkillRef, b: SkillRef) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+/**
+ * Team skills by access mode at their newest approved version, sorted by name (which skills a
+ * full run leaves out, `skill_limit`, is stable). Only approved versions, like named team skills:
+ * an access mode never widens what review allows. A suspended one is reported `suspended`
+ * (review N1); a Required one with no approved version is reported `not_approved`, so it holds
+ * its name too (review S2).
+ */
+async function localByAccess(
+  tx: KobeTx,
+  teamId: string,
+  names: readonly string[],
+  required: boolean,
+): Promise<{ refs: SkillRef[]; omissions: SkillOmission[] }> {
+  const states = await teamSkillStates(tx, teamId, names);
+  const suspended = new Set(states.suspended);
+  const approved = new Set(states.approved.map((s) => s.name));
+  const omissions = [...names]
+    .sort()
+    .flatMap((name): SkillOmission[] =>
+      suspended.has(name)
+        ? [{ name, reason: "suspended" }]
+        : required && !approved.has(name)
+          ? [{ name, reason: "not_approved" }]
+          : [],
+    );
+  return { refs: states.approved.map(fromTeam).sort(byName), omissions };
+}
+
+const fromTeam = (s: { name: string; hash: string; semver?: string }): SkillRef => ({
+  ...s,
+  source: "team",
+});
 
 export function buildResolveInput(args: {
   readonly frontmatter: AgentFrontmatter;
@@ -135,8 +397,10 @@ export function buildResolveInput(args: {
       modelAlias: frontmatter.model ?? null,
       approvalMode: args.versionMode,
       skills: args.skills.agent,
-      builtinSkills: args.skills.agentBuiltin,
+      catalogSkills: args.skills.agentCatalog,
+      skillOmissions: args.skills.agentOmissions,
       unapprovedSkills: args.skills.agentUnapproved,
+      suspendedSkills: args.skills.agentSuspended,
       exclusiveSkills: agentSkills(frontmatter).exclusive,
       // `connectors: all` (KOBE-254) stays a request: the resolver intersects it like a list.
       connectors: connectors.all ? "all" : connectors.names,
@@ -145,11 +409,15 @@ export function buildResolveInput(args: {
       models: team.models,
       connectors: team.connectors.map((c) => c.name),
       personalSkillsDisabled: team.personalSkillsDisabled,
+      requiredSkills: args.skills.required,
+      requiredOmissions: args.skills.requiredOmissions,
       offeredSkills: args.skills.offered,
+      offeredOmissions: args.skills.offeredOmissions,
     },
     user: {
       skills: args.skills.user,
       unapprovedSkills: args.skills.userUnapproved,
+      suspendedSkills: args.skills.userSuspended,
       connectedConnectors: args.connectedConnectors,
     },
     approvalFloor: args.floor,

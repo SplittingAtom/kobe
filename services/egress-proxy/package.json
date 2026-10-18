@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "description": "Default-deny egress proxy (spec D28): HTTPS CONNECT with SNI match, per-team allowlists within the install ceiling",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

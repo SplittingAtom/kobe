@@ -40,6 +40,7 @@ import { fieldError } from "./field-errors";
 import { FrontmatterForm } from "./frontmatter-form";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
+import { leftOutText, SkillUpdates } from "./skill-updates";
 import { AgentTestPane } from "./test-pane";
 import { VersionHistory } from "./version-history";
 
@@ -343,6 +344,14 @@ function Builder({
           </div>
         )}
       </form>
+      {agent && scope === "team" && agent.currentVersion !== null && (
+        <SkillUpdates
+          key={`${agent.currentVersion}:${historyKey}`}
+          teamId={teamId}
+          agentId={agent.id}
+          version={agent.currentVersion}
+        />
+      )}
       {agent && !readOnly && (
         <Section
           id="test-chat-heading"
@@ -403,7 +412,9 @@ function Builder({
           onPublished={(result, version) => {
             apply(result.agent);
             setHistoryKey((k) => k + 1);
-            setPublished(`Published v${version}.`);
+            // KOBE-318: named team skills with no loadable version are left out of the version.
+            const leftOut = (result.skillsLeftOut ?? []).map((s) => leftOutText(s, version));
+            setPublished([`Published v${version}.`, ...leftOut].join(" "));
             setPublishing(false);
           }}
         />

@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: pdf
+version: 1.0.0
+summary: "Create PDFs from Markdown-style text, and read, search, split or merge existing PDFs, offline."
+license: Apache-2.0
+changelog: Published by Kobe from the built-in skill of the same name.

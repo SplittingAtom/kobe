@@ -222,8 +222,8 @@ async function seedTeamSkill(
   for (const [i, status] of versions.entries()) {
     await admin.query(
       `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
-         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
-       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5)`,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5, '0.' || $3::int || '.0', $3::int)`,
       [team, skillId, i + 1, `${slug.length}${i}`.padEnd(64, "a"), userId],
     );
     if (status === "none") continue;
@@ -247,17 +247,17 @@ async function seedTeamSkill(
 
 async function seedPersonalSkill(userId: string, slug: string, flagged = false) {
   const { rows } = await f.fx.admin.query<{ id: string }>(
-    `INSERT INTO site_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
+    `INSERT INTO personal_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
     [userId, slug],
   );
   await f.fx.admin.query(
-    `INSERT INTO site_skill_versions (skill_id, version, frontmatter, source, content_hash,
-       storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
-     VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3)`,
+    `INSERT INTO personal_skill_versions (skill_id, version, frontmatter, source, content_hash,
+       storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+     VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3, '0.1.0', 1)`,
     [rows[0]?.id, "b".repeat(64), userId],
   );
   await f.fx.admin.query(
-    `INSERT INTO site_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
+    `INSERT INTO personal_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
      VALUES ($1, 1, $2, '[]', '[]', '[]')`,
     [rows[0]?.id, flagged],
   );

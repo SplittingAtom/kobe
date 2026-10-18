@@ -16,6 +16,7 @@ import {
   ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldXIcon,
+  SparklesIcon,
   UnplugIcon,
   WalletIcon,
   type LucideIcon,
@@ -40,6 +41,7 @@ import {
   type ProjectMarker,
   type RunMarker,
   type SkillMarker,
+  type SkillUpdateMarker,
   type ThreadMarkers,
 } from "../../lib/chat/markers";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
@@ -58,6 +60,8 @@ interface MarkerData {
   readonly runsAt: ReadonlyMap<string, readonly RunMarker[]>;
   /** Project moves (CE19, KOBE-220) above the prompt of the run they mark, by message id. */
   readonly projectsAt: ReadonlyMap<string, readonly ProjectMarker[]>;
+  /** "Skill updated" (KOBE-315, CE12) above the prompt of the run that got the new version. */
+  readonly updatesAt: ReadonlyMap<string, readonly SkillUpdateMarker[]>;
   /** By {@link approvalKey}: tool call ids are only unique within a run. */
   readonly approvals: ReadonlyMap<string, ApprovalMarker>;
   /** Skill uses (KOBE-297) by {@link approvalKey}, and by {@link runToolKey} for the live run. */
@@ -67,11 +71,13 @@ interface MarkerData {
 
 const NO_RUNS: ReadonlyMap<string, readonly RunMarker[]> = new Map();
 const NO_MOVES: ReadonlyMap<string, readonly ProjectMarker[]> = new Map();
+const NO_UPDATES: ReadonlyMap<string, readonly SkillUpdateMarker[]> = new Map();
 const NO_APPROVALS: ReadonlyMap<string, ApprovalMarker> = new Map();
 const NO_SKILLS: ReadonlyMap<string, SkillMarker> = new Map();
 const MarkersContext = createContext<MarkerData>({
   runsAt: NO_RUNS,
   projectsAt: NO_MOVES,
+  updatesAt: NO_UPDATES,
   approvals: NO_APPROVALS,
   skills: NO_SKILLS,
   skillsByRun: NO_SKILLS,
@@ -110,6 +116,8 @@ function useTriggers() {
           .join(",")
       : null,
     interrupted: state?.interruptedRun?.runId ?? null,
+    // KOBE-315: the run loads a skill at a new version; its marker is the server's to place.
+    updated: live?.skillsUpdated ? live.runId : null,
     read: live
       ? Object.entries(live.tools)
           .flatMap(([id, t]) => (t.result?.tool === "read" && !t.result.is_error ? [id] : []))
@@ -145,7 +153,8 @@ function useThreadMarkers(): ThreadMarkers | null {
     void attempt(true);
   }, [controller, threadId]);
   useEffect(load, [load]);
-  const { ended, decided, interrupted, read: reads } = useTriggers();
+  const { ended, decided, interrupted, read: reads, updated } = useTriggers();
+  useOnSet(updated, load);
   useOnSet(ended, load);
   useOnSet(decided, load);
   useOnSet(interrupted, load);
@@ -190,6 +199,13 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
       : placeProjectMarkers(markers.projects, projection);
   if (!samePlacement(movesPlaced.current, moves)) movesPlaced.current = moves;
   const projectsAt = movesPlaced.current;
+  const updatesPlaced = useRef(NO_UPDATES);
+  const updates =
+    markers?.skillUpdates === undefined || !projection
+      ? NO_UPDATES
+      : placeProjectMarkers(markers.skillUpdates, projection);
+  if (!samePlacement(updatesPlaced.current, updates)) updatesPlaced.current = updates;
+  const updatesAt = updatesPlaced.current;
   const skills = useMemo(
     () =>
       new Map((markers?.skills ?? []).map((m) => [approvalKey(m.userEntryId, m.toolCallId), m])),
@@ -200,8 +216,8 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
     [markers],
   );
   const value = useMemo(
-    () => ({ runsAt, projectsAt, approvals, skills, skillsByRun }),
-    [runsAt, projectsAt, approvals, skills, skillsByRun],
+    () => ({ runsAt, projectsAt, updatesAt, approvals, skills, skillsByRun }),
+    [runsAt, projectsAt, updatesAt, approvals, skills, skillsByRun],
   );
   return <MarkersContext.Provider value={value}>{children}</MarkersContext.Provider>;
 }
@@ -442,12 +458,18 @@ export function MessageMarkers({
   const data = useContext(MarkersContext);
   const runs = data.runsAt.get(id);
   const moves = place === "before" ? data.projectsAt.get(id) : undefined;
+  const updates = place === "before" ? data.updatesAt.get(id) : undefined;
   const entries = place === "before" ? meta?.before : meta?.after;
   return (
     <div className={cn("flex flex-col gap-1 empty:hidden", className)}>
       {place === "before" && <ForkMarker />}
       {moves?.map((move) => (
         <ProjectMoveRow key={move.runId} move={move} />
+      ))}
+      {updates?.map((u) => (
+        <MarkerRow key={`${u.runId}:${u.name}`} kind="skill-updated" icon={SparklesIcon}>
+          {`Skill updated: ${u.name} ${u.from} → ${u.to}`}
+        </MarkerRow>
       ))}
       {place === "after" && runs?.map((run) => <RunMarkerRow key={run.runId} run={run} />)}
       {entries?.map((marker) => (

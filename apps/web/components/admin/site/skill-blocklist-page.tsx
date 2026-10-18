@@ -30,6 +30,7 @@ import {
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { SkillRescansSection } from "./skill-rescans-section";
 
 /** The list's heading: focus lands here after a removal (the list reloads from its first page). */
 const HEADING = "blocked-hashes";
@@ -57,6 +58,7 @@ export function SkillBlocklistPage() {
           onRemoved={() => setGeneration((g) => g + 1)}
         />
       </Section>
+      <SkillRescansSection />
     </>
   );
 }

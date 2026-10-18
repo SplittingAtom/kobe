@@ -161,6 +161,27 @@ describe("Agent builder: edit and publish", () => {
     expect(publish.headers.get("if-match")).toBe('"4"');
   });
 
+  it("says which named team skills a publish left out (KOBE-318)", async () => {
+    stubApi({
+      ...READ,
+      "POST /v1/agents/a-1/publish": [
+        201,
+        {
+          agent: { ...AGENT, currentVersion: 7 },
+          version: { ...VERSIONS.versions[0], version: 7 },
+          skillsLeftOut: [{ name: "house-style", reason: "blocklisted" }],
+        },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Publish…" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Publish v/ }));
+    await screen.findByText(
+      "Published v7. house-style is left out of v7: every version is blocklisted.",
+    );
+  });
+
   it("cancels the dialog with Escape and shows a publish conflict in it", async () => {
     stubApi({
       ...READ,

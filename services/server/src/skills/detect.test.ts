@@ -8,7 +8,9 @@ const C = "c".repeat(64);
 const refs: RunSkillRef[] = [
   { name: "pretty-html", source: "team", sha256: A },
   { name: "mine", source: "personal", sha256: B },
-  { name: "pdf", source: "builtin" },
+  { name: "pdf", source: "catalog", sha256: C, semver: "1.0.0" },
+  // A run from before KOBE-317 recorded image built-ins without a hash: nothing matches them now.
+  { name: "docx", source: "builtin" },
 ];
 const read = (path: unknown, extra: Record<string, unknown> = {}) =>
   matchSkillRead("read", { path, ...extra }, refs);
@@ -19,8 +21,8 @@ describe("matchSkillRead (KOBE-297)", () => {
     expect(read(`/run/kobe-skills/store/sk-${B}/SKILL.md`)).toEqual(refs[1]);
   });
 
-  it("names a built-in the run lists by its image directory", () => {
-    expect(read("/opt/kobe/skills/pdf/SKILL.md")).toEqual(refs[2]);
+  it("names a Kobe skill (a former built-in) by its bundle directory, like any other (KOBE-317)", () => {
+    expect(read(`/run/kobe-skills/store/sk-${C}/SKILL.md`)).toEqual(refs[2]);
   });
 
   it("normalizes the path the tool reads (doubled slashes, dot segments)", () => {
@@ -30,8 +32,11 @@ describe("matchSkillRead (KOBE-297)", () => {
   it.each([
     ["another file of the skill", `/run/kobe-skills/store/sk-${A}/reference.md`],
     ["the skill directory itself", `/run/kobe-skills/store/sk-${A}`],
-    ["a hash the run was not given (forged)", `/run/kobe-skills/store/sk-${C}/SKILL.md`],
-    ["a built-in the run does not list", "/opt/kobe/skills/docx/SKILL.md"],
+    [
+      "a hash the run was not given (forged)",
+      `/run/kobe-skills/store/sk-${"d".repeat(64)}/SKILL.md`,
+    ],
+    ["the old image directory of a built-in", "/opt/kobe/skills/docx/SKILL.md"],
     ["a workspace SKILL.md", "/workspace/pretty-html/SKILL.md"],
     ["a workspace copy named like the store", `/workspace/run/kobe-skills/store/sk-${A}/SKILL.md`],
     ["a relative path", `run/kobe-skills/store/sk-${A}/SKILL.md`],
@@ -75,15 +80,16 @@ describe("runSkillRefs", () => {
         [
           { name: "pretty-html", sha256: A, size: 10 },
           { name: "mine", sha256: B, size: 10 },
+          { name: "pdf", sha256: C, size: 10 },
         ],
         [
           { name: "pretty-html", hash: A, source: "team" },
           { name: "mine", hash: B, source: "personal" },
-          { name: "dropped", hash: C, source: "team" },
+          { name: "pdf", hash: C, source: "catalog", semver: "1.0.0" },
+          { name: "dropped", hash: "e".repeat(64), source: "team" },
         ],
-        ["pdf"],
       ),
-    ).toEqual(refs);
+    ).toEqual(refs.slice(0, 3));
   });
 
   it("gives a shared directory (identical bytes) to the first skill listed, by name, not by hash", () => {
@@ -96,7 +102,6 @@ describe("runSkillRefs", () => {
         { name: "team-one", hash: A, source: "team" },
         { name: "my-copy", hash: A, source: "personal" },
       ],
-      [],
     );
     expect(refs).toEqual([{ name: "team-one", source: "team", sha256: A }]);
     expect(
@@ -105,7 +110,7 @@ describe("runSkillRefs", () => {
   });
 
   it("drops a bundle whose source is unknown rather than guessing", () => {
-    expect(runSkillRefs([{ name: "x", sha256: A, size: 1 }], [], [])).toEqual([]);
+    expect(runSkillRefs([{ name: "x", sha256: A, size: 1 }], [])).toEqual([]);
   });
 });
 

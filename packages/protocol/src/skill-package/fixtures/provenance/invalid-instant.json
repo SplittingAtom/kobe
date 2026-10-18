@@ -1,0 +1,61 @@
+{
+  "apiVersion": "kobe.dev/skill-provenance/v1",
+  "name": "quarterly-report",
+  "version": "1.3.0",
+  "hashes": {
+    "runtime": "1111111111111111111111111111111111111111111111111111111111111111",
+    "package": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "source": {
+    "scope": "team",
+    "teamId": "0b1c2d3e-0000-4000-8000-00000000000a",
+    "skillId": "5e6f7a8b-0000-4000-8000-00000000000b",
+    "seq": 7,
+    "semver": "1.3.0"
+  },
+  "submitter": {
+    "userId": "7f3c2a10-1b2c-4d5e-8f90-0a1b2c3d4e5f",
+    "at": "2026-10-17T09:30:00.000Z"
+  },
+  "confirmedBy": {
+    "userId": "a19d0000-0000-4000-8000-000000000001",
+    "at": "2026-10-17T10:00:00.000Z"
+  },
+  "fromConversation": true,
+  "origin": {
+    "kind": "git",
+    "url": "https://git.example.com/acme/skills",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "fetchedSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "scan": {
+    "scanner": {
+      "name": "kobe-skill-scanner",
+      "version": "1.2.0",
+      "rulesVersion": "2026.10.1"
+    },
+    "verdict": "caution",
+    "findings": [
+      {
+        "category": "network",
+        "rule": "net.fetch",
+        "file": "scripts/build.py",
+        "line": 12
+      }
+    ]
+  },
+  "scorecard": {
+    "packageHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "mode": "full",
+    "cases": 5,
+    "negativeTriggerCases": 1,
+    "passRateWith": 0.8,
+    "passRateWithout": 0.4,
+    "lift": 0.4,
+    "triggerPrecision": 1,
+    "triggerRecall": 0.75,
+    "costUsd": 1.25,
+    "at": "2026-10-17T09:00:00.000Z"
+  },
+  "createdAt": "2026-10-17 10:00"
+}

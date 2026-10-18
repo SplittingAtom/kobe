@@ -91,6 +91,8 @@ export interface LiveRun {
   readonly messages: readonly LiveMessage[];
   readonly tools: Readonly<Record<string, ToolActivity>>;
   readonly notices: readonly RunNotice[];
+  /** `thread.skill_updated` arrived (KOBE-315): the markers have a "Skill updated" row to show. */
+  readonly skillsUpdated?: boolean | undefined;
 }
 
 export function newLiveRun(runId: string): LiveRun {
@@ -306,6 +308,8 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     case "thread.updated":
     case "thread.suggestions":
       return next;
+    case "thread.skill_updated":
+      return { ...next, skillsUpdated: true };
   }
 }
 

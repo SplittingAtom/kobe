@@ -23,7 +23,13 @@ const NOUNS =
   "admins?|owners?|roles?|console|floor|ceiling|catalog|budgets?|maximum|invitations?|invites?|" +
   "policy|rules?|settings|deny|registry|default|log|scope|key|blocklist|report|level";
 const SCOPE_WORDING = [
-  new RegExp(`\\binstall (?:${NOUNS})\\b`, "i"),
+  // "Builders may install catalog skills" installs skills from the catalog (KOBE-316): followed by
+  // "skills" and with no determiner before it ("the install catalog"), install is the verb.
+  new RegExp(
+    `(?<=\\b(?:the|a|an|this|that|your|our|each|every) )install (?:${NOUNS})\\b|` +
+      `\\binstall (?:${NOUNS})\\b(?! skills?\\b)`,
+    "i",
+  ),
   new RegExp(`\\binstall${APOSTROPHE}s\\b`, "i"),
   /\b(?:this|your|that|each|every|one|per) (?:kobe )?install\b/i,
   /\b(?:a|an|the) (?:new|fresh|test|existing|throwaway|large|single-admin|real) install\b/i,
@@ -59,6 +65,9 @@ function selfTest() {
     '"not allowed by this Kobe install."',
     "<p>a fresh install reaches nothing</p>",
     'prefix="Install "',
+    '"Pick a model from the install catalog."',
+    '"the install catalog skills list"',
+    '"open the install settings"',
   ];
   const good = [
     "// an install admin, in a comment",
@@ -66,6 +75,9 @@ function selfTest() {
     'run <code>helm install</code> first, see "https://example.com/install"',
     'scope: "install", requireInstallPermission("install.users.manage")',
     "Install gVisor on every node (scripts/install-gvisor-k3s.sh)",
+    '<Checkbox label="Builders may install catalog skills" />',
+    '"Builders can install catalog skills only while the team allows it"',
+    '"Only team admins install catalog skills."',
   ];
   const missed = bad.filter((s) => findings(s).length === 0);
   const flagged = good.filter((s) => findings(s).length > 0);

@@ -1,13 +1,13 @@
 import { Readable } from "node:stream";
-import { withTeam, type KobeDb } from "@kobe/db";
+import type { KobeDb } from "@kobe/db";
 import { sha256HexSchema } from "@kobe/protocol";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { BlobStore } from "../retention/blobs.js";
 import type { SandboxAuthenticator } from "../workspace-sync/auth.js";
-import { IntegrityError, verifyingStream } from "../workspace-sync/object-store.js";
-import { locateBundle } from "./materialize.js";
+import { IntegrityError } from "../workspace-sync/object-store.js";
+import { PostgresSkillStore, type SkillStore } from "./skill-store.js";
 
 /** Bundle downloads per sandbox: a run start fetches at most a few dozen, then a steady trickle. */
 export const SKILL_FETCH_RATE = { capacity: 200, refillPerSecond: 20 } as const;
@@ -18,6 +18,8 @@ export interface SkillSandboxRoutesDeps {
   readonly authenticate: SandboxAuthenticator;
   readonly log: Pick<Logger, "error" | "warn">;
   readonly limiter?: RateLimiter;
+  /** Defaults to the Postgres + object-store implementation over `db` and `blobs`. */
+  readonly store?: SkillStore;
 }
 
 const notFound = () =>
@@ -36,6 +38,7 @@ const notFound = () =>
  */
 export function skillSandboxRoutes(deps: SkillSandboxRoutesDeps): Hono {
   const { db, blobs, authenticate, log, limiter = createRateLimiter(SKILL_FETCH_RATE) } = deps;
+  const store = deps.store ?? new PostgresSkillStore(db, blobs);
   const app = new Hono();
   app.get("/:sha256", async (c) => {
     const auth = await authenticate(c.req.header("authorization"));
@@ -51,15 +54,13 @@ export function skillSandboxRoutes(deps: SkillSandboxRoutesDeps): Hono {
     }
     const hash = sha256HexSchema.safeParse(c.req.param("sha256"));
     if (!hash.success) return notFound();
-    const found = await withTeam(db, caller.teamId, (tx) => locateBundle(tx, caller, hash.data));
-    if (!found) return notFound();
-    const object = await blobs.objects.get(found.storageKey);
-    if (!object || object.size !== found.size) {
+    const found = await store.openSandboxBundle(caller, hash.data);
+    if (!found.ok && found.error === "not_found") return notFound();
+    if (!found.ok) {
       log.error({ hash: hash.data }, "skills: effective bundle is missing or the wrong size");
       return c.json({ code: "unavailable", message: "The bundle is not available." }, 503);
     }
-    const verified = object.body.pipe(verifyingStream(hash.data, found.size));
-    object.body.on("error", (err) => verified.destroy(err));
+    const verified = found.body;
     verified.on("error", (err) => {
       if (err instanceof IntegrityError) {
         log.error({ hash: hash.data, reason: err.reason }, "skills: stored bundle is corrupt");

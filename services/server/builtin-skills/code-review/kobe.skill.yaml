@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: code-review
+version: 1.0.0
+summary: "A local code review: static checks for risky patterns, secrets and style, from files or a git diff."
+license: Apache-2.0
+changelog: Published by Kobe from the built-in skill of the same name.

@@ -10,7 +10,10 @@ export interface SkillSummary {
   readonly scope: SkillScope;
   readonly slug: string;
   readonly description: string;
+  /** Sequence number of the latest version (paths and downloads use it). */
   readonly latestVersion: number;
+  /** MAJOR.MINOR.PATCH of the latest version (KOBE-308): what the UI shows. */
+  readonly latestSemver: string;
   readonly ownerUserId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -18,6 +21,7 @@ export interface SkillSummary {
 
 export interface SkillVersionInfo {
   readonly version: number;
+  readonly semver: string;
   readonly contentHash: string;
   readonly sizeBytes: number;
   readonly fileCount: number;
@@ -81,8 +85,13 @@ export interface SkillReachAgent {
   readonly canEdit: boolean;
 }
 
+/** A team skill's access mode (KOBE-316, SK25). */
+export type SkillAccess = "available" | "default_on" | "required" | "hidden";
+
 export interface SkillReach {
   readonly offerToAll: boolean;
+  /** On by default and Required reach agents without naming; Required also exclusive ones. */
+  readonly access: SkillAccess;
   /** A version is approved: without one no agent gets the skill. */
   readonly approved: boolean;
   readonly agents: readonly SkillReachAgent[];
@@ -93,17 +102,20 @@ export function getSkillReach(teamId: string, id: string): Promise<ApiResult<Ski
   return apiRequest(`/v1/skills/${enc(id)}/reach`, { teamId });
 }
 
-/** "Offer to all agents" on or off (team admins). */
-export function setSkillOffer(
+export interface SkillAccessChange {
+  readonly access: SkillAccess;
+  /** Required team skills and installs now (the console warns from 5). */
+  readonly requiredCount: number;
+  readonly warning?: "many_required";
+}
+
+/** The access mode (Builders; Required is Team admins only). */
+export function setSkillAccess(
   teamId: string,
   id: string,
-  offerToAll: boolean,
-): Promise<ApiResult<{ offerToAll: boolean }>> {
-  return apiRequest(`/v1/skills/${enc(id)}/offer`, {
-    method: "PUT",
-    json: { offerToAll },
-    teamId,
-  });
+  access: SkillAccess,
+): Promise<ApiResult<SkillAccessChange>> {
+  return apiRequest(`/v1/skills/${enc(id)}/access`, { method: "PUT", json: { access }, teamId });
 }
 
 export interface SkillUsage {

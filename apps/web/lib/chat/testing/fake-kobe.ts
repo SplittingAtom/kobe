@@ -362,7 +362,7 @@ export class FakeKobe {
   /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
   readonly threadMarkers = new Map<
     string,
-    { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[] }
+    { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[]; skill_updates?: Json[] }
   >();
 
   /** The caller's answer ratings (KOBE-275), wire casing, by run id. */
