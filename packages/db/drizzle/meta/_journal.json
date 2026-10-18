@@ -939,6 +939,13 @@
       "when": 1792315069416,
       "tag": "0133_skill_registry_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792319989846,
+      "tag": "0134_skill_rescans",
+      "breakpoints": true
     }
   ]
 }
