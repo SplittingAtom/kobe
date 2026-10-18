@@ -223,7 +223,7 @@ export class ThreadController {
     const {
       entries: firstPage,
       nextEntriesAfter,
-      agentCurrentVersion: _v,
+      agentCurrentVersion,
       agentModel,
       ...summary
     } = detail.data;
@@ -235,6 +235,7 @@ export class ThreadController {
       loadError: undefined,
       summary,
       agentModel: agentModel ?? null,
+      agentCurrentVersion,
       entries: mergeServerEntries(s.entries, entries),
       serverSeq: maxSeq(entries, s.serverSeq),
     }));
@@ -347,7 +348,7 @@ export class ThreadController {
     const {
       entries: firstPage,
       nextEntriesAfter,
-      agentCurrentVersion: _v,
+      agentCurrentVersion,
       agentModel,
       ...summary
     } = detail.data;
@@ -356,6 +357,7 @@ export class ThreadController {
     this.#set((s) => ({
       ...s,
       agentModel: agentModel ?? null,
+      agentCurrentVersion,
       // A branch chosen while this read was on its way wins over the leaf it read.
       summary:
         leafVersion === this.#leafVersion || !s.summary
@@ -836,6 +838,26 @@ export class ThreadController {
     }
     this.#set((s) => ({ ...s, summary: res.data }));
     this.#announce(model === null ? "The team's default model is used." : "Model changed.");
+    return true;
+  };
+
+  /**
+   * Moves the thread to its agent's current version (D19, U8, KOBE-420): the next run uses it, and
+   * the server marks the switch on that run. Refused while a run is active (`thread_busy`).
+   */
+  readonly switchAgentVersion = async (): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    const target = this.#state.agentCurrentVersion;
+    if (threadId === null || target == null) return false;
+    const res = await this.#busy("agent-version", () =>
+      this.#api.switchAgentVersion(threadId, target),
+    );
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(`Switched to v${target}. Your next message uses it.`);
     return true;
   };
 

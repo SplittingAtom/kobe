@@ -30,8 +30,9 @@ export function markersOpenApiPaths(): Record<string, Record<string, unknown>> {
         description:
           "What the chat marks inline that the entry tree does not hold: runs that ended " +
           "`interrupted` or `budget_stopped`, runs that started and were stopped (`cancelled`) " +
-          "or `failed` (with the server's message), and decided approvals (outcome and cause " +
-          "only). " +
+          "or `failed` (with the server's message), decided approvals (outcome and cause " +
+          "only), skills used, moves to another project and switches of the agent version " +
+          "(each on the first run after it). " +
           "Newest 500 of each, oldest first; `truncated` says older ones were left out. Visible " +
           "like the thread; approvals only to the run's user (a reader of a shared thread gets " +
           "none). Reads Postgres only.",

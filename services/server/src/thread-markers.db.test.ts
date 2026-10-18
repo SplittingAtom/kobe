@@ -61,6 +61,7 @@ describe("GET /v1/threads/{id}/markers", () => {
       approvals: [],
       skills: [],
       projects: [],
+      agents: [],
       truncated: false,
     });
 

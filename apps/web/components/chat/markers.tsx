@@ -7,6 +7,7 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import {
+  BotIcon,
   CircleStopIcon,
   CircleXIcon,
   CpuIcon,
@@ -32,7 +33,8 @@ import {
 } from "react";
 import {
   approvalKey,
-  placeProjectMarkers,
+  placePromptMarkers,
+  type AgentMarker,
   placeRunMarkers,
   runToolKey,
   type ApprovalMarker,
@@ -58,6 +60,8 @@ interface MarkerData {
   readonly runsAt: ReadonlyMap<string, readonly RunMarker[]>;
   /** Project moves (CE19, KOBE-220) above the prompt of the run they mark, by message id. */
   readonly projectsAt: ReadonlyMap<string, readonly ProjectMarker[]>;
+  /** Agent version switches (U8, KOBE-420), placed like project moves. */
+  readonly agentsAt: ReadonlyMap<string, readonly AgentMarker[]>;
   /** By {@link approvalKey}: tool call ids are only unique within a run. */
   readonly approvals: ReadonlyMap<string, ApprovalMarker>;
   /** Skill uses (KOBE-297) by {@link approvalKey}, and by {@link runToolKey} for the live run. */
@@ -67,11 +71,13 @@ interface MarkerData {
 
 const NO_RUNS: ReadonlyMap<string, readonly RunMarker[]> = new Map();
 const NO_MOVES: ReadonlyMap<string, readonly ProjectMarker[]> = new Map();
+const NO_SWITCHES: ReadonlyMap<string, readonly AgentMarker[]> = new Map();
 const NO_APPROVALS: ReadonlyMap<string, ApprovalMarker> = new Map();
 const NO_SKILLS: ReadonlyMap<string, SkillMarker> = new Map();
 const MarkersContext = createContext<MarkerData>({
   runsAt: NO_RUNS,
   projectsAt: NO_MOVES,
+  agentsAt: NO_SWITCHES,
   approvals: NO_APPROVALS,
   skills: NO_SKILLS,
   skillsByRun: NO_SKILLS,
@@ -187,9 +193,16 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
   const moves =
     markers?.projects === undefined || !projection
       ? NO_MOVES
-      : placeProjectMarkers(markers.projects, projection);
+      : placePromptMarkers(markers.projects, projection);
   if (!samePlacement(movesPlaced.current, moves)) movesPlaced.current = moves;
   const projectsAt = movesPlaced.current;
+  const switchesPlaced = useRef(NO_SWITCHES);
+  const switches =
+    markers?.agents === undefined || !projection
+      ? NO_SWITCHES
+      : placePromptMarkers(markers.agents, projection);
+  if (!samePlacement(switchesPlaced.current, switches)) switchesPlaced.current = switches;
+  const agentsAt = switchesPlaced.current;
   const skills = useMemo(
     () =>
       new Map((markers?.skills ?? []).map((m) => [approvalKey(m.userEntryId, m.toolCallId), m])),
@@ -200,8 +213,8 @@ export function ThreadMarkersProvider({ children }: { readonly children: ReactNo
     [markers],
   );
   const value = useMemo(
-    () => ({ runsAt, projectsAt, approvals, skills, skillsByRun }),
-    [runsAt, projectsAt, approvals, skills, skillsByRun],
+    () => ({ runsAt, projectsAt, agentsAt, approvals, skills, skillsByRun }),
+    [runsAt, projectsAt, agentsAt, approvals, skills, skillsByRun],
   );
   return <MarkersContext.Provider value={value}>{children}</MarkersContext.Provider>;
 }
@@ -315,6 +328,16 @@ function ProjectMoveRow({ move }: { readonly move: ProjectMarker }) {
         </>
       )}
       <span>· its instructions apply from here</span>
+    </MarkerRow>
+  );
+}
+
+/** "Switched to v3 · from v1": the agent works as that version from this message on (U8). */
+function AgentSwitchRow({ change }: { readonly change: AgentMarker }) {
+  return (
+    <MarkerRow kind="agent" icon={BotIcon}>
+      Switched to <span className="text-foreground font-medium">v{change.toVersion}</span>{" "}
+      <span>· from v{change.fromVersion}</span>
     </MarkerRow>
   );
 }
@@ -442,12 +465,16 @@ export function MessageMarkers({
   const data = useContext(MarkersContext);
   const runs = data.runsAt.get(id);
   const moves = place === "before" ? data.projectsAt.get(id) : undefined;
+  const switches = place === "before" ? data.agentsAt.get(id) : undefined;
   const entries = place === "before" ? meta?.before : meta?.after;
   return (
     <div className={cn("flex flex-col gap-1 empty:hidden", className)}>
       {place === "before" && <ForkMarker />}
       {moves?.map((move) => (
         <ProjectMoveRow key={move.runId} move={move} />
+      ))}
+      {switches?.map((change) => (
+        <AgentSwitchRow key={change.runId} change={change} />
       ))}
       {place === "after" && runs?.map((run) => <RunMarkerRow key={run.runId} run={run} />)}
       {entries?.map((marker) => (

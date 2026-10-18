@@ -13,6 +13,7 @@ import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { projectMarkers, projectMarkerSchema } from "../threads/project-moves.js";
+import { agentMarkers, agentMarkerSchema } from "../threads/agent-switches.js";
 
 /** Most rows of each kind one answer carries (newest kept; a thread rarely has more). */
 export const MAX_MARKERS = 500;
@@ -61,6 +62,11 @@ export const threadMarkersSchema = z.strictObject({
    * project's context applies from there. At most one per run, at most 20.
    */
   projects: z.array(projectMarkerSchema),
+  /**
+   * Switches to another version of the thread's agent (U8, KOBE-420), each on the first run that
+   * started after it: that version applies from there. At most one per run, at most 50.
+   */
+  agents: z.array(agentMarkerSchema),
   /** True when a list held more than {@link MAX_MARKERS}: only the newest are returned. */
   truncated: z.boolean(),
 });
@@ -178,7 +184,8 @@ async function skillMarkers(tx: KobeTx, teamId: string, threadId: string) {
  * the entry tree doesn't hold: runs that ended `interrupted` or `budget_stopped`, or that started
  * and were stopped (`cancelled`) or failed (KOBE-290), decided
  * approvals (outcome and cause only, never the checked input or reasons), and the skills its runs
- * used (KOBE-297, to everyone who sees the thread, like the tool calls themselves). Newest 500 of each,
+ * used (KOBE-297, to everyone who sees the thread, like the tool calls themselves), its moves to
+ * another project (KOBE-220) and switches of its agent version (KOBE-420). Newest 500 of each,
  * oldest first; `truncated` says older ones were left out. Visible like the thread
  * (`findThread`); approvals only to the run's user, as `GET /v1/approvals` (a reader of a shared
  * thread gets none). Team-scoped under RLS. Reads Postgres only; never wakes a sandbox.
@@ -205,6 +212,7 @@ export function threadMarkerRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
         approvals: approvals.approvals,
         skills: skills.skills,
         projects: await projectMarkers(tx, viewer, threadId),
+        agents: await agentMarkers(tx, teamId, threadId),
         truncated: runs.truncated || approvals.truncated || skills.truncated,
       } satisfies ThreadMarkers;
     });

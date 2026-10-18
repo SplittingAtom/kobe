@@ -3366,7 +3366,7 @@
       "get": {
         "operationId": "listThreadMarkers",
         "summary": "How the thread's runs ended and how its approvals were decided",
-        "description": "What the chat marks inline that the entry tree does not hold: runs that ended `interrupted` or `budget_stopped`, runs that started and were stopped (`cancelled`) or `failed` (with the server's message), and decided approvals (outcome and cause only). Newest 500 of each, oldest first; `truncated` says older ones were left out. Visible like the thread; approvals only to the run's user (a reader of a shared thread gets none). Reads Postgres only.",
+        "description": "What the chat marks inline that the entry tree does not hold: runs that ended `interrupted` or `budget_stopped`, runs that started and were stopped (`cancelled`) or `failed` (with the server's message), decided approvals (outcome and cause only), skills used, moves to another project and switches of the agent version (each on the first run after it). Newest 500 of each, oldest first; `truncated` says older ones were left out. Visible like the thread; approvals only to the run's user (a reader of a shared thread gets none). Reads Postgres only.",
         "parameters": [
           {
             "name": "id",
@@ -7940,11 +7940,74 @@
               "additionalProperties": false
             }
           },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "user_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "parent_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "from_version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "to_version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "run_id",
+                "user_entry_id",
+                "parent_entry_id",
+                "from_version",
+                "to_version"
+              ],
+              "additionalProperties": false
+            }
+          },
           "truncated": {
             "type": "boolean"
           }
         },
-        "required": ["runs", "approvals", "skills", "projects", "truncated"],
+        "required": ["runs", "approvals", "skills", "projects", "agents", "truncated"],
         "additionalProperties": false
       },
       "CompactThreadRequest": {
