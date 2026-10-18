@@ -340,9 +340,13 @@ export function Composer({
             ) : dictation.listening ? (
               "Listening… speak your prompt, then press the mic again to stop"
             ) : running ? (
-              "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
+              // Key hints stay on one line (ellipsized on a phone), so the row never grows as a run
+              // starts; statuses and errors above still wrap.
+              <span className="block truncate">
+                Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line
+              </span>
             ) : (
-              "Enter sends · Shift+Enter new line"
+              <span className="block truncate">Enter sends · Shift+Enter new line</span>
             )}
           </p>,
         )}

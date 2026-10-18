@@ -1,7 +1,16 @@
 "use client";
 
 import { useAuiState } from "@assistant-ui/react";
-import { useCallback, useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { useShellBand } from "../shell/shell-band";
@@ -18,16 +27,20 @@ import { ModelSelects, useModelPicker, type ModelPickerData } from "./model-pick
  */
 export const FOLD_SELECTORS_BELOW_PX = 640;
 
+/** Before paint in the browser; a plain effect on the server, where there is nothing to measure. */
+const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 /**
  * Whether the composer is too narrow for its selectors (KOBE-418): on a phone (the one-column
  * band) or when its panel is narrower than `FOLD_SELECTORS_BELOW_PX`, as beside the rail and an
- * artifact column. Measured on mount, on resize of the panel and of the window; a panel with no
- * layout yet (width 0) counts as wide.
+ * artifact column. Measured before the first paint (so a narrow composer never shows them inline
+ * first), then on resize of the panel and of the window; a panel with no layout yet (width 0)
+ * counts as wide.
  */
 export function useFoldedSelectors(panel: HTMLElement | null): boolean {
   const single = useShellBand() === "single";
   const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
+  useBeforePaint(() => {
     if (!panel) return;
     const measure = () => {
       const width = panel.getBoundingClientRect().width;
@@ -69,7 +82,9 @@ function useDismissOutside(root: HTMLElement | null, open: boolean, close: () =>
 /**
  * The folded selectors' menu: one "Agent and model" button and, above the toolbar, the pickers.
  * The pickers stay mounted while it is closed (hidden), so `/model` keeps its binding and nothing
- * remounts when the composer crosses the fold.
+ * remounts when the composer crosses the fold. Closed, it is `display: none` inline: the chat has
+ * no preflight `[hidden]` rule, and a display utility would beat the browser's own. It closes on
+ * Escape, on a press outside and when the focus leaves it (not into the agent popover).
  */
 function SelectorsMenu({
   folded,
@@ -94,12 +109,19 @@ function SelectorsMenu({
     setOpen(false);
     root?.querySelector<HTMLElement>('[data-command="conversation-settings"]')?.focus();
   };
+  const onBlur = (e: FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+    if (!open || !next || e.currentTarget.contains(next) || next.closest(CHAT_PORTALLED)) return;
+    setOpen(false);
+  };
+  const closed = folded && !open;
   return (
     <div
       ref={setRoot}
       data-composer-selectors={folded ? "folded" : "inline"}
       className={cn("relative flex min-w-0 items-center", !folded && "flex-1")}
       onKeyDown={folded ? onKeyDown : undefined}
+      onBlur={folded ? onBlur : undefined}
     >
       {folded && (
         <IconAction
@@ -115,11 +137,14 @@ function SelectorsMenu({
         id={id}
         role={folded ? "group" : undefined}
         aria-label={folded ? "Agent and model" : undefined}
-        hidden={folded && !open}
+        hidden={closed}
+        style={closed ? { display: "none" } : undefined}
         className={
-          folded
-            ? "bg-background absolute start-0 bottom-full z-30 mb-2 flex w-max max-w-[calc(100vw-2rem)] flex-col items-start gap-2 rounded-lg border p-2 shadow-md"
-            : "flex min-w-0 flex-1 items-center gap-1.5"
+          closed
+            ? undefined
+            : folded
+              ? "bg-background absolute start-0 bottom-full z-30 mb-2 flex w-max max-w-[calc(100vw-2rem)] flex-col items-start gap-2 rounded-lg border p-2 shadow-md"
+              : "flex min-w-0 flex-1 items-center gap-1.5"
         }
       >
         {children}

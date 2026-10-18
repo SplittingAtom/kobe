@@ -16,9 +16,10 @@ export function isReadOnlyThread(extras: KobeThreadExtras | null | undefined): b
 
 /**
  * The sharing side of a thread (D23, CE20): for a reader the read-only banner naming who shared it
- * and the thread's agent (KOBE-418: its composer has no selectors), with Fork; for its owner a share-with-the-project switch on a project thread, or, while it is
- * shared with the team, a note with Make private (the row menu's Share sets every scope). Plain
- * text only. The server decides every call; a refusal shows.
+ * and the thread's agent (KOBE-418: its composer has no selectors), with Fork; for its owner a
+ * share-with-the-project switch on a project thread, or, while it is shared with the team, a note
+ * with Make private (the row menu's Share sets every scope). Plain text only. The server decides
+ * every call; a refusal shows.
  */
 export function ProjectBar({
   extras,

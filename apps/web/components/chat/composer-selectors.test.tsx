@@ -161,8 +161,17 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
     const button = await within(bar).findByRole("button", { name: "Agent and model" }, WAIT);
     expect(button.getAttribute("aria-expanded")).toBe("false");
     const menu = must(document.getElementById(must(button.getAttribute("aria-controls"))));
-    // Folded, the pickers stay mounted (their `/model` binding too), hidden in the menu.
+    // Folded, the pickers stay mounted (their `/model` binding too), hidden in the menu: not
+    // displayed (the chat has no preflight `[hidden]` rule) and out of the accessibility tree.
     expect(menu.hidden).toBe(true);
+    // happy-dom loads no Tailwind, so check what wins in a browser too: an inline display:none,
+    // and no display utility class that would beat the browser's own `[hidden]` rule.
+    expect(menu.style.display).toBe("none");
+    expect(menu.className).not.toMatch(/\b(flex|block|grid)\b/);
+    expect(getComputedStyle(menu).display).toBe("none");
+    expect(
+      within(menu).queryByRole("combobox", { name: "Model for this conversation" }),
+    ).toBeNull();
     expect(
       await within(menu).findByRole("combobox", {
         name: "Model for this conversation",
@@ -175,6 +184,7 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
     expect(menu.hidden).toBe(false);
+    expect(getComputedStyle(menu).display).not.toBe("none");
     expect(within(menu).getByRole("button", { name: "Chat with: No agent" })).toBeTruthy();
     await user.selectOptions(
       within(menu).getByRole("combobox", { name: "Model for this conversation" }),
@@ -187,7 +197,22 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
     within(menu).getByRole("combobox", { name: "Model for this conversation" }).focus();
     await user.keyboard("{Escape}");
     expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(getComputedStyle(menu).display).toBe("none");
     expect(document.activeElement).toBe(button);
+  });
+
+  it("closes when the focus leaves the menu, not when it moves inside it", async () => {
+    resizeWindow(390);
+    openApp(fake);
+    const user = userEvent.setup();
+    const button = await screen.findByRole("button", { name: "Agent and model" }, WAIT);
+    await user.click(button);
+    const menu = must(document.getElementById(must(button.getAttribute("aria-controls"))));
+    act(() => within(menu).getByRole("combobox", { name: "Model for this conversation" }).focus());
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    act(() => document.getElementById("kobe-composer")?.focus());
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(getComputedStyle(menu).display).toBe("none");
   });
 
   it("a press outside closes the menu; the agent's popover inside it does not", async () => {

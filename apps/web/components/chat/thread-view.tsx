@@ -153,9 +153,12 @@ function LoadingSkeleton() {
 function MessagesAndComposer({
   extras,
   welcome,
+  inShell,
 }: {
   readonly extras: KobeThreadExtras;
   readonly welcome: boolean;
+  /** The chat shell shows the context gauge under the composer; the builder's test pane not. */
+  readonly inShell: boolean;
 }) {
   const { state } = extras;
   const starters = useAgentStarters(extras);
@@ -212,7 +215,10 @@ function MessagesAndComposer({
         {follow === "unpinned" && hasMessages && <JumpToLatest key={state.threadId ?? ""} />}
       </div>
       <div data-kobe-composer className={cn("bg-background shrink-0", welcome && "flex-1")}>
-        <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6">
+        <div
+          data-kobe-composer-column
+          className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6"
+        >
           {/* Long notices scroll on their own, so they never push the composer away. */}
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
             <RunNotices extras={extras} />
@@ -222,7 +228,7 @@ function MessagesAndComposer({
             {/* The overlay sheet at 768–820 px ends above this box (KOBE-269, chat-global.css). */}
             <div className="flex flex-col" data-kobe-composer-box>
               <SteeringPanel extras={extras} />
-              <Composer extras={extras} footer={<ComposerGauge />} />
+              <Composer extras={extras} footer={inShell ? <ComposerGauge /> : undefined} />
             </div>
           </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
@@ -291,7 +297,7 @@ export function ThreadView({
         <ThreadCommands extras={extras} />
         <CompactNowProvider extras={extras} enabled={inShell}>
           <ThreadPrimitive.ViewportProvider>
-            <MessagesAndComposer extras={extras} welcome={welcome} />
+            <MessagesAndComposer extras={extras} welcome={welcome} inShell={inShell} />
           </ThreadPrimitive.ViewportProvider>
         </CompactNowProvider>
       </OpenThreadContext.Provider>

@@ -32,7 +32,10 @@ test("steering panel: queue, keyboard reorder, pause and resume, delete, stop", 
   const queue = chat.toolbar.getByRole("button", { name: "Queue", exact: true });
   const model = chat.toolbar.getByRole("combobox", { name: "Model for this conversation" });
   const [q, m] = [await queue.boundingBox(), await model.boundingBox()];
-  if (q && m) expect(Math.abs(q.y + q.height / 2 - (m.y + m.height / 2))).toBeLessThanOrEqual(4);
+  expect(q).not.toBeNull();
+  expect(m).not.toBeNull();
+  const mid = (b: { y: number; height: number } | null) => (b ? b.y + b.height / 2 : NaN);
+  expect(Math.abs(mid(q) - mid(m))).toBeLessThanOrEqual(4);
   await expect(button("Stop")).toBeVisible();
 
   // Messages sent while the run holds the thread queue as chips, in send order.

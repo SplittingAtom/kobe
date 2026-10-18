@@ -56,6 +56,20 @@
 - The read-only shared-thread banner names the thread's agent (`AgentChips`, with Suspended or
   Archived), since that composer has no selectors (`thread-share.test.tsx`).
 
+## Review fixes (review-418, 2026-10-18)
+
+- B1: the folded menu is `display: none` inline while closed (the chat has no preflight `[hidden]`
+  rule, so its `flex` class kept it on screen). Unit test checks the inline style and the absence
+  of display classes; `chat-layout.spec.ts` checks it is hidden at 390 px before opening and after
+  Escape.
+- S1: `opensAsBlock` matches assistant-ui's converted `{ type: "data", name }` parts (stored step,
+  compaction marker); tests for both.
+- S2: the action-bar e2e asks for a tool step; the width e2e has a lower bound at 1920 px.
+- S3: the fold is measured in a layout effect, before paint.
+- Nits: the menu closes when focus leaves it; the gauge shows in the shell only (not the builder
+  pane, as before); key hints stay on one line under the composer; comment wraps; the steering
+  spec asserts its boxes. Not done: a Trash thread still names no agent (minor, left as is).
+
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `composer-selectors.test.tsx` (no row two, no Files), `shell.test.tsx`,

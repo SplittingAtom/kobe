@@ -10,7 +10,11 @@ import { expect, test } from "./support/chat.js";
  * evidence). Spends one short model turn.
  */
 const PROMPT = "No tools. Reply with one short sentence about lighthouses.";
+/** A turn with a tool step, so the answer has blocks to open (Show details shows only then). */
+const TOOL_PROMPT = "Use the bash tool to run `echo kobe-418`, then reply with the single word OK.";
 const COLUMN_MAX_PX = 1280;
+/** At 1920 px the column is 80rem less its padding: far wider than the old 44rem (704 px). */
+const COLUMN_MIN_AT_1920_PX = 1200;
 const PHONE = { width: 390, height: 844 } as const;
 
 /** Screenshots of `target` in both themes, attached to the report. */
@@ -100,7 +104,7 @@ test("an answer's action bar: Show details beside Fork, Compact now beside thumb
   page,
 }) => {
   await chat.open();
-  await chat.ask(PROMPT);
+  await chat.ask(TOOL_PROMPT);
   const answer = chat.answers.last();
   await answer.hover();
   const details = answer.getByRole("button", { name: "Show details", exact: true });
@@ -124,16 +128,22 @@ test("a phone: the selectors fold into one menu on one toolbar line (ac-2)", asy
   const toolbar = chat.toolbar;
   const menu = toolbar.getByRole("button", { name: "Agent and model", exact: true });
   await expect(menu).toBeVisible();
+  const panel = page.getByRole("group", { name: "Agent and model", exact: true });
+  // Closed until opened: really not shown (KOBE-418 review B1), not only `hidden` in the DOM.
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(`[id="${await menu.getAttribute("aria-controls")}"]`)).toBeHidden();
   await expectOneLine(toolbar);
   await expectSendInside(page);
   await noPageScrollX(page);
   await shoot(page, "composer-phone", page.locator("[data-kobe-composer]"));
   await menu.click();
-  const panel = page.getByRole("group", { name: "Agent and model", exact: true });
+  await expect(panel).toBeVisible();
   await expect(panel.getByRole("combobox", { name: "Model for this conversation" })).toBeVisible();
   await shoot(page, "composer-phone-menu", page.locator("[data-kobe-composer]"));
+  await panel.getByRole("combobox", { name: "Model for this conversation" }).focus();
   await page.keyboard.press("Escape");
   await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(panel).toBeHidden();
 
   await chat.ask(PROMPT);
   await expect(chat.compactNow).toBeVisible();
@@ -148,12 +158,13 @@ test("the conversation column is up to 80rem wide and centred, without page scro
   await chat.ask(PROMPT);
   for (const width of [1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
-    const composer = await page.locator("[data-kobe-composer] > div").first().boundingBox();
+    const composer = await page.locator("[data-kobe-composer-column]").boundingBox();
     const main = await page.locator("#kobe-chat-main").boundingBox();
     expect(composer).not.toBeNull();
     expect(main).not.toBeNull();
     if (composer && main) {
       expect(composer.width).toBeLessThanOrEqual(COLUMN_MAX_PX + 1);
+      if (width === 1920) expect(composer.width).toBeGreaterThan(COLUMN_MIN_AT_1920_PX);
       // Centred in the conversation's column.
       const left = composer.x - main.x;
       const right = main.x + main.width - (composer.x + composer.width);

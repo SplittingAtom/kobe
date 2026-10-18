@@ -105,9 +105,10 @@ function counterOf(models: readonly TeamModel[], size: ContextSize): TeamModel |
 }
 
 /**
- * The open thread's gauge, at the end of the row under the composer (KOBE-418). The value is the newest model call's prompt: run_usage on
- * load and after each run, each streamed assistant message during one; unknown (no gauge) before
- * the first call and after a compaction until the next. The scale is the model the thread runs
+ * The open thread's gauge, at the end of the row under the composer (KOBE-418). The value is the
+ * newest model call's prompt: run_usage on load and after each run, each streamed assistant
+ * message during one; unknown (no gauge) before the first call and after a compaction until the
+ * next. The scale is the model the thread runs
  * with next (the agent's pin, the thread's choice, else the team default), so a model change
  * re-scales the same fill; when another model counted the tokens, the text says which.
  */

@@ -67,6 +67,58 @@ const toggleOf = (root: HTMLElement) => within(root).getByRole("button", { name:
 const toggleAll = () => pressModShift("D");
 
 describe("Show details per answer (KOBE-418 ac-3)", { timeout: 30_000 }, () => {
+  it("is offered on an answer whose only block is a stored step", async () => {
+    const t = fake.addThread("Stored");
+    const q = fake.addEntry(t, null, { role: "user", content: "Dump it" });
+    const stored = fake.addEntry(
+      t,
+      q,
+      { role: "assistant", content: [{ type: "text", text: "a very long body" }] },
+      { offloaded: true },
+    );
+    fake.addEntry(t, stored, { role: "assistant", content: [{ type: "text", text: "Stored." }] });
+    openApp(fake, t);
+    const answer = await answerOf("Stored.");
+    expect(within(answer).getByRole("button", { name: /stored separately/ })).toBeTruthy();
+    const toggle = toggleOf(answer);
+    await userEvent.setup().click(toggle);
+    expect(expanded(answer)).toEqual(["true"]);
+  });
+
+  it("is offered on an answer whose only block is a compaction marker", async () => {
+    const t = fake.addThread("Compacted");
+    const q = fake.addEntry(t, null, { role: "user", content: "Go on" });
+    const step = fake.addEntry(t, q, {
+      role: "assistant",
+      content: [{ type: "text", text: "Part one." }],
+    });
+    const thread = must(fake.threads.get(t));
+    thread.entries.push({
+      entry_id: "c1",
+      parent_id: step,
+      seq: thread.entries.length + 1,
+      type: "compaction",
+      payload: {
+        type: "compaction",
+        id: "c1",
+        parentId: step,
+        summary: "Earlier.",
+        tokensBefore: 1,
+      },
+      payload_offloaded: false,
+      created_at: "2026-10-14T10:01:00.000Z",
+    });
+    fake.addEntry(t, "c1", { role: "assistant", content: [{ type: "text", text: "Part two." }] });
+    openApp(fake, t);
+    const answer = await answerOf("Part two.");
+    const marker = await waitFor(() =>
+      must(answer.querySelector<HTMLElement>('[data-kobe-marker="compaction"]')),
+    );
+    expect(marker).toBeTruthy();
+    await userEvent.setup().click(toggleOf(answer));
+    expect(expanded(answer)).toEqual(["true"]);
+  });
+
   it("is offered only on answers with something to open, not on plain text", async () => {
     const t = fake.addThread("Mixed");
     const q = fake.addEntry(t, null, { role: "user", content: "Hello" });
