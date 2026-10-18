@@ -96,7 +96,12 @@ steps_for() { # gate story → its steps for that story
 # ---- runs ------------------------------------------------------------------------------------------
 run_gate() { # log steps → runs that gate into $OUT/<log>.log (its exit status is kept in the log)
   local log=$1 steps=$2 rc=0 n=${1#gate}
-  [[ "$log" == restore ]] && return 0 # e2e/gate4-restore.sh is its own run (KOBE-233)
+  if [[ "$log" == restore && "$(${KUBECTL:-kubectl} config current-context)" != k3d-* ]]; then
+    # On a real cluster e2e/gate4-restore.sh is its own run (it needs other Kobe servers stopped):
+    # give its log as KOBE_GATE4_LOGS/restore.log (docs/gates/gate-4.md).
+    echo "==> restore: not run here (e2e/gate4-restore.sh is run on its own on a real cluster)"
+    return 0
+  fi
   echo "==> running $log${steps:+ (steps: $steps)} → $OUT/$log.log"
   local env=(
     "KOBE_GATE${n}_NS=${KOBE_GATE4_NS:-kobe-dev}" "KOBE_GATE${n}_RELEASE=${KOBE_GATE4_RELEASE:-kobe}"
@@ -109,18 +114,21 @@ run_gate() { # log steps → runs that gate into $OUT/<log>.log (its exit status
   [[ -n "$steps" ]] && env+=("KOBE_GATE${n}_STEPS=$steps")
   if [[ "$log" == gate4 ]]; then
     env "${env[@]}" KOBE_GATE4_STORIES="$steps" e2e/gate4/stories.sh >"$OUT/$log.log" 2>&1 || rc=$?
+  elif [[ "$log" == restore ]]; then
+    # k3d: last, because it deletes this cluster and leaves a new one with the restored site.
+    e2e/gate4-restore.sh >"$OUT/$log.log" 2>&1 || rc=$?
   else
     env "${env[@]}" "e2e/$log.sh" >"$OUT/$log.log" 2>&1 || rc=$?
   fi
   echo "     $log exited $rc"
 }
 if [[ "${KOBE_GATE4_VERDICT_ONLY:-0}" != 1 ]]; then
-  for log in gate1 gate2 gate3 gate4; do
+  for log in gate1 gate2 gate3 gate4 restore; do
     [[ -n "$LOGS" && -s "$LOGS/$log.log" ]] && continue
     steps=""
     for s in $STORIES; do
-      if [[ "$log" == gate4 ]]; then
-        printf '%s\n' "${PARTS[@]}" | grep -q "^$s|gate4|" && steps+="$s "
+      if [[ "$log" == gate4 || "$log" == restore ]]; then
+        printf '%s\n' "${PARTS[@]}" | grep -q "^$s|$log|" && steps+="$s "
       else
         steps+="$(steps_for "$log" "$s") "
       fi

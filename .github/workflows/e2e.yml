@@ -10,9 +10,10 @@
 # KOBE-40 model setup, then e2e/gate1.sh), `gate2` (the same install, then e2e/gate2.sh), `gate3`
 # (the same install, then e2e/gate3.sh with its browser checks in Playwright's Chromium) and
 # `gate4` (the same install, then the Gate 4 checks no earlier gate makes, e2e/gate4/stories.sh) and
-# `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/). The
-# gate shards keep their output; the `stories` job then gives one verdict per user story U1-U16
-# from them (e2e/gate4.sh, KOBE-232).
+# `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/) and
+# `restore` (KOBE-233: a timed clean install, `kobe backup`, a new k3d cluster, `kobe restore`;
+# e2e/gate4-restore.sh). The gate shards keep their output; the `stories` job then gives one
+# verdict per user story U1-U16 from them (e2e/gate4.sh, KOBE-232).
 # Branch protection and the merge queue require the check named `k3d`: the last job, which passes
 # only when every image build and every shard passed.
 name: e2e
@@ -169,7 +170,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [suite, cold-start, gate1, gate2, gate3, gate4, executor]
+        shard: [suite, cold-start, gate1, gate2, gate3, gate4, executor, restore]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,10 +183,26 @@ jobs:
           version: v1.34.6
       # KOBE-231: Gate 3's browser checks (e2e/browser/scripts/gate3-browser.mjs) run beside kubectl
       # in Playwright's Chromium, pinned by e2e/browser/package-lock.json.
+      # KOBE-233: the restore shard runs the operator CLI (packages/cli) on the runner, as an operator
+      # would, with PostgreSQL 17 client tools (docs/backup-restore.md, Requirements).
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: matrix.shard == 'restore'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: matrix.shard == 'gate3'
+        if: matrix.shard == 'gate3' || matrix.shard == 'restore'
         with:
           node-version-file: .nvmrc
+          cache: ${{ matrix.shard == 'restore' && 'pnpm' || '' }}
+      - name: The kobe CLI and PostgreSQL 17 client tools
+        if: matrix.shard == 'restore'
+        run: |
+          pnpm install --frozen-lockfile --filter '@kobe/cli...'
+          pnpm --filter '@kobe/cli...' run build
+          if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends postgresql-common
+          fi
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - name: Playwright and Chromium for the browser checks
         if: matrix.shard == 'gate3'
         run: |
@@ -247,8 +264,8 @@ jobs:
         run: |
           ls -lh "${KOBE_IMAGE_ARCHIVES}"
           e2e/load-images.sh kobe "${KOBE_IMAGE_TAG}"
-          # The node now has its own copies.
-          rm -rf "${KOBE_IMAGE_ARCHIVES}"
+          # The node now has its own copies (the restore shard loads them again into its second cluster).
+          if [ "${{ matrix.shard }}" != restore ]; then rm -rf "${KOBE_IMAGE_ARCHIVES}"; fi
       - name: Run the ${{ matrix.shard }} shard
         env:
           KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:${{ env.KOBE_IMAGE_TAG }}
@@ -256,6 +273,9 @@ jobs:
           # The nightly and manual runs also exercise the real ClamAV image (KOBE-146): its image and
           # signature download add minutes and ~1 GiB of memory, so pull requests leave it out.
           KOBE_E2E_CLAMAV: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.shard == 'suite' && '1' || '' }}
+          # The restore shard creates a second cluster (scripts/dev-cluster.sh) and loads the images again.
+          KOBE_DOCKERHUB_MIRROR: ${{ runner.environment == 'github-hosted' && 'https://mirror.gcr.io' || 'http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000' }}
+          KOBE_IMAGE_ARCHIVES: ${{ matrix.shard == 'restore' && format('{0}/e2e-images', runner.temp) || '' }}
         run: |
           # Gate shards keep their output for the stories job (GitHub's bash runs with pipefail).
           logs="${RUNNER_TEMP}/gate-logs"
@@ -280,10 +300,13 @@ jobs:
             # Gate 4 (KOBE-4, KOBE-232): the checks of U1, U2, U5-U8, U11, U14-U16 that Gates 1-3
             # don't make, against a fake OAuth MCP server and the Orbit test model (docs/gates/gate-4.md).
             gate4) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate4/stories.sh 2>&1 | tee "${logs}/gate4.log" ;;
+            # KOBE-233 (U16's backup half, docs/gates/gate-4.md): its own clean install, timed to the
+            # first assistant token; kobe backup; this cluster deleted and a new one created; kobe restore.
+            restore) e2e/gate4-restore.sh 2>&1 | tee "${logs}/restore.log" ;;
             *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
           esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && startsWith(matrix.shard, 'gate') }}
+        if: ${{ !cancelled() && (startsWith(matrix.shard, 'gate') || matrix.shard == 'restore') }}
         with:
           name: gate-log-${{ matrix.shard }}
           path: ${{ runner.temp }}/gate-logs/
@@ -302,6 +325,7 @@ jobs:
           kubectl -n kobe-team-gate2-a describe pods | tail -60 || true
           kubectl -n kobe-team-gate3-a describe pods,pvc | tail -80 || true
           kubectl -n kobe-team-gate4-a describe pods | tail -60 || true
+          kubectl -n kobe-team-gate4-r describe pods,pvc | tail -60 || true
           kubectl -n kobe-gate4-infra get pods -o wide || true
           kubectl -n kobe-gate2-infra get pods -o wide || true
           df -h /
