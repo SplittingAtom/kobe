@@ -237,15 +237,14 @@ restored under new names (`auth.existingSecret`, `envelope.keySecret`, as docs/b
 says), stops its writers and runs `kobe restore --expect-audit-head <source head>` as the owner
 role. (6) Checks the restored site.
 
-**The documented order, then an empty database.** The restore is first tried exactly as
-docs/backup-restore.md orders it: install, stop the writers, `kobe restore`. Read in the code, that
-cannot work today: the server seeds the gallery agents (`site_agents`, with their audit events)
-when it starts (`services/server/src/gallery/seed.ts`), and the restore refuses a target with rows
-outside `packages/cli/src/seeded.ts` ("the target already has data"). That check is an expected
-failure (`XFAIL`, KOBE-233 failure 1; `XPASS` once fixed). The run then empties the target's
-database and migrates it with the chart's own migration Job (`helm template --show-only
-templates/migrate-job.yaml`, the server never started) and restores into that, so every later
-check still runs against a real restore.
+**The documented order.** The restore runs exactly as docs/backup-restore.md orders it: install,
+stop the writers, `kobe restore`. The server's start has already written the gallery agents
+(`site_agents`, their versions and audit events) and the background jobs' bookkeeping
+(`site_settings`); the restore replaces those rows with the backup's and refuses anything else
+(KOBE-422, `packages/db/src/startup-seeds.ts`). Only if that check fails does the run empty the
+target's database, migrate it with the chart's own migration Job (`helm template --show-only
+templates/migrate-job.yaml`, the server never started) and restore into that, so the later checks
+still run against a real restore.
 
 **The checks** (`==> restore:` sections): the backup has its four files and a fingerprint; the
 restore names the same fingerprint, finds every S3 object present and unchanged, and verifies the

@@ -493,12 +493,12 @@ kobe_restore() { # → the CLI's output (docs/backup-restore.md "Restore onto a 
 }
 restore_out=$(kobe_restore)
 sed 's/^/     /' <<<"$restore_out"
-# KOBE-233 product failure 1: the server seeds the gallery agents (site_agents, with audit events)
-# when it starts, so the freshly installed site the docs restore into is not empty any more.
-xcontains "kobe restore accepts the freshly installed site once its writers are stopped (docs steps 2-4)" \
-  "restored backup ${FINGERPRINT:-none}" "$restore_out" \
-  "KOBE-233 failure 1: the server's start seeds rows the restore's empty-target check refuses"
+# The server's start seeds the gallery agents (with their audit events) and the jobs' bookkeeping;
+# the restore replaces those rows (KOBE-422, @kobe/db STARTUP_SEEDED_ROWS) and refuses anything else.
+contains "kobe restore accepts the freshly installed site once its writers are stopped (docs steps 2-4)" \
+  "restored backup ${FINGERPRINT:-none}" "$restore_out"
 if ! grep -q "restored backup ${FINGERPRINT:-none}" <<<"$restore_out"; then
+  # Only after a FAIL above: the later checks still run against a real restore.
   echo "     restoring instead into a new, empty database that the chart's own migration Job migrated (the server never started)"
   if migrated_empty_db; then ok "the target's database is new and migrated by the chart's migration Job"
   else fail "the target's database is new and migrated by the chart's migration Job"; fi

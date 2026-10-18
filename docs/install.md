@@ -491,7 +491,8 @@ helm install kobe charts/kobe -n kobe \
 
 ### First run: to the first chat
 
-`helm install` leaves a site with no users. To get to a first chat:
+`helm install` leaves a site with no users. To get to a first chat (not on a site you are about
+to restore a backup into: see [Backup and restore](#backup-and-restore)):
 
 1. **Create the Owner.** Open `https://<ingress.host>/setup`. The wizard asks for the setup token,
    which proves you control the site:
@@ -809,6 +810,20 @@ EXISTS` an invalid leftover.
 [backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and the
 generated `<release>-auth` and `<release>-envelope-key` Secrets) in your secret store: backups never
 contain them. Losing the envelope key makes every stored credential unreadable.
+
+To recover a site from a backup (full steps in
+[backup-restore.md](backup-restore.md#restore-onto-a-fresh-cluster)):
+
+1. Recreate the auth and envelope Secrets from your secret store under new names.
+2. Install the Kobe version the backup was taken with, pointing `auth.existingSecret` and
+   `envelope.keySecret` at them, with the same public URL and the same bucket (or a copy). **Skip
+   first-run setup** ([First run](#first-run-to-the-first-chat)): the restore refuses a site with
+   users. The server's start seeds the gallery agents; the restore replaces those.
+3. Stop the writers: `kubectl -n kobe scale deploy/kobe-server deploy/kobe-scheduler --replicas=0`.
+4. Run `kobe restore --from <backup>` as the owner role (`KOBE_DB_MIGRATE_URL`), and check the
+   printed fingerprint against the one recorded at backup time.
+5. If the backup is older than the bucket or the cluster, set `retention.paused: true` first; then
+   scale back up. Users sign in again.
 
 ## Local development cluster
 

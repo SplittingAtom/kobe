@@ -221,8 +221,18 @@ recorded fingerprint can.
 
 A restore goes into a **freshly installed Kobe of the same version** (same migrations). It refuses
 a target whose applied migrations differ or that already has data, and it never deletes anything
-except rows a migration seeds into every new site (the egress presets in `egress_domains`,
-listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the same transaction.
+except rows every new site has before anyone signs up, which the backup's rows replace in the same
+transaction:
+
+- rows a migration seeds (the egress presets in `egress_domains` and the others listed in
+  `packages/cli/src/seeded.ts`);
+- rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
+  with their published versions and the system's audit events for seeding them, and where the
+  retention pass and the audit PII sweep stand (`site_settings`). The started site's own audit
+  events go with them: the restored audit chain is the backup's, continued by the restore's event.
+
+Any other row (a user, a personal agent, a person's audit event, a setting) is real data, and the
+restore refuses the target.
 
 1. Recreate the Secrets from your secret store. Give the auth and envelope Secrets new names so
    that Helm does not have to adopt them (the envelope key must be the backed-up value):
@@ -300,7 +310,8 @@ How restore works:
    - lifts `FORCE ROW LEVEL SECURITY` for the owner only (the app role stays bound by RLS);
    - disables user triggers (e.g. the `seq`-assigning triggers on `thread_entries` and
      `run_events`, so the backed-up `seq` values are kept) and defers foreign keys;
-   - re-checks the migrations and that the target is empty;
+   - re-checks the migrations and that the target holds no data but the seeded rows above, then
+     deletes those;
    - loads the data and verifies every table's row count against the manifest;
    - restores the triggers and FORCE RLS;
    - verifies the restored audit hash chain, that it ends at the head the signed manifest

@@ -49,9 +49,8 @@ docs/gates/gate-4.md ("Backup → fresh site → restore", "Clean install timing
    writers → restore, and the chart's schema forbids installing with 0 server replicas, so the
    documented procedure cannot succeed. Check: `kobe restore accepts the freshly installed site
 once its writers are stopped`, XFAIL in `e2e/gate4-restore.sh` (CI stays green; the run goes on
-   with an empty, chart-migrated database). Fix options: let the restore replace seeded gallery
-   rows (and their audit events) like `SEEDED_TABLES`, or seed the gallery in a migration, or
-   document a supported way to migrate without starting the server.
+   with an empty, chart-migrated database). **Fixed** by KOBE-422 on this branch: the restore
+   replaces startup-seeded rows (docs/ledger/KOBE-422.md); the check is an ordinary one again.
 2. **Skill bundle keys are not blob refs:** `team_skill_versions.storage_key` and
    `site_skill_versions.storage_key` hold object keys but are not in `BLOB_REF_COLUMNS`
    (`packages/db/src/blob-refs.ts`), so `kobe backup`'s "every referenced key is in the listing"
