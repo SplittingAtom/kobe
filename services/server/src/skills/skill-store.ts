@@ -1,8 +1,11 @@
 import type { Readable } from "node:stream";
+import { unzipSync } from "fflate";
+import { parse as parseYaml } from "yaml";
+import { MANIFEST_PATH, MANIFEST_YAML_OPTIONS } from "@kobe/protocol";
 import type { ScanResult } from "@kobe/skill-scanner";
 import {
   and,
-  asc,
+  desc,
   eq,
   isNotNull,
   personalSkills,
@@ -15,7 +18,7 @@ import {
 } from "@kobe/db";
 import type { BlobStore } from "../retention/blobs.js";
 import { openVerified, readVerified } from "./blob-read.js";
-import { legacyProblems } from "./hash-checks.js";
+import { checkStoredZip, hashOutcome } from "./hash-checks.js";
 import { locateBundle, type BundleCaller } from "./materialize.js";
 import { decideReview, type DecideResult } from "./review.js";
 import { discardAttemptBundle, putSkillBundle, sha256Hex, skillBundleKey } from "./storage.js";
@@ -68,8 +71,9 @@ export interface SkillStore {
   ): Promise<DecideResult>;
   /**
    * The packages of a skill's versions with seq in `range` (both ends inclusive, oldest first),
-   * for promotion and export (SK19, SK30). Legacy versions (refused by today's path rules) come
-   * back without bytes: they are not exportable until re-saved.
+   * for promotion and export (SK19, SK30). Legacy versions come back without bytes: they are not
+   * exportable until re-saved. A version whose hash was not checked yet is checked here first
+   * (never assumed clean). The blocklist is not consulted: callers check `runtimeHash` themselves.
    */
   export(
     location: SkillLocation,
@@ -108,8 +112,18 @@ export type SandboxBundle =
   | { readonly ok: true; readonly body: Readable; readonly size: number }
   | { readonly ok: false; readonly error: "not_found" | "unavailable" };
 
+/**
+ * One exported version. `runtimeHash` is its identity under the package contract (for a version
+ * stored before KOBE-310 with `evals/`, not its `contentHash`): promotion and the catalog use it.
+ * `legacy` lists why a version can't leave until re-saved: today's path rules, an invalid SKILL.md
+ * or `kobe.skill.yaml`, or a manifest whose version is not the version's semver.
+ */
 export type ExportedVersion =
-  | { readonly version: SkillVersionRecord; readonly bytes: Uint8Array }
+  | {
+      readonly version: SkillVersionRecord;
+      readonly runtimeHash: string;
+      readonly bytes: Uint8Array;
+    }
   | { readonly version: SkillVersionRecord; readonly legacy: readonly string[] };
 
 /** The only implementation: Postgres records, object-store bytes. */
@@ -133,10 +147,20 @@ export class PostgresSkillStore implements SkillStore {
       return key;
     };
     const discard = () => Promise.all(written.map((k) => discardAttemptBundle(this.blobs, k)));
+    // Reuse only an object that is still there and still these bytes: re-uploading repairs a
+    // version whose object was lost or damaged.
+    const intact = async (candidates: readonly Candidate[], hash: string) => {
+      for (const c of candidates)
+        if ((await readVerified(this.blobs, c.key, hash, c.size).catch(() => null)) !== null)
+          return c.key;
+      return null;
+    };
     try {
-      const storageKey = existing.runtime ?? (await write(bundle.zip, contentHash));
+      const storageKey =
+        (await intact(existing.runtime, contentHash)) ?? (await write(bundle.zip, contentHash));
       const packageStorageKey = bundle.packageZip
-        ? (existing.package ?? (await write(bundle.packageZip, bundle.packageHash)))
+        ? ((await intact(existing.package, bundle.packageHash)) ??
+          (await write(bundle.packageZip, bundle.packageHash)))
         : null;
       const result = await uploadSkillVersion(this.db, location, {
         slug: bundle.name,
@@ -164,8 +188,18 @@ export class PostgresSkillStore implements SkillStore {
   }
 
   async getPackage(location: SkillLocation, hash: string): Promise<Uint8Array | null> {
-    const found = await this.inLocation(location, (tx) => findByHash(tx, location, hash));
-    return found ? readVerified(this.blobs, found.key, hash, found.size) : null;
+    const candidates = await this.inLocation(location, (tx) => candidatesFor(tx, location, hash));
+    let failure: unknown = null;
+    for (const c of candidates) {
+      try {
+        const bytes = await readVerified(this.blobs, c.key, hash, c.size);
+        if (bytes) return bytes;
+      } catch (err) {
+        failure = err;
+      }
+    }
+    if (failure) throw failure;
+    return null;
   }
 
   listVersions(location: SkillLocation, skillId: string): Promise<SkillVersionRecord[]> {
@@ -216,26 +250,31 @@ export class PostgresSkillStore implements SkillStore {
       .filter((v) => (range.fromSeq ?? 1) <= v.seq && v.seq <= (range.toSeq ?? Infinity))
       .reverse();
     const out: ExportedVersion[] = [];
-    for (const version of versions) {
-      const legacy = await this.db.transaction((tx) => legacyProblems(tx, version.contentHash));
-      if (legacy) {
-        out.push({ version, legacy });
-        continue;
-      }
-      // A version stored before KOBE-310 has one zip, the whole (valid) package: its hash is
-      // its content hash. Later ones keep the package zip apart when it differs.
-      const bytes = version.packageStorageKey
-        ? await readVerified(this.blobs, version.packageStorageKey, version.packageHash ?? "", null)
-        : await readVerified(
-            this.blobs,
-            version.storageKey,
-            version.contentHash,
-            version.sizeBytes,
-          );
-      if (!bytes) throw new Error(`skills: stored package of ${version.contentHash} is missing`);
-      out.push({ version, bytes });
-    }
+    for (const version of versions) out.push(await this.exportOne(version));
     return out;
+  }
+
+  private async exportOne(version: SkillVersionRecord): Promise<ExportedVersion> {
+    const stored = () =>
+      readVerified(this.blobs, version.storageKey, version.contentHash, version.sizeBytes);
+    let outcome = await this.db.transaction((tx) => hashOutcome(tx, version.contentHash));
+    if (!outcome) {
+      const zip = await stored();
+      if (!zip) throw new Error(`skills: stored bundle of ${version.contentHash} is missing`);
+      outcome = await checkStoredZip(this.db, version.contentHash, zip);
+    }
+    if (outcome.runtimeHash === null) return { version, legacy: outcome.problems };
+    // A version stored before KOBE-310 has one zip, the whole package: its hash is its content
+    // hash. Later ones keep the package zip apart when it differs.
+    const bytes =
+      version.packageStorageKey && version.packageHash
+        ? await readVerified(this.blobs, version.packageStorageKey, version.packageHash, null)
+        : await stored();
+    if (!bytes) throw new Error(`skills: stored package of ${version.contentHash} is missing`);
+    const manifest = unzipSync(bytes, { filter: (f) => f.name === MANIFEST_PATH })[MANIFEST_PATH];
+    if (manifest && !manifestNumbers(manifest, version.semver))
+      return { version, legacy: ["manifest_version_mismatch"] };
+    return { version, runtimeHash: outcome.runtimeHash, bytes };
   }
 
   private inLocation<T>(location: SkillLocation, fn: (tx: KobeTx) => Promise<T>): Promise<T> {
@@ -245,85 +284,116 @@ export class PostgresSkillStore implements SkillStore {
   }
 }
 
-/** Keys already holding these bytes in this location (deduplication by hash). */
+interface Candidate {
+  readonly key: string;
+  /** Null for a package zip (its row records only its hash). */
+  readonly size: number | null;
+}
+
+/** Keys already holding these bytes in this location (deduplication by hash), newest first. */
 async function storedKeys(
   tx: KobeTx,
   location: SkillLocation,
   contentHash: string,
   packageHash: string,
-): Promise<{ runtime?: string; package?: string }> {
-  const runtime = await findByHash(tx, location, contentHash);
-  const pkg = packageHash === contentHash ? null : await findPackageKey(tx, location, packageHash);
+): Promise<{ runtime: Candidate[]; package: Candidate[] }> {
   return {
-    ...(runtime ? { runtime: runtime.key } : {}),
-    ...(pkg ? { package: pkg } : {}),
+    runtime: await runtimeCandidates(tx, location, contentHash),
+    package: packageHash === contentHash ? [] : await packageCandidates(tx, location, packageHash),
   };
 }
 
-async function findByHash(
-  tx: KobeTx,
-  location: SkillLocation,
-  hash: string,
-): Promise<{ key: string; size: number | null } | null> {
-  if (location.scope === "team") {
-    const [runtime] = await tx
-      .select({ key: teamSkillVersions.storageKey, size: teamSkillVersions.sizeBytes })
-      .from(teamSkillVersions)
-      .where(
-        and(eq(teamSkillVersions.teamId, location.teamId), eq(teamSkillVersions.contentHash, hash)),
-      )
-      .limit(1);
-    if (runtime) return runtime;
-  } else {
-    const [runtime] = await tx
-      .select({ key: personalSkillVersions.storageKey, size: personalSkillVersions.sizeBytes })
-      .from(personalSkillVersions)
-      .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
-      .where(
-        and(
-          eq(personalSkills.ownerUserId, location.ownerUserId),
-          eq(personalSkillVersions.contentHash, hash),
-        ),
-      )
-      .limit(1);
-    if (runtime) return runtime;
-  }
-  const key = await findPackageKey(tx, location, hash);
-  return key ? { key, size: null } : null;
+/** Every distinct key in `location` that should hold the bytes of `hash`, newest first. */
+async function candidatesFor(tx: KobeTx, location: SkillLocation, hash: string) {
+  return [
+    ...(await runtimeCandidates(tx, location, hash)),
+    ...(await packageCandidates(tx, location, hash)),
+  ];
 }
 
-async function findPackageKey(
+const distinct = (rows: readonly Candidate[]): Candidate[] => {
+  const seen = new Set<string>();
+  return rows.filter((r) => !seen.has(r.key) && seen.add(r.key));
+};
+
+async function runtimeCandidates(
   tx: KobeTx,
   location: SkillLocation,
   hash: string,
-): Promise<string | null> {
-  if (location.scope === "team") {
-    const [row] = await tx
-      .select({ key: teamSkillVersions.packageStorageKey })
-      .from(teamSkillVersions)
-      .where(
-        and(
-          eq(teamSkillVersions.teamId, location.teamId),
-          eq(teamSkillVersions.packageHash, hash),
-          isNotNull(teamSkillVersions.packageStorageKey),
-        ),
-      )
-      .orderBy(asc(teamSkillVersions.seq))
-      .limit(1);
-    return row?.key ?? null;
+): Promise<Candidate[]> {
+  const rows =
+    location.scope === "team"
+      ? await tx
+          .select({ key: teamSkillVersions.storageKey, size: teamSkillVersions.sizeBytes })
+          .from(teamSkillVersions)
+          .where(
+            and(
+              eq(teamSkillVersions.teamId, location.teamId),
+              eq(teamSkillVersions.contentHash, hash),
+            ),
+          )
+          .orderBy(desc(teamSkillVersions.uploadedAt))
+      : await tx
+          .select({ key: personalSkillVersions.storageKey, size: personalSkillVersions.sizeBytes })
+          .from(personalSkillVersions)
+          .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
+          .where(
+            and(
+              eq(personalSkills.ownerUserId, location.ownerUserId),
+              eq(personalSkillVersions.contentHash, hash),
+            ),
+          )
+          .orderBy(desc(personalSkillVersions.uploadedAt));
+  return distinct(rows);
+}
+
+async function packageCandidates(
+  tx: KobeTx,
+  location: SkillLocation,
+  hash: string,
+): Promise<Candidate[]> {
+  const rows =
+    location.scope === "team"
+      ? await tx
+          .select({ key: teamSkillVersions.packageStorageKey })
+          .from(teamSkillVersions)
+          .where(
+            and(
+              eq(teamSkillVersions.teamId, location.teamId),
+              eq(teamSkillVersions.packageHash, hash),
+              isNotNull(teamSkillVersions.packageStorageKey),
+            ),
+          )
+          .orderBy(desc(teamSkillVersions.uploadedAt))
+      : await tx
+          .select({ key: personalSkillVersions.packageStorageKey })
+          .from(personalSkillVersions)
+          .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
+          .where(
+            and(
+              eq(personalSkills.ownerUserId, location.ownerUserId),
+              eq(personalSkillVersions.packageHash, hash),
+              isNotNull(personalSkillVersions.packageStorageKey),
+            ),
+          )
+          .orderBy(desc(personalSkillVersions.uploadedAt));
+  return distinct(rows.flatMap((r) => (r.key ? [{ key: r.key, size: null }] : [])));
+}
+
+/**
+ * Whether a stored (already validated) `kobe.skill.yaml` names `semver`: a version uploaded
+ * before KOBE-310 was numbered 0.<n>.0 whatever its manifest said, and such a package can't
+ * leave under a number its own manifest contradicts.
+ */
+function manifestNumbers(bytes: Uint8Array, semver: string): boolean {
+  try {
+    const value: unknown = parseYaml(new TextDecoder().decode(bytes), MANIFEST_YAML_OPTIONS);
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      (value as { version?: unknown }).version === semver
+    );
+  } catch {
+    return false;
   }
-  const [row] = await tx
-    .select({ key: personalSkillVersions.packageStorageKey })
-    .from(personalSkillVersions)
-    .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
-    .where(
-      and(
-        eq(personalSkills.ownerUserId, location.ownerUserId),
-        eq(personalSkillVersions.packageHash, hash),
-        isNotNull(personalSkillVersions.packageStorageKey),
-      ),
-    )
-    .orderBy(asc(personalSkillVersions.seq))
-    .limit(1);
-  return row?.key ?? null;
 }

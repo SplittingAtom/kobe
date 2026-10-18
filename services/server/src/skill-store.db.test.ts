@@ -150,6 +150,24 @@ describe("put and get by hash", () => {
   });
 });
 
+describe("repair by re-upload (KOBE-310 review S4)", () => {
+  it("writes the bytes again when the object a version names was lost", async () => {
+    const bundle = bundleOf("repairable", {}, "Lost once.");
+    const v1 = await put(team(teamA), bundle);
+    if (!v1.ok) throw new Error(v1.error);
+    objects.objects.delete(v1.version.storageKey);
+    // Same runtime bytes under a new version (an evals change keeps the runtime hash).
+    const v2 = await put(
+      team(teamA),
+      bundleOf("repairable", { "evals/x.yaml": "a: 1\n" }, "Lost once."),
+    );
+    if (!v2.ok) throw new Error(v2.error);
+    expect(v2.version.contentHash).toBe(v1.version.contentHash);
+    expect(v2.version.storageKey).not.toBe(v1.version.storageKey);
+    expect(await store.getPackage(team(teamA), v2.version.contentHash)).not.toBeNull();
+  });
+});
+
 describe("versions, approval and export", () => {
   it("lists newest first, records an approval and exports packages oldest first", async () => {
     const v1 = await put(team(teamA), bundleOf("exported", {}, "One."), "1.0.0");

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { packageHash, runtimeHash } from "@kobe/protocol/node";
+import { blockedAmong } from "./skills/blocklist.js";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -16,6 +18,7 @@ const team = randomUUID();
 const objects = new MemoryObjects();
 let h: Harness;
 let admin: TestBrowser;
+let siteAdmin: TestBrowser;
 
 const SKILL_MD = "---\nname: packaged\ndescription: A packaged skill\n---\nUse it.\n";
 const zipOf = (files: Record<string, string>) =>
@@ -38,6 +41,8 @@ beforeAll(async () => {
     [team, id],
   );
   admin = await h.signIn("pkg@skills.test");
+  await h.createUser("site@skills.test", "admin");
+  siteAdmin = await h.signIn("site@skills.test");
   expect((await admin.put("/v1/me/teams/active", { teamId: team })).status).toBe(200);
   admin.team = team;
 });
@@ -117,5 +122,44 @@ describe("packages with evals/ and kobe.skill.yaml", () => {
   it("refuses a manifest that names another skill", async () => {
     const res = await upload(zipOf({ ...files, "kobe.skill.yaml": manifest("9.0.0", "other") }));
     expect(res).toMatchObject({ status: 400, json: { code: "invalid_manifest" } });
+  });
+});
+
+describe("blocking the hash of a downloaded package (KOBE-310 review S1)", () => {
+  it("blocks the skill: the package hash joins its runtime hash's group", async () => {
+    const files = {
+      "SKILL.md": SKILL_MD.replace("name: packaged", "name: blockable"),
+      "evals/cases.yaml": "cases: [blockable]\n",
+    };
+    const res = await upload(zipOf(files));
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const id = res.json.skill.id as string;
+    const download = await admin.get(`/v1/skills/${id}/versions/1/bundle`);
+    const downloaded = createHash("sha256").update(download.bytes).digest("hex");
+    expect(downloaded).toBe(res.json.version.packageHash);
+    expect(downloaded).not.toBe(res.json.version.contentHash);
+
+    const block = await siteAdmin.post("/v1/site/skill-blocklist", {
+      contentHash: downloaded,
+      reason: "reported",
+    });
+    expect(block.status, JSON.stringify(block.json)).toBe(201);
+    // The skill stops loading: every check is on the runtime hash's group.
+    const blocked = await h.deps.database.db.transaction((tx) =>
+      blockedAmong(tx, [res.json.version.contentHash]),
+    );
+    expect(blocked).toEqual([res.json.version.contentHash]);
+    expect((await admin.get(`/v1/skills/${id}/versions/1/bundle`)).status).toBe(422);
+    // Blocking the runtime hash too is a no-op; unblocking by it lifts the package hash's entry.
+    const again = await siteAdmin.post("/v1/site/skill-blocklist", {
+      contentHash: res.json.version.contentHash,
+      reason: "again",
+    });
+    expect(again.status).toBe(409);
+    const removed = await siteAdmin.delete(
+      `/v1/site/skill-blocklist/${res.json.version.contentHash}`,
+    );
+    expect(removed.status).toBe(204);
+    expect((await admin.get(`/v1/skills/${id}/versions/1/bundle`)).status).toBe(200);
   });
 });

@@ -17,7 +17,9 @@ import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
 import { parseSemver } from "../skills/semver.js";
 import { readUploadBody } from "../skills/upload-body.js";
+import { IntegrityError } from "../skills/blob-read.js";
 import { PostgresSkillStore, type SkillStore } from "../skills/skill-store.js";
+import { logger } from "../logger.js";
 import {
   findSkill,
   getSkillVersion,
@@ -261,8 +263,15 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       return error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted_download);
     const store = skillStore();
     if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
-    const opened = await store.openVersion(found.location, found.skill.id, version.seq);
+    const opened = await store.openVersion(found.location, found.skill.id, version.version);
     if (!opened) return error(c, 404, "not_found", "That version's bundle is not available.");
+    opened.body.on("error", (err) => {
+      if (err instanceof IntegrityError)
+        logger.error(
+          { hash: version.contentHash, reason: err.reason },
+          "skills: stored package is corrupt",
+        );
+    });
     return new Response(Readable.toWeb(opened.body) as ReadableStream, {
       status: 200,
       headers: {

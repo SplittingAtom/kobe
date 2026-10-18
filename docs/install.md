@@ -591,8 +591,7 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Skill packages (KOBE-310, migration `0131_skill_store`).** Additive: a site-wide
   `skill_hash_checks` table and a nullable `package_storage_key` on the skill version tables, so
-  the previous release keeps working and `helm rollback` is safe. After the upgrade every server
-  checks, in the background, each stored skill version against the package contract
+  the previous release keeps working and `helm rollback` is safe. After the upgrade the servers check, in the background (at start and every 10 minutes, one replica at a time), each stored skill version against the package contract
   ([skill packages](skill-package.md#identity-one-hash-per-payload)) and logs
   `skills: stored hashes checked against the package contract` with the counts: `aliased` versions
   held `evals/` or `kobe.skill.yaml` (they share one blocklist identity with their runtime

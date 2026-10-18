@@ -51,6 +51,17 @@ skillId, {fromSeq, toSeq})`. Location-scoped: a hash is only found in the caller
   group is blocked; remove deletes every listed member (each audited). Writes take an advisory
   lock. The review queue's `blocked` flag uses the same rule.
 
+- **Review fixes (S1-S4):** a new version's package hash is recorded as an alias of its runtime
+  hash at upload, so blocking a downloaded package's hash blocks the skill (and unblocking by
+  either hash lifts the group). Export checks an unchecked hash on demand and refuses invalid or
+  contradicting manifests (`invalid_manifest`, `invalid_skill_md`, `manifest_version_mismatch`);
+  exported entries carry `runtimeHash`; callers check the blocklist. The recompute runs at start
+  and every 10 minutes under a session advisory lock (one replica), logs progress every 100.
+  Reuse verifies the candidate object (any intact one, newest first) before skipping a write, so a
+  re-upload repairs a lost object; reads try every candidate. Nits: download passes
+  `version.version` and logs `IntegrityError`; the team `package_storage` check is tested. No
+  schema change.
+
 ## Open questions (for Chris or the coordinator)
 
 - Promotion (333) must refuse legacy versions: `legacyProblems(hash)` is there for it.

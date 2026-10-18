@@ -2,7 +2,7 @@ import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
-import { recomputeSkillHashes } from "./skills/hash-checks.js";
+import { startSkillHashRecompute } from "./skills/hash-checks.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
@@ -196,13 +196,13 @@ if (deps && config.process === "server") {
 }
 
 // Stored skill hashes against the package contract (KOBE-310, docs/skill-package.md "Identity"):
-// in the background at every start; it checks only hashes not recorded yet, so after the first
-// run it is a quick no-op. A failure is logged; the next start retries.
-if (deps?.blobs && config.process === "server") {
-  void recomputeSkillHashes({ db: deps.database.db, blobs: deps.blobs, log: logger }).catch(
-    (err: unknown) => logger.error({ err }, "skills: stored hash recompute failed"),
-  );
-}
+// in the background at start and every 10 minutes, one replica at a time (advisory lock). It
+// checks only hashes not recorded yet (also rows pods of the previous release write during a
+// rolling upgrade), so it is a quick no-op once caught up. Failures are logged and retried.
+const stopSkillHashRecompute =
+  deps?.blobs && config.process === "server"
+    ? startSkillHashRecompute({ database: deps.database, blobs: deps.blobs, log: logger })
+    : undefined;
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
@@ -605,6 +605,7 @@ function shutdown(signal: string): void {
   isolation.stop();
   schedulerRunner?.stop();
   stopRunHook?.();
+  stopSkillHashRecompute?.();
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();

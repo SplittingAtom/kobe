@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runtimeHash, runtimeZip } from "@kobe/protocol/node";
 import { runWithAuditContext } from "./audit/context.js";
 import { addBlocked, blockedAmong, isBlocked, removeBlocked } from "./skills/blocklist.js";
-import { recomputeSkillHashes } from "./skills/hash-checks.js";
+import pg from "pg";
+import { recomputeOnce, recomputeSkillHashes } from "./skills/hash-checks.js";
 import { PostgresSkillStore } from "./skills/skill-store.js";
 import { sha256Hex } from "./skills/storage.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -34,7 +35,11 @@ const asMap = (files: Record<string, string>) =>
 const RUNTIME = runtimeHash(asMap(PAYLOAD));
 const stored = {
   a: zip({ ...PAYLOAD, "evals/cases.yaml": "a: 1\n" }),
-  b: zip({ ...PAYLOAD, "evals/cases.yaml": "b: 2\n", "kobe.skill.yaml": "x: 1\n" }),
+  b: zip({
+    ...PAYLOAD,
+    "evals/cases.yaml": "b: 2\n",
+    "kobe.skill.yaml": "apiVersion: kobe.dev/skill/v1\nname: shared\nversion: 0.1.0\nsummary: S.\n",
+  }),
   c: runtimeZip(asMap(PAYLOAD)),
   d: zip({ ...PAYLOAD, "provenance.json": "{}" }),
   e: zip({ ...PAYLOAD, "Evals/cases.yaml": "e: 1\n" }),
@@ -202,5 +207,96 @@ describe("legacy versions", () => {
       { legacy: ["reserved_name_case"] },
       { bytes: hash.f },
     ]);
+  });
+});
+
+describe("export never assumes an unchecked hash is clean (KOBE-310 review S2)", () => {
+  async function newPersonalSkill(slug: string, versions: Record<string, string>[]) {
+    const { rows } = await h.admin.query<{ id: string }>(
+      `INSERT INTO personal_skills (owner_user_id, slug, description, latest_version)
+       VALUES ($1, $2, 'd', $3) RETURNING id`,
+      [userId, slug, versions.length],
+    );
+    const skill = rows[0]?.id as string;
+    for (const [i, files] of versions.entries()) {
+      const bytes = zip(files);
+      const key = `kobe/legacy/${slug}/${i + 1}`;
+      objects.objects.set(key, Buffer.from(bytes));
+      await h.admin.query(
+        `INSERT INTO personal_skill_versions (skill_id, version, semver, seq, frontmatter, source,
+           content_hash, storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
+         VALUES ($1, $2, $3, $2, '{}', 'zip', $4, $5, $6, 1, 1, $7)`,
+        [skill, i + 1, `0.${i + 1}.0`, sha256Hex(bytes), key, bytes.length, userId],
+      );
+    }
+    return skill;
+  }
+  const md = "---\nname: manifested\ndescription: Has a manifest\n---\nBody.\n";
+  const manifest = (version: string, name = "manifested") =>
+    `apiVersion: kobe.dev/skill/v1\nname: ${name}\nversion: ${version}\nsummary: S.\n`;
+
+  it("checks on demand, and refuses invalid or contradicting manifests", async () => {
+    const skill = await newPersonalSkill("manifested", [
+      { "SKILL.md": md, "notes.md": "plain, never checked" },
+      { "SKILL.md": md, "kobe.skill.yaml": "apiVersion: nope\n" },
+      { "SKILL.md": md, "kobe.skill.yaml": manifest("0.3.0", "other-name") },
+      { "SKILL.md": md, "kobe.skill.yaml": manifest("9.9.9") },
+      { "SKILL.md": md, "kobe.skill.yaml": manifest("0.5.0") },
+    ]);
+    const store = new PostgresSkillStore(db(), blobs());
+    const exported = await store.export({ scope: "personal", ownerUserId: userId }, skill);
+    expect(exported.map((e) => ("legacy" in e ? e.legacy : "ok"))).toEqual([
+      "ok",
+      ["invalid_manifest"],
+      ["invalid_manifest"],
+      ["manifest_version_mismatch"],
+      "ok",
+    ]);
+    // The on-demand checks were recorded like the recompute's.
+    const first = exported[0];
+    if (!first || !("runtimeHash" in first)) throw new Error("first not exported");
+    const row = await h.admin.query(
+      `SELECT runtime_hash FROM skill_hash_checks WHERE stored_hash = $1`,
+      [first.version.contentHash],
+    );
+    expect(row.rows).toEqual([{ runtime_hash: first.runtimeHash }]);
+  });
+});
+
+describe("one replica at a time (KOBE-310 review S3)", () => {
+  it("skips the run while another replica holds the lock", async () => {
+    const other = new pg.Client({ connectionString: h.adminUrl });
+    await other.connect();
+    try {
+      await other.query(
+        `SELECT pg_advisory_lock(hashtextextended('kobe.skills.hash_recompute', 0))`,
+      );
+      expect(
+        await recomputeOnce({ database: h.deps.database, blobs: blobs(), log: silent }),
+      ).toBeNull();
+      await other.query(
+        `SELECT pg_advisory_unlock(hashtextextended('kobe.skills.hash_recompute', 0))`,
+      );
+      expect(
+        await recomputeOnce({ database: h.deps.database, blobs: blobs(), log: silent }),
+      ).toMatchObject({ unreadable: 0 });
+    } finally {
+      await other.end();
+    }
+  });
+
+  it("picks up versions written after an earlier run (a previous-release pod mid-upgrade)", async () => {
+    const files = { "SKILL.md": SKILL_MD.replace("Body.", "Late."), "evals/late.yaml": "a: 1\n" };
+    const bytes = zip(files);
+    const late = sha256Hex(bytes);
+    objects.objects.set("kobe/legacy/late", Buffer.from(bytes));
+    await h.admin.query(
+      `INSERT INTO personal_skill_versions (skill_id, version, semver, seq, frontmatter, source,
+         content_hash, storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
+       VALUES ($1, 9, '0.9.0', 9, '{}', 'zip', $2, 'kobe/legacy/late', $3, 2, 10, $4)`,
+      [personalSkill, late, bytes.length, userId],
+    );
+    const report = await recomputeOnce({ database: h.deps.database, blobs: blobs(), log: silent });
+    expect(report).toMatchObject({ checked: 1, aliased: 1 });
   });
 });

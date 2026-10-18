@@ -7,14 +7,17 @@ import {
   teams,
   teamSkillVersions,
   withTeam,
+  type KobeDatabase,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
-import { checkPackagePaths } from "@kobe/protocol";
+import { checkPackagePaths, MANIFEST_PATH } from "@kobe/protocol";
 import { runtimeHash } from "@kobe/protocol/node";
 import type { Logger } from "pino";
 import type { BlobStore } from "../retention/blobs.js";
 import { readVerified } from "./blob-read.js";
+import { readManifest } from "./bundle.js";
+import { parseSkillMd } from "./skill-md.js";
 
 /**
  * What each stored skill hash is under the KOBE-309 package contract (KOBE-310;
@@ -26,12 +29,18 @@ import { readVerified } from "./blob-read.js";
  * Rows are written once and never changed.
  */
 
-/** A version stored from KOBE-310 on is its own runtime payload. */
-export async function recordRuntimeHash(tx: KobeTx, hash: string): Promise<void> {
-  await tx
-    .insert(skillHashChecks)
-    .values({ storedHash: hash, runtimeHash: hash })
-    .onConflictDoNothing();
+/**
+ * A version stored from KOBE-310 on is its own runtime payload; its package zip, when it has one,
+ * joins the runtime hash's group, so blocking the hash of a downloaded package blocks the skill.
+ */
+export async function recordUploadHashes(
+  tx: KobeTx,
+  hashes: { readonly runtimeHash: string; readonly packageHash: string },
+): Promise<void> {
+  const rows = [{ storedHash: hashes.runtimeHash, runtimeHash: hashes.runtimeHash }];
+  if (hashes.packageHash !== hashes.runtimeHash)
+    rows.push({ storedHash: hashes.packageHash, runtimeHash: hashes.runtimeHash });
+  await tx.insert(skillHashChecks).values(rows).onConflictDoNothing();
 }
 
 /**
@@ -59,13 +68,38 @@ export async function hashGroups(
   return new Map([...groups].map(([h, members]) => [h, [...members].sort()]));
 }
 
-/** Contract problems of a legacy stored hash; null when it is not legacy (or not checked yet). */
-export async function legacyProblems(tx: KobeTx, hash: string): Promise<string[] | null> {
+export type HashOutcome =
+  | { readonly runtimeHash: string; readonly problems: readonly [] }
+  | { readonly runtimeHash: null; readonly problems: readonly string[] };
+
+/** The recorded outcome for a stored hash; null when it has not been checked yet. */
+export async function hashOutcome(tx: KobeTx, hash: string): Promise<HashOutcome | null> {
   const [row] = await tx
     .select({ problems: skillHashChecks.problems, runtime: skillHashChecks.runtimeHash })
     .from(skillHashChecks)
     .where(eq(skillHashChecks.storedHash, hash));
-  return row && row.runtime === null ? row.problems : null;
+  if (!row) return null;
+  return row.runtime === null
+    ? { runtimeHash: null, problems: row.problems }
+    : { runtimeHash: row.runtime, problems: [] };
+}
+
+/**
+ * Checks one stored zip (bytes already verified against `hash`) and records the outcome; the
+ * recorded row wins if another runner was first. Used by the recompute and, on demand, by export,
+ * so an unchecked hash is never treated as clean.
+ */
+export async function checkStoredZip(
+  db: KobeDb,
+  hash: string,
+  zip: Uint8Array,
+): Promise<HashOutcome> {
+  const outcome = classifyStoredZip(hash, zip);
+  await db
+    .insert(skillHashChecks)
+    .values({ storedHash: hash, runtimeHash: outcome.runtimeHash, problems: [...outcome.problems] })
+    .onConflictDoNothing();
+  return (await db.transaction((tx) => hashOutcome(tx, hash))) ?? outcome;
 }
 
 export interface RecomputeReport {
@@ -120,22 +154,32 @@ async function unchecked(db: KobeDb): Promise<Stored[]> {
   return [...found.values()];
 }
 
-/** The outcome for one stored zip (already verified against its hash). */
-export function classifyStoredZip(
-  hash: string,
-  zip: Uint8Array,
-): { runtimeHash: string | null; problems: string[] } {
+/**
+ * The outcome for one stored zip (already verified against its hash): legacy when today's path
+ * rules refuse it, or when its SKILL.md or `kobe.skill.yaml` (never read before KOBE-310) is
+ * invalid; otherwise its runtime hash. Rows are written once and never re-evaluated, so a later
+ * tightening of the rules applies to new uploads only.
+ */
+export function classifyStoredZip(hash: string, zip: Uint8Array): HashOutcome {
   const files = new Map(Object.entries(unzipSync(zip)));
-  const problems = [...new Set(checkPackagePaths(files.keys()).map((p) => p.problem))].sort();
-  if (problems.length > 0) return { runtimeHash: null, problems };
+  const problems = new Set<string>(checkPackagePaths(files.keys()).map((p) => p.problem));
+  if (problems.size === 0) {
+    const skillMd = files.get("SKILL.md");
+    const parsed = skillMd ? parseSkillMd(skillMd) : "missing";
+    if (typeof parsed === "string") problems.add("invalid_skill_md");
+    else if (!readManifest(files.get(MANIFEST_PATH), parsed.name).ok)
+      problems.add("invalid_manifest");
+  }
+  if (problems.size > 0) return { runtimeHash: null, problems: [...problems].sort() };
   const runtime = runtimeHash(files);
   return { runtimeHash: runtime === hash ? hash : runtime, problems: [] };
 }
 
 /**
- * The one-off recompute (KOBE-310), safe to run any number of times and on several replicas: it
- * checks only stored hashes with no row yet and records each outcome with ON CONFLICT DO NOTHING,
- * so a later run picks up only what is new or was unreadable. Rows and bytes are never rewritten.
+ * The recompute (KOBE-310), safe to run any number of times and on several replicas: it checks
+ * only stored hashes with no row yet and records each outcome with ON CONFLICT DO NOTHING, so a
+ * later run picks up only what is new (rows a pod of the previous release wrote during a rolling
+ * upgrade, or after a rollback) or was unreadable. Rows and bytes are never rewritten.
  */
 export async function recomputeSkillHashes(deps: {
   readonly db: KobeDb;
@@ -143,7 +187,10 @@ export async function recomputeSkillHashes(deps: {
   readonly log: Pick<Logger, "info" | "warn" | "error">;
 }): Promise<RecomputeReport> {
   const counts = { checked: 0, same: 0, aliased: 0, legacy: 0, unreadable: 0 };
-  for (const stored of await unchecked(deps.db)) {
+  const todo = await unchecked(deps.db);
+  for (const [i, stored] of todo.entries()) {
+    if (i > 0 && i % PROGRESS_EVERY === 0)
+      deps.log.info({ done: i, of: todo.length }, "skills: checking stored hashes");
     const zip = await readVerified(deps.blobs, stored.key, stored.hash, stored.size).catch(
       () => null,
     );
@@ -152,23 +199,79 @@ export async function recomputeSkillHashes(deps: {
       deps.log.error({ hash: stored.hash }, "skills: stored bundle unreadable during recompute");
       continue;
     }
-    let outcome: { runtimeHash: string | null; problems: string[] };
+    let outcome: HashOutcome;
     try {
-      outcome = classifyStoredZip(stored.hash, zip);
+      outcome = await checkStoredZip(deps.db, stored.hash, zip);
     } catch (err) {
       counts.unreadable++;
       deps.log.error({ err, hash: stored.hash }, "skills: stored bundle is not a readable zip");
       continue;
     }
-    await deps.db
-      .insert(skillHashChecks)
-      .values({ storedHash: stored.hash, ...outcome })
-      .onConflictDoNothing();
     counts.checked++;
     if (outcome.runtimeHash === null) counts.legacy++;
     else if (outcome.runtimeHash === stored.hash) counts.same++;
     else counts.aliased++;
   }
-  deps.log.info(counts, "skills: stored hashes checked against the package contract");
+  if (todo.length > 0)
+    deps.log.info(counts, "skills: stored hashes checked against the package contract");
   return counts;
+}
+
+const PROGRESS_EVERY = 100;
+const RECOMPUTE_LOCK = "kobe.skills.hash_recompute";
+
+/**
+ * One recompute on this replica if no other replica is running one: a session advisory lock on a
+ * dedicated connection, released (with the connection) when the run ends. Returns null when
+ * another replica holds it.
+ */
+export async function recomputeOnce(deps: {
+  readonly database: KobeDatabase;
+  readonly blobs: BlobStore;
+  readonly log: Pick<Logger, "info" | "warn" | "error">;
+}): Promise<RecomputeReport | null> {
+  const client = await deps.database.pool.connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`,
+      [RECOMPUTE_LOCK],
+    );
+    if (!rows[0]?.locked) return null;
+    try {
+      return await recomputeSkillHashes({ db: deps.database.db, blobs: deps.blobs, log: deps.log });
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [RECOMPUTE_LOCK]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/** How often each server looks for stored hashes not checked yet (cheap when there are none). */
+export const RECOMPUTE_EVERY_MS = 10 * 60_000;
+
+/**
+ * Runs {@link recomputeOnce} now and every {@link RECOMPUTE_EVERY_MS}, never two at once on this
+ * replica. Returns a stop function. Failures are logged; the next tick retries.
+ */
+export function startSkillHashRecompute(deps: {
+  readonly database: KobeDatabase;
+  readonly blobs: BlobStore;
+  readonly log: Pick<Logger, "info" | "warn" | "error">;
+  readonly everyMs?: number;
+}): () => void {
+  let running = false;
+  const tick = () => {
+    if (running) return;
+    running = true;
+    recomputeOnce(deps)
+      .catch((err: unknown) => deps.log.error({ err }, "skills: stored hash recompute failed"))
+      .finally(() => {
+        running = false;
+      });
+  };
+  tick();
+  const timer = setInterval(tick, deps.everyMs ?? RECOMPUTE_EVERY_MS);
+  timer.unref();
+  return () => clearInterval(timer);
 }

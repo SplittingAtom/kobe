@@ -18,7 +18,7 @@ import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
 import { isBlocked } from "./blocklist.js";
 import { recordPendingReview, recordPersonalScan } from "./review.js";
-import { recordRuntimeHash } from "./hash-checks.js";
+import { recordUploadHashes } from "./hash-checks.js";
 import { legacySemver, nextSemver, parseSemver } from "./semver.js";
 
 /**
@@ -176,8 +176,11 @@ export function uploadSkillVersion(
       ...input,
       semver: semver.semver,
     });
-    // The stored zip is its own runtime payload (KOBE-310): its hash needs no recompute.
-    await recordRuntimeHash(tx, input.contentHash);
+    // The stored zip is its own runtime payload (KOBE-310), and a package zip joins its group.
+    await recordUploadHashes(tx, {
+      runtimeHash: input.contentHash,
+      packageHash: input.packageHash,
+    });
     if (location.scope === "team") {
       await recordPendingReview(
         tx,

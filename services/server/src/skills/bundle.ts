@@ -166,8 +166,11 @@ function checkContract(names: readonly string[]): Result<never> | null {
   return fail(code, why);
 }
 
-/** Parses and checks `kobe.skill.yaml` by the contract's text rules; null when absent. */
-function readManifest(
+/**
+ * Parses and checks `kobe.skill.yaml` by the contract's text rules; null when absent. Also used on
+ * stored packages (KOBE-310 recompute and export), whose manifests were never read before.
+ */
+export function readManifest(
   bytes: Uint8Array | undefined,
   skillName: string,
 ): Result<KobeSkillManifest | null> {

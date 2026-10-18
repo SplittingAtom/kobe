@@ -77,11 +77,23 @@ file/folder clash, a case variant such as `Evals/`) has no runtime hash at all. 
      it keeps running exactly as before, but is never promotable or exportable until re-saved,
      and the re-save goes through today's rules and gets a runtime hash. (A root
      `provenance.json` is legacy, never hashed with `kobeProvenance`.)
-     Every checked hash is recorded with its outcome, so the recompute is **idempotent and
-     re-runnable**: a later run skips what is recorded and checks only what is new. It reports how
-     many hashes were aliased and how many are legacy. The stored rows and bytes are never
-     rewritten.
-3. **Treats an alias group as one identity.** The alias map is site-wide, and many stored hashes
+   - a stored `kobe.skill.yaml` (never read before KOBE-310) that is invalid or names another
+     skill, or an invalid SKILL.md, also makes it legacy.
+
+   Every checked hash is recorded with its outcome, so the recompute is **idempotent and
+   re-runnable**: a later run skips what is recorded and checks only what is new. It runs at
+   start and every 10 minutes, one replica at a time (a Postgres advisory lock), so versions a
+   pod of the previous release writes during a rolling upgrade or after a rollback are picked up
+   too. It reports how many hashes were aliased and how many are legacy. The stored rows and
+   bytes are never rewritten, and a recorded outcome is never re-evaluated: a later tightening of
+   the rules applies to new uploads only. Export (and so promotion) never treats an unchecked
+   hash as clean: it checks one on demand first, and refuses a version whose manifest names
+   another version than its own.
+
+3. **Records the package hash too.** When a new version's package zip differs from its runtime
+   zip, its package hash is recorded as an alias of the runtime hash, so blocking the hash of a
+   downloaded package (downloads serve the package) blocks the skill.
+4. **Treats an alias group as one identity.** The alias map is site-wide, and many stored hashes
    can share one runtime hash (the same payload uploaded with different `evals/`, in one team or
    several). A hash's group is its runtime hash plus every stored hash aliased to it (a legacy
    hash is a group of one). The blocklist works on groups: a hash is blocked when any member of

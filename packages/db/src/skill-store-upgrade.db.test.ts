@@ -154,6 +154,13 @@ describe("skill store upgrade (KOBE-310)", () => {
           [ids.personal, ids.user],
         ),
       ).rejects.toMatchObject({ constraint: "personal_skill_versions_package_storage" });
+      await expect(
+        c.query(
+          `INSERT INTO team_skill_versions (team_id, skill_id, ${COLUMNS}, package_storage_key)
+           VALUES ($1, $2, ${values(6)}, $3, 'p/6')`,
+          [ids.team, ids.skill, ids.user],
+        ),
+      ).rejects.toMatchObject({ constraint: "team_skill_versions_package_storage" });
     });
   });
 });
