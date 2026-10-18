@@ -222,7 +222,7 @@ while [ $i -lt 30 ]; do
 done
 echo no-mail'
 mail_token() { # address → the invitation token from the newest mail to it
-  local name="mail-$RANDOM$RANDOM" q
+  local name="mail-$BASHPID-$RANDOM$RANDOM" q
   q="$MAILPIT/api/v1/search?query=to%3A$(printf '%s' "$1" | sed 's/@/%40/')&limit=5"
   $KUBECTL create namespace "$INFRA_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
   UNDO+=("$KUBECTL delete namespace $INFRA_NS --ignore-not-found --wait=false")
