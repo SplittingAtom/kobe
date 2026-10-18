@@ -1397,12 +1397,33 @@ export const AUDIT_EVENTS = {
     name: catalogName,
     kind: z.enum(["add", "remove", "move_major"]),
     teams: count,
-    installed: count,
-    kept: count,
-    optedOut: count,
-    converted: count,
-    optoutsCleared: count,
-    moved: count,
+    /**
+     * The per-outcome counts are left out when a team count among them (opted out, opt-outs
+     * cleared, blocked) is 1 or 2: the minimum-count rule (SK26) would be undone by subtraction.
+     */
+    masked: z.boolean(),
+    installed: count.optional(),
+    kept: count.optional(),
+    optedOut: count.optional(),
+    blocked: count.optional(),
+    converted: count.optional(),
+    optoutsCleared: count.optional(),
+    moved: count.optional(),
+  }),
+  /** A Default sync job failed too often and was parked; the queue moved on (error code only). */
+  "skill.default.sync_failed": event("site", {
+    skillId: id,
+    name: catalogName,
+    kind: z.enum(["add", "remove", "move_major"]),
+    attempts: count,
+    error: z.string().regex(/^[a-z0-9_]{1,64}$/),
+  }),
+  /** A Default sync or the new-team hook changed a team's install of a Default skill (SK8). */
+  "skill.default.applied": event("team", {
+    skillId: id,
+    name: catalogName,
+    change: z.enum(["installed", "converted", "optout_cleared", "moved"]),
+    semver: z.string().max(32).optional(),
   }),
   /** A Team admin uninstalled a catalog skill; for a Default skill that records an opt-out (SK7). */
   "skill.catalog.removed": event("team", {

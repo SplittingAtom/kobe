@@ -184,5 +184,5 @@ export const uninstallSkillSchema = z.strictObject({
  */
 export const DEFAULT_SYNC_KINDS = ["add", "remove", "move_major"] as const;
 export type DefaultSyncKind = (typeof DEFAULT_SYNC_KINDS)[number];
-export const DEFAULT_SYNC_STATUSES = ["queued", "running", "done"] as const;
+export const DEFAULT_SYNC_STATUSES = ["queued", "running", "done", "failed"] as const;
 export type DefaultSyncStatus = (typeof DEFAULT_SYNC_STATUSES)[number];

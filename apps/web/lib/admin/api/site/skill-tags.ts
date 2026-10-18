@@ -30,24 +30,35 @@ export interface SiteCatalogSkill {
   readonly optOuts: number | "few" | null;
 }
 
+/** A job's counts by outcome. */
+export interface DefaultSyncCounts {
+  readonly installed: number;
+  readonly kept: number;
+  readonly optedOut: number;
+  readonly blocked: number;
+  readonly converted: number;
+  readonly optoutsCleared: number;
+  readonly moved: number;
+}
+
 export interface DefaultSync {
   readonly id: string;
   readonly skillId: string;
   readonly name: string;
   readonly kind: "add" | "remove" | "move_major";
   readonly major: number | null;
-  readonly status: "queued" | "running" | "done";
+  readonly status: "queued" | "running" | "done" | "failed";
   readonly createdAt: string;
   readonly startedAt: string | null;
   readonly finishedAt: string | null;
   readonly teamsTotal: number;
   readonly teamsDone: number;
-  readonly installed: number;
-  readonly kept: number;
-  readonly optedOut: number | "few";
-  readonly converted: number;
-  readonly optoutsCleared: number;
-  readonly moved: number;
+  /** Null when fewer than 3 teams opted out, cleared or blocked (the minimum-count rule). */
+  readonly counts: DefaultSyncCounts | null;
+  readonly attempts: number;
+  /** The last failure's code (e.g. `no_version`), if any. */
+  readonly lastError: string | null;
+  readonly nextAttemptAt: string | null;
 }
 
 /** Mirrors REGISTRY_TAG_PATTERN in @kobe/protocol. */

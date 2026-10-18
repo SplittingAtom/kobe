@@ -133,7 +133,7 @@ export async function uninstallCatalogSkill(
 
 export type ReinstallResult =
   | { readonly ok: true; readonly semver: string }
-  | { readonly ok: false; readonly code: "not_found" | "no_version" };
+  | { readonly ok: false; readonly code: "not_found" | "no_version" | "blocked" };
 
 /**
  * Reinstalls a removed default (SK7): clears the team's opt-out and installs the skill as the
@@ -146,13 +146,17 @@ export async function reinstallDefault(
   const { teamId, skillId } = input;
   return withTeam(db, teamId, async (tx): Promise<ReinstallResult> => {
     await lockDefaultSet(tx, "shared");
+    // The install lock before any read: two concurrent Reinstalls run one after the other.
+    await lockInstall(tx, teamId, skillId);
     const [target] = await defaultTargets(tx, skillId);
     const optout = await tx.execute(sql`
       SELECT 1 FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     if (!target || optout.rows.length === 0) return { ok: false, code: "not_found" };
+    const blocked = await tx.execute(sql`
+      SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    if (blocked.rows.length > 0) return { ok: false, code: "blocked" };
     const version = await defaultVersion(tx, target);
     if (!version) return { ok: false, code: "no_version" };
-    await lockInstall(tx, teamId, skillId);
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     // The install names the Team admin who brought it back.
@@ -163,5 +167,35 @@ export async function reinstallDefault(
       target: { skillId, name: target.name, semver: version.semver },
     });
     return { ok: true, semver: version.semver };
+  });
+}
+
+export interface InstallChange {
+  readonly pinMode?: InstallRow["pinMode"] | undefined;
+  readonly access?: InstallRow["access"] | undefined;
+}
+
+/**
+ * A team's change to its install's pin mode or access (KOBE-314 review, coordinator decision):
+ * any such change marks the install touched (`team_changed_at`), and a touched install never
+ * moves with the Default to a new major; the team's choice sticks (SK6). The team install route
+ * (a later ticket) changes installs only through this. Returns false when nothing is installed.
+ */
+export async function changeTeamInstall(
+  db: KobeDb,
+  teamId: string,
+  skillId: string,
+  change: InstallChange,
+): Promise<boolean> {
+  return withTeam(db, teamId, async (tx) => {
+    await lockInstall(tx, teamId, skillId);
+    const r = await tx.execute(sql`
+      UPDATE team_skill_installs SET
+        pin_mode = coalesce(${change.pinMode ?? null}::skill_pin_mode, pin_mode),
+        access = coalesce(${change.access ?? null}::skill_access, access),
+        team_changed_at = now(), updated_at = now()
+      WHERE team_id = ${teamId} AND skill_id = ${skillId}
+      RETURNING 1`);
+    return r.rows.length > 0;
   });
 }

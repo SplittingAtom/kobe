@@ -74,7 +74,7 @@ export async function isDefaultSkill(db: KobeDb | KobeTx, skillId: string): Prom
 export interface DefaultTarget {
   readonly skillId: string;
   readonly name: string;
-  /** The major Default installs follow (the newest `add` or `move_major` job's). */
+  /** The major Default installs follow (the newest `add` or `move_major` job's, by `seq`). */
   readonly major: number;
   /** Who tagged it (or last moved its major): the installer a Default install names. */
   readonly requestedBy: string;
@@ -101,7 +101,7 @@ export async function defaultTargets(
     JOIN registry_tags t ON t.id = st.tag_id AND t.kind = 'system' AND t.name = 'default'
     JOIN skill_default_syncs j ON j.skill_id = s.id AND j.kind IN ('add', 'move_major')
     WHERE true ${only}
-    ORDER BY s.id, j.created_at DESC, j.id DESC`);
+    ORDER BY s.id, j.seq DESC`);
   return rows.map((r) => ({
     skillId: r.skill_id,
     name: r.name,

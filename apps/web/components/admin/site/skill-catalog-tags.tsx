@@ -215,22 +215,36 @@ const STATUS: Record<DefaultSync["status"], string> = {
   queued: "Queued",
   running: "Running",
   done: "Done",
+  failed: "Failed",
 };
 
+function Status({ sync }: { readonly sync: DefaultSync }) {
+  if (sync.status === "failed")
+    return (
+      <Badge tone="failed">{`Failed after ${sync.attempts} attempts (${sync.lastError ?? "error"})`}</Badge>
+    );
+  if (sync.lastError && sync.nextAttemptAt)
+    return <>{`${STATUS[sync.status]}, retrying (${sync.lastError})`}</>;
+  return <>{STATUS[sync.status]}</>;
+}
+
 function Outcome({ sync }: { readonly sync: DefaultSync }) {
+  const c = sync.counts;
+  if (!c) return <>Hidden: fewer than 3 teams opted out or blocked it</>;
   if (sync.kind === "add")
     return (
       <>
-        {sync.installed} installed, {sync.kept} kept their own, {sync.optedOut} opted out
+        {c.installed} installed, {c.kept} kept their own, {c.optedOut} opted out, {c.blocked}{" "}
+        blocked
       </>
     );
   if (sync.kind === "remove")
     return (
       <>
-        {sync.converted} now team installs, {sync.optoutsCleared} opt-outs cleared
+        {c.converted} now team installs, {c.optoutsCleared} opt-outs cleared
       </>
     );
-  return <>{sync.moved} moved</>;
+  return <>{c.moved} moved</>;
 }
 
 /** The Default sync jobs and their progress (SK8); counts only, never team names. */
@@ -262,7 +276,9 @@ export function DefaultSyncsSection() {
                       {KIND[j.kind]}
                       {j.major !== null ? ` (major ${j.major})` : ""}
                     </TableCell>
-                    <TableCell>{STATUS[j.status]}</TableCell>
+                    <TableCell>
+                      <Status sync={j} />
+                    </TableCell>
                     <TableCell>{`${j.teamsDone} of ${j.teamsTotal} teams`}</TableCell>
                     <TableCell>
                       <Outcome sync={j} />

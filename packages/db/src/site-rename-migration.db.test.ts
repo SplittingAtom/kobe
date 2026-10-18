@@ -227,6 +227,9 @@ const KEPT = ["constraint runs.runs_budget_stop_scope", "function kobe_reserve_b
 
 /** KOBE-311's objects named after installing a catalog skill (a noun, not the scope). */
 const SKILL_INSTALL_OBJECTS = [
+  // The Default sync's count of new installs and the check over its counts (KOBE-314).
+  "column skill_default_syncs.installed",
+  "constraint skill_default_syncs.skill_default_syncs_counts",
   "column team_skill_installs.installed_by",
   "constraint team_skill_installs.team_skill_installs_installed_by_users_id_fk",
   "constraint team_skill_installs.team_skill_installs_skill_id_registry_skills_id_fk",

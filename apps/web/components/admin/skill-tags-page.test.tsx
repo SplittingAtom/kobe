@@ -38,18 +38,24 @@ const SYNC = {
   finishedAt: null,
   teamsTotal: 3,
   teamsDone: 2,
-  installed: 1,
-  kept: 1,
-  optedOut: 0,
-  converted: 0,
-  optoutsCleared: 0,
-  moved: 0,
+  counts: null,
+  attempts: 0,
+  lastError: null,
+  nextAttemptAt: null,
+};
+const FAILED = {
+  ...SYNC,
+  id: "j-0",
+  status: "failed",
+  finishedAt: "2026-10-18T09:00:00.000Z",
+  attempts: 5,
+  lastError: "no_version",
 };
 
 const routes = (extra: Record<string, unknown> = {}) => ({
   "GET /v1/site/skills/tags": [200, { tags: TAGS }],
   "GET /v1/site/skills/catalog": [200, { skills: [SKILL] }],
-  "GET /v1/site/skills/default-syncs": [200, { syncs: [SYNC] }],
+  "GET /v1/site/skills/default-syncs": [200, { syncs: [SYNC, FAILED] }],
   ...extra,
 });
 
@@ -66,7 +72,10 @@ describe("Skill tags in the Site console (KOBE-314)", () => {
     expect(within(row).getByText(/major 1/)).toBeTruthy();
     expect(within(row).getByText(/Opted out: few/)).toBeTruthy();
     const syncs = await screen.findByRole("table", { name: "Default syncs" });
-    expect(within(syncs).getByText("2 of 3 teams")).toBeTruthy();
+    expect(within(syncs).getAllByText("2 of 3 teams")).toHaveLength(2);
+    // Below the minimum count the breakdown is hidden, not partly shown.
+    expect(within(syncs).getAllByText(/Hidden: fewer than 3 teams/)).toHaveLength(2);
+    expect(within(syncs).getByText("Failed after 5 attempts (no_version)")).toBeTruthy();
   });
 
   it("adds a topic tag", async () => {

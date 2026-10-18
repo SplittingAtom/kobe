@@ -4,6 +4,7 @@ import { logger } from "./logger.js";
 import { defaultSyncOnce } from "./skills/default-sync.js";
 import { queueDefaultSync } from "./skills/default-sync.js";
 import { newestApproved } from "./skills/default-target.js";
+import { changeTeamInstall } from "./skills/team-installs.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
@@ -217,10 +218,9 @@ describe("adding Default (SK6, SK8; ac-1)", () => {
       status: "done",
       teamsTotal: 3,
       teamsDone: 3,
-      installed: 1,
-      kept: 1,
-      // One team: below the minimum count, so never a number.
-      optedOut: "few",
+      // One opted-out team is below the minimum count: the whole breakdown is hidden, so it
+      // can't be worked out by subtraction.
+      counts: null,
     });
     expect(
       (await as.site.get("/v1/site/skills/catalog")).json.skills.find(
@@ -232,11 +232,20 @@ describe("adding Default (SK6, SK8; ac-1)", () => {
       systemAdded: ["default"],
       topicAdded: ["finance"],
     });
-    expect((await audits("skill.default.synced"))[0]?.target).toMatchObject({
+    expect((await audits("skill.default.synced"))[0]?.target).toEqual({
+      skillId: skill,
+      name: "xlsx-pro",
       kind: "add",
       teams: 3,
-      installed: 1,
+      masked: true,
     });
+    // Each team's audit shows what the sync changed there.
+    expect(await audits("skill.default.applied")).toEqual([
+      {
+        team_id: team.finance,
+        target: { skillId: skill, name: "xlsx-pro", change: "installed", semver: "1.1.0" },
+      },
+    ]);
     // Team admins of the teams it reached get a notice; the opted-out team does not.
     expect(h.mailer.to("finance@default.test").at(-1)?.subject).toContain("xlsx-pro");
     expect(h.mailer.to("legal@default.test").at(-1)?.text).toContain("settings");
@@ -258,10 +267,15 @@ describe("adding Default (SK6, SK8; ac-1)", () => {
       adminUserId: ids.ops,
     });
     expect(r.status, JSON.stringify(r.json)).toBe(201);
-    expect(await install(r.json.team?.id ?? r.json.id)).toMatchObject({
+    const id = r.json.team.id as string;
+    expect(await install(id)).toMatchObject({
       origin: "default_tag",
       semver: "1.1.0",
       access: "default_on",
+    });
+    expect((await audits("skill.default.applied")).at(-1)).toEqual({
+      team_id: id,
+      target: { skillId: skill, name: "xlsx-pro", change: "installed", semver: "1.1.0" },
     });
   });
 });
@@ -335,23 +349,32 @@ describe("moving Default installs to a new major (SK6; ac-3)", () => {
        WHERE id = $1`,
       [versions.v200, ids.reviewer],
     );
-    // The new team pinned its Default install: it keeps its choice.
-    await h.admin.query(
-      `UPDATE team_skill_installs SET pin_mode = 'pinned'
-       WHERE skill_id = $1 AND team_id = (SELECT id FROM teams WHERE slug = 'new-team')`,
-      [skill],
-    );
+    // Touched installs keep the team's choice: the new team pinned and went back to Track within
+    // major; another team only changed the access mode.
+    const newTeam = (await h.admin.query(`SELECT id FROM teams WHERE slug = 'new-team'`)).rows[0]
+      ?.id as string;
+    const db = h.deps.database.db;
+    expect(await changeTeamInstall(db, newTeam, skill, { pinMode: "pinned" })).toBe(true);
+    expect(await changeTeamInstall(db, newTeam, skill, { pinMode: "within_major" })).toBe(true);
+    const touch = await as.site.post("/v1/site/teams", {
+      slug: "touch-team",
+      name: "Touch team",
+      adminUserId: ids.ops,
+    });
+    const touchTeam = touch.json.team.id as string;
+    expect(await changeTeamInstall(db, touchTeam, skill, { access: "available" })).toBe(true);
     const r = await as.site.post(`/v1/site/skills/catalog/${skill}/default/move-major`, { to: 2 });
     expect(r.status, JSON.stringify(r.json)).toBe(202);
     expect(r.json.semver).toBe("2.0.0");
     expect(await sync()).toBe(1);
     expect((await install(team.finance))?.semver).toBe("2.0.0");
     expect((await install(team.legal))?.semver).toBe("1.0.0");
-    const pinned = await h.admin.query(
-      `SELECT v.semver FROM team_skill_installs i JOIN registry_versions v ON v.id = i.version_id
-       JOIN teams t ON t.id = i.team_id WHERE t.slug = 'new-team'`,
-    );
-    expect(pinned.rows).toEqual([{ semver: "1.1.0" }]);
+    expect(await install(newTeam)).toMatchObject({ semver: "1.1.0", pin_mode: "within_major" });
+    expect(await install(touchTeam)).toMatchObject({ semver: "1.1.0", access: "available" });
+    expect((await audits("skill.default.applied")).at(-1)).toEqual({
+      team_id: team.finance,
+      target: { skillId: skill, name: "xlsx-pro", change: "moved", semver: "2.0.0" },
+    });
     expect((await audits("skill.default.major_moved"))[0]?.target).toMatchObject({
       fromMajor: 1,
       toMajor: 2,
@@ -374,7 +397,7 @@ describe("moving Default installs to a new major (SK6; ac-3)", () => {
       adminUserId: ids.ops,
     });
     expect(r.status).toBe(201);
-    expect((await install(r.json.team?.id ?? r.json.id))?.semver).toBe("2.0.0");
+    expect((await install(r.json.team.id))?.semver).toBe("2.0.0");
   });
 });
 
@@ -396,8 +419,17 @@ describe("removing Default (SK8; ac-3)", () => {
     });
     expect((await audits("skill.default.synced")).at(-1)?.target).toMatchObject({
       kind: "remove",
-      optoutsCleared: 1,
+      masked: true,
     });
+    const applied = (await audits("skill.default.applied")).filter((a) =>
+      ["converted", "optout_cleared"].includes(String(a.target.change)),
+    );
+    expect(applied.map((a) => [a.team_id, a.target.change])).toEqual(
+      expect.arrayContaining([
+        [team.finance, "converted"],
+        [team.ops, "optout_cleared"],
+      ]),
+    );
     const notices = h.mailer.sent.slice(before).map((m) => m.to);
     expect(notices).toEqual(
       expect.arrayContaining(["finance@default.test", "legal@default.test", "ops@default.test"]),
@@ -407,7 +439,7 @@ describe("removing Default (SK8; ac-3)", () => {
       name: "Later team",
       adminUserId: ids.ops,
     });
-    expect(await install(t.json.team?.id ?? t.json.id)).toBeUndefined();
+    expect(await install(t.json.team.id)).toBeUndefined();
     // A non-Default uninstall records no opt-out.
     const un = await as.finance.delete(`/v1/team/skills/installs/${skill}`);
     expect(un.json).toEqual({ optedOut: false });

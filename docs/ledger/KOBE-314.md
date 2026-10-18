@@ -69,12 +69,41 @@ catalog/:id/default/move-major, default-syncs}`; `/v1/team/skills/{installs, ins
   and Reinstall for Team admins.
 - **For KOBE-317:** the seed calls `queueDefaultSync(tx, {kind: "add", …})` under
   `lockDefaultSet(tx, "exclusive")` on every upgrade; opt-outs survive (tested). `requested_by`
-  and `installed_by` are NOT NULL users: the seed needs an actor (no system user exists).
+  and `installed_by` are NOT NULL users today; per the coordinator, 317 makes them NULL for
+  Kobe-published skills with a publisher marker and a CHECK (its own migration).
+
+- **Review fixes (review-314; 0135 edited in place, own commit):**
+  - B1: jobs carry `seq` (bigserial drawn at insert, after `queueDefaultSync` takes the exclusive
+    Default-set lock, so it follows commit order); the queue and `defaultTargets` order by it.
+    Every team step re-reads the tag under the shared lock and acts on the current state: `add`
+    only while Default, `remove` only once not Default (a stale remove leaves installs and
+    opt-outs), `move_major` only while its major is the Default's. A fast on-off toggle installs
+    nothing. Tests: `skill-default-sync-races.db.test.ts`.
+  - Touched (coordinator): `team_skill_installs.team_changed_at`; `changeTeamInstall` (the only
+    way later routes change pin mode or access) sets it; `move_major` moves only installs with
+    origin `default_tag`, `team_changed_at` null and `within_major`. A pin and un-pin, or an access
+    change, stick.
+  - Team audit: `skill.default.applied` (team, system actor: installed, converted,
+    optout_cleared, moved, with semver) from the sync and the new-team hook.
+  - Minimum count: when opted out, opt-outs cleared or blocked is 1 or 2, the API returns
+    `counts: null` and the site audit `skill.default.synced` has `masked: true` and no counts.
+  - Failures: `attempts`, `next_attempt_at`, `last_error` (code only); backoff 30 s doubling to
+    30 min; after 5 attempts `failed` (`skill.default.sync_failed`, error log) and the queue moves
+    on. No approved version in the job's major is `no_version` (visible, N5).
+  - Blocks: the sync never installs where the team blocked the skill (`blocked` count); Reinstall
+    there is 409 `blocked`.
+  - Nits: cursor fence (a second runner rolls back and stops, `LeaseLost`, N1); the version is
+    re-read per batch and filtered as installable inside the INSERT/UPDATE (N2); Reinstall takes
+    the install lock before reading (N3); a kept tag-made install (e.g. from the new-team hook)
+    sends no notice (N4); `after_team_id` documented as a cursor only (N6).
+  - Coordinator (2): removing Default clears opt-outs (SK8), unchanged.
+  - Also: `site-rename-migration.db.test.ts` lists `skill_default_syncs.installed` and its counts
+    check as install-the-noun objects (missed in the first round).
 
 ## Open questions (for Chris or the coordinator)
 
-- Should a team that changes a Default install's access keep origin `default_tag` (moves still
-  apply) as SK6 reads? Nothing changes access yet (no PUT install route in Phase A).
+- None. (Decided: any team change marks an install touched; KOBE-317 uses requester NULL with a
+  publisher `kobe` marker and a CHECK.)
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -88,6 +117,8 @@ catalog/:id/default/move-major, default-syncs}`; `/v1/team/skills/{installs, ins
   move; pinned and team-made stay; new teams get the new major; audited) and "removing Default"
   (origin → team, opt-outs cleared, notices, new teams get nothing; audited).
 - ac-4: same file: two concurrent `defaultSyncOnce` run the job once; a rerun does nothing; a
-  job left `running` with a cursor resumes and finishes all teams.
-- `@kobe/server` test:db 124 files / 1686 tests green; server, web and db unit suites green;
+  job left `running` with a cursor resumes and finishes all teams. `skill-default-sync-races.db.test.ts`:
+  seq follows commit order, fast toggle, stale add/remove, blocks, opt-out racing the sync (both
+  orders), retry/backoff/park.
+- `@kobe/server` test:db 125 files / 1693 tests green (after the review fixes); `@kobe/db` test:db green; server, web and db unit suites green;
   `drizzle-kit generate` → no schema changes.

@@ -1,4 +1,5 @@
 import { scanTeams, sql, type KobeDb } from "@kobe/db";
+import { isMasked } from "./default-sync-run.js";
 import { defaultTargets } from "./default-target.js";
 
 /**
@@ -74,6 +75,17 @@ export async function listSiteCatalog(db: KobeDb): Promise<SiteCatalogSkill[]> {
   }));
 }
 
+/** Counts of a job by outcome; null when the minimum-count rule hides them (SK26). */
+export interface DefaultSyncCounts {
+  readonly installed: number;
+  readonly kept: number;
+  readonly optedOut: number;
+  readonly blocked: number;
+  readonly converted: number;
+  readonly optoutsCleared: number;
+  readonly moved: number;
+}
+
 export interface DefaultSyncRow {
   readonly id: string;
   readonly skillId: string;
@@ -86,42 +98,50 @@ export interface DefaultSyncRow {
   readonly finishedAt: string | null;
   readonly teamsTotal: number;
   readonly teamsDone: number;
-  readonly installed: number;
-  readonly kept: number;
-  readonly optedOut: number | "few";
-  readonly converted: number;
-  readonly optoutsCleared: number;
-  readonly moved: number;
+  /**
+   * Null when a team count among them (opted out, opt-outs cleared, blocked) is 1 or 2: showing
+   * the others would give it away by subtraction, so the whole breakdown is hidden.
+   */
+  readonly counts: DefaultSyncCounts | null;
+  readonly attempts: number;
+  readonly lastError: string | null;
+  readonly nextAttemptAt: string | null;
 }
 
 const SHOWN_SYNCS = 20;
 const iso = (v: unknown) => (v === null ? null : v instanceof Date ? v.toISOString() : String(v));
 
-/**
- * The newest Default sync jobs with their progress. Team counts are totals over the whole Site
- * (no team names); the opted-out count of a job obeys the minimum-count rule too.
- */
+/** The newest Default sync jobs with their progress; totals only, never team names. */
 export async function listDefaultSyncs(db: KobeDb): Promise<DefaultSyncRow[]> {
   const { rows } = await db.execute<Record<string, unknown>>(sql`
     SELECT j.*, s.name FROM skill_default_syncs j JOIN registry_skills s ON s.id = j.skill_id
-    ORDER BY j.created_at DESC, j.id DESC LIMIT ${SHOWN_SYNCS}`);
-  return rows.map((r) => ({
-    id: String(r.id),
-    skillId: String(r.skill_id),
-    name: String(r.name),
-    kind: String(r.kind),
-    major: r.major === null ? null : Number(r.major),
-    status: String(r.status),
-    createdAt: iso(r.created_at) ?? "",
-    startedAt: iso(r.started_at),
-    finishedAt: iso(r.finished_at),
-    teamsTotal: Number(r.teams_total),
-    teamsDone: Number(r.teams_done),
-    installed: Number(r.installed),
-    kept: Number(r.kept),
-    optedOut: shown(Number(r.opted_out)),
-    converted: Number(r.converted),
-    optoutsCleared: Number(r.optouts_cleared),
-    moved: Number(r.moved),
-  }));
+    ORDER BY j.seq DESC LIMIT ${SHOWN_SYNCS}`);
+  return rows.map((r) => {
+    const counts: DefaultSyncCounts = {
+      installed: Number(r.installed),
+      kept: Number(r.kept),
+      optedOut: Number(r.opted_out),
+      blocked: Number(r.blocked),
+      converted: Number(r.converted),
+      optoutsCleared: Number(r.optouts_cleared),
+      moved: Number(r.moved),
+    };
+    return {
+      id: String(r.id),
+      skillId: String(r.skill_id),
+      name: String(r.name),
+      kind: String(r.kind),
+      major: r.major === null ? null : Number(r.major),
+      status: String(r.status),
+      createdAt: iso(r.created_at) ?? "",
+      startedAt: iso(r.started_at),
+      finishedAt: iso(r.finished_at),
+      teamsTotal: Number(r.teams_total),
+      teamsDone: Number(r.teams_done),
+      counts: isMasked(counts) ? null : counts,
+      attempts: Number(r.attempts),
+      lastError: r.last_error === null ? null : String(r.last_error),
+      nextAttemptAt: iso(r.next_attempt_at),
+    };
+  });
 }

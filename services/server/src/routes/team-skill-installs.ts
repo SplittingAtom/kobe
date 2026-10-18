@@ -68,8 +68,16 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
         userId: c.get("user").id,
       });
       if (r.ok) return c.json({ semver: r.semver }, 201);
-      return r.code === "not_found"
-        ? c.json({ code: "not_found", message: "That skill is not a removed default here." }, 404)
+      if (r.code === "not_found")
+        return c.json(
+          { code: "not_found", message: "That skill is not a removed default here." },
+          404,
+        );
+      return r.code === "blocked"
+        ? c.json(
+            { code: "blocked", message: "The team blocked this skill: unblock it first." },
+            409,
+          )
         : c.json(
             { code: "no_version", message: "The default has no approved version right now." },
             409,
