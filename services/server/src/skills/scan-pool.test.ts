@@ -120,4 +120,22 @@ describe("scan pool", () => {
     },
     BIG_SCAN_TEST_MS,
   );
+
+  it(
+    "doesn't count a preview toward its owner's share (KOBE-321 re-review)",
+    async () => {
+      const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+      const pool = createScanPool({ concurrency: 3, perOwner: 2 });
+      const preview = pool.scan(big, { owner: "u1", preview: true }).catch(() => null);
+      expect(pool.canStartPreview?.()).toBe(true);
+      const uploads = [pool.scan(bundle(), { owner: "u1" }), pool.scan(bundle(), { owner: "u1" })];
+      expect((await Promise.all(uploads)).map((r) => r.verdict)).toEqual(["pass", "pass"]);
+      await preview;
+      const busy = createScanPool({ concurrency: 1 });
+      const running = busy.scan(big);
+      expect(busy.canStartPreview?.()).toBe(false);
+      await running;
+    },
+    BIG_SCAN_TEST_MS,
+  );
 });

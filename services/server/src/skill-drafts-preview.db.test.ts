@@ -217,6 +217,30 @@ describe("scan preview (ac-2)", () => {
     expect((await older).json.code).toBe("scan_busy");
   });
 
+  it("says busy before reading files or counting the rate when the pool has no free slot", async () => {
+    const d = await draftWith(author, "full-pool-preview");
+    let scans = 0;
+    usePool({
+      canStartPreview: () => false,
+      scan: () => {
+        scans += 1;
+        return Promise.reject(new ScanBusyError("global"));
+      },
+    });
+    const key = `kobe:skill-draft-preview:${authorId}`;
+    const count = async () =>
+      (
+        await h.admin.query<{ count: number }>(`SELECT count FROM rate_limits WHERE key = $1`, [
+          key,
+        ])
+      ).rows[0]?.count ?? 0;
+    const before = await count();
+    const busy = await author.get(`/v1/skills/drafts/${d.id}/scan`);
+    expect([busy.status, busy.json.code]).toEqual([429, "scan_busy"]);
+    expect(scans).toBe(0);
+    expect(await count()).toBe(before);
+  });
+
   it("never caches a scan that didn't finish: it is unavailable, and the next request scans again", async () => {
     const d = await draftWith(author, "slow-preview");
     let scans = 0;

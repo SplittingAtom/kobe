@@ -12,10 +12,11 @@ import type { DraftContext } from "./service.js";
  *
  *  1. a cheap read of the draft's revision (visibility first: one the caller can't see is not
  *     found); a scan of that revision already made, or running, is reused, for free;
- *  2. only then the rate limit (`admit`), so polling an unchanged draft costs nothing;
- *  3. the caller's older preview (another revision) is cancelled: the newest request wins, so a
+ *  2. busy when the pool has no free slot (and the caller holds none to take back);
+ *  3. only then the rate limit (`admit`), so polling or a busy pod costs nothing;
+ *  4. the caller's older preview (another revision) is cancelled: the newest request wins, so a
  *     slow scan never holds a typist's next one back;
- *  4. the files are read and zipped, and the scan runs.
+ *  5. the files are read and zipped, and the scan runs.
  *
  * Only complete scans are cached. A scan that ran out of time or memory is `unavailable` (the
  * page retries; the save scans in full), never a cached Block; files that don't form a package
@@ -76,10 +77,12 @@ export async function previewDraftScan(
   if (hit) return { ok: true, rev: draft.rev, scan: hit };
   const running = inflight.get(key);
   if (running) return running;
-  if (!(await options.admit())) return { ok: false, error: "rate_limited" };
-
   const owner = `${ctx.teamId}/${ctx.viewer.userId}`;
   const older = newest.get(owner);
+  // No slot and none of the caller's own to take back: busy, before the rate or any file read.
+  if (!older && scanPool().canStartPreview?.() === false) return { ok: false, error: "busy" };
+  if (!(await options.admit())) return { ok: false, error: "rate_limited" };
+
   if (older && older.key !== key) {
     older.abort.abort();
     await older.done.catch(() => undefined);

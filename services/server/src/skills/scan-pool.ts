@@ -31,6 +31,8 @@ export interface ScanOptions {
 export interface ScanPool {
   /** Rejects with {@link ScanBusyError} when the queue (or the owner's share) is full. */
   scan(zip: Uint8Array, options?: ScanOptions): Promise<ScanResult>;
+  /** Whether a preview would get a slot now (checked before any work is done for one). */
+  canStartPreview?(): boolean;
 }
 
 /** A scan stopped before its result: its caller aborted it, or a real scan took its slot. */
@@ -197,8 +199,12 @@ export function createScanPool(
     }
   };
   return {
+    canStartPreview: () => active < concurrency,
     async scan(zip, scanOptions = {}) {
-      const { owner, preview = false, signal } = scanOptions;
+      const { preview = false, signal } = scanOptions;
+      // Previews don't count toward the owner's share (re-review): an editor left open never
+      // turns its author's uploads away. The Workbench keeps one preview per author itself.
+      const owner = preview ? undefined : scanOptions.owner;
       if (signal?.aborted) throw new ScanCancelledError("aborted");
       if (owner !== undefined && (owners.get(owner) ?? 0) >= perOwner)
         throw new ScanBusyError("owner");
