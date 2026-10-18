@@ -3,7 +3,6 @@ import { expect, test } from "../support/chat.js";
 import {
   allowApproval,
   deleteWorkspacePath,
-  EXPECTED_FAILURES,
   longAnswer,
   regions,
   toolTurn,
@@ -57,19 +56,33 @@ test("U18: memory and the member's settings open beside the thread (CE4)", async
   chat,
   page,
 }) => {
-  // KOBE-227 failure 1: My memory and the profile menu's pages are full pages today
-  // (components/shell/bar-links.tsx: "full pages for now; CE4 moves some beside").
-  test.fail(EXPECTED_FAILURES, "KOBE-227 failure 1: memory and settings open as full pages");
+  // KOBE-424: My memory, My approvals (and My schedules, My connectors) open in the artifact
+  // column; the thread, its answer and the composer stay on screen.
+  const { artifact } = regions(page);
   await chat.open();
   await chat.ask("No tools. Reply with the single word MEMORY.");
   const thread = await chat.threadId();
   await page.locator('[data-command="my-memory"]').click();
-  await expect(chat.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await expect(artifact.getByRole("region", { name: "My memory" })).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+  await expect(chat.composer).toBeInViewport();
+  await expect(chat.answers.last()).toBeInViewport();
   expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
+  expect(new URL(page.url()).searchParams.get("area")).toBe("memory");
   await page.locator('[data-command="profile"]').click();
   await page.getByRole("link", { name: "My approvals" }).click();
-  await expect(chat.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await expect(artifact.getByRole("region", { name: "My approvals" })).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+  await expect(chat.composer).toBeInViewport();
   expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
+  // Back returns to My memory, then to the thread alone.
+  await page.goBack();
+  await expect(artifact.getByRole("region", { name: "My memory" })).toBeVisible();
+  await page.goBack();
+  await expect(page.locator("[data-kobe-area]")).toHaveCount(0);
+  await expect(chat.composer).toBeVisible();
 });
 
 test("U18: while scrolled up, the Jump pill counts the messages that arrive", async ({

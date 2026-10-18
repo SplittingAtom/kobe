@@ -73,7 +73,8 @@ What the `gate5/` specs add, per criterion:
   and the artifact width set in one browser are stored (`/v1/me/preferences`) and applied in a
   second browser that signs in on its own.
 - **U18** an artifact and a workspace file open as tabs beside the thread with the composer and the
-  answer on screen; memory and the profile menu's pages beside the thread (expected failure, below);
+  answer on screen; My memory and My approvals beside the thread (`?area=`), Back returning to
+  each in turn;
   scrolled up, two messages sent from another tab make the pill say "2 new messages" while the
   view holds; the composer in view and no page scroll at 1920, 1280, 960, 800 and 390 px.
 - **U19** one run of the panel through idle (zero height), active, queued (paused queue after
@@ -93,11 +94,9 @@ What the `gate5/` specs add, per criterion:
 
 ## Product failures found
 
-1. **U18: memory and the member's settings pages leave the conversation** (CE4). The bar's My memory
-   and the profile menu's pages (My approvals and the rest) are full-page routes
-   (`components/shell/bar-links.tsx`: "full pages for now; CE4 moves some beside"). Check:
-   `U18: memory and the member's settings open beside the thread (CE4)`, `test.fail()` until filed
-   and fixed.
+1. **U18: memory and the member's settings pages left the conversation** (CE4). Fixed by KOBE-424
+   on this branch: My memory, My approvals, My schedules and My connectors open beside the thread
+   in the chat; the check is an ordinary test again.
 
 ## What this does not prove
 

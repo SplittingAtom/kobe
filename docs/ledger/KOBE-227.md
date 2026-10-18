@@ -37,8 +37,8 @@ from Playwright's JSON report (`e2e/gate5/verdict.mjs`). CI: shards `gate5-a` (U
 1. **U18 (CE4): memory and the member's settings leave the conversation.** The bar's My memory and
    the profile menu's pages (My approvals and the rest) are full-page routes
    (`apps/web/components/shell/bar-links.tsx`: "full pages for now; CE4 moves some beside"), so
-   the thread leaves the screen. Check `U18: memory and the member's settings open beside the
-thread (CE4)`, `test.fail()` (CI green, story XFAIL).
+   the thread leaves the screen. **Fixed** by KOBE-424 on this branch (docs/ledger/KOBE-424.md);
+   the check is an ordinary test again.
 
 ## Open questions (for Chris or the coordinator)
 
