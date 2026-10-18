@@ -5,6 +5,10 @@
   "license": "Apache-2.0",
   "description": "Kobe API server: REST + SSE, auth, runs, policy, sandbox orchestration",
   "type": "module",
+  "files": [
+    "dist",
+    "builtin-skills"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
