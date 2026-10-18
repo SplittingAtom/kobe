@@ -99,6 +99,8 @@ function publishedResponse(c: Context, published: Published, access: AgentAccess
       agent: agentDetail(published.agent, access),
       version: versionDetail(published.version),
       warnings: agentWarnings(published.agent.frontmatter),
+      // Named team skills with no loadable version, left out of the frozen manifest (KOBE-318).
+      skillsLeftOut: published.skillsLeftOut,
     },
     201,
   );

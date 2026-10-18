@@ -23,7 +23,9 @@ run-start parity, the 313 frozen-version check). Phase A summary in `skills-phas
     one shadows it). So there are no named personal skills to freeze.
   - Personal and gallery agent versions (`site_agent_versions`) have no team at publish and run
     in any of their user's teams; freezing team skills there would put team skill ids in a
-    site-wide row (teams are walls). They freeze nothing and resolve as before. **Open question.**
+    site-wide row (teams are walls). They freeze nothing and resolve as before; the 315 "Skill
+    updated" markers make each change visible in their threads. **Coordinator (B-S4): keep it;
+    on Chris's gate-review list as an SK28 amendment.**
   - Gallery versions name only Kobe skills, which are catalog skills (never frozen, 317).
 - **0139 (generated):** `skill_manifest jsonb`, nullable so it can be added to existing rows.
 - **0140 (custom backfill):** every team agent version gets the versions it resolves to on
@@ -31,26 +33,40 @@ run-start parity, the 313 frozen-version check). Phase A summary in `skills-phas
   Kobe's seven; only names the team has a skill of; the newest approved or suspended review row
   of that slug (`teamSkillStates`, so a suspended newest stays `suspended`); not a name whose own
   skill is archived while the team installed a published catalog skill of that name
-  (`catalogNamed`). FORCE is lifted on `team_agent_versions`, `team_skills`,
+  (`catalogNamed`). Review rows are found through the team's skill of the name (`team_skills`
+  unique `(team_id, slug)`, then the review primary key), not by scanning every review row of the
+  team (B-S1): on the reviewer's set (20,000 versions × 8 names, 40,000 review rows, as the
+  owner through `runMigrations`) 0139 + 0140 went from 155.6 s to 4.4 s, same manifests (upgrade
+  and parity tests). FORCE is lifted on `team_agent_versions`, `team_skills`,
   `team_skill_reviews` and `team_skill_installs`, and the immutability trigger disabled, for the
   backfill only (one transaction); a `RAISE NOTICE` counts versions and frozen entries. Then
   `team_agent_versions_skill_manifest` (SQL-only CHECK, like 0130's): not null, an object with a
-  `skills` array, at most 16 KiB. Upgrade note in `docs/install.md` (old pods can't publish team
-  agents after the Job; a rolled-back release ignores the freeze).
+  `skills` array, at most 16 KiB. Upgrade note in `docs/install.md` (the four tables are held for
+  the backfill; names pending on upgrade day reach the agent at its next publish).
+- **Departure (B-S3, expand/contract):** after the Job, previous-release pods can't publish team
+  agents (their insert has no manifest: 23514, answered 500 by the old code; the new server can't
+  change that answer). Accepted as a rollout transient (coordinator); **rolling back across
+  0137–0140 is unsupported** (install.md, like 0128): back up first, reinstall and restore to go
+  back. A BEFORE INSERT trigger running the freeze SQL would lift it; not done.
 - **Publish (`agents/skill-freeze.ts`, `skills/frozen.ts`):** `insertVersion` freezes for team
   locations, inside the publish transaction: the names that route to the team's own skills
-  (`localNamedSkills`, the same split as run start), each at its **newest valid** version
+  (`localNamedSkills`, the same split as run start), each at its **newest loadable** version
   (approved, not suspended, hash not blocklisted), so a republish moves off a version a rescan
-  or the blocklist took out. With none valid, the newest approved-or-suspended one, so the
-  notice keeps its reason. A name with no reviewed version is not frozen.
+  or the blocklist took out (coordinator decision). A name with **no loadable version** is left
+  out of the manifest (B-S2): never frozen at a version that can't load, which a later
+  re-approval or unblock would then switch on without a republish. The publish answers
+  `skillsLeftOut: [{name, reason}]` (`blocklisted`, `suspended`, `not_approved`), the builder shows
+  it after "Published vN.", and the builder notice lists it too (also after an eval-gated publish,
+  which answers 202). Runs omit such a name as `not_approved` until a republish.
   - `contentKey` includes the skill manifest (team only), so a republish that only picks up a
     newer skill version is a new version, and one that changes nothing is still `unchanged`.
     The eval gate's own unchanged check freezes the same way.
   - **Rollback** restores the frozen versions of the version it republishes (it restores that
     version's behaviour; the tool manifest is recomputed because it is a policy ceiling, while
     every frozen version is checked again at run start anyway).
-  - Drafts (test pane) freeze nothing: they run today's newest approved versions, a preview of
-    what a publish would freeze.
+  - Drafts (test pane) freeze nothing: they run today's newest approved-or-suspended versions,
+    as before; with a blocklisted or suspended newest version the pane omits a skill that a
+    publish would freeze at an older loadable version (review N1, not aligned).
 - **Run start (`runs/resolver-input.ts`):** `loadSkillFacts` takes `frozen` (the pinned team
   version's manifest). A frozen name resolves to exactly that version (`frozenStates`): loaded
   only while the team's review row (scope team, same slug) is `approved` and `suspended_at` is
@@ -80,12 +96,14 @@ run-start parity, the 313 frozen-version check). Phase A summary in `skills-phas
 
 ## Open questions (for Chris or the coordinator)
 
-- Personal agents name team skills of whichever team runs them, and freeze nothing. Freezing them
-  per team would need a team table (frozen at first run or at publish for each of the owner's
-  teams); say if SK28 should cover them.
-- Republish picks the newest **valid** version, which can be older than a suspended or
-  blocklisted newest one (a visible step back the builder shows as the update). Say if a
-  republish should rather keep the newest and its notice.
+- For Chris's gate review (B-S4): personal agents name team skills of whichever team runs them,
+  and freeze nothing (an SK28 amendment). Freezing them per team would need a team table (frozen
+  at first run, or at publish for each of the owner's teams).
+- Decided (coordinator): republish freezes the newest loadable version, else leaves the skill
+  out with a warning.
+- Review nits not done: N2 (a Required skill of the same name shows `ok` for the frozen version),
+  N3 (publish still freezes an archived team skill), N6 (the eval gate does not evaluate the
+  skill versions the publish then freezes; for Phase B skill evals).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -101,8 +119,11 @@ run-start parity, the 313 frozen-version check). Phase A summary in `skills-phas
   blocklisted, no longer approved; republish picks a valid one), "next to Required, archive,
   catalog and the cap", "the builder's skill updates";
   `apps/web/components/admin/team/agent-builder/skill-updates.test.tsx`.
-- Suites: `@kobe/server` test:db 132 files / 1751 (alone; the one failure, a raw insert without
-  a manifest in `agent-versions.db.test.ts`, fixed and rerun with the changed files: 46 / 46);
+- Review-318: B-S2 "with no loadable version left, republish leaves it out and warns", "every
+  version blocklisted" (same file) and `agent-builder-pages.test.tsx` "says which named team
+  skills a publish left out"; N5 "a manifest entry naming another team's skill never loads";
+  A-S1 `kobe-skills.db.test.ts` asserts `queued_before_upgrade` and its message.
+- Suites (after the review-318 fixes): `@kobe/server` test:db 132 files / 1754 (alone);
   `@kobe/db` test:db 58 / 1335; `@kobe/cli` test:db 4 / 28 with `KOBE_PG_BIN_DIR`; unit suites
-  of server (1991), web (1831), db (566), cli (85); repo typecheck, lint, format:check. The old
-  marker test fails under the freeze, as intended (checked, then changed).
+  of server (1991) and web (1833); repo typecheck, lint, format:check. The old 315 marker test
+  fails under the freeze, as intended (checked, then changed).

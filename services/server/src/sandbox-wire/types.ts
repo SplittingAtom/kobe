@@ -78,6 +78,7 @@ export const COMMAND_FAILURES = {
   sandboxLost: "sandbox_lost", // run.start for a run the reconnected sandbox no longer has
   sessionUnavailable: "session_unavailable", // entry sync/restore before run.start failed
   skillsUnsupported: "skills_unsupported", // run.start lists skills, the agent can't load them
+  queuedBeforeUpgrade: "queued_before_upgrade", // run.start queued before KOBE-317 lists built-ins
   compactUnsupported: "compact_unsupported", // thread.compact to an agent without it or run tokens
 } as const;
 

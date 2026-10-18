@@ -20,7 +20,7 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
-import { freezeLocalSkills } from "./skill-freeze.js";
+import { freezeLocalSkills, type SkillLeftOut } from "./skill-freeze.js";
 import { skillManifestSchema, type SkillManifest } from "../skills/frozen.js";
 import {
   computeToolManifest,
@@ -98,6 +98,11 @@ export const DEFAULT_VERSION_LIMITS: VersionLimits = { maxVersions: 1000 };
 export interface Published {
   readonly agent: AgentRecord;
   readonly version: AgentVersionRecord;
+  /**
+   * Named team skills this publish left out of the frozen manifest: none of their versions can
+   * load (KOBE-318, review-318 B-S2). A publish warning; runs omit them until a republish.
+   */
+  readonly skillsLeftOut: readonly SkillLeftOut[];
 }
 
 const SUMMARY_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) => ({
@@ -299,15 +304,15 @@ async function insertVersion(
   }
   // Team versions freeze their named local skills at publish (KOBE-318); a rollback restores
   // the frozen versions of the version it republishes.
-  const skillManifest =
-    location.scope !== "team"
-      ? null
-      : (input.skillManifest ??
-        (await freezeLocalSkills(
+  const frozen =
+    location.scope !== "team" || input.skillManifest
+      ? { manifest: input.skillManifest ?? null, leftOut: [] }
+      : await freezeLocalSkills(
           tx,
           location.teamId,
           agentSkills(input.definition.frontmatter).names,
-        )));
+        );
+  const skillManifest = frozen.manifest;
   if (await sameAsCurrent(tx, location, agent, input.definition, manifest, skillManifest)) {
     return { ok: false, error: "unchanged" };
   }
@@ -355,7 +360,14 @@ async function insertVersion(
       .returning(SITE);
   }
   if (!row || !updated) throw new Error("agent version insert returned no row");
-  return { ok: true, value: { agent: toRecord(location.scope, updated), version: toVersion(row) } };
+  return {
+    ok: true,
+    value: {
+      agent: toRecord(location.scope, updated),
+      version: toVersion(row),
+      skillsLeftOut: frozen.leftOut,
+    },
+  };
 }
 
 const ref = (location: AgentLocation, agent: AgentRecord) => ({

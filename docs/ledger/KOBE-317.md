@@ -89,7 +89,7 @@ materialization changes, removal of the image path, the image and e2e checks, an
   resolver's `builtinSkills` are gone. `KOBE_SKILL_NAMES` / `isKobeSkillName` replace
   `BUILTIN_SKILL_NAMES` (protocol `skill-catalog.ts`; `@kobe/db` mirrors it, a test ties them).
   Delivery keeps one legacy guard: a `run.start` queued before the upgrade that still lists
-  `builtin_skills` fails visibly on an agent without the old capability.
+  `builtin_skills` fails visibly (review fixes, S1).
   Run records keep `source: "builtin"` for old runs (readers unchanged).
 - **Intended changes (spec SK4/SK6):** the seven now load in every non-exclusive run (On by
   default), count against the 64 cap, are blocklistable by hash, and shadow a personal skill of
@@ -106,9 +106,10 @@ materialization changes, removal of the image path, the image and e2e checks, an
 
 - **S1:** the legacy guard read the parsed frame, whose schema strips `builtin_skills`, so it
   never fired. It now reads the stored JSON (`row.frame.config.builtin_skills`) and fails such a
-  run visibly on every agent (`skills_unsupported`, "queued before an upgrade… send it again"):
-  no frame can carry the field any more, so even an old agent would start without them. Test:
-  `kobe-skills.db.test.ts` "a run.start queued before the upgrade".
+  run visibly on every agent: no frame can carry the field any more, so even an old agent would
+  start without them. Its own code `queued_before_upgrade` (review-318 A-S1) tells the member
+  "This message was queued while Kobe was being upgraded and couldn't start. Send it again." (the
+  prompt is kept). Test: `kobe-skills.db.test.ts` "a run.start queued before the upgrade".
 - **S2 (0137 edited in place, own commit `ae8d95ad`):** `registry_skills_kobe_names` is two-way,
   `(publisher = 'kobe') = (name IN the seven)`: Kobe rows are exactly the seven, and a Kobe skill
   can't be renamed. Residual: the app role (which the seed runs as) can still insert a new Kobe

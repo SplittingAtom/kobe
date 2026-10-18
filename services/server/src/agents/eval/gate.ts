@@ -110,7 +110,7 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
       location.scope === "team"
         ? await withTeam(db, location.teamId, (tx) =>
             freezeLocalSkills(tx, location.teamId, agentSkills(definition.frontmatter).names),
-          )
+          ).then((f) => f.manifest)
         : null;
     if (
       current &&

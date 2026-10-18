@@ -75,7 +75,7 @@
 
 Every backfill (0130, 0140) has an upgrade test that migrates a database with rows as the
 non-superuser owner. Several migrations were edited in place after review while unreleased
-(0132, 0133, 0134, 0135, 0137), each edit in its own migration-only commit.
+(0132, 0133, 0134, 0135, 0137, 0140: its backfill lookup, 155.6 s to 4.4 s on 20,000 versions), each edit in its own migration-only commit.
 
 ## Departures from the briefs
 
@@ -89,8 +89,13 @@ non-superuser owner. Several migrations were edited in place after review while 
 - **318:** only team agent versions freeze (`team_agent_versions.skill_manifest`, not a shared
   `agent_versions`): agents name only team and catalog skills, so there are no named personal
   skills to freeze, and personal and gallery versions have no team (open question in the
-  ledger). Republish picks the newest valid version; a rollback restores the frozen versions of
-  the version it republishes.
+  ledger; on Chris's gate-review list). Publish freezes the newest loadable version and leaves
+  out, with a warning, a skill with none; a rollback restores the frozen versions of the version
+  it republishes.
+- **Expand/contract (318, review B-S3):** after 0140's Job, previous-release pods can't publish
+  team agents (500) until Helm replaces them, and **rolling back across 0137–0140 is unsupported**
+  (`docs/install.md`, like 0128): back up first; to go back, reinstall and restore. Run starts and
+  reads keep working on old pods.
 - **Commit hygiene:** 308 (0129 + 0130) and 311 (0132 + 0133) each landed a generated and a
   custom migration in one commit; later tickets keep them apart.
 - **Behaviour changes on purpose:** 310 (a new upload's `evals/` and `kobe.skill.yaml` no
@@ -157,4 +162,6 @@ public.registry_skills WHERE publisher = 'kobe')`); bucket objects `<prefix>skil
 - 316: Builders may set On by default (reaches every member).
 - 317: rolling upgrade order (servers before the sandbox image), cold-start fetch of seven bundles
   (KOBE-319 should read the k3d trial), e2e changes checked in CI only.
-- 318: freezing for personal agents; republish picking an older valid version.
+- 318 (Chris's gate review): personal agents don't freeze (an SK28 amendment; "Skill updated"
+  markers show the changes). Decided by the coordinator: republish freezes the newest loadable
+  version, else leaves the skill out with a warning.

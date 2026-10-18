@@ -51,6 +51,10 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-82: the run has skills, but the workspace's agent is too old to load them.
   skills_unsupported:
     "Your workspace is running an older version that can't load this agent's skills. Ask your admin to upgrade it.",
+  // KOBE-317: a run.start queued before the upgrade still lists the image's built-in skills; the
+  // workspace is new and nothing needs upgrading: the member resends (the prompt is kept).
+  queued_before_upgrade:
+    "This message was queued while Kobe was being upgraded and couldn't start. Send it again.",
   // A compaction run's end (KOBE-213); not a chat turn, so these are seen only in its events.
   compaction_failed: "The conversation could not be compacted.",
   nothing_to_compact: "There was nothing to compact.",

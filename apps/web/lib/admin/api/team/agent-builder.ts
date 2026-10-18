@@ -41,6 +41,17 @@ export interface VersionPage {
 /** A publish or rollback answer: the agent as it now stands and the version just created. */
 export interface PublishedAgent extends AgentDetailSaved {
   readonly version: AgentVersionSummary;
+  /**
+   * Named team skills the publish left out of the frozen manifest: none of their versions can
+   * load (KOBE-318). Absent from servers before it, and from rollbacks.
+   */
+  readonly skillsLeftOut?: readonly AgentSkillLeftOut[];
+}
+
+/** Why a publish left a named team skill out (no version of it can load). */
+export interface AgentSkillLeftOut {
+  readonly name: string;
+  readonly reason: "blocklisted" | "suspended" | "not_approved";
 }
 
 export type EvalStatus = "pending" | "running" | "passed" | "blocked" | "errored";

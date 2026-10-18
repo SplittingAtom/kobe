@@ -433,7 +433,7 @@ export class CommandDelivery {
       await this.#failRunStart(
         row,
         failure(
-          COMMAND_FAILURES.skillsUnsupported,
+          COMMAND_FAILURES.queuedBeforeUpgrade,
           "this run was queued before an upgrade and lists skills this sandbox no longer has; send it again",
         ),
       );

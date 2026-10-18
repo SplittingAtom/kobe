@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubApi } from "../../testing";
-import { SkillUpdates } from "./skill-updates";
+import { leftOutText, SkillUpdates } from "./skill-updates";
 
 /** KOBE-318 ac-3: the builder shows skill updates and frozen versions runs leave out. */
 const AGENT = "11111111-1111-4111-8111-111111111111";
@@ -77,6 +77,25 @@ describe("SkillUpdates", () => {
       await screen.findByText("sus 0.2.0 is suspended after a rescan: runs of v3 leave it out."),
     ).toBeTruthy();
     expect(screen.getByText(/Skill update available: later 0\.1\.0\. Publish again/)).toBeTruthy();
+  });
+
+  it("names a skill the publish left out because no version can load (B-S2)", async () => {
+    stubApi({
+      [ROUTE]: [
+        200,
+        {
+          version: 3,
+          skills: [{ name: "gone", frozen: null, status: "blocklisted", update: null }],
+        },
+      ],
+    });
+    show();
+    expect(
+      await screen.findByText("gone is left out of v3: every version is blocklisted."),
+    ).toBeTruthy();
+    expect(leftOutText({ name: "sus", reason: "suspended" }, 4)).toBe(
+      "sus is left out of v4: its newest version is suspended after a rescan.",
+    );
   });
 
   it("says nothing when every frozen version is current, or on an error", async () => {

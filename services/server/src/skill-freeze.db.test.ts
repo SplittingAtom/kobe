@@ -39,11 +39,19 @@ async function createAgent(p: Person, skills: unknown): Promise<string> {
   return created.json.agent.id as string;
 }
 
-/** Publishes the agent's draft; returns the new version number (or the refusal's status). */
-async function publish(p: Person, agentId: string): Promise<number> {
+/** Publishes the agent's draft; the new version number and the skills it left out. */
+async function published(p: Person, agentId: string) {
   const pub = await f.on(0, p).request("POST", `/v1/agents/${agentId}/publish`, {}, ANY);
   expect(pub.status, JSON.stringify(pub.json)).toBe(201);
-  return pub.json.version.version as number;
+  return {
+    version: pub.json.version.version as number,
+    leftOut: pub.json.skillsLeftOut as { name: string; reason: string }[],
+  };
+}
+
+/** Publishes the agent's draft; returns the new version number. */
+async function publish(p: Person, agentId: string): Promise<number> {
+  return (await published(p, agentId)).version;
 }
 
 async function manifestOf(team: string, agentId: string, version: number) {
@@ -171,7 +179,9 @@ describe("publish freezes local skill versions (ac-2)", () => {
     const name = `later-${tag()}`;
     const skill = await seed.teamSkill(w.team, w.owner.id, name);
     const agent = await createAgent(w.owner, [name]);
-    const v1 = await publish(w.owner, agent);
+    const first = await published(w.owner, agent);
+    const v1 = first.version;
+    expect(first.leftOut).toEqual([{ name, reason: "not_approved" }]);
     expect(await manifestOf(w.team, agent, v1)).toEqual({ skills: [] });
     await seed.addVersion(w.team, w.owner.id, skill, name, 1);
     expect((await runOf(w.team, w.owner.id, agent, v1)).omissions).toEqual([
@@ -212,16 +222,57 @@ describe("a frozen version that later fails a check is omitted, never swapped (3
     expect((await runOf(team, me, agent, v2)).skills).toEqual([`${name}@0.1.0:team`]);
   });
 
-  it("with no valid version left, republish keeps the reason visible", async () => {
+  it("with no loadable version left, republish leaves it out and warns (B-S2)", async () => {
     const { w, team, me, name, skill } = await teamWithSkill(1);
     const agent = await createAgent(w.owner, [name]);
-    await publish(w.owner, agent);
+    const v1 = await publish(w.owner, agent);
     await suspend(team, skill, 1);
-    // The manifest is unchanged (still version 1, now suspended): the publish is refused.
-    const again = await f.on(0, w.owner).request("POST", `/v1/agents/${agent}/publish`, {}, ANY);
-    expect(again.status).toBe(409);
-    const v1run = await runOf(team, me, agent, 1);
-    expect(v1run.omissions).toEqual([`${name}:suspended`]);
+    expect((await runOf(team, me, agent, v1)).omissions).toEqual([`${name}:suspended`]);
+    const again = await published(w.owner, agent);
+    expect(again.leftOut).toEqual([{ name, reason: "suspended" }]);
+    expect(await manifestOf(team, agent, again.version)).toEqual({ skills: [] });
+    expect((await runOf(team, me, agent, again.version)).omissions).toEqual([
+      `${name}:not_approved`,
+    ]);
+    // A re-approval reaches v1 (it froze that version), never the version that left it out.
+    await admin().query(
+      `UPDATE team_skill_reviews SET status = 'approved', reviewed_by = $3, reviewed_at = now(),
+         suspended_at = NULL WHERE team_id = $1 AND skill_id = $2`,
+      [team, skill, me],
+    );
+    expect((await runOf(team, me, agent, again.version)).skills).toEqual([]);
+    expect((await runOf(team, me, agent, v1)).skills).toEqual([`${name}@0.1.0:team`]);
+  });
+
+  it("every version blocklisted: republish leaves it out as blocklisted", async () => {
+    const { w, team, me, name, hashes } = await teamWithSkill(2);
+    const agent = await createAgent(w.owner, [name]);
+    await publish(w.owner, agent);
+    for (const h of hashes) await blocklist(h, me);
+    const again = await published(w.owner, agent);
+    expect(again.leftOut).toEqual([{ name, reason: "blocklisted" }]);
+    expect(await manifestOf(team, agent, again.version)).toEqual({ skills: [] });
+    const updates = await f.on(0, w.owner).get(`/v1/agents/${agent}/skill-updates`);
+    expect(updates.json.skills).toEqual([
+      { name, frozen: null, status: "blocklisted", update: null },
+    ]);
+  });
+
+  it("a manifest entry naming another team's skill never loads (walls, N5)", async () => {
+    const a = await teamWithSkill(1);
+    const b = await teamWithSkill(1);
+    const frozen = [{ name: b.name, skill_id: b.skill, version: 1 }];
+    const facts = await withTeam(f.fx.db, a.team, (tx) =>
+      loadSkillFacts(tx, {
+        teamId: a.team,
+        userId: a.me,
+        agentSkillNames: [b.name],
+        personalSkillsDisabled: false,
+        frozen,
+      }),
+    );
+    expect(facts.agent).toEqual([]);
+    expect(facts.agentUnapproved).toEqual([b.name]);
   });
 
   it("a blocklisted frozen version is omitted; no personal skill stands in", async () => {

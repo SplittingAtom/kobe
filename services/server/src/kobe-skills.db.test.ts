@@ -347,7 +347,11 @@ describe("a run.start queued before the upgrade (review-317 S1)", () => {
     const ws = await f.connect(w, 0, ["skill_bundles", "builtin_skills"]);
     await f.until(w.team, run, "failed");
     expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
-      error: { code: "skills_unsupported" },
+      error: {
+        code: "queued_before_upgrade",
+        message:
+          "This message was queued while Kobe was being upgraded and couldn't start. Send it again.",
+      },
     });
     expect(ws.starts().map((x) => x.run_id)).not.toContain(run);
     ws.kill();

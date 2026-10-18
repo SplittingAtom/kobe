@@ -109,27 +109,35 @@ export async function frozenStates(
   });
 }
 
-/** What a publish would freeze for one name: the pick, and whether it can load right now. */
+/** What a publish freezes for one name: the newest version that can load right now. */
 export interface FreezePick {
   readonly entry: FrozenSkill;
   readonly semver: string;
-  /** Approved, not suspended, not blocklisted. */
-  readonly valid: boolean;
+}
+
+/** Why a publish left a named team skill out of the manifest: no version of it can load. */
+export type LeftOutReason = "blocklisted" | "suspended" | "not_approved";
+
+export interface FreezePicks {
+  readonly picks: ReadonlyMap<string, FreezePick>;
+  /** Names with no loadable version, with the newest version's reason (none: `not_approved`). */
+  readonly leftOut: ReadonlyMap<string, LeftOutReason>;
 }
 
 /**
  * Per name (team skills only, inside `withTeam`), the version a publish freezes: the newest
- * valid one (approved, not suspended, hash not blocklisted), so a republish moves off a version a
- * rescan or the blocklist took out. With none valid, the newest approved or suspended version
- * (what an unfrozen run resolves to), so runs keep showing why it is left out. Names with no such
- * version are absent: runs omit them as `not_approved` until a republish after approval.
+ * loadable one (approved, not suspended, hash not blocklisted), so a republish moves off a version
+ * a rescan or the blocklist took out (coordinator decision, review-318 B-S2). A name with no
+ * loadable version is left out of the manifest, never frozen at a version that can't load (a later
+ * re-approval or unblock would then change the agent without a republish): the publish warns, and
+ * runs omit it as `not_approved` until a republish picks a loadable version.
  */
 export async function freezePicks(
   tx: KobeTx,
   teamId: string,
   names: readonly string[],
-): Promise<Map<string, FreezePick>> {
-  if (names.length === 0) return new Map();
+): Promise<FreezePicks> {
+  if (names.length === 0) return { picks: new Map(), leftOut: new Map() };
   const rows = await tx
     .select(REVIEW)
     .from(teamSkillReviews)
@@ -147,15 +155,22 @@ export async function freezePicks(
   const isValid = (r: (typeof rows)[number]) =>
     r.status === "approved" && !r.suspendedAt && !blocked.has(r.hash);
   const picks = new Map<string, FreezePick>();
+  const leftOut = new Map<string, LeftOutReason>();
   for (const name of names) {
     const mine = rows.filter((r) => r.slug === name);
-    const row = mine.find(isValid) ?? mine[0];
-    if (!row) continue;
-    picks.set(name, {
-      entry: { name, skill_id: row.skillId, version: row.version },
-      semver: row.semver ?? legacySemver(row.version),
-      valid: isValid(row),
-    });
+    const row = mine.find(isValid);
+    if (row) {
+      picks.set(name, {
+        entry: { name, skill_id: row.skillId, version: row.version },
+        semver: row.semver ?? legacySemver(row.version),
+      });
+      continue;
+    }
+    const newest = mine[0];
+    leftOut.set(
+      name,
+      newest === undefined ? "not_approved" : newest.suspendedAt ? "suspended" : "blocklisted",
+    );
   }
-  return picks;
+  return { picks, leftOut };
 }
