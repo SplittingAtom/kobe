@@ -641,7 +641,7 @@ describe("personal saves of the team's skills (review S4)", () => {
     const uploaded = await uploadDraft(zip("verbatim-team", files));
     const viaUpload = await confirmed(uploaded);
     expect([viaUpload.status, viaUpload.json.code]).toEqual([409, "team_content"]);
-    expect(viaUpload.json.message).toContain("holds a Finance skill");
+    expect(viaUpload.json.message).toContain("holds a skill of Finance");
     expect(viaUpload.json.message).not.toContain("forked");
 
     const threadId = (await author.post("/v1/threads", { title: "Copy" })).json.thread_id as string;

@@ -274,6 +274,8 @@ const OWN_START_CODES = new Set([
   "agent_suspended",
   "skill_draft_unavailable",
   "skill_draft_changed",
+  "skill_draft_personal_off",
+  "skill_draft_declined",
 ]);
 const startFailureCode = (code: string) => (OWN_START_CODES.has(code) ? code : "agent_unavailable");
 

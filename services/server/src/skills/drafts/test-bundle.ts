@@ -2,18 +2,8 @@ import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import type { SkillBundleRef } from "@kobe/protocol";
 import { canonicalZip, SkillPackageError } from "@kobe/protocol";
-import {
-  and,
-  eq,
-  inArray,
-  skillDrafts,
-  teamMembers,
-  withTeam,
-  type KobeDb,
-  type KobeTx,
-  type TeamRole,
-} from "@kobe/db";
-import type { ScanResult } from "@kobe/skill-scanner";
+import { and, eq, teamMembers, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
+import { RULE_SET, type ScanResult } from "@kobe/skill-scanner";
 import type { BlobStore } from "../../retention/blobs.js";
 import type { SkillRef } from "../../resolver/resolve.js";
 import { isBlocked } from "../blocklist.js";
@@ -23,6 +13,8 @@ import { scanCanonicalZip } from "../review.js";
 import { ScanBusyError } from "../scan-pool.js";
 import { DRAFT_LIMITS, SKILL_MD_PATH } from "./files.js";
 import { readAllFiles, visibleDraft, type DraftRecord } from "./records.js";
+import { GATE_MESSAGES, testGate, type TestGate } from "./test-gates.js";
+import { pruneDraftBundles } from "./test-holds.js";
 
 /**
  * A draft's test bundle (KOBE-323, SK13): the runtime zip of the draft's current revision, what a
@@ -30,7 +22,7 @@ import { readAllFiles, visibleDraft, type DraftRecord } from "./records.js";
  * bundle is scanned in full (the save's scan: same pool, rules and verdict) before it can reach a
  * sandbox, and it is stored only when the scan did not Block:
  *
- *   <prefix>skills/drafts/<team_id>/<draft_id>/<sha256>
+ *   <prefix>skills/drafts/<team_id>/<draft_id>/<sha256>.r<rule set>
  *
  * So an object at that key means "these exact bytes scanned without a Block". The run start
  * (resolver, in its transaction) rebuilds the zip from the draft's files, and lists it only if that
@@ -53,6 +45,10 @@ export function draftBundlePrefix(prefix: string, teamId: string, draftId: strin
   return `${prefix}skills/drafts/${teamId}/${draftId}/`;
 }
 
+/**
+ * A bundle's key: its hash and the scanner rule set it was scanned with (review S3), so a new rule
+ * set finds no object and the next send scans again.
+ */
 export function draftBundleKey(
   prefix: string,
   teamId: string,
@@ -60,7 +56,14 @@ export function draftBundleKey(
   sha256: string,
 ): string {
   if (!SHA256.test(sha256)) throw new Error("draft bundle keys: the hash must be a SHA-256");
-  return `${draftBundlePrefix(prefix, teamId, draftId)}${sha256}`;
+  return `${draftBundlePrefix(prefix, teamId, draftId)}${sha256}.r${RULE_SET}`;
+}
+
+/** The bundle hash a key names (any rule set), or null for a key that isn't one. */
+export function hashOfBundleKey(key: string): string | null {
+  const name = key.slice(key.lastIndexOf("/") + 1);
+  const hash = name.split(".", 1)[0] ?? "";
+  return SHA256.test(hash) ? hash : null;
 }
 
 export interface DraftRuntime {
@@ -136,7 +139,8 @@ export type PrepareResult =
         | "blocklisted"
         | "scan_blocked"
         | "scan_incomplete"
-        | "scan_busy";
+        | "scan_busy"
+        | TestGate;
       readonly message: string;
     };
 
@@ -169,10 +173,12 @@ export async function prepareDraftTest(
     if (!draft) return null;
     const runtime = await draftRuntime(tx, who.teamId, draftId);
     if (!runtime.ok) return runtime;
-    return { ...runtime, blocked: await isBlocked(tx, runtime.value.sha256) };
+    const sha = runtime.value.sha256;
+    return { ...runtime, blocked: await isBlocked(tx, sha), gate: await testGate(tx, who, sha) };
   });
   if (!built) return { ok: false, error: "draft_unavailable", message: UNAVAILABLE_MESSAGE };
   if (!built.ok) return { ok: false, error: "invalid_draft", message: built.message };
+  if (built.gate) return { ok: false, error: built.gate, message: GATE_MESSAGES[built.gate] };
   const { value } = built;
   if (built.blocked)
     return {
@@ -203,6 +209,7 @@ export async function prepareDraftTest(
   if (scan.verdict === "block")
     return { ok: false, error: "scan_blocked", message: blockMessage(scan) };
   await deps.blobs.objects.put(key, Readable.from([Buffer.from(value.zip)]), value.zip.length);
+  await pruneDraftBundles(deps.db, deps.blobs, who.teamId, draftId);
   return { ok: true, sha256: value.sha256 };
 }
 
@@ -210,7 +217,11 @@ export type DraftSkillResult =
   | { readonly ok: true; readonly ref: SkillRef; readonly bundle: SkillBundleRef }
   | {
       readonly ok: false;
-      readonly code: "skill_draft_unavailable" | "skill_draft_changed";
+      readonly code:
+        | "skill_draft_unavailable"
+        | "skill_draft_changed"
+        | "skill_draft_personal_off"
+        | "skill_draft_declined";
     };
 
 /**
@@ -232,6 +243,9 @@ export async function draftSkillForRun(
   if (!runtime.ok || (await isBlocked(tx, runtime.value.sha256)))
     return { ok: false, code: "skill_draft_changed" };
   const { name, sha256, zip } = runtime.value;
+  const gate = viewer ? await testGate(tx, { teamId: input.teamId, ...viewer }, sha256) : null;
+  if (gate === "personal_skills_disabled") return { ok: false, code: "skill_draft_personal_off" };
+  if (gate === "skill_declined") return { ok: false, code: "skill_draft_declined" };
   const key = draftBundleKey(blobs.prefix, input.teamId, input.draftId, sha256);
   if (!(await hasDraftBundle(blobs, key))) return { ok: false, code: "skill_draft_changed" };
   return {
@@ -239,61 +253,4 @@ export async function draftSkillForRun(
     ref: { name, hash: sha256, source: "draft" },
     bundle: { name, sha256, size: zip.length },
   };
-}
-
-/** Removes every stored test bundle of a draft (its delete and purge). */
-export async function deleteDraftBundles(
-  blobs: BlobStore,
-  teamId: string,
-  draftId: string,
-): Promise<void> {
-  const prefix = draftBundlePrefix(blobs.prefix, teamId, draftId);
-  let after: string | undefined;
-  for (;;) {
-    const page = await blobs.objects.list(prefix, after === undefined ? {} : { cursor: after });
-    const keys = page.objects.map((o) => o.key);
-    if (keys.length > 0) await blobs.objects.delete(keys);
-    if (!page.next) return;
-    after = page.next;
-  }
-}
-
-/**
- * The team's test bundles whose draft is gone (deleted by its author, the retention purge or the
- * departed-author sweep; or stored by a send that raced the delete): removed, folder by folder.
- * The retention job runs it per team, so a failed delete never leaves bundles behind for good.
- */
-export async function sweepOrphanDraftBundles(
-  db: KobeDb,
-  blobs: BlobStore,
-  teamId: string,
-): Promise<{ readonly drafts: number }> {
-  const root = `${blobs.prefix}skills/drafts/${teamId}/`;
-  if (!UUID.test(teamId)) return { drafts: 0 };
-  let cursor: string | undefined;
-  let removed = 0;
-  for (;;) {
-    const page = await blobs.objects.list(root, {
-      delimiter: "/",
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    const ids = page.prefixes
-      .map((p) => p.slice(root.length).replace(/\/$/, ""))
-      .filter((id) => UUID.test(id));
-    if (ids.length > 0) {
-      const live = await withTeam(db, teamId, (tx) =>
-        tx
-          .select({ id: skillDrafts.id })
-          .from(skillDrafts)
-          .where(and(eq(skillDrafts.teamId, teamId), inArray(skillDrafts.id, ids))),
-      );
-      const kept = new Set(live.map((r) => r.id));
-      for (const id of ids.filter((d) => !kept.has(d))) {
-        await deleteDraftBundles(blobs, teamId, id);
-        removed += 1;
-      }
-    }
-    if (!page.next) return { drafts: removed };
-    cursor = page.next;
-  }
 }

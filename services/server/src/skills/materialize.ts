@@ -179,6 +179,7 @@ export async function locateBundle(
        AND c.user_id = ${who.userId} AND c.status IN ('pending', 'delivered')
        AND c.frame -> 'config' -> 'skill_bundles'
            @> jsonb_build_array(jsonb_build_object('sha256', ${hash}::text))
+     ORDER BY t.skill_draft_id IS NULL
      LIMIT 8`);
   if (bound.rows.length === 0) return null;
   // The bytes: this team's version with that hash, else one of the caller's own personal versions

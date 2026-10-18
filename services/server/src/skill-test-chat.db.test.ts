@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RULE_SET } from "@kobe/skill-scanner";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
-import { draftBundlePrefix, sweepOrphanDraftBundles } from "./skills/drafts/test-bundle.js";
+import { draftBundlePrefix } from "./skills/drafts/test-bundle.js";
+import { sweepOrphanDraftBundles } from "./skills/drafts/test-holds.js";
 import { RawBody } from "./testing/browser.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { RunFixture, type FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
@@ -446,5 +448,134 @@ describe("the draft bundle in the sandbox and in storage", () => {
     expect(await sweepOrphanDraftBundles(f.fx.db, blobs, w.team)).toEqual({ drafts: 1 });
     expect(objects.objects.has(orphan)).toBe(false);
     expect(objects.objects.has(liveKey)).toBe(true);
+  });
+});
+
+/** An active hold on `userId` in `teamId` (two Site admins, as the hold workflow needs). */
+async function placeHold(teamId: string, userId: string) {
+  const placer = await f.fx.person(`hp${randomUUID().slice(0, 4)}`);
+  const approver = await f.fx.person(`ha${randomUUID().slice(0, 4)}`);
+  for (const p of [placer, approver])
+    await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [p.id]);
+  const { rows } = await f.fx.admin.query<{ id: string }>(
+    `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'matter', $3) RETURNING id`,
+    [teamId, userId, placer.id],
+  );
+  const id = must(rows[0], "hold").id;
+  await f.fx.admin.query(
+    `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+    [id, approver.id],
+  );
+  return async () => {
+    await f.fx.admin.query(
+      `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(),
+         release_reason = 'closed' WHERE id = $1`,
+      [id, placer.id],
+    );
+    await f.fx.admin.query(
+      `UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+      [id, approver.id],
+    );
+  };
+}
+
+const bundlesOf = (teamId: string, draftId: string) =>
+  [...objects.objects.keys()].filter((k) =>
+    k.startsWith(draftBundlePrefix("kobe/", teamId, draftId)),
+  );
+
+async function asBuilder(w: World): Promise<Person> {
+  const builder = await f.member(w.team);
+  await f.fx.admin.query(
+    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+    [w.team, builder.id],
+  );
+  return builder;
+}
+
+describe("review 323: the team's personal-skill gates (S1)", () => {
+  it("lets only Builders and Team admins test while the team has personal skills off", async () => {
+    const w = await world();
+    const member = await f.member(w.team);
+    const theirs = await testChat(member, (await draftOf(member, "member-draft")).id);
+    const mine = await testChat(w.owner, (await draftOf(w.owner, "admin-draft")).id);
+    await f.fx.admin.query(
+      `INSERT INTO team_skill_settings (team_id, personal_skills_disabled, updated_by)
+       VALUES ($1, true, $2) ON CONFLICT (team_id) DO UPDATE SET personal_skills_disabled = true`,
+      [w.team, w.owner.id],
+    );
+    const refused = await f.send(member, theirs, "Hi");
+    expect([refused.status, refused.json.code]).toEqual([403, "personal_skills_disabled"]);
+    expect(refused.json.message).toMatch(/turned personal skills off.*Builders and Team admins/);
+    expect((await f.send(w.owner, mine, "Hi")).status).toBe(201);
+  });
+
+  it("refuses a test of files the team declined as a personal skill", async () => {
+    const w = await world();
+    const d = await draftOf(w.owner, "declined-draft");
+    const thread = await testChat(w.owner, d.id);
+    const { run, ws, frame } = await startOf(w, thread);
+    ws.reply(frame, "ok");
+    await f.until(w.team, run, "completed");
+    ws.kill();
+    const hash = must(frame.config?.skill_bundles?.[0], "bundle").sha256;
+    await f.fx.admin.query(
+      `INSERT INTO team_skill_reviews (team_id, skill_id, version, scope, slug, content_hash, status,
+         flagged, findings, scripts, skipped, reviewed_by, reviewed_at)
+       VALUES ($1, $2, 1, 'personal', 'declined-draft', $3, 'rejected', false, '[]', '[]', '[]', $4, now())`,
+      [w.team, randomUUID(), hash, w.owner.id],
+    );
+    const res = await f.send(w.owner, thread, "Again");
+    expect([res.status, res.json.code]).toEqual([409, "skill_declined"]);
+    expect(res.json.message).toMatch(/declined a personal skill with exactly these files/);
+  });
+});
+
+describe("review 323: bundles under holds and over time (S2, S3)", () => {
+  it("keeps a bundle a held tester's run loaded when the draft goes, until the hold ends", async () => {
+    const w = await world();
+    const tester = await asBuilder(w);
+    const d = await draftOf(w.owner, "held-tester-draft");
+    const share = await f
+      .on(0, w.owner)
+      .request("PATCH", `/v1/skills/drafts/${d.id}`, { shared: true }, ifMatch(d.rev));
+    expect(share.status, JSON.stringify(share.json)).toBe(200);
+    const thread = await testChat(tester, d.id);
+    const tw = { ...w, owner: tester, target: { teamId: w.team, userId: tester.id } };
+    const ws = await f.connect(tw, 0);
+    const run = await f.message(tester, thread, "Go");
+    const start = await ws.started(run);
+    ws.reply(start, "ok");
+    await f.until(w.team, run, "completed");
+    ws.kill();
+    expect(bundlesOf(w.team, d.id)).toHaveLength(1);
+    const release = await placeHold(w.team, tester.id);
+    expect((await f.on(0, w.owner).delete(`/v1/skills/drafts/${d.id}`)).status).toBe(204);
+    expect(bundlesOf(w.team, d.id)).toHaveLength(1);
+    expect(await sweepOrphanDraftBundles(f.fx.db, blobs, w.team)).toEqual({ drafts: 0 });
+    expect(bundlesOf(w.team, d.id)).toHaveLength(1);
+    await release();
+    expect(await sweepOrphanDraftBundles(f.fx.db, blobs, w.team)).toEqual({ drafts: 1 });
+    expect(bundlesOf(w.team, d.id)).toEqual([]);
+  });
+
+  it("keeps the newest five bundles per draft, keyed by the scanner's rule set", async () => {
+    const w = await world();
+    const d = await draftOf(w.owner, "many-revisions");
+    const thread = await testChat(w.owner, d.id);
+    let rev = d.rev;
+    for (let i = 0; i < 7; i += 1) {
+      rev = await put(
+        w.owner,
+        d.id,
+        "SKILL.md",
+        rev,
+        text(skillMd("many-revisions", `Rule ${i}.`)),
+      );
+      expect((await f.send(w.owner, thread, `Try ${i}`)).status).toBe(201);
+    }
+    const keys = bundlesOf(w.team, d.id);
+    expect(keys).toHaveLength(5);
+    for (const k of keys) expect(k).toMatch(new RegExp(`/[0-9a-f]{64}\\.r${RULE_SET}$`));
   });
 });

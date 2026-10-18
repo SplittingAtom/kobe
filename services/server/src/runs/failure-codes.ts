@@ -11,6 +11,10 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-323: a Workbench test chat runs only its draft, never the member's usual skills instead.
   skill_draft_unavailable:
     "This test chat's draft isn't available: it was deleted, or it is no longer shared with you.",
+  skill_draft_personal_off:
+    "This team has turned personal skills off, so only its Builders and Team admins can test drafts here.",
+  skill_draft_declined:
+    "This team declined a personal skill with exactly these files, so the draft can't be tested here.",
   skill_draft_changed:
     "The draft changed after you sent the message, so the run didn't start. Send it again to test the current draft.",
   agent_suspended:

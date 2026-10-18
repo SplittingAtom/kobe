@@ -154,7 +154,7 @@ function personalRefusal(
 }
 
 const teamContentMessage = (teamName: string) =>
-  `This draft holds a ${teamName} skill, which is the team's content and can't become a personal skill. Promote it, or save it as a team skill.`;
+  `This draft holds a skill of ${teamName}, which is the team's content and can't become a personal skill. Promote it, or save it as a team skill.`;
 
 /** Whether a runtime zip is, byte for byte, a version of one of this team's skills (RLS too). */
 async function isTeamVersion(ctx: DraftContext, runtimeZip: Uint8Array): Promise<boolean> {

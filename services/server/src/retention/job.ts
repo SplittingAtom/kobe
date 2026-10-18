@@ -12,7 +12,7 @@ import {
 import type pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
-import { sweepOrphanDraftBundles } from "../skills/drafts/test-bundle.js";
+import { sweepOrphanDraftBundles } from "../skills/drafts/test-holds.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
@@ -320,7 +320,7 @@ async function teamPass(
   const skillDraftBundles =
     deps.blobs && !stop()
       ? await step("skill_draft_bundles", { drafts: 0 }, () =>
-          sweepOrphanDraftBundles(db, deps.blobs as BlobStore, teamId),
+          sweepOrphanDraftBundles(db, deps.blobs as BlobStore, teamId, { stop }),
         )
       : { drafts: 0 };
   return {

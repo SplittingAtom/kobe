@@ -10,6 +10,7 @@ import {
   type TeamRole,
 } from "@kobe/db";
 import { KOBE_GALLERY_KEY } from "../../gallery/definitions.js";
+import { logger } from "../../logger.js";
 import type { BlobStore } from "../../retention/blobs.js";
 import { visibleDraft } from "./records.js";
 import { prepareDraftTest, UNAVAILABLE_MESSAGE } from "./test-bundle.js";
@@ -50,18 +51,20 @@ export async function testChatStart(
 }
 
 export interface TestChatRefusal {
-  readonly status: 409 | 422 | 503;
+  readonly status: 403 | 409 | 422 | 503;
   readonly code: string;
   readonly message: string;
 }
 
-const REFUSALS: Readonly<Record<string, { status: 409 | 422 | 503; code: string }>> = {
+const REFUSALS: Readonly<Record<string, { status: 403 | 409 | 422 | 503; code: string }>> = {
   draft_unavailable: { status: 409, code: "skill_draft_unavailable" },
   invalid_draft: { status: 422, code: "invalid_draft" },
   blocklisted: { status: 409, code: "skill_blocklisted" },
   scan_blocked: { status: 409, code: "scan_blocked" },
   scan_incomplete: { status: 503, code: "scan_incomplete" },
   scan_busy: { status: 503, code: "scan_busy" },
+  personal_skills_disabled: { status: 403, code: "personal_skills_disabled" },
+  skill_declined: { status: 409, code: "skill_declined" },
 };
 
 /**
@@ -96,7 +99,18 @@ export async function prepareTestChat(
       code: "skills_unavailable",
       message: "Skill storage is not configured, so drafts can't be tested here.",
     };
-  const prepared = await prepareDraftTest({ db: deps.db, blobs: deps.blobs }, who, thread.draftId);
+  let prepared: Awaited<ReturnType<typeof prepareDraftTest>>;
+  try {
+    prepared = await prepareDraftTest({ db: deps.db, blobs: deps.blobs }, who, thread.draftId);
+  } catch (err) {
+    // Storage or the scanner failed (review N2): a clear refusal, the details in the server log.
+    logger.error({ err, threadId, draftId: thread.draftId }, "skill test chat: draft not prepared");
+    return {
+      status: 503,
+      code: "draft_not_prepared",
+      message: "The draft couldn't be prepared for testing right now. Send again in a moment.",
+    };
+  }
   if (prepared.ok) return null;
   const refusal = REFUSALS[prepared.error] ?? { status: 409 as const, code: prepared.error };
   return { ...refusal, message: prepared.message };

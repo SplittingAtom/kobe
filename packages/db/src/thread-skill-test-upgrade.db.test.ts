@@ -72,6 +72,25 @@ describe("thread skill_test upgrade (KOBE-323)", () => {
         `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'threads'`,
       );
       expect(rls.rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+      // 0144's objects exist, and the NOT VALID key still holds every new row (review N4).
+      const objects = await c.query<{ name: string }>(
+        `SELECT conname AS name FROM pg_constraint WHERE conrelid = 'threads'::regclass
+           AND conname LIKE 'threads_skill_%'
+         UNION ALL SELECT indexname FROM pg_indexes WHERE indexname = 'threads_skill_draft_idx'
+         ORDER BY 1`,
+      );
+      expect(objects.rows.map((r) => r.name)).toEqual([
+        "threads_skill_draft_fk",
+        "threads_skill_draft_idx",
+        "threads_skill_draft_test",
+        "threads_skill_test_not_builder",
+      ]);
+      await expect(
+        c.query(
+          `INSERT INTO threads (team_id, owner_user_id, skill_test, skill_draft_id) VALUES ($1, $2, true, $3)`,
+          [ids.team, ids.user, randomUUID()],
+        ),
+      ).rejects.toMatchObject({ code: "23503", constraint: "threads_skill_draft_fk" });
     });
   });
 });

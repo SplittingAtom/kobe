@@ -28,7 +28,7 @@ import {
   type DraftContext,
   type DraftFailure,
 } from "../skills/drafts/service.js";
-import { deleteDraftBundles } from "../skills/drafts/test-bundle.js";
+import { deleteDraftBundles } from "../skills/drafts/test-holds.js";
 import { logger } from "../logger.js";
 import {
   listVisibleDrafts,
@@ -351,7 +351,7 @@ export function skillDraftRoutes(
     if (!result.ok) return failure(c, result);
     // Its test bundles (KOBE-323) go too; the retention pass sweeps any a failure here left.
     if (deps.blobs)
-      await deleteDraftBundles(deps.blobs, ctx.teamId, id.data).catch((err: unknown) =>
+      await deleteDraftBundles(db, deps.blobs, ctx.teamId, id.data).catch((err: unknown) =>
         logger.warn({ err, draftId: id.data }, "skill drafts: test bundles not deleted yet"),
       );
     return c.body(null, 204);
