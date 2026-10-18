@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../../lib/utils";
-import { PageHeaderText } from "./embedded-page";
+import { PageHeaderText } from "./embedded-context";
 
 /**
  * A console page's title (the page's only h1), what it is for, and its page-wide actions. `back`

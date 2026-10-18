@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FOCUS_RING } from "./focus";
 import { Badge } from "./badge";
 import { Button } from "./button";
-import { EmbeddedPage } from "./embedded-page";
+import { EmbeddedPage } from "./embedded-context";
 import { EmptyState } from "./empty-state";
 import { Notice } from "./notice";
 import { PageHeader } from "./page-header";
