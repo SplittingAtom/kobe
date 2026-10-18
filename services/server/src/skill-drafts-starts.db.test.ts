@@ -314,10 +314,10 @@ describe("fork (ac-1, ac-3)", () => {
       hash: creator.runtime_hash,
     });
     expect(await filesOf(author, fork.json.draft.id)).toContain("scripts/init_skill.py");
-    const notInstalled = await author.post("/v1/skills/drafts/fork", {
+    const absent = await author.post("/v1/skills/drafts/fork", {
       source: { kind: "catalog", skillId: charts.skill_id },
     });
-    expect(notInstalled.status).toBe(404);
+    expect(absent.status).toBe(404);
     // A catalog fork may become the author's personal skill (the catalog is already Site-wide).
     expect((await saveAs(author, fork.json.draft.id, "personal", "0.1.0")).status).toBe(201);
   });
