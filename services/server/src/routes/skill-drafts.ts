@@ -35,6 +35,13 @@ import {
   type DraftCursor,
 } from "../skills/drafts/records.js";
 import { withTeam } from "@kobe/db";
+import { bodyLimit } from "hono/body-limit";
+import { SKILL_LIMITS } from "../skills/limits.js";
+import { startFromTemplate, startFromUpload, type StartResult } from "../skills/drafts/starts.js";
+import { TEMPLATE_IDS, templates } from "../skills/drafts/templates.js";
+import { saveWorkspaceSkill } from "../skills/drafts/from-workspace.js";
+import { startFork } from "../skills/drafts/fork.js";
+import type { WorkspaceSync } from "../workspace-sync/index.js";
 import { skillJson, versionJson } from "./skill-json.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
@@ -45,9 +52,28 @@ const error = (c: Ctx, status: Status, code: string, message: string, extra = {}
 
 const idSchema = z.uuid();
 const NAME = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
-const createSchema = z.strictObject({ name: z.string().regex(NAME) });
+const createSchema = z.strictObject({
+  name: z.string().regex(NAME),
+  template: z.enum(TEMPLATE_IDS).optional(),
+});
 const patchSchema = z.strictObject({ shared: z.boolean() });
 const destinationSchema = z.enum(["team", "personal"]);
+const forkSchema = z.strictObject({
+  source: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.enum(["team", "personal"]),
+      skillId: z.uuid(),
+      version: z.number().int().positive().optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("catalog"),
+      skillId: z.uuid(),
+      semver: semverSchema.optional(),
+    }),
+  ]),
+  name: z.string().regex(NAME).optional(),
+});
+const fromWorkspaceSchema = z.strictObject({ threadId: z.uuid(), folder: z.string().regex(NAME) });
 const saveSchema = z.strictObject({
   destination: z.enum(["team", "personal"]),
   semver: semverSchema,
@@ -106,7 +132,11 @@ function filePath(c: Ctx, id: string): string | null {
  * and `GET /:id/bump?destination=` the suggested semver bump (KOBE-321). A draft the caller may
  * not see is a 404.
  */
-export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+export function skillDraftRoutes(
+  deps: ServerDeps,
+  /** The workspace store (Save to Workbench reads the caller's `/workspace/skills/<name>/`). */
+  workspace?: WorkspaceSync,
+): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
   let made: SkillStore | null | undefined;
@@ -153,16 +183,123 @@ export function skillDraftRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
 
   const json = async (c: Ctx): Promise<unknown> => c.req.json().catch(() => undefined);
 
+  const mayStart = (c: Ctx) => teamRoleAllows(c.get("team").role, "team.personal.create");
+  const NO_DRAFTS = "Your team role doesn't allow drafts.";
+  const started = (c: Ctx, result: StartResult) => {
+    if (result.ok) return c.json({ draft: draftJson(result.draft, c.get("user").id) }, 201);
+    if (result.error === "invalid_bundle")
+      return error(
+        c,
+        result.bundle.code === "bundle_too_large" || result.bundle.code === "file_too_large"
+          ? 413
+          : 400,
+        result.bundle.code,
+        result.bundle.message,
+      );
+    return failure(c, result);
+  };
+
+  // A blank draft, or one from a template (KOBE-322, SK10).
   app.post("/", async (c) => {
-    if (!teamRoleAllows(c.get("team").role, "team.personal.create"))
-      return error(c, 403, "forbidden", "Your team role doesn't allow drafts.");
+    if (!mayStart(c)) return error(c, 403, "forbidden", NO_DRAFTS);
     const body = createSchema.safeParse(await json(c));
     if (!body.success)
-      return error(c, 400, "invalid_request", "Give a name: lowercase letters, digits, hyphens.");
-    const result = await createBlankDraft(ctxOf(c), body.data.name);
-    if (!result.ok) return failure(c, result);
-    return c.json({ draft: draftJson(result.draft, c.get("user").id) }, 201);
+      return error(
+        c,
+        400,
+        "invalid_request",
+        "Give a name (lowercase letters, digits, hyphens) and, optionally, a template.",
+      );
+    const { name, template } = body.data;
+    return started(
+      c,
+      template
+        ? await startFromTemplate(ctxOf(c), template, name)
+        : await createBlankDraft(ctxOf(c), name),
+    );
   });
+
+  // Fork (KOBE-322): a copy of a team, own personal or installed catalog version; the parent is
+  // recorded from the version copied. Forking a skill under its own name is how it is edited.
+  app.post("/fork", async (c) => {
+    if (!mayStart(c)) return error(c, 403, "forbidden", NO_DRAFTS);
+    const body = forkSchema.safeParse(await json(c));
+    if (!body.success)
+      return error(
+        c,
+        400,
+        "invalid_request",
+        "Give source {kind, skillId, version or semver} and, optionally, a name.",
+      );
+    const store = skillStore();
+    if (!store || !deps.blobs)
+      return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    const result = await startFork(
+      ctxOf(c),
+      { store, blobs: deps.blobs },
+      body.data.source,
+      body.data.name,
+    );
+    if (!result.ok && result.error === "source_not_found")
+      return error(c, 404, "not_found", "No such skill version to copy.");
+    if (!result.ok && result.error === "source_unavailable")
+      return error(c, 409, "source_unavailable", "That version's files can't be copied yet.");
+    if (!result.ok && result.error === "blocklisted")
+      return error(c, 422, "skill_blocklisted", "That version is on the site's blocklist.");
+    return started(c, result as StartResult);
+  });
+
+  // Save to Workbench (KOBE-322): `/workspace/skills/<folder>/` from a conversation of this team.
+  app.post("/from-workspace", async (c) => {
+    if (!mayStart(c)) return error(c, 403, "forbidden", NO_DRAFTS);
+    if (!workspace)
+      return error(c, 503, "workspace_unavailable", "Workspace files are not available here.");
+    const body = fromWorkspaceSchema.safeParse(await json(c));
+    if (!body.success)
+      return error(c, 400, "invalid_request", "Give threadId and folder (a skill name).");
+    if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
+      return error(c, 429, "rate_limited", "Too many saves. Wait a few minutes and try again.");
+    const result = await saveWorkspaceSkill(ctxOf(c), workspace, body.data);
+    if (!result.ok && result.error === "thread_not_found")
+      return error(c, 404, "not_found", "No such conversation.");
+    if (!result.ok && result.error === "folder_empty")
+      return error(
+        c,
+        404,
+        "folder_empty",
+        `/workspace/skills/${body.data.folder}/ has no saved files yet.`,
+      );
+    if (!result.ok && result.error === "folder_changed")
+      return error(c, 409, "folder_changed", "The folder changed while saving. Save again.");
+    if (result.ok && result.created === false)
+      return c.json({ draft: draftJson(result.draft, c.get("user").id), created: false });
+    return started(c, result as StartResult);
+  });
+
+  app.get("/templates", (c) =>
+    c.json({
+      templates: templates().map(({ id, title, summary }) => ({ id, title, summary })),
+    }),
+  );
+
+  // An uploaded zip or SKILL.md (KOBE-322): the upload's validation, then the draft's limits.
+  app.post(
+    "/upload",
+    bodyLimit({
+      maxSize: SKILL_LIMITS.maxBundleBytes,
+      onError: (c) =>
+        c.json({ code: "bundle_too_large", message: "That skill is too large." }, 413),
+    }),
+    async (c) => {
+      if (!mayStart(c)) return error(c, 403, "forbidden", NO_DRAFTS);
+      const kind = z.enum(["zip", "skill_md"]).safeParse(c.req.query("kind"));
+      if (!kind.success) return error(c, 400, "invalid_request", "Give kind=zip or kind=skill_md.");
+      if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
+        return error(c, 429, "rate_limited", "Too many uploads. Wait a few minutes and try again.");
+      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      return started(c, await startFromUpload(ctxOf(c), bytes, kind.data));
+    },
+  );
 
   app.get("/", async (c) => {
     const ctx = ctxOf(c);

@@ -202,7 +202,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
-  api.route("/skills/drafts", skillDraftRoutes(deps));
+  api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
   api.route("/skills", skillRoutes(deps));
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

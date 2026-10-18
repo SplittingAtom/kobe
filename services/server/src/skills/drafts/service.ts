@@ -15,6 +15,7 @@ import {
   type DraftRecord,
   type DraftViewer,
 } from "./records.js";
+import type { SkillDraftStart } from "@kobe/db";
 
 /**
  * Draft operations (KOBE-320, SK11). Each change runs in one team transaction holding the draft's
@@ -64,21 +65,63 @@ async function lockedAt(
 
 const isFailure = (value: DraftRecord | DraftFailure): value is DraftFailure => "error" in value;
 
-/** A blank draft: a SKILL.md skeleton under `name`, private to its author. */
-export async function createBlankDraft(
+/** How a draft starts (KOBE-322, SK10): its provenance and first files. */
+export interface DraftStartInput {
+  readonly name: string;
+  readonly startedFrom: SkillDraftStart;
+  readonly files: ReadonlyMap<string, Uint8Array>;
+  /** A fork's parent: from the version actually copied, never from the request. */
+  readonly parentRef?: Record<string, unknown>;
+  /** A start from a conversation: a thread of this team. */
+  readonly fromThreadId?: string;
+}
+
+/** Why the files can't start a draft (the draft's own limits and path rules), or null. */
+export function startFilesProblem(files: ReadonlyMap<string, Uint8Array>): DraftFailure | null {
+  if (files.size > DRAFT_LIMITS.maxFiles) return { error: "too_many_files" };
+  let total = 0;
+  const paths = [...files.keys()];
+  for (const [path, bytes] of files) {
+    const problem = draftPathProblem(path, paths);
+    if (problem) return { error: "invalid_path", message: `${path}: ${problem}.` };
+    if (path === SKILL_MD_PATH && bytes.length > DRAFT_LIMITS.maxSkillMdBytes)
+      return {
+        error: "file_too_large",
+        message: `SKILL.md may be at most ${DRAFT_LIMITS.maxSkillMdBytes} bytes.`,
+      };
+    total += bytes.length;
+  }
+  if (total > DRAFT_LIMITS.maxDraftBytes)
+    return {
+      error: "draft_too_large",
+      message: `A draft may hold at most ${DRAFT_LIMITS.maxDraftBytes} bytes in all.`,
+    };
+  return null;
+}
+
+/** A new draft, private to its author, under the per-author cap (every start goes here). */
+export async function createDraft(
   ctx: DraftContext,
-  name: string,
+  start: DraftStartInput,
 ): Promise<DraftOutcome<{ draft: DraftRecord }>> {
+  const problem = startFilesProblem(start.files);
+  if (problem) return fail(problem);
   return withTeam(ctx.db, ctx.teamId, async (tx) => {
     if (
       (await countOwnDrafts(tx, ctx.teamId, ctx.viewer.userId)) >= DRAFT_LIMITS.maxDraftsPerAuthor
     )
       return fail({ error: "draft_limit" });
-    const files = new Map([[SKILL_MD_PATH, new TextEncoder().encode(skeletonSkillMd(name))]]);
     const draft = await insertDraft(
       tx,
-      { teamId: ctx.teamId, ownerUserId: ctx.viewer.userId, name, startedFrom: "blank" },
-      files,
+      {
+        teamId: ctx.teamId,
+        ownerUserId: ctx.viewer.userId,
+        name: start.name,
+        startedFrom: start.startedFrom,
+        parentRef: start.parentRef ?? null,
+        fromThreadId: start.fromThreadId ?? null,
+      },
+      start.files,
     );
     await recordAudit(tx, {
       action: "skill.draft.created",
@@ -87,6 +130,15 @@ export async function createBlankDraft(
     });
     return { ok: true, draft };
   });
+}
+
+/** A blank draft: a SKILL.md skeleton under `name`, private to its author. */
+export function createBlankDraft(
+  ctx: DraftContext,
+  name: string,
+): Promise<DraftOutcome<{ draft: DraftRecord }>> {
+  const files = new Map([[SKILL_MD_PATH, new TextEncoder().encode(skeletonSkillMd(name))]]);
+  return createDraft(ctx, { name, startedFrom: "blank", files });
 }
 
 /** The draft and its file list, if the viewer may see it. */
@@ -218,5 +270,35 @@ export async function removeDraft(
       target: { draftId: id },
     });
     return { ok: true };
+  });
+}
+
+/**
+ * Replaces every file of the author's draft with `files` (Save to Workbench, KOBE-322): files no
+ * longer there are deleted, the rest written, one new revision. Author only; the draft's own
+ * limits were checked on `files` already (`startFilesProblem`).
+ */
+export async function replaceDraftFiles(
+  ctx: DraftContext,
+  id: string,
+  files: ReadonlyMap<string, Uint8Array>,
+): Promise<DraftOutcome<{ draft: DraftRecord }>> {
+  const problem = startFilesProblem(files);
+  if (problem) return fail(problem);
+  return withTeam(ctx.db, ctx.teamId, async (tx) => {
+    const draft = await visibleDraft(tx, ctx.teamId, id, ctx.viewer, true);
+    if (!draft) return fail({ error: "not_found" });
+    if (draft.ownerUserId !== ctx.viewer.userId)
+      return fail({ error: "forbidden", message: "Only the draft's author can sync into it." });
+    for (const f of await fileInfos(tx, ctx.teamId, id))
+      if (!files.has(f.path)) await removeFile(tx, ctx.teamId, id, f.path);
+    for (const [path, bytes] of files)
+      await putFile(tx, ctx.teamId, id, path, bytes, ctx.viewer.userId);
+    const name = files.get(SKILL_MD_PATH);
+    const renamed = name ? nameOf(name) : undefined;
+    return {
+      ok: true,
+      draft: await bumpRevision(tx, draft, ctx.viewer.userId, renamed ? { name: renamed } : {}),
+    };
   });
 }

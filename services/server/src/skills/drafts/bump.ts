@@ -1,5 +1,6 @@
 import { parse } from "yaml";
 import { parseSemver } from "../semver.js";
+import { manifestWithoutNumber } from "./manifest-sync.js";
 
 /**
  * The suggested semver bump of a Save version (KOBE-321, spec SK14): patch for references, assets
@@ -51,6 +52,14 @@ function partsOf(bytes: Uint8Array | undefined): SkillMdParts | null {
 const same = (a: Uint8Array | undefined, b: Uint8Array | undefined): boolean =>
   a !== undefined && b !== undefined && Buffer.from(a).equals(Buffer.from(b));
 
+/** Same file; for kobe.skill.yaml, the same apart from the number and changelog a save writes. */
+function sameFile(path: string, a: Uint8Array | undefined, b: Uint8Array | undefined): boolean {
+  if (same(a, b)) return true;
+  if (path !== "kobe.skill.yaml" || !a || !b) return false;
+  const x = manifestWithoutNumber(a);
+  return x !== null && x === manifestWithoutNumber(b);
+}
+
 const listed = (paths: readonly string[]): string =>
   paths.length <= MAX_LISTED
     ? paths.join(", ")
@@ -62,7 +71,7 @@ function skillMdReasons(
   before: Uint8Array | undefined,
   after: Uint8Array | undefined,
 ): { major: string[]; minor: string[] } {
-  if (same(before, after)) return { major: [], minor: [] };
+  if (same(before, after) || (!before && !after)) return { major: [], minor: [] };
   const a = partsOf(before);
   const b = partsOf(after);
   // An unreadable SKILL.md on either side: its name and description can't be compared, so major.
@@ -80,7 +89,7 @@ export function adviseBump(
   after: ReadonlyMap<string, Uint8Array>,
 ): BumpAdvice {
   const paths = [...new Set([...before.keys(), ...after.keys()])]
-    .filter((p) => p !== SKILL_MD && !same(before.get(p), after.get(p)))
+    .filter((p) => p !== SKILL_MD && !sameFile(p, before.get(p), after.get(p)))
     .sort();
   const md = skillMdReasons(before.get(SKILL_MD), after.get(SKILL_MD));
   const scripts = paths.filter(isScript);

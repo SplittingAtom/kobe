@@ -7,6 +7,7 @@ import { numberingFrom, publishBundle, type PublishResult } from "../publish.js"
 import type { SkillStore } from "../skill-store.js";
 import type { SkillLocation } from "../store.js";
 import { DRAFT_LIMITS, SKILL_MD_PATH } from "./files.js";
+import { withSavedNumber } from "./manifest-sync.js";
 import { changedBy, readAllFiles, visibleDraft, type DraftRecord } from "./records.js";
 import type { DraftContext } from "./service.js";
 
@@ -83,7 +84,9 @@ export async function saveDraftVersion(
   const fromConversation = draft.startedFrom === "thread" || draft.fromThreadId !== null;
   if (!files.has(SKILL_MD_PATH))
     return refuse(400, "skill_md_missing", "The draft needs a SKILL.md at its root.");
-  const valid = validateZipBundle(canonicalZip(files), DRAFT_BUNDLE_LIMITS);
+  // The manifest takes the number and changelog the author chose (a fork's names its parent's).
+  const packaged = withSavedNumber(files, request.semver, request.changelog);
+  const valid = validateZipBundle(canonicalZip(packaged), DRAFT_BUNDLE_LIMITS);
   if (!valid.ok) return bundleRefusal(valid.error);
   const numbering = numberingFrom(request, valid.value);
   if (!numbering.ok) return refuse(400, "invalid_request", numbering.message);
