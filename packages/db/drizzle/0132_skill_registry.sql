@@ -96,6 +96,7 @@ CREATE TABLE "registry_versions" (
         AND ("registry_versions"."authoritative_scorecard" IS NULL OR jsonb_typeof("registry_versions"."authoritative_scorecard") = 'object')
         AND ("registry_versions"."mirror" IS NULL OR jsonb_typeof("registry_versions"."mirror") = 'object')),
 	CONSTRAINT "registry_versions_claim" CHECK (("registry_versions"."claimed_by" IS NULL) = ("registry_versions"."claimed_at" IS NULL)),
+	CONSTRAINT "registry_versions_review" CHECK ("registry_versions"."reviewed_by" IS DISTINCT FROM "registry_versions"."submitted_by"),
 	CONSTRAINT "registry_versions_approval" CHECK (("registry_versions"."state" IN ('approved', 'deprecated', 'withdrawn', 'revoked'))
         = ("registry_versions"."approved_at" IS NOT NULL AND "registry_versions"."reviewed_by" IS NOT NULL))
 );
@@ -129,19 +130,16 @@ CREATE TABLE "member_skill_enablements" (
 	"team_id" uuid NOT NULL,
 	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
-	"skill_ref" jsonb NOT NULL,
+	"catalog_skill_id" uuid,
+	"team_skill_id" uuid,
 	"enabled" boolean NOT NULL,
 	"version_id" uuid,
 	"pin_mode" "skill_pin_mode",
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "member_skill_enablements_team_id_id_pk" PRIMARY KEY("team_id","id"),
-	CONSTRAINT "member_skill_enablements_ref_unique" UNIQUE("team_id","user_id","skill_ref"),
-	CONSTRAINT "member_skill_enablements_ref" CHECK (jsonb_typeof("member_skill_enablements"."skill_ref") = 'object'
-        AND "member_skill_enablements"."skill_ref" ->> 'kind' IN ('catalog', 'team')
-        AND ("member_skill_enablements"."skill_ref" ->> 'skillId') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-        AND "member_skill_enablements"."skill_ref" - 'kind' - 'skillId' = '{}'::jsonb),
+	CONSTRAINT "member_skill_enablements_one_skill" CHECK (num_nonnulls("member_skill_enablements"."catalog_skill_id", "member_skill_enablements"."team_skill_id") = 1),
 	CONSTRAINT "member_skill_enablements_pin" CHECK (("member_skill_enablements"."version_id" IS NULL) = ("member_skill_enablements"."pin_mode" IS NULL)
-        AND ("member_skill_enablements"."version_id" IS NULL OR "member_skill_enablements"."skill_ref" ->> 'kind' = 'catalog'))
+        AND ("member_skill_enablements"."version_id" IS NULL OR "member_skill_enablements"."catalog_skill_id" IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "team_skill_blocks" (
@@ -193,8 +191,10 @@ ALTER TABLE "site_skill_settings" ADD CONSTRAINT "site_skill_settings_updated_by
 ALTER TABLE "site_grants" ADD CONSTRAINT "site_grants_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "site_grants" ADD CONSTRAINT "site_grants_granted_by_users_id_fk" FOREIGN KEY ("granted_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_version_id_registry_versions_id_fk" FOREIGN KEY ("version_id") REFERENCES "public"."registry_versions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_catalog_skill_id_registry_skills_id_fk" FOREIGN KEY ("catalog_skill_id") REFERENCES "public"."registry_skills"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_member_fk" FOREIGN KEY ("team_id","user_id") REFERENCES "public"."team_members"("team_id","user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_team_skill_fk" FOREIGN KEY ("team_id","team_skill_id") REFERENCES "public"."team_skills"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "member_skill_enablements" ADD CONSTRAINT "member_skill_enablements_version_fk" FOREIGN KEY ("version_id","catalog_skill_id") REFERENCES "public"."registry_versions"("id","skill_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "team_skill_blocks" ADD CONSTRAINT "team_skill_blocks_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "team_skill_blocks" ADD CONSTRAINT "team_skill_blocks_skill_id_registry_skills_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."registry_skills"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "team_skill_blocks" ADD CONSTRAINT "team_skill_blocks_blocked_by_users_id_fk" FOREIGN KEY ("blocked_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -207,7 +207,11 @@ ALTER TABLE "team_skill_optouts" ADD CONSTRAINT "team_skill_optouts_skill_id_reg
 ALTER TABLE "team_skill_optouts" ADD CONSTRAINT "team_skill_optouts_opted_out_by_users_id_fk" FOREIGN KEY ("opted_out_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "registry_maintainers_user_idx" ON "registry_maintainers" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "registry_review_events_version_idx" ON "registry_review_events" USING btree ("version_id","at");--> statement-breakpoint
+CREATE INDEX "registry_review_events_actor_idx" ON "registry_review_events" USING btree ("actor_id","at");--> statement-breakpoint
 CREATE INDEX "registry_skill_tags_tag_idx" ON "registry_skill_tags" USING btree ("tag_id");--> statement-breakpoint
 CREATE INDEX "registry_versions_state_idx" ON "registry_versions" USING btree ("state","submitted_at");--> statement-breakpoint
 CREATE INDEX "registry_versions_runtime_idx" ON "registry_versions" USING btree ("runtime_hash");--> statement-breakpoint
+CREATE INDEX "registry_versions_package_idx" ON "registry_versions" USING btree ("package_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "member_skill_enablements_catalog_unique" ON "member_skill_enablements" USING btree ("team_id","user_id","catalog_skill_id") WHERE "member_skill_enablements"."catalog_skill_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "member_skill_enablements_team_unique" ON "member_skill_enablements" USING btree ("team_id","user_id","team_skill_id") WHERE "member_skill_enablements"."team_skill_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "team_skill_installs_skill_idx" ON "team_skill_installs" USING btree ("skill_id");

@@ -1,5 +1,5 @@
 {
-  "id": "1fbfbab3-7b2b-42e1-9516-fb411dbf384a",
+  "id": "fefb3ff2-8fe9-4a18-b3f9-88952c2dc459",
   "prevId": "295c18df-5aeb-4610-b891-936554689937",
   "version": "7",
   "dialect": "postgresql",
@@ -15197,6 +15197,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "registry_review_events_actor_idx": {
+          "name": "registry_review_events_actor_idx",
+          "columns": [
+            {
+              "expression": "actor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -15691,6 +15712,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "registry_versions_package_idx": {
+          "name": "registry_versions_package_idx",
+          "columns": [
+            {
+              "expression": "package_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -15795,6 +15831,10 @@
         "registry_versions_claim": {
           "name": "registry_versions_claim",
           "value": "(\"registry_versions\".\"claimed_by\" IS NULL) = (\"registry_versions\".\"claimed_at\" IS NULL)"
+        },
+        "registry_versions_review": {
+          "name": "registry_versions_review",
+          "value": "\"registry_versions\".\"reviewed_by\" IS DISTINCT FROM \"registry_versions\".\"submitted_by\""
         },
         "registry_versions_approval": {
           "name": "registry_versions_approval",
@@ -16020,11 +16060,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "skill_ref": {
-          "name": "skill_ref",
-          "type": "jsonb",
+        "catalog_skill_id": {
+          "name": "catalog_skill_id",
+          "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "team_skill_id": {
+          "name": "team_skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "enabled": {
           "name": "enabled",
@@ -16053,7 +16099,64 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "member_skill_enablements_catalog_unique": {
+          "name": "member_skill_enablements_catalog_unique",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "catalog_skill_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"member_skill_enablements\".\"catalog_skill_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "member_skill_enablements_team_unique": {
+          "name": "member_skill_enablements_team_unique",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "team_skill_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"member_skill_enablements\".\"team_skill_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "member_skill_enablements_team_id_teams_id_fk": {
           "name": "member_skill_enablements_team_id_teams_id_fk",
@@ -16068,12 +16171,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "member_skill_enablements_version_id_registry_versions_id_fk": {
-          "name": "member_skill_enablements_version_id_registry_versions_id_fk",
+        "member_skill_enablements_catalog_skill_id_registry_skills_id_fk": {
+          "name": "member_skill_enablements_catalog_skill_id_registry_skills_id_fk",
           "tableFrom": "member_skill_enablements",
-          "tableTo": "registry_versions",
+          "tableTo": "registry_skills",
           "columnsFrom": [
-            "version_id"
+            "catalog_skill_id"
           ],
           "columnsTo": [
             "id"
@@ -16095,6 +16198,36 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "member_skill_enablements_team_skill_fk": {
+          "name": "member_skill_enablements_team_skill_fk",
+          "tableFrom": "member_skill_enablements",
+          "tableTo": "team_skills",
+          "columnsFrom": [
+            "team_id",
+            "team_skill_id"
+          ],
+          "columnsTo": [
+            "team_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "member_skill_enablements_version_fk": {
+          "name": "member_skill_enablements_version_fk",
+          "tableFrom": "member_skill_enablements",
+          "tableTo": "registry_versions",
+          "columnsFrom": [
+            "version_id",
+            "catalog_skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -16106,26 +16239,16 @@
           ]
         }
       },
-      "uniqueConstraints": {
-        "member_skill_enablements_ref_unique": {
-          "name": "member_skill_enablements_ref_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "team_id",
-            "user_id",
-            "skill_ref"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "member_skill_enablements_ref": {
-          "name": "member_skill_enablements_ref",
-          "value": "jsonb_typeof(\"member_skill_enablements\".\"skill_ref\") = 'object'\n        AND \"member_skill_enablements\".\"skill_ref\" ->> 'kind' IN ('catalog', 'team')\n        AND (\"member_skill_enablements\".\"skill_ref\" ->> 'skillId') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'\n        AND \"member_skill_enablements\".\"skill_ref\" - 'kind' - 'skillId' = '{}'::jsonb"
+        "member_skill_enablements_one_skill": {
+          "name": "member_skill_enablements_one_skill",
+          "value": "num_nonnulls(\"member_skill_enablements\".\"catalog_skill_id\", \"member_skill_enablements\".\"team_skill_id\") = 1"
         },
         "member_skill_enablements_pin": {
           "name": "member_skill_enablements_pin",
-          "value": "(\"member_skill_enablements\".\"version_id\" IS NULL) = (\"member_skill_enablements\".\"pin_mode\" IS NULL)\n        AND (\"member_skill_enablements\".\"version_id\" IS NULL OR \"member_skill_enablements\".\"skill_ref\" ->> 'kind' = 'catalog')"
+          "value": "(\"member_skill_enablements\".\"version_id\" IS NULL) = (\"member_skill_enablements\".\"pin_mode\" IS NULL)\n        AND (\"member_skill_enablements\".\"version_id\" IS NULL OR \"member_skill_enablements\".\"catalog_skill_id\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false
