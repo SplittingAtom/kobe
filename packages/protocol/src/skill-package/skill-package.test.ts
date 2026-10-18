@@ -17,6 +17,7 @@ import {
   packageFileRole,
   packagePathProblem,
   provenanceMismatches,
+  SkillPackageError,
   provenanceSchema,
   runtimeFiles,
 } from "./index.js";
@@ -74,6 +75,92 @@ describe("package layout (KOBE-309)", () => {
       { path: "SKILL.md", problem: "skill_md_missing" },
     ]);
   });
+
+  it("refuses lone surrogates: two of them would encode to one zip name and one hash", () => {
+    expect(packagePathProblem("x\uD800.md")).toBe("not_well_formed");
+    expect(packagePathProblem("x\uDBFF.md")).toBe("not_well_formed");
+    expect(packagePathProblem("x\uDC00")).toBe("not_well_formed");
+    expect(packagePathProblem("\u{1F600}.md")).toBeNull();
+    const twins = new Map([
+      ["SKILL.md", utf8("x")],
+      ["x\uD800.md", utf8("a")],
+      ["x\uDBFF.md", utf8("b")],
+    ]);
+    expect(() => runtimeHash(twins)).toThrow(SkillPackageError);
+  });
+
+  it("refuses invisible and bidi controls that spoof a path in review", () => {
+    for (const bad of ["scripts/run\u202egnp.sh", "a\u200bb", "a\u0085b", "\ufeffx", "a\u2066b"])
+      expect(packagePathProblem(bad), JSON.stringify(bad)).toBe("invisible_or_bidi");
+  });
+
+  it("refuses a path that is both a file and a directory, case-folded", () => {
+    expect(checkPackagePaths(["SKILL.md", "scripts", "scripts/x.py"])).toEqual([
+      { path: "scripts", problem: "file_and_directory" },
+      { path: "scripts/x.py", problem: "file_and_directory" },
+    ]);
+    expect(checkPackagePaths(["SKILL.md", "Docs", "docs/a/b"]).map((p) => p.problem)).toEqual([
+      "file_and_directory",
+      "file_and_directory",
+    ]);
+    expect(checkPackagePaths(["SKILL.md", "docs/a", "docs/b"])).toEqual([]);
+  });
+
+  it("refuses case variants of the reserved root names instead of shipping them as payload", () => {
+    for (const path of [
+      "Evals/cases.yaml",
+      "EVALS",
+      "KOBE.SKILL.YAML",
+      "Provenance.json",
+      "skill.md",
+    ])
+      expect(checkPackagePaths(["SKILL.md", path], { kobeProvenance: true }), path).toContainEqual({
+        path,
+        problem: "reserved_name_case",
+      });
+    expect(
+      checkPackagePaths(["SKILL.md", "scripts/Evals/x", "references/KOBE.SKILL.YAML"]),
+    ).toEqual([]);
+    expect(checkPackagePaths(["SKILL.md", "aς", "aσ"]).map((p) => p.problem)).toEqual([
+      "duplicate",
+    ]);
+  });
+
+  it("refuses an authored provenance.json; only a package Kobe assembled may carry one", () => {
+    expect(checkPackagePaths(["SKILL.md", "provenance.json"])).toEqual([
+      { path: "provenance.json", problem: "provenance_not_allowed" },
+    ]);
+    expect(checkPackagePaths(["SKILL.md", "provenance.json"], { kobeProvenance: true })).toEqual(
+      [],
+    );
+    const files = new Map([
+      ["SKILL.md", utf8("x")],
+      ["provenance.json", utf8("{}")],
+    ]);
+    expect(() => runtimeHash(files)).toThrow(/provenance_not_allowed/);
+    expect(runtimeHash(files, { kobeProvenance: true })).toBe(
+      runtimeHash(new Map([["SKILL.md", utf8("x")]])),
+    );
+  });
+
+  it("never hashes or zips an unchecked package", () => {
+    const unsafe = new Map([
+      ["SKILL.md", utf8("x")],
+      ["../../etc/x", utf8("y")],
+    ]);
+    expect(() => runtimeHash(unsafe)).toThrow(SkillPackageError);
+    expect(() => packageHash(unsafe)).toThrow(SkillPackageError);
+    expect(() => canonicalZip(unsafe)).toThrow(SkillPackageError);
+    expect(() => canonicalZip(new Map([["a", utf8("x")]]))).toThrow(/skill_md_missing/);
+    expect(() =>
+      canonicalZip(
+        new Map([
+          ["SKILL.md", utf8("x")],
+          ["provenance.json", utf8("{}")],
+        ]),
+      ),
+    ).toThrow(/provenance_not_allowed/);
+  });
 });
 
 describe("canonical zip (KOBE-309)", () => {
@@ -97,40 +184,53 @@ describe("canonical zip (KOBE-309)", () => {
   });
 
   it("writes stored entries with the fixed DOS time, UTF-8 flags and no extras", () => {
-    const zip = canonicalZip(new Map([["é", utf8("x")]]));
+    // Entries: SKILL.md (ASCII name, 2 bytes), then é (UTF-8 name).
+    const zip = canonicalZip(
+      new Map([
+        ["é", utf8("x")],
+        ["SKILL.md", utf8("hi")],
+      ]),
+    );
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     expect(view.getUint32(0, true)).toBe(0x04034b50);
     expect(view.getUint16(4, true)).toBe(20); // version needed
-    expect(view.getUint16(6, true)).toBe(0x0800); // UTF-8 name
+    expect(view.getUint16(6, true)).toBe(0); // ASCII name
     expect(view.getUint16(8, true)).toBe(0); // stored
     expect(view.getUint16(10, true)).toBe(0x6000); // 12:00:00
     expect(view.getUint16(12, true)).toBe(0x5021); // 2020-01-01
+    expect(view.getUint16(26, true)).toBe(8); // "SKILL.md"
     expect(view.getUint16(28, true)).toBe(0); // no extra field
+    const second = 30 + 8 + 2;
+    expect(view.getUint32(second, true)).toBe(0x04034b50);
+    expect(view.getUint16(second + 6, true)).toBe(0x0800); // UTF-8 name
     const end = zip.length - 22;
     expect(view.getUint32(end, true)).toBe(0x06054b50);
-    expect(view.getUint16(end + 10, true)).toBe(1);
+    expect(view.getUint16(end + 10, true)).toBe(2);
     expect(view.getUint16(end + 20, true)).toBe(0); // no comment
-    const ascii = canonicalZip(new Map([["a", utf8("x")]]));
-    expect(new DataView(ascii.buffer).getUint16(6, true)).toBe(0);
   });
 
-  it("does not depend on the process timezone", () => {
-    const files = SKILL_HASH_VECTORS[1]?.files ?? new Map();
-    const before = process.env.TZ;
-    const hashes = ["UTC", "Pacific/Kiritimati", "America/Los_Angeles"].map((tz) => {
-      process.env.TZ = tz;
-      return runtimeHash(files);
-    });
-    process.env.TZ = before;
-    expect(new Set(hashes).size).toBe(1);
+  it("orders by UTF-16 code units, not code points or UTF-8 bytes", () => {
+    // U+FF5E is one UTF-16 unit (0xFF5E); U+1F600 starts with 0xD83D, so it sorts first here,
+    // though its code point and UTF-8 bytes are larger. Pinned by the last golden vector.
+    expect(canonicalOrder(["\uff5e.txt", "\u{1F600}.txt"])).toEqual([
+      "\u{1F600}.txt",
+      "\uff5e.txt",
+    ]);
+    expect(canonicalOrder(["4294967295", "4294967294", "-1", "01", "0"])).toEqual([
+      "0",
+      "4294967294",
+      "-1",
+      "01",
+      "4294967295",
+    ]);
   });
 });
 
 describe("golden hash vectors (KOBE-309 ac-3)", () => {
   for (const v of SKILL_HASH_VECTORS) {
     it(v.name, () => {
-      expect(checkPackagePaths(v.files.keys())).toEqual([]);
-      expect(skillPackageHashes(v.files)).toEqual({
+      expect(checkPackagePaths(v.files.keys(), v.options)).toEqual([]);
+      expect(skillPackageHashes(v.files, v.options)).toEqual({
         runtimeHash: v.runtimeHash,
         packageHash: v.packageHash,
       });
@@ -142,8 +242,12 @@ describe("golden hash vectors (KOBE-309 ac-3)", () => {
       ["SKILL.md", utf8("x")],
       ["provenance.json", utf8("{}")],
     ]);
-    expect(packageHash(files)).toBe(runtimeHash(files));
-    expect(runtimeZip(files)).toEqual(canonicalZip(new Map([["SKILL.md", utf8("x")]])));
+    expect(packageHash(files, { kobeProvenance: true })).toBe(
+      runtimeHash(files, { kobeProvenance: true }),
+    );
+    expect(runtimeZip(files, { kobeProvenance: true })).toEqual(
+      canonicalZip(new Map([["SKILL.md", utf8("x")]])),
+    );
   });
 
   it("does not depend on the order files are given in", () => {
@@ -179,6 +283,11 @@ const PROVENANCE_REFUSALS: Record<string, string> = {
   "invalid-api-version.json": "apiVersion",
   "invalid-finding-excerpt.json": "scan.findings.0",
   "invalid-hash.json": "hashes.runtime",
+  "invalid-instant-date.json": "createdAt",
+  "invalid-origin-userinfo.json": "origin.url",
+  "invalid-origin-query.json": "origin.url",
+  "invalid-origin-fragment.json": "origin.url",
+  "invalid-finding-path.json": "scan.findings.0.file",
   "invalid-instant.json": "createdAt",
   "invalid-origin-http.json": "origin.url",
   "invalid-ratio.json": "scorecard.passRateWith",

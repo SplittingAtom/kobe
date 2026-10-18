@@ -35,7 +35,7 @@ describe("runtime hash = stored content_hash (KOBE-309)", () => {
         for (const wrapper of [null, "my-skill"]) {
           const checked = validateZipBundle(foreignZip(payload, wrapper));
           if (!checked.ok) throw new Error(`${tz}: ${checked.error.code}`);
-          expect(checked.value.zip).toEqual(runtimeZip(v.files));
+          expect(checked.value.zip).toEqual(runtimeZip(v.files, v.options));
           expect(sha256Hex(checked.value.zip), tz).toBe(v.runtimeHash);
         }
       }
@@ -51,7 +51,7 @@ describe("runtime hash = stored content_hash (KOBE-309)", () => {
       const wrapped = bundleFromSkillMd(md);
       if (!wrapped.ok) throw new Error(wrapped.error.code);
       expect(sha256Hex(wrapped.value.zip)).toBe(v.runtimeHash);
-      expect(runtimeHash(v.files)).toBe(v.runtimeHash);
+      expect(runtimeHash(v.files, v.options)).toBe(v.runtimeHash);
     }
   });
 });

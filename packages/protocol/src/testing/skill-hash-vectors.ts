@@ -9,6 +9,8 @@ const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 export interface SkillHashVector {
   readonly name: string;
   readonly files: ReadonlyMap<string, Uint8Array>;
+  /** Hash options: a package Kobe assembled may carry its own `provenance.json`. */
+  readonly options?: { readonly kobeProvenance: true };
   readonly runtimeHash: string;
   readonly packageHash: string;
 }
@@ -54,12 +56,14 @@ export const SKILL_HASH_VECTORS: readonly SkillHashVector[] = [
   {
     name: "the same payload as a full package (evals/, kobe.skill.yaml, provenance.json)",
     files: new Map([...PAYLOAD, ...PACKAGE_EXTRAS, PROVENANCE]),
+    options: { kobeProvenance: true },
     runtimeHash: PAYLOAD_RUNTIME,
     packageHash: "918647c1b383b9f4c2b191b1f84774829dd8b9a9685b27a470974f00a62a8d37",
   },
   {
     name: "the full package with a different provenance.json (neither hash moves)",
     files: new Map([...PAYLOAD, ...PACKAGE_EXTRAS, ["provenance.json", utf8("{}")]]),
+    options: { kobeProvenance: true },
     runtimeHash: PAYLOAD_RUNTIME,
     packageHash: "918647c1b383b9f4c2b191b1f84774829dd8b9a9685b27a470974f00a62a8d37",
   },
@@ -79,5 +83,20 @@ export const SKILL_HASH_VECTORS: readonly SkillHashVector[] = [
     ]),
     runtimeHash: "ff7ffecdc6a6b71ca904042523324b54b38db200b023eab8505bd2b43731c21b",
     packageHash: "ff7ffecdc6a6b71ca904042523324b54b38db200b023eab8505bd2b43731c21b",
+  },
+  {
+    name: "ordering is UTF-16 code units, not code points or UTF-8 bytes (U+FF5E sorts after 😀); index boundaries",
+    files: new Map([
+      ["SKILL.md", SKILL_MD],
+      ["\uff5e.txt", utf8("fullwidth tilde, U+FF5E")],
+      ["\u{1F600}.txt", utf8("emoji, U+1F600: first in UTF-16 order, last in byte order")],
+      ["4294967294", utf8("the largest array index")],
+      ["4294967295", utf8("not an array index")],
+      ["01", utf8("leading zero: not an index")],
+      ["-1", utf8("not an index")],
+      ["0", utf8("the smallest index")],
+    ]),
+    runtimeHash: "505f95cd6479ef6971e73c8e1d43aac900097b6acd55d3dea30c04d7e7a7816d",
+    packageHash: "505f95cd6479ef6971e73c8e1d43aac900097b6acd55d3dea30c04d7e7a7816d",
   },
 ];

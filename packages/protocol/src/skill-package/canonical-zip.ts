@@ -2,7 +2,8 @@
  * The canonical skill zip (KOBE-309, spec SK14): the only bytes Kobe ever hashes for a skill. Two
  * tools that hold the same files produce the same bytes, in every timezone, so the hash is an
  * identity. It is byte-for-byte what the server's canonical repack has written since KOBE-78
- * (fflate `zipSync`, stored), so every existing `content_hash` is a runtime hash under this rule.
+ * (fflate `zipSync`, stored): for a stored bundle without the reserved root names (`evals/`,
+ * `kobe.skill.yaml`, `provenance.json`), its `content_hash` is its runtime hash under this rule.
  *
  * Layout (all integers little-endian), for each file in {@link canonicalOrder}:
  *
@@ -23,6 +24,7 @@
  *
  * Pure and dependency-free (no hashing here: `@kobe/protocol/node` hashes these bytes).
  */
+import { assertPackagePaths } from "./layout.js";
 
 const DOS_TIME = 0x6000; // 12:00:00
 const DOS_DATE = 0x5021; // 2020-01-01
@@ -39,7 +41,8 @@ const isArrayIndex = (name: string): boolean =>
   ARRAY_INDEX.test(name) && Number(name) <= MAX_ARRAY_INDEX;
 
 /**
- * The order of entries: names compared as UTF-16 code units (JavaScript's default sort), except
+ * The order of entries: names compared as UTF-16 code units (JavaScript's default sort; NOT
+ * code points or UTF-8 bytes, which differ for U+E000..U+FFFF against astral characters), except
  * that names which are array indices ("7", "10": only possible at the root, without a slash) come
  * first in numeric order. The exception is what the KOBE-78 repack produced (fflate takes an
  * object, and objects enumerate index keys first), kept so that existing hashes stay valid.
@@ -81,11 +84,12 @@ interface Entry {
 }
 
 /**
- * The canonical zip of `files` (path → bytes). Paths are used as given: check them first with
- * `checkPackagePaths` (skill-package/layout.ts), which also refuses names that differ only by
- * case or normalization.
+ * The canonical zip of `files` (path → bytes), which must be a valid package without
+ * `provenance.json` (`checkPackagePaths`; throws `SkillPackageError` otherwise): there is no
+ * unchecked way to produce a canonical zip.
  */
 export function canonicalZip(files: ReadonlyMap<string, Uint8Array>): Uint8Array {
+  assertPackagePaths(files.keys());
   const entries: Entry[] = [];
   let offset = 0;
   for (const path of canonicalOrder(files.keys())) {

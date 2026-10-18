@@ -36,10 +36,25 @@ server test proves the contract equals today's stored hashes.
   only, tied to a package hash (`provenanceMismatches` flags a stale one); origin URLs https.
 - Semver pattern shared with KOBE-308 (`SEMVER_PATTERN`, 9 digits a part).
 
+- **Review fixes (S1-S6):** paths must be well-formed Unicode (lone surrogates refused) and NFC
+  (refused, never normalized); zero-width, bidi and C1 controls refused (N2). Zip and hash
+  functions validate the whole set themselves and throw `SkillPackageError` (S3). File/dir
+  conflicts refused, case variants of reserved root names refused (not treated as payload), an
+  authored `provenance.json` refused unless `{ kobeProvenance: true }` (S4). Ordering stays UTF-16
+  code units (what stored hashes use), stated as "not code points or bytes" with a vector pinning
+  U+FF5E vs U+1F600 and the array-index boundaries (S2). Identity = the hash of the zip a sandbox
+  receives = runtime hash from 310 on; 310's duties for legacy rows are in the doc (S5).
+  Provenance documented as unsigned with verifiable / Kobe-attested / informational fields;
+  `origin.url` refuses userinfo, query and fragment (S6). Also N5 (real instants) and N6
+  (finding paths are package paths). S7-S9 and the other nits are left for 310 or later.
+
 ## Open questions (for Chris or the coordinator)
 
-- Confirm `provenance.json` outside both hashes (and outside the runtime payload).
-- Confirm the array-index ordering quirk is kept as contract rather than changing hashes.
+- S2: switching the ordering to UTF-8 byte (code-point) order would change the hash only of
+  stored bundles holding a name with a character in U+E000..U+FFFF and, at the deciding
+  position of another name, a character above U+FFFF. I can't count them without reading every
+  stored zip (names are not in the database); gate1 most likely has none. Kept UTF-16 order for
+  now; 310's one-off recompute (doc, "Identity" step 1) can count them if a switch is wanted.
 
 ## Evidence (acceptance criteria → test or command output)
 

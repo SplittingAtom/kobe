@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { SEMVER_PATTERN, SHA256_HEX_PATTERN, SKILL_NAME_PATTERN, UUID_PATTERN } from "./layout.js";
+import {
+  packagePathProblem,
+  SEMVER_PATTERN,
+  SHA256_HEX_PATTERN,
+  SKILL_NAME_PATTERN,
+  UUID_PATTERN,
+} from "./layout.js";
 
 /**
  * `provenance.json` (KOBE-309, spec SK19/SK30): Kobe-generated at promotion, never author-edited.
@@ -7,6 +13,16 @@ import { SEMVER_PATTERN, SHA256_HEX_PATTERN, SKILL_NAME_PATTERN, UUID_PATTERN } 
  * only** (never eval transcripts, prompts, answers or test threads: those stay in the team), and
  * both hashes. Written as canonical JSON (RFC 8785, `canonicalJson`) in UTF-8, at most
  * {@link PROVENANCE_MAX_BYTES}. Outside both hashes, since it names them.
+ *
+ * It is **unsigned**: anyone who handles an exported or mirrored package can edit it without
+ * changing a hash. So its fields are of three kinds:
+ *  - verifiable against the package beside it ({@link provenanceMismatches}): `name`, `version`,
+ *    `hashes`, and `scorecard.packageHash` (freshness);
+ *  - Kobe-attested, authoritative only in Kobe's own records, never read back from a file:
+ *    `source`, `submitter`, `confirmedBy`, `scan`, the scorecard numbers, `origin`;
+ *  - informational: `fromConversation`, `createdAt`.
+ * Kobe never trusts an incoming `provenance.json` (uploads, drafts and imports refuse one;
+ * `checkPackagePaths`) and writes its own from its records whenever it exports a package.
  */
 
 export const PROVENANCE_API_VERSION = "kobe.dev/skill-provenance/v1";
@@ -16,8 +32,39 @@ export const MAX_PROVENANCE_FINDINGS = 500;
 const sha256 = z.string().regex(SHA256_HEX_PATTERN);
 const semver = z.string().regex(SEMVER_PATTERN);
 const uuid = z.string().regex(UUID_PATTERN);
-/** ISO 8601 instant in UTC with milliseconds (`Date.prototype.toISOString`). */
-const instant = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+/** ISO 8601 instant in UTC with milliseconds, exactly as `Date.prototype.toISOString` writes it. */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const instant = z.string().refine((s) => {
+  if (!INSTANT.test(s)) return false;
+  const d = new Date(s);
+  return !Number.isNaN(d.getTime()) && d.toISOString() === s;
+}, "an instant as toISOString writes it");
+
+/**
+ * Where an import came from: `https`, no credentials (userinfo), no query or fragment (tokens
+ * travel there), as the URL parser normalizes it. Provenance goes into exports and the mirror.
+ */
+const originUrl = z
+  .string()
+  .max(2048)
+  .refine((s) => {
+    let u: URL;
+    try {
+      u = new URL(s);
+    } catch {
+      return false;
+    }
+    return (
+      u.protocol === "https:" &&
+      u.username === "" &&
+      u.password === "" &&
+      u.search === "" &&
+      u.hash === "" &&
+      !s.includes("?") &&
+      !s.includes("#") &&
+      u.href === s
+    );
+  }, "an https URL without credentials, query or fragment");
 const ratio = z.number().min(0).max(1);
 const count = z.number().int().min(0);
 
@@ -45,7 +92,7 @@ export const provenanceSchema = z.strictObject({
   origin: z
     .strictObject({
       kind: z.enum(["git", "zip"]),
-      url: z.url({ protocol: /^https$/ }).max(2048),
+      url: originUrl,
       commit: z
         .string()
         .regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/)
@@ -66,7 +113,7 @@ export const provenanceSchema = z.strictObject({
         z.strictObject({
           category: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
           rule: z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/),
-          file: z.string().min(1).max(240),
+          file: z.string().refine((f) => packagePathProblem(f) === null, "not a package path"),
           line: z.number().int().min(0),
         }),
       )
