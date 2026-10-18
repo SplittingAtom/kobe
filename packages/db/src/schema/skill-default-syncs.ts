@@ -77,6 +77,11 @@ export const skillDefaultSyncs = pgTable(
     moved: integer().notNull().default(0),
     /** `add`: teams that blocked the skill (never installed there). */
     blocked: integer().notNull().default(0),
+    /**
+     * `add`: teams with their own unarchived skill of the same name (SK27): skipped, never
+     * installed there; each such team sees a `name_conflict` result in its audit.
+     */
+    nameConflicts: integer().notNull().default(0),
     /** Failed runs so far, when the next may start, and the last failure's code (no messages). */
     attempts: integer().notNull().default(0),
     nextAttemptAt: ts(),
@@ -108,7 +113,8 @@ export const skillDefaultSyncs = pgTable(
       "skill_default_syncs_counts",
       sql`${t.teamsTotal} >= 0 AND ${t.teamsDone} >= 0 AND ${t.installed} >= 0 AND ${t.kept} >= 0
         AND ${t.optedOut} >= 0 AND ${t.converted} >= 0 AND ${t.optoutsCleared} >= 0
-        AND ${t.moved} >= 0 AND ${t.blocked} >= 0 AND ${t.attempts} >= 0`,
+        AND ${t.moved} >= 0 AND ${t.blocked} >= 0 AND ${t.nameConflicts} >= 0
+        AND ${t.attempts} >= 0`,
     ),
     check(
       "skill_default_syncs_last_error",

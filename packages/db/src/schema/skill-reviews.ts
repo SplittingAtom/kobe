@@ -144,6 +144,10 @@ export const teamSkillSettings = pgTable("team_skill_settings", {
     .references(() => teams.id, { onDelete: "cascade" }),
   /** Members' personal skills are left out of this team's runs (spec D22). */
   personalSkillsDisabled: boolean().notNull().default(false),
+  /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
+  membersMayAddCatalog: boolean().notNull().default(true),
+  /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
+  buildersMayInstallCatalog: boolean().notNull().default(true),
   updatedBy: uuid()
     .notNull()
     .references(() => users.id),
