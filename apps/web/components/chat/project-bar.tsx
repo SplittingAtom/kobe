@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { createProjectsApi } from "../../lib/projects/api";
 import { isBusy } from "../../lib/chat/thread-state";
 import { SHARED_HINT, sharedBy, visibilityOf } from "../../lib/chat/share";
+import { AgentChips } from "./agent-chips";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -14,8 +15,8 @@ export function isReadOnlyThread(extras: KobeThreadExtras | null | undefined): b
 }
 
 /**
- * The sharing side of a thread (D23, CE20): for a reader the read-only banner naming who shared it,
- * with Fork; for its owner a share-with-the-project switch on a project thread, or, while it is
+ * The sharing side of a thread (D23, CE20): for a reader the read-only banner naming who shared it
+ * and the thread's agent (KOBE-418: its composer has no selectors), with Fork; for its owner a share-with-the-project switch on a project thread, or, while it is
  * shared with the team, a note with Make private (the row menu's Share sets every scope). Plain
  * text only. The server decides every call; a refusal shows.
  */
@@ -50,6 +51,11 @@ export function ProjectBar({
           {sharedBy(summary.ownerName)} This conversation is shared with you read-only. You can read
           it and fork it into your own private copy; only its author can continue it.
         </p>
+        {summary.agentName != null && (
+          <p className="flex flex-wrap items-center gap-1.5">
+            <AgentChips />
+          </p>
+        )}
         <button type="button" disabled={isBusy(state, "fork")} onClick={() => void fork()}>
           Fork into my conversations
         </button>

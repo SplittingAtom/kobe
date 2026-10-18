@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuiState } from "@assistant-ui/react";
 import { ChevronRightIcon } from "lucide-react";
 import {
   createContext,
@@ -93,9 +94,24 @@ export function useDetail(): DetailApi {
   return useContext(DetailContext);
 }
 
-/** An answer's Show details, beside Fork (KOBE-418): pressed while its blocks are open. */
+/** A message part that renders as a block with its own disclosure (`useDisclosure`). */
+function opensAsBlock(part: { readonly type: string; readonly data?: unknown }): boolean {
+  if (part.type === "reasoning" || part.type === "tool-call") return true;
+  if (part.type === "data-kobe-offloaded") return true;
+  return (
+    part.type === "data-kobe-marker" && (part.data as { kind?: string })?.kind === "compaction"
+  );
+}
+
+/**
+ * An answer's Show details, beside Fork (KOBE-418): pressed while its blocks are open. Only on an
+ * answer with something to open (reasoning, a tool card, a stored step, a compaction); a plain
+ * text answer has none, so no toggle.
+ */
 export function AnswerDetailToggle() {
   const { expanded, toggle } = useContext(DetailContext);
+  const hasBlocks = useAuiState((s) => s.message.content.some(opensAsBlock));
+  if (!hasBlocks) return null;
   return <IconAction command="answer-detail" size="sm" aria-pressed={expanded} onClick={toggle} />;
 }
 

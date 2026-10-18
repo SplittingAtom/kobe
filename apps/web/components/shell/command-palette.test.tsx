@@ -44,9 +44,13 @@ function conversation(title = "Report") {
   const first = fake.addSystemEntry(t, null, "model_change", { provider: "kobe", modelId: "kimi" });
   const root = fake.addSystemEntry(t, first, "thinking_level_change", { thinkingLevel: "off" });
   const q = fake.addEntry(t, root, { role: "user", content: "Sum the numbers" });
+  // A reasoning block, so the answer has a Show details toggle to watch (KOBE-418).
   fake.addEntry(t, q, {
     role: "assistant",
-    content: [{ type: "text", text: "They add up to 42." }],
+    content: [
+      { type: "thinking", thinking: "Adding up." },
+      { type: "text", text: "They add up to 42." },
+    ],
   });
   return { t, root };
 }

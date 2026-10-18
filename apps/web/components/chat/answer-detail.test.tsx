@@ -67,6 +67,23 @@ const toggleOf = (root: HTMLElement) => within(root).getByRole("button", { name:
 const toggleAll = () => pressModShift("D");
 
 describe("Show details per answer (KOBE-418 ac-3)", { timeout: 30_000 }, () => {
+  it("is offered only on answers with something to open, not on plain text", async () => {
+    const t = fake.addThread("Mixed");
+    const q = fake.addEntry(t, null, { role: "user", content: "Hello" });
+    const plain = fake.addEntry(t, q, {
+      role: "assistant",
+      content: [{ type: "text", text: "Just text." }],
+    });
+    turn(t, plain, 2, "With steps.");
+    openApp(fake, t);
+    const text = await answerOf("Just text.");
+    const steps = await answerOf("With steps.");
+    expect(within(steps).getByRole("button", { name: "Show details" })).toBeTruthy();
+    expect(within(text).queryByRole("button", { name: "Show details" })).toBeNull();
+    // Fork is still there on the plain answer.
+    expect(within(text).getByRole("button", { name: "Fork to a new thread" })).toBeTruthy();
+  });
+
   it("sits beside Fork on each answer, before the thumbs", async () => {
     openApp(fake, twoAnswers());
     for (const text of ["First answer.", "Second answer."]) {

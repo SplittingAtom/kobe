@@ -49,12 +49,12 @@
 - Kept: KOBE-374 outline/pulse (panel unchanged), KOBE-288 queue/steer, KOBE-304 drag into the
   composer, KOBE-305 grid and chat-column minimum (CSS untouched), KOBE-225 shortcuts.
 
-## Open questions (for Chris or the coordinator)
+## Follow-up after review questions (coordinator, 2026-10-18)
 
-- Show details is on every answer, as the AC says; on a plain-text answer it changes nothing.
-  Limit it to answers with reasoning or tool steps?
-- A shared (read-only) thread no longer shows its agent's name anywhere (row two did). Add the
-  chip to the read-only banner?
+- Show details shows only on answers with something to open (reasoning, tool card, stored step,
+  compaction marker); plain-text answers have none (`answer-detail.test.tsx`).
+- The read-only shared-thread banner names the thread's agent (`AgentChips`, with Suspended or
+  Archived), since that composer has no selectors (`thread-share.test.tsx`).
 
 ## Evidence (acceptance criteria → test or command output)
 
