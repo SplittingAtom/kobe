@@ -1,7 +1,6 @@
-import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
+import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
 import { expect, test } from "../support/chat.js";
 import {
-  allowApproval,
   deleteWorkspacePath,
   longAnswer,
   regions,
@@ -29,8 +28,7 @@ test("U18: an artifact and a workspace file open beside the thread", async ({ ch
         content: "<!doctype html><html><body><p>beside</p></body></html>",
       }),
     );
-    await chat.threadId();
-    await allowApproval(page);
+    await chat.threadId(); // create_artifact never asks (PROMPT_EXEMPT_KOBE_TOOLS)
     await chat.waitForIdle();
     await expect(artifact.getByRole("tab").first()).toBeVisible({ timeout: RUN_TIMEOUT_MS });
     await expect(chat.composer).toBeInViewport();
@@ -89,12 +87,18 @@ test("U18: memory and the member's settings open beside the thread (CE4)", async
 test("U18: while scrolled up, the Jump pill counts the messages that arrive", async ({
   chat,
   page,
-  context,
 }) => {
+  // The messages arrive in this tab's own stream: a long answer, and a message queued behind it
+  // (Enter while it works, CE10) that runs once it ends. An open thread does not follow runs
+  // another tab or device starts (it reads them when opened again), so they are not the source.
   await chat.open();
-  await chat.ask(longAnswer("No tools. Write a numbered list of 80 short lines about fruit."));
-  const thread = await chat.threadId();
-  // Scrolled up: the list is unpinned and holds.
+  await chat.ask("No tools. Reply with the single word FIRST.");
+  await chat.send(longAnswer("No tools. Write a numbered list of 80 short lines about fruit."));
+  await expect(chat.steering).toHaveAttribute("data-state", "active", {
+    timeout: RUN_START_TIMEOUT_MS,
+  });
+  await chat.send("No tools. Reply with the single word ARRIVED.");
+  // Scrolled up mid-stream: the list is unpinned and holds.
   const list = chat.list;
   const box = await list.boundingBox();
   if (box === null) throw new Error("the message list has no box");
@@ -103,21 +107,10 @@ test("U18: while scrolled up, the Jump pill counts the messages that arrive", as
   await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
   const jump = page.getByRole("button", { name: /^Jump to latest/ });
   await expect(jump).toBeVisible();
-
-  // The same member sends from another tab: two new messages (the question and its answer).
-  const other = await context.newPage();
-  try {
-    await other.goto(`/?thread=${thread}`);
-    const composer = other.getByRole("textbox", { name: "Message", exact: true });
-    await expect(composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-    await composer.fill("No tools. Reply with the single word ARRIVED.");
-    await composer.press("Enter");
-    await expect(page.getByText("ARRIVED").first()).toBeAttached({ timeout: RUN_TIMEOUT_MS });
-    await expect(jump).toHaveAccessibleName(/\b2 new messages\b/, { timeout: RUN_TIMEOUT_MS });
-    await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
-  } finally {
-    await other.close();
-  }
+  // The queued message and its answer arrive after the long answer: two new messages.
+  await expect(page.getByText("ARRIVED").first()).toBeAttached({ timeout: 2 * RUN_TIMEOUT_MS });
+  await expect(jump).toHaveAccessibleName(/\b2 new messages\b/, { timeout: RUN_TIMEOUT_MS });
+  await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
 });
 
 test("U18: the composer is visible at every width", async ({ chat, page }) => {

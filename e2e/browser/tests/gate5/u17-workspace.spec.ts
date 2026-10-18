@@ -1,7 +1,6 @@
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
 import { expect, test, type Chat } from "../support/chat.js";
 import {
-  allowApproval,
   preferences,
   putPreferences,
   regions,
@@ -32,8 +31,7 @@ async function openArtifact(chat: Chat, title: string) {
       content: `<!doctype html><html><body><h1>${title}</h1></body></html>`,
     }),
   );
-  await chat.threadId();
-  await allowApproval(chat.page);
+  await chat.threadId(); // create_artifact never asks (PROMPT_EXEMPT_KOBE_TOOLS)
   await chat.waitForIdle();
 }
 

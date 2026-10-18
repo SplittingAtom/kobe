@@ -349,6 +349,12 @@ jobs:
           kubectl -n kobe-team-gate4-a describe pods | tail -60 || true
           kubectl -n kobe-team-gate4-r describe pods,pvc | tail -60 || true
           kubectl -n kobe-team-gate5-a describe pods | tail -60 || true
+          # The sandbox agent's own log (Pi starts, refusals) for the gate shards' members.
+          for ns in kobe-team-gate5-a kobe-team-gate3-a kobe-team-gate4-a; do
+            kubectl -n "$ns" logs -l agents.x-k8s.io/claim-uid --all-containers --prefix --tail=200 2>/dev/null | grep -v '"level":30' | tail -120 || true
+          done
+          kubectl -n kobe-dev logs -l app.kubernetes.io/component=server -c server --tail=-1 2>/dev/null \
+            | grep -E 'pi_rejected|pi_start|could not|run failed|"level":(40|50)' | tail -60 || true
           kubectl -n kobe-gate4-infra get pods -o wide || true
           kubectl -n kobe-gate2-infra get pods -o wide || true
           df -h /
