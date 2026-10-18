@@ -1,10 +1,12 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { useArtifactPanel } from "../chat/artifact-state";
+import { ChatSessionContext } from "../chat/kobe-runtime";
+import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
@@ -14,6 +16,8 @@ import {
   useRailDropZone,
   type DropStatus,
 } from "./rail-drop-zone";
+import { railDocked } from "../../lib/shell/layout";
+import { RAIL_ID, RailResizeHandle } from "./rail-resize";
 import { sectionRows, useRail, type RailApi } from "./rail-state";
 import { useShellBand } from "./shell-band";
 import { useModalLayer } from "./use-modal-layer";
@@ -97,6 +101,16 @@ function RailFiles({
         panel.openFile(entry.path);
       }
     : undefined;
+  // "Mention in message" (KOBE-374): into the composer on screen, which the drawer makes way for.
+  const session = useContext(ChatSessionContext);
+  const mention = session
+    ? (entry: FileEntry) => {
+        const refused =
+          mentionRefusal(entry.path, entry.type) ?? session.composerMentions.request(entry.path);
+        if (refused === undefined && rail.drawer) rail.closeDrawer();
+        return refused;
+      }
+    : undefined;
   return (
     <section
       id={SECTION_IDS.files}
@@ -125,6 +139,8 @@ function RailFiles({
           wakeKey={rail.filesRequests}
           showFolder={showFolder}
           onOpenFile={openFile}
+          onMoved={panel?.moveFiles}
+          onMention={mention}
         />
       )}
     </section>
@@ -140,6 +156,9 @@ function RailFiles({
  * Below 1100 px an expanded rail is a modal drawer (CE7, CE8, KOBE-201): focus moves in, the rest
  * of the chat is inert, Escape or a press outside closes it and focus returns to the control that
  * opened it. Under 768 px the collapsed rail is not shown at all; the bar opens the drawer.
+ *
+ * On wide windows the expanded rail has a drag handle on its right edge (KOBE-305,
+ * `rail-resize.tsx`), beside the aside so it is laid out against the grid, not the rail's scroll.
  */
 export function WorkspaceRail({
   teamName,
@@ -158,63 +177,71 @@ export function WorkspaceRail({
   useModalLayer(aside, drawer, rail.closeDrawer, { modal: true, escape: true });
   useRevealFocus(rail);
   const sections = useRef<HTMLDivElement>(null);
-  const single = useShellBand() === "single";
+  const band = useShellBand();
+  const single = band === "single";
+  const resizable = railDocked(band) && !collapsed && !drawer;
   const drop = useRailDropZone(filesApi, rail);
 
   return (
-    <aside
-      ref={aside}
-      aria-label="Workspace"
-      className={styles.rail}
-      {...(collapsed ? { "data-collapsed": "" } : {})}
-      {...(drawer ? { "data-drawer": "", role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}
-      {...drop.handlers}
-    >
-      {drop.active && <RailDropOverlay />}
-      {!single && <CollapsedIcons rail={rail} />}
-      <div className={styles.expanded} hidden={collapsed}>
-        <div className={styles.header}>
-          <h2 className={styles.team} title={teamName}>
-            {teamName}
-          </h2>
-          <IconAction
-            command="toggle-rail"
-            label={drawer ? "Close the workspace" : undefined}
-            side="right"
-            aria-expanded
-            aria-controls="kobe-rail-sections"
-            onClick={() => toggle(true)}
-          />
-        </div>
-        <div
-          id="kobe-rail-sections"
-          ref={sections}
-          className={styles.sections}
-          style={{ gridTemplateRows: sectionRows(rail.threadsShare) }}
-        >
-          <section
-            id={SECTION_IDS.threads}
-            aria-labelledby="kobe-rail-threads-title"
-            tabIndex={-1}
-            className={styles.section}
+    <>
+      <aside
+        ref={aside}
+        id={RAIL_ID}
+        aria-label="Workspace"
+        className={styles.rail}
+        {...(collapsed ? { "data-collapsed": "" } : {})}
+        {...(drawer ? { "data-drawer": "", role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}
+        {...drop.handlers}
+      >
+        {drop.active && <RailDropOverlay />}
+        {!single && <CollapsedIcons rail={rail} />}
+        <div className={styles.expanded} hidden={collapsed}>
+          <div className={styles.header}>
+            <h2 className={styles.team} title={teamName}>
+              {teamName}
+            </h2>
+            <IconAction
+              command="toggle-rail"
+              label={drawer ? "Close the workspace" : undefined}
+              side="right"
+              aria-expanded
+              aria-controls="kobe-rail-sections"
+              onClick={() => toggle(true)}
+            />
+          </div>
+          <div
+            id="kobe-rail-sections"
+            ref={sections}
+            className={styles.sections}
+            style={{ gridTemplateRows: sectionRows(rail.threadsShare) }}
           >
-            <RailThreads listError={listError} />
-          </section>
-          <RailDivider
-            share={rail.threadsShare}
-            onChange={rail.setThreadsShare}
-            container={sections}
-            controls={SECTION_IDS.threads}
-          />
-          <RailFiles
-            rail={rail}
-            api={filesApi}
-            drop={drop.status}
-            showFolder={drop.showFolder}
-            clearDrop={drop.clear}
-          />
+            <section
+              id={SECTION_IDS.threads}
+              aria-labelledby="kobe-rail-threads-title"
+              tabIndex={-1}
+              className={styles.section}
+            >
+              <RailThreads listError={listError} />
+            </section>
+            <RailDivider
+              share={rail.threadsShare}
+              onChange={rail.setThreadsShare}
+              container={sections}
+              controls={SECTION_IDS.threads}
+            />
+            <RailFiles
+              rail={rail}
+              api={filesApi}
+              drop={drop.status}
+              showFolder={drop.showFolder}
+              clearDrop={drop.clear}
+            />
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+      {resizable && (
+        <RailResizeHandle width={rail.width} onChange={rail.setWidth} onReset={rail.resetWidth} />
+      )}
+    </>
   );
 }

@@ -24,6 +24,8 @@ let answers: (() => Response)[];
 let uploadGate: Promise<void>;
 let touch: boolean;
 let attachCalls: UploadRequest[];
+/** Extra top-level folders of the workspace (KOBE-304's tree drops). */
+let extraRoot: string[];
 
 const entry = (name: string, path: string, type: "file" | "dir", area = "workspace") => ({
   name,
@@ -54,7 +56,12 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     const entries =
       path === "uploads"
         ? uploads.map((u) => entry(u.name, `uploads/${u.name}`, "file", "uploads"))
-        : [entry("uploads", "uploads", "dir", "uploads")];
+        : path === ""
+          ? [
+              ...extraRoot.map((d) => entry(d, d, "dir")),
+              entry("uploads", "uploads", "dir", "uploads"),
+            ]
+          : [];
     return Response.json({ path, entries });
   }
   if (route === "POST /v1/workspace/files") {
@@ -70,7 +77,9 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     }
     const up = { path: String(form.get("path")), name };
     uploads.push(up);
-    return Response.json(entry(up.name, `uploads/${up.name}`, "file", "uploads"), { status: 201 });
+    return Response.json(entry(up.name, `${up.path}/${up.name}`, "file", "uploads"), {
+      status: 201,
+    });
   }
   return new Response(null, { status: 500 });
 };
@@ -104,7 +113,9 @@ beforeEach(() => {
   uploadGate = Promise.resolve();
   touch = false;
   attachCalls = [];
+  extraRoot = [];
   sessionStorage.clear();
+  localStorage.clear();
   vi.stubGlobal("fetch", fetchFn);
   vi.spyOn(window, "matchMedia").mockImplementation(matchMedia);
 });
@@ -263,6 +274,26 @@ describe("rail drop zone: upload (ac-1)", () => {
     expect(alert.textContent).toContain("Folders can't be added to your workspace (photos)");
     expect(await within(filesRegion()).findByText("a.txt")).toBeTruthy();
     expect(uploads.map((u) => u.name)).toEqual(["a.txt"]);
+  });
+});
+
+describe("rail drop zone: onto a folder of the Files tree (KOBE-304, ac-7)", () => {
+  it("uploads into that folder, without the overlay; elsewhere on the rail it is still uploads/", async () => {
+    extraRoot = ["notes"];
+    const rail = await mount();
+    const user = userEvent.setup();
+    await user.click(within(filesRegion()).getByRole("button", { name: "Open files" }));
+    const notes = await within(filesRegion()).findByRole("treeitem", { name: "notes" });
+    fireEvent.dragEnter(notes, files(fileOf("brief.pdf")));
+    fireEvent.dragOver(notes, files(fileOf("brief.pdf")));
+    expect(overlay()).toBeNull();
+    expect(notes.hasAttribute("data-drop-target")).toBe(true);
+    fireEvent.drop(notes, items([fileOf("brief.pdf")]));
+    await waitFor(() => expect(uploads).toEqual([{ path: "notes", name: "brief.pdf" }]));
+    fireEvent.dragEnter(rail, files(fileOf("other.pdf")));
+    expect(overlay()).not.toBeNull();
+    fireEvent.drop(rail, files(fileOf("other.pdf")));
+    await waitFor(() => expect(uploads).toContainEqual({ path: "uploads", name: "other.pdf" }));
   });
 });
 

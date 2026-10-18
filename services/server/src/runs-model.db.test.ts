@@ -105,6 +105,10 @@ describe("run model resolution (D30)", () => {
       ok: true,
       model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
       limits: { maxOutputTokens: null, contextWindow: null, reasoning: false },
+      thinking: {
+        site: { control: "none", allowed: false, default: null, max: null, lowest: "off" },
+        teamMax: null,
+      },
     });
     expect(await resolve("gem")).toMatchObject({
       model: { gateway_model: "gemini/gemini-fake", api: "google-generative-ai" },
@@ -194,6 +198,89 @@ describe("run model resolution (D30)", () => {
       await set("smart", "max_output_tokens = NULL, context_window = NULL", []);
       await set("gem", "reasoning = false", []);
       await set("qwen", "reasoning = false, context_window = NULL", []);
+    }
+  });
+
+  it("a conversation picks a thinking level; each run is clamped to the site and team settings (KOBE-260 ac-2)", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [
+      { alias: "fast", isDefault: true },
+      { alias: "qwen", isDefault: false },
+    ]);
+    const admin = f.fx.admin;
+    const site = (sql: string) =>
+      admin.query(`UPDATE model_catalog SET ${sql} WHERE alias = 'qwen'`);
+    const teamMax = (level: string | null) =>
+      admin.query(
+        `UPDATE team_models SET thinking_max = $1 WHERE team_id = $2 AND alias = 'qwen'`,
+        [level, w.team],
+      );
+    await site(`reasoning = true, thinking_control = 'reasoning_effort', thinking_allowed = true,
+      thinking_default = 'low', thinking_max = 'medium'`);
+    const owner = f.on(0, w.owner);
+    const ws = await f.connect(w, 0);
+    const created = await owner.post("/v1/threads", { title: "t", model: "qwen" });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const threadId = created.json.thread_id as string;
+    expect(created.json.thinking_level).toBeNull();
+    /** One run: its run.start level, run.started level and recorded level. */
+    const run = async () => {
+      const runId = await f.message(w.owner, threadId, "think");
+      const start = await ws.started(runId);
+      ws.reply(start, "ok");
+      await f.until(w.team, runId, "completed");
+      const [started] = await f.events(w.team, runId);
+      const { rows } = await admin.query<{ thinking_level: string | null }>(
+        `SELECT thinking_level FROM runs WHERE id = $1`,
+        [runId],
+      );
+      const level = start.config?.thinking_level;
+      expect((started?.payload as { thinking_level?: string }).thinking_level).toBe(level);
+      expect(rows[0]?.thinking_level ?? undefined).toBe(level);
+      return level;
+    };
+    const choose = async (level: string | null) => {
+      const r = await owner.patch(`/v1/threads/${threadId}`, { thinking_level: level });
+      expect(r.status, JSON.stringify(r.json)).toBe(200);
+      expect(r.json.thinking_level).toBe(level);
+    };
+    try {
+      // No choice: the model's default.
+      expect(await run()).toBe("low");
+      // A choice above the site's maximum is kept on the thread but clamped for the run.
+      await choose("high");
+      expect((await owner.get(`/v1/threads/${threadId}`)).json.thinking_level).toBe("high");
+      expect(await run()).toBe("medium");
+      await choose("off");
+      expect(await run()).toBe("off");
+      // The team narrows it further.
+      await choose("high");
+      await teamMax("low");
+      expect(await run()).toBe("low");
+      await teamMax("off");
+      expect(await run()).toBe("off");
+      await teamMax(null);
+      // The site turns thinking off: every run is off.
+      await site(`thinking_allowed = false, thinking_default = NULL, thinking_max = NULL`);
+      expect(await run()).toBe("off");
+      // A model without a thinking control: no level at all.
+      await owner.patch(`/v1/threads/${threadId}`, { model: "fast" });
+      expect(await run()).toBeUndefined();
+      // Only levels are accepted.
+      for (const bad of ["max", "xhigh", 3]) {
+        const r = await owner.patch(`/v1/threads/${threadId}`, { thinking_level: bad });
+        expect(r.status, String(bad)).toBe(400);
+      }
+      // Only the owner chooses (review N7): another member can't, even on a shared thread.
+      const shared = await owner.post(`/v1/threads/${threadId}/share`, { visibility: "team" });
+      expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+      const reader = f.on(0, await f.member(w.team));
+      const refused = await reader.patch(`/v1/threads/${threadId}`, { thinking_level: "off" });
+      expect(refused.status).not.toBe(200);
+      expect((await owner.get(`/v1/threads/${threadId}`)).json.thinking_level).toBe("high");
+    } finally {
+      await site(`thinking_control = 'none', thinking_allowed = false, thinking_default = NULL,
+        thinking_max = NULL, reasoning = false`);
     }
   });
 

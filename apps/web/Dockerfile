@@ -24,6 +24,8 @@ COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/apps/web/public ./apps/web/public
 # Next.js needs a writable cache dir; everything else stays root-owned
 RUN mkdir -p apps/web/.next/cache && chown 1000:1000 apps/web/.next/cache
+# Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).
+COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /usr/share/doc/kobe/
 # Files stay root-owned (read-only to the app); numeric non-root user so runAsNonRoot can verify it.
 USER 1000:1000
 EXPOSE 8080

@@ -55,6 +55,11 @@ export interface ThreadManagerOptions extends ThreadEnv {
   readonly skills?: Pick<SkillStore, "prepare" | "release">;
   /** Where the image's built-in skills live (KOBE-88); absent: runs that list built-ins fail. */
   readonly builtinSkillsDir?: string;
+  /**
+   * The run's current span as a `traceparent` (KOBE-274), written to the model file with the run
+   * so Pi's first model call already carries it; absent or null: none.
+   */
+  readonly traceparentOf?: (runId: string) => string | null;
 }
 
 export const PI_REQUEST_TIMEOUT_MS = 60_000;
@@ -150,7 +155,12 @@ export class ThreadManager {
         return fail("runtime_tampered", tampered);
       }
       try {
-        await thread.attachRun(frame.run_id, model, frame.run_token?.token);
+        await thread.attachRun(
+          frame.run_id,
+          model,
+          frame.run_token?.token,
+          this.#options.traceparentOf?.(frame.run_id) ?? null,
+        );
         // The run's memory (KOBE-157): its own file, so a changed index never restarts Pi.
         // Project instructions (KOBE-245) only for an agent that announced `projects`.
         await thread.attachMemory(
@@ -243,6 +253,11 @@ export class ThreadManager {
   }
 
   /** Abort a run the server no longer leases to us, or one the outbox gave up on. */
+  /** The run's current span for its model calls (KOBE-274). */
+  setTraceparent(runId: string, traceparent: string | null): void {
+    for (const thread of this.#threads.values()) thread.setTraceparent(runId, traceparent);
+  }
+
   abortRun(runId: string): void {
     for (const thread of this.#threads.values()) {
       if (thread.runId === runId) void this.#abort(thread);
@@ -279,7 +294,12 @@ export class ThreadManager {
       const ready = await this.#compactReady(thread, model);
       if (ready !== undefined) return ready;
       // Memory only (KOBE-118): kobe-models asks for it when Pi starts summarizing.
-      await thread.attachRun(frame.run_id, model, frame.run_token.token);
+      await thread.attachRun(
+        frame.run_id,
+        model,
+        frame.run_token.token,
+        this.#options.traceparentOf?.(frame.run_id) ?? null,
+      );
       // Once more with the run's file in place: `compact` goes out right after this.
       const tampered = await thread.verifyRuntime();
       if (tampered !== undefined) {

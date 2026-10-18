@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ArrowDownIcon,
   ArrowUpIcon,
+  AtSignIcon,
   BellIcon,
   BotIcon,
   BrainIcon,
@@ -52,6 +53,8 @@ import {
   SquarePenIcon,
   SunIcon,
   TextCursorInputIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   Trash2Icon,
   UsersIcon,
   XIcon,
@@ -327,9 +330,14 @@ const LIST = [
   },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
-  // A Files row's menu (KOBE-292). The workspace API has no rename or move yet.
+  // A Files row's menu (KOBE-292). Rename (also F2 in the tree) and Move to… (the keyboard way to
+  // move, beside drag and drop) use the workspace move API (KOBE-304).
   { id: "open-file", name: "Open", icon: ExternalLinkIcon, scope: "file-menu" },
+  // The keyboard way to drag a file onto the composer (KOBE-374): an @file mention (KOBE-223).
+  { id: "mention-file", name: "Mention in message", icon: AtSignIcon, scope: "file-menu" },
   { id: "download-file", name: "Download", icon: DownloadIcon, scope: "file-menu" },
+  { id: "rename-file", name: "Rename", icon: PencilIcon, scope: "file-menu" },
+  { id: "move-file", name: "Move to…", icon: FolderInputIcon, scope: "file-menu" },
   { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
   { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "file-menu" },
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
@@ -354,6 +362,15 @@ const LIST = [
     icon: GitForkIcon,
     scope: "message",
     slash: "fork",
+    readOnlySafe: true,
+  },
+  // Answer feedback (KOBE-275): each member rates for themselves, a reader of a shared thread too.
+  { id: "rate-up", name: "Good answer", icon: ThumbsUpIcon, scope: "message", readOnlySafe: true },
+  {
+    id: "rate-down",
+    name: "Bad answer",
+    icon: ThumbsDownIcon,
+    scope: "message",
     readOnlySafe: true,
   },
   { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },

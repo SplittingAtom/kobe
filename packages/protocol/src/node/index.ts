@@ -16,3 +16,4 @@ export {
   signServerCallToken,
   verifyServerCallToken,
 } from "./server-call-token.js";
+export { deriveTraceSpanKey, mapSandboxSpanId } from "./trace-span.js";

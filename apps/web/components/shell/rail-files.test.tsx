@@ -112,6 +112,7 @@ beforeEach(() => {
   fake = new FakeKobe();
   wakeGate = Promise.resolve();
   sessionStorage.clear();
+  localStorage.clear(); // the tree remembers expanded folders (KOBE-304)
   vi.stubGlobal("fetch", fetchFn);
 });
 afterEach(() => {
@@ -129,8 +130,9 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(seen).toEqual([]);
     await userEvent.setup().click(openFiles);
     await within(panel).findByText("report.csv");
-    expect(within(panel).getByRole("button", { name: "Open folder notes" })).toBeTruthy();
-    expect(within(panel).getByRole("button", { name: "Open folder uploads" })).toBeTruthy();
+    const folder = (name: string) => within(panel).getByRole("treeitem", { name });
+    expect(folder("notes").getAttribute("aria-expanded")).toBe("false");
+    expect(folder("uploads").getAttribute("aria-expanded")).toBe("false");
     expect(within(panel).getAllByText("2 KB").length).toBeGreaterThan(0);
     await waitFor(() => expect(wakes()).toBe(1));
     expect(rootListings()).toBe(1);
@@ -156,7 +158,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   it("keeps its folder through collapse and expand, without waking again", async () => {
     const { user, panel } = await open();
     await waitFor(() => expect(wakes()).toBe(1));
-    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
+    await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
     await within(panel).findByText("todo.md");
     await user.click(screen.getByRole("button", { name: "Collapse the rail" }));
     expect(screen.getByText("todo.md").closest("[hidden]")).not.toBeNull(); // hidden, still mounted
@@ -192,14 +194,14 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     await waitFor(() => expect(within(panel).queryByText(/last synced/i)).toBeNull());
   }, 10000);
 
-  it("navigates into a folder and back with the breadcrumb", async () => {
+  it("opens a folder in place and closes it again (the tree replaced the breadcrumb, KOBE-304)", async () => {
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
+    await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
     await within(panel).findByText("todo.md");
     expect(seen.some((s) => s.url === "/v1/workspace/files?path=notes")).toBe(true);
-    const crumbs = within(panel).getByRole("navigation", { name: "Folder path" });
-    await user.click(within(crumbs).getByRole("button", { name: "Workspace" }));
-    await within(panel).findByText("report.csv");
+    expect(within(panel).getByText("report.csv")).toBeTruthy();
+    await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
+    await waitFor(() => expect(within(panel).queryByText("todo.md")).toBeNull());
   });
 
   it("each row has one ⋯ menu: Open, Download, Copy path, Delete (KOBE-292, ac-3)", async () => {
@@ -209,15 +211,29 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(within(panel).queryByRole("button", { name: "Delete report.csv" })).toBeNull();
     const button = within(panel).getByRole("button", { name: "Actions for report.csv" });
     expect(button.getAttribute("aria-haspopup")).toBe("menu");
-    // The standard 32 px target, as the row icons had (KOBE-269).
-    expect(button.className).toMatch(/\bsize-8\b/);
+    // KOBE-304's compact rows take the 24 px button (WCAG 2.5.8's minimum; was 32 px, KOBE-269).
+    expect(button.className).toMatch(/\bsize-6\b/);
     const menu = await rowMenu("report.csv");
     expect(menu.closest("[data-kobe-chat]")).not.toBeNull();
-    // The workspace API has no rename or move: not offered.
-    expect(menuNames(menu)).toEqual(["Open", "Download", "Copy path", "Delete"]);
+    // Rename and Move to… since the move API (KOBE-304); Mention in message for files (KOBE-374).
+    expect(menuNames(menu)).toEqual([
+      "Open",
+      "Mention in message",
+      "Download",
+      "Rename",
+      "Move to…",
+      "Copy path",
+      "Delete",
+    ]);
     await user.keyboard("{Escape}");
     expect(document.activeElement).toBe(button);
-    expect(menuNames(await rowMenu("notes"))).toEqual(["Open", "Copy path", "Delete"]);
+    expect(menuNames(await rowMenu("notes"))).toEqual([
+      "Open",
+      "Rename",
+      "Move to…",
+      "Copy path",
+      "Delete",
+    ]);
     await user.keyboard("{Escape}");
 
     await fileAction(user, "notes", "Open");
@@ -269,8 +285,9 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     await fileAction(user, "report.csv", "Delete");
     await user.click(within(panel).getByRole("button", { name: "Cancel" }));
     expect(within(panel).queryByRole("alertdialog")).toBeNull();
+    // The focus is back on the row (KOBE-304: the tree's row, which owns the tab stop).
     expect(document.activeElement).toBe(
-      within(panel).getByRole("button", { name: "Actions for report.csv" }),
+      within(panel).getByRole("treeitem", { name: "report.csv" }),
     );
     expect(seen.some((s) => s.method === "DELETE")).toBe(false);
   });
@@ -304,7 +321,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     // Read-only rows offer no Delete (KOBE-292: in their menus).
     expect(menuNames(await rowMenu("uploads"))).toEqual(["Open", "Copy path"]);
     await user.keyboard("{Escape}");
-    await user.click(within(panel).getByRole("button", { name: "Open folder uploads" }));
+    await user.click(within(panel).getByRole("treeitem", { name: "uploads" }));
     await within(panel).findByText("brief.pdf");
     expect(menuNames(await rowMenu("0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d"))).toEqual([
       "Open",
@@ -314,7 +331,10 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     // A file directly in uploads/ is a rail drop (KOBE-199): its owner may delete it.
     expect(menuNames(await rowMenu("brief.pdf"))).toEqual([
       "Open",
+      "Mention in message",
       "Download",
+      "Rename",
+      "Move to…",
       "Copy path",
       "Delete",
     ]);
@@ -325,7 +345,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
 
   it("uploads into the current folder", async () => {
     const { user, panel } = await open();
-    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
+    await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
     await within(panel).findByText("todo.md");
     const input = within(panel).getByLabelText("Upload a file to notes");
     await user.upload(input, new File(["hello"], "up.txt", { type: "text/plain" }));

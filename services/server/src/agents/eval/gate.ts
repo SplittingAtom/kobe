@@ -1,5 +1,7 @@
 import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import { withTeam, type KobeDb } from "@kobe/db";
+import { acceptedCases, caseReviewerPresent } from "../../eval-cases/review.js";
+import { EVAL_CASES_MAX_BYTES, casesFile } from "./cases.js";
 import type { BackgroundTasks } from "../../background.js";
 import type { TeamRef } from "../../sandbox/manifests.js";
 import { readPublishFloor } from "../floor.js";
@@ -17,7 +19,8 @@ import { createEval, readEvalSettings, versionScores, type EvalRecord } from "./
  * does not publish: it freezes the draft, exports it as Orbit YAML and starts an eval Job, and
  * answers 202 with the eval. The version is created only when the eval passes (`EvalRunner`).
  * Gallery agents and rollbacks are not gated (a rollback republishes content that was gated when
- * it was first published).
+ * it was first published). The agent's accepted shared eval cases (KOBE-276) are frozen into the
+ * eval and run as an extra suite whose failure rate is held to the same threshold.
  */
 
 export type GateOutcome =
@@ -134,6 +137,29 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
       err instanceof Error ? err.message : "This draft can't be exported for evaluation.",
     );
   }
+  // The agent's accepted shared cases (KOBE-276), frozen now: they run as an extra suite. Only
+  // while someone can review them: a team agent whose owner left or can no longer build would
+  // otherwise be blocked by cases nobody may dismiss (review S1); they run again if that changes.
+  // The eval records how many were left out and why (re-review R4), never which.
+  const { cases, caseSkips } = await withTeam(db, input.team.id, async (tx) => {
+    const accepted = await acceptedCases(tx, {
+      teamId: input.team.id,
+      agentId: agent.id,
+      scope: location.scope,
+    });
+    return (await caseReviewerPresent(tx, input.team.id, agent))
+      ? { cases: accepted, caseSkips: {} }
+      : { cases: [], caseSkips: accepted.length > 0 ? { no_reviewer: accepted.length } : {} };
+  });
+  const casesJson = casesFile(cases);
+  if (casesJson !== null && Buffer.byteLength(casesJson, "utf8") > EVAL_CASES_MAX_BYTES) {
+    return refused(
+      422,
+      "eval_cases_too_large",
+      "The agent's accepted shared cases are too large to run together. Dismiss some and " +
+        "publish again; nothing was published.",
+    );
+  }
   const created = await createEval(db, {
     teamId: input.team.id,
     agentId: agent.id,
@@ -145,6 +171,8 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     model: gatewayModelId(model),
     toolManifest: toolManifest as unknown as Record<string, unknown>,
     threshold: settings.maxAttackSuccessRate,
+    caseIds: cases.map((c) => c.id),
+    caseSkips,
     ...(rollbackFrom === undefined ? {} : { rollbackFrom }),
   });
   if (!created.ok) {

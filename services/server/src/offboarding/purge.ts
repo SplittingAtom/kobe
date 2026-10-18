@@ -10,6 +10,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import { memoryRecorder, purgeMemoryBatchInTx } from "../retention/memory.js";
+import { EVAL_CASE_BATCH, purgeDepartedCasesInTx } from "../retention/eval-cases.js";
 import { deleteBounded } from "../retention/bounded-delete.js";
 import { withTeamRecovering } from "../retention/recovering.js";
 import { workspaceBlobKey } from "../workspace-sync/keys.js";
@@ -85,6 +86,13 @@ async function deleteFiles(
     const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
       const state = await guard(tx, target);
       if (state !== "ok") return state;
+      // A released hold's copies of moved paths (KOBE-304) go with the manifest (guarded: no hold).
+      await tx.execute(sql`
+        DELETE FROM workspace_file_hold_history
+         WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
+      await tx.execute(sql`
+        DELETE FROM workspace_moves
+         WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
       const rows = await tx.execute<{ path: string; blob_key: string | null; size: string }>(sql`
         SELECT path, blob_key, size FROM workspace_files
          WHERE team_id = ${target.teamId} AND user_id = ${target.userId} LIMIT ${BATCH}`);
@@ -197,7 +205,26 @@ async function deleteMemory(
   }
 }
 
-/** Step 5: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
+/**
+ * Step 5: the eval cases the member shared (KOBE-276): copies of their own conversations, which
+ * they can no longer withdraw. The guard above is the hold check; the batch re-checks it.
+ */
+async function deleteEvalCases(
+  ctx: OffboardingContext,
+  target: Departed,
+): Promise<PurgeOutcome | "ok"> {
+  for (;;) {
+    const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
+      const state = await guard(tx, target);
+      if (state !== "ok") return state;
+      const n = await purgeDepartedCasesInTx(tx, target.teamId, target.userId);
+      return n < EVAL_CASE_BATCH ? ("ok" as const) : ("more" as const);
+    });
+    if (result !== "more") return result;
+  }
+}
+
+/** Step 6: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
 async function finish(
   ctx: OffboardingContext,
   target: Departed,
@@ -240,6 +267,7 @@ export async function purgeDeparted(
     () => deleteFiles(ctx, target, counts),
     () => deleteBlobs(ctx, target, counts),
     () => deleteMemory(ctx, target),
+    () => deleteEvalCases(ctx, target),
     () => finish(ctx, target, counts),
   ]) {
     const outcome = await step();

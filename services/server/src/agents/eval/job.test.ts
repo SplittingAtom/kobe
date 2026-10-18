@@ -162,6 +162,22 @@ describe("Orbit eval Job manifest (KOBE-93)", () => {
     expect(JSON.stringify(map)).not.toContain(TOKEN);
   });
 
+  it("adds only an argument for shared cases (KOBE-276): their text is fetched, never in the Job", async () => {
+    const i = await input();
+    const plain = (evalJobManifest(i) as unknown as Job).spec.template.spec;
+    const cased = (evalJobManifest({ ...i, withCases: true }) as unknown as Job).spec.template.spec;
+    expect((plain.containers[0] as { args?: string[] }).args).toBeUndefined();
+    expect((cased.containers[0] as { args?: string[] }).args).toEqual([
+      "--orbit-yaml",
+      "/input/agent.yaml",
+      "--output",
+      "/output/result.json",
+      "--gateway-cases",
+    ]);
+    const { args: _args, ...rest } = cased.containers[0] as { args?: string[] };
+    expect({ ...cased, containers: [rest] }).toEqual(plain);
+  });
+
   it("uses the pull secrets by name and labels the pod for the eval's NetworkPolicy", async () => {
     const { spec, metadata } = evalJobManifest(await input()) as unknown as Job;
     expect(spec.template.spec).toMatchObject({ imagePullSecrets: [{ name: "ghcr-pull" }] });

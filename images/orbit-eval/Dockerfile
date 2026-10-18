@@ -44,6 +44,8 @@ RUN groupadd --gid 1000 kobe \
 # The package managers are removed (nothing installs at runtime). /var/lib/dpkg/status stays on
 # purpose: Trivy reads it to scan the Debian packages, and deleting it would blind the CVE gate.
 
+# Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).
+COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /usr/share/doc/kobe/
 USER 1000:1000
 WORKDIR /tmp
 # Model access: KOBE_MODEL_GATEWAY_URL + KOBE_MODEL_SESSION_TOKEN (set by the Job), never a key.

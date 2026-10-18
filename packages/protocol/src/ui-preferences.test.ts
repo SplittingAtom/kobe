@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_WIDTH_BOUNDS,
+  RAIL_WIDTH_BOUNDS,
   readUiPreferences,
   THREADS_SHARE_BOUNDS,
   uiPreferencesSchema,
@@ -15,6 +16,8 @@ describe("uiPreferencesSchema", () => {
     expect(uiPreferencesSchema.parse({ artifact_width: 720 })).toEqual({ artifact_width: 720 });
     expect(uiPreferencesSchema.parse({ artifact_width: null })).toEqual({ artifact_width: null });
     expect(uiPreferencesSchema.parse({ detail_expanded: true })).toEqual({ detail_expanded: true });
+    expect(uiPreferencesSchema.parse({ rail_width: 360 })).toEqual({ rail_width: 360 });
+    expect(uiPreferencesSchema.parse({ rail_width: null })).toEqual({ rail_width: null });
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -38,6 +41,10 @@ describe("uiPreferencesSchema", () => {
     { threads_share: -0.1 },
     { threads_share: Number.NaN },
     { artifact_width: ARTIFACT_WIDTH_BOUNDS.min - 1 },
+    { rail_width: RAIL_WIDTH_BOUNDS.min - 1 },
+    { rail_width: RAIL_WIDTH_BOUNDS.max + 1 },
+    { rail_width: 300.5 },
+    { rail_width: "300" },
     { artifact_width: ARTIFACT_WIDTH_BOUNDS.max + 1 },
     { artifact_width: 400.5 },
     { artifact_width: "400" },
@@ -50,6 +57,9 @@ describe("uiPreferencesSchema", () => {
   it("accepts the width bounds themselves", () => {
     for (const w of [ARTIFACT_WIDTH_BOUNDS.min, ARTIFACT_WIDTH_BOUNDS.max]) {
       expect(uiPreferencesSchema.parse({ artifact_width: w })).toEqual({ artifact_width: w });
+    }
+    for (const w of [RAIL_WIDTH_BOUNDS.min, RAIL_WIDTH_BOUNDS.max]) {
+      expect(uiPreferencesSchema.parse({ rail_width: w })).toEqual({ rail_width: w });
     }
   });
 });
@@ -65,6 +75,12 @@ describe("readUiPreferences", () => {
         threads_share: 2,
       }),
     ).toEqual({ rail_collapsed: false, detail_expanded: true });
+  });
+
+  it("reads a stored rail width, dropping one out of bounds (KOBE-305)", () => {
+    expect(readUiPreferences({ rail_width: 360 })).toEqual({ rail_width: 360 });
+    expect(readUiPreferences({ rail_width: null })).toEqual({ rail_width: null });
+    expect(readUiPreferences({ rail_width: 9000 })).toEqual({});
   });
 
   it("drops a share outside the rail's bounds instead of clamping it", () => {

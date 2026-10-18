@@ -11,7 +11,15 @@ import {
   type ServerCallRequest,
 } from "@kobe/protocol";
 import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
-import { SpanKind, idAttributes, injectTraceHeaders, withSpan } from "@kobe/telemetry";
+import {
+  SpanKind,
+  idAttributes,
+  injectTraceHeaders,
+  runParentContext,
+  sessionAttributes,
+  trace,
+  withSpan,
+} from "@kobe/telemetry";
 
 /**
  * The server's own model calls (KOBE-219 titles, KOBE-222 follow-ups) through the model gateway,
@@ -235,11 +243,20 @@ export function createServerCallClient(options: ServerCallClientOptions): Server
         threadId: input.threadId,
         runId: input.runId,
       };
+      // In the triggering run's trace and the thread's session (KOBE-274 ac-6); the gateway's
+      // span for the call hangs under the run's root too.
+      const cause = trace.getActiveSpan()?.spanContext();
       return withSpan(
         `server_call.${input.purpose}`,
         {
           kind: SpanKind.CLIENT,
-          attributes: { ...idAttributes(ids), "kobe.usage_kind": input.purpose },
+          parent: runParentContext(input.runId),
+          ...(cause && trace.isSpanContextValid(cause) ? { links: [{ context: cause }] } : {}),
+          attributes: {
+            ...idAttributes(ids),
+            ...sessionAttributes({ threadId: input.threadId, userId: input.userId }),
+            "kobe.usage_kind": input.purpose,
+          },
         },
         async () => {
           const body = JSON.stringify(bodyOf(input));

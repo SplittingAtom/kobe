@@ -2,11 +2,14 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  findMalformedExceptions,
+  findPendingExceptions,
   findStaleExceptions,
   findViolations,
   type LicenseExceptions,
   type LicenseReport,
 } from "./policy.js";
+import { fail, reportPending } from "./output.js";
 
 // Default: the pnpm workspace. LICENSE_REPORT/LICENSE_EXCEPTIONS check another report instead
 // (e.g. the sandbox image: images/sandbox/collect-licenses.sh).
@@ -29,18 +32,15 @@ function loadReport(): LicenseReport {
   return JSON.parse(output) as LicenseReport;
 }
 
-function fail(lines: readonly string[]): never {
-  for (const line of lines) console.error(line);
-  process.exit(1);
-}
-
 function main(): void {
   const exceptions = JSON.parse(readFileSync(exceptionsPath, "utf8")) as LicenseExceptions;
-  const unjustified = Object.entries(exceptions)
-    .filter(([, e]) => !e.reason?.trim() || !Array.isArray(e.versions) || e.versions.length === 0)
-    .map(([name]) => name);
-  if (unjustified.length > 0) {
-    fail([`License exceptions need a reason and pinned versions: ${unjustified.join(", ")}`]);
+  const malformed = findMalformedExceptions(exceptions);
+  if (malformed.length > 0) {
+    fail([
+      `Malformed license exceptions: ${malformed.join(", ")}`,
+      "Each needs a reason, pinned versions, and either approvedBy + approvedOn (YYYY-MM-DD) from",
+      'Chris or pending: "gate review" (asked at the next gate review), not both.',
+    ]);
   }
 
   const lockfile = reportPath ? "" : readFileSync(lockfilePath, "utf8");
@@ -58,12 +58,16 @@ function main(): void {
     fail([
       `License check failed: ${violations.length} of ${total} packages are not allowed.`,
       ...violations.map((v) => `  ${v.name}@${v.versions.join(",")}  ${v.license}`),
-      "Allowed: MIT/Apache/BSD/MPL family. Document justified exceptions in license-exceptions.json.",
+      "Allowed: MIT/Apache/BSD/MPL family. Add a version-pinned exception with a reason to",
+      `${exceptionsPath}, marked pending: "gate review" until Chris decides (docs/licensing.md).`,
     ]);
   }
   if (stale.length > 0) {
     fail([`Stale license exceptions (no matching package/version): ${stale.join(", ")}`]);
   }
+  reportPending(
+    findPendingExceptions(exceptions).map((name) => `exception ${name} (${exceptionsPath})`),
+  );
   console.log(
     `License check passed: ${total} packages, ${Object.keys(exceptions).length} documented exceptions.`,
   );

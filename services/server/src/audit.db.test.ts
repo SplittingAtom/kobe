@@ -503,8 +503,8 @@ describe("policy and thread events", () => {
 
   it("records a member revoking their own remember-rule in the team", async () => {
     const { rows: inserted } = await h.admin.query<{ id: string }>(
-      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by)
-       VALUES ($1, 'user', $2, 'allow', 'read', $2) RETURNING id`,
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope)
+       VALUES ($1, 'user', $2, 'allow', 'read', $2, 'forever') RETURNING id`,
       [finance, ids.alice],
     );
     const id = inserted[0]?.id ?? "";

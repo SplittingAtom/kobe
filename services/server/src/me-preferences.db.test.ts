@@ -55,6 +55,19 @@ describe("/v1/me/preferences", () => {
     });
   });
 
+  it("stores the rail's width per member, and null resets it (KOBE-305)", async () => {
+    const laptop = await h.signIn("alice@prefs.test");
+    const phone = await h.signIn("alice@prefs.test");
+    const put = await laptop.put(PATH, { rail_width: 420 });
+    expect(put.status).toBe(200);
+    expect(put.json.preferences.rail_width).toBe(420);
+    expect((await phone.get(PATH)).json).toEqual(put.json);
+    const reset = await phone.put(PATH, { rail_width: null });
+    expect(reset.json.preferences.rail_width).toBeNull();
+    // The other keys are kept.
+    expect(reset.json.preferences).toEqual({ ...put.json.preferences, rail_width: null });
+  });
+
   it("clamps the threads share to the rail's bounds", async () => {
     const b = await h.signIn("alice@prefs.test");
     expect((await b.put(PATH, { threads_share: 0.95 })).json.preferences.threads_share).toBe(0.8);
@@ -66,6 +79,8 @@ describe("/v1/me/preferences", () => {
     ["a width under the floor", { artifact_width: 359 }],
     ["an absurd width", { artifact_width: 100_000 }],
     ["a fractional width", { artifact_width: 512.5 }],
+    ["a rail width under its minimum", { rail_width: 199 }],
+    ["a rail width over its maximum", { rail_width: 561 }],
     ["a share outside 0..1", { threads_share: 1.5 }],
     ["a non-boolean rail state", { rail_collapsed: "yes" }],
     ["an array", [true]],

@@ -10,6 +10,7 @@ import {
   workspaceCommitRequestSchema,
   type WorkspaceChangeResult,
   type WorkspaceEntry,
+  type WorkspaceMoveRecord,
   type WorkspaceRestoreReport,
 } from "@kobe/protocol";
 
@@ -24,12 +25,16 @@ export class FakeSyncServer {
   readonly blobs = new Map<string, Buffer>();
   readonly rows = new Map<string, WorkspaceEntry>();
   readonly reports: WorkspaceRestoreReport[] = [];
+  /** The move journal (KOBE-304), with each move's file count. */
+  readonly moves: (WorkspaceMoveRecord & { files: number })[] = [];
   readonly requests: string[] = [];
   head = 0;
   /** Tombstones at or below this revision were purged (compaction). */
   horizon = 0;
   /** Answer every request with this status (e.g. 404: sync not configured). */
   failWith: number | undefined;
+  /** The next this many file downloads answer 500 (a transient server error). */
+  failDownloads = 0;
   #server: Server | undefined;
 
   async start(): Promise<string> {
@@ -64,6 +69,29 @@ export class FakeSyncServer {
   serverDelete(path: string): void {
     const row = this.rows.get(path);
     if (row && !row.deleted) this.#delete(path, row, "server");
+  }
+
+  /**
+   * The file browser's move (KOBE-304), as the server does it: new rows with the same content
+   * first, then tombstones of the old ones, and a journal entry.
+   */
+  serverMove(from: string, to: string): void {
+    const moved = [...this.rows.values()].filter(
+      (r) => !r.deleted && (r.path === from || r.path.startsWith(`${from}/`)),
+    );
+    if (moved.length === 0) throw new Error(`nothing at ${from}`);
+    const type = moved.length === 1 && moved[0]?.path === from ? "file" : "dir";
+    const rev = this.head + 1;
+    for (const r of moved) {
+      const { sha256, size, mtime_ms, executable } = r;
+      this.#write(
+        `${to}${r.path.slice(from.length)}`,
+        { sha256: sha256 ?? "", size, mtime_ms, executable },
+        "server",
+      );
+    }
+    for (const r of moved) this.#delete(r.path, r, "server");
+    this.moves.push({ rev, from, to, type, files: moved.length });
   }
 
   /** Purges every tombstone and moves the horizon to the head (the server's compaction). */
@@ -145,6 +173,14 @@ export class FakeSyncServer {
         more: all.length > limit,
       });
     }
+    if (req.method === "GET" && route === "/moves") {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      const after = Number(url.searchParams.get("after") ?? 0);
+      const moves = this.moves
+        .filter((m) => m.rev + 2 * m.files - 1 > since && m.rev > after)
+        .map(({ files: _f, ...m }) => m);
+      return json(200, { moves, more: false });
+    }
     if (req.method === "POST" && route === "/blobs/missing") {
       const { sha256 } = JSON.parse(body.toString()) as { sha256: string[] };
       return json(200, { missing: [...new Set(sha256)].filter((h) => !this.blobs.has(h)) });
@@ -177,6 +213,10 @@ export class FakeSyncServer {
         return { status: "applied", path, entry: this.#write(path, f, "sandbox") };
       });
       return json(200, { head_rev: this.head, results });
+    }
+    if (req.method === "GET" && route === "/file" && this.failDownloads > 0) {
+      this.failDownloads -= 1;
+      return json(500, { code: "internal", message: "" });
     }
     if (req.method === "GET" && route === "/file") {
       const row = this.rows.get(url.searchParams.get("path") ?? "");

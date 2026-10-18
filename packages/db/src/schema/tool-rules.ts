@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -12,6 +13,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
+import { runs } from "./runs.js";
+import { threads } from "./threads.js";
 import { teamMembers } from "./team-members.js";
 import { teams } from "./teams.js";
 
@@ -26,6 +29,12 @@ export type ToolRuleEffect = (typeof toolRuleEffect.enumValues)[number];
 
 /** Scope of a row in `tool_rules` (site rules live in `site_tool_rules`). */
 export const toolRuleScope = pgEnum("tool_rule_scope", ["team", "user"]);
+
+/**
+ * How long and where a user's remember-rule holds (KOBE-289; `REMEMBER_SCOPES` in @kobe/protocol):
+ * `thread` and `run` name their thread or run; the engine checks the call's ids against them.
+ */
+export const REMEMBER_SCOPE_VALUES = ["thread", "today", "run", "day", "month", "forever"] as const;
 
 const GLOB_LENGTH_CHECK = (column: unknown) => sql`char_length(${column}) BETWEEN 1 AND 256`;
 const ARG_PATTERN_CHECK = (column: unknown) =>
@@ -78,9 +87,38 @@ export const toolRules = pgTable(
       .references(() => users.id),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp({ withTimezone: true }),
+    /** User rules: the scope the member chose (KOBE-289). Null for team rules. */
+    rememberScope: text().$type<(typeof REMEMBER_SCOPE_VALUES)[number]>(),
+    /** `thread` rules: the conversation it holds in (the rule goes with the thread). */
+    threadId: uuid(),
+    /** `run` rules: the run it holds in (the rule goes with the run). */
+    runId: uuid(),
+    /** When the rule last allowed a call (the member's Approvals page). */
+    lastUsedAt: timestamp({ withTimezone: true }),
+    /**
+     * "Only this exact action" pinning every top-level argument (KOBE-289 review S3): the rule
+     * matches only inputs whose top-level keys are exactly its pattern's (no extra, none missing).
+     */
+    exactKeys: boolean().notNull().default(false),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
+    foreignKey({
+      name: "tool_rules_thread_fk",
+      columns: [t.teamId, t.threadId],
+      foreignColumns: [threads.teamId, threads.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "tool_rules_run_fk",
+      columns: [t.teamId, t.runId],
+      foreignColumns: [runs.teamId, runs.id],
+    }).onDelete("cascade"),
+    index("tool_rules_thread_idx")
+      .on(t.teamId, t.threadId)
+      .where(sql`${t.threadId} IS NOT NULL`),
+    index("tool_rules_run_idx")
+      .on(t.teamId, t.runId)
+      .where(sql`${t.runId} IS NOT NULL`),
     foreignKey({
       name: "tool_rules_member_fk",
       columns: [t.teamId, t.userId],
@@ -88,6 +126,9 @@ export const toolRules = pgTable(
     }).onDelete("cascade"),
     // Rules the engine loads per decision: the team's rules plus one user's.
     index("tool_rules_scope_idx").on(t.teamId, t.scope, t.userId),
+    // SQL-only (custom migration `0123_tool_rules_remember_scopes.sql`, after its backfill):
+    // `tool_rules_remember_scope` (user rules carry one of the scopes, team rules none) and
+    // `tool_rules_remember_binding` (thread_id exactly for `thread`, run_id exactly for `run`).
     check("tool_rules_scope_ref", sql`(${t.scope} = 'team') = (${t.userId} IS NULL)`),
     // Users only remember allow rules; deny/ask are team policy.
     check("tool_rules_user_effect", sql`${t.scope} = 'team' OR ${t.effect} = 'allow'`),

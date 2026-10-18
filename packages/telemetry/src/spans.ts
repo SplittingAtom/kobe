@@ -6,6 +6,7 @@ import {
   trace,
   type Attributes,
   type Context,
+  type Link,
   type Span,
 } from "@opentelemetry/api";
 import { MAX_CAPTURED_CHARS } from "./content.js";
@@ -60,6 +61,8 @@ export interface SpanOptions {
   readonly kind?: SpanKind;
   /** Parent context (e.g. extracted from request headers); default: the active context. */
   readonly parent?: Context;
+  /** Spans this one relates to without being their child (e.g. the request that caused it). */
+  readonly links?: readonly Link[];
 }
 
 /**
@@ -78,6 +81,7 @@ export async function withSpan<T>(
     {
       kind: options.kind ?? SpanKind.INTERNAL,
       ...(options.attributes ? { attributes: options.attributes } : {}),
+      ...(options.links ? { links: [...options.links] } : {}),
     },
     parent,
   );
@@ -98,9 +102,20 @@ export function markFailed(span: Span, error: unknown): void {
 
 export { SpanKind, SpanStatusCode };
 
+/**
+ * Epoch milliseconds as an OpenTelemetry time. A plain number is ambiguous to the SDK: one not
+ * above `performance.now()` (the process's uptime) is read as a performance timestamp, so a span
+ * whose start and end fall on either side of it gets a negative, zeroed duration. A Date is not.
+ */
+export function epochTime(ms: number): Date {
+  return new Date(ms);
+}
+
 export interface FinishedSpan {
   readonly attributes?: Attributes;
+  /** Epoch milliseconds. */
   readonly startTime: number;
+  /** Epoch milliseconds (default: now). */
   readonly endTime?: number;
   readonly kind?: SpanKind;
   readonly error?: boolean;
@@ -114,11 +129,11 @@ export function recordSpan(name: string, finished: FinishedSpan): void {
     name,
     {
       kind: finished.kind ?? SpanKind.INTERNAL,
-      startTime: finished.startTime,
+      startTime: epochTime(finished.startTime),
       ...(finished.attributes ? { attributes: finished.attributes } : {}),
     },
     finished.parent ?? context.active(),
   );
   if (finished.error) span.setStatus({ code: SpanStatusCode.ERROR });
-  span.end(finished.endTime ?? Date.now());
+  span.end(epochTime(finished.endTime ?? Date.now()));
 }

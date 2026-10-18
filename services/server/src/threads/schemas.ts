@@ -7,6 +7,7 @@ import {
   threadOrganizationSchema,
   threadTitleSchema,
   threadStatusSchema,
+  thinkingLevelSchema,
   timestampSchema,
   threadVisibilitySchema,
   uuidSchema as wireUuidSchema,
@@ -49,6 +50,8 @@ export const createThreadBodySchema = z.strictObject({
   title: titleSchema.optional(),
   /** The thread's model (KOBE-44, D30): an alias the team enabled; null or absent = team default. */
   model: modelAliasSchema.nullable().optional(),
+  /** The conversation's thinking level (KOBE-260); null or absent = the model's default. */
+  thinking_level: thinkingLevelSchema.nullable().optional(),
   /**
    * A builder test thread (KOBE-85): chats with the agent's unpublished draft (needs `agent_id`
    * and the right to edit that agent), private to its creator, kept out of lists and search.
@@ -68,10 +71,19 @@ export const updateThreadBodySchema = z
      * team's default. Runs already started keep theirs; queued runs use it when they start.
      */
     model: modelAliasSchema.nullable().optional(),
+    /**
+     * The thinking level for the thread's next runs (KOBE-260), or null for the model's default.
+     * Each run clamps it to the site and team settings of its model.
+     */
+    thinking_level: thinkingLevelSchema.nullable().optional(),
   })
   .refine(
-    (b) => b.title !== undefined || b.shared_to_project !== undefined || b.model !== undefined,
-    { message: "give title, shared_to_project or model" },
+    (b) =>
+      b.title !== undefined ||
+      b.shared_to_project !== undefined ||
+      b.model !== undefined ||
+      b.thinking_level !== undefined,
+    { message: "give title, shared_to_project, model or thinking_level" },
   );
 export type UpdateThreadBody = z.infer<typeof updateThreadBodySchema>;
 
@@ -169,6 +181,8 @@ export const threadSummarySchema = z.object({
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   model: z.string().nullable(),
+  /** The conversation's thinking level (KOBE-260); null = the model's default. */
+  thinking_level: thinkingLevelSchema.nullable().optional(),
   leaf_entry_id: idSchema.nullable(),
   last_activity_at: timestamp,
   created_at: timestamp,

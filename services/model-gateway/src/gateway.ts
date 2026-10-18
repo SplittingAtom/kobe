@@ -8,14 +8,16 @@ import {
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
-import type { ServerCallClaims, SessionTokenClaims } from "@kobe/protocol";
+import type { ServerCallClaims, SessionTokenClaims, ThinkingLevel } from "@kobe/protocol";
 import { SessionTokenError } from "@kobe/session-token";
 import {
-  annotate,
   contentAttributes,
+  idAttributes,
   injectTraceHeaders,
   telemetryState,
   traceNodeRequest,
+  type Context,
+  type RequestSpan,
 } from "@kobe/telemetry";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
@@ -24,6 +26,7 @@ import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { resolveRunAttribution } from "./run-attribution.js";
+import { placeRequestSpan, type GatewayTracing } from "./trace-placement.js";
 import {
   authenticateServerCall,
   checkServerCallBody,
@@ -32,6 +35,7 @@ import {
   type ServerCallOptions,
 } from "./server-call.js";
 import { classify, forwardedQuery, type Route, type RouteKind } from "./routes.js";
+import { applyThinking, callThinkingLevel } from "./thinking.js";
 import type { RunTokenSubject } from "@kobe/db";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
 import { chargedOutput } from "./usage/charge.js";
@@ -71,8 +75,26 @@ export interface GatewayOptions {
     /** Enforcement: a call without a run token is refused (off for rollout). */
     readonly require: boolean;
   };
+  /**
+   * A run's recorded thinking level (KOBE-260; cached by the caller, it never changes). Absent:
+   * calls use the model's default level.
+   */
+  readonly runThinking?: (
+    teamId: string,
+    runId: string,
+  ) => Promise<ThinkingLevel | null | undefined>;
+  /** Run traces (KOBE-274); absent: spans of sandbox calls hang under the run's root. */
+  readonly tracing?: GatewayTracing;
   /** Server-originated calls (KOBE-234); without it every server-call token is refused. */
   readonly serverCalls?: ServerCallOptions;
+  /**
+   * Shared eval cases for a running Orbit eval Job (KOBE-276): `GET /kobe/eval-cases` with the
+   * eval's own token answers its `cases.json` (null: not that member's running eval, or none).
+   * Absent: the route is a 404.
+   */
+  readonly evalCases?: {
+    readonly load: (teamId: string, userId: string, evalId: string) => Promise<string | null>;
+  };
   readonly bifrostUrl: string;
   readonly limiter: CallLimiter;
   /** Request bytes held in memory, per sandbox and in total. */
@@ -87,6 +109,9 @@ export interface GatewayOptions {
   readonly settings: { readonly maxBodyBytes: number; readonly idleTimeoutMs: number };
   readonly ready: () => boolean;
 }
+
+/** Where an Orbit eval Job reads its shared cases (KOBE-276); never forwarded to Bifrost. */
+export const EVAL_CASES_PATH = "/kobe/eval-cases";
 
 /** Bifrost's error types meaning "this virtual key does not exist here". */
 const KEY_UNKNOWN = new Set(["access_not_found", "virtual_key_required"]);
@@ -275,7 +300,59 @@ export function createModelGateway(options: GatewayOptions): Server {
     };
   }
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  /**
+   * An Orbit eval Job's shared cases (KOBE-276 review S2): the case text stays in Postgres until
+   * the Job asks for it with its eval token. The eval must be live for that member (the
+   * principal), within the request rate, and the store answers only that member's running eval.
+   */
+  async function serveEvalCases(
+    req: IncomingMessage,
+    res: ServerResponse,
+    identity: {
+      readonly teamId: string;
+      readonly userId: string;
+      readonly sandboxId: string | undefined;
+    },
+  ): Promise<void> {
+    const evalId = identity.sandboxId;
+    if (!options.evalCases || req.method !== "GET" || evalId === undefined) {
+      sendError(res, "openai", 404, "not_found", "Not a model inference endpoint.");
+      return;
+    }
+    if (!options.rate.allow(evalId)) {
+      sendError(res, "openai", 429, "rate_limited", "Too many requests.", 1);
+      return;
+    }
+    const who = await options.principals.resolve(identity.teamId, identity.userId, evalId);
+    if (!who.ok) {
+      sendError(res, "openai", 403, "forbidden", "This eval can't read shared cases.");
+      return;
+    }
+    let file: string | null;
+    try {
+      file = await options.evalCases.load(identity.teamId, identity.userId, evalId);
+    } catch (err) {
+      logger.error({ err, teamId: identity.teamId, evalId }, "eval cases could not be read");
+      sendError(res, "openai", 503, "unavailable", "Shared cases are unavailable.");
+      return;
+    }
+    if (file === null) {
+      sendError(res, "openai", 404, "not_found", "No shared cases for this eval.");
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    res.end(file);
+  }
+
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+    span: RequestSpan,
+  ): Promise<void> {
     const url = new URL(req.url ?? "/", "http://gateway.invalid");
     if (url.pathname === "/healthz" && req.method === "GET") {
       const ready = options.ready();
@@ -291,6 +368,10 @@ export function createModelGateway(options: GatewayOptions): Server {
     const caller = authenticate(req, url, route);
     if (!caller.ok) {
       sendError(res, kind, caller.status, caller.code, caller.message);
+      return;
+    }
+    if (url.pathname === EVAL_CASES_PATH && !caller.serverCall) {
+      await serveEvalCases(req, res, caller.identity);
       return;
     }
     // 2. Inference paths only.
@@ -340,6 +421,8 @@ export function createModelGateway(options: GatewayOptions): Server {
     let errorType: string | undefined;
     let aborted = false;
     let call: CallContext | undefined;
+    let traceContext: Context | undefined;
+    let thinkingLevel: ThinkingLevel | undefined;
     try {
       // 4. Liveness, the member's virtual key and the team's enabled models.
       let resolution = await options.principals.resolve(
@@ -390,6 +473,14 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       const runId = attribution.runId;
+      // The span opens only now, in the attributed run's trace (KOBE-274 listener rule).
+      const placement = await placeRequestSpan(options.tracing, req.headers, {
+        teamId: identity.teamId,
+        runId,
+        serverCall,
+      });
+      span.setAttributes(placement.attributes);
+      traceContext = span.open(placement.parent);
 
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(
@@ -459,9 +550,46 @@ export function createModelGateway(options: GatewayOptions): Server {
           );
           return;
         }
+        // KOBE-260 review S5: Bifrost's `fallbacks` would reach other models past every
+        // per-model check (enablement, thinking): never from a sandbox.
+        if (scanned.fallbacks) {
+          status = 400;
+          sendError(
+            res,
+            kind,
+            400,
+            "fallbacks_not_supported",
+            "Model fallbacks are not accepted through the model gateway; the run's model is fixed.",
+          );
+          return;
+        }
+        // KOBE-260: the thinking level the server decided, in the model's control's form.
+        const policy = model === undefined ? undefined : resolution.thinking.get(model);
+        if (policy !== undefined) {
+          const runLevel =
+            runId === undefined ? undefined : await options.runThinking?.(identity.teamId, runId);
+          const level = callThinkingLevel(policy, runLevel ?? undefined, {
+            eval: resolution.eval,
+          });
+          const rewritten = applyThinking(body, route, policy, level);
+          if (!rewritten.ok) {
+            status = rewritten.status;
+            sendError(res, kind, rewritten.status, rewritten.code, rewritten.message);
+            return;
+          }
+          forwardBody = rewritten.body;
+          thinkingLevel = rewritten.level;
+          // Review S7: a written thinking budget is output the reservation must hold.
+          if (rewritten.budgetTokens !== undefined && !countOnly) {
+            outputAllowance = Math.max(
+              outputAllowance,
+              chargedOutput(rewritten.budgetTokens, scanned.choices, false),
+            );
+          }
+        }
         // KOBE-43: a streaming Chat Completions call always asks for its usage report.
         if (scanned.stream && route.path === "/v1/chat/completions") {
-          forwardBody = withStreamUsage(body);
+          forwardBody = withStreamUsage(forwardBody);
         }
       }
       call = {
@@ -515,6 +643,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           resolution.virtualKey,
           attempt === 0,
           { kind: route.kind, started, outputAllowance },
+          traceContext,
         );
         status = outcome.status;
         errorType = outcome.errorType;
@@ -549,34 +678,32 @@ export function createModelGateway(options: GatewayOptions): Server {
       release();
       if (call) {
         // Metadata only; the prompt joins only when content capture is on.
-        annotate(
-          {
+        span.setAttributes({
+          ...idAttributes({
             teamId: call.teamId,
             userId: call.userId,
             sandboxId: call.sandboxId,
             runId: call.runId,
-            ...(serverCall ? { threadId: serverCall.thread_id } : {}),
-          },
-          {
-            "kobe.call_id": call.callId,
-            "kobe.usage_kind": call.purpose ?? "run",
-            "kobe.route": call.route,
-            ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
-            ...(usage === undefined
-              ? {}
-              : {
-                  "gen_ai.usage.input_tokens": usage.counts.input,
-                  "gen_ai.usage.output_tokens": usage.counts.output,
-                }),
-            "http.response.status_code": status,
-            "http.request.body.size": bytesIn,
-            "http.response.body.size": bytesOut,
-            "kobe.aborted": aborted,
-            ...(promptBody
-              ? contentAttributes({ "gen_ai.prompt": promptBody.toString("utf8") })
-              : {}),
-          },
-        );
+          }),
+          "kobe.call_id": call.callId,
+          "kobe.usage_kind": call.purpose ?? "run",
+          "kobe.route": call.route,
+          ...(thinkingLevel === undefined ? {} : { "kobe.thinking_level": thinkingLevel }),
+          ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
+          ...(usage === undefined
+            ? {}
+            : {
+                "gen_ai.usage.input_tokens": usage.counts.input,
+                "gen_ai.usage.output_tokens": usage.counts.output,
+              }),
+          "http.response.status_code": status,
+          "http.request.body.size": bytesIn,
+          "http.response.body.size": bytesOut,
+          "kobe.aborted": aborted,
+          ...(promptBody
+            ? contentAttributes({ "gen_ai.prompt": promptBody.toString("utf8") })
+            : {}),
+        });
       }
       // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
       // that named a model), so the gate never sees spend that is neither reserved nor recorded.
@@ -636,6 +763,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       readonly started: number;
       readonly outputAllowance: number;
     },
+    traceContext: Context | undefined,
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let bytesOut = 0;
@@ -673,7 +801,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           agent,
           headers: {
             ...forwardRequestHeaders(req.headers, virtualKey, body.length),
-            ...injectTraceHeaders({}),
+            ...(traceContext === undefined ? {} : injectTraceHeaders({}, traceContext)),
           },
         },
         (up) => {
@@ -771,7 +899,7 @@ export function createModelGateway(options: GatewayOptions): Server {
   }
 
   const server = createServer((req, res) => {
-    traceNodeRequest("model_gateway.request", req, res, () => handle(req, res)).catch(
+    traceNodeRequest("model_gateway.request", req, res, (span) => handle(req, res, span)).catch(
       (err: unknown) => {
         logger.error({ err }, "model gateway request failed");
         if (!res.headersSent) sendError(res, "openai", 500, "internal_error", "Internal error.");

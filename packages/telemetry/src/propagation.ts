@@ -15,9 +15,15 @@ export function extractContext(headers: Readonly<Record<string, HeaderValue>>): 
   });
 }
 
-/** A copy of `headers` with the active trace context added (unchanged when tracing is off). */
-export function injectTraceHeaders<T extends Record<string, string>>(headers: T): T {
+/**
+ * A copy of `headers` with the trace context of `ctx` (default: the active one) added; unchanged
+ * when tracing is off.
+ */
+export function injectTraceHeaders<T extends Record<string, string>>(
+  headers: T,
+  ctx: Context = context.active(),
+): T {
   const out: Record<string, string> = { ...headers };
-  if (telemetryState().enabled) propagation.inject(context.active(), out);
+  if (telemetryState().enabled) propagation.inject(ctx, out);
   return out as T;
 }

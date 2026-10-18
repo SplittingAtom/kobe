@@ -45,7 +45,10 @@ const labels = (teamId: string, evalId: string): Record<string, string> => ({
   [LABEL_ORBIT_EVAL]: evalId,
 });
 
-/** The exported YAML as a ConfigMap (a plain input, not a credential). */
+/**
+ * The exported YAML as a ConfigMap (a plain input, not a credential). Shared eval cases never go
+ * in here: the Job fetches them from the model gateway (KOBE-276 review S2).
+ */
 export function evalConfigMapManifest(input: {
   readonly namespace: string;
   readonly teamId: string;
@@ -78,6 +81,8 @@ export interface EvalJobInput {
   readonly model: string;
   /** Short-lived gateway token scoped to this team and eval. */
   readonly token: string;
+  /** The eval runs shared cases (KOBE-276): the image fetches them from the gateway. */
+  readonly withCases?: boolean;
 }
 
 const gatewayUrl = (s: SandboxSettings): string => {
@@ -119,6 +124,18 @@ export function evalPodSpec(input: EvalJobInput): Record<string, unknown> {
         name: EVAL_CONTAINER,
         image: e.image,
         imagePullPolicy: s.imagePullPolicy,
+        // The image's default command, plus the shared cases (from the gateway) when there are any.
+        ...(input.withCases
+          ? {
+              args: [
+                "--orbit-yaml",
+                `${EVAL_INPUT_DIR}/${EVAL_INPUT_FILE}`,
+                "--output",
+                `${EVAL_OUTPUT_DIR}/result.json`,
+                "--gateway-cases",
+              ],
+            }
+          : {}),
         env: [
           { name: "KOBE_MODEL_GATEWAY_URL", value: gatewayUrl(s) },
           { name: "KOBE_MODEL_SESSION_TOKEN", value: input.token },

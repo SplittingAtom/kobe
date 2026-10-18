@@ -4,7 +4,7 @@
  * queue, Steer, Stop; D14: Retry / Continue without retry; branch switch and edit-and-regenerate).
  * The server decides everything; this only shows what it says and asks again after each change.
  */
-import { isTerminalRunStatus, type KobeEvent } from "@kobe/protocol";
+import { isTerminalRunStatus, type KobeEvent, type ThinkingLevel } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
 import type { ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
@@ -36,6 +36,8 @@ import {
   type ThreadState,
 } from "./thread-state";
 import type { MessageFiles } from "./attachments";
+import type { EvalCaseOptions } from "./eval-cases";
+import type { FeedbackChange } from "./feedback";
 import { SHARED_ANNOUNCEMENT } from "./share";
 import type { ThreadEntry, ThreadRuns, ThreadSummary, ThreadVisibility } from "./types";
 
@@ -130,6 +132,30 @@ export class ThreadController {
     const id = this.#state.threadId;
     return id === null ? null : this.#api.threadMarkers(id);
   };
+
+  /** The thread's rateable answers and the member's own ratings (KOBE-275); null for a draft. */
+  readonly threadFeedback = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadFeedback(id);
+  };
+
+  /** Rates an answer of this thread for the member, or changes their rating (KOBE-275). */
+  readonly rateAnswer = (runId: string, change: FeedbackChange) =>
+    this.#api.rateAnswer(runId, change);
+
+  /** Clears the member's rating of an answer (KOBE-275). */
+  readonly clearRating = (runId: string) => this.#api.clearRating(runId);
+
+  /** The preview of sharing an answer of this thread as an eval case (KOBE-276). */
+  readonly previewEvalCase = (runId: string, options: EvalCaseOptions) =>
+    this.#api.previewEvalCase(runId, options);
+
+  /** Shares an answer as previewed (KOBE-276). */
+  readonly shareEvalCase = (runId: string, options: EvalCaseOptions, digest: string) =>
+    this.#api.shareEvalCase(runId, options, digest);
+
+  /** Withdraws the member's eval case (KOBE-276). */
+  readonly withdrawEvalCase = (caseId: string) => this.#api.withdrawEvalCase(caseId);
 
   /** A tool output of this thread in full (KOBE-208: a large one, when its card opens). */
   readonly toolOutput = (entryId: string) => {
@@ -810,6 +836,25 @@ export class ThreadController {
     }
     this.#set((s) => ({ ...s, summary: res.data }));
     this.#announce(model === null ? "The team's default model is used." : "Model changed.");
+    return true;
+  };
+
+  /**
+   * Chooses the thread's thinking level for its next runs (KOBE-260); null = the model's default.
+   * Each run is clamped to the site and team settings of its model by the server.
+   */
+  readonly setThinkingLevel = async (level: ThinkingLevel | null): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return false;
+    const res = await this.#busy("thinking", () => this.#api.setThreadThinking(threadId, level));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(
+      level === null ? "The model's default thinking level is used." : `Thinking: ${level}.`,
+    );
     return true;
   };
 

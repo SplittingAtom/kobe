@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds every control-plane service image (the sandbox image has its own checks:
-# images/sandbox/test-image.sh) and asserts it runs as a non-root numeric user (KOBE-5 ac-2).
+# images/sandbox/test-image.sh) and asserts it runs as a non-root numeric user (KOBE-5 ac-2) and
+# ships LICENSE, NOTICE and THIRD_PARTY_LICENSES.md (KOBE-375).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,6 +31,7 @@ for entry in ${IMAGES}; do
   fi
 
   scripts/assert-image-nonroot.sh "${image}" || failed=1
+  scripts/assert-image-licenses.sh "${image}" || failed=1
 done
 
 exit "${failed}"

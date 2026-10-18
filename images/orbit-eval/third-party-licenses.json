@@ -1,0 +1,922 @@
+{
+  "Apache License 2.0": [
+    {
+      "name": "multidict",
+      "versions": [
+        "6.7.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "Apache-2.0": [
+    {
+      "name": "aioboto3",
+      "versions": [
+        "15.5.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "aiobotocore",
+      "versions": [
+        "2.25.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "aiofiles",
+      "versions": [
+        "25.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Asyncio support for files\nCopyright 2016 Tin Tvrtkovic"
+    },
+    {
+      "name": "aiosignal",
+      "versions": [
+        "1.4.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "boto3",
+      "versions": [
+        "1.40.61"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "boto3\nCopyright 2013-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved."
+    },
+    {
+      "name": "botocore",
+      "versions": [
+        "1.40.61"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Botocore\nCopyright 2012-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.\n\n----\n\nBotocore includes vendorized parts of the requests python library for backwards compatibility.\n\nRequests License\n================\n\nCopyright 2013 Kenneth Reitz\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.\n\nBotocore includes vendorized parts of the urllib3 library for backwards compatibility.\n\nUrllib3 License\n===============\n\nThis is the MIT license: http://www.opensource.org/licenses/mit-license.php\n\nCopyright 2008-2011 Andrey Petrov and contributors (see CONTRIBUTORS.txt),\nModifications copyright 2012 Kenneth Reitz.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this\nsoftware and associated documentation files (the \"Software\"), to deal in the Software\nwithout restriction, including without limitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of the Software, and to permit persons\nto whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or\nsubstantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,\nINCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE\nFOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR\nOTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n\nBundle of CA Root Certificates\n==============================\n\n***** BEGIN LICENSE BLOCK *****\nThis Source Code Form is subject to the terms of the\nMozilla Public License, v. 2.0. If a copy of the MPL\nwas not distributed with this file, You can obtain\none at http://mozilla.org/MPL/2.0/.\n\n***** END LICENSE BLOCK *****"
+    },
+    {
+      "name": "frozenlist",
+      "versions": [
+        "1.8.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonpath-ng",
+      "versions": [
+        "1.8.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "openai",
+      "versions": [
+        "3.13.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "orbit",
+      "versions": [
+        "1.0.3"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Orbit — Multi-Agent Security Benchmarking Framework\nCopyright 2026 The Orbit Authors\n\nThis product includes software developed by The Orbit Authors and\ncontributors. Orbit is licensed under the Apache License, Version 2.0\n(see `LICENSE` at the repository root).\n\n================================================================================\nThird-party components\n================================================================================\n\nOrbit integrates with, extends, or vendors portions of the following\nthird-party projects. Each component is redistributed under its own\nlicense, which governs that component's use regardless of Orbit's\ntop-level Apache-2.0 license. See the per-scenario directories for\nverbatim license text where required by the upstream license.\n\n--------------------------------------------------------------------------------\n1. Inspect AI (plugin host)\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/UKGovernmentBEIS/inspect_ai\n    License:  MIT\n    Orbit extends Inspect AI via its documented plugin architecture\n    (@task / @solver / @scorer / @agent / @tool decorators and entry-point\n    discovery). No Inspect AI source is vendored in this repository.\n\n--------------------------------------------------------------------------------\n2. inspect_evals — SWE-Bench vendored modules\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/UKGovernmentBEIS/inspect_evals\n    License:  MIT  (see orbit/scenarios/coding/swe_bench/_vendor/LICENSE.inspect_evals)\n    Vendored paths:\n        orbit/scenarios/coding/swe_bench/_vendor/build_images.py\n        orbit/scenarios/coding/swe_bench/_vendor/scorers.py\n        orbit/scenarios/coding/swe_bench/_vendor/swe_bench_tasks.py\n    Original authors: Carlos E. Jimenez, John Yang, Alexander Wettig,\n    Shunyu Yao, Kexin Pei, Ofir Press, Karthik Narasimhan\n    (https://arxiv.org/abs/2310.06770).\n\n--------------------------------------------------------------------------------\n3. τ²-bench — vendored domain data\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/sierra-research/tau2-bench\n    License:  MIT  (see orbit/scenarios/customer_service/tau2/LICENSE.tau2)\n    Vendored paths: orbit/scenarios/customer_service/tau2/data/{airline,retail,telecom}/\n\n--------------------------------------------------------------------------------\n4. ConVerse — vendored benchmark data (normalized derivative)\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/amrgomaaelhady/ConVerse\n    License:  MIT  (see orbit/scenarios/customer_service/converse/LICENSE.converse)\n    Vendored paths: orbit/scenarios/customer_service/converse/data/\n    The JSON files under data/ are a normalized derivative of the\n    upstream ConVerse benchmark data, redistributed under the upstream\n    MIT license. The converse scenario code itself is Orbit-original\n    (Apache-2.0).\n\n--------------------------------------------------------------------------------\n5. BrowserART — upstream datasets are NOT redistributed\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/scaleapi/browser-art\n    License:  CC BY-NC-ND 4.0  (per the upstream LICENSE file; upstream\n              README says MIT but the LICENSE file controls).\n    Orbit does not redistribute BrowserART's upstream datasets\n    (hbb.json, hbb_benign.json, hbb/behaviors.json). Users fetch them\n    separately; see orbit/scenarios/browser/browserart/data/README.md.\n    The file orbit/scenarios/browser/browserart/data/hbb_benign_custom.json\n    is Orbit-original content and is licensed under Apache-2.0 with\n    the rest of Orbit.\n\n--------------------------------------------------------------------------------\n6. RedCode-Gen — upstream stubs are NOT redistributed\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/AI-secure/RedCode\n    License:  Upstream repository has no LICENSE file. The companion\n              paper (Guo et al., NeurIPS 2024 D&B) declares the\n              dataset as CC BY 4.0 but the code portion is undeclared.\n    Orbit does not redistribute RedCode-Gen's malware-stub function\n    signatures. Users fetch them separately; see\n    orbit/scenarios/coding/redcode_gen/data/README.md.\n\n--------------------------------------------------------------------------------\n7. OSWorld / OS-Harm (API-only, via pip extra)\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/xlang-ai/OSWorld\n    License:  Apache-2.0\n    Orbit depends on this via the `osworld` optional extra and does not\n    redistribute upstream source.\n\n--------------------------------------------------------------------------------\n8. BigCodeBench (API-only, via pip extra)\n--------------------------------------------------------------------------------\n    Upstream: https://github.com/bigcode-project/bigcodebench\n    License:  Apache-2.0\n    Orbit depends on this via the `bigcodebench` optional extra and\n    does not redistribute upstream source.\n\n================================================================================\nFirst-party scenarios\n================================================================================\n\nThe following scenarios were authored in-house and are licensed under\nApache-2.0 with the rest of Orbit:\n\n    orbit/scenarios/cooperative_allocation/hospital/\n    orbit/scenarios/cooperative_allocation/jira_ticket/\n    orbit/scenarios/cooperative_allocation/meeting_scheduling/\n    orbit/scenarios/customer_service/converse/  (scenario code only; the\n        vendored benchmark data under data/ is a ConVerse derivative —\n        see item 4 above)\n    orbit/scenarios/browser/browserart/data/hbb_benign_custom.json"
+    },
+    {
+      "name": "propcache",
+      "versions": [
+        "0.5.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Copyright 2016-2021, Andrew Svetlov and aio-libs team\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License."
+    },
+    {
+      "name": "requests",
+      "versions": [
+        "2.34.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Requests\nCopyright 2019 Kenneth Reitz"
+    },
+    {
+      "name": "s3transfer",
+      "versions": [
+        "0.14.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "s3transfer\nCopyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved."
+    },
+    {
+      "name": "tenacity",
+      "versions": [
+        "9.1.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "yarl",
+      "versions": [
+        "1.24.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "notice": "Copyright 2016-2021, Andrew Svetlov and aio-libs team\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License."
+    }
+  ],
+  "Apache-2.0 AND CNRI-Python": [
+    {
+      "name": "regex",
+      "versions": [
+        "2026.7.10"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "Apache-2.0 AND MIT": [
+    {
+      "name": "aiohttp",
+      "versions": [
+        "3.14.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "Apache-2.0 OR BSD-3-Clause": [
+    {
+      "name": "python-dateutil",
+      "versions": [
+        "2.9.0.post0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "Apache-2.0 OR MIT": [
+    {
+      "name": "sniffio",
+      "versions": [
+        "1.3.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "BSD-2-Clause": [
+    {
+      "name": "pygments",
+      "versions": [
+        "2.20.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "BSD-3-Clause": [
+    {
+      "name": "click",
+      "versions": [
+        "8.2.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "fsspec",
+      "versions": [
+        "2025.9.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "httpcore",
+      "versions": [
+        "1.0.9"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "httpcore2",
+      "versions": [
+        "2.12.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "httpx",
+      "versions": [
+        "0.28.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "httpx2",
+      "versions": [
+        "2.12.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "idna",
+      "versions": [
+        "3.18"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonlines",
+      "versions": [
+        "4.0.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonpatch",
+      "versions": [
+        "1.33"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonpointer",
+      "versions": [
+        "3.1.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "nest-asyncio2",
+      "versions": [
+        "1.7.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "psutil",
+      "versions": [
+        "7.2.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "python-dotenv",
+      "versions": [
+        "1.2.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "s3fs",
+      "versions": [
+        "2025.9.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "semver",
+      "versions": [
+        "3.0.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "shortuuid",
+      "versions": [
+        "1.0.13"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "starlette",
+      "versions": [
+        "1.3.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "uvicorn",
+      "versions": [
+        "0.51.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "wrapt",
+      "versions": [
+        "1.17.3"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "zstandard",
+      "versions": [
+        "0.25.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0": [
+    {
+      "name": "numpy",
+      "versions": [
+        "2.5.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "BSD-3-Clause AND ISC": [
+    {
+      "name": "ijson",
+      "versions": [
+        "3.5.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "MIT": [
+    {
+      "name": "aioitertools",
+      "versions": [
+        "0.13.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "annotated-doc",
+      "versions": [
+        "0.0.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "annotated-types",
+      "versions": [
+        "0.7.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "anyio",
+      "versions": [
+        "4.14.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "attrs",
+      "versions": [
+        "26.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "beautifulsoup4",
+      "versions": [
+        "4.15.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "charset-normalizer",
+      "versions": [
+        "3.4.9"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "debugpy",
+      "versions": [
+        "1.8.21"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "docstring_parser",
+      "versions": [
+        "0.18.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "fastapi",
+      "versions": [
+        "0.139.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "h11",
+      "versions": [
+        "0.16.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "inspect_ai",
+      "versions": [
+        "0.3.263"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jiter",
+      "versions": [
+        "0.16.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jmespath",
+      "versions": [
+        "1.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonref",
+      "versions": [
+        "1.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonschema",
+      "versions": [
+        "4.26.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "jsonschema-specifications",
+      "versions": [
+        "2025.9.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "linkify-it-py",
+      "versions": [
+        "2.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "markdown-it-py",
+      "versions": [
+        "4.2.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "mdit-py-plugins",
+      "versions": [
+        "0.6.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "mdurl",
+      "versions": [
+        "0.1.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "mmh3",
+      "versions": [
+        "5.2.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "platformdirs",
+      "versions": [
+        "4.10.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "pydantic",
+      "versions": [
+        "2.13.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "pydantic_core",
+      "versions": [
+        "2.46.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "pyyaml",
+      "versions": [
+        "6.0.3"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "referencing",
+      "versions": [
+        "0.37.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "rich",
+      "versions": [
+        "15.0.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "rpds-py",
+      "versions": [
+        "2026.6.3"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "six",
+      "versions": [
+        "1.17.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "soupsieve",
+      "versions": [
+        "2.8.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "textual",
+      "versions": [
+        "8.2.8"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "truststore",
+      "versions": [
+        "0.10.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "typing-inspection",
+      "versions": [
+        "0.4.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "uc-micro-py",
+      "versions": [
+        "2.0.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "universal_pathlib",
+      "versions": [
+        "0.3.10"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "urllib3",
+      "versions": [
+        "2.7.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "zipfile-zstd",
+      "versions": [
+        "0.0.4"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "zipp",
+      "versions": [
+        "4.1.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "MIT License": [
+    {
+      "name": "tiktoken",
+      "versions": [
+        "0.13.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "MPL-2.0": [
+    {
+      "name": "certifi",
+      "versions": [
+        "2026.6.17"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "PSF-2.0": [
+    {
+      "name": "typing_extensions",
+      "versions": [
+        "4.16.0"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "Python-2.0": [
+    {
+      "name": "aiohappyeyeballs",
+      "versions": [
+        "2.7.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    },
+    {
+      "name": "pathlib_abc",
+      "versions": [
+        "0.5.2"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ],
+  "UNKNOWN": [
+    {
+      "name": "agent-client-protocol",
+      "versions": [
+        "0.12.1"
+      ],
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ]
+    }
+  ]
+}

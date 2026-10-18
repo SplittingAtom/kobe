@@ -24,10 +24,11 @@ import { ShortcutSheet } from "../shell/shortcut-sheet";
 import { ThreadGroupsProvider } from "../shell/thread-groups";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
-import { RailDrawerButton, RailProvider } from "../shell/rail-state";
+import { RailDrawerButton, RailProvider, useRail } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
 import { useLayoutPreferences } from "../../lib/shell/preferences";
 import { DetailProvider } from "./detail";
+import { AnswerFeedbackProvider } from "./answer-feedback";
 import { ThreadUsageProvider } from "./message-footer";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
@@ -125,18 +126,20 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
   return state;
 }
 
-/** The shell grid with the artifact column's dragged width (CE6) and sheet (CE7). */
+/** The shell grid with the rail's and the artifact column's dragged widths (CE6) and sheet (CE7). */
 function WorkspaceGrid(
   props: Omit<
     Parameters<typeof ShellGrid>[0],
-    "artifactWidth" | "artifactSheet" | "artifactHidden"
+    "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
   >,
 ) {
   const panel = useArtifactPanel();
+  const rail = useRail();
   return (
     <ShellGrid
       {...props}
       artifactWidth={panel?.width ?? null}
+      railWidth={rail?.width ?? null}
       artifactSheet={panel?.sheetOpen ?? false}
       artifactHidden={panel?.hidden ?? false}
     />
@@ -217,49 +220,51 @@ function ChatWorkspace({
           <RailProvider preferences={layout.preferences} onSave={layout.save}>
             <DetailProvider preferences={layout.preferences} onSave={layout.save}>
               <ThreadUsageProvider>
-                <TeamModelsProvider>
-                  <ThreadMarkersProvider>
-                    <ArtifactPanelProvider
-                      teamId={session.teamId}
-                      threadId={threadId}
-                      preferences={layout.preferences}
-                      onSavePreferences={layout.save}
-                    >
-                      <FileGoneNotice />
-                      {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
-                      <ThreadActivityWatch pollMs={activityPollMs} />
-                      <AppCommands />
-                      {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
-                      <ShortcutKeys />
-                      <CommandPalette onOpenThread={setThreadId} />
-                      <ShortcutSheet />
-                      <ShellSlot name="search">
-                        <ThreadSearch onOpenThread={setThreadId} />
-                      </ShellSlot>
-                      <ShellSlot name="context">
-                        <ContextRow />
-                      </ShellSlot>
-                      <ShellSlot name="nav">
-                        <RailDrawerButton />
-                      </ShellSlot>
-                      <WorkspaceGrid
-                        rail={
-                          <WorkspaceRail
-                            teamName={teamName || "Workspace"}
-                            listError={listError}
-                            filesApi={filesApi}
-                          />
-                        }
-                        artifact={<ArtifactPanel filesApi={filesApi} />}
-                        conversation={
-                          <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                            <ThreadView onOpenThread={setThreadId} contextInBar />
-                          </main>
-                        }
-                      />
-                    </ArtifactPanelProvider>
-                  </ThreadMarkersProvider>
-                </TeamModelsProvider>
+                <AnswerFeedbackProvider>
+                  <TeamModelsProvider>
+                    <ThreadMarkersProvider>
+                      <ArtifactPanelProvider
+                        teamId={session.teamId}
+                        threadId={threadId}
+                        preferences={layout.preferences}
+                        onSavePreferences={layout.save}
+                      >
+                        <FileGoneNotice />
+                        {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
+                        <ThreadActivityWatch pollMs={activityPollMs} />
+                        <AppCommands />
+                        {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
+                        <ShortcutKeys />
+                        <CommandPalette onOpenThread={setThreadId} />
+                        <ShortcutSheet />
+                        <ShellSlot name="search">
+                          <ThreadSearch onOpenThread={setThreadId} />
+                        </ShellSlot>
+                        <ShellSlot name="context">
+                          <ContextRow />
+                        </ShellSlot>
+                        <ShellSlot name="nav">
+                          <RailDrawerButton />
+                        </ShellSlot>
+                        <WorkspaceGrid
+                          rail={
+                            <WorkspaceRail
+                              teamName={teamName || "Workspace"}
+                              listError={listError}
+                              filesApi={filesApi}
+                            />
+                          }
+                          artifact={<ArtifactPanel filesApi={filesApi} />}
+                          conversation={
+                            <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                              <ThreadView onOpenThread={setThreadId} contextInBar />
+                            </main>
+                          }
+                        />
+                      </ArtifactPanelProvider>
+                    </ThreadMarkersProvider>
+                  </TeamModelsProvider>
+                </AnswerFeedbackProvider>
               </ThreadUsageProvider>
             </DetailProvider>
           </RailProvider>

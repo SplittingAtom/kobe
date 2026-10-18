@@ -5,6 +5,9 @@ import {
   MODEL_PROVIDER_KINDS,
   PROVIDER_ID_PATTERN,
   PROVIDER_MODEL_PATTERN,
+  THINKING_CONTROLS,
+  THINKING_LEVELS,
+  THINKING_LOWEST,
 } from "../schema/models.js";
 import {
   BUDGET_PERIODS,
@@ -75,6 +78,20 @@ const toolRule = {
   /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
+  /** User rules (KOBE-289): the remember scope, and the thread or run a bound rule holds in. */
+  rememberScope: z.enum(["thread", "today", "run", "day", "month", "forever"]).optional(),
+  threadId: id.optional(),
+  runId: id.optional(),
+};
+
+/** Admin limits on remembered approvals (KOBE-289): the site floor's or a team's. */
+const rememberLimits = {
+  scope: z.enum(["site", "team"]),
+  scopes: z.array(z.enum(["thread", "today", "run", "day", "month", "forever"])).max(6),
+  maxDurationSeconds: z.number().int().positive().nullable(),
+  mcpTools: z.boolean(),
+  exactOnly: z.boolean(),
+  approveAll: z.boolean(),
 };
 
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
@@ -340,6 +357,20 @@ export const AUDIT_EVENTS = {
   "policy.rule.updated": event("any", toolRule),
   /** Includes a member revoking their own remember-rule (scope `user`). */
   "policy.rule.deleted": event("any", toolRule),
+  /**
+   * A member's remembered approval let a call run without asking (KOBE-289), at the sandbox's
+   * policy check or the MCP proxy's: one row per call, naming the rule. Never the input.
+   */
+  "policy.rule.applied": event("team", {
+    ruleId: id,
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    rememberScope: z.enum(["thread", "today", "run", "day", "month", "forever"]),
+    enforcementPoint: z.enum(["sandbox", "mcp_proxy"]),
+  }),
+  /** The site floor's or a team's limits on remembered approvals were saved (KOBE-289). */
+  "policy.remember_limits.updated": event("any", rememberLimits),
   "policy.settings.updated": event("site", {
     setting: z.enum(["prompt_sandbox_writes"]),
     value: z.boolean(),
@@ -525,12 +556,24 @@ export const AUDIT_EVENTS = {
     imageSupportChanged: z.boolean().optional(),
     /** Its output limit, context window or reasoning flag changed (KOBE-259). */
     limitsChanged: z.boolean().optional(),
+    /** Its thinking settings when added or changed (KOBE-260). */
+    thinking: z
+      .strictObject({
+        control: z.enum(THINKING_CONTROLS),
+        allowed: z.boolean(),
+        default: z.enum(THINKING_LEVELS).nullable(),
+        max: z.enum(THINKING_LEVELS).nullable(),
+        lowest: z.enum(THINKING_LOWEST),
+      })
+      .optional(),
   }),
   /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
   "models.team.changed": event("team", {
     alias: modelAlias,
     enabled: z.boolean(),
     isDefault: z.boolean(),
+    /** The team's thinking maximum for the model (KOBE-260); null: the site's. */
+    thinkingMax: z.enum(THINKING_LEVELS).nullable().optional(),
   }),
   /** A team admin turned post-run follow-up suggestions on or off for the team (KOBE-222, CE21). */
   "models.followups.changed": event("team", { enabled: z.boolean() }),
@@ -599,6 +642,8 @@ export const AUDIT_EVENTS = {
     risk: z.enum(["read", "write", "destructive"]).optional(),
     approvalId: id.optional(),
     approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
+    /** The member's remembered approval that allowed it (KOBE-289). */
+    ruleId: id.optional(),
   }),
 
   /**
@@ -763,6 +808,25 @@ export const AUDIT_EVENTS = {
   /** Ended runs' live events folded away 7 days after the run (system; entries keep the content). */
   "retention.compacted": event("team", { runs: count, events: count }),
   /**
+   * Answer feedback kept for a legal hold purged once no hold covers its thread's owner or rater
+   * (system; KOBE-275; count only).
+   */
+  "retention.feedback_history_purged": event("team", { rows: count }),
+  /**
+   * Moved workspace files' old paths kept for a legal hold, purged once the hold was released
+   * (system; KOBE-304; count only).
+   */
+  "retention.workspace_hold_history_purged": event("team", { rows: count }),
+  /**
+   * Shared eval cases purged (system; KOBE-276): past the team's retention window (`retention`)
+   * or copies kept for a released hold (`hold_released`). Counts only, never a member: a departed
+   * member's cases go with the offboarding step, unaudited on their own (review S4).
+   */
+  "retention.eval_cases_purged": event("team", {
+    reason: z.enum(["retention", "hold_released"]),
+    rows: count,
+  }),
+  /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
    * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
    * Counts only, never paths or content; live files and held owners' memory are never in a batch.
@@ -917,6 +981,8 @@ export const AUDIT_EVENTS = {
     decision: z.enum(["allow", "deny"]),
     remember: z.boolean(),
     ruleId: id.optional(),
+    /** Allowed with "Approve all waiting" (KOBE-289): one row per approval all the same. */
+    approveAll: z.boolean().optional(),
   }),
   /** A pending approval ended without a decision: TTL (D29, 1 h) or its run ended (system). */
   "approval.expired": event("team", {
@@ -1136,6 +1202,11 @@ export const AUDIT_EVENTS = {
   }),
   /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
   "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
+  /**
+   * The user moved or renamed a file or folder of their own workspace in the file browser
+   * (KOBE-304): counts only, never a name or path.
+   */
+  "workspace.file_moved": event("team", { userId: id, files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
@@ -1194,6 +1265,16 @@ export const AUDIT_EVENTS = {
     evalId: id,
     status: z.enum(["passed", "blocked", "errored"]),
     attackSuccessRate: z.number().min(0).max(1).nullable(),
+  }),
+  /**
+   * The agent's owner reviewed a shared eval case (KOBE-276): its id and new status only, never
+   * its text or who shared it.
+   */
+  "agent.eval_case.reviewed": event("team", {
+    agentId: id,
+    scope: z.enum(["team", "personal"]),
+    caseId: id,
+    status: z.enum(["open", "accepted", "dismissed"]),
   }),
   /** A team admin changed the eval gate switch or its attack-success-rate ceiling (KOBE-93). */
   "agent.eval.settings_changed": event("team", {

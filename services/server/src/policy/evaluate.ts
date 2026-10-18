@@ -13,6 +13,7 @@ import {
   checkConnector,
   type ConnectorPolicyState,
 } from "./gates.js";
+import { allowedByRuleMessage, rememberedRuleAllowed, scopeOf } from "./remember-limits.js";
 import { matchingRules, type PolicyRule, type PolicyRuleSet } from "./rules.js";
 import { PROMPT_EXEMPT_KOBE_TOOLS, riskClassPrompts, type PolicySettings } from "./settings.js";
 import { prepareInput } from "./tool-inputs.js";
@@ -33,9 +34,14 @@ import { prepareInput } from "./tool-inputs.js";
  *   (`ask-all`: always; `ask-on-write`: `riskClassPrompts`). **Only the user's own allow rules
  *   (approve and remember) lift that prompt** (D29: mode → user allow rules → prompt). Team allow
  *   rules never lift a prompt (D6: team rules only tighten).
+ * - A user's allow rule applies only to its own calls: a `thread` rule in its thread, a `run`
+ *   rule in its run (KOBE-289; the rule source has already dropped rules whose thread or run is
+ *   gone), and only while the team's remember limits still allow it (remember-limits.ts).
  * - `auto` mode and scheduled runs never prompt (D29, D32): read-only tools run; anything else
- *   runs only if allow-listed by a user or team allow rule (the agent's `tools.allow` only
- *   narrows), else it is denied. The ask-on-write sandbox switch plays no part here.
+ *   runs only if allow-listed by a team allow rule (the agent's `tools.allow` only narrows), else
+ *   it is denied. **Remembered approvals never apply there** (KOBE-289): nobody watches an
+ *   unattended run, so only the team's own allow list does. The ask-on-write sandbox switch plays
+ *   no part here.
  *
  * `tool` is the server's own descriptor (registry), never one built from what the sandbox sent.
  */
@@ -141,15 +147,24 @@ function noPromptReason(ctx: Prepared): PolicyReason {
   return { code: RISK_REASON[tool.risk], stage: "risk_class", message: `${tool.name} ${where}.` };
 }
 
+/** The member's own remembered approval for this call, if one applies (interactive runs only). */
 function userAllow(ctx: Prepared): PolicyReason | undefined {
-  const [rule] = matchingRules(ctx.rules.user, "allow", ctx.tool, ctx.view, ctx.now);
-  return rule && ruleReason(rule, "user_allow_rule", "user_allow", "You allowed this earlier.");
+  const binding = { thread_id: ctx.input.run.thread_id, run_id: ctx.input.run.run_id };
+  const [rule] = matchingRules(
+    ctx.rules.user,
+    "allow",
+    ctx.tool,
+    ctx.view,
+    ctx.now,
+    binding,
+  ).filter((r) => rememberedRuleAllowed(r, ctx.tool, ctx.rules.remember_limits, ctx.now));
+  return (
+    rule && ruleReason(rule, "user_allow_rule", "user_allow", allowedByRuleMessage(scopeOf(rule)))
+  );
 }
 
-/** Allow-listed for auto mode / scheduled runs: the user's own rule, else a team allow rule. */
+/** Allow-listed for auto mode / scheduled runs: a team allow rule only (never a remembered one). */
 function allowListed(ctx: Prepared): PolicyReason | undefined {
-  const own = userAllow(ctx);
-  if (own) return own;
   const [team] = matchingRules(ctx.rules.team, "allow", ctx.tool, ctx.view, ctx.now);
   return (
     team &&

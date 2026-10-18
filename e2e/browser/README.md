@@ -9,7 +9,7 @@ must be allowed to, and archives it afterwards), and sharing with the team betwe
 (KOBE-221; needs `KOBE_USER2`, skipped without it), and follow-up chips behind the team switch
 (KOBE-222; `KOBE_USER` must be a team admin; it turns the switch on and off again), and `@file`
 mentions (KOBE-223; it drops a small file into the member's `uploads/` and deletes it at the
-end). It is **not** part
+end), and thumbs up and down on an answer with a reason and a comment (KOBE-275). It is **not** part
 of CI and not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
 (`@playwright/test` 1.55.0, Apache-2.0).
 
@@ -43,12 +43,48 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Files tree (KOBE-304)
+
+`files-tree.spec.ts` uploads three small files into a new folder of the member's workspace, opens
+it in the rail's Files tree with the keyboard, checks the ARIA tree, the type icons and the 26 px
+rows, saves screenshots of the tree in light and dark (`test-results/.../files-tree-*.png`),
+renames a file with F2, moves it by drag and drop and with Move to…, checks that a name clash is
+refused, and deletes the folder at the end. No tokens: `npx playwright test files-tree`.
+
+## Resizable rail (KOBE-305)
+
+`rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width is
+saved per user (a second browser context gets it) and survives a reload, Home/End (200 and 560 px at 1280), Mod+B collapse and expand (the width comes
+back), double-click back to 280 px, no handle at 960 and 390 px, and, with a file tab open in the
+artifact column, that End stops at 520 px so the conversation keeps 400 px and the column 360 px.
+Screenshots in light and dark (`test-results/.../rail-resize-*.png`). It uploads one small file
+and deletes it at the end, and puts the member's stored rail width back as it found it; no
+tokens: `npx playwright test rail-resize`.
+
+## Remembered approvals (KOBE-289)
+
+`remember-approvals.spec.ts` makes the agent write and share a small file, remembers the
+share_file approval for "this conversation", checks the next share runs without a card and its
+tool card says "Allowed by your rule (this conversation)", finds the rule on My area, Approvals and
+on the team Policy page, revokes it there and checks the next share asks again (denied). It
+revokes any share_file rule it left at the end. `KOBE_USER` must be a team admin, with the team's
+remember limits allowing "this conversation"; a few short model turns:
+`npx playwright test remember-approvals`.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
 Site backup and restore, and the Team inventory, and checks none of them is a "coming soon"
 placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
 of the active team: `npx playwright test console-sections`.
+
+## Thinking level (KOBE-260)
+
+`thinking.spec.ts` looks in the model picker for an enabled model that offers a thinking level
+(Site → Models: a reasoning model with a thinking control and thinking allowed; the team must not
+have turned it off), picks **Thinking off**, asks for one word and checks that the answer has no
+reasoning block and that the thread and its run record `off`. It skips itself when no model
+offers a level. On kobe-gate1, give glm-5.3 the `reasoning_effort` control first.
 
 ## Console screenshots (KOBE-294)
 

@@ -36,7 +36,25 @@ describe("dial-out connection", () => {
       agent_version: "0.0.0-test",
       pi_version: "1.0.0",
       runs: [],
+      capabilities: ["trace_spans"],
     });
+  });
+
+  it("announces workspace_moves with move replay, and replays when told a move happened (KOBE-304)", async () => {
+    let moved = 0;
+    h = await startHarness({
+      workspace: () => ({
+        beforeRun: () => Promise.resolve(),
+        runEnded: () => undefined,
+        flush: () => Promise.resolve(),
+        movedOnServer: () => {
+          moved += 1;
+        },
+      }),
+    });
+    expect(h.server.frames("hello")[0]?.capabilities).toContain("workspace_moves");
+    h.server.send({ v: 1, type: "workspace.moved" });
+    await until(() => moved === 1);
   });
 
   it("keeps retrying with backoff while the token is refused, and picks up a rotated token", async () => {

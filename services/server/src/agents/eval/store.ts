@@ -62,6 +62,12 @@ export interface EvalRecord {
   readonly rollbackFrom: number | null;
   readonly toolManifest: Record<string, unknown> | null;
   readonly jobName: string | null;
+  /** Shared eval cases frozen into this eval (KOBE-276); their outcome once it has a verdict. */
+  readonly caseIds: readonly string[];
+  readonly caseScored: number | null;
+  readonly caseFailures: number | null;
+  /** Accepted cases left out, by reason (re-review R4). */
+  readonly caseSkips: Readonly<Record<string, number>>;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
@@ -88,6 +94,10 @@ const COLUMNS = {
   rollbackFrom: orbitEvals.rollbackFrom,
   toolManifest: orbitEvals.toolManifest,
   jobName: orbitEvals.jobName,
+  caseIds: orbitEvals.caseIds,
+  caseScored: orbitEvals.caseScored,
+  caseFailures: orbitEvals.caseFailures,
+  caseSkips: orbitEvals.caseSkips,
   createdAt: orbitEvals.createdAt,
   startedAt: orbitEvals.startedAt,
   finishedAt: orbitEvals.finishedAt,
@@ -161,6 +171,10 @@ export interface NewEval {
   readonly threshold: number;
   readonly rollbackFrom?: number;
   readonly toolManifest?: Record<string, unknown>;
+  /** The agent's accepted shared cases run as an extra suite (KOBE-276). */
+  readonly caseIds?: readonly string[];
+  /** Accepted cases left out, by reason (`no_reviewer`). */
+  readonly caseSkips?: Readonly<Record<string, number>>;
 }
 
 /** A new `pending` eval; `eval_in_progress` when the agent has an unfinished one. */
@@ -171,7 +185,7 @@ export function createEval(
   return withTeam(db, input.teamId, async (tx) => {
     const [row] = await tx
       .insert(orbitEvals)
-      .values(input)
+      .values({ ...input, caseIds: [...(input.caseIds ?? [])], caseSkips: { ...input.caseSkips } })
       .onConflictDoNothing()
       .returning(COLUMNS);
     if (!row) return { ok: false, error: "eval_in_progress" } as const;
@@ -228,6 +242,8 @@ export function finishEval(
         attackSuccessRate: scored?.attackSuccessRate ?? null,
         attempts: scored?.attempts ?? null,
         attackSuccesses: scored?.attackSuccesses ?? null,
+        caseScored: scored?.caseScored ?? null,
+        caseFailures: scored?.caseFailures ?? null,
         report: verdict.report ?? null,
         error: verdict.status === "errored" ? verdict.error : null,
       })

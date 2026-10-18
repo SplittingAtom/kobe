@@ -245,17 +245,16 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
   const thread = uuidSchema.safeParse(ctx.threadHeader);
   const threadId = thread.success ? thread.data : undefined;
 
+  // The tool's name is the sandbox's (model-chosen) text until the server resolves it to a pinned
+  // tool: the span says `unknown` until then (KOBE-274). The thread header is the sandbox's too,
+  // so it stays off the span.
   return withSpan(
     "mcp.tools/call",
     {
       attributes: {
-        ...idAttributes({
-          teamId: ctx.teamId,
-          sandboxId: ctx.sandboxId,
-          threadId,
-        }),
+        ...idAttributes({ teamId: ctx.teamId, sandboxId: ctx.sandboxId }),
         "kobe.connector_id": ctx.connectorId,
-        "kobe.tool.name": params.name,
+        "kobe.tool.name": "unknown",
         ...contentAttributes({ "kobe.tool.input": canonical }),
       },
     },
@@ -323,6 +322,8 @@ async function decideAndForward(
       deps.log.error({ sandboxId: ctx.sandboxId }, "mcp: server allowed a different call; refused");
       return [toolError(id, "Kobe could not check this call, so it was not run.")];
     }
+    // The server's own record of the tool: now the name is metadata, not model text.
+    annotate({}, { "kobe.tool.name": decision.tool.name });
     const credentials = await deps.credentials.headersFor({
       token: ctx.token,
       teamId: ctx.teamId,

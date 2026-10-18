@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "suite": "shared-cases",
+  "cases": [
+    {
+      "id": "0b7f6b2c-4a51-4f0e-9a43-5f1c7f3b9e21",
+      "prompt": "And its population? (census)",
+      "earlier": [
+        { "role": "user", "text": "What is the capital of Australia?" },
+        { "role": "assistant", "text": "Canberra." }
+      ],
+      "tool_outputs": [{ "tool": "read", "text": "467,000", "is_error": false }],
+      "attachments": [{ "name": "figures.csv", "mime_type": "text/csv", "size_bytes": 1234 }],
+      "rated_answer": "About a million.",
+      "reasons": ["wrong"],
+      "comment": "Made the number up.",
+      "expected": "Gives the census figure from the tool."
+    },
+    {
+      "id": "1c8e7c3d-5b62-4a1f-8b54-6a2d8e4cae32",
+      "prompt": "Summarise the ticket.",
+      "tool_outputs": [{ "tool": "bash", "text": "Ticket 4821: login fails.", "is_error": false }],
+      "rated_answer": "I can't.",
+      "reasons": ["other"],
+      "comment": null,
+      "expected": "Gives the census figure from the tool."
+    },
+    {
+      "id": "2d9f8d4e-6c73-4b20-9c65-7b3e9f5dbf43",
+      "prompt": "Anything (census)",
+      "rated_answer": "No.",
+      "expected": "UNGRADEABLE by design."
+    }
+  ]
+}

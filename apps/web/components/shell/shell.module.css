@@ -263,10 +263,14 @@
   min-height: 0;
 }
 
-/* The workspace rail is 280 px, 48 px while collapsed (CE5). The artifact column defaults to half
-   the space right of the rail (CE6); a dragged width (inline, KOBE-200) replaces it. */
+/* The workspace rail is 280 px, 48 px while collapsed (CE5); on wide windows a dragged width
+   (inline `--kobe-rail-expanded-width`, KOBE-305) replaces the 280, within the room the columns
+   right of it need: the conversation's 400 px, plus the artifact column's 360 px while it is a
+   column (below). The artifact column defaults to half the space right of the rail (CE6); a
+   dragged width (inline, KOBE-200) replaces it. */
 .grid {
-  --kobe-rail-width: 280px;
+  --kobe-rail-room: 400px;
+  --kobe-rail-width: min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room));
   --kobe-artifact-width: calc((100% - var(--kobe-rail-width)) / 2);
 }
 
@@ -380,6 +384,11 @@
   .artifact[data-sheet-open] {
     animation: sheet-in 160ms ease-out;
   }
+
+  /* The rail's handle (KOBE-305) fades its highlight in. */
+  .railHandle {
+    transition: background-color 120ms ease-out;
+  }
 }
 
 @keyframes sheet-in {
@@ -399,6 +408,7 @@
    when the window widens again. */
 @media (width >= 820px) {
   .grid:has(> .artifact:not(:empty):not([data-hidden])) {
+    --kobe-rail-room: 760px;
     grid-template-columns:
       var(--kobe-rail-width)
       minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px))
@@ -425,6 +435,47 @@
   .resizeHandle:hover,
   .resizeHandle:focus-visible {
     background: var(--admin-accent);
-    outline: none;
+    outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
+  }
+}
+
+/* The drag handle on the expanded rail's right edge (KOBE-305): wide windows only (the component
+   renders it there, while the rail is expanded). It is laid out against the grid, so it neither
+   scrolls with the rail nor covers more than 2 px of it (its border and a sliver). */
+.railHandle {
+  display: none;
+}
+
+@media (width >= 1100px) {
+  .railHandle {
+    position: absolute;
+    z-index: 10;
+    inset-block: 0;
+    inset-inline-start: calc(var(--kobe-rail-width) - 2px);
+    display: block;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .railHandle:hover,
+  .railHandle:focus-visible {
+    background: var(--admin-accent);
+    outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
+  }
+
+  /* An invisible hit area around the 6 px line: 12 px for a mouse, 24 px for touch (WCAG 2.5.8),
+     mostly outside the rail so the rail's scrollbars stay reachable. */
+  .railHandle::before {
+    position: absolute;
+    inset-block: 0;
+    inset-inline: -2px -4px;
+    content: "";
+  }
+}
+
+@media (width >= 1100px) and (pointer: coarse) {
+  .railHandle::before {
+    inset-inline: -4px -14px;
   }
 }

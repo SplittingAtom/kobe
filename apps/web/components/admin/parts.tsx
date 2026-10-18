@@ -21,19 +21,47 @@ export function ResourceView<T>({
 }
 
 /**
+ * "Oct 17, 05:26" in the viewer's locale: month, day and a 24-hour time, with the year only when
+ * it is not `now`'s (KOBE-306). For dense tables, where the full form would wrap.
+ */
+export function compactDateTime(date: Date, now: Date = new Date()): string {
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+}
+
+/**
  * A timestamp people can read, with the exact value for machines. `precise` shows seconds and
- * the time zone (the audit log, where times are compared with exports and other logs).
+ * the time zone (the audit log, where times are compared with exports and other logs). `compact`
+ * is for dense tables (KOBE-306): "Oct 17, 05:26" on one line; screen readers get the full date,
+ * time and zone instead (visually hidden text), and a mouse gets it as the tooltip.
  */
 export function DateTime({
   value,
   precise = false,
+  compact = false,
 }: {
   readonly value: string | null | undefined;
   readonly precise?: boolean;
+  readonly compact?: boolean;
 }) {
   if (!value) return <>—</>;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return <>—</>;
+  if (compact) {
+    const full = date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" });
+    return (
+      <time dateTime={value} title={full} className="whitespace-nowrap">
+        <span aria-hidden>{compactDateTime(date)}</span>
+        <span className="sr-only">{full}</span>
+      </time>
+    );
+  }
   return (
     <time dateTime={value} title={date.toISOString()}>
       {date.toLocaleString(undefined, {

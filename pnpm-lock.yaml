@@ -380,6 +380,9 @@ importers:
 
   packages/telemetry:
     dependencies:
+      '@kobe/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -610,7 +613,11 @@ importers:
         specifier: ^8.18.2
         version: 8.18.2
 
-  tools/license-check: {}
+  tools/license-check:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
 packages:
 

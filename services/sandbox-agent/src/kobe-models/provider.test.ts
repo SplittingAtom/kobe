@@ -232,6 +232,20 @@ describe("kobe provider", () => {
     expect(none.calls[0]?.headers).not.toHaveProperty("x-kobe-run-token");
   });
 
+  it("sends the run's span as traceparent (KOBE-274), never a forged one or one without a run", async () => {
+    const tp = "00-3e4f5a6b7c8d4e9f8a1b2c3d4e5f6072-1111111111111111-01";
+    const { provider, model, calls } = setup([{ text: "a" }], [state({ traceparent: tp })]);
+    await collect(provider.stream(model, {}, { headers: { traceparent: "00-forged" } }));
+    expect(calls[0]?.headers).toMatchObject({ traceparent: tp });
+    const off = setup([{ text: "b" }], [state()]);
+    await collect(off.provider.stream(off.model, {}, { headers: { Traceparent: "00-forged" } }));
+    expect(off.calls[0]?.headers).not.toHaveProperty("traceparent");
+    expect(off.calls[0]?.headers).not.toHaveProperty("Traceparent");
+    const idle = setup([{ text: "c" }], [state({ run_id: null, traceparent: tp })]);
+    await collect(idle.provider.stream(idle.model, {}));
+    expect(idle.calls[0]?.headers).not.toHaveProperty("traceparent");
+  });
+
   it("reads the file per request: a rotated token and a cleared run id reach the next call", async () => {
     const states = [state(), state({ token: "token-two-".padEnd(40, "2"), run_id: null })];
     const { provider, model, calls } = setup([{ text: "a" }, { text: "b" }], states);

@@ -116,6 +116,7 @@ function toWire(
     pinned_at: hit.pinnedAt?.toISOString() ?? null,
     archived_at: hit.archivedAt?.toISOString() ?? null,
     model: hit.modelAlias,
+    thinking_level: hit.thinkingLevel,
     leaf_entry_id: hit.leafEntryId,
     last_activity_at: hit.lastActivityAt.toISOString(),
     created_at: hit.createdAt.toISOString(),

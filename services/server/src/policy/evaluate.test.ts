@@ -501,21 +501,22 @@ const CASES: readonly Case[] = [
     effect: "allow",
     codes: ["user_allow_rule", "mode_ask_all"],
   },
+  // KOBE-289: remembered approvals never apply to unattended runs (only team allow rules do).
   {
-    name: "user allow allow-lists a write in auto mode",
+    name: "a remembered approval does not allow-list a write in auto mode",
     tool: kobeWrite,
     options: { mode: "auto" },
     rules: [rule("user", "allow", "share_file")],
-    effect: "allow",
-    codes: ["user_allow_rule"],
+    effect: "deny",
+    codes: ["mode_auto_not_allowlisted", "risk_write"],
   },
   {
-    name: "user allow allow-lists bash in a scheduled run",
+    name: "a remembered approval does not allow-list bash in a scheduled run",
     tool: bash,
     options: { mode: "auto", kind: "schedule" },
     rules: [rule("user", "allow", "bash")],
-    effect: "allow",
-    codes: ["user_allow_rule"],
+    effect: "deny",
+    codes: ["scheduled_run_no_prompt", "risk_destructive"],
   },
   {
     name: "a wildcard user allow rule is ignored (remember-rules name one tool)",
@@ -783,11 +784,11 @@ describe("evaluatePolicy: D29 order, table-driven", () => {
     });
   });
 
-  it("prefers the user's own allow rule over a team allow rule in the reason", () => {
+  it("in auto mode only the team's allow rule allow-lists, never the member's own (KOBE-289)", () => {
     const team = rule("team", "allow", "share_file");
     const user = rule("user", "allow", "share_file");
     const decision = run({ tool: kobeWrite, rules: [team, user], options: { mode: "auto" } });
-    expect(decision.reasons[0]?.rule_id).toBe(user.id);
+    expect(decision.reasons[0]).toMatchObject({ code: "team_allow_rule", rule_id: team.id });
   });
 
   it("sets a 1 h approval expiry on prompts", () => {

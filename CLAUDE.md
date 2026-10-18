@@ -27,7 +27,9 @@ pnpm test           # vitest in every package (depends on ^build)
 pnpm lint           # eslint flat config at repo root
 pnpm typecheck
 pnpm format:check   # prettier
-pnpm license:check  # fails on deps outside MIT/Apache/BSD/MPL family
+pnpm license:check  # fails on deps outside MIT/Apache/BSD/MPL family, or a stale/missing inventory entry
+pnpm licenses:update  # regenerates THIRD_PARTY_LICENSES.md and NOTICE
+pnpm license:gate   # gate tickets: also fails while a license decision is pending
 
 pnpm --filter @kobe/server test                              # one package
 pnpm --filter @kobe/server exec vitest run src/app.test.ts   # one file
@@ -78,7 +80,17 @@ services/<svc>/Dockerfile .`), runtime `USER 1000:1000` (numeric, for `runAsNonR
   inbound connections. `pi-server` is not used in v1.
 - No Redis: Postgres `LISTEN/NOTIFY` for fan-out hints; Postgres is always the durable record.
 - Dependencies MIT/Apache/BSD/MPL only; exceptions documented in
-  `tools/license-check/license-exceptions.json`. `sharp` is excluded (LGPL libvips).
+  `tools/license-check/license-exceptions.json` (and the images' `license-exceptions.json`), each
+  with `approvedBy`/`approvedOn` from Chris or `pending: "gate review"`. `sharp` is excluded (LGPL libvips).
+- Every third-party component has an entry in `THIRD_PARTY_LICENSES.md` (generated with `NOTICE`
+  by `pnpm licenses:update`; policy in `docs/licensing.md`). Adding a dependency: run
+  `pnpm licenses:update` and commit the result. Adding an image, chart component or external
+  service: add a row (or a `chartValues` key) to `tools/license-check/inventory.yaml` first.
+  Changing an image's Python/npm packages: refresh `images/<image>/third-party-licenses.json`.
+  Outside the family: add the entry with `pending: gate review` and a reason and keep working;
+  never stop to ask (it is a warning, not a failure). `pnpm license:check` fails only on anything
+  stale or missing; gate tickets run `pnpm license:gate`, which fails while anything is pending,
+  and clear the pending list with Chris.
 
 ### Version pins worth knowing
 

@@ -10,6 +10,7 @@ import type { StreamTimings } from "../event-stream/stream.js";
 import { EventStreamFixture, PUBLIC_URL, must, type Person } from "./event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./fake-sandbox.js";
 import type { ModelTokenDefaults } from "../models/token-limits.js";
+import type { ServerDepsOptions } from "../deps.js";
 
 /** Condition waits are bounded below the 30 s test timeout and sized for a loaded 2-CPU CI runner. */
 const WAIT_MS = 25_000;
@@ -237,6 +238,8 @@ export class RunFixture {
       readonly runMaxBytes?: number;
       /** The server's own model calls (KOBE-219 titles): a (fake) gateway and the token key. */
       readonly serverCalls?: { readonly gatewayUrl: string; readonly key: Uint8Array };
+      /** Answer ratings as trace scores (KOBE-275): a (fake) sink for both replicas. */
+      readonly feedbackScores?: ServerDepsOptions["feedbackScores"];
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
@@ -247,6 +250,7 @@ export class RunFixture {
         ? {}
         : { modelTokenDefaults: options.modelTokenDefaults }),
       ...(options.serverCalls === undefined ? {} : { serverCalls: options.serverCalls }),
+      ...(options.feedbackScores === undefined ? {} : { feedbackScores: options.feedbackScores }),
       sandboxWire: {
         sweep: false,
         ...(options.runTokenKey === undefined ? {} : { runTokenKey: options.runTokenKey }),

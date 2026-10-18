@@ -196,6 +196,33 @@ describe("status tokens (KOBE-301)", () => {
     });
   }
 
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`the gold tool badge keeps AA on its tint and on cards (${name}, KOBE-374)`, () => {
+      const gold = resolve(theme, "--kobe-tool-badge");
+      for (const surface of ["--kobe-tool-badge-bg", "--card", "--background"]) {
+        expect(contrast(gold, resolve(theme, surface)), surface).toBeGreaterThanOrEqual(4.5);
+      }
+      // Gold is the tool's identity, not an outcome: it is none of the status colours.
+      for (const status of ["running", "attention", "failed", "done"]) {
+        expect(gold).not.toBe(resolve(theme, `--kobe-status-${status}`));
+      }
+    });
+
+    it(`the composer's focus and running outlines keep 3:1 on the page, panels and cards (${name}, KOBE-374)`, () => {
+      for (const outline of ["--kobe-composer-focus", "--kobe-status-running"]) {
+        for (const surface of ["--background", "--muted", "--card"]) {
+          expect(
+            contrast(resolve(theme, outline), resolve(theme, surface)),
+            `${outline} on ${surface}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+  }
+
   it("the gauges read the status colours, and both dark blocks set the same ones", () => {
     expect(light.get("--kobe-gauge-warn")).toBe("var(--kobe-status-attention)");
     expect(light.get("--kobe-gauge-full")).toBe("var(--kobe-status-failed)");

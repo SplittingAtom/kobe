@@ -1,0 +1,104 @@
+/* The composer panel's outline (KOBE-374), from the tokens in app/theme.css. Outlines and shadows
+   never take layout space, so focus, a run and a drop change no size or position. */
+
+/* Focus anywhere in the composer (text, chips, buttons) outlines the whole panel: darker and
+   thicker than its border, 3:1 or more on the page in both themes (app/theme-css.test.ts). */
+.panel {
+  /* No outline at rest (not a transparent one: forced colours would paint it, so focus would
+     change nothing there). */
+  outline: 2px none var(--kobe-composer-focus);
+  outline-offset: 0;
+  transition:
+    outline-color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+
+.panel:focus-within {
+  outline-style: solid;
+  outline-color: var(--kobe-composer-focus);
+}
+
+/* The text field has no ring of its own: the panel's outline shows where the focus is. More
+   specific than the chat's `.app :focus-visible` ring and the inputs' base ring. Buttons inside
+   keep their own focus ring, so keyboard focus stays visible on each control. */
+.panel .input:focus,
+.panel .input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* While a run holds the thread (queue and steer mode) the panel's edge is the running colour and a
+   soft halo pulses around it (KOBE-374, the KOBE-301 running token). Only the shadow moves; the
+   border and outline stay solid, so focus stays visible at every frame. */
+.panel[data-running] {
+  border-color: var(--kobe-status-running);
+  animation: kobe-composer-pulse 2s ease-in-out infinite;
+}
+
+.panel[data-running]:focus-within {
+  outline-color: var(--kobe-status-running);
+}
+
+@keyframes kobe-composer-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--kobe-status-running) 45%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--kobe-status-running) 0%, transparent);
+  }
+}
+
+/* No motion for people who asked for less: a still halo says the same. */
+@media (prefers-reduced-motion: reduce) {
+  .panel[data-running] {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--kobe-status-running) 45%, transparent);
+  }
+}
+
+/* Files from the computer during a run: the drop border wins over the running one. */
+.panel[data-running][data-dragging] {
+  border-color: var(--primary);
+}
+
+/* A file row from the Files tree over the composer (KOBE-374): the panel lights up as the drop
+   target for a mention; a folder, which can't be mentioned, gets a dashed red outline instead.
+   The `:focus-within` forms match `.panel[data-running]:focus-within` and come later, so the drop
+   cue wins over the focus and running outlines. */
+.panel[data-mention-drop="file"],
+.panel[data-mention-drop="file"]:focus-within {
+  outline-style: solid;
+  outline-color: var(--admin-accent);
+  background-color: color-mix(in srgb, var(--admin-accent) 6%, transparent);
+}
+
+.panel[data-mention-drop="folder"],
+.panel[data-mention-drop="folder"]:focus-within {
+  outline-style: dashed;
+  outline-color: var(--kobe-status-failed);
+}
+
+/* Forced colours (Windows High Contrast): tokens and shadows are overridden there, so the focus,
+   running and drop cues use system colours and outline styles that survive. */
+@media (forced-colors: active) {
+  .panel:focus-within,
+  .panel[data-running]:focus-within {
+    outline: 3px solid Highlight;
+  }
+
+  .panel[data-running] {
+    border-color: Highlight;
+  }
+
+  .panel[data-mention-drop="file"],
+  .panel[data-mention-drop="file"]:focus-within {
+    outline: 3px solid Highlight;
+  }
+
+  .panel[data-mention-drop="folder"],
+  .panel[data-mention-drop="folder"]:focus-within {
+    outline: 3px dashed CanvasText;
+  }
+}

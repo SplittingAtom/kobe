@@ -1,4 +1,12 @@
-import type { PiModelApi, PiThreadConfig } from "@kobe/protocol";
+import {
+  narrowThinkingPolicy,
+  strictestThinkingPolicy,
+  type PiModelApi,
+  type PiThreadConfig,
+  type ThinkingLevel,
+  type ThinkingPolicy,
+} from "@kobe/protocol";
+import { catalogThinking } from "../models/thinking.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
 import {
   and,
@@ -45,6 +53,13 @@ interface EnabledModel {
   readonly gatewayModel: string;
   readonly api: PiModelApi;
   readonly limits: CatalogTokenLimits;
+  readonly thinking: RunModelThinking;
+}
+
+/** The model's thinking settings for the team (KOBE-260): the site's and the team's maximum. */
+export interface RunModelThinking {
+  readonly site: ThinkingPolicy;
+  readonly teamMax: ThinkingLevel | null;
 }
 
 /** The team's enabled models (RLS: inside `withTeam`). */
@@ -59,6 +74,12 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
       maxOutputTokens: modelCatalog.maxOutputTokens,
       contextWindow: modelCatalog.contextWindow,
       reasoning: modelCatalog.reasoning,
+      thinkingControl: modelCatalog.thinkingControl,
+      thinkingAllowed: modelCatalog.thinkingAllowed,
+      thinkingDefault: modelCatalog.thinkingDefault,
+      thinkingMax: modelCatalog.thinkingMax,
+      thinkingLowest: modelCatalog.thinkingLowest,
+      teamThinkingMax: teamModels.thinkingMax,
     })
     .from(teamModels)
     .innerJoin(modelCatalog, eq(modelCatalog.alias, teamModels.alias))
@@ -74,6 +95,7 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
       contextWindow: r.contextWindow,
       reasoning: r.reasoning,
     },
+    thinking: { site: catalogThinking(r), teamMax: r.teamThinkingMax },
   }));
 }
 
@@ -86,6 +108,8 @@ export type RunModelResolution =
       readonly ok: true;
       readonly model: RunModelConfig | undefined;
       readonly limits?: CatalogTokenLimits;
+      /** The model's thinking settings for the team (KOBE-260); absent without a model. */
+      readonly thinking?: RunModelThinking;
     }
   | { readonly ok: false; readonly code: "agent_model_not_enabled"; readonly alias: string };
 
@@ -103,10 +127,19 @@ export async function resolveRunModel(
     return { ok: false, code: "agent_model_not_enabled", alias: requestedAlias };
   }
   if (chosen === undefined) return { ok: true, model: undefined };
+  // Several aliases may name one provider model: the gateway writes the strictest of their
+  // policies, so the run records that one too (review N1).
+  const strictest = strictestThinkingPolicy(
+    enabled
+      .filter((m) => m.gatewayModel === chosen.gatewayModel)
+      .map((m) => narrowThinkingPolicy(m.thinking.site, m.thinking.teamMax)),
+  );
+  const thinking = strictest === undefined ? chosen.thinking : { site: strictest, teamMax: null };
   return {
     ok: true,
     model: { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
     limits: chosen.limits,
+    thinking,
   };
 }
 

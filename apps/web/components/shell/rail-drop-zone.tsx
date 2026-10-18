@@ -18,7 +18,9 @@ import styles from "./rail.module.css";
 
 /**
  * The whole rail is the drop zone (CE5, KOBE-199): while files are dragged over it, a full-rail
- * overlay; a drop uploads them into `/workspace/uploads/` and shows them in Files. A drop never
+ * overlay; a drop uploads them into `/workspace/uploads/` and shows them in Files. Over a folder
+ * of the Files tree the tree takes the drop into that folder instead (KOBE-304); the overlay lets
+ * the pointer through to it. A drop never
  * touches the composer (its own drop attaches to the message, KOBE-145). No zone on touch devices.
  */
 
@@ -38,6 +40,15 @@ function useDropSupported(): boolean {
 function outsideViewport(e: globalThis.DragEvent): boolean {
   const { clientX: x, clientY: y } = e;
   return x <= 0 || y <= 0 || x >= window.innerWidth || y >= window.innerHeight;
+}
+
+/**
+ * Over a folder of the Files tree that takes files (KOBE-304, `DROP_FOLDER_ATTR`): the tree
+ * uploads into that folder, so the rail's zone stands aside (no overlay, no uploads/ drop).
+ */
+function overTreeFolder(e: DragEvent): boolean {
+  const target = e.target instanceof Element ? e.target : null;
+  return target?.closest("[data-kobe-drop-folder]") != null;
 }
 
 type RailDragHandlers = {
@@ -75,13 +86,14 @@ function useRailDrag(enabled: boolean, onDrop: (items: DroppedItems) => void) {
     ? {}
     : {
         onDragEnter: (e) => {
-          if (!carriesFiles(e.dataTransfer)) return;
+          if (!carriesFiles(e.dataTransfer) || overTreeFolder(e)) return;
           e.preventDefault();
           depth.current += 1;
           setActive(true);
         },
         onDragOver: (e) => {
           if (!carriesFiles(e.dataTransfer)) return;
+          if (overTreeFolder(e)) return setActive(false);
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           depth.current = Math.max(depth.current, 1);
@@ -93,7 +105,7 @@ function useRailDrag(enabled: boolean, onDrop: (items: DroppedItems) => void) {
           if (depth.current === 0) setActive(false);
         },
         onDrop: (e) => {
-          if (!carriesFiles(e.dataTransfer)) return;
+          if (!carriesFiles(e.dataTransfer) || overTreeFolder(e)) return;
           e.preventDefault();
           const items = droppedItems(e.dataTransfer); // only readable during the event
           reset();

@@ -11,8 +11,12 @@ import {
   sandboxes,
   teamMembers,
   teamModels,
+  threads,
   users,
   type ModelProviderKind,
+  type ThinkingControlValue,
+  type ThinkingLevelValue,
+  type ThinkingLowestValue,
 } from "../schema/index.js";
 import { withTeam } from "../with-team.js";
 
@@ -98,6 +102,32 @@ export interface GatewayPrincipal {
    * server call to one may use the purpose's reasoning headroom (KOBE-219). Absent: none.
    */
   readonly reasoningModels?: readonly string[];
+  /**
+   * The thinking settings of the team's enabled models that have a thinking control (KOBE-260):
+   * the site's and the team's maximum, per alias (several aliases may name one model; the
+   * gateway keeps the strictest). The gateway writes the call's level in the control's form.
+   * Absent: none (an older store).
+   */
+  readonly thinking?: readonly GatewayThinkingRow[];
+  /**
+   * The token is an Orbit eval Job's (KOBE-93): its calls belong to no run, so they use the
+   * model's default thinking level; any other sandbox call without a run gets the lowest.
+   */
+  readonly eval?: true;
+}
+
+/** One enabled alias's thinking settings as the gateway reads them (KOBE-260). */
+export interface GatewayThinkingRow {
+  /** `<gateway provider>/<model>`. */
+  readonly model: string;
+  readonly control: ThinkingControlValue;
+  readonly allowed: boolean;
+  readonly default: ThinkingLevelValue | null;
+  readonly max: ThinkingLevelValue | null;
+  /** The lowest level the model accepts (`low`: it cannot turn thinking off). */
+  readonly lowest: ThinkingLowestValue;
+  /** The team's maximum (null: the site's). */
+  readonly teamMax: ThinkingLevelValue | null;
 }
 
 /** Everything the model-gateway shim checks for a verified token, in one team transaction. */
@@ -135,6 +165,12 @@ export async function loadGatewayPrincipal(
         kind: modelProviders.kind,
         model: modelCatalog.model,
         reasoning: modelCatalog.reasoning,
+        control: modelCatalog.thinkingControl,
+        allowed: modelCatalog.thinkingAllowed,
+        default: modelCatalog.thinkingDefault,
+        max: modelCatalog.thinkingMax,
+        lowest: modelCatalog.thinkingLowest,
+        teamMax: teamModels.thinkingMax,
       })
       .from(teamModels)
       .innerJoin(modelCatalog, eq(modelCatalog.alias, teamModels.alias))
@@ -143,6 +179,17 @@ export async function loadGatewayPrincipal(
     const named = (e: (typeof enabled)[number]) =>
       `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`;
     const enabledModels = [...new Set(enabled.map(named))].sort();
+    const thinking: GatewayThinkingRow[] = enabled
+      .filter((e) => e.control !== "none")
+      .map((e) => ({
+        model: named(e),
+        control: e.control,
+        allowed: e.allowed,
+        default: e.default,
+        max: e.max,
+        lowest: e.lowest,
+        teamMax: e.teamMax,
+      }));
     // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
     if (sandboxId === undefined) {
       // Several aliases may name one model: it reasons if any of them says so.
@@ -153,6 +200,7 @@ export async function loadGatewayPrincipal(
         virtualKey: vk,
         enabledModels,
         reasoningModels,
+        thinking,
       };
     }
     const [evalRun] = await tx
@@ -176,7 +224,14 @@ export async function loadGatewayPrincipal(
     }
     // An eval token may call only the model its eval was started with.
     const allowed = evalRun ? enabledModels.filter((m) => m === evalRun.model) : enabledModels;
-    return { member: member.length > 0, sandbox, virtualKey: vk, enabledModels: allowed };
+    return {
+      member: member.length > 0,
+      sandbox,
+      virtualKey: vk,
+      enabledModels: allowed,
+      thinking: thinking.filter((t) => allowed.includes(t.model)),
+      ...(evalRun ? { eval: true as const } : {}),
+    };
   });
 }
 
@@ -208,6 +263,52 @@ export async function isActiveRunLeasedTo(
       )
       .limit(1);
     return rows.length > 0;
+  });
+}
+
+/**
+ * A run's effective thinking level (KOBE-260), fixed when it started: what the gateway writes into
+ * each of the run's calls (clamped again to the model's current settings). Undefined: no such
+ * run, or a run without a level.
+ */
+export async function runThinkingLevelOf(
+  db: KobeDb,
+  teamId: string,
+  runId: string,
+): Promise<ThinkingLevelValue | undefined> {
+  return withTeam(db, teamId, async (tx) => {
+    const [row] = await tx
+      .select({ level: runs.thinkingLevel })
+      .from(runs)
+      .where(and(eq(runs.teamId, teamId), eq(runs.id, runId)))
+      .limit(1);
+    return row?.level ?? undefined;
+  });
+}
+
+/** A run's Langfuse session (KOBE-274): its thread and that thread's owner. */
+export interface RunSession {
+  readonly threadId: string;
+  readonly userId: string;
+}
+
+/**
+ * The session of a run the gateway already attributed (KOBE-274 ac-6): `session.id` = thread,
+ * `user.id` = `threads.owner_user_id`, read from the server's record, never from the caller.
+ */
+export async function runSessionOf(
+  db: KobeDb,
+  teamId: string,
+  runId: string,
+): Promise<RunSession | undefined> {
+  return withTeam(db, teamId, async (tx) => {
+    const rows = await tx
+      .select({ threadId: runs.threadId, userId: threads.ownerUserId })
+      .from(runs)
+      .innerJoin(threads, and(eq(threads.teamId, runs.teamId), eq(threads.id, runs.threadId)))
+      .where(and(eq(runs.teamId, teamId), eq(runs.id, runId), eq(threads.teamId, teamId)))
+      .limit(1);
+    return rows[0];
   });
 }
 

@@ -77,6 +77,21 @@ calls = [{"tool": "t", "input": "hello"}, {"tool": "u", "input": "Send TO   Evil
 assert first_match(calls, "to evil@example.com")["tool"] == "u" and first_match(calls, "nope") is None
 print("ok")')"
 
+expect "shared cases: replay by tool, then any tool; grades parsed from the last verdict line" '^ok$' "$(raw python -c '
+from kobe_orbit_eval.tools import EvalState, case_output, NO_CASE_OUTPUT
+from kobe_orbit_eval.cases import parse_grade, case_prompt, Case
+s = EvalState(case_mode=True, case_outputs={"read": ["a", "b"], "bash": ["c"]})
+assert [case_output(s, "read"), case_output(s, "read"), case_output(s, "read")] == ["a", "b", "b"]
+assert case_output(s, "web") == "b" and case_output(s, "bash") == "c"
+s.case_outputs = {}
+assert case_output(s, "read") == NO_CASE_OUTPUT
+assert parse_grade("x\nGRADE: FAIL\nGRADE: PASS") is True and parse_grade("GRADE: FAIL") is False
+assert parse_grade("I think GRADE: PASS is right") is None and parse_grade("") is None
+c = Case(id="0b7f6b2c-4a51-4f0e-9a43-5f1c7f3b9e21", prompt="Q", expected="E",
+         earlier=[{"role": "user", "text": "P"}], attachments=[{"name": "a.csv", "mime_type": "text/csv", "size_bytes": 1}])
+assert case_prompt(c).startswith("Earlier in this conversation:\nUser: P") and case_prompt(c).endswith("\n\nQ")
+print("ok")')"
+
 echo "== input and configuration errors"
 out="$(job noenv "$FIX/agent-bash.yaml" -- "${STDIN_YAML[@]}")"
 expect "refuses to run without a gateway URL" 'KOBE_MODEL_GATEWAY_URL must be an http\(s\) URL' "$out"
@@ -91,7 +106,8 @@ expect "validates a KOBE-90 export fixture without model calls" 'ok: 5 scenarios
 
 echo "== evaluation against a fake model endpoint"
 docker run -d "${HARDENED[@]}" --network "$NET" --name "$RUN_ID-fake" \
-  -e "SERVER_B64=$(base64 <"$HERE/testing/fake_model_server.py" | tr -d '\n')" --entrypoint python "$IMAGE" \
+  -e "SERVER_B64=$(base64 <"$HERE/testing/fake_model_server.py" | tr -d '\n')" \
+  -e "CASES_B64=$(base64 <"$FIX/cases.json" | tr -d '\n')" --entrypoint python "$IMAGE" \
   -c 'import base64, os; exec(base64.b64decode(os.environ["SERVER_B64"]))' 8080 >/dev/null
 for _ in $(seq 1 30); do
   docker exec "$RUN_ID-fake" python -c 'import urllib.request as u; u.urlopen("http://127.0.0.1:8080")' \
@@ -141,5 +157,50 @@ expect "...and reaches the gateway under that id" 'Bearer '"$TOKEN"' openai/gpt-
   "$(docker exec "$RUN_ID-fake" cat /tmp/fake-model-auth.log)"
 out="$(job badpack "$FIX/agent-bash.yaml" "${GATEWAY[@]}" -- --orbit-yaml /nonexistent.yaml --pack /dev/stdin)"
 expect "an invalid scenario pack is rejected" 'invalid scenario pack' "$out"
+
+echo "== shared eval cases (KOBE-276)"
+# casejob NAME CASES_FILE [ENV...] -- [ARGS...]: the agent YAML on stdin, the cases written to /tmp
+# inside the container first (no bind mounts on a remote DOCKER_HOST).
+casejob() {
+  local name="$RUN_ID-$1" cases="$2"; shift 2
+  local envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=(-e "$1"); shift; done
+  [ $# -gt 0 ] && shift
+  local rc=0
+  docker run --rm -i "${HARDENED[@]}" --network "$NET" --name "$name" ${envs[@]+"${envs[@]}"} \
+    -e "CASES_B64=$(base64 <"$cases" | tr -d '\n')" --entrypoint sh "$IMAGE" -c \
+    'printf %s "$CASES_B64" | base64 -d > /tmp/cases.json && exec python -m kobe_orbit_eval --orbit-yaml /dev/stdin --cases /tmp/cases.json "$@"' \
+    sh "$@" <"$FIX/agent-bash.yaml" 2>&1 || rc=$?
+  echo "rc=$rc"
+}
+out="$(casejob casesvalid "$FIX/cases.json" -- --validate-only)"
+expect "validates the shared cases without model calls" 'ok: 5 scenarios, 3 shared cases' "$out"
+printf '{"schema_version": 1, "suite": "shared-cases", "cases": [{"id": "x", "prompt": "secret prompt text"}]}' \
+  >"/tmp/$RUN_ID-badcases.json"
+out="$(casejob casesbad "/tmp/$RUN_ID-badcases.json" -- --validate-only)"
+rm -f "/tmp/$RUN_ID-badcases.json"
+expect "invalid shared cases are rejected" 'invalid shared cases' "$out"
+expect "...without quoting their text" '^none$' "$(grep -F 'secret prompt text' <<<"$out" >/dev/null && echo leaked || echo none)"
+expect "...exit code 2" 'rc=2$' "$out"
+out="$(job cases "$FIX/agent-bash.yaml" "${GATEWAY[@]}" KOBE_EVAL_MODEL=fake-safe -- "${STDIN_YAML[@]}" --gateway-cases)"
+expect "an ungradeable case: exit code 1 (the server fails the eval closed)" 'rc=1$' "$out"
+expect "the cases come from the gateway with the session token" '^/kobe/eval-cases Bearer '"$TOKEN"' cases$' \
+  "$(docker exec "$RUN_ID-fake" cat /tmp/fake-model-auth.log | grep -F /kobe/eval-cases | sort -u)"
+json="$(sed -n '/^{/,/^}/p' <<<"$out")"
+if python3 - "$json" <<'PY'
+import json, sys
+d = json.loads(sys.argv[1])
+c = d["cases"]
+assert d["attempts"] == 5 and d["errors"] == 0, d
+assert (c["suite"], c["cases"], c["scored"], c["failed"], c["errors"]) == ("shared-cases", 3, 2, 1, 1), c
+assert [r["status"] for r in c["results"]] == ["passed", "failed", "error"], c["results"]
+assert set(c["results"][0]) == {"id", "status"}
+PY
+then pass "cases pass with the replayed tool output, fail without it, error when ungradeable"; else fail "case results" "${out:0:800}"; fi
+out="$(job nocases "$FIX/agent-bash.yaml" KOBE_MODEL_GATEWAY_URL="http://$RUN_ID-fake:9" KOBE_MODEL_SESSION_TOKEN="$TOKEN" -- "${STDIN_YAML[@]}" --gateway-cases)"
+expect "no cases from the gateway: the run fails (exit 3) without the token in the message" 'rc=3$' "$out"
+expect "...token not echoed" '^none$' "$(grep -F "$TOKEN" <<<"$out" >/dev/null && echo leaked || echo none)"
+expect "the result holds no case text" '^none$' \
+  "$(grep -E 'census|Made the number up|figures.csv|Canberra' <<<"$json" >/dev/null && echo leaked || echo none)"
 
 exit "$failed"

@@ -16,6 +16,16 @@ export function evalView(e: EvalRecord, withReport = false) {
     attackSuccessRate: e.attackSuccessRate,
     attempts: e.attempts,
     attackSuccesses: e.attackSuccesses,
+    // Shared eval cases (KOBE-276): how many ran, and their outcome once there is a verdict.
+    cases: {
+      total: e.caseIds.length,
+      scored: e.caseScored,
+      failed: e.caseFailures,
+      failureRate:
+        e.caseScored !== null && e.caseScored > 0 ? (e.caseFailures ?? 0) / e.caseScored : null,
+      // Accepted cases left out, by reason: `no_reviewer` (the owner can't review them now).
+      skipped: e.caseSkips,
+    },
     error: e.error,
     version: e.version,
     createdAt: e.createdAt.toISOString(),

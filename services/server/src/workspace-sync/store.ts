@@ -96,7 +96,12 @@ export async function lockWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<
   };
 }
 
-async function saveState(tx: KobeTx, owner: WorkspaceOwner, s: SyncState, push: boolean) {
+export async function saveState(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  s: SyncState,
+  push: boolean,
+): Promise<void> {
   await tx.execute(sql`
     UPDATE workspace_sync
        SET head_rev = ${s.headRev}, horizon_rev = ${s.horizonRev}, live_files = ${s.liveFiles},
@@ -357,9 +362,24 @@ async function roomForRow(
   state: SyncState,
   maxRows: number,
 ): Promise<{ readonly state: SyncState; readonly ok: boolean }> {
-  if (state.liveFiles + state.tombstones < maxRows) return { state, ok: true };
-  const compacted = await compactTombstones(tx, owner, state, COMPACT_BATCH);
-  return { state: compacted, ok: compacted.liveFiles + compacted.tombstones < maxRows };
+  return roomForRows(tx, owner, state, 1, maxRows);
+}
+
+/**
+ * Room for `extra` more rows (a server move adds one per moved file), compacting at least as many
+ * tombstones as are missing. Like {@link roomForRow}, callers keep the returned state.
+ */
+export async function roomForRows(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  state: SyncState,
+  extra: number,
+  maxRows: number,
+): Promise<{ readonly state: SyncState; readonly ok: boolean }> {
+  const over = state.liveFiles + state.tombstones + extra - maxRows;
+  if (over <= 0) return { state, ok: true };
+  const compacted = await compactTombstones(tx, owner, state, Math.max(COMPACT_BATCH, over));
+  return { state: compacted, ok: compacted.liveFiles + compacted.tombstones + extra <= maxRows };
 }
 
 /**

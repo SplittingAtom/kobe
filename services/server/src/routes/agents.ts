@@ -42,6 +42,8 @@ import {
 import { mountEvalRoutes } from "../agents/eval/routes.js";
 import { currentGalleryScores, galleryScoreView } from "../agents/eval/gallery-scores.js";
 import type { EvalRunner } from "../agents/eval/service.js";
+import { mountFeedbackTotals } from "../agents/feedback-routes.js";
+import { mountAgentEvalCases } from "../eval-cases/routes.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
 import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
@@ -313,6 +315,21 @@ export function agentRoutes(
     db,
     resolve: resolveVersioned,
     teamId: (c) => (c as Ctx).get("team").id,
+  });
+  // Answer ratings per version (KOBE-275): owners and team admins.
+  mountFeedbackTotals(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
+    role: (c) => (c as Ctx).get("team").role,
+    userId: (c) => (c as Ctx).get("user").id,
+  });
+  // Shared eval cases (KOBE-276): the agent's owner only.
+  mountAgentEvalCases(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
+    userId: (c) => (c as Ctx).get("user").id,
   });
 
   return app;

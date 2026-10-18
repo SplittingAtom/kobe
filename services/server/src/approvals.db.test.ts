@@ -359,13 +359,13 @@ describe("a policy rule makes the call wait for its user", () => {
       (
         await decide(w.owner, pending.approval_id, {
           decision: "allow",
-          remember: { tool_glob: "mcp__*" },
+          remember: { tool_glob: "mcp__*", scope: "day" },
         })
       ).json,
     ).toMatchObject({ code: "glob_too_broad" });
     const ok = await decide(w.owner, pending.approval_id, {
       decision: "allow",
-      remember: { tool_glob: "share_file", expires_in: 3600 },
+      remember: { tool_glob: "share_file", scope: "day" },
     });
     expect(ok.json).toMatchObject({ status: "allowed", remembered: true });
     expect((await first.result()).decision).toBe("allow");

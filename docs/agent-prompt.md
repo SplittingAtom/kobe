@@ -42,7 +42,11 @@ Read other code and ledgers only as needed; prefer grep over reading whole files
 
 <Anything the brief lacks: dependencies that just merged, a binding decision, files to start from.>
 
-Rules: tests first; notes in docs/ledger/KOBE-<N>.md (template; stay under ~150 lines, link
+Rules: tests first; a new dependency, image or service gets an entry in THIRD_PARTY_LICENSES.md
+(`pnpm licenses:update`; images, chart components and services: a row in
+tools/license-check/inventory.yaml; outside MIT/Apache/BSD/MPL: mark it `pending: gate review`
+with a reason and carry on, never stop to ask);
+notes in docs/ledger/KOBE-<N>.md (template; stay under ~150 lines, link
 evidence instead of pasting logs). Before pushing run `pnpm verify` (it formats, so commit after
 it). Open a PR, then wait for CI with exactly one background `gh pr checks <n> --watch`; never
 write until/while loops around pgrep or sleep (they outlive you and never exit). Fix failures.

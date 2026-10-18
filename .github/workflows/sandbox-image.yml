@@ -9,6 +9,7 @@ on:
       - services/sandbox-agent/**
       - packages/**
       - tools/license-check/**
+      - scripts/assert-image-licenses.sh
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
@@ -63,6 +64,21 @@ jobs:
           LICENSE_REPORT="$RUNNER_TEMP/sandbox-licenses.json" \
           LICENSE_EXCEPTIONS="$PWD/images/sandbox/license-exceptions.json" \
             node tools/license-check/dist/cli.js
+      # KOBE-375: the committed report (THIRD_PARTY_LICENSES.md and NOTICE are rendered from it in
+      # the `checks` job) must match the image; on a mismatch the fresh report is uploaded.
+      - name: Committed license report matches the image
+        run: |
+          node tools/license-check/dist/inventory-cli.js image-report sandbox \
+            "$RUNNER_TEMP/sandbox-licenses.json" --check
+      - name: Upload the fresh license report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sandbox-third-party-licenses
+          path: ${{ runner.temp }}/sandbox-licenses.json
+          retention-days: 7
+      - name: The image ships LICENSE, NOTICE and THIRD_PARTY_LICENSES.md
+        run: scripts/assert-image-licenses.sh kobe-sandbox:ci
       - name: Vulnerability report (HIGH and CRITICAL with fixes available)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

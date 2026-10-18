@@ -137,7 +137,7 @@ export function runUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
       const actor = actorOf(c);
       await deps.runs.getRun(actor, id.data);
       const [usage] = await runsUsage(deps.database.db, actor.team_id, { runId: id.data });
-      return c.json(usage ?? { run_id: id.data, models: [], ...EMPTY });
+      return c.json(usage ?? { run_id: id.data, models: [], thinking_level: null, ...EMPTY });
     });
   });
   return app;

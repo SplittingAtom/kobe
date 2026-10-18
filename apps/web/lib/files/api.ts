@@ -32,11 +32,21 @@ export interface FolderListing {
   readonly nextCursor?: string | null;
 }
 
+/** What a move or rename did (KOBE-304): `to` is the full new path. */
+export interface MoveResult {
+  readonly from: string;
+  readonly to: string;
+  readonly type: "file" | "dir";
+  readonly files: number;
+}
+
 export interface FileSearchResult {
   readonly entries: readonly FileEntry[];
 }
 
 export interface FilesApi {
+  /** The team every call names (the tree remembers its folders per team, KOBE-304). */
+  readonly teamId: string;
   list(path: string, cursor?: string): Promise<ApiResult<FolderListing>>;
   /**
    * The caller's own synced files whose path contains `query` (KOBE-223, the composer's `@`
@@ -46,6 +56,11 @@ export interface FilesApi {
   download(path: string): Promise<ApiResult<Uint8Array>>;
   upload(folder: string, file: File): Promise<ApiResult<FileEntry>>;
   remove(path: string): Promise<ApiResult<void>>;
+  /**
+   * Moves or renames a file or folder to the full path `to` (KOBE-304). The server decides: a
+   * clash is 409 `already_exists` (never overwritten), read-only areas 403 `read_only`.
+   */
+  move(from: string, to: string): Promise<ApiResult<MoveResult>>;
   /**
    * A file's first `maxBytes` for a preview (KOBE-268); the rest is never fetched. `wholeOnly`:
    * nothing is read when its size is over the cap (images; 0 = headers only, for the size and
@@ -68,6 +83,7 @@ function query(params: Readonly<Record<string, string | undefined>>): string {
 export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi {
   const opts = { teamId, fetchFn };
   return {
+    teamId,
     list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
     search: (q, limit, signal) =>
       apiRequest(
@@ -85,6 +101,8 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
     },
     remove: (path) =>
       apiRequest(`/v1/workspace/files${query({ path })}`, { ...opts, method: "DELETE" }),
+    move: (from, to) =>
+      apiRequest(`/v1/workspace/files/move`, { ...opts, method: "POST", json: { from, to } }),
     wake: () => apiRequest(`/v1/workspace/wake`, { ...opts, method: "POST" }),
   };
 }

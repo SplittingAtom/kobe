@@ -9,6 +9,7 @@ import {
   PROVIDER_MODEL_PATTERN,
 } from "@kobe/db";
 import { z } from "zod";
+import { teamThinkingMaxSchema, thinkingPolicySchema } from "./thinking.js";
 
 /** Request bodies of the model admin API (KOBE-40). Errors never echo input (keys). */
 
@@ -133,6 +134,8 @@ const tokenLimitFields = {
   max_output_tokens: tokenCount("the output limit", MODEL_OUTPUT_TOKENS_RANGE).optional(),
   context_window: tokenCount("the context window", MODEL_CONTEXT_WINDOW_RANGE).optional(),
   reasoning: z.boolean({ error: "reasoning is true or false" }).optional(),
+  /** KOBE-260: how the model's thinking is controlled, allowed and bounded (the whole policy). */
+  thinking: thinkingPolicySchema.optional(),
 };
 
 export const addCatalogSchema = z.strictObject({
@@ -162,6 +165,11 @@ export const teamModelSchema = z.strictObject({
   enabled: z.boolean(),
   /** Make this the team's default (requires enabled). */
   is_default: z.boolean().optional(),
+  /**
+   * The team's highest thinking level for this model (KOBE-260; requires enabled): it can only
+   * narrow the site's; null goes back to the site's.
+   */
+  thinking_max: teamThinkingMaxSchema.optional(),
 });
 export type TeamModelInput = z.infer<typeof teamModelSchema>;
 

@@ -4,7 +4,10 @@ import {
   CAPABILITY_FILES,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
+  CAPABILITY_TRACE_SPANS,
   CAPABILITY_WEB_SEARCH,
+  CAPABILITY_WORKSPACE_MOVES,
+  builtinToolDescriptor,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
@@ -18,6 +21,7 @@ import {
   type SandboxCloseReason,
   type SandboxErrorCode,
   type SandboxToServerFrame,
+  type TraceSpansFrame,
   type WebSearchQueryFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
@@ -47,6 +51,7 @@ import {
   type InterruptCause,
 } from "./run-state.js";
 import { createRunTranslator } from "./translate.js";
+import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
 export interface ConnectionClaims {
@@ -127,6 +132,10 @@ export class SandboxConnection implements RegisteredConnection {
   #registered = false;
   /** `hello.capabilities` of the agent on this connection (none from older agents). */
   #capabilities: ReadonlySet<string> = new Set();
+  /** Relayed sandbox spans (KOBE-274): the replica's run state; absent when it does not relay. */
+  readonly #traces: TraceIntake | undefined;
+  readonly #traceRate: TraceFrameRate | undefined;
+  readonly #owner: RunOwner;
   readonly #tokenExpiresAt: number;
 
   constructor(
@@ -144,6 +153,11 @@ export class SandboxConnection implements RegisteredConnection {
     this.#tokens = ctx.tuning.frameBurst;
     this.#byteTokens = ctx.tuning.byteBurst;
     this.#delivery = new CommandDelivery(ctx, this);
+    this.#owner = { teamId: claims.teamId, userId: claims.userId, sandboxId: claims.sandboxId };
+    this.#traces = ctx.traceRelay?.runs;
+    this.#traceRate = this.#traces
+      ? new TraceFrameRate(this.#traces.tuning, ctx.metrics)
+      : undefined;
   }
 
   get ready(): boolean {
@@ -205,6 +219,11 @@ export class SandboxConnection implements RegisteredConnection {
     this.#delivery.poke();
   }
 
+  workspaceMoved(): void {
+    if (this.#state !== "ready" || !this.hasCapability(CAPABILITY_WORKSPACE_MOVES)) return;
+    this.send({ v: 1, type: "workspace.moved" });
+  }
+
   replaced(): void {
     this.close("replaced", "replaced by a newer connection");
   }
@@ -229,10 +248,17 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /** A run.start is about to be delivered here: the run (and its thread) are leased to us. */
-  leaseRun(runId: string, threadId: string, cursor: number, compaction = false): void {
+  leaseRun(
+    runId: string,
+    threadId: string,
+    cursor: number,
+    compaction = false,
+    startedAt: Date | null = null,
+  ): void {
     const existing = this.#leases.get(runId);
     if (existing && !existing.ended) return;
     this.#threads.add(threadId);
+    this.#traces?.track(runId, threadId, startedAt, this.#owner);
     this.#leases.set(runId, {
       threadId,
       ended: false,
@@ -241,11 +267,17 @@ export class SandboxConnection implements RegisteredConnection {
     });
   }
 
+  /** The run's start carried a trace context naming `commandSpanId` (KOBE-274). */
+  traceStarted(runId: string, commandSpanId: string): void {
+    this.#traces?.traced(runId, commandSpanId);
+  }
+
   /** The run ended (here or elsewhere): late frames get `run_not_active`. */
   endLease(runId: string): void {
     const lease = this.#leases.get(runId);
     if (!lease) return;
     lease.ended = true;
+    this.#traces?.ended(runId);
     lease.ingest.close();
     this.#deniedBuckets.delete(runId);
     const ended = [...this.#leases].filter(([, l]) => l.ended);
@@ -413,6 +445,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "web_search.query":
         this.#onWebSearch(frame);
         return;
+      case "trace.spans":
+        this.#onTraceSpans(frame);
+        return;
       case "command.result":
         this.#onCommandResult(frame);
         return;
@@ -502,6 +537,40 @@ export class SandboxConnection implements RegisteredConnection {
     this.#leases.get(frame.run_id)?.ingest.push(frame, bytes);
   }
 
+  /**
+   * `trace.spans` (KOBE-274): never answered, never closing the connection, except for a run or
+   * thread this connection never held (a lease violation like any other frame's). Classified by
+   * the decoded type (key order cannot skip the rate); the spans are parsed later, one by one.
+   */
+  #onTraceSpans(frame: TraceSpansFrame): void {
+    const traces = this.#traces;
+    if (
+      traces === undefined ||
+      this.#traceRate === undefined ||
+      !this.#capabilities.has(CAPABILITY_TRACE_SPANS)
+    ) {
+      this.#ctx.metrics.traceFramesDropped += 1;
+      return;
+    }
+    if (!this.#traceRate.admit()) return;
+    const lease = this.#leases.get(frame.run_id);
+    if (lease === undefined) {
+      // Note: a late frame for a run whose lease the ended-lease count cap evicted AND whose 30 s
+      // trace grace passed is a violation; that needs 256 ended runs on one connection meanwhile.
+      if (traces.recentlyEnded(frame.run_id, frame.thread_id, this.#owner)) {
+        traces.dropFrame(frame.run_id, frame.spans.length);
+      } else {
+        this.#violate("unknown_run", "trace.spans");
+      }
+      return;
+    }
+    if (lease.threadId !== frame.thread_id) {
+      this.#violate("unknown_thread", "trace.spans");
+      return;
+    }
+    traces.accept(frame, this.#owner);
+  }
+
   #onPolicyCheck(frame: PolicyCheckFrame): void {
     const check = this.#checkToolRun(frame.run_id, frame.thread_id, "policy.check");
     if (check === "violation") return;
@@ -540,6 +609,10 @@ export class SandboxConnection implements RegisteredConnection {
     ).then((result) => {
       this.#policyPending.delete(key);
       remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
+      // Tool spans get their name from this decision, never from the sandbox (KOBE-274): a denied
+      // call's name is model text unless it names a built-in.
+      const known = result.decision === "allow" || builtinToolDescriptor(frame.tool) !== undefined;
+      this.#traces?.noteToolCall(frame.run_id, frame.tool_call_id, known ? frame.tool : undefined);
       // A run that ended while we decided gets a deny, whatever the decision was.
       const lease = this.#leases.get(frame.run_id);
       if (result.decision === "allow" && lease && !lease.ended) {
@@ -1303,6 +1376,14 @@ export class SandboxConnection implements RegisteredConnection {
         compaction: false, // never kept (above)
         ingest: this.#newIngest(run.runId, run.threadId, run.sandboxSeq),
       });
+      // A resumed run keeps the trace context its agent got on the old connection (KOBE-274):
+      // on this replica its state (command spans, cap, seen-set) is still known; on another one
+      // it starts afresh, marked traced (harmless: same run, same team).
+      const knownTraced = this.#traces?.isTraced(run.runId) === true;
+      this.#traces?.track(run.runId, run.threadId, run.startedAt, this.#owner);
+      if (!knownTraced && this.#capabilities.has(CAPABILITY_TRACE_SPANS)) {
+        this.#traces?.traced(run.runId);
+      }
     }
     // Runs the sandbox no longer has (Pi or agent restarted, volume lost): interrupted, never
     // resumed (D14). Runs it offers that we don't list are aborted by the agent.

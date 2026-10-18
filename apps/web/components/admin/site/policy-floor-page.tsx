@@ -9,9 +9,11 @@ import {
   putPolicySettings,
   type PolicySettings,
 } from "../../../lib/admin/api/site/policy";
+import { getSiteRememberLimits, putSiteRememberLimits } from "../../../lib/admin/api/remember";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { RulesEditor } from "../policy-rules";
+import { RememberLimitsForm } from "../remember-limits-form";
 import { useMutation, useResource } from "../use-resource";
 import { Button, Checkbox, PageHeader, Section } from "../../ui/console";
 
@@ -35,7 +37,29 @@ export function PolicyFloorPage() {
       <Section title="Approval defaults">
         <PolicySettingsForm />
       </Section>
+      <Section
+        title="Remember limits"
+        description="What members of every team may choose when they remember an approval (KOBE-289). Teams can tighten these limits, never loosen them."
+      >
+        <SiteLimits />
+      </Section>
     </>
+  );
+}
+
+function SiteLimits() {
+  const { state, reload } = useResource(getSiteRememberLimits);
+  return (
+    <ResourceView state={state} label="remember limits">
+      {(limits) => (
+        <RememberLimitsForm
+          label="Site remember limits"
+          initial={limits}
+          save={putSiteRememberLimits}
+          onSaved={reload}
+        />
+      )}
+    </ResourceView>
   );
 }
 

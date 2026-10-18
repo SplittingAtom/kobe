@@ -282,6 +282,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         isTest: test,
         title: body.title ?? null,
         modelAlias: model,
+        thinkingLevel: body.thinking_level ?? null,
       });
     });
     return typeof result === "string" ? fail(c, result) : c.json(result, 201);

@@ -10,6 +10,7 @@ import {
 } from "./common.js";
 import { argPatternSchema, globSchema } from "./glob.js";
 import { toolDescriptorSchema } from "./tools.js";
+import { rememberRuleSchema } from "./remember.js";
 
 /**
  * Policy decision contract (D29). The policy engine (KOBE-35) decides every tool call; the
@@ -186,19 +187,6 @@ export interface PolicyEngine {
    */
   decide(input: PolicyInput): Promise<PolicyDecision>;
 }
-
-/** A remember-rule as the user submits it with an approval (§6.1). */
-export const rememberRuleSchema = z.strictObject({
-  tool_glob: globSchema,
-  arg_pattern: argPatternSchema.optional(),
-  /** Seconds until the rule expires; absent = until revoked. */
-  expires_in: z
-    .number()
-    .int()
-    .positive()
-    .max(366 * 24 * 3600)
-    .optional(),
-});
 
 /** §6.1 `POST /v1/approvals/{id}` body. */
 export const approvalResolutionBodySchema = z.strictObject({

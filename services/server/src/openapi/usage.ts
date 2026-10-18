@@ -1,3 +1,4 @@
+import { thinkingLevelSchema } from "@kobe/protocol";
 import { z } from "zod";
 
 /**
@@ -30,6 +31,8 @@ const runUsageSchema = z.strictObject({
   /** The run's prompt entry: the chat shows the run's usage under its answer. */
   user_entry_id: z.string().nullable(),
   models: z.array(z.string()),
+  /** The run's thinking level (KOBE-260); null: its model has no thinking control. */
+  thinking_level: thinkingLevelSchema.nullable(),
   ...usageTotals,
 });
 

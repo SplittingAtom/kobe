@@ -11,6 +11,7 @@ import type { WebSearchService } from "../web-search/service.js";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
+import type { TraceIntake } from "./trace-intake.js";
 import type { ArtifactPutDeps } from "../artifacts/put.js";
 import type { FileShareDeps } from "../files/share.js";
 import type { MemoryAgentDeps } from "../memory/agent.js";
@@ -38,6 +39,10 @@ export interface WireMetrics {
   runsCompleted: number;
   /** Translated events dropped for failing their protocol schema or size bound. */
   eventsDropped: number;
+  /** Relayed sandbox spans (KOBE-274): exported, dropped, and frames dropped whole. */
+  traceSpansRelayed: number;
+  traceSpansDropped: number;
+  traceFramesDropped: number;
 }
 
 export function newMetrics(): WireMetrics {
@@ -58,6 +63,9 @@ export function newMetrics(): WireMetrics {
     runsInterrupted: 0,
     runsCompleted: 0,
     eventsDropped: 0,
+    traceSpansRelayed: 0,
+    traceSpansDropped: 0,
+    traceFramesDropped: 0,
   };
 }
 
@@ -65,6 +73,12 @@ export type SandboxLimit =
   "frame_rate" | "byte_rate" | "frame_size" | "run_events" | "run_bytes" | "thread_entries";
 
 export type LeaseViolation = "unknown_run" | "unknown_thread" | "unknown_command";
+
+/** What every connection of a replica shares for relayed sandbox spans (KOBE-274). */
+export interface TraceRelayContext {
+  /** Per-run relay state of this replica (cap, seen-set, command spans; survives reconnects). */
+  readonly runs: TraceIntake;
+}
 
 /** Everything a connection shares with its replica. */
 export interface WireContext {
@@ -74,6 +88,8 @@ export interface WireContext {
   readonly replicaId: string;
   /** Derived run token key (KOBE-118); unset: no run tokens are minted. */
   readonly runTokenKey?: Uint8Array;
+  /** Relayed sandbox spans (KOBE-274); unset (tracing off or no key): no trace context, no intake. */
+  readonly traceRelay?: TraceRelayContext;
   /** Server calls a completed run may announce (KOBE-234/219); empty: none configured. */
   readonly serverCalls: readonly ServerCallPurpose[];
   readonly tools: ToolRegistry;

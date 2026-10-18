@@ -1,5 +1,5 @@
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { initTelemetry, type Telemetry } from "./init.js";
 import { annotate, contentAttributes, withSpan } from "./spans.js";
 
@@ -125,6 +125,21 @@ describe("recordSpan", () => {
     });
     const span = exporter.getFinishedSpans()[0];
     expect(span?.name).toBe("egress.connection");
+    expect(span?.duration).toEqual([0, 250_000_000]);
+  });
+
+  it("keeps its timing when the process uptime falls between start and end (epoch, never performance time)", async () => {
+    const { recordSpan } = await import("./spans.js");
+    const exporter = start(false);
+    // The SDK reads a plain number not above performance.now() as a performance timestamp.
+    const uptime = vi.spyOn(performance, "now").mockReturnValue(1_100);
+    try {
+      recordSpan("egress.connection", { startTime: 1_000, endTime: 1_250 });
+    } finally {
+      uptime.mockRestore();
+    }
+    const span = exporter.getFinishedSpans()[0];
+    expect(span?.startTime).toEqual([1, 0]);
     expect(span?.duration).toEqual([0, 250_000_000]);
   });
 });

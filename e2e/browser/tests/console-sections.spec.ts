@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { pageAlerts } from "./support/alerts.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 
 /**
@@ -72,5 +73,64 @@ test("Team inventory: agents, skills and connectors", async ({ page }) => {
   await expect(
     agents.getByRole("table", { name: "Agent inventory" }).or(agents.getByText("No agents yet.")),
   ).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  // Not page.getByRole("alert"): Next's route announcer is one, empty or naming the page.
+  await expect(pageAlerts(page)).toHaveCount(0);
+});
+
+/** How far the table captioned `name`'s scroll box, and the page, are wider than their views. */
+async function overflow(page: Page, name: string) {
+  return page.evaluate((caption) => {
+    const wrapper = [...document.querySelectorAll<HTMLElement>('[data-slot="console-table"]')].find(
+      (w) => w.querySelector("caption")?.textContent === caption,
+    );
+    const root = document.documentElement;
+    return {
+      table: wrapper ? wrapper.scrollWidth - wrapper.clientWidth : -1,
+      page: root.scrollWidth - root.clientWidth,
+    };
+  }, name);
+}
+
+/**
+ * KOBE-306, asserted on layout rather than the team's data (names, counts and dates vary): the
+ * page never scrolls sideways, the table either fits or is its own named scroll region (scrolls,
+ * never clips), every row's ⋯ button can be brought fully into view, and the fixed-width cells
+ * stay compact (dates on one line, the ⋯ button the only action control).
+ */
+async function checkAgentTable(page: Page): Promise<void> {
+  const table = page.getByRole("table", { name: "Agent inventory" });
+  const scroll = await overflow(page, "Agent inventory");
+  expect(scroll.page).toBe(0);
+  if (scroll.table > 0) {
+    await expect(page.getByRole("region", { name: "Agent inventory" })).toBeVisible();
+  }
+  await expect(table.getByRole("button", { name: /to Orbit$|^Suspend|^Reactivate/ })).toHaveCount(
+    0,
+  );
+  for (const menu of await table.getByRole("button", { name: /^Actions for / }).all()) {
+    await menu.scrollIntoViewIfNeeded();
+    await expect(menu).toBeInViewport({ ratio: 1 });
+  }
+  for (const time of await table.locator("time").all()) {
+    // One line on screen; the full date for screen readers (visually hidden text).
+    expect((await time.boundingBox())?.height ?? 0).toBeLessThan(30);
+    await expect(time.locator(".sr-only")).not.toBeEmpty();
+  }
+}
+
+test("Team inventory: the agent table scrolls in its box, never the page, at 1280 and 390 px", async ({
+  page,
+}) => {
+  await open(page, "/admin/team/inventory", "Inventory");
+  const agents = page.getByRole("region", { name: "Agents" });
+  const table = agents.getByRole("table", { name: "Agent inventory" });
+  await expect(table.or(agents.getByText("No agents yet."))).toBeVisible();
+  // Rows are the team's own; with none there is no table to lay out (the page check still runs).
+  if ((await table.count()) === 0) {
+    expect((await overflow(page, "Agent inventory")).page).toBe(0);
+    return;
+  }
+  await checkAgentTable(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await checkAgentTable(page);
 });

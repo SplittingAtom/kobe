@@ -1,6 +1,7 @@
 import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
+import { createSandboxApp, type SandboxRoutesDeps } from "./routes/sandbox.js";
 
 describe("server health endpoints", () => {
   const app = createApp();
@@ -24,7 +25,7 @@ describe("server health endpoints", () => {
 });
 
 describe("server tracing (KOBE-10)", () => {
-  it("emits a metadata-only span in the caller's trace", async () => {
+  it("emits a metadata-only span in a trace of its own, never the caller's (KOBE-274)", async () => {
     const exporter = new InMemorySpanExporter();
     const telemetry = initTelemetry(
       {
@@ -41,9 +42,41 @@ describe("server tracing (KOBE-10)", () => {
         headers: { traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" },
       });
       const [span] = exporter.getFinishedSpans();
-      expect(span?.spanContext().traceId).toBe("0af7651916cd43dd8448eb211c80319c");
+      expect(span?.spanContext().traceId).not.toBe("0af7651916cd43dd8448eb211c80319c");
+      expect(span?.parentSpanContext).toBeUndefined();
       expect(span?.attributes["http.response.status_code"]).toBe(200);
       expect(JSON.stringify(span?.attributes)).not.toContain("s3cret");
+    } finally {
+      await telemetry.shutdown();
+    }
+  });
+});
+
+describe("sandbox listener tracing (KOBE-274)", () => {
+  it("the sandbox-facing app never joins a caller's trace", async () => {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      const app = createSandboxApp({
+        provider: { identifyBootstrapToken: () => Promise.resolve(undefined) },
+        sessionKeys: {} as SandboxRoutesDeps["sessionKeys"],
+      } as unknown as SandboxRoutesDeps);
+      await app.request("/healthz", {
+        headers: { traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" },
+      });
+      const [span] = exporter.getFinishedSpans();
+      expect(span).toBeDefined();
+      expect(span?.spanContext().traceId).not.toBe("0af7651916cd43dd8448eb211c80319c");
+      expect(span?.parentSpanContext).toBeUndefined();
     } finally {
       await telemetry.shutdown();
     }

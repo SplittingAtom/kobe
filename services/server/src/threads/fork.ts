@@ -221,6 +221,7 @@ async function storeFork(
     agent: pin.value,
     title: plan.title ?? source.title,
     modelAlias: model,
+    thinkingLevel: source.thinkingLevel ?? null,
     forkedFrom: { threadId: source.id, entryId: forkPoint },
   });
   // In chunks, in path order (append order): one INSERT is capped at 65,535 bind parameters.

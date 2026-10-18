@@ -15,6 +15,7 @@ import { logger } from "../logger.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { neverPromptReason } from "../policy/evaluate.js";
+import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
@@ -351,6 +352,26 @@ export async function decidePolicyCheck(
     }
     const { decision } = evaluated;
     if (decision.effect === "allow") {
+      // A remembered approval allowed it (KOBE-289): recorded first (last used, audit, tool card).
+      // A rule revoked meanwhile, or a failed record, denies the call instead.
+      const rule = appliedUserRule(decision);
+      if (rule?.rule_id !== undefined) {
+        const recorded = await recordRuleApplied(deps.db, {
+          teamId: target.teamId,
+          userId: target.userId,
+          runId: frame.run_id,
+          toolCallId: frame.tool_call_id,
+          tool: frame.tool,
+          ruleId: rule.rule_id,
+          enforcementPoint: "sandbox",
+          runMaxEvents: deps.runMaxEvents,
+          announce: true,
+        });
+        if (!recorded) {
+          const message = "The remembered approval for this call was revoked; it was denied.";
+          return denyFrame(frame, [denyReason("policy_error", message)], message);
+        }
+      }
       return {
         v: 1,
         type: "policy.result",

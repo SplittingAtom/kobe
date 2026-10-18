@@ -147,6 +147,29 @@ export const workspaceManifestPageSchema = z.strictObject({
 });
 export type WorkspaceManifestPage = z.infer<typeof workspaceManifestPageSchema>;
 
+/**
+ * Server moves and renames of the workspace (KOBE-304, the file browser's move): the agent applies
+ * them as **local renames** of the whole tree (unsynced edits, skipped caches and never-synced
+ * files move along), before the manifest pull that carries their rows. A move's rows are
+ * `rev` .. `rev + 2 * files - 1` (new paths first, then the tombstones of the old ones).
+ * `GET moves?since=<rev>&after=<rev>`: the moves with a row newer than `since`, oldest first;
+ * `more` → ask again with the same `since` and `after` = the last move's `rev`. The server keeps them about as long as tombstones; a
+ * move it no longer lists is applied by the pull alone (download the new path, drop the old).
+ */
+export const WORKSPACE_MOVES_PAGE = 100;
+export const workspaceMoveRecordSchema = z.strictObject({
+  rev: z.number().int().positive(),
+  from: workspacePathSchema,
+  to: workspacePathSchema,
+  type: z.enum(["file", "dir"]),
+});
+export type WorkspaceMoveRecord = z.infer<typeof workspaceMoveRecordSchema>;
+export const workspaceMovesPageSchema = z.strictObject({
+  moves: z.array(workspaceMoveRecordSchema).max(WORKSPACE_MOVES_PAGE),
+  more: z.boolean(),
+});
+export type WorkspaceMovesPage = z.infer<typeof workspaceMovesPageSchema>;
+
 /** `POST blobs/missing`: which of these hashes the server does not hold for this workspace. */
 export const workspaceBlobsMissingRequestSchema = z.strictObject({
   sha256: z.array(sha256HexSchema).max(WORKSPACE_MAX_BATCH),

@@ -35,13 +35,17 @@ beforeEach(async () => {
   syncUrl = await sync.start();
 });
 afterEach(async () => {
-  expect(h?.server.violations ?? []).toEqual([]);
-  await h?.close();
-  h = undefined;
-  await sync.stop();
-  sync.rows.clear();
-  sync.blobs.clear();
-  sync.failWith = undefined;
+  try {
+    expect(h?.server.violations ?? []).toEqual([]);
+    await h?.close();
+  } finally {
+    // Always reset the shared sync server: a failed close must not leak rows into the next test.
+    h = undefined;
+    await sync.stop();
+    sync.rows.clear();
+    sync.blobs.clear();
+    sync.failWith = undefined;
+  }
 });
 
 interface Options {

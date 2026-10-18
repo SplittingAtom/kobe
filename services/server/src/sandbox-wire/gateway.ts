@@ -6,7 +6,7 @@ import {
   SANDBOX_WS_SUBPROTOCOL,
   type SessionTokenClaims,
 } from "@kobe/protocol";
-import { SpanKind, type Span, annotate, extractContext, withSpan } from "@kobe/telemetry";
+import { ROOT_CONTEXT, SpanKind, type Span, annotate, withSpan } from "@kobe/telemetry";
 
 import type { Logger } from "pino";
 import type WebSocket from "ws";
@@ -144,12 +144,10 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
 
   const listener = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy());
-    // The upgrade is one span in the caller's trace (traceparent on the request, when sent);
-    // the long-lived socket itself is not traced.
-    withSpan(
-      "sandbox.ws.upgrade",
-      { kind: SpanKind.SERVER, parent: extractContext(req.headers) },
-      (span) => handle(req, socket, head, span),
+    // The upgrade is one span in a fresh trace: a sandbox's `traceparent` is never joined (run
+    // trace ids are predictable, KOBE-274). The long-lived socket itself is not traced.
+    withSpan("sandbox.ws.upgrade", { kind: SpanKind.SERVER, parent: ROOT_CONTEXT }, (span) =>
+      handle(req, socket, head, span),
     ).catch((err: unknown) => {
       options.log.error({ err }, "sandbox upgrade failed");
       refuse(socket, 503);

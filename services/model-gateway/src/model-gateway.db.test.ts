@@ -20,6 +20,7 @@ import {
   modelProviders,
   recordModelUsage,
   runUsage,
+  runThinkingLevelOf,
   serverCallRunMatches,
   sandboxes,
   teamModels,
@@ -65,6 +66,7 @@ let bifrost: Server;
 let shim: Server;
 let base = "";
 const seenVks: string[] = [];
+const seenBodies: string[] = [];
 const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode(KEY));
 let requireRunToken = false;
 const SC_KEY = deriveServerCallTokenKey(new TextEncoder().encode(KEY));
@@ -127,8 +129,12 @@ beforeAll(async () => {
   });
   bifrost = createServer((req, res) => {
     seenVks.push(String(req.headers["x-bf-vk"]));
-    req.resume();
-    req.on("end", () => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      seenBodies.push(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    });
   });
   await new Promise<void>((r) => bifrost.listen(0, "127.0.0.1", r));
   const db = app.db;
@@ -150,6 +156,7 @@ beforeAll(async () => {
       { ttlMs: 0, keyWaitMs: 100, keyPollMs: 20 },
     ),
     isRunLeased: (t, r, s) => isActiveRunLeasedTo(db, t, r, s),
+    runThinking: (t, r) => runThinkingLevelOf(db, t, r),
     serverCalls: {
       key: SC_KEY,
       replay: new ServerCallReplay(),
@@ -194,6 +201,72 @@ describe("model gateway with its Postgres principal store", () => {
     );
     expect(await chat(token())).toBe(200);
     expect(seenVks).toEqual([VK, VK]);
+  });
+
+  it("writes the run's recorded thinking level, clamped to the catalog and team, into each call (KOBE-260)", async () => {
+    const alias = `fast-${team.slice(0, 8)}`;
+    const vksBefore = seenVks.length;
+    await app.db.execute(sql`UPDATE model_catalog SET reasoning = true,
+      thinking_control = 'reasoning_effort', thinking_allowed = true, thinking_default = 'low',
+      thinking_max = 'medium' WHERE alias = ${alias}`);
+    try {
+      const runId = await withTeam(app.db, team, async (tx) => {
+        const [thread] = await tx
+          .insert(threads)
+          .values({ teamId: team, ownerUserId: user, thinkingLevel: "high" })
+          .returning({ id: threads.id });
+        const [run] = await tx
+          .insert(runs)
+          .values({
+            teamId: team,
+            threadId: thread?.id ?? "",
+            trigger: "user",
+            status: "running",
+            startedAt: new Date(),
+            thinkingLevel: "high",
+          })
+          .returning({ id: runs.id });
+        await tx.insert(sandboxRunLeases).values({
+          teamId: team,
+          runId: run?.id ?? "",
+          userId: user,
+          threadId: thread?.id ?? "",
+          sandboxId,
+        });
+        return run?.id ?? "";
+      });
+      const send = async (extra: Record<string, unknown>, run?: string) => {
+        const r = await fetch(`${base}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token()}`,
+            "content-type": "application/json",
+            ...(run ? { "x-kobe-run-id": run } : {}),
+          },
+          body: JSON.stringify({ model: "openai/gpt-x", messages: [], ...extra }),
+        });
+        expect(r.status).toBe(200);
+        return JSON.parse(seenBodies.at(-1) ?? "{}") as Record<string, unknown>;
+      };
+      // The run recorded high; the site's maximum is medium; the sandbox asks for high.
+      expect((await send({ reasoning_effort: "high" }, runId)).reasoning_effort).toBe("medium");
+      // The team lowers it: the next call follows.
+      await withTeam(app.db, team, (tx) =>
+        tx.update(teamModels).set({ thinkingMax: "off" }).where(eq(teamModels.alias, alias)),
+      );
+      expect((await send({ reasoning_effort: "high" }, runId)).reasoning_effort).toBe("none");
+      // A call that names no run gets the model's default (here clamped by the team: off).
+      expect((await send({})).reasoning_effort).toBe("none");
+    } finally {
+      // The later revocation test counts the calls that reached Bifrost.
+      seenVks.splice(vksBefore);
+      await withTeam(app.db, team, (tx) =>
+        tx.update(teamModels).set({ thinkingMax: null }).where(eq(teamModels.alias, alias)),
+      );
+      await app.db.execute(sql`UPDATE model_catalog SET thinking_control = 'none',
+        thinking_allowed = false, thinking_default = NULL, thinking_max = NULL, reasoning = false
+        WHERE alias = ${alias}`);
+    }
   });
 
   it("a token naming another team (where the user is no member) is refused", async () => {

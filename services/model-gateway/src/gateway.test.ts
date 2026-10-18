@@ -3,9 +3,15 @@ import { createServer, request, type IncomingHttpHeaders, type Server } from "no
 import type { AddressInfo } from "node:net";
 import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
 import { RUN_TOKEN_HEADER, type RunTokenClaims, type SessionTokenAudience } from "@kobe/protocol";
-import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
+import {
+  deriveRunTokenKey,
+  deriveTraceSpanKey,
+  mapSandboxSpanId,
+  signRunToken,
+} from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
+import { runRootSpanId, runTraceId } from "@kobe/protocol";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -120,6 +126,8 @@ let vkValue = "";
 let keyRequests = 0;
 let leased = new Set<string>();
 const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode("r".repeat(40)));
+const SPAN_KEY = deriveTraceSpanKey(new TextEncoder().encode("r".repeat(40)));
+const SESSION_THREAD = "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60";
 /** jti of the run tokens the (fake) record still holds as active. */
 let activeTokens = new Set<string>();
 let records: CallRecord[] = [];
@@ -153,6 +161,10 @@ interface ShimOptions {
   readonly requireRunToken?: boolean;
 }
 
+/** What the fake case store answers, by eval id (KOBE-276); the calls it saw. */
+let caseFiles = new Map<string, string>();
+let caseLoads: [string, string, string][] = [];
+
 async function start(over: ShimOptions = {}): Promise<void> {
   if (shim.listening) {
     shim.closeAllConnections();
@@ -183,6 +195,10 @@ async function start(over: ShimOptions = {}): Promise<void> {
       isActive: async (s) => activeTokens.has(s.jti),
       require: over.requireRunToken ?? false,
     },
+    tracing: {
+      spanKey: SPAN_KEY,
+      runSession: async () => ({ threadId: SESSION_THREAD, userId: user }),
+    },
     bifrostUrl,
     limiter: new CallLimiter({ perSandbox: over.perSandboxCalls ?? 1, total: 10 }),
     bytes: new ByteBudget(over.bytes ?? { perSandbox: 8192, total: 16384 }),
@@ -195,6 +211,12 @@ async function start(over: ShimOptions = {}): Promise<void> {
     logger,
     settings: { maxBodyBytes: 4096, idleTimeoutMs: 5_000 },
     ready: () => true,
+    evalCases: {
+      load: async (t, u, e) => {
+        caseLoads.push([t, u, e]);
+        return caseFiles.get(e) ?? null;
+      },
+    },
   });
   await new Promise<void>((r) => shim.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(shim.address() as AddressInfo).port}`;
@@ -202,6 +224,8 @@ async function start(over: ShimOptions = {}): Promise<void> {
 
 beforeEach(async () => {
   hits.length = 0;
+  caseFiles = new Map();
+  caseLoads = [];
   records = [];
   forgot = 0;
   keyRequests = 0;
@@ -870,19 +894,53 @@ describe("tracing (KOBE-10)", () => {
     expect(dump).not.toContain("gen_ai.prompt");
   });
 
-  it("joins the caller's trace and passes it on to Bifrost", async () => {
+  const RUN = "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6071";
+  const OTHER_RUN = "9e8d7c6b-5a49-4382-b170-6f5e4d3c2b1a";
+  const tp = (runId: string, span = "b7ad6b7169203331") => `00-${runTraceId(runId)}-${span}-01`;
+  const gatewaySpan = (exporter: InMemorySpanExporter) =>
+    exporter.getFinishedSpans().find((s) => s.name === "model_gateway.request");
+
+  it("never joins the caller's trace without an attributed run (KOBE-274)", async () => {
     const exporter = trace(false);
-    await call("/v1/chat/completions", {
-      headers: {
-        ...bearer(),
-        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-      },
-    });
-    const span = exporter.getFinishedSpans()[0];
-    expect(span?.spanContext().traceId).toBe("0af7651916cd43dd8448eb211c80319c");
+    await call("/v1/chat/completions", { headers: { ...bearer(), traceparent: tp(RUN) } });
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).not.toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext).toBeUndefined();
     const upstream = String(hits[0]?.headers.traceparent);
-    expect(upstream).toContain("0af7651916cd43dd8448eb211c80319c");
+    expect(upstream).toContain(span?.spanContext().traceId);
     expect(upstream).toContain(span?.spanContext().spanId);
+  });
+
+  it("places the call in its run's trace under the caller's remapped span, with the session", async () => {
+    const exporter = trace(false);
+    leased.add(RUN);
+    await call("/v1/chat/completions", {
+      headers: { ...bearer(), "x-kobe-run-id": RUN, traceparent: tp(RUN) },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext?.spanId).toBe(
+      mapSandboxSpanId(SPAN_KEY, RUN, "b7ad6b7169203331"),
+    );
+    expect(span?.attributes).toMatchObject({
+      "session.id": SESSION_THREAD,
+      "user.id": user,
+      "kobe.thread_id": SESSION_THREAD,
+      "kobe.run_id": RUN,
+    });
+    expect(String(hits[0]?.headers.traceparent)).toContain(runTraceId(RUN));
+  });
+
+  it("puts a call naming another run's trace in its own run's trace, under the root", async () => {
+    const exporter = trace(false);
+    leased.add(RUN);
+    await call("/v1/chat/completions", {
+      headers: { ...bearer(), "x-kobe-run-id": RUN, traceparent: tp(OTHER_RUN) },
+    });
+    const span = gatewaySpan(exporter);
+    expect(span?.spanContext().traceId).toBe(runTraceId(RUN));
+    expect(span?.parentSpanContext?.spanId).toBe(runRootSpanId(RUN));
   });
 
   it("adds the prompt only with content capture on", async () => {
@@ -891,5 +949,32 @@ describe("tracing (KOBE-10)", () => {
     await new Promise((r) => setTimeout(r, 20));
     const span = exporter.getFinishedSpans()[0];
     expect(String(span?.attributes["gen_ai.prompt"])).toContain(PROMPT);
+  });
+});
+
+describe("shared eval cases for an Orbit eval Job (KOBE-276)", () => {
+  const get = (headers: Record<string, string>) =>
+    call("/kobe/eval-cases", { method: "GET", headers });
+
+  it("serves the running eval's cases with its own token, from the store, never via Bifrost", async () => {
+    caseFiles.set(sandbox, '{"cases":[]}\n');
+    const res = await get(bearer());
+    expect(res.status).toBe(200);
+    expect(res.text).toBe('{"cases":[]}\n');
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(caseLoads).toEqual([[team, user, sandbox]]);
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses without a valid token, for a revoked principal, another method, or no cases", async () => {
+    caseFiles.set(sandbox, "{}");
+    expect((await get({})).status).toBe(401);
+    expect((await get(bearer(token({ key: OTHER_KEY })))).status).toBe(401);
+    expect((await call("/kobe/eval-cases", { headers: bearer() })).status).toBe(404);
+    expect((await get(bearer(token({ sub: randomUUID() })))).status).toBe(404);
+    principal = { ...principal, sandbox: "revoked" };
+    expect((await get(bearer())).status).toBe(403);
+    expect(caseLoads.map((l) => l[2])).not.toContain(undefined);
+    expect(hits).toEqual([]);
   });
 });

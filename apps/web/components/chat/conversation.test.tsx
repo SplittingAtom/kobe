@@ -467,8 +467,11 @@ describe("interrupted runs (D14)", () => {
 
     openApp(fake, t);
     expect(await screen.findByText("The run was interrupted")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry from last entry" })).toBeTruthy();
-    await userEvent.setup().click(screen.getByRole("button", { name: "Continue without retry" }));
+    // The banner can render a moment before its actions (they need the run's markers): wait for them.
+    expect(await screen.findByRole("button", { name: "Retry from last entry" })).toBeTruthy();
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Continue without retry" }));
     const queued = must([...fake.runs.values()].find((r) => r.input === "afterwards"));
     await waitFor(() => expect(queued.status).toBe("running"));
     await streaming(fake, queued.run_id);

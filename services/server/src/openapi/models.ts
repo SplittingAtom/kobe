@@ -1,3 +1,4 @@
+import { thinkingControlSchema, thinkingLevelSchema, thinkingLowestSchema } from "@kobe/protocol";
 import { z } from "zod";
 import { aliasSchema, teamModelSchema } from "../models/schemas.js";
 
@@ -32,6 +33,18 @@ export const teamModelResponseSchema = z.strictObject({
   /** Context window in tokens; null: unknown (the chat's gauge then shows tokens only). */
   context_window: tokens,
   reasoning: z.boolean(),
+  /**
+   * The site's thinking settings (KOBE-260): the provider control the gateway writes, whether
+   * thinking may be on, the default level and the highest level members may pick.
+   */
+  thinking: z.strictObject({
+    control: thinkingControlSchema,
+    allowed: z.boolean(),
+    default: thinkingLevelSchema.nullable(),
+    max: thinkingLevelSchema.nullable(),
+    /** `low` when the model cannot turn thinking off: "off" then means low. */
+    lowest: thinkingLowestSchema,
+  }),
   gateway_model: z.string(),
   input_usd_per_mtok: price,
   output_usd_per_mtok: price,
@@ -42,6 +55,16 @@ export const teamModelResponseSchema = z.strictObject({
   /** The team enabled it: members' agents and threads may use it. */
   enabled: z.boolean(),
   is_default: z.boolean(),
+  /** The team's thinking maximum for the model (it only narrows the site's); null: the site's. */
+  thinking_max: thinkingLevelSchema.nullable(),
+  /**
+   * What members get in this team: the default level (null: no control) and the levels they may
+   * pick per conversation (empty: the chat offers no choice). Runs are clamped to it.
+   */
+  thinking_in_team: z.strictObject({
+    default: thinkingLevelSchema.nullable(),
+    levels: z.array(thinkingLevelSchema),
+  }),
 });
 
 export const teamModelsResponseSchema = z.strictObject({
@@ -87,7 +110,9 @@ export function modelsOpenApiPaths(): Record<string, Record<string, unknown>> {
       put: {
         operationId: "setTeamModel",
         summary: "Enable or disable a catalog model for the team, or make it the default",
-        description: "Team admins (`team.models.manage`). Only an enabled model can be default.",
+        description:
+          "Team admins (`team.models.manage`). Only an enabled model can be default. " +
+          "`thinking_max` lowers the site's thinking maximum for the team (never raises it).",
         parameters: [
           { name: "alias", in: "path", required: true, schema: jsonSchema(aliasSchema, "input") },
           teamHeader(true),
@@ -100,7 +125,11 @@ export function modelsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
         responses: {
           "200": json("TeamModels", "The catalog after the change."),
-          "400": json("Error", "`invalid_request`: a bad body, or a default that isn't enabled."),
+          "400": json(
+            "Error",
+            "`invalid_request`: a bad body, or a default that isn't enabled. " +
+              "`thinking_invalid`: a thinking maximum above the site's.",
+          ),
           ...ERRORS,
           "404": json("Error", "`model_not_found`: the alias is not in the site's catalog."),
         },

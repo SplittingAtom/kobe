@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FOCUS_RING } from "./focus";
@@ -137,6 +137,84 @@ describe("Table", () => {
       wide.mockRestore();
       box.mockRestore();
     }
+  });
+});
+
+describe("Table: wide tables scroll in their own box (KOBE-306)", () => {
+  function renderWide() {
+    render(
+      <Table caption="Agent inventory">
+        <TableHead>
+          <TableRow>
+            <TableHeader>Agent</TableHeader>
+            <TableHeader>
+              <span className="sr-only">Actions</span>
+            </TableHeader>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          <TableRow>
+            <TableCell>Triage</TableCell>
+            <TableCell>…</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    return screen.getByRole("region", { name: "Agent inventory" });
+  }
+  const edges = (region: HTMLElement) =>
+    [...(region.parentElement?.querySelectorAll("[data-edge]") ?? [])].map((e) => [
+      e.getAttribute("data-edge"),
+      e.getAttribute("aria-hidden"),
+    ]);
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fades the edge with more columns past it, following the scroll position", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    const region = renderWide();
+    expect(edges(region)).toEqual([["end", "true"]]);
+
+    act(() => {
+      region.scrollLeft = 300;
+      fireEvent.scroll(region);
+    });
+    expect(edges(region)).toEqual([
+      ["start", "true"],
+      ["end", "true"],
+    ]);
+
+    act(() => {
+      region.scrollLeft = 600;
+      fireEvent.scroll(region);
+    });
+    expect(edges(region)).toEqual([["start", "true"]]);
+  });
+
+  it("has no fades while the table fits", () => {
+    render(
+      <Table caption="Team skills">
+        <TableBody>
+          <TableRow>
+            <TableCell>pdf-tools</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>,
+    );
+    const table = screen.getByRole("table", { name: "Team skills" });
+    expect(table.parentElement?.parentElement?.querySelector("[data-edge]")).toBeNull();
+  });
+
+  it("keeps visually hidden cell text inside the scroll box (positioned), not the page", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    const region = renderWide();
+    // An absolutely positioned `sr-only` span escapes a scroll box that is not positioned and
+    // widens the page (the inventory's "Actions" header did at 390 px).
+    expect(region.className.split(" ")).toEqual(
+      expect.arrayContaining(["relative", "overflow-x-auto"]),
+    );
   });
 });
 

@@ -77,18 +77,34 @@ export function rule(
   scope: PolicyRule["scope"],
   effect: PolicyRule["effect"],
   toolGlob: string,
-  extra: Partial<Pick<PolicyRule, "arg_pattern" | "expires_at" | "id">> = {},
+  extra: Partial<
+    Pick<
+      PolicyRule,
+      | "arg_pattern"
+      | "expires_at"
+      | "id"
+      | "remember_scope"
+      | "thread_id"
+      | "run_id"
+      | "created_at"
+      | "exact_keys"
+    >
+  > = {},
 ): PolicyRule {
   nextId += 1;
   const id = `00000000-0000-4000-8000-${String(nextId).padStart(12, "0")}`;
   return { id, scope, effect, tool_glob: toolGlob, ...extra };
 }
 
-export function ruleSet(rules: readonly PolicyRule[]): PolicyRuleSet {
+export function ruleSet(
+  rules: readonly PolicyRule[],
+  limits?: PolicyRuleSet["remember_limits"],
+): PolicyRuleSet {
   return {
     site: rules.filter((r) => r.scope === "site"),
     team: rules.filter((r) => r.scope === "team"),
     user: rules.filter((r) => r.scope === "user"),
+    ...(limits === undefined ? {} : { remember_limits: limits }),
   };
 }
 

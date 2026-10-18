@@ -11,9 +11,11 @@ import {
 } from "../../../lib/admin/api/team/agents";
 import { consoleHref } from "../../../lib/admin/nav/registry";
 import { scoreLabel } from "../../../lib/admin/orbit-score";
+import { formatTokens } from "../../../lib/admin/usage-format";
 import {
   Button,
   EmptyState,
+  RowMenu,
   Section,
   Table,
   TableBody,
@@ -23,10 +25,10 @@ import {
   TableRow,
   TableRowHeader,
   useConfirm,
-  eventTrigger,
+  type RowMenuItem,
 } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
-import { OrbitExportButton } from "./agent-builder/orbit-export-button";
+import { downloadOrbitExport } from "./agent-builder/orbit-export-button";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 
@@ -80,6 +82,8 @@ function InventoryTable({
   const [cursor, setCursor] = useState<string | null>(first.nextCursor);
   const mutation = useMutation();
   const paging = useMutation();
+  const exporting = useMutation();
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [confirm, confirmDialog] = useConfirm();
 
   async function loadMore() {
@@ -118,18 +122,57 @@ function InventoryTable({
     }
   }
 
+  async function exportToOrbit(agent: InventoryAgent, version: number) {
+    setExportingId(agent.id);
+    try {
+      await exporting.run(() => downloadOrbitExport(teamId, agent.id, agent.slug, version));
+    } finally {
+      setExportingId(null);
+    }
+  }
+
+  /** The row's ⋯ menu: Export to Orbit (published, exportable), then Suspend or Reactivate. */
+  function actions(a: InventoryAgent): RowMenuItem[] {
+    const version = a.currentVersion;
+    return [
+      ...(a.canExport === true && version !== null
+        ? [
+            {
+              id: "export",
+              label: "Export to Orbit",
+              disabled: exporting.pending,
+              onSelect: () => void exportToOrbit(a, version),
+            },
+          ]
+        : []),
+      ...(canSuspend
+        ? [
+            {
+              id: "status",
+              label: a.status === "active" ? "Suspend" : "Reactivate",
+              destructive: a.status === "active",
+              disabled: mutation.pending,
+              onSelect: (trigger: HTMLElement | null) => void toggle(a, trigger),
+            },
+          ]
+        : []),
+    ];
+  }
+
   if (agents.length === 0) return <EmptyState title="No agents yet." />;
   return (
     <>
-      <MutationStatus error={mutation.error ?? paging.error} notice={mutation.notice} />
+      <MutationStatus
+        error={mutation.error ?? exporting.error ?? paging.error}
+        notice={mutation.notice}
+      />
       <Table caption="Agent inventory">
         <TableHead>
           <TableRow>
             <TableHeader>Agent</TableHeader>
-            <TableHeader>Owner</TableHeader>
-            <TableHeader>Scope</TableHeader>
+            <TableHeader>Owner and scope</TableHeader>
             <TableHeader>Status</TableHeader>
-            <TableHeader>Versions</TableHeader>
+            <TableHeader>Version</TableHeader>
             <TableHeader numeric>Runs</TableHeader>
             <TableHeader>Last run</TableHeader>
             <TableHeader numeric>Tokens</TableHeader>
@@ -145,9 +188,15 @@ function InventoryTable({
             <TableRow key={a.id}>
               <TableRowHeader>{a.name}</TableRowHeader>
               <TableCell>
-                {a.scope === "gallery" ? "Gallery" : (a.ownerName ?? PLACEHOLDER)}
+                {a.scope === "gallery" ? (
+                  SCOPE_LABEL.gallery
+                ) : (
+                  <>
+                    {a.ownerName ?? PLACEHOLDER}
+                    <div className="text-sm text-console-muted">{SCOPE_LABEL[a.scope]}</div>
+                  </>
+                )}
               </TableCell>
-              <TableCell>{SCOPE_LABEL[a.scope]}</TableCell>
               <TableCell>
                 {a.archivedAt !== null
                   ? "Archived"
@@ -158,9 +207,11 @@ function InventoryTable({
               <TableCell>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</TableCell>
               <TableCell numeric>{a.runCount.toLocaleString("en-US")}</TableCell>
               <TableCell>
-                {a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} />}
+                {a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} compact />}
               </TableCell>
-              <TableCell numeric>{a.tokens.toLocaleString("en-US")}</TableCell>
+              <TableCell numeric>
+                <TokenCount tokens={a.tokens} />
+              </TableCell>
               <TableCell>
                 <ScheduleList schedules={a.schedules} />
               </TableCell>
@@ -172,36 +223,18 @@ function InventoryTable({
                     {scoreLabel(a.orbitScore)}
                     {a.orbitScore.at !== null && a.orbitScore.status !== "evaluating" && (
                       <div className="text-sm text-console-muted">
-                        <DateTime value={a.orbitScore.at} />
+                        <DateTime value={a.orbitScore.at} compact />
                       </div>
                     )}
                   </>
                 )}
               </TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1.5">
-                  {a.canExport === true && a.currentVersion !== null && (
-                    <OrbitExportButton
-                      teamId={teamId}
-                      agentId={a.id}
-                      agentSlug={a.slug}
-                      version={a.currentVersion}
-                      label={`Export ${a.name} to Orbit`}
-                      size="sm"
-                    />
-                  )}
-                  {canSuspend && (
-                    <Button
-                      size="sm"
-                      variant={a.status === "active" ? "danger" : "secondary"}
-                      disabled={mutation.pending}
-                      onClick={(e) => void toggle(a, eventTrigger(e))}
-                    >
-                      {a.status === "active" ? "Suspend" : "Reactivate"}
-                      <span className="sr-only"> {a.name}</span>
-                    </Button>
-                  )}
-                </div>
+              <TableCell className="w-0 py-1">
+                <RowMenu
+                  label={`Actions for ${a.name}`}
+                  items={actions(a)}
+                  busy={exportingId === a.id}
+                />
               </TableCell>
             </TableRow>
           ))}
@@ -216,6 +249,17 @@ function InventoryTable({
       )}
       {confirmDialog}
     </>
+  );
+}
+
+/** "12.3M" on screen; the exact count for screen readers and, as the tooltip, for a mouse. */
+function TokenCount({ tokens }: { readonly tokens: number }) {
+  const exact = `${tokens.toLocaleString("en-US")} tokens`;
+  return (
+    <span title={exact}>
+      <span aria-hidden>{formatTokens(tokens)}</span>
+      <span className="sr-only">{exact}</span>
+    </span>
   );
 }
 

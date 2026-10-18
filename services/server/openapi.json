@@ -3660,6 +3660,187 @@
         }
       }
     },
+    "/v1/approvals/approve-all": {
+      "post": {
+        "operationId": "approveAllWaiting",
+        "summary": "Allow every listed pending approval of one run (only the run's user)",
+        "description": "Each approval is signed over its own (run, tool call, tool, canonical input) and audited on its own. Refused as a whole when the team's limits forbid it, or any is destructive or open-world, not pending, or not of this run.",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveAllBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The approvals, now allowed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`approve_all_not_allowed`: the team's limits or a tool's risk.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, another run, user or team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`approval_resolved`, `approval_expired`, `run_not_active` or `approval_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`approvals_unavailable`: no approval key is configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/remember": {
+      "get": {
+        "operationId": "getApprovalRememberOptions",
+        "summary": "What the approval card may offer for a pending approval",
+        "description": "The remember scopes the team's limits allow for this tool with the expiry the server would set now, the exact-action pattern derived from the stored canonical input, and whether Approve all waiting is offered for its run. The decisions check all of it again.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The options.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RememberOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the id is not a uuid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/approvals/{id}": {
       "get": {
         "operationId": "getApproval",
@@ -3741,7 +3922,7 @@
       "post": {
         "operationId": "decideApproval",
         "summary": "Allow or deny a pending approval (only the run's user)",
-        "description": "Allow signs HMAC(team, run, tool_call_id, tool, token expiry, canonical input) so exactly the approved input runs, once. `remember` (allow only) writes a user allow rule for exactly this tool (optional arg pattern and expiry); it never lifts an ask or deny rule. Pending approvals expire after 1 hour; the run then ends.",
+        "description": "Allow signs HMAC(team, run, tool_call_id, tool, token expiry, canonical input) so exactly the approved input runs, once. `remember` (allow only) writes a user allow rule for exactly this tool with a scope (this conversation, until end of today, this run, 1 day, 30 days, until revoked) and optionally only this exact action; the server computes the expiry and the pattern and applies the team's remember limits. It never lifts an ask or deny rule, nor applies to scheduled or auto runs. Pending approvals expire after 1 hour; the run then ends.",
         "parameters": [
           {
             "name": "id",
@@ -3785,7 +3966,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`, `invalid_remember` (remember with deny, bad rule) or `glob_too_broad`.",
+            "description": "`invalid_request`, `invalid_remember` (remember with deny, bad rule), `glob_too_broad` or `exact_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3805,7 +3986,7 @@
             }
           },
           "403": {
-            "description": "`not_a_team_member` or `forbidden`.",
+            "description": "`not_a_team_member`, `forbidden` or `remember_not_allowed` (destructive tool, or the team's limits).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4002,7 +4183,7 @@
       "put": {
         "operationId": "setTeamModel",
         "summary": "Enable or disable a catalog model for the team, or make it the default",
-        "description": "Team admins (`team.models.manage`). Only an enabled model can be default.",
+        "description": "Team admins (`team.models.manage`). Only an enabled model can be default. `thinking_max` lowers the site's thinking maximum for the team (never raises it).",
         "parameters": [
           {
             "name": "alias",
@@ -4047,7 +4228,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: a bad body, or a default that isn't enabled.",
+            "description": "`invalid_request`: a bad body, or a default that isn't enabled. `thinking_invalid`: a thinking maximum above the site's.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4088,6 +4269,955 @@
           },
           "409": {
             "description": "`no_active_team` or `team_mismatch` (stale tab).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/feedback": {
+      "put": {
+        "operationId": "rateAnswer",
+        "summary": "Rate an answer (thumbs up or down), or change your rating",
+        "description": "Anyone who can read the run's thread rates it for themselves: its owner and readers of a project- or team-shared thread. One rating per run and member. Reasons and a comment (at most 500 characters) go with a thumbs down only. The comment is shown to its author only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutFeedbackBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored rating.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerFeedback"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the body does not match.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found` (unknown id, or a thread you can't read) or `entry_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`run_not_ended`, `not_an_answer`, `thread_in_trash`, `test_thread`, `no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearAnswerRating",
+        "summary": "Clear your rating of an answer",
+        "description": "Removes the caller's own rating, if any, even after they lost access to the thread.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cleared, or there was none."
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found`: the id is not a uuid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{id}/feedback": {
+      "get": {
+        "operationId": "getAgentFeedbackTotals",
+        "summary": "An agent's answer ratings per version, model, reason and day (counts only)",
+        "description": "For the agent's owners and the team's admins (a gallery agent: team admins), in the active team, over a preset window: the last 7, 30 (default) or 90 finished UTC days. No custom ranges. Numbers show only over `min_raters` raters other than the caller; a breakdown is null unless every one of its cells has that many. Residual: comparing nested windows, or the same window on different days, can still narrow raters down over time.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["7", "30", "90"],
+              "default": "30"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The totals and the breakdowns that may be shown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentFeedbackTotals"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: any query but window=7, 30 or 90.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no agent with that id that you can see.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{id}/feedback": {
+      "get": {
+        "operationId": "getThreadFeedback",
+        "summary": "The thread's rateable answers with your ratings",
+        "description": "Every ended message run of the thread with its prompt entry and the caller's rating (or null). None for a thread in Trash or a test thread.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Answers and the caller's ratings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadFeedback"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, or a thread you can't read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/eval-case/preview": {
+      "post": {
+        "operationId": "previewEvalCase",
+        "summary": "See exactly what sharing this answer as an eval case would store",
+        "description": "For the conversation's owner, on their own thumbs down. Shares nothing. Returns the copy (prompt, answer, reasons and comment, plus what the options add), its digest and what can be added: earlier exchanges, this answer's tool outputs, the prompt's files (names only).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvalCaseOptions"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The copy as it would be stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalCasePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: bad options, or an id this answer doesn't have.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found`: unknown id, or a thread you can't read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_shareable` (not your conversation, not your thumbs down, or a gallery agent), `thread_unavailable` (Trash or a test thread), `exchange_unavailable`, `already_shared`, `no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}/eval-case": {
+      "post": {
+        "operationId": "shareEvalCase",
+        "summary": "Share this answer with the agent's owner as an eval case, as previewed",
+        "description": "Takes the previewed options and the preview's digest; refused with `preview_stale` when the copy changed since. The agent's owner never sees who shared it. Not audited.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareEvalCaseBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The shared case.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEvalCase"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`run_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_shareable` (not your conversation, not your thumbs down, or a gallery agent), `thread_unavailable` (Trash or a test thread), `exchange_unavailable`, `already_shared`, `preview_stale`, `no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/eval-cases": {
+      "get": {
+        "operationId": "listMyEvalCases",
+        "summary": "The cases you shared in the active team",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your cases, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEvalCases"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/eval-cases/{id}": {
+      "delete": {
+        "operationId": "withdrawEvalCase",
+        "summary": "Withdraw a case you shared (deletes the copy)",
+        "description": "Your own cases only; 204 whether or not there was one.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Withdrawn, or there was none."
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden` (no `team.chat`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{id}/eval-cases": {
+      "get": {
+        "operationId": "listAgentEvalCases",
+        "summary": "Cases members shared on this agent (its owner only)",
+        "description": "Open first, then accepted, then dismissed. Never who shared a case; the day only.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cases and the accepted count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvalCases"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: you don't own this agent (team admins included).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`agent_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{id}/eval-cases/{caseId}": {
+      "get": {
+        "operationId": "getAgentEvalCase",
+        "summary": "One shared case with its copied exchange",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The case.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvalCase"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: you don't own this agent (team admins included).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`agent_not_found` or `case_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "reviewAgentEvalCase",
+        "summary": "Accept, dismiss or reopen a case, or write its expected behaviour",
+        "description": "Accepted cases (each with an expected behaviour) run in the agent's pre-publish Orbit eval as an extra suite; their failure rate is held to the team's threshold.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewEvalCaseBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The reviewed case.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvalCase"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`forbidden`: you don't own this agent (team admins included).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`agent_not_found` or `case_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`expected_behaviour_required`, `case_limit`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4217,6 +5347,17 @@
           },
           "model": {
             "type": ["string", "null"]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "leaf_entry_id": {
             "anyOf": [
@@ -4480,6 +5621,17 @@
                 },
                 "model": {
                   "type": ["string", "null"]
+                },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "leaf_entry_id": {
                   "anyOf": [
@@ -4783,6 +5935,17 @@
                 },
                 "model": {
                   "type": ["string", "null"]
+                },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "leaf_entry_id": {
                   "anyOf": [
@@ -5091,6 +6254,17 @@
           },
           "model": {
             "type": ["string", "null"]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "leaf_entry_id": {
             "anyOf": [
@@ -5590,6 +6764,17 @@
               }
             ]
           },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "test": {
             "type": "boolean"
           }
@@ -5621,6 +6806,17 @@
                 "type": "string",
                 "maxLength": 64,
                 "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
               },
               {
                 "type": "null"
@@ -5804,6 +7000,17 @@
           },
           "model": {
             "type": ["string", "null"]
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "leaf_entry_id": {
             "anyOf": [
@@ -7319,30 +8526,196 @@
                 "minLength": 1,
                 "maxLength": 256
               },
-              "arg_pattern": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string",
-                  "maxLength": 512,
-                  "pattern": "^(\\/([^~/]|~[01])*)+$"
-                },
-                "additionalProperties": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
+              "scope": {
+                "type": "string",
+                "enum": ["thread", "today", "run", "day", "month", "forever"]
               },
-              "expires_in": {
-                "type": "integer",
-                "exclusiveMinimum": 0,
-                "maximum": 31622400
+              "exact": {
+                "default": false,
+                "type": "boolean"
               }
             },
-            "required": ["tool_glob"],
+            "required": ["tool_glob", "scope"],
             "additionalProperties": false
           }
         },
         "required": ["decision"],
+        "additionalProperties": false
+      },
+      "ApproveAllBody": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "approval_ids": {
+            "minItems": 2,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f-]+$"
+                }
+              ]
+            }
+          }
+        },
+        "required": ["run_id", "approval_ids"],
+        "additionalProperties": false
+      },
+      "RememberOptions": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "can_remember": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": ["string", "null"]
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": ["thread", "today", "run", "day", "month", "forever"]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "expires_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["scope", "label", "expires_at"],
+              "additionalProperties": false
+            }
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "exact": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "arg_pattern": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "pattern": "^(\\/([^~/]|~[01])*)+$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "pins_all": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["arg_pattern", "pins_all"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exact_only": {
+            "type": "boolean"
+          },
+          "approve_all": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "approval_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": ["approval_ids"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approve_all_reason": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "approval_id",
+          "run_id",
+          "can_remember",
+          "reason",
+          "choices",
+          "time_zone",
+          "exact",
+          "exact_only",
+          "approve_all",
+          "approve_all_reason"
+        ],
         "additionalProperties": false
       },
       "ThreadUsage": {
@@ -7431,6 +8804,17 @@
                     "type": "string"
                   }
                 },
+                "thinking_level": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "calls": {
                   "type": "integer",
                   "minimum": 0,
@@ -7478,6 +8862,7 @@
                 "run_id",
                 "user_entry_id",
                 "models",
+                "thinking_level",
                 "calls",
                 "input_tokens",
                 "output_tokens",
@@ -7598,6 +8983,53 @@
                 "reasoning": {
                   "type": "boolean"
                 },
+                "thinking": {
+                  "type": "object",
+                  "properties": {
+                    "control": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "reasoning_effort",
+                        "anthropic_adaptive",
+                        "anthropic_effort",
+                        "anthropic_budget",
+                        "gemini_budget"
+                      ]
+                    },
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "default": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "max": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lowest": {
+                      "type": "string",
+                      "enum": ["off", "low"]
+                    }
+                  },
+                  "required": ["control", "allowed", "default", "max", "lowest"],
+                  "additionalProperties": false
+                },
                 "gateway_model": {
                   "type": "string"
                 },
@@ -7660,6 +9092,42 @@
                 },
                 "is_default": {
                   "type": "boolean"
+                },
+                "thinking_max": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": ["off", "low", "medium", "high"]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "thinking_in_team": {
+                  "type": "object",
+                  "properties": {
+                    "default": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["off", "low", "medium", "high"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "levels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["off", "low", "medium", "high"]
+                      }
+                    }
+                  },
+                  "required": ["default", "levels"],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -7671,6 +9139,7 @@
                 "max_output_tokens",
                 "context_window",
                 "reasoning",
+                "thinking",
                 "gateway_model",
                 "input_usd_per_mtok",
                 "output_usd_per_mtok",
@@ -7679,7 +9148,9 @@
                 "created_at",
                 "updated_at",
                 "enabled",
-                "is_default"
+                "is_default",
+                "thinking_max",
+                "thinking_in_team"
               ],
               "additionalProperties": false
             }
@@ -7699,9 +9170,1486 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "thinking_max": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["off", "low", "medium", "high"]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": ["enabled"],
+        "additionalProperties": false
+      },
+      "PutFeedbackBody": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": ["up", "down"]
+          },
+          "reasons": {
+            "default": [],
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+            }
+          },
+          "comment": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entry_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["rating"],
+        "additionalProperties": false
+      },
+      "AnswerFeedback": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rating": {
+            "type": "string",
+            "enum": ["up", "down"]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+            }
+          },
+          "comment": {
+            "type": ["string", "null"]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "run_id",
+          "thread_id",
+          "entry_id",
+          "rating",
+          "reasons",
+          "comment",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "ThreadFeedback": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "user_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "feedback": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "run_id": {
+                          "type": "string",
+                          "allOf": [
+                            {
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            {
+                              "pattern": "^[0-9a-f-]+$"
+                            }
+                          ]
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "allOf": [
+                            {
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            {
+                              "pattern": "^[0-9a-f-]+$"
+                            }
+                          ]
+                        },
+                        "entry_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "rating": {
+                          "type": "string",
+                          "enum": ["up", "down"]
+                        },
+                        "reasons": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                          }
+                        },
+                        "comment": {
+                          "type": ["string", "null"]
+                        },
+                        "updated_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                        }
+                      },
+                      "required": [
+                        "run_id",
+                        "thread_id",
+                        "entry_id",
+                        "rating",
+                        "reasons",
+                        "comment",
+                        "updated_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "eval_case_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["run_id", "user_entry_id", "feedback"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["thread_id", "answers"],
+        "additionalProperties": false
+      },
+      "AgentFeedbackTotals": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "window_days": {
+            "anyOf": [
+              {
+                "type": "number",
+                "const": 7
+              },
+              {
+                "type": "number",
+                "const": 30
+              },
+              {
+                "type": "number",
+                "const": 90
+              }
+            ]
+          },
+          "bucket": {
+            "type": "string",
+            "const": "day"
+          },
+          "min_raters": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "enough": {
+                "type": "boolean"
+              },
+              "up": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "down": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "rate": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["enough", "up", "down", "rate"],
+            "additionalProperties": false
+          },
+          "versions": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "up": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "down": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "rate": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reasons": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "wrong": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "ignored_instructions": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "unsafe": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "too_slow": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "other": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "wrong",
+                            "ignored_instructions",
+                            "unsafe",
+                            "too_slow",
+                            "other"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "models": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "model": {
+                                "type": ["string", "null"]
+                              },
+                              "up": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "down": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "rate": {
+                                "anyOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["model", "up", "down", "rate"],
+                            "additionalProperties": false
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["version", "up", "down", "rate", "reasons", "models"],
+                  "additionalProperties": false
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    "up": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "down": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["start", "up", "down"],
+                  "additionalProperties": false
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "agent_id",
+          "from",
+          "to",
+          "window_days",
+          "bucket",
+          "min_raters",
+          "totals",
+          "versions",
+          "series"
+        ],
+        "additionalProperties": false
+      },
+      "EvalCaseOptions": {
+        "type": "object",
+        "properties": {
+          "earlier_exchanges": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "tool_output_ids": {
+            "default": [],
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "attachment_ids": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f-]+$"
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ShareEvalCaseBody": {
+        "type": "object",
+        "properties": {
+          "earlier_exchanges": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "tool_output_ids": {
+            "default": [],
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "attachment_ids": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f-]+$"
+                }
+              ]
+            }
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": ["digest"],
+        "additionalProperties": false
+      },
+      "EvalCasePreview": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "agent": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": ["team", "personal"]
+              },
+              "id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              "version": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["scope", "id", "version"],
+            "additionalProperties": false
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string"
+              },
+              "answer": {
+                "type": "string"
+              },
+              "earlier": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": ["user", "assistant"]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["role", "text"],
+                  "additionalProperties": false
+                }
+              },
+              "tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tool": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "is_error": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["tool", "text", "is_error"],
+                  "additionalProperties": false
+                }
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["name", "mime_type", "size_bytes"],
+                  "additionalProperties": false
+                }
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                }
+              },
+              "comment": {
+                "type": ["string", "null"]
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "prompt",
+              "answer",
+              "earlier",
+              "tool_outputs",
+              "attachments",
+              "reasons",
+              "comment",
+              "truncated"
+            ],
+            "additionalProperties": false
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "available": {
+            "type": "object",
+            "properties": {
+              "earlier_exchanges": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "is_error": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["id", "tool", "is_error"],
+                  "additionalProperties": false
+                }
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["id", "name", "mime_type", "size_bytes"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["earlier_exchanges", "tool_outputs", "attachments"],
+            "additionalProperties": false
+          },
+          "shared_case_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["run_id", "agent", "content", "digest", "available", "shared_case_id"],
+        "additionalProperties": false
+      },
+      "MyEvalCase": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "agent": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": ["team", "personal"]
+              },
+              "id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              "version": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["scope", "id", "version"],
+            "additionalProperties": false
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "accepted", "dismissed"]
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string"
+              },
+              "answer": {
+                "type": "string"
+              },
+              "earlier": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": ["user", "assistant"]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["role", "text"],
+                  "additionalProperties": false
+                }
+              },
+              "tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tool": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "is_error": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["tool", "text", "is_error"],
+                  "additionalProperties": false
+                }
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["name", "mime_type", "size_bytes"],
+                  "additionalProperties": false
+                }
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                }
+              },
+              "comment": {
+                "type": ["string", "null"]
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "prompt",
+              "answer",
+              "earlier",
+              "tool_outputs",
+              "attachments",
+              "reasons",
+              "comment",
+              "truncated"
+            ],
+            "additionalProperties": false
+          },
+          "shared_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": ["id", "agent", "status", "content", "shared_at"],
+        "additionalProperties": false
+      },
+      "MyEvalCases": {
+        "type": "object",
+        "properties": {
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "agent": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": ["team", "personal"]
+                    },
+                    "id": {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    "version": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["scope", "id", "version"],
+                  "additionalProperties": false
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["open", "accepted", "dismissed"]
+                },
+                "content": {
+                  "type": "object",
+                  "properties": {
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "answer": {
+                      "type": "string"
+                    },
+                    "earlier": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "role": {
+                            "type": "string",
+                            "enum": ["user", "assistant"]
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["role", "text"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "tool_outputs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tool": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "is_error": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["tool", "text", "is_error"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "mime_type": {
+                            "type": "string"
+                          },
+                          "size_bytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": ["name", "mime_type", "size_bytes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                      }
+                    },
+                    "comment": {
+                      "type": ["string", "null"]
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "prompt",
+                    "answer",
+                    "earlier",
+                    "tool_outputs",
+                    "attachments",
+                    "reasons",
+                    "comment",
+                    "truncated"
+                  ],
+                  "additionalProperties": false
+                },
+                "shared_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": ["id", "agent", "status", "content", "shared_at"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["cases"],
+        "additionalProperties": false
+      },
+      "AgentEvalCases": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "accepted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_accepted": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["open", "accepted", "dismissed"]
+                },
+                "agent_version": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                  }
+                },
+                "prompt_excerpt": {
+                  "type": "string"
+                },
+                "shared_on": {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                },
+                "expected_behaviour": {
+                  "type": ["string", "null"]
+                },
+                "reviewed_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "status",
+                "agent_version",
+                "reasons",
+                "prompt_excerpt",
+                "shared_on",
+                "expected_behaviour",
+                "reviewed_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["agent_id", "accepted", "max_accepted", "cases"],
+        "additionalProperties": false
+      },
+      "AgentEvalCase": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "accepted", "dismissed"]
+          },
+          "agent_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+            }
+          },
+          "prompt_excerpt": {
+            "type": "string"
+          },
+          "shared_on": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "expected_behaviour": {
+            "type": ["string", "null"]
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string"
+              },
+              "answer": {
+                "type": "string"
+              },
+              "earlier": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": ["user", "assistant"]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["role", "text"],
+                  "additionalProperties": false
+                }
+              },
+              "tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tool": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "is_error": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["tool", "text", "is_error"],
+                  "additionalProperties": false
+                }
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["name", "mime_type", "size_bytes"],
+                  "additionalProperties": false
+                }
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["wrong", "ignored_instructions", "unsafe", "too_slow", "other"]
+                }
+              },
+              "comment": {
+                "type": ["string", "null"]
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "prompt",
+              "answer",
+              "earlier",
+              "tool_outputs",
+              "attachments",
+              "reasons",
+              "comment",
+              "truncated"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "agent_version",
+          "reasons",
+          "prompt_excerpt",
+          "shared_on",
+          "expected_behaviour",
+          "reviewed_at",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewEvalCaseBody": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["open", "accepted", "dismissed"]
+          },
+          "expected_behaviour": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "additionalProperties": false
       }
     },

@@ -1,0 +1,1 @@
+ALTER TABLE "tool_rules" ADD COLUMN "exact_keys" boolean DEFAULT false NOT NULL;

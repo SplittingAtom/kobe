@@ -43,10 +43,19 @@ export const users = pgTable(
      * in @kobe/protocol); the CHECK only bounds it to a small JSON object. Not a Better Auth field.
      */
     uiPreferences: jsonb(),
+    /**
+     * The member's IANA time zone (KOBE-289): the server ends "until end of today" approvals at
+     * midnight there. NULL means UTC. Not a Better Auth field.
+     */
+    timeZone: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      "users_time_zone",
+      sql`${t.timeZone} IS NULL OR char_length(${t.timeZone}) BETWEEN 1 AND 64`,
+    ),
     check(
       "users_ui_preferences",
       sql`${t.uiPreferences} IS NULL OR (jsonb_typeof(${t.uiPreferences}) = 'object' AND octet_length(${t.uiPreferences}::text) <= ${sql.raw(String(UI_PREFERENCES_MAX_BYTES))})`,

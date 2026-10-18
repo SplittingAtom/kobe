@@ -24,10 +24,12 @@ import {
   eventTrigger,
   useConfirm,
 } from "../../ui/console";
+import type { ThinkingLevel } from "@kobe/protocol";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { TeamThinkingCell } from "./model-thinking-cell";
 
 /**
  * Team console: the team's models (spec D6, D30; `/v1/team/models`, team.models.manage). Team
@@ -43,7 +45,7 @@ export function TeamModelsPage() {
     <>
       <PageHeader
         title="Models"
-        description="Choose which of the site's models your team may use and which one is the default. Conversations use the default unless someone picks another enabled model for them. Usage is charged to the team's budget."
+        description="Choose which of the site's models your team may use and which one is the default. Conversations use the default unless someone picks another enabled model for them. You can lower how much a thinking model may think for your team, never raise it above the site's setting. Usage is charged to the team's budget."
       />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="models">
@@ -105,6 +107,19 @@ function ModelsTable({
     if (done) onChanged();
   }
 
+  async function setThinking(m: TeamModel, max: ThinkingLevel | null) {
+    const done = await mutation.run(
+      () => setTeamModel(teamId, m.alias, { enabled: true, thinkingMax: max }),
+      () =>
+        max === null
+          ? `${modelName(m)} follows the site's thinking settings.`
+          : max === "off"
+            ? `Thinking is off for ${modelName(m)} in this team.`
+            : `${modelName(m)} thinks at most at ${max} in this team.`,
+    );
+    if (done) onChanged();
+  }
+
   return (
     <>
       {enabled.length === 0 ? (
@@ -133,6 +148,7 @@ function ModelsTable({
             <TableHeader>Provider model</TableHeader>
             <TableHeader>Enabled</TableHeader>
             <TableHeader>Default</TableHeader>
+            <TableHeader>Thinking</TableHeader>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -168,6 +184,13 @@ function ModelsTable({
                 ) : (
                   <span className="text-sm text-console-muted">Enable first</span>
                 )}
+              </TableCell>
+              <TableCell>
+                <TeamThinkingCell
+                  model={m}
+                  disabled={mutation.pending}
+                  onChange={(max) => void setThinking(m, max)}
+                />
               </TableCell>
             </TableRow>
           ))}
