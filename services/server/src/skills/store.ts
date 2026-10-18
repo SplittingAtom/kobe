@@ -92,6 +92,19 @@ export interface NewSkillVersion {
   /** Requested semver; by default the next minor of the latest (0.1.0 for a new skill). */
   readonly semver?: string;
   readonly changelog?: string;
+  /** The Workbench draft this version was saved from (KOBE-320). */
+  readonly draft?: UploadDraft;
+}
+
+/**
+ * A draft's Save version (KOBE-320): its id goes into the `skill.uploaded` audit, and a personal
+ * save of a draft started from a team conversation also records `skill.draft.personalized` (SK11)
+ * in the version's transaction.
+ */
+export interface UploadDraft {
+  readonly id: string;
+  readonly teamId: string;
+  readonly personalized: boolean;
 }
 
 export type UploadError =
@@ -222,8 +235,20 @@ export function uploadSkillVersion(
         files: input.fileCount,
         source: input.source,
         findings: input.scan.findings.length,
+        ...(input.draft ? { draftId: input.draft.id } : {}),
       },
     });
+    if (input.draft?.personalized)
+      await recordAudit(tx, {
+        action: "skill.draft.personalized",
+        teamId: input.draft.teamId,
+        target: {
+          draftId: input.draft.id,
+          skillId: skill.id,
+          slug: skill.slug,
+          semver: version.semver,
+        },
+      });
     return { ok: true, skill, version };
   });
 }

@@ -11,6 +11,7 @@ import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import { memoryRecorder, purgeMemoryBatchInTx } from "../retention/memory.js";
 import { EVAL_CASE_BATCH, purgeDepartedCasesInTx } from "../retention/eval-cases.js";
+import { DRAFT_BATCH, purgeDepartedDraftsInTx } from "../retention/skill-drafts.js";
 import { deleteBounded } from "../retention/bounded-delete.js";
 import { withTeamRecovering } from "../retention/recovering.js";
 import { workspaceBlobKey } from "../workspace-sync/keys.js";
@@ -224,7 +225,26 @@ async function deleteEvalCases(
   }
 }
 
-/** Step 6: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
+/**
+ * Step 6: the member's Workbench drafts (KOBE-320), shared ones too: a draft is its author's, and
+ * what was worth keeping was saved as a version. The guard above is the hold check.
+ */
+async function deleteDrafts(
+  ctx: OffboardingContext,
+  target: Departed,
+): Promise<PurgeOutcome | "ok"> {
+  for (;;) {
+    const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
+      const state = await guard(tx, target);
+      if (state !== "ok") return state;
+      const n = await purgeDepartedDraftsInTx(tx, target.teamId, target.userId);
+      return n < DRAFT_BATCH ? ("ok" as const) : ("more" as const);
+    });
+    if (result !== "more") return result;
+  }
+}
+
+/** Step 7: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
 async function finish(
   ctx: OffboardingContext,
   target: Departed,
@@ -268,6 +288,7 @@ export async function purgeDeparted(
     () => deleteBlobs(ctx, target, counts),
     () => deleteMemory(ctx, target),
     () => deleteEvalCases(ctx, target),
+    () => deleteDrafts(ctx, target),
     () => finish(ctx, target, counts),
   ]) {
     const outcome = await step();

@@ -127,10 +127,7 @@ export const skillDraftFiles = pgTable(
       "skill_draft_files_path_size",
       sql`octet_length(${t.path}) BETWEEN 1 AND ${sql.raw(String(PATH_MAX_BYTES))}`,
     ),
-    check(
-      "skill_draft_files_one_content",
-      sql`(${t.textContent} IS NULL) <> (${t.bytes} IS NULL)`,
-    ),
+    check("skill_draft_files_one_content", sql`(${t.textContent} IS NULL) <> (${t.bytes} IS NULL)`),
     check(
       "skill_draft_files_size",
       sql`${t.size} = COALESCE(octet_length(${t.textContent}), octet_length(${t.bytes})) AND ${t.size} <= ${sql.raw(String(SKILL_DRAFT_MAX_BYTES))}`,

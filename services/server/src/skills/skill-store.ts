@@ -30,6 +30,7 @@ import {
   type SkillLocation,
   type SkillRecord,
   type SkillVersionRecord,
+  type UploadDraft,
   type UploadResult,
 } from "./store.js";
 
@@ -99,6 +100,7 @@ export interface PutPackageInput {
   readonly scan: ScanResult;
   readonly semver?: string;
   readonly changelog?: string;
+  readonly draft?: UploadDraft;
 }
 
 export interface OpenedVersion {
@@ -178,6 +180,7 @@ export class PostgresSkillStore implements SkillStore {
         scan: input.scan,
         ...(input.semver ? { semver: input.semver } : {}),
         ...(input.changelog ? { changelog: input.changelog } : {}),
+        ...(input.draft ? { draft: input.draft } : {}),
       });
       if (!result.ok) await discard();
       return result;

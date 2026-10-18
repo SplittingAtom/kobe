@@ -53,7 +53,8 @@ async function newDraft(teamId = teamA, name = "demo"): Promise<string> {
       .insert(skillDrafts)
       .values({ teamId, ownerUserId: alice, updatedBy: alice, name })
       .returning({ id: skillDrafts.id });
-    return row!.id;
+    if (!row) throw new Error("no draft");
+    return row.id;
   });
 }
 
@@ -167,10 +168,7 @@ describe("skill_drafts", () => {
     expect(
       await sqlState(
         withTeam(app.db, teamA, (tx) =>
-          tx
-            .update(skillDraftFiles)
-            .set({ draftId: other })
-            .where(eq(skillDraftFiles.draftId, id)),
+          tx.update(skillDraftFiles).set({ draftId: other }).where(eq(skillDraftFiles.draftId, id)),
         ),
       ),
     ).toBe("55000");

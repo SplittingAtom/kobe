@@ -52,6 +52,7 @@ import { runEventsRoutes } from "./routes/run-events.js";
 import { runRoutes, threadRunRoutes } from "./routes/runs.js";
 import { setupRoutes } from "./routes/setup.js";
 import { skillRoutes } from "./routes/skills.js";
+import { skillDraftRoutes } from "./routes/skill-drafts.js";
 import { skillReachRoutes } from "./routes/skill-reach.js";
 import { meSkillEnablementRoutes } from "./routes/me-skill-enablements.js";
 import { teamAuditRoutes } from "./routes/team-audit.js";
@@ -200,6 +201,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/connector-grants", connectorGrantRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
+  // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
+  api.route("/skills/drafts", skillDraftRoutes(deps));
   api.route("/skills", skillRoutes(deps));
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

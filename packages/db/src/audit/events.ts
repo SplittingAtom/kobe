@@ -829,6 +829,11 @@ export const AUDIT_EVENTS = {
     rows: count,
   }),
   /**
+   * Workbench drafts unchanged for longer than the team's window, purged (system, count only,
+   * KOBE-320); a departed author's drafts go with offboarding, not audited on their own.
+   */
+  "retention.skill_drafts_purged": event("team", { rows: count }),
+  /**
    * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
    * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
    * Counts only, never paths or content; live files and held owners' memory are never in a batch.
@@ -1302,6 +1307,8 @@ export const AUDIT_EVENTS = {
     source: z.enum(["zip", "skill_md"]),
     /** Scanner findings (KOBE-80); absent on uploads recorded before the scanner ran. */
     findings: count.optional(),
+    /** The Workbench draft it was saved from (KOBE-320); absent for uploads. */
+    draftId: id.optional(),
   }),
   /** A team admin approved or rejected a team skill version (KOBE-80, D22). */
   "skill.reviewed": event("team", {
@@ -1500,6 +1507,28 @@ export const AUDIT_EVENTS = {
   "skill.default.restored": event("team", {
     skillId: id,
     name: catalogName,
+    semver: z.string().max(32),
+  }),
+
+  // ── skill drafts: the Workbench (KOBE-320, SK11); ids and names, never file contents ──
+  /** A member started a draft in the team (private to them until shared). */
+  "skill.draft.created": event("team", {
+    draftId: id,
+    name: catalogName,
+    startedFrom: z.enum(["blank", "template", "thread", "fork", "upload", "git"]),
+  }),
+  /** A draft's author shared it with the team's Builders and Team admins, or stopped sharing. */
+  "skill.draft.shared": event("team", { draftId: id, shared: z.boolean() }),
+  /** A draft's author deleted it (its saved versions stay). */
+  "skill.draft.deleted": event("team", { draftId: id }),
+  /**
+   * A draft started from a team conversation was saved as its author's personal skill, after the
+   * author confirmed that personal skills go with them to every team (SK11).
+   */
+  "skill.draft.personalized": event("team", {
+    draftId: id,
+    skillId: id,
+    slug,
     semver: z.string().max(32),
   }),
 
