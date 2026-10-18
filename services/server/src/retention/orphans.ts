@@ -175,7 +175,8 @@ async function protectedKeys(tx: KobeTx, teamId: string, keys: string[]): Promis
     sql`, `,
   )}]::text[]`;
   const keep = new Set<string>();
-  for (const ref of BLOB_REF_COLUMNS) {
+  // Site-wide columns (personal skills) have no team and live outside every team tree.
+  for (const ref of BLOB_REF_COLUMNS.filter((r) => !r.site)) {
     const res = await tx.execute<{ key: string }>(sql`
       SELECT DISTINCT x.${sql.identifier(ref.column)} AS key FROM ${sql.identifier(ref.table)} x
        WHERE x.team_id = ${teamId} AND x.${sql.identifier(ref.column)} = ANY(${list})`);

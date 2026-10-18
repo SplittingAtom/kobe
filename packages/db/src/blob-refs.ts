@@ -10,12 +10,18 @@ export interface BlobRefColumn {
    * export reads and retention deletes nothing else for a thread.
    */
   readonly thread?: true;
+  /**
+   * A site-wide table without `team_id` (a member's personal skills, KOBE-423): backups check its
+   * keys like any other; the team-scoped retention sweeps never look at it (its objects live
+   * under `<prefix>users/<user>/`, outside every team tree).
+   */
+  readonly site?: true;
 }
 
 /**
  * Every column that stores an object key. `kobe backup` checks, in its Postgres snapshot, that each
  * referenced key is in the bucket listing it records, and refuses otherwise. Every listed table is
- * a team table with `team_id`. The retention job (KOBE-18) deletes only keys in a purged thread's
+ * a team table with `team_id`, unless marked `site`. The retention job (KOBE-18) deletes only keys in a purged thread's
  * own tree (`<prefix>teams/<team>/threads/<thread>/`), and only when no `thread: true` column of
  * the team still references them (another thread's rows, e.g. a fork), so shared and deduplicated
  * thread objects survive; it never looks at the other columns (their keys can't be in a thread
@@ -31,4 +37,8 @@ export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "project_files", column: "blob_ref" }, // project file content (KOBE-160); not a thread tree
   { table: "workspace_files", column: "blob_key" }, // /workspace durable copy (KOBE-27)
   { table: "workspace_file_hold_history", column: "blob_key" }, // a hold's copy of moved files (KOBE-304)
+  { table: "team_skill_versions", column: "storage_key" }, // team skill runtime zip (KOBE-78, 310)
+  { table: "team_skill_versions", column: "package_storage_key" }, // its package zip (KOBE-310)
+  { table: "personal_skill_versions", column: "storage_key", site: true }, // personal skill (KOBE-79)
+  { table: "personal_skill_versions", column: "package_storage_key", site: true }, // (KOBE-310)
 ];
