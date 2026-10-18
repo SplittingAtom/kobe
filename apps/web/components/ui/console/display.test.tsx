@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FOCUS_RING } from "./focus";
 import { Badge } from "./badge";
 import { Button } from "./button";
+import { EmbeddedPage } from "./embedded-page";
 import { EmptyState } from "./empty-state";
 import { Notice } from "./notice";
 import { PageHeader } from "./page-header";
@@ -34,6 +35,21 @@ describe("PageHeader, Section and Card", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Invitations" })).toBeTruthy();
     expect(screen.getByText("Invitations last 14 days.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
+  });
+
+  it("embedded beside the thread, the title is left out; description and actions stay (KOBE-424)", () => {
+    render(
+      <EmbeddedPage.Provider value={true}>
+        <PageHeader
+          title="My memory"
+          description="What Kobe remembers."
+          actions={<Button>Add</Button>}
+        />
+      </EmbeddedPage.Provider>,
+    );
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByText("What Kobe remembers.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
   });
 
   it("a section is a region named by its h2", () => {
