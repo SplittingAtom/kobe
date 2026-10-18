@@ -17,7 +17,9 @@ import {
  * value without a render (a custom property on the grid) and what to do with a chosen value.
  *
  * - Drag: a press that moves less than {@link DRAG_THRESHOLD_PX} is a click (nothing changes);
- *   a drag shows each value directly and commits once, on release.
+ *   a drag shows each value directly and commits once, on release. It keeps the grab offset:
+ *   the value moves by the pointer's travel, so a press beside the edge (the handle is a few px
+ *   wide) never jumps the width to the pointer.
  * - Keys: arrows by one step, Page Up/Down by four, Home the minimum, End the maximum; a step
  *   that crosses `snap` (the default width) stops on it, so the keys reach it. Modified keys
  *   (Alt, Ctrl, Cmd) pass through to the browser.
@@ -144,8 +146,15 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     latest.current = options;
   });
   const [range, setRange, remeasure] = useMeasuredRange(ref, latest);
-  /** The drag under way: where it started, and the value shown once it moved (else null). */
-  const drag = useRef<{ readonly startX: number; readonly value: number | null } | null>(null);
+  /**
+   * The drag under way: where it started, the value minus the pointer's value at the press (the
+   * grab offset), and the value shown once it moved (else null).
+   */
+  const drag = useRef<{
+    readonly startX: number;
+    readonly offset: number;
+    readonly value: number | null;
+  } | null>(null);
   useEffect(
     () => () => {
       const dragged = drag.current?.value ?? null;
@@ -159,7 +168,10 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    drag.current = { startX: e.clientX, value: null };
+    const now = measure(e.currentTarget);
+    const raw = pointerValue(e.clientX, e.currentTarget);
+    const offset = now && raw !== null ? now.value - raw : 0;
+    drag.current = { startX: e.clientX, offset, value: null };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -169,7 +181,7 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     const now = measure(e.currentTarget);
     const raw = pointerValue(e.clientX, e.currentTarget);
     if (!now || raw === null) return;
-    const next = clampToRange(raw, now);
+    const next = clampToRange(raw + current.offset, now);
     drag.current = { ...current, value: next };
     preview(next, e.currentTarget);
     e.currentTarget.setAttribute("aria-valuenow", String(next));

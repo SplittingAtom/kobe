@@ -302,6 +302,20 @@ describe("compact rows and icons (ac-2, ac-3)", () => {
     expect(menu.className).toMatch(/group-hover\/row:opacity-100/);
     expect(menu.getAttribute("tabindex")).toBe("-1");
   });
+
+  it("a long tree keeps its height in the scrolling panel: the dialogs below it never sit under rows", async () => {
+    // happy-dom lays nothing out, so this pins the classes: in the panel's scrolling flex column
+    // the tree's box must not shrink (min-h-0 let it, and on gate1 the rows past the panel's
+    // height painted over the Delete confirm and took its clicks).
+    mount();
+    await findItem("report.csv");
+    const box = must(tree().parentElement);
+    const panel = must(box.parentElement);
+    expect(panel.className).toMatch(/\bflex-col\b/);
+    expect(panel.className).toMatch(/\boverflow-auto\b/);
+    expect(box.className).toMatch(/\bshrink-0\b/);
+    expect(box.className).not.toMatch(/\bmin-h-0\b/);
+  });
 });
 
 describe("special roots (ac-4)", () => {

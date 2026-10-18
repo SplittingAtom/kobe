@@ -68,6 +68,10 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     await expect(row("sales.csv")).toBeVisible();
     await page.keyboard.press("ArrowRight");
     await expect(row("notes")).toBeFocused();
+    // Type-ahead (WAI-ARIA tree): the next row after the focused one starting with the key, so
+    // "s" from notes is sales.csv and "s" again is script.py (folders first, then names).
+    await page.keyboard.press("s");
+    await expect(row("sales.csv")).toBeFocused();
     await page.keyboard.press("s");
     await expect(row("script.py")).toBeFocused();
     await expect(row("sales.csv")).toHaveAttribute("aria-level", "2");
@@ -80,13 +84,19 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     for (const theme of ["light", "dark"] as const) {
       await context.addCookies([{ name: THEME_COOKIE, value: theme, url: baseURL ?? "" }]);
       await page.reload();
+      // A load never lists Files on its own (listing wakes the sandbox): ask, as a member does,
+      // once the rail has rendered.
+      await expect(openFiles.or(row("sales.csv"))).toBeVisible();
+      if (await openFiles.isVisible()) await openFiles.click();
       await expect(row("sales.csv")).toBeVisible(); // expansion is remembered
       await files.screenshot({ path: testInfo.outputPath(`files-tree-${theme}.png`) });
     }
     await context.clearCookies({ name: THEME_COOKIE });
 
-    // Rename with F2.
-    await row("script.py").click();
+    // Rename with F2. Focus the row without clicking it: a click opens the file in the artifact
+    // column, which takes the focus (KOBE-268), so F2 would land there.
+    await row("script.py").focus();
+    await expect(row("script.py")).toBeFocused();
     await page.keyboard.press("F2");
     const rename = files.getByRole("dialog", { name: "Rename script.py" });
     await rename.getByRole("textbox").fill("tool.py");

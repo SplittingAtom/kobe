@@ -14,10 +14,13 @@ test("share, clear the rating, withdraw from My shared cases", async ({ chat, pa
   test.skip(!AGENT, "set KOBE_AGENT to a team agent's name");
   await chat.open();
   await page.getByRole("button", { name: /^Chat with:/ }).click();
-  await page
-    .getByRole("radiogroup", { name: "Chat with" })
-    .getByRole("radio", { name: new RegExp(AGENT as string) })
-    .click();
+  // The radio is visually hidden inside its option card: click the card (its label), as a
+  // member does, then check the radio took it.
+  // (`has` is matched inside each label, so the radio's locator starts from the page.)
+  const picker = page.getByRole("radiogroup", { name: "Chat with" });
+  const radio = page.getByRole("radio", { name: new RegExp(AGENT as string) });
+  await picker.locator("label").filter({ has: radio }).click();
+  await expect(picker.locator(radio)).toBeChecked();
   await page.keyboard.press("Escape");
   await chat.ask("No tools. Reply with the single word CASE.");
   const answer = chat.answers.last();
