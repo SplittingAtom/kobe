@@ -47,7 +47,9 @@ from Playwright's JSON report (`e2e/gate5/verdict.mjs`). CI: shards `gate5-a` (U
    with the server refusing its events, and the queued message met "thread has an active run".
    A Stop during the workspace pull before the prompt also aborted an idle Pi twice (2 × 5 s)
    and killed it. **Fixed** on this branch in `services/sandbox-agent/src/threads/manager.ts`
-   (`agent.stop-before-prompt.test.ts`); needs a ticket id.
+   (`agent.stop-before-prompt.test.ts`); needs a ticket id. Round 5 found the same race for
+   Steer (a steer overtaking a start that restarts Pi answered `unknown_run`): a steer now waits
+   for its run's start.
 
 ## Observations (not fixed here)
 
