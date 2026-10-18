@@ -20,7 +20,16 @@ const THREAD_ITEMS = [
   "Share",
   "Delete",
 ];
-const FILE_ITEMS = ["Open", "Download", "Copy path", "Delete"];
+// KOBE-374 added Mention in message; KOBE-304 Rename and Move to….
+const FILE_ITEMS = [
+  "Open",
+  "Mention in message",
+  "Download",
+  "Rename",
+  "Move to…",
+  "Copy path",
+  "Delete",
+];
 
 const themeToggle = (page: Page) =>
   page.getByRole("button", { name: "Dark theme", exact: true }).first();
@@ -88,7 +97,10 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
     mimeType: "text/plain",
     buffer: Buffer.from("KOBE-292 row menu check\n"),
   });
-  const fileRow = files.getByRole("listitem").filter({ hasText: fileName });
+  // Since KOBE-304 the panel is an ARIA tree: the file is a treeitem named after it.
+  const fileRow = files
+    .getByRole("tree", { name: "Files in your workspace" })
+    .getByRole("treeitem", { name: fileName, exact: true });
   await expect(fileRow).toHaveCount(1, { timeout: 30_000 });
 
   for (const theme of ["light", "dark"] as const) {

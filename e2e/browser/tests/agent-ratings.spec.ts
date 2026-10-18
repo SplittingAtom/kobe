@@ -28,8 +28,11 @@ test("Ratings: fixed periods, counts only, withheld numbers say so", async ({ pa
   expect((await week).status()).toBe(200);
 
   // Either too few raters (no numbers at all), or totals with each breakdown shown or withheld.
+  // Exact: the section's description also says "thumbs up and down".
   await expect(
-    ratings.getByText(/^Not enough ratings yet/).or(ratings.getByText("Thumbs up").first()),
+    ratings
+      .getByText(/^Not enough ratings yet/)
+      .or(ratings.getByText("Thumbs up", { exact: true }).first()),
   ).toBeVisible();
   // Counts only: nothing in the section links to a member or a conversation.
   await expect(ratings.getByRole("link")).toHaveCount(0);

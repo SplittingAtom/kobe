@@ -95,7 +95,10 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   await page.mouse.move(box.x + box.width / 2 + 120, y, { steps: 4 });
   await page.mouse.up();
   await expectWidth(rail, 400);
-  await expect.poll(() => stored(page)).toBe(400); // saved debounced, per user
+  // Saved debounced, per user: the width the handle shows once released, not one from mid-drag.
+  const shown = Number(await handle.getAttribute("aria-valuenow"));
+  expect(Math.abs(shown - 400)).toBeLessThanOrEqual(SLACK_PX);
+  await expect.poll(() => stored(page)).toBe(shown);
   // Another browser context of the same member (another device) gets the same width.
   const other = await context.browser()?.newContext({ storageState: await context.storageState() });
   if (other) {
