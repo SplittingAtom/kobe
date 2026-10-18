@@ -52,6 +52,18 @@ describe("pointer lifecycle", () => {
     expect(preview).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the grab offset: a press beside the edge moves the width by the drag only", () => {
+    // The handle is 6 px wide and straddles the edge, so a press is rarely on the edge itself:
+    // here 1 px right of it (281 for a 280 px width), as at the handle's middle on gate1.
+    const { handle, commit, preview } = harness();
+    fireEvent.pointerDown(handle(), { clientX: 281, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(handle(), { clientX: 341, pointerId: 1 });
+    expect(preview).toHaveBeenLastCalledWith(340, handle());
+    fireEvent.pointerMove(handle(), { clientX: 401, pointerId: 1 });
+    fireEvent.pointerUp(handle(), { clientX: 401, pointerId: 1 });
+    expect(commit).toHaveBeenCalledExactlyOnceWith(400); // 280 + 120, not the pointer's 401
+  });
+
   it("unmounted mid-drag: the preview is reverted and nothing is committed", () => {
     const { handle, commit, revert, view } = harness();
     fireEvent.pointerDown(handle(), { clientX: 280, button: 0, pointerId: 1 });
