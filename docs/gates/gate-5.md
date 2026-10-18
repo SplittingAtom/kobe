@@ -83,9 +83,21 @@ What the `gate5/` specs add, per criterion:
 - **U20** with the fake: 120k, 140k and 172k of 200k tokens read `ok`, `warn`, `full`, and red offers
   Compact now; with a real model the level matches the 65/85 rule for whatever the turn used.
 - **U21** after a reload: the reasoning block, a tool card that opens to its output, the hover
-  footer ("Answer details") and the thread's model, approval and stopped markers; a tool output
-  over 64 KB read in full when its card opens (skipped, `NOTRUN`, when the tool trimmed its output
-  below 64 KB first); Mod+Shift+D opens every block, is stored, and a second browser opens with it.
+  footer ("Answer details") and the thread's model, approval and stopped markers (the approval is
+  a `share_file`: `create_artifact` never asks); a tool output over 64 KB stored is listed as a
+  preview and read in full when its card opens; Mod+Shift+D opens every block, is stored, and a
+  second browser opens with it.
+
+  **The 64 KB path, measured** (Pi 1.0.0): Pi trims what a tool returns before Kobe sees it:
+  bash and read at 50 KB of text (`DEFAULT_MAX_BYTES`), MCP results at 20 KB
+  (`MCP_OUTPUT_MAX_BYTES`, the full text left in a file the model can read), Kobe's `recall` at
+  32 KB. The chat's limit (`OUTPUT_INLINE_MAX_BYTES`, 64 KB) is on the stored JSON of the output,
+  so text that escapes heavily crosses it from under Pi's limits: the check runs bash printing
+  40,000 double quotes (40 KB of text, 80 KB stored). Plain text under 50 KB never does; an MCP
+  result could only with escape-heavy text under 20 KB that more than triples in JSON (control
+  characters). So the path is reachable in practice, by quote-, backslash- or control-heavy output
+  (JSON and logs) only.
+
 - **U22** fork markers ("2 branches") at the edited first message and at a regenerated answer; the
   fork's "Forked from" link opens the source; Regenerate with another model switches the picker;
   on the pinned agent's thread Regenerate is offered and Regenerate with is not.
@@ -101,7 +113,8 @@ What the `gate5/` specs add, per criterion:
 ## What this does not prove
 
 - Touch gestures and real phones: the narrow checks are Chromium at 390 px.
-- U21's 64 KB path when Pi's own tools trim output first (it then reports `NOTRUN`).
+- U21's 64 KB path for plain text: Pi's limits (above) keep it under 64 KB stored; the check
+  proves the path with escape-heavy bash output.
 - U20's thresholds with a real model (only that the level matches the reading).
 
 ## Verdict

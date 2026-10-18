@@ -73,8 +73,11 @@ test("U21: a tool output over 64 KB is read in full when its card opens", async 
   page,
 }) => {
   await chat.open();
+  // Pi trims what a tool returns before Kobe sees it (bash and read at 50 KB, MCP at 20 KB of
+  // text), but the chat's 64 KB limit is on the stored JSON of the output: 40,000 double quotes
+  // are 40 KB of text (under Pi's limit) and 80 KB escaped, so a real bash output crosses it.
   const threadId = await chat.ask(
-    bashTurn("head -c 80000 /dev/zero | tr '\\0' x; echo; echo G5-OUTPUT-END"),
+    bashTurn(`head -c 40000 /dev/zero | tr '\\0' '"'; echo; echo G5-OUTPUT-END`),
   );
   const thread = await pageApi<{ entries?: { payload_truncated?: boolean }[] }>(
     page,
@@ -82,9 +85,7 @@ test("U21: a tool output over 64 KB is read in full when its card opens", async 
     `/v1/threads/${threadId}`,
   );
   const trimmed = (thread.json.entries ?? []).some((e) => e.payload_truncated === true);
-  // Pi's own bash tool trims what it returns (about 50 KB): then no output of this install reaches
-  // the 64 KB the chat trims at, and the expand path cannot be shown here.
-  test.skip(!trimmed, "no tool output over 64 KB reached the thread (the tool trimmed it first)");
+  expect(trimmed, "the stored output is over 64 KB, so the chat lists only its preview").toBe(true);
   const card = page.getByRole("region", { name: "Tool call bash" }).last();
   await expect(card).not.toContainText("G5-OUTPUT-END");
   await toggleOf(card).click();
