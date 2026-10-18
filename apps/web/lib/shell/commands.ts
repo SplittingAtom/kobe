@@ -58,6 +58,7 @@ import {
   ThumbsUpIcon,
   Trash2Icon,
   UsersIcon,
+  WandSparklesIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -165,6 +166,17 @@ const LIST = [
     scope: "bar",
     href: "/me/agents",
     slash: "agents",
+    readOnlySafe: true,
+  },
+  // The Skills page (KOBE-321, SK9): Catalog, Team, Mine and the Workbench.
+  {
+    id: "skills",
+    group: "areas",
+    name: "Skills",
+    icon: WandSparklesIcon,
+    scope: "bar",
+    href: "/me/skills",
+    slash: "skills",
     readOnlySafe: true,
   },
   // On the rail's top line since KOBE-419 (team admins only); the palette still lists it.

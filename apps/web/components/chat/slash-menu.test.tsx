@@ -97,6 +97,7 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
       "/memory, My memory",
       "/schedules, My schedules",
       "/agents, My agents",
+      "/skills, Skills",
     ]);
     // Stop is listed but unavailable while nothing runs.
     const stop = within(list).getByRole("option", { name: /^\/stop/ });

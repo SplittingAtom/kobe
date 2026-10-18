@@ -15,46 +15,39 @@ import {
   TableRowHeader,
 } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
-import { skillPaths, type SkillArea } from "./area";
 import { CatalogInstallsSection } from "./catalog-installs-section";
 import { CatalogSwitchesSection } from "./catalog-switches";
-import { MySkillChoices } from "./my-skill-choices";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 
 /**
- * Skills the caller can see; each one opens in the editor (KOBE-83). In the member's own area
- * (`area="my"`, KOBE-98) it lists personal skills only.
+ * The team's skills in the Team console (KOBE-83; admin view since KOBE-321): each opens its
+ * access and reach settings; catalog installs and switches follow. Skills are written in the
+ * member's Workbench (spec SK9).
  */
-export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
+export function SkillsPage() {
   const teamId = useTeamAccess().team.id;
-  const paths = skillPaths(area);
-  const { state } = useResource(() => listSkills(teamId, paths.listScope));
+  const { state } = useResource(() => listSkills(teamId, "team"));
   return (
     <>
       <PageHeader
-        title={paths.listTitle}
-        description={`Saving a skill creates a new immutable version. ${
-          area === "my"
-            ? "Personal skills are only yours."
-            : "Team skills are shared with the team; personal skills are only yours."
-        }`}
+        title="Skills"
+        description="Team skills, their access and the agents they reach. Skills are written in the Workbench; a saved team version waits in Skill review."
         actions={
           <Button asChild variant="primary">
-            <Link href={`${paths.base}/new`}>New skill</Link>
+            <Link href="/me/skills?tab=workbench">Open the Workbench</Link>
           </Button>
         }
       />
       <ResourceView state={state} label="skills">
         {(skills) =>
           skills.length === 0 ? (
-            <EmptyState title="No skills yet." />
+            <EmptyState title="No team skills yet." />
           ) : (
-            <Table caption={paths.listTitle}>
+            <Table caption="Team skills">
               <TableHead>
                 <TableRow>
                   <TableHeader>Skill</TableHeader>
-                  {area === "team" && <TableHeader>Scope</TableHeader>}
                   <TableHeader>Latest version</TableHeader>
                   <TableHeader>Updated</TableHeader>
                 </TableRow>
@@ -63,12 +56,9 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
                 {skills.map((s) => (
                   <TableRow key={s.id}>
                     <TableRowHeader>
-                      <Link href={`${paths.base}/${s.id}`}>{s.slug}</Link>
+                      <Link href={`/admin/team/skills/${encodeURIComponent(s.id)}`}>{s.slug}</Link>
                       <div className="text-sm font-normal text-console-muted">{s.description}</div>
                     </TableRowHeader>
-                    {area === "team" && (
-                      <TableCell>{s.scope === "team" ? "Team" : "Personal"}</TableCell>
-                    )}
                     <TableCell>v{s.latestSemver}</TableCell>
                     <TableCell>
                       <DateTime value={s.updatedAt} />
@@ -80,9 +70,8 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
           )
         }
       </ResourceView>
-      {area === "my" && <MySkillChoices />}
-      {area === "team" && <CatalogInstallsSection />}
-      {area === "team" && <CatalogSwitchesSection />}
+      <CatalogInstallsSection />
+      <CatalogSwitchesSection />
     </>
   );
 }

@@ -163,6 +163,7 @@ const CONSOLE_DIRS = [
   "components/me",
   "components/memory",
   "components/projects",
+  "components/skills",
   "components/ui/console",
 ] as const;
 

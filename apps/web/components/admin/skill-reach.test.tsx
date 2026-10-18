@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { AgentBuilderPage } from "./team/agent-builder/agent-builder-page";
-import { SkillEditorPage } from "./team/skill-editor/skill-editor-page";
+import { SkillAdminPage } from "./team/skill-editor/skill-admin-page";
 import { forbidNativeConfirm, renderTeam, stubApi } from "./testing";
 
 beforeEach(forbidNativeConfirm);
@@ -96,7 +96,7 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [200, USAGE],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     expect(rows(await reachList())).toEqual(["Named Team · names it"]);
     expect(screen.getByText(/reaches the agents that name it/)).toBeTruthy();
     expect(screen.getByText(/Used 3 times/)).toBeTruthy();
@@ -114,7 +114,7 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skills/s-1/usage": [200, USAGE],
       "PUT /v1/skills/s-1/access": [200, { access: "default_on", required_count: 0 }],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     await reachList();
     const mode = screen.getByRole("combobox", { name: "Access" }) as HTMLSelectElement;
     expect(mode.value).toBe("available");
@@ -142,7 +142,7 @@ describe("team skill reach (KOBE-297)", () => {
         { access: "required", required_count: 5, warning: "many_required" },
       ],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     await reachList();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Access" }), "required");
     expect((await screen.findByText(/5 Required skills/)).textContent).toMatch(/limit of 64/);
@@ -158,7 +158,7 @@ describe("team skill reach (KOBE-297)", () => {
         { code: "offer_limit", message: "A team can have at most 32 skills On by default." },
       ],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     await reachList();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Access" }), "default_on");
     expect((await screen.findByRole("alert")).textContent).toMatch(/at most 32 skills/);
@@ -170,7 +170,7 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [403, { code: "forbidden", message: "no" }],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, {
+    renderTeam(<SkillAdminPage skillId="s-1" />, {
       role: "builder",
       permissions: ["team.skills.publish"],
     });
@@ -199,7 +199,7 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skills/s-1/reach": [200, { ...REACH, approved: false }],
       "GET /v1/skills/s-1/usage": [200, { uses: 0, last_used_at: null, agents: [] }],
     });
-    renderTeam(<SkillEditorPage skillId="s-1" />, ADMIN);
+    renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     await reachList();
     expect(screen.getByText(/No version is approved yet/)).toBeTruthy();
     expect(screen.getByText("Not used yet.")).toBeTruthy();

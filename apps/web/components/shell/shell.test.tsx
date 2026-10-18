@@ -71,10 +71,12 @@ describe("utility bar", () => {
       ["My memory", "/me/memory"],
       ["My schedules", "/me/schedules"],
       ["My agents", "/me/agents"],
+      ["Skills", "/me/skills"],
     ]);
     const profile = row(1).querySelector('summary[aria-label="Profile"]')?.closest("details");
     const menu = within(must(profile));
-    expect(menu.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/me/skills");
+    // Skills moved to the bar (KOBE-321).
+    expect(menu.queryByRole("link", { name: /skills/i })).toBeNull();
     expect(menu.getByRole("link", { name: "Projects" }).getAttribute("href")).toBe("/me/projects");
     expect(menu.getByRole("link", { name: "My approvals" }).getAttribute("href")).toBe(
       "/me/approvals",

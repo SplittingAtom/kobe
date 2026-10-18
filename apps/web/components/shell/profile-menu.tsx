@@ -35,9 +35,6 @@ export function ProfileMenu() {
       <IconAction command="profile" as="summary" className={styles.iconLink} />
       <ul className={styles.menuList}>
         <li>
-          <MenuLink href="/me/skills">My skills</MenuLink>
-        </li>
-        <li>
           <MenuLink href="/me/projects">Projects</MenuLink>
         </li>
         <li>

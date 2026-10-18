@@ -32,11 +32,10 @@ const FIXED_PAGES = [
   "/admin/site",
   "/admin/team",
   "/admin/team/agents/new",
-  "/admin/team/skills/new",
   "/me/agents",
   "/me/agents/new",
   "/me/skills",
-  "/me/skills/new",
+  "/me/skills?tab=workbench",
   "/me/projects",
   "/me/memory",
   "/me/schedules",
@@ -62,7 +61,8 @@ const DETAILS = [
     name: "team-skill",
   },
   { list: "/me/agents", link: /^\/me\/agents\/(?!new$)[^/]+$/, name: "my-agent" },
-  { list: "/me/skills", link: /^\/me\/skills\/(?!new$)[^/]+$/, name: "my-skill" },
+  // The Workbench editor (KOBE-321) of the first draft listed.
+  { list: "/me/skills?tab=workbench", link: /^\/me\/skills\/drafts\/[^/]+$/, name: "skill-draft" },
   { list: "/me/projects", link: /^\/me\/projects\/[^/]+$/, name: "my-project" },
   // An eval report, linked from the team agent found above (when it has one).
   {
