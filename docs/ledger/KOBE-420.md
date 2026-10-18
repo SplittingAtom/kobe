@@ -21,13 +21,13 @@ project move (KOBE-220). Then flip gate3's two U8 browser checks from expected-f
   thread sees the pill without Switch; a suspended or archived agent shows the pill without Switch
   too (the server would refuse). While a run is active, Switch is disabled with the title "Switch
   when the run ends" (the server answers `thread_busy`). Refusals use the thread's action error.
-- **The marker** (after review, coordinator decision): `runs.agent_version` (migration 0128,
+- **The marker** (after review, coordinator decision): `runs.agent_version` (migration 0141, was 0128 before the Skills Phase A merge,
   nullable), set when a run starts from the pin read under the thread lock (`runs/lifecycle.ts`,
   the one start path for chat, scheduled, retry and resumed runs; compaction runs have no agent).
-  0129 backfills it from surviving `run.started` events (FORCE RLS lifted on runs and run_events
+  0142 (was 0129) backfills it from surviving `run.started` events (FORCE RLS lifted on runs and run_events
   for the backfill only; upgrade test as the non-superuser owner). `GET /v1/threads/:id/markers`
   `agents` compares each message run's version with the previous known one in the thread
-  (newest 500 runs, `runs_thread_idx`; no new index); NULL (no agent, compacted before 0129) is
+  (newest 500 runs, `runs_thread_idx`; no new index); NULL (no agent, compacted before 0142) is
   skipped; a change on a run whose prompt never reached the tree moves to the next run with one.
   The first version (audit events) was dropped: no RLS on audit_log, a cross-team scan, and a
   clock race between `started_at` and the audit `at`. Shown above that run's prompt: "Switched

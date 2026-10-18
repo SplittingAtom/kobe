@@ -72,6 +72,13 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
       site_agent_versions: 0,
       audit_log: 0,
       site_settings: 0,
+      // Kobe's catalog skills and the jobs they start (KOBE-317): none in this fixture.
+      registry_skills: 0,
+      registry_versions: 0,
+      registry_skill_tags: 0,
+      skill_default_syncs: 0,
+      team_skill_installs: 0,
+      skill_rescan_runs: 0,
       // The replaced chain's head and size, for the restore's event (KOBE-422).
       replacedAudit: `2:${head?.hash ?? ""}:2`,
     });
@@ -94,6 +101,12 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
          VALUES ('system', 'platform.isolation.changed', '{"from":"verified","to":"missing"}')`,
     ],
     ["site_settings", "INSERT INTO site_settings (key, value) VALUES ('require_2fa', 'true')"],
+    [
+      // The Default sync's system event for a skill that is not Kobe's (a site admin's job).
+      "audit_log",
+      `INSERT INTO audit_log (actor_kind, action, target)
+         VALUES ('system', 'skill.default.synced', '{"skillId":"00000000-0000-4000-8000-0000000000b1"}')`,
+    ],
   ])("still refuses a started site with real data in %s", async (table, insert) => {
     const db = await started();
     await sql(db.adminUrl, insert);

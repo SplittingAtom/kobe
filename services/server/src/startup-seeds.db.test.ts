@@ -5,6 +5,7 @@ import { logger } from "./logger.js";
 import { FakeBifrost } from "./models/testing/fake-bifrost.js";
 import { seedAtStart, serverJobs } from "./startup/jobs.js";
 import { openHarness, type Harness } from "./testing/harness.js";
+import { MemoryObjects } from "./testing/memory-objects.js";
 
 /**
  * What the server's start writes into a fresh site before first-run setup (KOBE-422): every row
@@ -15,7 +16,11 @@ import { openHarness, type Harness } from "./testing/harness.js";
 let h: Harness;
 
 beforeAll(async () => {
-  h = await openHarness({ egressHeaderSecrets: ["e".repeat(48)] });
+  // Object storage, so the Kobe skills seed (KOBE-317) and the skill jobs run as in a real start.
+  h = await openHarness({
+    egressHeaderSecrets: ["e".repeat(48)],
+    blobs: { objects: new MemoryObjects(), prefix: "kobe/" },
+  });
 });
 afterAll(async () => {
   await h.close();
@@ -50,7 +55,7 @@ async function snapshot(): Promise<Map<string, string[]>> {
  */
 async function start(): Promise<void> {
   const db = h.deps.database.db;
-  await seedAtStart(h.deps, logger);
+  (await seedAtStart(h.deps, logger)).stop();
   const isolation = isolationAuditor(db, "replica-1");
   await isolation({
     state: "verified",
@@ -87,7 +92,9 @@ async function start(): Promise<void> {
       },
     },
   });
-  expect(jobs.map((j) => j.name)).toContain("audit-forwarding");
+  expect(jobs.map((j) => j.name)).toEqual(
+    expect.arrayContaining(["audit-forwarding", "skill-default-sync", "skill-rescan"]),
+  );
   for (const j of jobs) await j.once();
   const browser = h.browser();
   for (const path of ["/healthz", "/readyz", "/v1/setup"]) await browser.get(path);
@@ -119,7 +126,16 @@ describe("rows a fresh site's start writes (KOBE-422)", () => {
       );
       expect(other.rows, `${table} rows the restore would refuse`).toEqual([]);
     }
-    expect(written).toEqual(expect.arrayContaining(["audit_log", "site_agents", "site_settings"]));
+    expect(written).toEqual(
+      expect.arrayContaining([
+        "audit_log",
+        "site_agents",
+        "site_settings",
+        "registry_skills",
+        "registry_versions",
+        "skill_default_syncs",
+      ]),
+    );
     const keys = await h.admin.query<{ key: string }>(`SELECT key FROM site_settings ORDER BY key`);
     expect(keys.rows.map((r) => r.key)).toEqual(
       expect.arrayContaining(["audit.forward.otlp", "audit.forward.syslog"]),

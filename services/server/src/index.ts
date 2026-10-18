@@ -1,10 +1,6 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
-import { startSkillHashRecompute } from "./skills/hash-checks.js";
-import { startSkillRescan } from "./skills/rescan.js";
-import { startDefaultSync } from "./skills/default-sync.js";
-import { startKobeSeed } from "./skills/kobe-seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { destinationsOf } from "./audit/forward/index.js";
@@ -178,9 +174,10 @@ if (config.process === "scheduler") {
   }
 }
 
-// Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
-// upgrade alike. Idempotent; a failure is logged and never stops the server from starting.
-if (deps && config.process === "server") await seedAtStart(deps, logger);
+// Gallery agents (KOBE-87) and Kobe's own catalog skills (KOBE-317), seeded at every start before
+// the server serves (startup/jobs.ts); a failure is logged and never stops the server.
+const startSeeds =
+  deps && config.process === "server" ? await seedAtStart(deps, logger) : undefined;
 
 // KOBE-425: sealed values whose key this server does not hold (a restore with other Secrets) are
 // named at start, with the Secret to put back. Reads key ids only; never stops the start.
@@ -200,54 +197,6 @@ if (deps && config.process === "server") {
     logger.error({ err }, "the sealed key check failed"),
   );
 }
-
-// Kobe's own catalog skills (KOBE-317, SK4: the former built-ins) from the package set the server
-// ships: published at every start, so install and upgrade alike, before the Default sync starts
-// below. Idempotent; a failure is logged and never stops the server from starting.
-// A failed attempt (the object store or Postgres briefly away) is retried with backoff until it
-// gets through (review-317 S3).
-const kobeSeed =
-  deps?.blobs && config.process === "server"
-    ? startKobeSeed({ db: deps.database.db, blobs: deps.blobs, log: logger })
-    : undefined;
-if (deps && config.process === "server" && !deps.blobs) {
-  logger.warn("no object storage (s3.*): Kobe's catalog skills are not published");
-}
-await kobeSeed?.first;
-
-// Stored skill hashes against the package contract (KOBE-310, docs/skill-package.md "Identity"):
-// in the background at start and every 10 minutes, one replica at a time (advisory lock). It
-// checks only hashes not recorded yet (also rows pods of the previous release write during a
-// rolling upgrade), so it is a quick no-op once caught up. Failures are logged and retried.
-const stopSkillHashRecompute =
-  deps?.blobs && config.process === "server"
-    ? startSkillHashRecompute({ database: deps.database, blobs: deps.blobs, log: logger })
-    : undefined;
-
-// Rescans on a scanner rule-set change (KOBE-313, SK32): at start and every 10 minutes, one
-// replica at a time (advisory lock), once per rule set (skill_rescan_runs); a no-op once done.
-const stopSkillRescan =
-  deps?.blobs && config.process === "server"
-    ? startSkillRescan({
-        database: deps.database,
-        blobs: deps.blobs,
-        log: logger,
-        mailer: deps.mailer,
-        publicUrl: deps.publicUrl,
-      })
-    : undefined;
-
-// Default sync jobs (KOBE-314, SK8): queued by Default tag changes, run one at a time by the
-// replica holding the lease (advisory lock); checked every 10 seconds, resumed after a crash.
-const stopDefaultSync =
-  deps && config.process === "server"
-    ? startDefaultSync({
-        database: deps.database,
-        log: logger,
-        mailer: deps.mailer,
-        publicUrl: deps.publicUrl,
-      })
-    : undefined;
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
@@ -556,10 +505,7 @@ function shutdown(signal: string): void {
   schedulerRunner?.stop();
   void stopServerJobs?.();
   stopRunHook?.();
-  stopSkillHashRecompute?.();
-  stopSkillRescan?.();
-  stopDefaultSync?.();
-  kobeSeed?.stop();
+  startSeeds?.stop();
   stopReconciler?.();
   stopTeamReconciler?.();
   if (evalSweep) clearInterval(evalSweep);

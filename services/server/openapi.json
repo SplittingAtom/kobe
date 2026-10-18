@@ -8053,7 +8053,15 @@
             "type": "boolean"
           }
         },
-        "required": ["runs", "approvals", "skills", "skill_updates", "projects", "agents", "truncated"],
+        "required": [
+          "runs",
+          "approvals",
+          "skills",
+          "skill_updates",
+          "projects",
+          "agents",
+          "truncated"
+        ],
         "additionalProperties": false
       },
       "CompactThreadRequest": {

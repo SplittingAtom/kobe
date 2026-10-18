@@ -30,6 +30,10 @@ import { NotificationEmailSweeper, sweepNotificationEmails } from "../notificati
 import { OFFBOARDING_SWEEP_LOCK } from "../offboarding/index.js";
 import { RetentionJob } from "../retention/job.js";
 import { createPgReconcileLock } from "../sandbox/reconcile-lock.js";
+import { defaultSyncOnce, startDefaultSync } from "../skills/default-sync.js";
+import { recomputeOnce, startSkillHashRecompute } from "../skills/hash-checks.js";
+import { startKobeSeed } from "../skills/kobe-seed.js";
+import { rescanOnce, startSkillRescan } from "../skills/rescan.js";
 
 const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 
@@ -40,6 +44,7 @@ const OFFBOARDING_SWEEP_MS = 10 * 60_000;
  * seed `kobe restore` replaces (`@kobe/db` STARTUP_SEEDED_ROWS). Jobs that need the sandbox
  * provider (team reconcile, hibernation, the pod reconciler, workspace collection, Orbit evals)
  * stay in `index.ts`: they act on teams' sandboxes, which a fresh site has none of.
+ * {@link seedAtStart} runs before the server serves; {@link serverJobs} after.
  */
 export interface ServerJob {
   readonly name: string;
@@ -65,11 +70,30 @@ export interface ServerJobsOptions {
   readonly models?: { readonly config: ModelsConfig; readonly admin: BifrostAdmin } | undefined;
 }
 
-/** Work done once, awaited, before the server serves: the gallery (KOBE-87, every start). */
-export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<void> {
+/** The start's seeds still at work: the Kobe skills seed retries until it gets through. */
+export interface StartSeeds {
+  stop(): void;
+}
+
+/**
+ * Work awaited before the server serves (and so before {@link serverJobs} start the Default
+ * sync), at every start, so install and upgrade alike; idempotent, and a failure is logged and
+ * never stops the server: the gallery (KOBE-87), then the first attempt of Kobe's own catalog
+ * skills (KOBE-317, SK4: the former built-ins) from the package set the server ships. A failed
+ * attempt (the object store or Postgres briefly away) is retried with backoff until it gets
+ * through (review-317 S3); `stop` ends those retries.
+ */
+export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<StartSeeds> {
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
   );
+  if (!deps.blobs) {
+    logger.warn("no object storage (s3.*): Kobe's catalog skills are not published");
+    return { stop: () => undefined };
+  }
+  const kobe = startKobeSeed({ db: deps.database.db, blobs: deps.blobs, log: logger });
+  await kobe.first;
+  return { stop: () => kobe.stop() };
 }
 
 const lockFor = (o: ServerJobsOptions, name: string, what: string) =>
@@ -304,9 +328,45 @@ function modelJobs(o: ServerJobsOptions): ServerJob[] {
   ];
 }
 
+function skillJobs(o: ServerJobsOptions): ServerJob[] {
+  const { deps } = o;
+  const log = o.logger;
+  const notify = { mailer: deps.mailer, publicUrl: deps.publicUrl };
+  // Default sync jobs (KOBE-314, SK8): queued by Default tag changes (and the Kobe skills seed),
+  // run one at a time by the replica holding the lease; checked every 10 s, resumed after a crash.
+  const sync = { database: deps.database, log, ...notify };
+  const jobs: ServerJob[] = [
+    job(
+      "skill-default-sync",
+      () => startDefaultSync(sync),
+      () => defaultSyncOnce(sync),
+    ),
+  ];
+  const blobs = deps.blobs;
+  if (!blobs) return jobs;
+  // Stored skill hashes against the package contract (KOBE-310): at start and every 10 minutes,
+  // one replica at a time; only hashes not recorded yet, so a quick no-op once caught up.
+  const hashes = { database: deps.database, blobs, log };
+  // Rescans on a scanner rule-set change (KOBE-313, SK32): once per rule set, one replica at a time.
+  const rescan = { database: deps.database, blobs, log, ...notify };
+  jobs.push(
+    job(
+      "skill-hash-recompute",
+      () => startSkillHashRecompute(hashes),
+      () => recomputeOnce(hashes),
+    ),
+    job(
+      "skill-rescan",
+      () => startSkillRescan(rescan),
+      () => rescanOnce(rescan),
+    ),
+  );
+  return jobs;
+}
+
 /** Every start-up job of a server replica, in start order. */
 export function serverJobs(o: ServerJobsOptions): ServerJob[] {
-  return [...auditJobs(o), ...sweepJobs(o), ...siteJobs(o), ...modelJobs(o)];
+  return [...auditJobs(o), ...sweepJobs(o), ...siteJobs(o), ...modelJobs(o), ...skillJobs(o)];
 }
 
 /** Starts the jobs; returns one function that stops them all. */
