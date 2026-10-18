@@ -91,13 +91,13 @@ runs `curl`). An agent that lists the skill is published. m1 runs it before revi
 admin approves it, and after the Owner blocklists the bundle's hash, in a new thread and in the
 live thread that had loaded it.
 
-| Check                                                                                                                                 | What it proves                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| upload `201`, `review=pending:flagged=true`; queue row with a `network` finding in `scripts/fetch.sh`                                 | The scanner flags the network call; it waits for the team admin. |
-| before review: no bundle with its hash in the run's `run.start`, `context.omitted skill:<slug>:not_approved`, the model never sees it | An unreviewed team skill is not used in a run.                   |
-| `decision=200:approved`; then the bundle is in `run.start`, nothing omitted, Pi lists it, its files are in the sandbox's skills store | Approval makes it usable.                                        |
-| blocklisted: new thread and the live thread both get no bundle and `…:blocklisted`                                                    | A blocklisted hash never loads, not even where it was loaded.    |
-| re-upload of the same bytes: `422 skill_blocklisted` (team, and another member's personal)                                            | The hash is refused anywhere on the site.                        |
+| Check                                                                                                                                                                                                                                                   | What it proves                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| upload `201`, `review=pending:flagged=true`; queue row with a `network` finding in `scripts/fetch.sh`                                                                                                                                                   | The scanner flags the network call; it waits for the team admin. |
+| before review: no bundle with its hash in the run's `run.start`, `context.omitted skill:<slug>:not_approved`, the model never sees it                                                                                                                   | An unreviewed team skill is not used in a run.                   |
+| `decision=200:approved` (the findings acknowledged, KOBE-312), the agent republished as v2 (a publish freezes the approved version, SK28); then the bundle is in `run.start`, nothing omitted, Pi lists it, its files are in the sandbox's skills store | Approval makes it usable.                                        |
+| blocklisted: new thread and the live thread both get no bundle and `…:blocklisted`                                                                                                                                                                      | A blocklisted hash never loads, not even where it was loaded.    |
+| re-upload of the same bytes: `422 skill_blocklisted` (team, and another member's personal)                                                                                                                                                              | The hash is refused anywhere on the site.                        |
 
 What `run.start` handed the sandbox is read from the run's own record, `runs.skill_refs` (KOBE-297:
 written in the run start's transaction from the same bundle list the `run.start` frame carries;

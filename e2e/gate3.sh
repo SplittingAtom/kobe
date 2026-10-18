@@ -243,6 +243,10 @@ if [[ "$STEPS" == *" skills "* ]] && sbx_need "ac-2 (skills)"; then
   skill_run "before review" "$pending" omitted:not_approved
   contains "the team admin approves it" '^decision=200:approved$' \
     "$(step skill-review "\"admin\":$U_AD,\"skillId\":\"$SKILL_ID\",\"version\":1,\"decision\":\"approved\"")"
+  # A publish freezes the team skills' loadable versions (SK28, KOBE-318): v1 froze none, so the
+  # Builder publishes again once the review approved it, and new threads start on v2.
+  contains "the Builder republishes the agent, freezing the approved version (v2)" '^version=2$' \
+    "$(step agent "\"user\":$U_BD,\"action\":\"publish\",\"agentId\":\"$SK_AGENT\"")"
   approved=$(turn "$U_M1" "$ask_skills" "\"agentId\":\"$SK_AGENT\",\"title\":\"gate3 skill approved\"")
   show "skill, approved" "$approved"
   skill_run "after approval" "$approved" loaded
