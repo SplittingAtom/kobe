@@ -98,7 +98,8 @@ U8 turns the team's eval gate off again.
 **U1.** The Owner invites a new address (`POST /v1/site/invites`); the email is read from Mailpit
 and its `invite#token=` link accepted with a password; the password signs in; before any team
 invitation no team is visible; the team admin invites them to `gate4-a` and they accept; only
-`gate4-a` is listed and team `gate4-b`'s data is refused. They register a passkey (a software
+`gate4-a` is listed; `gate4-b` can't be made their active team (`403`) nor named on a request, and
+their own team's data is served once it is active. They register a passkey (a software
 WebAuthn authenticator, ES256, user verification set, as in the server's own tests) and a fresh
 session signs in with the passkey alone. 2FA: the Owner turns "require 2FA" on; the user is held at
 `403 two_factor_enrollment_required`, enrolls TOTP and is let in; a new sign-in with the password
@@ -107,17 +108,19 @@ would be held too, so the previous value is written back to `site_settings` dire
 cannot undo it then).
 
 **U2.** A member of `gate4-a` joins `gate4-b`; a personal memory doc written in `gate4-a` is listed
-there and not in `gate4-b`.
+there and not in `gate4-b` (each listed with that team active, as the team switcher does).
 
 **U5.** In one thread: a run that sleeps in a tool; a second message while it runs is queued (201,
-`queued: true`), with one running run in the thread; Steer is accepted, applied (`steer.applied`),
+`queued: true`), with one running run in the thread; once the run is working (its first tool call),
+Steer is accepted, applied (`steer.applied`),
 and the model gets the steer text in the same run; the queued run starts only after the first ends.
 Stop: a run whose model never answers (`kobe-slow-start`) is cancelled and ends `run.interrupted`
 (`cancelled`) within seconds.
 
-**U6.** `create_artifact` (risk `write`) asks: the card has the tool, its risk and the exact input;
-the member allows it with a remember-rule (the first scope Kobe offers); the artifact holds exactly
-the approved content; the approval row is `allowed` and signed (`token_kid`, `input_hmac`). The rule
+**U6.** `share_file` (a Kobe write: it asks in ask-on-write; `create_artifact` never asks, by
+decision) of a file the member's bash made first: the card has the tool, its risk and the exact
+input; the member allows it with a remember-rule (the first scope Kobe offers); the file shared is
+exactly the one the approved input named; the approval row is `allowed` and signed (`token_kid`, `input_hmac`). The rule
 is listed in "my rules"; the next call does not ask; revoking the rule (`204`) makes it ask again.
 That approval's TTL is one hour (`expires_at - created_at`); its expiry is then moved to now in
 Postgres (the harness cannot wait an hour), and the broker expires it (`approval.resolved` expired,

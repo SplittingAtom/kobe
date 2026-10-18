@@ -77,10 +77,12 @@ chmod 700 "$WORK"
 PODS=()
 UNDO=()
 cleanup() {
+  local rc=$?
   local u
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   for u in "${UNDO[@]+"${UNDO[@]}"}"; do eval "$u" >/dev/null 2>&1 || true; done
   rm -rf "$WORK"
+  verdict_on_exit "$rc" "Gate 4 stories"
 }
 trap cleanup EXIT
 want() { [[ "$STORIES" == *" $1 "* ]]; }
@@ -239,7 +241,8 @@ if want U1; then
   contains "U1: before any team invitation, no team is visible" '^teams_before_team_invite=200:-$' "$acc"
   contains "U1: the team admin invites them; they accept" '^team_accept=200$' "$acc"
   contains "U1: only the invited team is visible" '^teams=200:gate4-a$' "$acc"
-  contains "U1: another team's data is refused" '^other_team=(403|404):' "$acc"
+  contains "U1: another team's data is refused (it can't be made the active team)" '^other_team=(403|404):' "$acc"
+  contains "U1: ...nor named on a request" '^other_team_named=(403|404|409):' "$acc"
   contains "U1: their own team's data is served" '^own_team=200$' "$acc"
   contains "U1: they register a passkey (user verification required)" '^passkey_register=200:-$' "$acc"
   contains "U1: the passkey alone signs them in" '^passkey_signin=200:-$' "$acc"
@@ -290,7 +293,10 @@ if want U5 && ((MODELS)); then
     contains "U5: the first message starts a run" '^first=201:queued=false$' "$u5"
     contains "U5: Enter while it works queues the next message" '^second=201:queued=true$' "$u5"
     contains "U5: one active run in the thread" '^active_runs=1$' "$u5"
+    contains "U5: the run is working (its first tool call) when the member steers" '^steer_during=tool.call$' "$u5"
     contains "U5: Steer is accepted for the running run" '^steer=200:-$' "$u5"
+    grep -q '^steer=200:' <<<"$u5" || $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=10m --tail=-1 2>/dev/null \
+      | grep -F 'steer not delivered' | tail -3 | sed 's/^/     server: /' || true
     contains "U5: ...and applied to it (steer.applied)" '^steer_applied=true$' "$u5"
     ((FAKE)) && contains "U5: ...the model got the steer in the same run" "^first_text=.*gate4 steered $NONCE" "$u5"
     contains "U5: the first run completes" '^first_terminal=run.completed$' "$u5"
@@ -304,11 +310,15 @@ fi
 # ---- U6 --------------------------------------------------------------------------------------------
 if want U6 && ((MODELS)) && sbx_ready m1 "U6"; then
   echo "==> U6: the approval card, the signed approval, a remember-rule, the 1 h expiry"
-  art() { tool_prompt create_artifact "$(printf '{"kind":"markdown","title":"Gate 4 U6 %s","content":"%s"}' "$1" "$2")"; }
+  # share_file asks in ask-on-write (a Kobe write); create_artifact never does (PROMPT_EXEMPT_KOBE_TOOLS,
+  # Chris 2026-10-06). The three files are made first with bash, which asks only by policy rule.
   marker="gate4-u6-$NONCE"
-  u6=$(step u6 "\"user\":$U_M1,\"marker\":\"$marker\",\"write\":$(json_str "$(art 1 "$marker")"),\"write2\":$(json_str "$(art 2 "second $NONCE")"),\"write3\":$(json_str "$(art 3 "third $NONCE")")")
+  share() { tool_prompt share_file "$(printf '{"path":"%s-%s.txt","description":"Gate 4 U6 %s"}' "$marker" "$1" "$1")"; }
+  files=$(turn "$U_M1" "$(bash_prompt "for n in 1 2 3; do echo \"gate4 U6 \$n $NONCE\" > /workspace/$marker-\$n.txt; done; ls /workspace/$marker-*.txt | wc -l")" '"title":"gate4 U6 files"')
+  contains "U6: three files in m1's workspace to share" '^tool_output=.*"preview":" *3\\n' "$files"
+  u6=$(step u6 "\"user\":$U_M1,\"marker\":\"$marker\",\"sharedName\":\"$marker-1.txt\",\"write\":$(json_str "$(share 1)"),\"write2\":$(json_str "$(share 2)"),\"write3\":$(json_str "$(share 3)")")
   show "U6" "$u6"
-  contains "U6: the card names the tool, its risk and the exact input" '^card=create_artifact:write:input=true$' "$u6"
+  contains "U6: the card names the tool, its risk and the exact input" '^card=share_file:write:input=true$' "$u6"
   contains "U6: it can be remembered" '^remember_scope=[a-z]+$' "$u6"
   contains "U6: the member allows it with a remember-rule" '^allow=200:-$' "$u6"
   contains "U6: the run completes" '^run1=run.completed$' "$u6"
@@ -389,11 +399,16 @@ if want U7 && ((MODELS)); then
   for pair in "m1:$r1" "m2:$r2"; do
     k=${pair%%:*}
     contains "U7: $k's tool call completes through the MCP proxy" '^terminal=run.completed$' "${pair#*:}"
-    if grep -q '"isError":true' <<<"$(said "${pair#*:}")"; then fail "U7: $k's call is not an error"; else ok "U7: $k's call is not an error"; fi
+    # Pi's tool.result says "is_error"; an MCP result inside it says "isError".
+    if grep -qE '"(isError|is_error)":true' <<<"$(said "${pair#*:}")"; then fail "U7: $k's call is not an error"; else ok "U7: $k's call is not an error"; fi
   done
   if [[ "$CONNECTOR" == "$FAKE_CONNECTOR" ]]; then
-    s1=$(grep -o 'fake-oauth:get_thing:user-[0-9]*' <<<"$(said "$r1")" | head -1)
-    s2=$(grep -o 'fake-oauth:get_thing:user-[0-9]*' <<<"$(said "$r2")" | head -1)
+    s1=$(grep -o 'fake-oauth:get_thing:user-[0-9]*' <<<"$(said "$r1")" | head -1 || true)
+    s2=$(grep -o 'fake-oauth:get_thing:user-[0-9]*' <<<"$(said "$r2")" | head -1 || true)
+    if [[ -z "$s1" || -z "$s2" ]]; then
+      printf '     m1 said: %s\n     m2 said: %s\n' "$(said "$r1" | tr '\n' ' ' | cut -c1-600)" "$(said "$r2" | tr '\n' ' ' | cut -c1-600)"
+      $KUBECTL -n "$INFRA_NS" logs fake-oauth --tail=20 2>&1 | sed 's/^/     fake-oauth: /' || true
+    fi
     contains "U7: each call carried its own user's token (two different grants)" '^fake-oauth:get_thing:user-[0-9]+ fake-oauth:get_thing:user-[0-9]+ different$' \
       "${s1:-none} ${s2:-none} $([[ -n "$s1" && "$s1" != "$s2" ]] && echo different || echo same)"
   fi
@@ -416,7 +431,7 @@ if want U7 && ((MODELS)); then
     else ok "U7: after revoking, m1's call no longer reaches the server with m1's token"; fi
     contains "U7: m2's call still works with m2's token" "${s2:-none}" "$(said "$r2")"
   else
-    contains "U7: after revoking, m1's call fails or the connector is left out" '"isError":true|connector:'"$MCP_NAME"':not_user_connected|not connected' "$(said "$r1")$(field omitted "$r1")"
+    contains "U7: after revoking, m1's call fails or the connector is left out" '"(isError|is_error)":true|connector:'"$MCP_NAME"':not_user_connected|not connected' "$(said "$r1")$(field omitted "$r1")"
     contains "U7: m2's call still works" '^terminal=run.completed$' "$r2"
   fi
   if ((FAKE_INFRA)) && [[ -n "$FAKE_CONNECTOR" ]]; then
@@ -548,7 +563,7 @@ if want U16; then
 fi
 
 if ((failed)); then
-  echo "Gate 4 stories: FAILED"
+  verdict "Gate 4 stories: FAILED"
   exit 1
 fi
-echo "Gate 4 stories: all checks passed"
+verdict "Gate 4 stories: all checks passed"

@@ -157,8 +157,15 @@ async function u1Account() {
   out("team_accept", (await c.call("POST", `/v1/me/invites/${config.teamId}/accept`)).status);
   const teams = await c.call("GET", "/v1/me/teams");
   out("teams", `${teams.status}:${teamSlugs(teams)}`);
+  // A session acts in one active team (the chat's switcher, `PUT /v1/me/teams/active`): another
+  // team can't be made active, and a request naming it is refused while the own team is active.
+  out(
+    "other_team",
+    statusOf(await c.call("PUT", "/v1/me/teams/active", { teamId: config.otherTeamId })),
+  );
+  out("own_team_active", await c.useTeam(config.teamId));
   c.team = config.otherTeamId;
-  out("other_team", statusOf(await c.call("GET", "/v1/threads")));
+  out("other_team_named", statusOf(await c.call("GET", "/v1/threads")));
   c.team = config.teamId;
   out("own_team", (await c.call("GET", "/v1/threads")).status);
   // A passkey (WebAuthn, user verification required), then a sign-in with it alone.
@@ -203,6 +210,7 @@ async function u1Totp() {
     out("enable", enable.status);
     const code = await totp(enable.json.totpURI);
     out("verify", (await c.call("POST", "/api/auth/two-factor/verify-totp", { code })).status);
+    await c.useTeam(config.teamId);
     out("after_enroll", (await c.call("GET", "/v1/threads")).status);
     const next = client(`198.51.103.${1 + Math.floor(Math.random() * 250)}`);
     const first = await next.call("POST", "/api/auth/sign-in/email", {
@@ -220,6 +228,7 @@ async function u1Totp() {
       code: await totp(enable.json.totpURI),
     });
     out("with_code", second.status);
+    await next.useTeam(config.teamId);
     out("after_code", (await next.call("GET", "/v1/threads")).status);
   } finally {
     await database.pool.query("UPDATE site_settings SET value = $1 WHERE key = 'require_2fa'", [
@@ -251,7 +260,7 @@ async function u2Memory() {
     statusOf(await c.call("PUT", "/v1/memory", { scope: "user", path, content: config.content })),
   );
   const listed = async (team) => {
-    c.team = team;
+    await c.useTeam(team); // the team switcher: the session's active team, then the header
     const r = await c.call("GET", "/v1/memory?scope=user");
     return `${r.status}:${r.text.includes(`"path":"${path}"`) ? "present" : "absent"}`;
   };
@@ -260,6 +269,26 @@ async function u2Memory() {
 }
 
 // --- U5: Enter queues, Steer injects, Stop cancels, one active run per thread ----------------------
+
+/** Follows the run's stream until an event of `type` (true) or its end or the timeout (false). */
+async function sawEvent(c, runId, type, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let seen = false;
+  try {
+    const res = await c.stream(runId, { signal: controller.signal });
+    if (res.status === 200) {
+      await readEvents(res, (e) => {
+        if (e.type === type) seen = true;
+        return seen || TERMINAL.has(e.type);
+      });
+    }
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+  return seen;
+}
 
 async function u5() {
   const c = await signedInAs(config.user);
@@ -280,7 +309,13 @@ async function u5() {
   const runs = await c.call("GET", `/v1/threads/${thread}/runs`);
   const statuses = (runs.json.runs ?? []).map((r) => r.status);
   out("active_runs", statuses.filter((s) => s === "running").length);
-  out("steer", statusOf(await c.call("POST", `/v1/runs/${runA}/steer`, { content: config.steer })));
+  // Steer while the run works: once Pi is in it (its first tool call, the `sleep`), as a member
+  // steers what they see working. `running` alone can precede the sandbox taking the run.
+  out("steer_during", (await sawEvent(c, runA, "tool.call", 120_000)) ? "tool.call" : "none");
+  const steered = await c.call("POST", `/v1/runs/${runA}/steer`, { content: config.steer });
+  out("steer", statusOf(steered));
+  if (steered.status !== 200)
+    out("steer_message", String(steered.json.message ?? "-").slice(0, 200));
   const seenA = await follow(c, runA, 300_000);
   stopApprover();
   out("first_terminal", seenA.terminal?.type ?? "none");
@@ -318,6 +353,7 @@ async function u5() {
 }
 
 // --- U6: the approval card, the signed approval, a remember-rule, the 1 h expiry -------------------
+// The writes are share_file calls of files already in the member's workspace (config.write*).
 
 async function pendingOf(c, runId, timeoutMs = 120_000) {
   for (let i = 0; i < timeoutMs / 1000; i += 1) {
@@ -371,12 +407,11 @@ async function u6() {
   out("allow", statusOf(decided));
   const seen1 = await follow(c, run1, 300_000);
   out("run1", seen1.terminal?.type ?? "none");
-  const created = seen1.events.find((e) => e.type === "artifact.created")?.data.payload;
-  out("artifact", created?.artifact_id ?? "-");
-  if (created) {
-    const content = await c.call("GET", `/v1/artifacts/${created.artifact_id}/versions/1/content`);
-    out("exact_input_ran", content.text.includes(config.marker));
-  }
+  // share_file (a Kobe write that asks in ask-on-write; artifacts never ask, by decision): the
+  // file it shared is the one the approved input named.
+  const shared = seen1.events.find((e) => e.type === "file.shared")?.data.payload;
+  out("shared", shared ? `${shared.file_id}:${shared.name}` : "-");
+  out("exact_input_ran", shared?.name === config.sharedName);
   if (a) {
     const row = await approvalRow(config.user.teamId, a.approval_id);
     out("approval_row", `${row.status}:signed=${row.signed}`);
