@@ -1,10 +1,12 @@
 import { RUN_START_TIMEOUT_MS, WAITING_FOR_AGENT } from "./support/constants.js";
 import { expect, test } from "./support/chat.js";
+import { longAnswer } from "./support/gate5.js";
 
 /** Runs long enough for every queue action below to happen while it streams. */
-const STORY =
+const STORY = longAnswer(
   "No tools. Write a detailed 2000-word short story about a lighthouse keeper who finds a " +
-  "message in a bottle.";
+    "message in a bottle.",
+);
 const ALPHA = "No tools. Reply with the single word ALPHA.";
 const BRAVO = "No tools. Reply with the single word BRAVO.";
 

@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createFakeLlm, lastToolResult } from "./testing/fake-llm.js";
+import { createFakeLlm, LONG_LINE_MS, lastToolResult } from "./testing/fake-llm.js";
 
 /** The fake provider's scripted tool call (KOBE-39 e2e: a bash tool call through real Pi). */
 const server = createFakeLlm();
@@ -238,5 +238,69 @@ describe("fake LLM reasoning (KOBE-260)", () => {
     const text = await r.text();
     expect(text.indexOf("reasoning_content")).toBeGreaterThan(0);
     expect(text.indexOf("reasoning_content")).toBeLessThan(text.indexOf("thought"));
+  });
+});
+
+describe("fake LLM long answers and prompt sizes (KOBE-227 Gate 5)", () => {
+  const stream = (content: string) =>
+    fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-fake",
+        stream: true,
+        messages: [{ role: "user", content }],
+      }),
+    });
+  const streamed = (body: string) =>
+    body
+      .split("\n\n")
+      .filter((e) => e.startsWith("data: {"))
+      .map((e) => JSON.parse(e.slice(6)) as Record<string, unknown>);
+  const textOf = (events: Record<string, unknown>[]) =>
+    events
+      .map((e) => (e.choices as { delta?: { content?: string } }[])[0]?.delta?.content ?? "")
+      .join("");
+
+  it("streams a 'kobe-long-answer=<n>' prompt as n numbered lines, one at a time", async () => {
+    const started = Date.now();
+    const r = await stream("kobe-long-answer=6 please");
+    const events = streamed(await r.text());
+    const lines = textOf(events).trim().split("\n");
+    expect(lines).toHaveLength(6);
+    expect(lines[0]).toMatch(/^1\. /);
+    expect(lines[5]).toMatch(/^6\. /);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(5 * LONG_LINE_MS);
+  });
+
+  it("stops a long answer when the caller goes away", async () => {
+    const abort = new AbortController();
+    const r = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-fake",
+        stream: true,
+        messages: [{ role: "user", content: "kobe-long-answer=2000" }],
+      }),
+      signal: abort.signal,
+    });
+    expect(r.status).toBe(200);
+    abort.abort();
+    const res = await chat([{ role: "user", content: "hello" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
+  });
+
+  it("reports the prompt tokens a 'kobe-prompt-tokens=<n>' prompt asks for", async () => {
+    const plain = (await chat([{ role: "user", content: "kobe-prompt-tokens=140000 hi" }])) as {
+      usage?: { prompt_tokens: number };
+    };
+    expect(plain.usage?.prompt_tokens).toBe(140000);
+    const events = streamed(await (await stream("kobe-prompt-tokens=176000 hi")).text());
+    const usage = events
+      .map((e) => e.usage as { prompt_tokens?: number } | undefined)
+      .find(Boolean);
+    expect(usage?.prompt_tokens).toBe(176000);
+    expect(textOf(events)).toBe("fake-openai: kobe-prompt-tokens=176000 hi");
   });
 });

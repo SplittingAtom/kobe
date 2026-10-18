@@ -372,6 +372,28 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     expect(pin.ok && pin.version.definition.prompt).toBe("You are Pinned.");
   });
 
+  it("reports the model the pinned version pins (agent_model), so the chat locks its model (U22)", async () => {
+    // KOBE-44: the thread read's `agent_model` comes from the run resolver's pinnedModel seam; the
+    // chat hides "Regenerate with…" and locks the picker when it is set.
+    const id = await create("bob", "team", "Pins a model", { model: "pinned-alias" });
+    await published("bob", id);
+    const pinnedThread = await newThread("carol", id);
+    expect((await as.carol.get(`/v1/threads/${pinnedThread.thread_id}`)).json).toMatchObject({
+      agent_version: 1,
+      agent_model: "pinned-alias",
+    });
+    // v2 drops the pin: the v1 thread keeps v1's, a v2 thread has none.
+    expect((await edit("bob", id, "no model now")).status).toBe(200);
+    await published("bob", id);
+    expect((await as.carol.get(`/v1/threads/${pinnedThread.thread_id}`)).json.agent_model).toBe(
+      "pinned-alias",
+    );
+    const free = await newThread("carol", id);
+    expect((await as.carol.get(`/v1/threads/${free.thread_id}`)).json.agent_model).toBeNull();
+    const plain = await newThread("carol", null);
+    expect((await as.carol.get(`/v1/threads/${plain.thread_id}`)).json.agent_model).toBeNull();
+  });
+
   it("switches a thread to the current version in one click, or to a chosen one", async () => {
     const id = await create("bob", "team", "Switchy");
     await published("bob", id);
@@ -398,6 +420,52 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     expect(missing).toMatchObject({ status: 404, json: { code: "version_not_found" } });
     // Not the owner: the thread doesn't exist for them.
     expect((await as.bob.post(`/v1/threads/${t.thread_id}/agent-version`, {})).status).toBe(404);
+  });
+
+  it("marks where the thread's runs changed version, per thread, skipping unknown versions (KOBE-420)", async () => {
+    const id = await create("bob", "team", "Marked");
+    await published("bob", id);
+    const t = await newThread("carol", id);
+    const other = await newThread("carol", id);
+    const markers = async (thread: string) => {
+      const res = await as.carol.get(`/v1/threads/${thread}/markers`);
+      expect(res.status, json(res)).toBe(200);
+      return res.json.agents as unknown[];
+    };
+    let minute = 0;
+    /** A run as the run start records it (runs/lifecycle.ts sets agent_version). */
+    const ran = async (thread: string, version: number | null, entry: string | null) => {
+      const run = randomUUID();
+      minute += 1;
+      await h.admin.query(
+        `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at, ended_at,
+                           user_entry_id, agent_version)
+         VALUES ($1, $2, $3, 'user', 'completed', now() + make_interval(mins => $4),
+                 now() + make_interval(mins => $4), $5, $6)`,
+        [finance, run, thread, minute, entry, version],
+      );
+      return run;
+    };
+    await ran(t.thread_id, 1, "e-1");
+    await ran(other.thread_id, 4, "o-1"); // another thread's versions never count here
+    await ran(t.thread_id, null, "e-2"); // compacted before 0129, or no agent: skipped
+    await ran(t.thread_id, 1, "e-3");
+    expect(await markers(t.thread_id)).toEqual([]);
+    await ran(t.thread_id, 3, null); // its prompt never reached the tree: the next run carries it
+    const third = await ran(t.thread_id, 3, "e-5");
+    await ran(t.thread_id, 3, "e-6");
+    expect(await markers(t.thread_id)).toEqual([
+      {
+        run_id: third,
+        user_entry_id: "e-5",
+        parent_entry_id: null,
+        from_version: 1,
+        to_version: 3,
+      },
+    ]);
+    expect(await markers(other.thread_id)).toEqual([]);
+    // Another member never sees a private thread or its markers.
+    expect((await as.dave.get(`/v1/threads/${t.thread_id}/markers`)).status).toBe(404);
   });
 
   it("refuses to switch while a run is active, without an agent, or a suspended agent", async () => {

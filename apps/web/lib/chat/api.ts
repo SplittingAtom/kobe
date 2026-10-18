@@ -141,6 +141,12 @@ export interface ChatApi {
   clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
   setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
+  /**
+   * Moves the thread to another version of its agent (D19, U8): `version`, or the agent's current
+   * one when absent (`POST /v1/threads/:id/agent-version`). The owner's own; refused while a run is
+   * active (`thread_busy`).
+   */
+  switchAgentVersion(threadId: string, version?: number): Promise<ApiResult<ThreadSummary>>;
   /** Sets the thread's thinking level for its next runs (KOBE-260; null = the model's default). */
   setThreadThinking(
     threadId: string,
@@ -326,6 +332,12 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     clearTestThreads: (agentId) =>
       send("DELETE", `/v1/threads/test${query({ agent_id: agentId })}`),
     setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
+    switchAgentVersion: (id, version) =>
+      send(
+        "POST",
+        `/v1/threads/${enc(id)}/agent-version`,
+        version === undefined ? {} : { version },
+      ),
     setThreadThinking: (id, level) =>
       send("PATCH", `/v1/threads/${enc(id)}`, { thinking_level: level }),
     listModels: () => listTeamModels(teamId, fetchFn),

@@ -62,6 +62,11 @@ export class SecretBox {
     return `${VERSION}.${current.id}.${b64(nonce)}.${b64(body)}.${b64(cipher.getAuthTag())}`;
   }
 
+  /** The ids of the keys this box holds, current first (not secret; KOBE-425's start-up check). */
+  get keyIds(): readonly string[] {
+    return this.#keys.map((k) => k.id);
+  }
+
   /** Whether `sealed` uses the current secret (false: re-seal it). */
   isCurrent(sealed: string): boolean {
     return sealed.split(".")[1] === this.#keys[0]?.id;

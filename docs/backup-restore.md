@@ -103,37 +103,54 @@ provider ever store OAuth tokens there, those tokens are in the dump too, and th
 only by the backup encryption. The test suite seeds such tokens and asserts exactly this. Inside
 the encryption:
 
-| Data                                          | Inside the backup as                                                    |
-| --------------------------------------------- | ----------------------------------------------------------------------- |
-| Passwords                                     | scrypt hashes (`accounts.password`)                                     |
-| TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)                    |
-| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)                     |
-| Connector grants, header injection (later)    | ciphertext under a site key held in a Kubernetes Secret (spec D27, D28) |
-| Sessions, reset tokens, JWT keys, rate limits | not included (absent even from the decrypted dump; tested)              |
+| Data                                          | Inside the backup as                                       |
+| --------------------------------------------- | ---------------------------------------------------------- |
+| Passwords                                     | scrypt hashes (`accounts.password`)                        |
+| TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)       |
+| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)        |
+| Connector grants, the web search API key      | ciphertext under the **envelope key** (spec D27, D28)      |
+| Model provider API keys, virtual keys         | ciphertext under the **model keys** Secret (KOBE-40)       |
+| Egress header values (KOBE-39)                | ciphertext under the **egress header** Secret              |
+| Sessions, reset tokens, JWT keys, rate limits | not included (absent even from the decrypted dump; tested) |
 
 Even so, a backup holds personal data (names, e-mail addresses, and conversations once they
 exist). Restrict who can read the backup files and who can read the key.
 
-**The Kubernetes Secrets are not in the backup**, and a restore needs them. When you install, keep
-copies of the following in your secret store:
+**The Kubernetes Secrets are not in the backup**, and a restore needs the ones that hold key
+material: data in Postgres is sealed or signed with them, and a site installed with new values
+cannot open it. The chart generates each of these (kept across upgrades and uninstalls) unless you
+give your own through its values key. When you install, copy every one into your secret store:
 
-- The auth Secret (`<release>-auth`, key `secret`). Without the same value, every enrolled TOTP
-  factor is unusable after a restore. Rotating it is not supported (see `auth.existingSecret`).
-- The envelope key Secret (`<release>-envelope-key`, key `key`, and `key-previous` during a
-  rotation; KOBE-107). It is the key-encryption key for stored credentials (connector grants and
-  other per-record secrets). **Back it up together with every database backup**: without the same
-  value every stored credential is unreadable, and a database restored under a different key fails
-  closed (each decrypt is refused; nothing is returned or guessed), so users must reconnect.
-  Export it to your secret store, never to a file in shell history or the backup bucket:
+| Secret (generated name)          | Values key to reuse it            | Keys                                                                                                  | Without the same value after a restore                                                                                                |
+| -------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `<release>-auth`                 | `auth.existingSecret`             | `secret`, `setup-token`                                                                               | Every enrolled TOTP factor is unusable. Rotating it is not supported.                                                                 |
+| `<release>-envelope-key`         | `envelope.keySecret`              | `key`, `key-previous` during a rotation (KOBE-107)                                                    | Every stored credential (connector grants, the web search key) is unreadable; decrypts fail closed and users must reconnect.          |
+| `<release>-model-keys`           | `bifrost.keysSecret`              | `provider-keys`, `virtual-keys` (and `-previous`), `bifrost-admin-password`, `bifrost-encryption-key` | The model provider API keys and members' virtual keys can't be opened: no run reaches a model until the Owner enters every key again. |
+| `<release>-egress-headers`       | `egressProxy.headerSecret`        | `secret`, `secret-previous` during a rotation (KOBE-39)                                               | Header values team admins set for egress domains can't be opened; they must be entered again.                                         |
+| `<release>-sandbox-session-keys` | `sandbox.sessionKeysSecret`       | `sandbox-wire`, `model-gateway`, `mcp-proxy`, `egress-proxy`, `approval-hmac`                         | Approvals allowed but not yet used are void (`approval-hmac`); sandbox session tokens are simply issued again.                        |
+| `<release>-mcp-proxy-internal`   | `mcpProxy.internalKeySecret`      | `key`                                                                                                 | Nothing: no data is sealed with it, a new one works at once. Copy it anyway, so one procedure covers every Secret.                    |
+| `<release>-db-app` (CNPG only)   | `postgres.cnpg.existingAppSecret` | `username`, `password`                                                                                | The bundled database's app credentials; with your own Postgres they are your database credentials.                                    |
 
-  ```bash
-  umask 077
-  kubectl -n kobe get secret kobe-envelope-key -o jsonpath='{.data.key}' | base64 -d \
-    > /secure/kobe-envelope-key   # also key-previous, if the Secret has it
-  ```
+Restore each with a new name and point the fresh install's values key at it (see
+[Restore onto a fresh cluster](#restore-onto-a-fresh-cluster), step 1). A server started with a
+Secret that is not the one the data was written with says so at start, one error line per kind of
+sealed value, naming the Secret to put back (`... were sealed with a key this server does not
+hold, so they cannot be opened ...`); nothing is decrypted, and the values stay as they were until
+the right Secret is back. `charts/kobe/tests/backup-secrets.test.ts` fails when the chart
+generates a Secret this table does not list.
 
-  `kobe backup` cannot include it: the CLI talks to Postgres and S3 only, and bundling the key with
-  the ciphertext it protects would defeat the separation.
+Export them to your secret store, never to a file in shell history or the backup bucket, for
+example (release `kobe` in namespace `kobe`):
+
+```bash
+umask 077
+for s in auth envelope-key model-keys egress-headers sandbox-session-keys mcp-proxy-internal; do
+  kubectl -n kobe get secret "kobe-$s" -o json > "/secure/kobe-$s.json"
+done
+```
+
+`kobe backup` cannot include them: the CLI talks to Postgres and S3 only, and bundling the keys with
+the ciphertext they protect would defeat the separation.
 
 - The backup key, the S3 credentials and the database credentials.
 
@@ -221,21 +238,47 @@ recorded fingerprint can.
 
 A restore goes into a **freshly installed Kobe of the same version** (same migrations). It refuses
 a target whose applied migrations differ or that already has data, and it never deletes anything
-except rows a migration seeds into every new site (the egress presets in `egress_domains`,
-listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the same transaction.
+except rows every new site has before anyone signs up, which the backup's rows replace in the same
+transaction:
 
-1. Recreate the Secrets from your secret store. Give the auth and envelope Secrets new names so
-   that Helm does not have to adopt them (the envelope key must be the backed-up value):
+- rows a migration seeds (the egress presets in `egress_domains` and the others listed in
+  `packages/cli/src/seeded.ts`);
+- rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
+  with their published versions and the system's audit events for seeding them, and where the
+  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`). The started
+  site's own audit events go with them: the restored audit chain is the backup's, continued by
+  the restore's event, which records the replaced chain's head and size
+  (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the
+  freshly installed server logged before the restore name that replaced head: they are superseded
+  by the restore event, not a sign of tampering.
+
+Any other row (a user, a personal agent, a person's audit event, a setting) is real data, and the
+restore refuses the target.
+
+1. Recreate every Secret of the [Secrets](#secrets) table from your secret store, each under a
+   new name so that Helm does not have to adopt it (the values must be the backed-up ones). From
+   the JSON exports above, for example:
 
    ```bash
-   kubectl -n kobe create secret generic kobe-auth-restored \
-     --from-file=secret=/secure/kobe-auth-secret --from-literal=setup-token="$(openssl rand -hex 16)"
-   kubectl -n kobe create secret generic kobe-envelope-key-restored \
-     --from-file=key=/secure/kobe-envelope-key
+   for s in auth envelope-key model-keys egress-headers sandbox-session-keys mcp-proxy-internal; do
+     jq --arg n "kobe-$s-restored" 'del(.metadata) | .metadata.name = $n' "/secure/kobe-$s.json" \
+       | kubectl -n kobe apply -f -
+   done
    ```
 
 2. Install the Kobe version the backup was taken with (see [install.md](install.md)), and:
-   - add `--set auth.existingSecret=kobe-auth-restored --set envelope.keySecret=kobe-envelope-key-restored`;
+   - point each values key of the [Secrets](#secrets) table at its restored Secret (and
+     `postgres.cnpg.existingAppSecret` with CNPG):
+
+     ```bash
+     --set auth.existingSecret=kobe-auth-restored \
+     --set envelope.keySecret=kobe-envelope-key-restored \
+     --set bifrost.keysSecret=kobe-model-keys-restored \
+     --set egressProxy.headerSecret=kobe-egress-headers-restored \
+     --set sandbox.sessionKeysSecret=kobe-sandbox-session-keys-restored \
+     --set mcpProxy.internalKeySecret=kobe-mcp-proxy-internal-restored
+     ```
+
    - use the same S3 bucket, or one that holds a copy of its objects;
    - use the same public URL, because passkeys are bound to it.
 
@@ -300,8 +343,12 @@ How restore works:
    - lifts `FORCE ROW LEVEL SECURITY` for the owner only (the app role stays bound by RLS);
    - disables user triggers (e.g. the `seq`-assigning triggers on `thread_entries` and
      `run_events`, so the backed-up `seq` values are kept) and defers foreign keys;
-   - re-checks the migrations and that the target is empty;
+   - re-checks the migrations and that the target holds no data but the seeded rows above, then
+     deletes those;
    - loads the data and verifies every table's row count against the manifest;
+   - marks every awake sandbox (`sandboxes.state = 'running'`) `hibernated`: none of them exists
+     where the backup lands, so each member's next turn shows "Waking your workspace…" while a new
+     sandbox starts, and Pi's session is rebuilt from Postgres (KOBE-426);
    - restores the triggers and FORCE RLS;
    - verifies the restored audit hash chain, that it ends at the head the signed manifest
      recorded and, with `--expect-audit-head <seq>:<hash>`, that it contains a head you recorded

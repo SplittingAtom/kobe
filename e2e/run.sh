@@ -118,7 +118,7 @@ gated() { # control-url label url
 $(answers "$3") >/dev/null 2>&1 && echo $2=REACHED || echo $2=BLOCKED; else echo control=BLOCKED; echo $2=UNTESTED; fi"
 }
 probe() { # namespace, shell command → prints its output (unique pod, cleaned up on exit)
-  local ns="$1" name="probe-$RANDOM$RANDOM"
+  local ns="$1" name="probe-$BASHPID-$RANDOM$RANDOM" # BASHPID: each $(probe) subshell its own
   PODS+=("-n $ns $name")
   $KUBECTL -n "$ns" run "$name" --restart=Never --image=busybox:1.37 --command -- sh -c "$2" >/dev/null
   local phase="" i
@@ -463,7 +463,7 @@ team_pod() { # namespace, name, shell command → a sandbox-like pod (gVisor, bo
       \"audience\":\"kobe.sandbox-bootstrap\",\"expirationSeconds\":3600,\"path\":\"bootstrap-token\"}}]}}]}}" >/dev/null
 }
 team_probe() { # shell command → its output, run from a sandbox-like pod in the team namespace
-  local name="tprobe-$RANDOM$RANDOM" phase="" i
+  local name="tprobe-$BASHPID-$RANDOM$RANDOM" phase="" i
   team_pod "$TEAM_NS" "$name" "$1" || { echo "team probe could not start"; return; }
   for i in $(seq 1 180); do
     phase=$($KUBECTL -n "$TEAM_NS" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)

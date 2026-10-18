@@ -100,10 +100,24 @@ export interface ProjectMarker {
   readonly toProjectHidden?: boolean | undefined;
 }
 
+/**
+ * The thread switched to another version of its agent (U8, KOBE-420), shown above the prompt of
+ * the first run that started after the switch: from there the agent works as that version.
+ */
+export interface AgentMarker {
+  readonly runId: string;
+  readonly userEntryId: string | null;
+  readonly parentEntryId: string | null;
+  readonly fromVersion: number;
+  readonly toVersion: number;
+}
+
 export interface ThreadMarkers {
   readonly runs: readonly RunMarker[];
   /** Absent from servers before KOBE-220. */
   readonly projects?: readonly ProjectMarker[] | undefined;
+  /** Absent from servers before KOBE-420. */
+  readonly agents?: readonly AgentMarker[] | undefined;
   readonly approvals: readonly ApprovalMarker[];
   /** Absent from servers before KOBE-297. */
   readonly skills?: readonly SkillMarker[] | undefined;
@@ -236,10 +250,10 @@ export function placeRunMarkers(
 }
 
 /**
- * Where each project move shows, by message id: above the prompt of the run it marks. A run whose
- * prompt is not in the loaded tree (never mirrored, another page) is left out.
+ * Where each project move or agent switch shows, by message id: above the prompt of the run it
+ * marks. A run whose prompt is not in the loaded tree (never mirrored, another page) is left out.
  */
-export function placeProjectMarkers<T extends { readonly userEntryId: string | null }>(
+export function placePromptMarkers<T extends { readonly userEntryId: string | null }>(
   moves: readonly T[],
   projection: Projection,
 ): ReadonlyMap<string, readonly T[]> {

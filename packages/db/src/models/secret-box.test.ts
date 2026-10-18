@@ -56,6 +56,15 @@ describe("SecretBox", () => {
     expect(() => old.open(resealed, "c")).toThrow(/does not hold/);
   });
 
+  it("lists the ids of its keys, current first: the id a sealed value names (KOBE-425)", () => {
+    const old = new SecretBox(KEY, "test");
+    const rotated = new SecretBox(["n".repeat(40), KEY], "test");
+    expect(rotated.keyIds).toHaveLength(2);
+    expect(rotated.keyIds[1]).toBe(old.keyIds[0]);
+    expect(old.seal("sk", "c").split(".")[1]).toBe(old.keyIds[0]);
+    expect(new SecretBox(KEY, "other").keyIds[0]).not.toBe(old.keyIds[0]); // per purpose
+  });
+
   it("requires a key of at least 32 characters", () => {
     expect(() => new SecretBox("short", "test")).toThrow(/32/);
   });

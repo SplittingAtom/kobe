@@ -1337,7 +1337,8 @@ Used to develop, test and run CI for Kobe; never shipped in an image or installe
 
 | Component | Version | License (SPDX) | How used | Where | License text | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Playwright (`@playwright/test`) | 1.55.0 | Apache-2.0 | test-only | e2e/browser (packages below) | [license](https://github.com/microsoft/playwright/blob/main/LICENSE) |  |
+| Playwright (`@playwright/test`) | 1.55.0 | Apache-2.0 | test-only | e2e/browser (packages below); CI e2e shard gate3 (e2e/browser/scripts/gate3-browser.mjs) | [license](https://github.com/microsoft/playwright/blob/main/LICENSE) |  |
+| Chromium (Playwright's build, `npx playwright install chromium`) | the build Playwright 1.55.0 pins | BSD-3-Clause | test-only | CI e2e shard gate3 and e2e/browser runs (downloaded at test time, never shipped) | [license](https://chromium.googlesource.com/chromium/src/+/main/LICENSE) |  |
 | Mailpit (`axllent/mailpit`) | v1.31.3 | MIT | dev-only (SMTP sink for the dev loop) | dev/mailpit.yaml (Tilt) | [license](https://github.com/axllent/mailpit/blob/develop/LICENSE) |  |
 | k3d (and its k3d-proxy/k3d-tools images) | v5.9.0 (CI e2e) | MIT | dev-only, test-only (local and CI clusters) | scripts/dev-cluster.sh, .github/workflows/e2e.yml | [license](https://github.com/k3d-io/k3d/blob/main/LICENSE.md) |  |
 | Tilt | chosen by the developer | Apache-2.0 | dev-only | Tiltfile | [license](https://github.com/tilt-dev/tilt/blob/master/LICENSE) |  |

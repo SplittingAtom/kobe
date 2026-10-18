@@ -31,6 +31,10 @@ interface FakeThread {
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
   is_test?: boolean;
   agent_id?: string | null;
+  /** The agent version the thread is pinned to (D19); absent = none. */
+  agent_version?: number | null;
+  /** The agent's current published version, as the thread detail reports it (KOBE-420). */
+  agent_current_version?: number | null;
   /** What the thread detail says of the pinned agent (KOBE-122). */
   agent_name?: string | null;
   agent_status?: "active" | "suspended" | "archived" | null;
@@ -362,7 +366,14 @@ export class FakeKobe {
   /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
   readonly threadMarkers = new Map<
     string,
-    { runs: Json[]; approvals: Json[]; skills?: Json[]; projects?: Json[]; skill_updates?: Json[] }
+    {
+      runs: Json[];
+      approvals: Json[];
+      skills?: Json[];
+      projects?: Json[];
+      agents?: Json[];
+      skill_updates?: Json[];
+    }
   >();
 
   /** The caller's answer ratings (KOBE-275), wire casing, by run id. */
@@ -743,7 +754,14 @@ export class FakeKobe {
   }
 
   #summary(thread: FakeThread): Json {
-    const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
+    const {
+      entries: _e,
+      agent_model: _a,
+      agent_name: _n,
+      agent_status: _s,
+      agent_current_version: _c,
+      ...rest
+    } = thread;
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
@@ -755,7 +773,7 @@ export class FakeKobe {
       ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
       owner_name: thread.read_only === true ? (thread.owner_name ?? null) : null,
       agent_id: thread.agent_id ?? null,
-      agent_version: null,
+      agent_version: thread.agent_version ?? null,
       is_test: thread.is_test ?? false,
       shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
@@ -802,6 +820,20 @@ export class FakeKobe {
     if (forced) {
       this.failNext.delete(key);
       return forced;
+    }
+    // The member and their access in the active team (the My area pages beside the thread, KOBE-424).
+    if (url.pathname === "/v1/me" && method === "GET") {
+      return json(200, {
+        user: { id: uuid(3, 1), name: "Ann", email: "ann@example.com" },
+        site_role: null,
+      });
+    }
+    if (url.pathname === "/v1/team" && method === "GET") {
+      return json(200, {
+        team: { id: this.teamId, slug: "fin", name: "Finance" },
+        role: this.teamRole,
+        permissions: ["team.chat"],
+      });
     }
     if (url.pathname === "/v1/me/teams") {
       return json(200, {
@@ -1346,6 +1378,7 @@ export class FakeKobe {
       return json(200, this.#summary(thread));
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);
+    if (action === "agent-version" && method === "POST") return this.#switchAgent(thread, body);
     if (ORGANIZE.has(action) && method === "POST") return this.#organize(thread, action, body);
     if (action === "fork" && method === "POST") {
       // Root to the entry (default: the leaf), with the source as provenance (KOBE-216).
@@ -1438,6 +1471,21 @@ export class FakeKobe {
     };
   }
 
+  /**
+   * Like the server (KOBE-46): the owner's idle thread with an agent moves to `version`, or to the
+   * agent's current one; a reader can't change the thread.
+   */
+  #switchAgent(thread: FakeThread, body: Json | undefined): Response {
+    if (thread.read_only) return error(404, "thread_not_found", "No thread with that id.");
+    if (thread.agent_id == null || thread.agent_version == null)
+      return error(409, "no_agent", "This thread has no agent.");
+    if (this.activeRun(thread.thread_id))
+      return error(409, "thread_busy", "The thread is busy. Try again when the run ends.");
+    const version = typeof body?.version === "number" ? body.version : thread.agent_current_version;
+    thread.agent_version = version ?? thread.agent_version;
+    return json(200, this.#summary(thread));
+  }
+
   /** Like the server (KOBE-213): idle threads only; Pi's `compaction` entry becomes the leaf. */
   #compact(thread: FakeThread, body: Json | undefined): Response {
     if (thread.read_only)
@@ -1480,7 +1528,7 @@ export class FakeKobe {
       const page = this.#entryPage(thread, url);
       return json(200, {
         ...this.#summary(thread),
-        agent_current_version: null,
+        agent_current_version: thread.agent_current_version ?? null,
         agent_model: thread.agent_model ?? null,
         agent_name: thread.agent_name ?? null,
         agent_status: thread.agent_status ?? null,

@@ -9,14 +9,22 @@ must be allowed to, and archives it afterwards), and sharing with the team betwe
 (KOBE-221; needs `KOBE_USER2`, skipped without it), and follow-up chips behind the team switch
 (KOBE-222; `KOBE_USER` must be a team admin; it turns the switch on and off again), and `@file`
 mentions (KOBE-223; it drops a small file into the member's `uploads/` and deletes it at the
-end), and thumbs up and down on an answer with a reason and a comment (KOBE-275). It is **not** part
-of CI and not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
+end), and thumbs up and down on an answer with a reason and a comment (KOBE-275). It runs in CI only as Gate 5
+(below) and is not a pnpm workspace package: it has its own `package.json` and `package-lock.json`
 (`@playwright/test` 1.55.0, Apache-2.0).
 
 Every spec starts its own conversation, talks to the deployment's real models with short prompts
 ("No tools. Reply with the single word ALPHA.") and moves the threads it created to Trash at the
 end. A full pass spends real tokens (Compact now sends one ~30k-token turn) and takes a few minutes
 (3 min on gate1), mostly waiting for runs.
+
+## Gate 5 (KOBE-227)
+
+`e2e/gate5.sh` runs these specs, grouped by user story U17–U24, plus `tests/gate5/` for the
+criteria they leave out, and gives one verdict per story (docs/gates/gate-5.md). In CI (shards
+`gate5-a`, `gate5-b`) it runs them against k3d with the scripted fake model: `KOBE_FAKE_MODEL=1`
+makes the specs use its prompts (`tests/support/gate5.ts`), and `KOBE_BROWSER_MAP=host:port` makes
+Chromium reach the site's host through a port-forward. `KOBE_BROWSER_RESULTS` moves the JSON report.
 
 ## Run it
 

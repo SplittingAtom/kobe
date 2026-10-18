@@ -3,28 +3,35 @@ body:has([data-kobe-chat]) {
   margin: 0;
 }
 @layer base {
-  [data-kobe-chat] *,
-  [data-kobe-chat] ::before,
-  [data-kobe-chat] ::after,
+  [data-kobe-chat] *:where(:not([data-kobe-console], [data-kobe-console] *)),
+  [data-kobe-chat] :where(:not([data-kobe-console], [data-kobe-console] *))::before,
+  [data-kobe-chat] :where(:not([data-kobe-console], [data-kobe-console] *))::after,
   [data-slot="tooltip-content"],
   [data-slot="tooltip-content"] * {
     box-sizing: border-box;
     border-color: var(--border);
   }
-  [data-kobe-chat] :where(button, input, select, textarea) {
+  [data-kobe-chat]
+    :where(button, input, select, textarea):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ) {
     font: inherit;
     color: inherit;
   }
-  [data-kobe-chat] :where(svg) {
+  [data-kobe-chat] :where(svg):where(:not([data-kobe-console], [data-kobe-console] *)) {
     display: block;
   }
   [data-kobe-chat] [data-kobe-composer-box] {
     anchor-name: --kobe-composer;
   }
-  [data-kobe-chat] :where(button:not(:disabled), [role="button"]:not(:disabled)) {
+  [data-kobe-chat]
+    :where(button:not(:disabled), [role="button"]:not(:disabled)):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ) {
     cursor: pointer;
   }
-  [data-kobe-chat] :where(button:not([data-slot])) {
+  [data-kobe-chat]
+    :where(button:not([data-slot])):where(:not([data-kobe-console], [data-kobe-console] *)) {
     padding: 0.25rem 0.75rem;
     font-size: 0.875rem;
     line-height: 1.25rem;
@@ -32,20 +39,32 @@ body:has([data-kobe-chat]) {
     border: 1px solid var(--border);
     border-radius: 0.375rem;
   }
-  [data-kobe-chat] :where(button:not([data-slot]):hover:not(:disabled, [aria-disabled="true"])) {
+  [data-kobe-chat]
+    :where(button:not([data-slot]):hover:not(:disabled, [aria-disabled="true"])):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ) {
     background: var(--accent);
     color: var(--accent-foreground);
   }
-  [data-kobe-chat] :where(button:not([data-slot]):disabled) {
+  [data-kobe-chat]
+    :where(button:not([data-slot]):disabled):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ) {
     opacity: 0.5;
     cursor: not-allowed;
   }
-  [data-kobe-chat] :where(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  [data-kobe-chat]
+    :where(input:not([type="checkbox"], [type="radio"]), select, textarea):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ) {
     background: var(--background);
     border: 1px solid var(--input);
     border-radius: 0.375rem;
   }
-  [data-kobe-chat] :where(input, select, textarea):focus-visible {
+  [data-kobe-chat]
+    :where(input, select, textarea):where(
+      :not([data-kobe-console], [data-kobe-console] *)
+    ):focus-visible {
     outline: none;
     border-color: var(--ring);
     box-shadow: 0 0 0 3px var(--ring);

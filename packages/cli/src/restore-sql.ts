@@ -1,4 +1,4 @@
-import { quoteIdent } from "@kobe/db";
+import { quoteIdent, startupSeed } from "@kobe/db";
 import { isSeeded } from "./seeded.js";
 
 export interface MigrationRecord {
@@ -78,11 +78,14 @@ export function restorePrelude(plan: RestorePlan): string {
   const lockKey = Math.trunc(plan.lockKey);
   const nonEmptyChecks = plan.loadTables
     .filter((t) => !isSeeded(t.name))
-    .map(
-      (t) =>
-        `  IF EXISTS (SELECT 1 FROM ${table(t.name)}) THEN found := found || ' ' || ${literal(t.name)}; END IF;`,
-    )
+    .map((t) => {
+      // Rows the server's start writes (KOBE-422) are allowed; anything else there is real data.
+      const startup = startupSeed(t.name);
+      const where = startup ? ` WHERE (${startup.rows}) IS NOT TRUE` : "";
+      return `  IF EXISTS (SELECT 1 FROM ${table(t.name)}${where}) THEN found := found || ' ' || ${literal(t.name)}; END IF;`;
+    })
     .join("\n");
+  const replaced = plan.loadTables.filter((t) => isSeeded(t.name) || startupSeed(t.name));
   return [
     "BEGIN;",
     "SET LOCAL lock_timeout = '10s';",
@@ -111,13 +114,26 @@ export function restorePrelude(plan: RestorePlan): string {
     doBlock(
       `DECLARE found text := '';\nBEGIN\n${nonEmptyChecks}\n  IF found <> '' THEN\n    RAISE EXCEPTION 'kobe restore: the target already has data in:%; restore only into a freshly installed Kobe. Nothing was restored', found;\n  END IF;\nEND`,
     ),
-    // Rows a migration seeded on the fresh target give way to the backup's (seeded.ts).
-    ...plan.loadTables.filter((t) => isSeeded(t.name)).map((t) => `DELETE FROM ${table(t.name)};`),
+    // Rows a migration or the server's start seeded on the fresh target give way to the backup's
+    // (seeded.ts, @kobe/db startup-seeds.ts). Triggers are off, so audit_log's rows go too: the
+    // restored chain is the backup's, and the restore's own event continues it.
+    // The started target's own audit chain (only start-up events by now) is recorded before it
+    // goes, for the restore's event: anchors it logged before the restore are explained.
+    ...(replaced.some((t) => t.name === "audit_log") ? [REPLACED_HEAD] : []),
+    ...replaced.map((t) => `DELETE FROM ${table(t.name)};`),
     "",
   ]
     .filter((line, i, all) => line !== "" || i === all.length - 1)
     .join("\n");
 }
+
+/** The replaced head's fields (null, so stripped, when nothing was replaced). */
+const REPLACED_PART = (n: number, cast: string) =>
+  `NULLIF(split_part(coalesce(current_setting('kobe.restore.replaced_audit', true), ''), ':', ${n}), '')${cast}`;
+const REPLACED_FIELDS = `'replacedAuditHeadSeq', ${REPLACED_PART(1, "::bigint")}, 'replacedAuditHeadHash', ${REPLACED_PART(2, "")}, 'replacedAuditRows', ${REPLACED_PART(3, "::bigint")}`;
+
+/** Transaction-local: the target's audit head and row count before the restore deleted them. */
+const REPLACED_HEAD = `SELECT set_config('kobe.restore.replaced_audit', coalesce((SELECT seq || ':' || hash || ':' || (SELECT count(*) FROM public."audit_log") FROM public."audit_log" ORDER BY seq DESC LIMIT 1), ''), true);`;
 
 const OPERATOR = /^[A-Za-z0-9._@-]{1,64}$/;
 const HASH = /^[0-9a-f]{64}$/;
@@ -152,7 +168,7 @@ function auditRestore(audit: RestoreAudit): string {
       new Date(audit.backupCreatedAt).toISOString(),
     )}, 'tables', ${Math.trunc(audit.tables)}, 'rows', ${Math.trunc(audit.rows)}, 'operator', ${literal(
       audit.operator,
-    )}, 'auditHeadSeq', NULLIF(${headSeq}, 0), 'auditHeadHash', ${headHash}))`;
+    )}, 'auditHeadSeq', NULLIF(${headSeq}, 0), 'auditHeadHash', ${headHash}, ${REPLACED_FIELDS}))`;
   return doBlock(
     [
       "DECLARE",
@@ -175,6 +191,17 @@ function auditRestore(audit: RestoreAudit): string {
   );
 }
 
+/**
+ * KOBE-426: no sandbox of the backup exists where it is restored (a new cluster, or a site whose
+ * sandboxes were never these). A `running` row would make the first turn's cold start look like a
+ * reconnect (the lifecycle announces no `sandbox.waking` for a `running` row), so every awake row
+ * becomes `hibernated`: the next turn wakes it visibly, and a wake creates a sandbox that is
+ * missing (SandboxProvider.wakeSandbox). Runs before FORCE RLS and the triggers come back, as the
+ * load does; offboarded (`destroyed`) rows stay as they are.
+ */
+export const SANDBOXES_NOT_PRESENT =
+  "UPDATE public.sandboxes SET state = 'hibernated', state_changed_at = now() WHERE state = 'running';";
+
 /** SQL sent after the data script: verify, restore triggers and FORCE RLS, record, commit. */
 export function restorePostlude(plan: RestorePlan): string {
   const countChecks = plan.loadTables
@@ -188,6 +215,7 @@ export function restorePostlude(plan: RestorePlan): string {
   return [
     "",
     doBlock(`DECLARE n bigint;\nBEGIN\n${countChecks}\nEND`),
+    ...(plan.loadTables.some((t) => t.name === "sandboxes") ? [SANDBOXES_NOT_PRESENT] : []),
     // Checks every deferred foreign key now (a violation aborts), then restores them as they were.
     "SET CONSTRAINTS ALL IMMEDIATE;",
     ...plan.immediateForeignKeys.map(
