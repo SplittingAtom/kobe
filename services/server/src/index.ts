@@ -199,27 +199,6 @@ deps?.runs.useIsolation(() => {
 });
 // The scheduler only fires runs: the server's background jobs below run on server replicas.
 const serverDeps = isServer ? deps : undefined;
-// The server replica's own background jobs (startup/jobs.ts, KOBE-422): audit anchor, PII erasure,
-// SIEM forwarding, break-glass, retention, approvals, budgets, email sweeps, egress relay,
-// offboarding, connector refresh, header re-seal and the Bifrost sync.
-const stopServerJobs = serverDeps
-  ? startServerJobs(
-      serverJobs({
-        deps: serverDeps,
-        databaseUrl: config.databaseUrl,
-        logger,
-        auditForwarding: config.auditForwarding,
-        retention: {
-          hourUtc: config.retentionHourUtc,
-          paused: config.retentionPaused,
-          uploadOrphanHours: uploadSettings.orphanHours,
-        },
-        connectorRefreshSeconds: config.connectorRefreshSeconds,
-        models:
-          modelsConfig && bifrostAdmin ? { config: modelsConfig, admin: bifrostAdmin } : undefined,
-      }),
-    )
-  : undefined;
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 if (config.process === "server" && !egressHeaderSecrets) {
@@ -392,6 +371,28 @@ if (isServer && sandbox && deps && !config.mcpProxyInternalKey) {
 // Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
 // replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
 if (providerRuntime && deps) deps.offboarding.setProvider(providerRuntime.provider);
+// The server replica's own background jobs (startup/jobs.ts, KOBE-422): audit anchor, PII erasure,
+// SIEM forwarding, break-glass, retention, approvals, budgets, email sweeps, egress relay,
+// offboarding, connector refresh, header re-seal and the Bifrost sync. Started after the
+// offboarding sweep has its sandbox provider (just above): its first pass deletes volumes.
+const stopServerJobs = serverDeps
+  ? startServerJobs(
+      serverJobs({
+        deps: serverDeps,
+        databaseUrl: config.databaseUrl,
+        logger,
+        auditForwarding: config.auditForwarding,
+        retention: {
+          hourUtc: config.retentionHourUtc,
+          paused: config.retentionPaused,
+          uploadOrphanHours: uploadSettings.orphanHours,
+        },
+        connectorRefreshSeconds: config.connectorRefreshSeconds,
+        models:
+          modelsConfig && bifrostAdmin ? { config: modelsConfig, admin: bifrostAdmin } : undefined,
+      }),
+    )
+  : undefined;
 const lifecycle =
   providerRuntime && deps
     ? createSandboxLifecycle({

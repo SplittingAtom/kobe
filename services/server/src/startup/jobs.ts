@@ -219,7 +219,8 @@ function siteJobs(o: ServerJobsOptions): ServerJob[] {
       },
       () => relay.sweep(),
     ),
-    // Departures missed, volumes deleted 30 days after a member left (KOBE-28, D12).
+    // Departures missed, volumes deleted 30 days after a member left (KOBE-28, D12). Start it after
+    // `deps.offboarding.setProvider(...)` where a sandbox provider exists (index.ts does).
     job(
       "offboarding",
       () =>
