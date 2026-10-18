@@ -40,12 +40,28 @@ from Playwright's JSON report (`e2e/gate5/verdict.mjs`). CI: shards `gate5-a` (U
    the thread leaves the screen. **Fixed** by KOBE-424 on this branch (docs/ledger/KOBE-424.md);
    the check is an ordinary test again.
 
+2. **U19 (CE10): after Stop, the next message failed "Pi could not take the prompt", later runs
+   "could not start Pi".** The sandbox's log (round 4, kept by the U19 kill command) showed the
+   cause: Stop overtook the run's `run.start` while the sandbox was still starting Pi for the new
+   thread, so the agent answered `unknown_run`; the start then began the run anyway, Pi ran it
+   with the server refusing its events, and the queued message met "thread has an active run".
+   A Stop during the workspace pull before the prompt also aborted an idle Pi twice (2 × 5 s)
+   and killed it. **Fixed** on this branch in `services/sandbox-agent/src/threads/manager.ts`
+   (`agent.stop-before-prompt.test.ts`); needs a ticket id.
+
+## Observations (not fixed here)
+
+- A sandbox replaying its un-acked frames after a reconnect can exceed the wire's frame rate
+  (500/s, burst 2,000): during compact-now the fake model's 11.9 MB compaction summary made the
+  agent reconnect about 30 times in a minute ("frame rate exceeded", 4006) before it drained.
+  The test passes; a real model streaming a long reply fast could do the same.
+- A sandbox deleted while a run's `run.start` is still starting Pi fails the run ("could not
+  start in your workspace"), not `interrupted`. U19 now deletes it while the answer streams.
+
 ## Open questions (for Chris or the coordinator)
 
-- U21's "over 64 KB on expand": Pi's own bash tool seems to trim its output (about 50 KB) before
-  the chat's 64 KB limit, so no tool in the install may reach it; the check then reports `NOTRUN`
-  and U21 is not proven. If CI shows that, U21 needs a tool that returns more (an MCP fixture) or a
-  ruling that the component tests cover it.
+- U21's "over 64 KB on expand": resolved; escape-heavy bash output crosses the stored-JSON limit
+  (docs/gates/gate-5.md), and the check passes in CI (round 4).
 - Real-cluster run (ac-2) needs the go-ahead, a reasoning team default model and a second model.
 - ac-3 (no regression in Gates 1–4): the same group CI runs shards gate1–gate4 and `stories`.
 
