@@ -78,7 +78,7 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     const { t } = conversation();
     openApp(fake, t);
     await ready();
-    const before = screen.getByRole("button", { name: "Show all details" });
+    const before = screen.getByRole("button", { name: "Show details" });
     before.focus();
     const { dialog, input, list } = await openPalette();
     expect(document.activeElement).toBe(input);
@@ -123,7 +123,8 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     const { t } = conversation();
     openApp(fake, t);
     await ready();
-    const toggle = screen.getByRole("button", { name: "Show all details" });
+    // The answer's own Show details follows the conversation-wide toggle (KOBE-418).
+    const toggle = screen.getByRole("button", { name: "Show details" });
     const { dialog } = await openPalette();
     const user = userEvent.setup();
     await user.keyboard("details show");

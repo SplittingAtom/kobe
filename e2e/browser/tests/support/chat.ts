@@ -110,10 +110,27 @@ export class Chat {
     return action;
   }
 
-  /** The open thread's "Conversation actions" menu (a disclosure in the bar). */
-  async openThreadActions(): Promise<void> {
-    // A <summary>: found by its label, since its role differs between engines.
-    await this.page.getByLabel("Conversation actions", { exact: true }).click();
+  /** The composer's toolbar: Attach, the Agent, Model and Thinking selectors, Send (KOBE-418). */
+  get toolbar(): Locator {
+    return this.page.locator("[data-composer-toolbar]");
+  }
+
+  /** The latest answer's Compact now icon, beside its thumbs down (KOBE-418). */
+  get compactNow(): Locator {
+    return this.answers.last().getByRole("button", { name: "Compact now", exact: true });
+  }
+
+  /**
+   * The composer's Model and Thinking selectors: in the toolbar, or in its folded "Agent and
+   * model" menu on a narrow composer (opened here when it is closed).
+   */
+  async selectors(): Promise<Locator> {
+    const folded = this.toolbar.getByRole("button", { name: "Agent and model", exact: true });
+    if (await folded.isVisible()) {
+      if ((await folded.getAttribute("aria-expanded")) !== "true") await folded.click();
+      return this.page.getByRole("group", { name: "Agent and model", exact: true });
+    }
+    return this.toolbar;
   }
 
   /**

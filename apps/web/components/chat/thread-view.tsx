@@ -9,9 +9,9 @@ import { Skeleton } from "../ui/skeleton";
 import { StatusBadge, type StatusTone } from "../ui/status";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
-import { FilesButton } from "../shell/rail-state";
+import { ThreadContextGauge } from "../shell/context-gauge";
 import { ArtifactList } from "./artifact-list";
-import { AgentChips } from "./agent-chips";
+import { CompactNowProvider, useCompactNow } from "./compact-now";
 import { Composer } from "./composer";
 import { ComposerDictationProvider } from "./composer-steer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
@@ -44,7 +44,19 @@ export function statusLabel(state: ThreadState): ThreadStatusCue | undefined {
   return undefined;
 }
 
-const COMPOSER_VARS = { "--thread-max-width": "44rem" } as React.CSSProperties;
+/**
+ * The conversation column's width (KOBE-418: 80rem, 1280 px; 44rem before): the messages, the run
+ * notices, the steering panel, the composer and the gauge under it. It still shrinks to fit beside
+ * the rail and an artifact column (the grid's 400 px floor, KOBE-305).
+ */
+export const THREAD_MAX_WIDTH = "80rem";
+const COMPOSER_VARS = { "--thread-max-width": THREAD_MAX_WIDTH } as React.CSSProperties;
+
+/** The gauge at the end of the row under the composer (KOBE-418), with its red Compact. */
+function ComposerGauge() {
+  const { blocker, open } = useCompactNow();
+  return <ThreadContextGauge compactBlocker={blocker} onCompact={open} />;
+}
 
 function ThreadWelcome() {
   return (
@@ -141,11 +153,9 @@ function LoadingSkeleton() {
 function MessagesAndComposer({
   extras,
   welcome,
-  modelPicker,
 }: {
   readonly extras: KobeThreadExtras;
   readonly welcome: boolean;
-  readonly modelPicker: boolean;
 }) {
   const { state } = extras;
   const starters = useAgentStarters(extras);
@@ -212,7 +222,7 @@ function MessagesAndComposer({
             {/* The overlay sheet at 768–820 px ends above this box (KOBE-269, chat-global.css). */}
             <div className="flex flex-col" data-kobe-composer-box>
               <SteeringPanel extras={extras} />
-              <Composer extras={extras} modelPicker={modelPicker} />
+              <Composer extras={extras} footer={<ComposerGauge />} />
             </div>
           </ComposerDictationProvider>
           <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
@@ -228,17 +238,18 @@ function MessagesAndComposer({
 
 /**
  * The conversation on screen: the active branch of the entry tree, the run notices, the steering
- * panel (CE10) and the composer.
+ * panel (CE10) and the composer, whose toolbar holds the agent, model and thinking selectors and
+ * whose footer the context gauge (KOBE-418).
  * It fills its column and never grows past it: only the message list scrolls (KOBE-205).
- * In the chat shell (`contextInBar`) the agent, model and Files controls live in bar row two
- * (KOBE-197); the builder's test pane keeps them here.
+ * In the chat shell (`inShell`) the title is editable and Compact now is offered; the builder's
+ * test pane has neither.
  */
 export function ThreadView({
   onOpenThread,
-  contextInBar = false,
+  inShell = false,
 }: {
   readonly onOpenThread?: ((threadId: string) => void) | undefined;
-  readonly contextInBar?: boolean;
+  readonly inShell?: boolean;
 } = {}) {
   const extras = useKobeExtras();
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
@@ -253,17 +264,11 @@ export function ThreadView({
       style={COMPOSER_VARS}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">
-        <ThreadTitle state={state} controller={extras.controller} editable={contextInBar} />
-        {!contextInBar && <AgentChips />}
+        <ThreadTitle state={state} controller={extras.controller} editable={inShell} />
         {label && (
           <StatusBadge tone={label.tone} pulse={label.pulse}>
             {label.label}
           </StatusBadge>
-        )}
-        {!contextInBar && (
-          <span className="ms-auto">
-            <FilesButton />
-          </span>
         )}
       </header>
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
@@ -284,9 +289,11 @@ export function ThreadView({
       )}
       <OpenThreadContext.Provider value={onOpenThread}>
         <ThreadCommands extras={extras} />
-        <ThreadPrimitive.ViewportProvider>
-          <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
-        </ThreadPrimitive.ViewportProvider>
+        <CompactNowProvider extras={extras} enabled={inShell}>
+          <ThreadPrimitive.ViewportProvider>
+            <MessagesAndComposer extras={extras} welcome={welcome} />
+          </ThreadPrimitive.ViewportProvider>
+        </CompactNowProvider>
       </OpenThreadContext.Provider>
       <p role="status" aria-live="polite" className="sr-only">
         {state.announcement}

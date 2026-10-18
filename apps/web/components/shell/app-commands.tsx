@@ -63,7 +63,7 @@ function useThreadSteps(): MenuBindings {
 /**
  * The workspace's own actions for the command listings and the shortcuts (KOBE-224, KOBE-225),
  * bound once for the chat whatever the layout shows (collapsed rail, drawer, one column): New
- * conversation (what `ThreadListPrimitive.New` calls), Files (the bar's Files button), the rail's
+ * conversation (what `ThreadListPrimitive.New` calls), Files (Mod+Shift+F, `/files`), the rail's
  * toggle, the artifact column, Detail, the theme, and previous/next conversation.
  */
 export function AppCommands() {

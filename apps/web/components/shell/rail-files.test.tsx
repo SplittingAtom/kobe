@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { ChatApp } from "../chat/chat-app";
-import { openRowMenu } from "../chat/testing";
+import { openRowMenu, pressModShift } from "../chat/testing";
 
 interface Seen {
   readonly method: string;
@@ -138,10 +138,10 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(rootListings()).toBe(1);
   });
 
-  it("wakes and lists again on each Show files, bar Files and Refresh", async () => {
+  it("wakes and lists again on each Show files, Mod+Shift+F and Refresh", async () => {
     const { user } = await open();
     await waitFor(() => expect(wakes()).toBe(1));
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => void pressModShift("F"));
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("region", { name: "Files" })),
     );
@@ -168,8 +168,8 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   });
 
   it("is gone from the artifact column: the old side panel is removed", async () => {
-    const { user } = await open();
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    await open();
+    act(() => void pressModShift("F"));
     const artifact = document.querySelector('[data-shell-region="artifact"]');
     expect(artifact?.childElementCount).toBe(0);
     expect(screen.queryByRole("region", { name: "Workspace files" })).toBeNull();
@@ -178,8 +178,8 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   it("shows the last synced listing while waking, then refreshes", async () => {
     let release: () => void = () => {};
     wakeGate = new Promise<void>((r) => (release = r));
-    const { user, panel } = await open();
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    const { panel } = await open();
+    act(() => void pressModShift("F"));
     expect(await within(panel).findByText(/last synced/i)).toBeTruthy();
     const before = seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length;
     await act(async () => release());

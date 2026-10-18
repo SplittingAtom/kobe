@@ -13,7 +13,8 @@ const AGENT = process.env["KOBE_AGENT"];
 test("share, clear the rating, withdraw from My shared cases", async ({ chat, page }) => {
   test.skip(!AGENT, "set KOBE_AGENT to a team agent's name");
   await chat.open();
-  await page.getByRole("button", { name: /^Chat with:/ }).click();
+  // The agent picker sits in the composer's toolbar (KOBE-418).
+  await (await chat.selectors()).getByRole("button", { name: /^Chat with:/ }).click();
   // The radio is visually hidden inside its option card: click the card (its label), as a
   // member does, then check the radio took it.
   // (`has` is matched inside each label, so the radio's locator starts from the page.)

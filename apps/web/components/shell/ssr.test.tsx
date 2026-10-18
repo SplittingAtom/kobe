@@ -9,7 +9,8 @@ describe("server render", () => {
     const html = renderToString(<ChatApp />);
     expect(html).toContain("data-kobe-chat");
     expect(html).toContain('data-bar-row="1"');
-    expect(html).toContain('data-bar-row="2"');
+    // One row since KOBE-418.
+    expect(html).not.toContain('data-bar-row="2"');
   });
 
   it("renders the theme toggle with both icons; CSS picks one before any script runs (KOBE-282)", () => {

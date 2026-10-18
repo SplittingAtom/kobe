@@ -73,7 +73,7 @@ function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
 
 /**
  * The Files section: nothing is listed or woken until the member asks (Open files, Show files,
- * the bar's Files); each ask, and Refresh, wakes the sandbox and lists again.
+ * Mod+Shift+F, `/files`); each ask, and Refresh, wakes the sandbox and lists again.
  */
 function RailFiles({
   rail,

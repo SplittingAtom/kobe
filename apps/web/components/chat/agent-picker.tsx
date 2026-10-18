@@ -156,9 +156,10 @@ function AgentPicker({
 }
 
 /**
- * The agent picker in bar row two (CE3, KOBE-197): a button naming the choice that opens the
- * radios in a popover. Renders nothing when there is no agent to pick. The lists are read here,
- * once, not by the popover's content, which mounts on every open.
+ * The agent picker in the composer's toolbar (KOBE-418; bar row two before, CE3 KOBE-197): a chip
+ * naming the choice that opens the radios in a popover above it. Renders nothing when there is no
+ * agent to pick. The lists are read here, once, not by the popover's content, which mounts on
+ * every open.
  */
 export function AgentPickerMenu() {
   const session = useChatSession();
@@ -175,11 +176,12 @@ export function AgentPickerMenu() {
   const chosen = draft === null ? null : chosenAgentText(listed ?? draft, labels.get(draft.id));
   return (
     <Popover.Root>
-      <Popover.Trigger className="hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
-        {`Chat with: ${chosen ?? "No agent"}`}
-        <ChevronDownIcon aria-hidden className="size-3.5" />
+      <Popover.Trigger className="hover:bg-muted text-muted-foreground inline-flex h-7 max-w-48 min-w-0 shrink items-center gap-1 rounded-full border px-2.5 text-xs">
+        <span className="min-w-0 truncate">{`Chat with: ${chosen ?? "No agent"}`}</span>
+        <ChevronDownIcon aria-hidden className="size-3.5 shrink-0" />
       </Popover.Trigger>
       <Popover.Content
+        side="top"
         align="start"
         sideOffset={4}
         className="bg-background z-50 w-80 rounded-lg border p-2 shadow-md"

@@ -9,7 +9,7 @@ import { ContextGauge } from "./context-gauge";
 import { IconActionProvider } from "./icon-action";
 
 /**
- * KOBE-211 (CE14): the context gauge in bar row two. Numerator: the newest model call's prompt
+ * KOBE-211 (CE14): the context gauge, under the composer since KOBE-418. Numerator: the newest model call's prompt
  * plus cache-read tokens (run_usage on load, message usage while a run goes); denominator: the
  * thread model's context window (KOBE-210).
  */
@@ -70,7 +70,7 @@ describe("context gauge", () => {
   it("is hidden before the first model call", async () => {
     openApp(fake, threadWith(null));
     await screen.findByRole("combobox", { name: "Model for this conversation" });
-    await screen.findByRole("button", { name: "Files" });
+    await composer();
     expect(screen.queryByRole("meter")).toBeNull();
     expect(document.querySelector("[data-context-gauge]")).toBeNull();
   });
@@ -93,7 +93,7 @@ describe("context gauge", () => {
       created_at: "2026-10-14T10:01:00.000Z",
     });
     openApp(fake, t);
-    await screen.findByRole("button", { name: "Files" });
+    await composer();
     await screen.findByText("Done.");
     expect(screen.queryByRole("meter")).toBeNull();
   });
@@ -192,6 +192,47 @@ describe("context gauge", () => {
       { timeout: 10_000 },
     );
     expect(action.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("under the composer (KOBE-418 ac-5)", () => {
+  /** The row under the composer box: the hint, then the gauge at its end. */
+  const footer = () =>
+    waitFor(() => must(document.querySelector<HTMLElement>("[data-composer-footer]")));
+
+  it("sits under the composer, right-aligned, not in the bar", async () => {
+    openApp(fake, threadWith(142_000));
+    const gauge = await meter();
+    const row = await footer();
+    expect(document.querySelector("header")?.contains(gauge)).toBe(false);
+    expect(row.contains(gauge)).toBe(true);
+    // Below the composer's box, in the same column.
+    const box = must(document.querySelector("[data-kobe-composer-box]"));
+    expect(box.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.closest("[data-kobe-composer]")).not.toBeNull();
+    // The gauge is the row's last item, pushed to its end.
+    const slot = must(row.querySelector<HTMLElement>("[data-composer-gauge]"));
+    expect(slot.contains(gauge)).toBe(true);
+    expect(row.lastElementChild).toBe(slot);
+    expect(slot.className).toContain("ms-auto");
+  });
+
+  it("keeps its row while there is no gauge yet, so nothing moves when it appears", async () => {
+    openApp(fake, threadWith(null));
+    await composer();
+    const row = await footer();
+    expect(row.querySelector("[data-composer-gauge]")).not.toBeNull();
+    expect(row.className).toContain("min-h-6");
+    expect(screen.queryByRole("meter")).toBeNull();
+  });
+
+  it("stays under a shared thread's banner, where there is no composer", async () => {
+    const t = threadWith(142_000);
+    must(fake.threads.get(t)).read_only = true;
+    openApp(fake, t);
+    const gauge = await meter();
+    expect((await footer()).contains(gauge)).toBe(true);
+    expect(screen.getByText(/You are reading a shared conversation/)).toBeTruthy();
   });
 });
 

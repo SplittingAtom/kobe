@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { PREFERENCES_PATH } from "../../lib/shell/preferences";
 import { must } from "../../lib/testing/must";
-import { openApp } from "../chat/testing";
+import { openApp, pressModShift } from "../chat/testing";
 
 /** KOBE-202 (CE8): the member's layout, loaded at shell start and saved per user. */
 let fake: FakeKobe;
@@ -160,15 +160,14 @@ describe("saving", () => {
     expect(puts()[0]?.body).toEqual({ threads_share: 0.55 });
   });
 
-  it("saves the rail's own toggles, but not an expansion the bar asked for", async () => {
+  it("saves the rail's own toggles, but not an expansion Show the files asked for", async () => {
     await openShell();
     const user = userEvent.setup();
     await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
     await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
     expect(puts()[0]?.body).toEqual({ rail_collapsed: true });
-    // The bar's Files expands the rail for this page only.
-    const files = screen.getAllByRole("button", { name: "Files" }).find((b) => !rail().contains(b));
-    await user.click(must(files));
+    // Mod+Shift+F (the bar's Files before KOBE-418) expands the rail for this page only.
+    pressModShift("F");
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
     await new Promise((r) => setTimeout(r, 900));
     expect(puts()).toHaveLength(1);

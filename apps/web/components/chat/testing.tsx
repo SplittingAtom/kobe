@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { expect } from "vitest";
 import type { UploadTransport } from "../../lib/chat/uploads";
 import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { ChatApp } from "./chat-app";
 
 /** Renders the chat app over the fake server, optionally on a thread (`?thread=`). */
@@ -57,7 +58,21 @@ export function announcement(): string {
   return (live?.textContent ?? "").replace(/\u00a0/g, "");
 }
 
-/** The agent radios (KOBE-122), in bar row two's popover since KOBE-197: opened when closed. */
+/**
+ * A press of `Mod`+Shift+`key` on the page (Cmd on macOS, Ctrl elsewhere): the CE23 chords whose
+ * on-screen buttons left the bar in KOBE-418 (Mod+Shift+F shows the files, Mod+Shift+D every
+ * detail).
+ */
+export function pressModShift(key: string, target: Element = document.body): boolean {
+  return fireEvent.keyDown(target, {
+    key,
+    code: `Key${key.toUpperCase()}`,
+    shiftKey: true,
+    ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+  });
+}
+
+/** The agent radios (KOBE-122), in the composer's popover since KOBE-418: opened when closed. */
 export async function agentChoices(): Promise<HTMLElement> {
   const open = screen.queryByRole("radiogroup", { name: "Chat with" });
   if (open) return open;

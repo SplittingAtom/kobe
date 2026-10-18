@@ -200,6 +200,7 @@
 .modelWarning {
   flex-basis: 100%;
   margin: 0;
+  font-size: 0.85rem;
   padding: 0.4rem 0.6rem;
   color: var(--admin-danger);
   background: var(--admin-danger-bg);
@@ -311,11 +312,19 @@
   overflow-wrap: anywhere;
 }
 
-/* Model picker (KOBE-44): a native select in the composer's action row, shaped like a shadcn
-   outline pill. */
+/* Model and thinking pickers (KOBE-44, KOBE-260): native selects in the composer's toolbar
+   (KOBE-418), shaped like a shadcn outline pill. They may shrink (a long model name ellipsizes)
+   rather than wrap the toolbar onto a second line. */
+.modelPicker {
+  display: inline-flex;
+  min-width: 0;
+}
+
 .modelPicker select {
-  max-width: 14rem;
-  height: 2rem;
+  min-width: 0;
+  max-width: 12rem;
+  height: 1.75rem;
+  text-overflow: ellipsis;
   padding: 0 0.75rem;
   color: var(--admin-muted);
   background: transparent;
@@ -326,6 +335,16 @@
 
 .modelPicker select[aria-invalid="true"] {
   border-color: var(--admin-danger);
+}
+
+/* "No models are enabled…": one short line in the toolbar. */
+.pickerNote {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--admin-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .fileCard {

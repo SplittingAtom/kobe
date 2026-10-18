@@ -9,6 +9,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
@@ -26,7 +27,8 @@ import type { MenuBindings } from "../../lib/shell/menu";
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
 import { cn } from "../../lib/utils";
-import { ModelPicker } from "./model-picker";
+import { ComposerSelectors, useComposerPicker, useFoldedSelectors } from "./composer-selectors";
+import { ModelWarning } from "./model-picker";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
 import panelStyles from "./composer.module.css";
@@ -78,15 +80,16 @@ function wantsEditLast(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
  * into the running agent at its next safe point. The Steer now and Stop buttons sit in the
  * steering panel above the input (CE10, `steering-panel.tsx`). The text is cleared only
  * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
- * sending stops dictation.
+ * sending stops dictation. Its toolbar holds Attach, then the conversation's Agent, Model and
+ * Thinking selectors (KOBE-418), folded into one menu on a narrow composer.
  */
 export function Composer({
   extras,
-  modelPicker = true,
+  footer,
 }: {
   readonly extras: KobeThreadExtras;
-  /** False in the chat shell, where the model picker sits in bar row two (KOBE-197). */
-  readonly modelPicker?: boolean;
+  /** The end of the row under the box (the context gauge, KOBE-418); shown under a banner too. */
+  readonly footer?: ReactNode;
 }) {
   const aui = useAui();
   const session = useChatSession();
@@ -100,9 +103,12 @@ export function Composer({
   const { steer, unavailable } = useSteer(extras);
   const draft = remoteId ?? NEW_DRAFT;
   const blocker = session.attachments.blocker(draft);
-  const picker = useRef<HTMLInputElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
+  const folded = useFoldedSelectors(panel);
+  const picker = useComposerPicker(extras);
   // A fork at a prompt opens with that prompt as its draft (KOBE-216), once.
   useEffect(() => {
     if (remoteId === undefined) return;
@@ -178,21 +184,36 @@ export function Composer({
     }
   };
 
+  const footerRow = (hint: ReactNode) => (
+    <div data-composer-footer className="flex min-h-6 items-center gap-2 px-2">
+      {hint}
+      <span data-composer-gauge className="ms-auto flex shrink-0 items-center">
+        {footer}
+      </span>
+    </div>
+  );
+
   if (readOnly && !inTrash) {
     return (
-      <p className={styles.banner} role="note">
-        You are reading a shared conversation. Fork it to ask the agent something of your own.
-      </p>
+      <div className="flex flex-col gap-1">
+        <p className={styles.banner} role="note">
+          You are reading a shared conversation. Fork it to ask the agent something of your own.
+        </p>
+        {footerRow(null)}
+      </div>
     );
   }
 
   if (inTrash) {
     return (
-      <div className={styles.banner} role="note">
-        This conversation is in Trash. Restore it to continue.{" "}
-        <button type="button" onClick={() => void aui.threadListItem.unarchive()}>
-          Restore
-        </button>
+      <div className="flex flex-col gap-1">
+        <div className={styles.banner} role="note">
+          This conversation is in Trash. Restore it to continue.{" "}
+          <button type="button" onClick={() => void aui.threadListItem.unarchive()}>
+            Restore
+          </button>
+        </div>
+        {footerRow(null)}
       </div>
     );
   }
@@ -209,6 +230,7 @@ export function Composer({
         }}
       >
         <div
+          ref={setPanel}
           data-kobe-composer-panel
           data-running={running || undefined}
           data-dragging={dragging || undefined}
@@ -245,9 +267,9 @@ export function Composer({
               "caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none",
             )}
           />
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <div data-composer-toolbar className="flex min-w-0 items-center gap-1.5">
             <input
-              ref={picker}
+              ref={filePicker}
               type="file"
               multiple
               tabIndex={-1}
@@ -257,19 +279,17 @@ export function Composer({
             />
             <IconAction
               command="attach"
-              className="size-7 rounded-full"
-              onClick={() => picker.current?.click()}
+              className="size-7 shrink-0 rounded-full"
+              onClick={() => filePicker.current?.click()}
             />
-            {modelPicker && (
-              <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
-            )}
-            <span className="flex-1" />
+            <ComposerSelectors picker={picker} folded={folded} />
+            {folded && <span className="flex-1" />}
             {dictation.supported && (
               <IconAction
                 command="dictate"
                 label={dictation.listening ? "Stop dictation" : "Dictate"}
                 variant={dictation.listening ? "destructive" : "ghost"}
-                className="size-7 rounded-full"
+                className="size-7 shrink-0 rounded-full"
                 aria-pressed={dictation.listening}
                 onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
               >
@@ -285,7 +305,7 @@ export function Composer({
               <Button
                 type="button"
                 size="sm"
-                className="h-8 rounded-full px-3"
+                className="h-8 shrink-0 rounded-full px-3"
                 onClick={() => void queue()}
                 disabled={empty || blocker !== undefined}
               >
@@ -297,32 +317,35 @@ export function Composer({
                   command="send"
                   type="button"
                   variant="default"
-                  className="size-7 rounded-full"
+                  className="size-7 shrink-0 rounded-full"
                   disabled={blocker !== undefined}
                 />
               </ComposerPrimitive.Send>
             )}
           </div>
+          {picker && <ModelWarning picker={picker} />}
         </div>
-        <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
-          {rowDrop.rowDrop === "file" ? (
-            "Drop to mention this file"
-          ) : rowDrop.rowDrop === "folder" ? (
-            <span role="status">{MENTION_FOLDER_REFUSED}</span>
-          ) : rowDrop.notice !== "" ? (
-            <span role="status">{rowDrop.notice}</span>
-          ) : blocker !== undefined ? (
-            <span role="status">{blocker}</span>
-          ) : dictation.error ? (
-            <span role="alert">{dictation.error}</span>
-          ) : dictation.listening ? (
-            "Listening… speak your prompt, then press the mic again to stop"
-          ) : running ? (
-            "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
-          ) : (
-            "Enter sends · Shift+Enter new line"
-          )}
-        </p>
+        {footerRow(
+          <p id="kobe-composer-hint" className="text-muted-foreground m-0 min-w-0 text-xs">
+            {rowDrop.rowDrop === "file" ? (
+              "Drop to mention this file"
+            ) : rowDrop.rowDrop === "folder" ? (
+              <span role="status">{MENTION_FOLDER_REFUSED}</span>
+            ) : rowDrop.notice !== "" ? (
+              <span role="status">{rowDrop.notice}</span>
+            ) : blocker !== undefined ? (
+              <span role="status">{blocker}</span>
+            ) : dictation.error ? (
+              <span role="alert">{dictation.error}</span>
+            ) : dictation.listening ? (
+              "Listening… speak your prompt, then press the mic again to stop"
+            ) : running ? (
+              "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
+            ) : (
+              "Enter sends · Shift+Enter new line"
+            )}
+          </p>,
+        )}
       </ComposerPrimitive.Root>
     </ComposerPrimitive.TriggerPopoverRoot>
   );

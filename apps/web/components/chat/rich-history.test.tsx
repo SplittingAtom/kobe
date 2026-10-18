@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { PREFERENCES_PATH } from "../../lib/shell/preferences";
 import { must } from "../../lib/testing/must";
-import { browserSpaced, crushedIconButtons, openApp } from "./testing";
+import { browserSpaced, crushedIconButtons, openApp, pressModShift } from "./testing";
 
 /**
  * KOBE-208 (CE12): rich history on a recorded thread. Reasoning collapses to its first line with
  * its duration; tool cards to a header (tool, input summary, status, duration); a large output is
  * read back only when its card opens; the answer's footer shows model, tokens, cost and time; the
- * Detail toggle opens or closes everything and follows the member across reloads.
+ * Detail toggle (Mod+Shift+D, the palette) opens or closes everything and follows the member
+ * across reloads; each answer's Show details follows it (KOBE-418).
  */
 let fake: FakeKobe;
 
@@ -112,7 +113,7 @@ const answer = async () =>
 const disclosures = (root: HTMLElement) =>
   within(root)
     .getAllByRole("button")
-    .filter((b) => b.hasAttribute("aria-expanded"));
+    .filter((b) => b.hasAttribute("aria-expanded") && !b.hasAttribute("aria-haspopup"));
 const regionOf = (button: HTMLElement) =>
   must(document.getElementById(must(button.getAttribute("aria-controls"))));
 const isShown = (el: HTMLElement) => el.closest("[hidden]") === null;
@@ -120,7 +121,10 @@ const outputPath = (thread: string, entryId: string) =>
   `/v1/threads/${thread}/entries/${entryId}/output`;
 const bodyReads = (entryId: string) =>
   fake.requests.filter((r) => r.method === "GET" && r.path.endsWith(`/entries/${entryId}/output`));
-const detailToggle = () => screen.getByRole("button", { name: "Show all details" });
+/** The answer's own Show details (KOBE-418): pressed while its blocks are open. */
+const detailToggle = () => screen.getByRole("button", { name: "Show details" });
+/** Mod+Shift+D: the conversation-wide Detail toggle, stored per member. */
+const toggleAll = () => pressModShift("D");
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 
 describe("collapsed by default (ac-3)", () => {
@@ -317,8 +321,8 @@ describe("the Detail toggle (ac-2)", () => {
     const toggle = detailToggle();
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
 
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    toggleAll();
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("true"));
     for (const d of disclosures(message)) expect(d.getAttribute("aria-expanded")).toBe("true");
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({ detail_expanded: true }), {
       timeout: 2_000,
@@ -328,7 +332,8 @@ describe("the Detail toggle (ac-2)", () => {
     const first = must(disclosures(message)[0]);
     await userEvent.click(first);
     expect(first.getAttribute("aria-expanded")).toBe("false");
-    await userEvent.click(toggle);
+    toggleAll();
+    await waitFor(() => expect(toggle.getAttribute("aria-pressed")).toBe("false"));
     for (const d of disclosures(message)) expect(d.getAttribute("aria-expanded")).toBe("false");
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({ detail_expanded: false }), {
       timeout: 2_000,

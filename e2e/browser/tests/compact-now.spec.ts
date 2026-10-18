@@ -18,12 +18,10 @@ const FILLER = Array.from(
 test("Compact now folds the older turns into a summary marker", async ({ chat, page }) => {
   test.setTimeout(RUN_TIMEOUT_MS * 2 + COMPACT_TIMEOUT_MS + 2 * 60_000);
   const dialog = page.getByRole("dialog", { name: "Compact this thread" });
+  // KOBE-418: Compact now is an icon beside the latest answer's thumbs down, enabled while idle.
   const openDialog = async () => {
-    await chat.openThreadActions();
-    await page
-      .locator("[data-thread-actions]")
-      .getByRole("button", { name: /^Compact now/ })
-      .click();
+    await expect(chat.compactNow).toHaveAttribute("aria-disabled", "false");
+    await chat.compactNow.click();
     await expect(dialog).toBeVisible();
   };
   /** "closed" once the dialog went away (success), else the refusal it shows. */
@@ -71,10 +69,16 @@ test("Compact now folds the older turns into a summary marker", async ({ chat, p
   await header.click();
   await expect(header).toHaveAttribute("aria-expanded", "true");
 
+  // Only the latest answer offers it.
+  await expect(
+    chat.answers.first().getByRole("button", { name: "Compact now", exact: true }),
+  ).toHaveCount(0);
   // Straight away again: nothing new to fold, and the dialog says so.
   await openDialog();
   await dialog.getByRole("button", { name: "Compact now", exact: true }).click();
   await expect(dialog.getByRole("alert")).toBeVisible({ timeout: 2 * 60_000 });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+  // Focus returns to the answer's button.
+  await expect(chat.compactNow).toBeFocused();
 });

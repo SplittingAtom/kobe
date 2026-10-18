@@ -1,4 +1,5 @@
-/* The v1.1 shell (KOBE-197): two-row utility bar over rail · artifact column · conversation.
+/* The v1.1 shell (KOBE-197): one-row utility bar (KOBE-418) over rail · artifact column ·
+   conversation.
    Colours come from the chat's tokens (`--admin-*` on .app, chat.module.css). */
 
 /* --- bar (CE3) ---------------------------------------------------------------------------- */
@@ -20,21 +21,6 @@
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
-}
-
-.rowTwo {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-  min-height: 40px;
-  padding: 0.25rem 1rem;
-  border-top: 1px solid var(--admin-border);
-}
-
-/* Nothing to show (no team yet, signed out): no empty band. */
-.rowTwo:empty {
-  display: none;
 }
 
 .actions {
@@ -211,18 +197,17 @@
   display: none;
 }
 
-/* The search and the bar's icons: part of row one on two rows; the Menu's body on one row. */
+/* The search and the bar's icons: part of the row on wide windows; the Menu's body under 768 px. */
 .menuPanel {
   display: contents;
 }
 
-.menuPanel[hidden],
-.rowTwo[hidden] {
+.menuPanel[hidden] {
   display: none;
 }
 
-/* Open, the Menu unfolds under row one (the bar grows; nothing remounts): search and icons on
-   their own line, then row two with the pickers. */
+/* Open, the Menu unfolds under the row (the bar grows; nothing remounts): search and icons on
+   their own line. */
 .bar[data-bar-layout="single"] .menuPanel:not([hidden]) {
   display: flex;
   flex-basis: 100%;

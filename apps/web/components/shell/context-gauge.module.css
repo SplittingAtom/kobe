@@ -1,4 +1,4 @@
-/* The context gauge in bar row two (CE14, KOBE-211). Chat CSS has no preflight: sizes are set here. */
+/* The context gauge under the composer (CE14, KOBE-211; KOBE-418). Chat CSS has no preflight: sizes are set here. */
 
 .gauge {
   --gauge-ok: var(--kobe-gauge-ok);

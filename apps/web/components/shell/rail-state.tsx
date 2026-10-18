@@ -81,7 +81,7 @@ export interface RailApi {
   /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
   readonly filesRequests: number;
   /**
-   * Expands the rail and moves focus to a section (the collapsed icons, the bar's Files).
+   * Expands the rail and moves focus to a section (the collapsed icons, Mod+Shift+F).
    * `toggle`: the member expanded the collapsed rail with its own icons (saved like `toggle`).
    */
   reveal(section: RailSection, options?: { readonly toggle?: boolean }): void;
@@ -238,13 +238,6 @@ export function RailProvider({
     ],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;
-}
-
-/** Bar row two's Files (CE3): shows the rail's Files section. Nothing outside a rail. */
-export function FilesButton() {
-  const rail = useRail();
-  if (!rail) return null;
-  return <IconAction command="files" onClick={() => rail.reveal("files")} />;
 }
 
 /** Under 768 px the rail has no column: the bar opens it as a drawer (CE8, KOBE-201). */

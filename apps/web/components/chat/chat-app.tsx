@@ -22,7 +22,6 @@ import { CommandPalette } from "../shell/command-palette";
 import { ShortcutKeys } from "../shell/shortcut-keys";
 import { ShortcutSheet } from "../shell/shortcut-sheet";
 import { ThreadGroupsProvider } from "../shell/thread-groups";
-import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider, useRail } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
@@ -240,9 +239,6 @@ function ChatWorkspace({
                         <ShellSlot name="search">
                           <ThreadSearch onOpenThread={setThreadId} />
                         </ShellSlot>
-                        <ShellSlot name="context">
-                          <ContextRow />
-                        </ShellSlot>
                         <ShellSlot name="nav">
                           <RailDrawerButton />
                         </ShellSlot>
@@ -257,7 +253,7 @@ function ChatWorkspace({
                           artifact={<ArtifactPanel filesApi={filesApi} />}
                           conversation={
                             <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                              <ThreadView onOpenThread={setThreadId} contextInBar />
+                              <ThreadView onOpenThread={setThreadId} inShell />
                             </main>
                           }
                         />

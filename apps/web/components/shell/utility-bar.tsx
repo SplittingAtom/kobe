@@ -13,7 +13,6 @@ import { ShellSlotTarget, useBarMenu } from "./shell-slots";
 import styles from "./shell.module.css";
 
 const MENU_ID = "kobe-bar-menu";
-const CONTEXT_ID = "kobe-bar-context";
 
 /**
  * The one-row bar's menu closes on a press outside the bar and on Escape (focus to its button). A
@@ -43,15 +42,16 @@ function useMenuDismiss(header: RefObject<HTMLElement | null>, open: boolean, cl
 }
 
 /**
- * The two-row utility bar (CE3, KOBE-197), about 96 px. Row one (56 px): team switcher, wordmark,
- * thread search, then the member's areas, the consoles (role-gated), notifications, the theme
- * toggle (KOBE-282) and the profile menu. Row two (40 px): the open thread's context, filled by the
- * workspace through its slot.
+ * The utility bar (CE3, KOBE-197): one 56 px row of team switcher, wordmark, thread search, then
+ * the member's areas, the consoles (role-gated), notifications, the theme toggle (KOBE-282) and
+ * the profile menu. Its second row went in KOBE-418: the agent, model and thinking selectors are in
+ * the composer's toolbar, the context gauge under the composer, Show details and Compact now on the
+ * answers, and the rail shows Files.
  *
- * Under 768 px (CE8, KOBE-201) it is one 56 px row: the rail's drawer button (filled by the
- * workspace), the team switcher, the title and a Menu that discloses the rest, row two included.
- * One tree at every width, so nothing remounts (search text, open pickers, notifications) when the
- * window crosses 768 px; only the Menu button comes and goes.
+ * Under 768 px (CE8, KOBE-201) it is the rail's drawer button (filled by the workspace), the team
+ * switcher, the title and a Menu that discloses the rest. One tree at every width, so nothing
+ * remounts (search text, notifications) when the window crosses 768 px; only the Menu button comes
+ * and goes.
  */
 export function UtilityBar({
   teamId,
@@ -77,7 +77,7 @@ export function UtilityBar({
     <header
       ref={header}
       className={styles.bar}
-      data-bar-layout={single ? "single" : "double"}
+      data-bar-layout={single ? "single" : "wide"}
       {...(open ? { "data-menu-open": "" } : {})}
     >
       <div className={styles.rowOne} data-bar-row="1">
@@ -89,7 +89,7 @@ export function UtilityBar({
             command="thread-menu"
             className={styles.iconLink}
             aria-expanded={open}
-            aria-controls={`${MENU_ID} ${CONTEXT_ID}`}
+            aria-controls={MENU_ID}
             onClick={() => setOpen(!open)}
           />
         )}
@@ -106,17 +106,6 @@ export function UtilityBar({
           </div>
         </div>
       </div>
-      {/* On one column row two is the Menu's first part. Slot: the context gauge (CE14, B7
-          KOBE-211) renders here through ContextRow, so it lands in the Menu there too. */}
-      <ShellSlotTarget
-        name="context"
-        id={CONTEXT_ID}
-        role="group"
-        aria-label="Conversation context"
-        className={styles.rowTwo}
-        data-bar-row="2"
-        hidden={folded}
-      />
     </header>
   );
 }

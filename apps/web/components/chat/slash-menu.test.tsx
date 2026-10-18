@@ -58,12 +58,9 @@ const sent = () => messagePosts().map((r) => (r.body as { content?: string }).co
 async function opened(t: string) {
   openApp(fake, t);
   await screen.findByText("They add up to 42.");
-  // The bar's row two (Compact now, the model) publishes its actions once the thread was read.
-  await waitFor(
-    () =>
-      expect(document.querySelector('summary[aria-label="Conversation actions"]')).not.toBeNull(),
-    WAIT,
-  );
+  // The latest answer's Compact now and the composer's model picker show once the thread was read
+  // and their actions are published (KOBE-418).
+  await screen.findByRole("button", { name: "Compact now" }, WAIT);
   await screen.findByRole("combobox", { name: "Model for this conversation" }, WAIT);
   return composer();
 }

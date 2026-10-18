@@ -28,6 +28,11 @@ test("steering panel: queue, keyboard reorder, pause and resume, delete, stop", 
   await expect(panel).toHaveAttribute("data-state", /^(active|waiting)$/, {
     timeout: RUN_START_TIMEOUT_MS,
   });
+  // Queue mode keeps the composer's toolbar on one line: Queue beside the selectors (KOBE-418).
+  const queue = chat.toolbar.getByRole("button", { name: "Queue", exact: true });
+  const model = chat.toolbar.getByRole("combobox", { name: "Model for this conversation" });
+  const [q, m] = [await queue.boundingBox(), await model.boundingBox()];
+  if (q && m) expect(Math.abs(q.y + q.height / 2 - (m.y + m.height / 2))).toBeLessThanOrEqual(4);
   await expect(button("Stop")).toBeVisible();
 
   // Messages sent while the run holds the thread queue as chips, in send order.

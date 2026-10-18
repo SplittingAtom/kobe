@@ -58,7 +58,9 @@ const artifactRegion = () =>
   must(document.querySelector<HTMLElement>('[data-shell-region="artifact"]'));
 const grid = () => must(artifactRegion().parentElement);
 const header = () => must(document.querySelector("header"));
-const row = (n: 1 | 2) => must(header().querySelector<HTMLElement>(`[data-bar-row="${n}"]`));
+const row = (n: 1) => must(header().querySelector<HTMLElement>(`[data-bar-row="${n}"]`));
+const toolbar = () =>
+  waitFor(() => must(document.querySelector<HTMLElement>("[data-composer-toolbar]")));
 const menuPanel = () => must(document.querySelector<HTMLElement>("#kobe-bar-menu"));
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const handle = () =>
@@ -79,12 +81,12 @@ async function openArtifact() {
 }
 
 describe("the CE7 table, per band (ac-1)", () => {
-  it("1280: the member's rail, the artifact column and its resize handle; two bar rows", async () => {
+  it("1280: the member's rail, the artifact column and its resize handle; one bar row", async () => {
     await openArtifact();
     expect(aside().hasAttribute("data-collapsed")).toBe(false);
     expect(handle()).not.toBeNull();
     expect(artifactRegion().hasAttribute("data-sheet-open")).toBe(false);
-    expect(document.querySelector('[data-bar-row="2"]')?.closest("details")).toBeNull();
+    expect(header().querySelectorAll("[data-bar-row]")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Back to the conversation" })).toBeNull();
   });
 
@@ -164,22 +166,26 @@ describe("the CE7 table, per band (ac-1)", () => {
     const one = within(row(1));
     expect(one.getByRole("button", { name: "Show the workspace" })).toBeTruthy();
     expect(one.getByRole("heading", { name: "Kobe" })).toBeTruthy();
-    // Folded: row two and the rest are hidden behind the Menu.
+    // Folded: the search and the icons are hidden behind the Menu.
     const menuButton = one.getByRole("button", { name: "Menu" });
     expect(menuButton.getAttribute("aria-expanded")).toBe("false");
-    expect(row(2).hidden).toBe(true);
     expect(menuPanel().hidden).toBe(true);
     await userEvent.setup().click(menuButton);
     expect(menuButton.getAttribute("aria-expanded")).toBe("true");
-    expect(menuButton.getAttribute("aria-controls")).toBe("kobe-bar-menu kobe-bar-context");
-    // Row two's pickers, then the search, the areas, the profile menu.
-    const context = within(row(2));
-    expect(row(2).hidden).toBe(false);
-    expect(await context.findByRole("button", { name: "Chat with: No agent" })).toBeTruthy();
+    expect(menuButton.getAttribute("aria-controls")).toBe("kobe-bar-menu");
+    // What row two held is not lost (KOBE-418): the pickers are in the composer's own menu...
+    expect(within(header()).queryByRole("combobox")).toBeNull();
+    const pickers = await within(await toolbar()).findByRole("button", { name: "Agent and model" });
+    const folded = within(
+      must(document.getElementById(must(pickers.getAttribute("aria-controls")))),
+    );
     expect(
-      await context.findByRole("combobox", { name: "Model for this conversation" }),
+      await folded.findByRole("button", { name: "Chat with: No agent", hidden: true }),
     ).toBeTruthy();
-    expect(context.getByRole("button", { name: "Files" })).toBeTruthy();
+    expect(
+      await folded.findByRole("combobox", { name: "Model for this conversation", hidden: true }),
+    ).toBeTruthy();
+    // ...and the Menu holds the search, the areas and the profile menu.
     const panel = within(menuPanel());
     expect(menuPanel().hidden).toBe(false);
     expect(panel.getByLabelText("Search conversations")).toBeTruthy();
@@ -187,18 +193,15 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(menuPanel().querySelector('summary[aria-label="Profile"]')).not.toBeNull();
   });
 
-  it("390: the Menu stays open through a picker; Escape and a press outside close it", async () => {
+  it("390: the Menu stays open through a press inside it; Escape and a press outside close it", async () => {
     resizeWindow(390);
     openApp(fake);
     await composer();
     const user = userEvent.setup();
     const menuButton = screen.getByRole("button", { name: "Menu" });
     await user.click(menuButton);
-    await user.click(await within(row(2)).findByRole("button", { name: "Chat with: No agent" }));
-    const choices = await screen.findByRole("radiogroup", { name: "Chat with" });
-    await user.click(within(choices).getByRole("radio", { name: /Ledger Bot/ }));
+    await user.click(within(menuPanel()).getByLabelText("Search conversations"));
     expect(menuButton.getAttribute("aria-expanded")).toBe("true");
-    await user.keyboard("{Escape}"); // the agent popover
     await user.keyboard("{Escape}");
     await waitFor(() => expect(menuButton.getAttribute("aria-expanded")).toBe("false"));
     expect(document.activeElement).toBe(menuButton);
@@ -235,9 +238,9 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect((box as HTMLInputElement).value).toBe("budget");
     expect(row(1).querySelector('[data-command="notifications"]')).toBe(bell);
     resizeWindow(DESKTOP_WIDTH);
-    await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("double"));
+    await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("wide"));
     expect(screen.getByLabelText("Search conversations")).toBe(box);
-    expect(row(2).hidden).toBe(false);
+    expect(menuPanel().hidden).toBe(false);
   });
 
   it("390: the rail is a drawer from the bar; the collapsed rail is not shown", async () => {
