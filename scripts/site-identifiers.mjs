@@ -10,6 +10,8 @@ const SOURCE = /\.(ts|tsx|mts|mjs|js|sh)$/;
 
 /** Identifiers that mean installing something (a verb), not the scope. */
 const ALLOWED = new Set(["installMemoryHooks"]);
+/** KOBE-311: a team's install of a catalog skill (a noun), not the scope. */
+const SKILL_INSTALL = /[sS]killInstall|SKILL_INSTALL/;
 
 /** Audit actions recorded before the rename (HISTORICAL_AUDIT_ACTIONS); readers accept them. */
 const HISTORICAL = /^(?:install\.settings\.updated|identity\.install_role\.(?:granted|revoked))$/;
@@ -60,7 +62,13 @@ export function identifierFindings(source) {
   return PATTERNS.flatMap(({ what, re, keep }) =>
     [...code.matchAll(re)]
       .map((m) => m[0])
-      .filter((token) => keep(token) && !ALLOWED.has(token) && !HISTORICAL.test(token))
+      .filter(
+        (token) =>
+          keep(token) &&
+          !ALLOWED.has(token) &&
+          !SKILL_INSTALL.test(token) &&
+          !HISTORICAL.test(token),
+      )
       .map((token) => `${what} ${token}`),
   );
 }
@@ -94,6 +102,7 @@ export function selfTestIdentifiers() {
     'action: "memory.install_settings_changed", // historical',
     'db.select().from(personalSkills); api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(d))',
     "SELECT value FROM site_skill_settings; db.select().from(siteSkillSettings)",
+    "db.insert(teamSkillInstalls); z.enum(SKILL_INSTALL_ORIGINS); putTeamSkillInstallSchema",
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);

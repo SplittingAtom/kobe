@@ -252,7 +252,8 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
     const hits = await withClient(database().adminUrl, (c) =>
       c.query<{ hit: string }>(LEFTOVER_OBJECTS).then((r) => r.rows.map((row) => row.hit)),
     );
-    expect(hits).toEqual(KEPT);
+    // KOBE-311's skill installs use "install" as a noun (installing a skill), not the old scope.
+    expect(hits.filter((hit) => !/skill_install/.test(hit))).toEqual(KEPT);
   });
 
   it("renames in place: same relations, same data files, same row counts", () => {

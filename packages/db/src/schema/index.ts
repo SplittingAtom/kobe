@@ -44,3 +44,6 @@ export * from "./agent-eval-cases.js";
 export * from "./workspace-hold-history.js";
 export * from "./workspace-moves.js";
 export * from "./skill-hash-checks.js";
+export * from "./registry.js";
+export * from "./grants.js";
+export * from "./installs.js";

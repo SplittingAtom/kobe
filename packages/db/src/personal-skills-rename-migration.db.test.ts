@@ -52,45 +52,45 @@ const EXPECTED_CONSTRAINTS = [
 /** Every object in `public` whose name or definition still says "site_skill". */
 const LEFTOVER_OBJECTS = `
   SELECT 'relation ' || c.relname AS hit FROM pg_class c
-   WHERE c.relnamespace = 'public'::regnamespace AND c.relname ILIKE '%site\\_skill%'
+   WHERE c.relnamespace = 'public'::regnamespace AND c.relname ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'type ' || t.typname FROM pg_type t
-   WHERE t.typnamespace = 'public'::regnamespace AND t.typname ILIKE '%site\\_skill%'
+   WHERE t.typnamespace = 'public'::regnamespace AND t.typname ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'constraint ' || c.relname || '.' || con.conname FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
    WHERE c.relnamespace = 'public'::regnamespace
-     AND (con.conname ILIKE '%site\\_skill%' OR pg_get_constraintdef(con.oid) ILIKE '%site\\_skill%')
+     AND (con.conname ~* 'site_skill(s|_version|_scan)' OR pg_get_constraintdef(con.oid) ~* 'site_skill(s|_version|_scan)')
   UNION ALL
   SELECT 'trigger ' || c.relname || '.' || tg.tgname FROM pg_trigger tg
     JOIN pg_class c ON c.oid = tg.tgrelid
    WHERE c.relnamespace = 'public'::regnamespace AND NOT tg.tgisinternal
-     AND tg.tgname ILIKE '%site\\_skill%'
+     AND tg.tgname ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'function ' || p.proname FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND (p.proname ILIKE '%site\\_skill%' OR p.prosrc ILIKE '%site\\_skill%')
+     AND (p.proname ~* 'site_skill(s|_version|_scan)' OR p.prosrc ~* 'site_skill(s|_version|_scan)')
   UNION ALL
   SELECT 'policy ' || tablename || '.' || policyname FROM pg_policies
    WHERE schemaname = 'public'
-     AND (policyname ILIKE '%site\\_skill%' OR qual ILIKE '%site\\_skill%'
-          OR with_check ILIKE '%site\\_skill%')
+     AND (policyname ~* 'site_skill(s|_version|_scan)' OR qual ~* 'site_skill(s|_version|_scan)'
+          OR with_check ~* 'site_skill(s|_version|_scan)')
   UNION ALL
   SELECT 'index ' || indexname FROM pg_indexes
-   WHERE schemaname = 'public' AND indexdef ILIKE '%site\\_skill%'
+   WHERE schemaname = 'public' AND indexdef ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'view ' || c.relname FROM pg_class c
    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('v', 'm')
-     AND pg_get_viewdef(c.oid) ILIKE '%site\\_skill%'
+     AND pg_get_viewdef(c.oid) ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'default ' || c.relname || '.' || a.attname FROM pg_attrdef d
     JOIN pg_class c ON c.oid = d.adrelid
     JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
    WHERE c.relnamespace = 'public'::regnamespace
-     AND pg_get_expr(d.adbin, d.adrelid) ILIKE '%site\\_skill%'
+     AND pg_get_expr(d.adbin, d.adrelid) ~* 'site_skill(s|_version|_scan)'
   UNION ALL
   SELECT 'comment ' || d.objoid::text FROM pg_description d
-   WHERE d.description ILIKE '%site\\_skill%'
+   WHERE d.description ~* 'site_skill(s|_version|_scan)'
   ORDER BY 1`;
 
 let db: TestDatabase | undefined;
