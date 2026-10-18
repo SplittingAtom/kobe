@@ -91,6 +91,8 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
       "/archive, Archive",
       "/unarchive, Unarchive, unavailable: It isn't archived.",
       "/share with, Share",
+      "/skill, Make a skill from this",
+      "/saveskill skill, Save skill to Workbench, unavailable: No skill folder in /workspace/skills yet: ask skill-creator to build one.",
       "/rename, Rename",
       "/fork, Fork to a new thread",
       "/stop, Stop, unavailable: Nothing is running.",

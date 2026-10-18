@@ -346,6 +346,24 @@ const LIST = [
     slash: "share",
     arg: "with",
   },
+  // Skills from a conversation (KOBE-322, SK10): a Workbench thread with skill-creator and this
+  // conversation attached read-only; then Save to Workbench brings /workspace/skills/<name>/ in.
+  {
+    id: "skill-from-thread",
+    name: "Make a skill from this",
+    icon: WandSparklesIcon,
+    scope: "thread-menu",
+    slash: "skill",
+    readOnlySafe: true,
+  },
+  {
+    id: "save-skill-to-workbench",
+    name: "Save skill to Workbench",
+    icon: FolderInputIcon,
+    scope: "thread-menu",
+    slash: "saveskill",
+    arg: "skill",
+  },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A Files row's menu (KOBE-292). Rename (also F2 in the tree) and Move to… (the keyboard way to

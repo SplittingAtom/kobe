@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { SKILL_NAME_PATTERN as SKILL_NAME } from "@kobe/protocol";
-import { createDraft, listDrafts, type DraftSummary } from "../../lib/skills/drafts-api";
+import { draftHref } from "./draft-href";
+import { NewDraft } from "./new-draft";
+import { listDrafts, type DraftSummary } from "../../lib/skills/drafts-api";
 import {
   Badge,
   Button,
   EmptyState,
-  Field,
   Section,
   Table,
   TableBody,
@@ -17,14 +17,13 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
-  TextInput,
 } from "../ui/console";
 import { useTeamAccess } from "../admin/console-context";
 import { ErrorNotice, MutationStatus } from "../admin/error-notice";
 import { DateTime } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
 
-export const draftHref = (id: string) => `/me/skills/drafts/${encodeURIComponent(id)}`;
+export { draftHref } from "./draft-href";
 
 /**
  * The Workbench tab (KOBE-321, SK11): the caller's drafts in the active team and, for Builders and
@@ -45,43 +44,6 @@ export function WorkbenchList() {
       )}
       <Drafts teamId={teamId} />
     </>
-  );
-}
-
-function NewDraft({ teamId }: { readonly teamId: string }) {
-  const [name, setName] = useState("");
-  const [attempted, setAttempted] = useState(false);
-  const mutation = useMutation();
-  const invalid = !SKILL_NAME.test(name);
-  return (
-    <Section title="New draft" level={2}>
-      <form
-        noValidate
-        className="flex flex-wrap items-end gap-2"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setAttempted(true);
-          if (invalid) return;
-          await mutation.run(async () => {
-            const res = await createDraft(teamId, name);
-            if (res.ok) window.location.assign(draftHref(res.data.id));
-            return res;
-          });
-        }}
-      >
-        <Field
-          label="Skill name"
-          hint="Lowercase letters, digits and hyphens, such as report-writer."
-          error={attempted && invalid ? "Use lowercase letters, digits and hyphens." : undefined}
-        >
-          <TextInput type="text" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Button type="submit" variant="primary" disabled={mutation.pending}>
-          Start a draft
-        </Button>
-      </form>
-      <MutationStatus error={mutation.error} notice={mutation.notice} />
-    </Section>
   );
 }
 

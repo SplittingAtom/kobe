@@ -91,13 +91,82 @@ export function listDrafts(teamId: string, cursor?: string): Promise<ApiResult<D
   return apiRequest(cursor ? `${BASE}?cursor=${enc(cursor)}` : BASE, { teamId });
 }
 
-export async function createDraft(teamId: string, name: string): Promise<ApiResult<DraftSummary>> {
-  const res = await apiRequest<{ draft: DraftSummary }>(BASE, {
-    method: "POST",
-    json: { name },
-    teamId,
-  });
-  return res.ok ? { ...res, data: res.data.draft } : res;
+const draftOf = (res: ApiResult<{ draft: DraftSummary }>): ApiResult<DraftSummary> =>
+  res.ok ? { ...res, data: res.data.draft } : res;
+
+/** A blank draft, or one from a template (KOBE-322). */
+export async function createDraft(
+  teamId: string,
+  name: string,
+  template?: string,
+): Promise<ApiResult<DraftSummary>> {
+  return draftOf(
+    await apiRequest(BASE, {
+      method: "POST",
+      json: template ? { name, template } : { name },
+      teamId,
+    }),
+  );
+}
+
+export interface DraftTemplate {
+  readonly id: string;
+  readonly title: string;
+  readonly summary: string;
+}
+
+export async function listTemplates(teamId: string): Promise<ApiResult<readonly DraftTemplate[]>> {
+  const res = await apiRequest<{ templates: DraftTemplate[] }>(`${BASE}/templates`, { teamId });
+  return res.ok ? { ...res, data: res.data.templates } : res;
+}
+
+/** A draft from an uploaded zip or SKILL.md, through the upload's validation (KOBE-322). */
+export async function uploadDraft(
+  teamId: string,
+  bytes: Uint8Array,
+  kind: "zip" | "skill_md",
+): Promise<ApiResult<DraftSummary>> {
+  return draftOf(
+    await apiRequest(`${BASE}/upload?kind=${kind}`, {
+      method: "POST",
+      raw: { body: bytes, contentType: kind === "zip" ? "application/zip" : "text/markdown" },
+      teamId,
+    }),
+  );
+}
+
+export type ForkSource =
+  | { readonly kind: "team" | "personal"; readonly skillId: string; readonly version?: number }
+  | { readonly kind: "catalog"; readonly skillId: string; readonly semver?: string };
+
+/** A copy of a version as a new draft; under the skill's own name, it is how a skill is edited. */
+export async function forkToDraft(
+  teamId: string,
+  source: ForkSource,
+  name?: string,
+): Promise<ApiResult<DraftSummary>> {
+  return draftOf(
+    await apiRequest(`${BASE}/fork`, {
+      method: "POST",
+      json: name ? { source, name } : { source },
+      teamId,
+    }),
+  );
+}
+
+/** Save to Workbench: `/workspace/skills/<folder>/` from the conversation `threadId`. */
+export async function saveWorkspaceSkill(
+  teamId: string,
+  threadId: string,
+  folder: string,
+): Promise<ApiResult<DraftSummary>> {
+  return draftOf(
+    await apiRequest(`${BASE}/from-workspace`, {
+      method: "POST",
+      json: { threadId, folder },
+      teamId,
+    }),
+  );
 }
 
 export function getDraft(teamId: string, id: string): Promise<ApiResult<DraftWithFiles>> {
