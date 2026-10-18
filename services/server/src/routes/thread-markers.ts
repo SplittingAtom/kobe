@@ -63,8 +63,8 @@ export const threadMarkersSchema = z.strictObject({
    */
   projects: z.array(projectMarkerSchema),
   /**
-   * Switches to another version of the thread's agent (U8, KOBE-420), each on the first run that
-   * started after it: that version applies from there. At most one per run, at most 50.
+   * Where the agent version changed between the thread's runs (U8, KOBE-420, `runs.agent_version`),
+   * each on the first run on the new version. At most one per run.
    */
   agents: z.array(agentMarkerSchema),
   /** True when a list held more than {@link MAX_MARKERS}: only the newest are returned. */

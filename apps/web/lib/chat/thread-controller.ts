@@ -848,7 +848,9 @@ export class ThreadController {
   readonly switchAgentVersion = async (): Promise<boolean> => {
     const threadId = this.#state.threadId;
     const target = this.#state.agentCurrentVersion;
-    if (threadId === null || target == null) return false;
+    if (threadId === null || target == null || this.#state.busy.includes("agent-version")) {
+      return false;
+    }
     const res = await this.#busy("agent-version", () =>
       this.#api.switchAgentVersion(threadId, target),
     );
@@ -858,6 +860,8 @@ export class ThreadController {
     }
     this.#set((s) => ({ ...s, summary: res.data }));
     this.#announce(`Switched to v${target}. Your next message uses it.`);
+    // A version published meanwhile is offered next (the switch answer has no current version).
+    void this.refresh();
     return true;
   };
 

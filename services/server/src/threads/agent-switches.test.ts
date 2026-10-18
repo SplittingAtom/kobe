@@ -1,23 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { agentMarkerSchema, groupAgentSwitches, type AgentSwitchRun } from "./agent-switches.js";
+import { agentChanges, agentMarkerSchema, type StartedRun } from "./agent-switches.js";
 
-const RUN_A = "11111111-1111-4111-8111-111111111111";
-const RUN_B = "22222222-2222-4222-8222-222222222222";
-
-const sw = (from: number, to: number, runId: string | null, entry = "e-1"): AgentSwitchRun => ({
-  fromVersion: from,
-  toVersion: to,
-  runId,
-  userEntryId: runId === null ? null : entry,
+let n = 0;
+const run = (version: number | null, entry: string | null = `e-${++n}`): StartedRun => ({
+  runId: `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+  version,
+  userEntryId: entry,
   parentEntryId: null,
 });
 
-describe("groupAgentSwitches (KOBE-420: the switch marker)", () => {
-  it("marks the first run after a switch with its versions", () => {
-    const [marker] = groupAgentSwitches([sw(1, 3, RUN_A)]);
+const shown = (runs: StartedRun[]) =>
+  agentChanges(runs).map((m) => [m.user_entry_id, m.from_version, m.to_version]);
+
+describe("agentChanges (KOBE-420: the version marker from runs.agent_version)", () => {
+  it("marks the first run on another version than the run before", () => {
+    const runs = [run(1, "a"), run(1, "b"), run(3, "c"), run(3, "d")];
+    const [marker] = agentChanges(runs);
     expect(marker).toEqual({
-      run_id: RUN_A,
-      user_entry_id: "e-1",
+      run_id: runs[2]?.runId,
+      user_entry_id: "c",
       parent_entry_id: null,
       from_version: 1,
       to_version: 3,
@@ -25,26 +26,28 @@ describe("groupAgentSwitches (KOBE-420: the switch marker)", () => {
     expect(agentMarkerSchema.parse(marker)).toEqual(marker);
   });
 
-  it("collapses switches before one run into the first from and the last to", () => {
-    expect(groupAgentSwitches([sw(1, 2, RUN_A), sw(2, 3, RUN_A)])).toMatchObject([
-      { run_id: RUN_A, from_version: 1, to_version: 3 },
-    ]);
+  it("shows nothing for a thread that never changed, or only has unknown versions", () => {
+    expect(shown([run(2), run(2)])).toEqual([]);
+    expect(shown([run(null), run(null)])).toEqual([]);
+    expect(shown([run(2)])).toEqual([]);
   });
 
-  it("leaves out a round trip and switches no run has started after yet", () => {
-    expect(groupAgentSwitches([sw(1, 2, RUN_A), sw(2, 1, RUN_A), sw(1, 4, null)])).toEqual([]);
+  it("skips runs with no known version (compacted before the column, or no agent)", () => {
+    expect(shown([run(1, "a"), run(null, "b"), run(2, "c")])).toEqual([["c", 1, 2]]);
+    expect(shown([run(1, "a"), run(null, "b"), run(1, "c")])).toEqual([]);
   });
 
-  it("keeps one marker per run, oldest first", () => {
-    expect(
-      groupAgentSwitches([sw(1, 2, RUN_A, "e-1"), sw(2, 3, RUN_B, "e-5")]).map((m) => [
-        m.user_entry_id,
-        m.from_version,
-        m.to_version,
-      ]),
-    ).toEqual([
-      ["e-1", 1, 2],
-      ["e-5", 2, 3],
+  it("passes a change on a run without a prompt entry to the next run that has one", () => {
+    expect(shown([run(1, "a"), run(2, null), run(2, "c")])).toEqual([["c", 1, 2]]);
+    // Changes that meet on one prompt are one; a round trip there shows none.
+    expect(shown([run(1, "a"), run(2, null), run(3, "c")])).toEqual([["c", 1, 3]]);
+    expect(shown([run(1, "a"), run(2, null), run(1, "c")])).toEqual([]);
+  });
+
+  it("marks each change, oldest first", () => {
+    expect(shown([run(1, "a"), run(2, "b"), run(2, "c"), run(1, "d")])).toEqual([
+      ["b", 1, 2],
+      ["d", 2, 1],
     ]);
   });
 });

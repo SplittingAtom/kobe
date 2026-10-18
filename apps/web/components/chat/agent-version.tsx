@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { Button } from "../ui/button";
 import type { KobeThreadExtras } from "./kobe-runtime";
@@ -31,23 +32,37 @@ export function agentVersionOffer(state: ThreadState): AgentVersionOffer | undef
     agentName: summary.agentName ?? "The agent",
     canSwitch: summary.readOnly !== true && status === "active",
     blocker: isThreadRunning(state)
-      ? "Switch when the run ends"
+      ? "Switch when the run ends."
       : state.busy.includes(BUSY)
         ? "Switching…"
         : undefined,
   };
 }
 
+/** After a switch the offer (and its focused button) goes: the composer is where the member goes next. */
+function focusComposer(from: HTMLElement | null): void {
+  const root = from?.closest("[data-kobe-thread-root]") ?? document;
+  root.querySelector<HTMLTextAreaElement>("[data-kobe-composer] textarea")?.focus();
+}
+
 /**
  * "v<N> available" in the thread header (U8: "badge on old threads, one-click switch"). Switch
  * moves the thread to that version through `POST /v1/threads/:id/agent-version`; the next run uses
- * it and the server marks the switch above its prompt. Refusals show as the thread's action error.
+ * it and the server marks the change above its prompt. Refusals show as the thread's action error.
+ * While Switch waits (a run is active) it stays focusable, says why in its description and does
+ * nothing.
  */
 export function AgentVersionBadge({ extras }: { readonly extras: KobeThreadExtras }) {
+  const reasonId = useId();
   const offer = agentVersionOffer(extras.state);
   if (!offer) return null;
   const { current, pinned, agentName, canSwitch, blocker } = offer;
   const controller = extras.controller;
+  const onSwitch = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (blocker !== undefined || !controller) return;
+    const button = event.currentTarget;
+    if (await controller.switchAgentVersion()) focusComposer(button);
+  };
   return (
     <span
       role="group"
@@ -55,24 +70,28 @@ export function AgentVersionBadge({ extras }: { readonly extras: KobeThreadExtra
       data-kobe-agent-version={current}
       className="inline-flex items-center gap-1.5"
     >
-      <span
-        title={`This thread uses v${pinned}. New threads use v${current}.`}
-        className="border-border text-muted-foreground inline-flex items-center rounded-full border px-2 text-xs leading-5"
-      >
+      <span className="border-border text-muted-foreground inline-flex items-center rounded-full border px-2 text-xs leading-5">
         v{current} available
       </span>
       {canSwitch && controller && (
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          aria-label={`Switch this thread to v${current}`}
-          title={blocker ?? `Your next message uses v${current}`}
-          disabled={blocker !== undefined}
-          onClick={() => void controller.switchAgentVersion()}
-        >
-          Switch
-        </Button>
+        <>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            aria-label={`Switch this thread to v${current}`}
+            aria-disabled={blocker !== undefined || undefined}
+            aria-describedby={reasonId}
+            title={blocker ?? `Your next message uses v${current}`}
+            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            onClick={(event) => void onSwitch(event)}
+          >
+            Switch
+          </Button>
+          <span id={reasonId} className="sr-only">
+            {blocker ?? `Your next message uses v${current}.`}
+          </span>
+        </>
       )}
     </span>
   );

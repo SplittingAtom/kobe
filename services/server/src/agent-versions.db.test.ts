@@ -400,32 +400,48 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     expect((await as.bob.post(`/v1/threads/${t.thread_id}/agent-version`, {})).status).toBe(404);
   });
 
-  it("marks the switch on the first run that started after it (KOBE-420)", async () => {
+  it("marks where the thread's runs changed version, per thread, skipping unknown versions (KOBE-420)", async () => {
     const id = await create("bob", "team", "Marked");
     await published("bob", id);
     const t = await newThread("carol", id);
-    await republish("bob", id);
-    await republish("bob", id);
-    const markers = async () => {
-      const res = await as.carol.get(`/v1/threads/${t.thread_id}/markers`);
+    const other = await newThread("carol", id);
+    const markers = async (thread: string) => {
+      const res = await as.carol.get(`/v1/threads/${thread}/markers`);
       expect(res.status, json(res)).toBe(200);
       return res.json.agents as unknown[];
     };
-    // A round trip before any run changes nothing.
-    expect((await as.carol.post(`/v1/threads/${t.thread_id}/agent-version`, {})).status).toBe(200);
-    await as.carol.post(`/v1/threads/${t.thread_id}/agent-version`, { version: 1 });
-    expect(await markers()).toEqual([]);
-    expect((await as.carol.post(`/v1/threads/${t.thread_id}/agent-version`, {})).status).toBe(200);
-    expect(await markers()).toEqual([]); // no run has started on v3 yet
-    const run = randomUUID();
-    await h.admin.query(
-      `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at, ended_at, user_entry_id)
-       VALUES ($1, $2, $3, 'user', 'completed', clock_timestamp(), clock_timestamp(), 'e-9')`,
-      [finance, run, t.thread_id],
-    );
-    expect(await markers()).toEqual([
-      { run_id: run, user_entry_id: "e-9", parent_entry_id: null, from_version: 1, to_version: 3 },
+    let minute = 0;
+    /** A run as the run start records it (runs/lifecycle.ts sets agent_version). */
+    const ran = async (thread: string, version: number | null, entry: string | null) => {
+      const run = randomUUID();
+      minute += 1;
+      await h.admin.query(
+        `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at, ended_at,
+                           user_entry_id, agent_version)
+         VALUES ($1, $2, $3, 'user', 'completed', now() + make_interval(mins => $4),
+                 now() + make_interval(mins => $4), $5, $6)`,
+        [finance, run, thread, minute, entry, version],
+      );
+      return run;
+    };
+    await ran(t.thread_id, 1, "e-1");
+    await ran(other.thread_id, 4, "o-1"); // another thread's versions never count here
+    await ran(t.thread_id, null, "e-2"); // compacted before 0129, or no agent: skipped
+    await ran(t.thread_id, 1, "e-3");
+    expect(await markers(t.thread_id)).toEqual([]);
+    await ran(t.thread_id, 3, null); // its prompt never reached the tree: the next run carries it
+    const third = await ran(t.thread_id, 3, "e-5");
+    await ran(t.thread_id, 3, "e-6");
+    expect(await markers(t.thread_id)).toEqual([
+      {
+        run_id: third,
+        user_entry_id: "e-5",
+        parent_entry_id: null,
+        from_version: 1,
+        to_version: 3,
+      },
     ]);
+    expect(await markers(other.thread_id)).toEqual([]);
     // Another member never sees a private thread or its markers.
     expect((await as.dave.get(`/v1/threads/${t.thread_id}/markers`)).status).toBe(404);
   });

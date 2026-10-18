@@ -82,6 +82,32 @@ describe("one-click Switch (KOBE-420 ac-2)", () => {
     ]);
     expect(fake.threads.get(t)?.agent_version).toBe(3);
     expect(announcement()).toBe("Switched to v3. Your next message uses it.");
+    // The button went with the offer: focus goes to the composer, not to the page.
+    await waitFor(async () => expect(document.activeElement).toBe(await composer()));
+  });
+
+  it("sends one request for a double click", async () => {
+    const t = pinned(1, 3);
+    openApp(fake, t);
+    const button = await within(await header()).findByRole("button", {
+      name: "Switch this thread to v3",
+    });
+    await userEvent.setup().dblClick(button);
+    await waitFor(() => expect(offer()).toBeNull());
+    expect(switches()).toHaveLength(1);
+  });
+
+  it("offers a version published meanwhile once switched", async () => {
+    const t = pinned(1, 3);
+    openApp(fake, t);
+    const button = await within(await header()).findByRole("button", {
+      name: "Switch this thread to v3",
+    });
+    must(fake.threads.get(t)).agent_current_version = 4;
+    await userEvent.setup().click(button);
+    expect(
+      await within(await header()).findByRole("button", { name: "Switch this thread to v4" }),
+    ).toBeTruthy();
   });
 
   it("shows the server's refusal and keeps the offer", async () => {
@@ -112,8 +138,13 @@ describe("one-click Switch (KOBE-420 ac-2)", () => {
     const button = await within(await header()).findByRole("button", {
       name: "Switch this thread to v3",
     });
-    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
-    expect(button.getAttribute("title")).toBe("Switch when the run ends");
+    // Still focusable, with the reason as its description; a click sends nothing.
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBe("true"));
+    expect(button.hasAttribute("disabled")).toBe(false);
+    const described = must(document.getElementById(must(button.getAttribute("aria-describedby"))));
+    expect(described.textContent).toBe("Switch when the run ends.");
+    await userEvent.setup().click(button);
+    expect(switches()).toEqual([]);
   });
 
   it("marks the switch above the prompt of the run that used the new version", async () => {
@@ -147,6 +178,25 @@ describe("one-click Switch (KOBE-420 ac-2)", () => {
     const text = document.body.textContent ?? "";
     expect(text.indexOf("Up.")).toBeLessThan(text.indexOf("Switched to v3"));
     expect(text.indexOf("Switched to v3")).toBeLessThan(text.indexOf("Q4?"));
+  });
+});
+
+describe("when Switch is not offered (KOBE-420 ac-3)", () => {
+  it.each(["suspended", "archived"] as const)(
+    "a %s agent shows the badge without Switch",
+    async (status) => {
+      openApp(fake, pinned(1, 3, { agent_status: status }));
+      const group = await within(await header()).findByRole("group", {
+        name: "Analyst v3 available. This thread uses v1.",
+      });
+      expect(within(group).queryByRole("button")).toBeNull();
+    },
+  );
+
+  it("a thread in Trash shows no offer", async () => {
+    openApp(fake, pinned(1, 3, { deleted_at: "2026-10-17T10:00:00.000Z" }));
+    await header();
+    expect(offer()).toBeNull();
   });
 });
 

@@ -267,6 +267,7 @@ export function ThreadView({
 
   return (
     <ThreadPrimitive.Root
+      data-kobe-thread-root
       className="bg-background @container flex min-h-0 flex-1 flex-col overflow-hidden"
       style={COMPOSER_VARS}
     >
