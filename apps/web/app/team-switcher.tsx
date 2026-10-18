@@ -108,23 +108,48 @@ export function TeamMenu({
           <span className={classes.name}>{active ? active.name : "Choose a team"}</span>
           {active && <small> · {roleLabel(active.role)}</small>}
         </summary>
-        <ul className={classes.list}>
-          {my.teams.map((t) => (
-            <li key={t.id}>
-              <button
-                type="button"
-                aria-current={t.id === my.activeTeamId ? "true" : undefined}
-                disabled={t.id === my.activeTeamId}
-                onClick={() => void switchTo(t.id)}
-              >
-                {t.name} <small>{roleLabel(t.role)}</small>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <TeamList my={my} switchTo={switchTo} className={classes.list} />
       </details>
     </nav>
   );
+}
+
+/** Each team with its role; the active one marked and disabled. Picking one switches to it. */
+export function TeamList({
+  my,
+  switchTo,
+  className,
+  label,
+}: {
+  readonly my: MyTeams;
+  readonly switchTo: (teamId: string) => Promise<void>;
+  readonly className?: string | undefined;
+  readonly label?: string | undefined;
+}) {
+  return (
+    <ul className={className} aria-label={label}>
+      {my.teams.map((t) => (
+        <li key={t.id}>
+          <button
+            type="button"
+            aria-current={t.id === my.activeTeamId ? "true" : undefined}
+            disabled={t.id === my.activeTeamId}
+            onClick={() => void switchTo(t.id)}
+          >
+            {t.name} <small>{roleLabel(t.role)}</small>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** A team's initials (the collapsed rail's icon): the first letters of its first two words. */
+export function teamInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  const letters = words.length > 1 ? `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}` : words[0]?.[0];
+  return (letters ?? "?").toUpperCase();
 }
 
 /**

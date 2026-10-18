@@ -43,14 +43,15 @@ function useMenuDismiss(header: RefObject<HTMLElement | null>, open: boolean, cl
 /**
  * The utility bar (CE3, KOBE-197): one 56 px row of wordmark, thread search, then the member's
  * areas, the Site console (role-gated), notifications, the theme toggle (KOBE-282) and the profile
- * menu. The team selector and Team console moved to the rail's top line (KOBE-419). Its second row went in KOBE-418: the agent, model and thinking selectors are in
- * the composer's toolbar, the context gauge under the composer, Show details and Compact now on the
- * answers, and the rail shows Files.
+ * menu. The team selector and Team console moved to the rail's top line (KOBE-419). Its second
+ * row went in KOBE-418: the agent, model and thinking selectors are in the composer's toolbar, the
+ * context gauge under the composer, Show details and Compact now on the answers, and the rail
+ * shows Files.
  *
- * Under 768 px (CE8, KOBE-201) it is the rail's drawer button (filled by the workspace; the drawer
- * is headed by the team selector), the title and a Menu that discloses the rest. One tree at every width, so nothing
- * remounts (search text, notifications) when the window crosses 768 px; only the Menu button comes
- * and goes.
+ * Under 768 px (CE8, KOBE-201) it is the rail's drawer button with the active team's name (filled
+ * by the workspace; the drawer is headed by the team selector), the title and a Menu that
+ * discloses the rest. One tree at every width, so nothing remounts (search text, notifications)
+ * when the window crosses 768 px; only the Menu button comes and goes.
  */
 export function UtilityBar({
   teamId,

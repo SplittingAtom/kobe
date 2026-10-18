@@ -86,6 +86,8 @@ type TeamState =
   | { readonly status: "loading" }
   | { readonly status: "signedOut" }
   | { readonly status: "noTeam" }
+  /** Teams but none active yet: `TeamActivation` is choosing one (KOBE-419 review S3). */
+  | { readonly status: "choosing" }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly teamId: string; readonly teamName: string };
 
@@ -104,8 +106,9 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
       (my) => {
         if (!current) return;
         if (my === null) setState({ status: "signedOut" });
-        else if (my.activeTeamId === null) setState({ status: "noTeam" });
-        else {
+        else if (my.activeTeamId === null) {
+          setState({ status: my.teams.length > 0 ? "choosing" : "noTeam" });
+        } else {
           const active = my.teams.find((t) => t.id === my.activeTeamId);
           setState({ status: "ready", teamId: my.activeTeamId, teamName: active?.name ?? "" });
         }
@@ -321,10 +324,10 @@ export function ChatApp({
   useViewportHeight(appEl);
 
   let body: ReactNode;
-  if (team.status === "loading")
+  if (team.status === "loading" || team.status === "choosing")
     body = (
       <p className={styles.empty} role="status">
-        Loading…
+        {team.status === "choosing" ? "Choosing your team…" : "Loading…"}
       </p>
     );
   else if (team.status === "signedOut") {

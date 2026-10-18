@@ -9,8 +9,9 @@ import { ContextGauge } from "./context-gauge";
 import { IconActionProvider } from "./icon-action";
 
 /**
- * KOBE-211 (CE14): the context gauge, under the composer since KOBE-418. Numerator: the newest model call's prompt
- * plus cache-read tokens (run_usage on load, message usage while a run goes); denominator: the
+ * KOBE-211 (CE14): the context gauge, under the composer since KOBE-418. Numerator: the newest
+ * model call's prompt plus cache-read tokens (run_usage on load, message usage while a run goes);
+ * denominator: the
  * thread model's context window (KOBE-210).
  */
 let fake: FakeKobe;

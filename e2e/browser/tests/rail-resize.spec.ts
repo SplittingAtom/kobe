@@ -145,6 +145,20 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
     ys.push(Math.round(box.y + box.height / 2));
   }
   expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
+  // The team name (or menu) ends before the first toggle: nothing overlaps (review S1).
+  const slot = await chat.railHeader
+    .getByRole("navigation", { name: "Teams" })
+    .or(chat.railHeader.getByRole("heading", { level: 2 }))
+    .boundingBox();
+  const firstToggle = await chat.railHeader
+    .getByRole("button", { name: "Threads panel", exact: true })
+    .boundingBox();
+  expect(slot).not.toBeNull();
+  expect(firstToggle).not.toBeNull();
+  if (slot && firstToggle) {
+    expect(slot.x + slot.width).toBeLessThanOrEqual(firstToggle.x + 1);
+    expect(slot.width).toBeGreaterThanOrEqual(30);
+  }
   await page.keyboard.press("End");
   await expectWidth(rail, 560);
   expect(await width(conversation)).toBeGreaterThanOrEqual(400);

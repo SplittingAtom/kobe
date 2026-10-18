@@ -4,8 +4,8 @@
  * across devices. The shell loads them once at start (`GET /v1/me/preferences`) and applies them
  * to the rail and the artifact column; changes are debounced into one `PUT` of the keys that
  * changed (callers commit on release or toggle, never per pointer move), and what is still queued
- * goes out when the page is hidden or left. A failure is logged and never blocks the UI: the shell keeps its defaults and whatever the
- * member does on screen.
+ * goes out when the page is hidden or left. A failure is logged and never blocks the UI: the shell
+ * keeps its defaults and whatever the member does on screen.
  *
  * Applying checks each value against this screen: a stored value that no longer fits (a width the
  * space right of the rail can't hold beside the conversation's floor, a share outside the rail's

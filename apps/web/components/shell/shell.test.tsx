@@ -9,7 +9,10 @@ import { must } from "../../lib/testing/must";
 import { composer, openApp, pressModShift } from "../chat/testing";
 import { ChatReturnLink } from "./chat-return-link";
 
-/** KOBE-197 (CE3, CE4, CE7): the utility bar (one row since KOBE-418) over the rail · artifact · conversation grid. */
+/**
+ * KOBE-197 (CE3, CE4, CE7): the utility bar (one row since KOBE-418) over the rail · artifact ·
+ * conversation grid.
+ */
 let fake: FakeKobe;
 
 beforeEach(() => {

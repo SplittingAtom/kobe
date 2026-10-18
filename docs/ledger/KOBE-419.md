@@ -22,8 +22,8 @@
   activated a team on first load; `TeamActivation` in `ChatApp` keeps that, since the rail renders
   only once a team is active. Its errors show under the line. The consoles keep `TeamSwitcher`.
   The no-team text is now the switcher's ("You are not in any team yet…").
-- **Phone:** the drawer's header is the same line, so the selector heads the drawer; the bar's
-  drawer button opens it (the bar shows no team name of its own).
+- **Phone:** the drawer's header is the same line, so the selector heads the drawer; the bar
+  shows the active team's name beside the drawer button (follow-up below).
 - **Toggles** (`rail-threads`, `rail-files` commands, "Threads panel" / "Files panel",
   `aria-pressed`, `aria-controls`): one panel alone fills the rail (rows `minmax(0, 1fr)`) and the
   divider is not rendered; both on restore the divider and the saved share. The last panel on is
@@ -44,6 +44,21 @@
   name as tooltip; `RailDrawerButton`), so the team is visible without opening the drawer
   (`rail-header.test.tsx`). Wide windows show the rail itself and no name in the bar.
 - The button keeps the product's name, "Team console".
+
+## Review fixes (review-419, 2026-10-18)
+
+- S1: the team slot clips and is a container; the name keeps a 2.5rem minimum and truncates; the
+  role shrinks first and hides under a 7.5rem slot; a caret marks the menu. CSS contract test;
+  `rail-resize.spec.ts` checks at 200 px that the name and the buttons don't overlap.
+- S2: the collapsed rail leads with the team's initials (name and role as tooltip and name); with
+  several teams it opens the team list in a popover. Tests for one and several teams.
+- S3: teams but none active yet shows "Choosing your team…" until one is active.
+- S4: the phone bar's name is capped at `min(9rem, 30vw)`, so the row doesn't wrap; the phone
+  e2e checks the bar stays one row.
+- Nits: `.teamMenu .teamList` wins over `.menuList`; one `useMyTeams` read for the rail; comment
+  wraps; the drawer's Threads reveal documented; tests for Escape in the drawer's team menu and an
+  unknown stored panels value; Team console and the second context are hard e2e assertions.
+- Disagreed: none. Not done: the doubled access/teams fetch between the bar and the rail (N4).
 
 ## Evidence (acceptance criteria → test or command output)
 

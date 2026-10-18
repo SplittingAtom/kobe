@@ -102,6 +102,19 @@ describe("the rail's top line (ac-1)", () => {
       expect(block(".team")).toContain(d);
     }
     expect(block(".headerActions")).toContain("flex-shrink: 0;");
+    // A multi-team summary at the 200 px minimum (KOBE-419 review S1): the slot clips, the name
+    // keeps a usable minimum, and the role yields first (it shrinks first, then hides).
+    expect(block(".teamSlot")).toContain("overflow: hidden;");
+    expect(block(".teamSlot")).toContain("container-type: inline-size;");
+    expect(block(".teamSummary .team")).toMatch(/min-width: \d/);
+    const role = block(".teamSummary small");
+    for (const d of ["min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;"]) {
+      expect(role).toContain(d);
+    }
+    expect(role).toMatch(/flex-shrink: [1-9]\d+;/);
+    expect(css).toMatch(
+      /@container \(width < [\d.]+rem\) \{\s*\.teamSummary small \{\s*display: none;/,
+    );
     // A hidden section is really gone: `.section` sets a display of its own.
     expect(css).toMatch(/\.section\[hidden\] \{\s*display: none;/);
   });
@@ -173,6 +186,43 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     await waitFor(() => expect(within(bar()).queryByText("Finance")).toBeNull());
   });
 
+  it("waits neutrally while a first team is activated, never saying there is none", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
+    fake.activeTeamId = null;
+    openApp(fake);
+    expect(await screen.findByText("Choosing your team…")).toBeTruthy();
+    expect(screen.queryByText(/not in any team/)).toBeNull();
+    await composer();
+    expect(fake.activeTeamId).toBe(fake.teamId);
+    expect(screen.queryByText(/not in any team/)).toBeNull();
+  });
+
+  it("the phone bar's team name is capped to fit one row", async () => {
+    resizeWindow(390);
+    openApp(fake);
+    await composer();
+    const name = await within(bar()).findByText("Finance");
+    expect(name.className).toContain("max-w-[min(9rem,30vw)]");
+    expect(name.className).toContain("truncate");
+  });
+
+  it("Escape closes the drawer's open team menu, not the drawer", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
+    resizeWindow(390);
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Show the workspace" }));
+    const drawer = await screen.findByRole("dialog", { name: "Workspace" });
+    const teams = await within(drawer).findByRole("navigation", { name: "Teams" }, WAIT);
+    const details = must(teams.querySelector("details"));
+    await user.click(must(teams.querySelector("summary")));
+    expect(details.open).toBe(true);
+    await user.keyboard("{Escape}");
+    expect(details.open).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+  });
+
   it("under 768 px it heads the drawer, which the bar opens", async () => {
     fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     resizeWindow(390);
@@ -186,7 +236,57 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
   });
 });
 
+describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, () => {
+  it("leads the icon strip with the team's initials; several teams open the same selector", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "team_admin" });
+    fake.preferences = { rail_collapsed: true };
+    openApp(fake);
+    await composer();
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    const team = await within(rail()).findByRole("button", { name: "Team: Finance, Member" }, WAIT);
+    expect(team.textContent).toBe("F");
+    const buttons = within(rail())
+      .getAllByRole("button")
+      .filter((b) => b.closest("[hidden]") === null);
+    expect(buttons[0]).toBe(team);
+    const user = userEvent.setup();
+    await user.click(team);
+    const list = await screen.findByRole("list", { name: "Your teams" });
+    const finance = within(list).getByRole("button", { name: /Finance/ });
+    expect((finance as HTMLButtonElement).disabled).toBe(true);
+    expect(finance.getAttribute("aria-current")).toBe("true");
+    const reload = vi.fn();
+    vi.spyOn(window, "location", "get").mockReturnValue({
+      ...window.location,
+      reload,
+    } as Location);
+    await user.click(within(list).getByRole("button", { name: /Operations Team admin/ }));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(fake.activeTeamId).toBe("t-2");
+  });
+
+  it("one team: its initials with the name and role as the tooltip, no menu", async () => {
+    fake.preferences = { rail_collapsed: true };
+    openApp(fake);
+    await composer();
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    const team = await within(rail()).findByRole("img", { name: "Team: Finance, Member" }, WAIT);
+    expect(team.textContent).toBe("F");
+    expect(within(rail()).queryByRole("button", { name: /^Team:/ })).toBeNull();
+  });
+});
+
 describe("the Threads and Files toggles (ac-3)", { timeout: 30_000 }, () => {
+  it("ignore a stored value this build doesn't know: both panels show", async () => {
+    fake.preferences = { rail_panels: "none" };
+    openApp(fake);
+    await composer();
+    await header();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(section("kobe-rail-threads").hidden).toBe(false);
+    expect(section("kobe-rail-files").hidden).toBe(false);
+  });
+
   it("are pressed for both panels by default, with the divider between", async () => {
     openApp(fake);
     await composer();

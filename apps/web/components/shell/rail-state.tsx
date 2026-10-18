@@ -40,8 +40,9 @@ import { useShellBand } from "./shell-band";
  * preferences (per user, server-side); collapsing keeps it, so expanding again restores it.
  *
  * Its panels (KOBE-419): Threads, Files or both, from the toggles on the rail's top line, saved per
- * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop) turns it on for
- * this page only, like those paths' expansions.
+ * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop, and the phone's
+ * drawer button, which reveals Threads) turns it on for this page only, like those paths'
+ * expansions: the toggles then show both while the stored choice stays as it was.
  */
 export type RailSection = "threads" | "files";
 
@@ -312,7 +313,7 @@ export function RailDrawerButton({ teamName = "" }: { readonly teamName?: string
       {teamName !== "" && (
         <span
           title={teamName}
-          className="max-w-[9rem] min-w-0 truncate text-sm font-medium"
+          className="max-w-[min(9rem,30vw)] min-w-0 truncate text-sm font-medium"
           data-bar-team
         >
           {teamName}

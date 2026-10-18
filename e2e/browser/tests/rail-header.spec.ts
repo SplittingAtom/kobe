@@ -46,10 +46,11 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   await expect(bar.getByRole("navigation", { name: "Teams" })).toHaveCount(0);
   // Team console is never in the bar any more; a team admin has it on the line.
   await expect(bar.getByRole("link", { name: "Team console" })).toHaveCount(0);
-  const consoleLink = line.getByRole("link", { name: "Team console" });
-  if ((await consoleLink.count()) > 0) {
-    await expect(consoleLink).toHaveAttribute("href", "/admin/team");
-  }
+  // The gate1 owner is the team's admin: the link is on the line.
+  await expect(line.getByRole("link", { name: "Team console" })).toHaveAttribute(
+    "href",
+    "/admin/team",
+  );
   // One line: every control on it shares a centre.
   const ys = await line.evaluate((el) =>
     [...el.querySelectorAll<HTMLElement>("button, a, summary")].map((c) => {
@@ -86,16 +87,14 @@ test("panel toggles: one panel fills the rail, the last stays on, the choice is 
     await shoot(page, "rail-files-only", page.locator('[data-shell-region="rail"]'));
 
     // Another browser context of the same member (another device) gets the same panels.
-    const other = await context.browser()?.newContext({
-      storageState: await context.storageState(),
-    });
-    if (other) {
-      const second = await other.newPage();
-      await second.goto("/");
-      await expect(second.getByRole("region", { name: "Files" })).toBeVisible();
-      await expect(second.getByRole("region", { name: "Threads" })).toBeHidden();
-      await other.close();
-    }
+    const browser = context.browser();
+    if (!browser) throw new Error("no browser for a second context");
+    const other = await browser.newContext({ storageState: await context.storageState() });
+    const second = await other.newPage();
+    await second.goto("/");
+    await expect(second.getByRole("region", { name: "Files" })).toBeVisible();
+    await expect(second.getByRole("region", { name: "Threads" })).toBeHidden();
+    await other.close();
 
     // Show threads from the keyboard path: the collapsed rail's icon turns it back on.
     await chat.composer.press("ControlOrMeta+b");
@@ -111,6 +110,13 @@ test("panel toggles: one panel fills the rail, the last stays on, the choice is 
 test("a phone: the drawer is headed by the team selector (ac-2)", async ({ chat, page }) => {
   await page.setViewportSize(PHONE);
   await chat.open();
+  // The bar stays one 56 px row with the team's name beside the drawer button (review S4).
+  const row = page.locator('[data-bar-row="1"]');
+  await expect(row.locator("[data-bar-team]")).toBeVisible();
+  expect((await row.boundingBox())?.height ?? 0).toBeLessThanOrEqual(60);
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect((await row.boundingBox())?.height ?? 0).toBeLessThanOrEqual(60);
+  await page.setViewportSize(PHONE);
   await page.getByRole("button", { name: "Show the workspace" }).click();
   const drawer = page.getByRole("dialog", { name: "Workspace" });
   await expect(drawer).toBeVisible();

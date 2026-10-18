@@ -8,7 +8,7 @@ import { useArtifactPanel } from "../chat/artifact-state";
 import { ChatSessionContext } from "../chat/kobe-runtime";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
-import { useMyTeams } from "../../app/team-switcher";
+import { useMyTeams, type MyTeamsState } from "../../app/team-switcher";
 import { useOpenConsoles } from "../admin/console-links";
 import { isLastPanel, LAST_PANEL_REASON, shows } from "../../lib/shell/rail-panels";
 import { shortcutOf } from "../../lib/shell/shortcuts";
@@ -25,7 +25,7 @@ import { RAIL_ID, RailResizeHandle } from "./rail-resize";
 import { sectionRows, useRail, type RailApi, type RailSection } from "./rail-state";
 import { useShellBand } from "./shell-band";
 import { useModalLayer } from "./use-modal-layer";
-import { RailTeam } from "./rail-team";
+import { RailTeam, RailTeamIcon } from "./rail-team";
 import { RailThreads } from "./rail-threads";
 import styles from "./rail.module.css";
 
@@ -56,9 +56,18 @@ function useRevealFocus({ revealed, collapsed }: RailApi) {
  * The three icons of the collapsed rail (CE5). New keeps the rail as it is. Hidden, not unmounted,
  * while the rail is expanded, so focus can return to the icon that opened a drawer.
  */
-function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
+function CollapsedIcons({
+  rail,
+  teams,
+  teamName,
+}: {
+  readonly rail: RailApi;
+  readonly teams: MyTeamsState;
+  readonly teamName: string;
+}) {
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
+      <RailTeamIcon teams={teams} teamName={teamName} />
       <ThreadListPrimitive.New asChild>
         <IconAction command="new-thread" side="right" />
       </ThreadListPrimitive.New>
@@ -107,8 +116,15 @@ function TeamConsoleLink() {
  * The rail's top line (KOBE-419): the team selector, the Threads and Files panel toggles, Team
  * console for team admins, then collapse. The name truncates; the buttons never shrink or wrap.
  */
-function RailHeader({ rail, teamName }: { readonly rail: RailApi; readonly teamName: string }) {
-  const teams = useMyTeams(false);
+function RailHeader({
+  rail,
+  teams,
+  teamName,
+}: {
+  readonly rail: RailApi;
+  readonly teams: MyTeamsState;
+  readonly teamName: string;
+}) {
   return (
     <>
       <div className={styles.header} data-rail-header>
@@ -221,8 +237,9 @@ function RailFiles({
 /**
  * The workspace rail (CE2, CE5, KOBE-198): its top line (KOBE-419: team selector, panel toggles,
  * Team console, collapse), then Threads over Files with a draggable divider, each scrolling on its
- * own (one panel alone fills the rail, without the divider); 280 px, or 48 px collapsed to three icons. The
- * sections stay mounted (hidden) while collapsed, so their state survives and nothing re-wakes.
+ * own (one panel alone fills the rail, without the divider); 280 px, or 48 px collapsed to the
+ * team's initials and three icons. The sections stay mounted (hidden) while collapsed, so their
+ * state survives and nothing re-wakes.
  * The whole rail is the drop zone for files (A3, KOBE-199, `rail-drop-zone.tsx`).
  *
  * Below 1100 px an expanded rail is a modal drawer (CE7, CE8, KOBE-201): focus moves in, the rest
@@ -253,6 +270,8 @@ export function WorkspaceRail({
   const single = band === "single";
   const resizable = railDocked(band) && !collapsed && !drawer;
   const drop = useRailDropZone(filesApi, rail);
+  // One read of the member's teams for the top line and the collapsed strip.
+  const teams = useMyTeams(false);
   const both = rail.panels === "both";
 
   return (
@@ -267,9 +286,9 @@ export function WorkspaceRail({
         {...drop.handlers}
       >
         {drop.active && <RailDropOverlay />}
-        {!single && <CollapsedIcons rail={rail} />}
+        {!single && <CollapsedIcons rail={rail} teams={teams} teamName={teamName} />}
         <div className={styles.expanded} hidden={collapsed}>
-          <RailHeader rail={rail} teamName={teamName} />
+          <RailHeader rail={rail} teams={teams} teamName={teamName} />
           <div
             id="kobe-rail-sections"
             ref={sections}
