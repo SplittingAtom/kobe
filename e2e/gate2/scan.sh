@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# ac-5 of e2e/gate2.sh: the secret scan of a running sandbox. Sourced; uses its helpers (ok, fail,
+# ac-5 of e2e/gate2.sh: the secret scan of a running sandbox (also U7 of e2e/gate4.sh: SCAN_LABEL,
+# SBX_WHO and T2 name the check and the user). Sourced; uses its helpers (ok, fail,
 # contains, in_sbx, sbx_pod, sbx_summary, client, chat, ...) and variables (KUBECTL, NS, TNS, TEAM, T2, BASE, WORK).
 #
 # The secrets are collected on the CI side only and never printed or sent into the sandbox: the
@@ -123,7 +124,7 @@ scan_check() { # name regex actual: like contains, with scan_ok for the pass
 }
 scan_verdict() {
   [[ -z "$SCAN_BAD" ]] && return 0
-  fail "ac-5 INVALID: the scan's own controls failed ($SCAN_BAD); its INVALID lines above prove nothing"
+  fail "${SCAN_LABEL:-ac-5} INVALID: the scan's own controls failed ($SCAN_BAD); its INVALID lines above prove nothing"
 }
 
 jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "foreign"
@@ -144,14 +145,14 @@ jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "fo
 }
 
 run_secret_scan() {
-  local dir="$WORK/scan" pod labels n label hits canary canary_file ctl spec
+  local dir="$WORK/scan-${SBX_WHO:-t2}" pod labels n label hits canary canary_file ctl spec
   SCAN_BAD=""
   mkdir -p "$dir/values" "$dir/files"
   chmod 700 "$dir"
   : >"$dir/labels"
   pod=$(sbx_pod)
   if [[ -z "$pod" ]]; then
-    fail "ac-5 INVALID: t2's sandbox has no Running pod to scan ($(sbx_summary))"
+    fail "${SCAN_LABEL:-ac-5} INVALID: ${SBX_WHO:-t2}'s sandbox has no Running pod to scan ($(sbx_summary))"
     return
   fi
 
@@ -160,7 +161,7 @@ run_secret_scan() {
   collect_k8s_secrets "$dir" "$NS" "${deps[@]}"
   collect_provider_keys "$dir"
   if [[ -n "${KOBE_GATE2_EXTRA_SECRETS_FILE:-}" ]]; then
-    [[ -r "$KOBE_GATE2_EXTRA_SECRETS_FILE" ]] || { fail "ac-5: KOBE_GATE2_EXTRA_SECRETS_FILE is not readable"; return; }
+    [[ -r "$KOBE_GATE2_EXTRA_SECRETS_FILE" ]] || { fail "${SCAN_LABEL:-ac-5}: KOBE_GATE2_EXTRA_SECRETS_FILE is not readable"; return; }
     add_secret_value "$dir" "extra secrets file" "$KOBE_GATE2_EXTRA_SECRETS_FILE"
   fi
   n=$(wc -l <"$dir/labels" | tr -d ' ')
@@ -201,7 +202,7 @@ run_secret_scan() {
     found=$(grep -rlaF -f "$dir/values/$n" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | head -5 || true)
     if [[ -n "$found" ]]; then
       hits=$((hits + 1))
-      fail "ac-5: $label is in the sandbox: $(printf '%s' "$found" | tr '\n' ' ')"
+      fail "${SCAN_LABEL:-ac-5}: $label is in the sandbox: $(printf '%s' "$found" | tr '\n' ' ')"
     fi
   done <"$dir/labels"
   ((hits == 0)) && scan_ok "no secret value of the install (internal keys, credentials, provider keys) is in the sandbox: $(wc -l <"$dir/labels" | tr -d ' ') values searched in $(find "$dir/files" -type f | wc -l | tr -d ' ') files, every process's environment and command line"
@@ -212,7 +213,7 @@ run_secret_scan() {
     name=${entry%%=*}
     pat=${entry#*=}
     matches=$(grep -raoE -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | sed -E "s#^$dir/files/##; s#(://[^:/]+:)[^@]*@#\\1***@#" | sort -u | cut -c1-200 | head -3 | tr '\n' ' ' || true)
-    if [[ -n "$matches" ]]; then generic=1; fail "ac-5: a $name-shaped value is in the sandbox: $matches"; fi
+    if [[ -n "$matches" ]]; then generic=1; fail "${SCAN_LABEL:-ac-5}: a $name-shaped value is in the sandbox: $matches"; fi
   done
   ((generic == 0)) && scan_ok "no generic API key, private key or credential-bearing URL shape is in the sandbox"
   tokens_ok=1
@@ -223,7 +224,7 @@ run_secret_scan() {
     if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token in $tokfile: $class"; fi
   done < <(grep -raoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | grep -a -v -E "$FIXTURE_RE" | sort -u -t: -k2,2)
   if ((tokens_ok)); then scan_ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
-  else fail "ac-5: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
+  else fail "${SCAN_LABEL:-ac-5}: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
 
   # 7. Mounted secrets: the pod spec mounts no Secret and injects none into an environment.
   scan_check "no Secret volume is mounted into the sandbox pod (volumes: $($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{.name}{" "}{end}' 2>/dev/null || true))" '^$' \

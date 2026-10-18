@@ -9,7 +9,10 @@
 # `cold-start` (the sections up to KOBE-25, with its trials), `gate1` (the install plus the
 # KOBE-40 model setup, then e2e/gate1.sh), `gate2` (the same install, then e2e/gate2.sh), `gate3`
 # (the same install, then e2e/gate3.sh with its browser checks in Playwright's Chromium) and
-# `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/).
+# `gate4` (the same install, then the Gate 4 checks no earlier gate makes, e2e/gate4/stories.sh) and
+# `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/). The
+# gate shards keep their output; the `stories` job then gives one verdict per user story U1-U16
+# from them (e2e/gate4.sh, KOBE-232).
 # Branch protection and the merge queue require the check named `k3d`: the last job, which passes
 # only when every image build and every shard passed.
 name: e2e
@@ -86,6 +89,9 @@ jobs:
           - { name: egress-proxy, dockerfile: services/egress-proxy/Dockerfile }
           - { name: model-gateway, dockerfile: services/model-gateway/Dockerfile }
           - { name: sandbox, dockerfile: images/sandbox/Dockerfile }
+          # KOBE-232: the pre-publish Orbit eval Job's image, for the gate4 shard only (its archive is
+          # named e2e-extra-*, so the other shards don't download or import it).
+          - { name: orbit-eval, dockerfile: images/orbit-eval/Dockerfile, archive: e2e-extra }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,7 +115,7 @@ jobs:
           provenance: false
           sbom: false
           tags: ghcr.io/splittingatom/kobe-${{ matrix.name }}:${{ env.KOBE_IMAGE_TAG }}
-          outputs: type=docker,dest=${{ runner.temp }}/e2e-image-${{ matrix.name }}.tar
+          outputs: type=docker,dest=${{ runner.temp }}/${{ matrix.archive || 'e2e-image' }}-${{ matrix.name }}.tar
           # Read-only: publish.yml writes these scopes on every push to main, which every pull
           # request and merge-queue run may read; PR runs don't spend the repository's cache quota.
           cache-from: type=gha,scope=${{ matrix.name }}
@@ -119,7 +125,7 @@ jobs:
       - name: Assert ${{ matrix.name }} runs as a non-root user
         if: matrix.name != 'sandbox'
         run: |
-          docker load --input "${RUNNER_TEMP}/e2e-image-${{ matrix.name }}.tar"
+          docker load --input "${RUNNER_TEMP}/${{ matrix.archive || 'e2e-image' }}-${{ matrix.name }}.tar"
           scripts/assert-image-nonroot.sh "ghcr.io/splittingatom/kobe-${{ matrix.name }}:${KOBE_IMAGE_TAG}"
       # KOBE-375: every image ships LICENSE, NOTICE and THIRD_PARTY_LICENSES.md (the sandbox image
       # is checked in sandbox-image.yml).
@@ -130,7 +136,7 @@ jobs:
         with:
           # archive: false uploads the file as is (its layers are compressed already); the
           # artifact is named after it.
-          path: ${{ runner.temp }}/e2e-image-${{ matrix.name }}.tar
+          path: ${{ runner.temp }}/${{ matrix.archive || 'e2e-image' }}-${{ matrix.name }}.tar
           archive: false
           retention-days: 1
           overwrite: true
@@ -163,7 +169,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [suite, cold-start, gate1, gate2, gate3, executor]
+        shard: [suite, cold-start, gate1, gate2, gate3, gate4, executor]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -228,9 +234,16 @@ jobs:
           pattern: e2e-image-*
           path: ${{ runner.temp }}/e2e-images
           merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: matrix.shard == 'gate4'
+        with:
+          pattern: e2e-extra-*
+          path: ${{ runner.temp }}/e2e-images
+          merge-multiple: true
       - name: Load the images into k3d
         env:
           KOBE_IMAGE_ARCHIVES: ${{ runner.temp }}/e2e-images
+          KOBE_E2E_EXTRA_IMAGES: ${{ matrix.shard == 'gate4' && 'orbit-eval' || '' }}
         run: |
           ls -lh "${KOBE_IMAGE_ARCHIVES}"
           e2e/load-images.sh kobe "${KOBE_IMAGE_TAG}"
@@ -244,6 +257,9 @@ jobs:
           # signature download add minutes and ~1 GiB of memory, so pull requests leave it out.
           KOBE_E2E_CLAMAV: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.shard == 'suite' && '1' || '' }}
         run: |
+          # Gate shards keep their output for the stories job (GitHub's bash runs with pipefail).
+          logs="${RUNNER_TEMP}/gate-logs"
+          mkdir -p "${logs}"
           case "${SHARD}" in
             suite | cold-start) KOBE_E2E_SHARD="${SHARD}" e2e/run.sh ;;
             # KOBE-168: the whole `suite` with sandbox.toolExecutor.enabled=true (Pi's tools in the
@@ -253,16 +269,26 @@ jobs:
             # Gate 1 (KOBE-1) against a fresh install with the model setup it needs: two teams ×
             # five users, refresh mid-run, live cross-team probe, kill mid-run + Retry, 20
             # cold-start trials (docs/gates/gate-1.md).
-            gate1) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate1.sh ;;
+            gate1) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate1.sh 2>&1 | tee "${logs}/gate1.log" ;;
             # Gate 2 (KOBE-2) on its own cluster, in parallel with the other shards: budget stop,
             # request access, tampered kobe-policy, break-glass, secret scan (docs/gates/gate-2.md).
-            gate2) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate2.sh ;;
+            gate2) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate2.sh 2>&1 | tee "${logs}/gate2.log" ;;
             # Gate 3 (KOBE-3, KOBE-231) on its own cluster: agent versions, skills review and
             # blocklist, projects, memory with Undo and approvals, CSV to chart under CSP and the
             # lost sandbox (docs/gates/gate-3.md). KOBE_GATE3_BROWSER: the Chromium checks too.
-            gate3) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && KOBE_GATE3_BROWSER=1 e2e/gate3.sh ;;
+            gate3) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && KOBE_GATE3_BROWSER=1 e2e/gate3.sh 2>&1 | tee "${logs}/gate3.log" ;;
+            # Gate 4 (KOBE-4, KOBE-232): the checks of U1, U2, U5-U8, U11, U14-U16 that Gates 1-3
+            # don't make, against a fake OAuth MCP server and the Orbit test model (docs/gates/gate-4.md).
+            gate4) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate4/stories.sh 2>&1 | tee "${logs}/gate4.log" ;;
             *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
           esac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && startsWith(matrix.shard, 'gate') }}
+        with:
+          name: gate-log-${{ matrix.shard }}
+          path: ${{ runner.temp }}/gate-logs/
+          retention-days: 7
+          if-no-files-found: warn
       - name: Diagnostics
         if: failure()
         run: |
@@ -275,14 +301,39 @@ jobs:
           for t in a b; do kubectl -n kobe-team-gate1-$t describe pods | tail -60 || true; done
           kubectl -n kobe-team-gate2-a describe pods | tail -60 || true
           kubectl -n kobe-team-gate3-a describe pods,pvc | tail -80 || true
+          kubectl -n kobe-team-gate4-a describe pods | tail -60 || true
+          kubectl -n kobe-gate4-infra get pods -o wide || true
           kubectl -n kobe-gate2-infra get pods -o wide || true
           df -h /
           scripts/ci-docker-diagnostics.sh
 
+  # Gate 4 (KOBE-232): one verdict per user story U1-U16 from the gate shards' output (no cluster).
+  stories:
+    needs: [changes, e2e]
+    if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gate-log-*
+          path: ${{ runner.temp }}/gate-logs
+          merge-multiple: true
+      - name: U1-U16, each from the checks that prove it
+        env:
+          KOBE_GATE4_LOGS: ${{ runner.temp }}/gate-logs
+        run: |
+          ls -l "${KOBE_GATE4_LOGS}"
+          KOBE_GATE4_VERDICT_ONLY=1 e2e/gate4.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
   # The required check (branch protection and the merge-queue ruleset name it): passes only when
-  # every image built and every shard passed. Skipped for draft PRs, as the suite is.
+  # every image built, every shard passed and every story is proven. Skipped for draft PRs, as the
+  # suite is.
   k3d:
-    needs: [changes, image, e2e]
+    needs: [changes, image, e2e, stories]
     if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -291,8 +342,9 @@ jobs:
         env:
           IMAGES: ${{ needs.image.result }}
           SHARDS: ${{ needs.e2e.result }}
+          STORIES: ${{ needs.stories.result }}
           CODE: ${{ needs.changes.outputs.code }}
         run: |
-          echo "code changed: ${CODE}, images: ${IMAGES}, shards: ${SHARDS}"
+          echo "code changed: ${CODE}, images: ${IMAGES}, shards: ${SHARDS}, stories: ${STORIES}"
           if [ "${CODE}" = false ]; then echo "docs-only change: nothing to test"; exit 0; fi
-          [ "${IMAGES}" = success ] && [ "${SHARDS}" = success ]
+          [ "${IMAGES}" = success ] && [ "${SHARDS}" = success ] && [ "${STORIES}" = success ]

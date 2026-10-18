@@ -44,12 +44,13 @@ function client(ip) {
     },
     /**
      * A request with a body sent as is (a zip, a Markdown file, FormData). FormData sets its own
-     * multipart content type, so the JSON default is dropped for it.
+     * multipart content type, so the JSON default is dropped for it. `init` adds fetch options
+     * (`redirect: "manual"` for an OAuth callback).
      */
-    async raw(method, path, body, extra) {
+    async raw(method, path, body, extra, init) {
       const h = headers(self.team, extra);
       if (body instanceof FormData) delete h["content-type"];
-      const res = await fetch(BASE + path, { method, headers: h, body });
+      const res = await fetch(BASE + path, { method, headers: h, body, ...init });
       keep(res);
       const text = await res.text();
       let json = {};

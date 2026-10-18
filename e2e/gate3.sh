@@ -63,6 +63,8 @@ fi
 source e2e/lib/gate-common.sh
 # shellcheck source=gate2/sandbox.sh
 source e2e/gate2/sandbox.sh
+# shellcheck source=lib/gate-turns.sh
+source e2e/lib/gate-turns.sh
 
 # The Gate 1 and Gate 2 clients' helpers (everything above their MODES) plus the Gate 3 steps.
 # shellcheck disable=SC2034 # read by client() in gate-common.sh
@@ -78,18 +80,6 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
-
-json_str() { # text → a JSON string literal
-  local s=$1
-  s=${s//\\/\\\\}
-  s=${s//\"/\\\"}
-  s=${s//$'\n'/\\n}
-  s=${s//$'\t'/\\t}
-  printf '"%s"' "$s"
-}
-show() { # label output → one evidence line (the bulky keys trimmed)
-  printf '     %s: %s\n' "$1" "$(grep -vE '^(text|tool_output)=' <<<"$2" | tr '\n' ' ' | cut -c1-600)"
-}
 
 # ---- fixtures: team gate3-a with an admin, a Builder and two members ---------------------------------
 user_json() { # key ip-suffix → fixture JSON
@@ -132,24 +122,6 @@ else
   MODELS=0
   fail "no model catalog entry '$MODEL_ALIAS' enabled for the team: every Gate 3 criterion needs runs"
 fi
-
-# ---- prompts: the scripted model's grammar, or plain instructions for a real model --------------------
-bash_prompt() { # command
-  if ((FAKE)); then printf 'bash: %s' "$1"; else
-    printf 'Use your bash tool to run exactly this command, once, then reply with its output verbatim: %s' "$1"
-  fi
-}
-tool_prompt() { # tool json-arguments
-  if ((FAKE)); then printf 'tool: %s %s' "$1" "$2"; else
-    printf 'Call the %s tool exactly once with exactly these arguments (JSON): %s. Then reply in one short sentence.' "$1" "$2"
-  fi
-}
-# A message from a user; extra JSON fields: threadId, agentId, projectId, fileIds, hold, ...
-turn() { # user-json text [extra-json-fields]
-  client "$(printf '{"mode":"turn","base":"%s","user":%s,"content":%s%s,"timeoutMs":300000}' \
-    "$BASE" "$1" "$(json_str "$2")" "${3:+,$3}")"
-}
-said() { grep -E '^(text|tool_output)=' <<<"$1" || true; } # what the model said and the tools returned
 
 # ---- m1's sandbox: the one under test ----------------------------------------------------------------
 T2=$M1 # e2e/gate2/sandbox.sh names the user T2
@@ -291,6 +263,7 @@ fi
 
 # ---- ac-3: projects: read-only files, private until shared -------------------------------------------
 if [[ "$STEPS" == *" projects "* || "$STEPS" == *" memory "* ]] && sbx_need "ac-3/ac-4 (projects)"; then
+  echo "==> project: two members and a file (for ac-3 and ac-4)"
   PROJECT_TEXT="gate3 project brief $NONCE"
   pr=$(step project-setup "\"admin\":$U_AD,\"name\":\"Gate3 project $NONCE\",\"members\":[\"$M1\",\"$M2\"],\"fileText\":\"$PROJECT_TEXT\"")
   show "project" "$pr"

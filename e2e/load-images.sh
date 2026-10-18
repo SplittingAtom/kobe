@@ -4,7 +4,8 @@
 #
 # With KOBE_IMAGE_ARCHIVES=<dir>, nothing is built: every <dir>/*.tar (image archives built once
 # for the whole CI run, .github/workflows/e2e.yml) is imported instead, and the same six images,
-# tagged <tag>, must then be on every node.
+# tagged <tag>, must then be on every node. KOBE_E2E_EXTRA_IMAGES names more images (e.g.
+# "orbit-eval", Gate 4's eval Job, KOBE-232) that must be there too (built, or in the archives).
 #
 # A failed build prints the Docker daemon's state (scripts/ci-docker-diagnostics.sh). The import
 # streams straight into each node (`--mode direct`): the default tools-node mode can start the
@@ -33,7 +34,7 @@ sources=()
 for pair in web:apps/web/Dockerfile server:services/server/Dockerfile \
   mcp-proxy:services/mcp-proxy/Dockerfile egress-proxy:services/egress-proxy/Dockerfile \
   model-gateway:services/model-gateway/Dockerfile \
-  sandbox:images/sandbox/Dockerfile; do
+  sandbox:images/sandbox/Dockerfile ${KOBE_E2E_EXTRA_IMAGES:+$(for x in ${KOBE_E2E_EXTRA_IMAGES}; do printf '%s:images/%s/Dockerfile ' "$x" "$x"; done)}; do
   image="${registry}/kobe-${pair%%:*}:${tag}"
   [ -n "${archives}" ] || build "${pair#*:}" "${image}"
   images+=("${image}")
