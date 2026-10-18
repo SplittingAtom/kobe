@@ -1,0 +1,1 @@
+ALTER TABLE "team_agent_versions" ADD COLUMN "skill_manifest" jsonb;

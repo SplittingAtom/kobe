@@ -974,6 +974,13 @@
       "when": 1792334868027,
       "tag": "0138_kobe_published_skills_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792340295087,
+      "tag": "0139_agent_skill_manifest",
+      "breakpoints": true
     }
   ]
 }
