@@ -205,17 +205,31 @@ async function blobRefs() {
   const missing = [];
   try {
     const teams = (await database.pool.query("SELECT id FROM teams")).rows.map((r) => r.id);
-    for (const { table, column } of columns) {
+    for (const { table, column, site } of columns) {
       let keys = 0;
       let gone = 0;
-      for (const teamId of teams) {
-        const rows = await kdb.withTeam(database.db, teamId, (tx) =>
-          tx.execute(
-            kdb.sql.raw(
-              `SELECT DISTINCT ${column} AS k FROM ${table} WHERE team_id = '${teamId}' AND ${column} IS NOT NULL`,
-            ),
-          ),
-        );
+      // Team tables per team (RLS); site-wide ones (no team_id: personal and catalog skills) once.
+      const reads = site
+        ? [
+            () =>
+              database.db.execute(
+                kdb.sql.raw(
+                  `SELECT DISTINCT ${column} AS k FROM ${table} WHERE ${column} IS NOT NULL`,
+                ),
+              ),
+          ]
+        : teams.map(
+            (teamId) => () =>
+              kdb.withTeam(database.db, teamId, (tx) =>
+                tx.execute(
+                  kdb.sql.raw(
+                    `SELECT DISTINCT ${column} AS k FROM ${table} WHERE team_id = '${teamId}' AND ${column} IS NOT NULL`,
+                  ),
+                ),
+              ),
+          );
+      for (const read of reads) {
+        const rows = await read();
         for (const { k } of rows.rows) {
           keys += 1;
           const got = await store.get(k);

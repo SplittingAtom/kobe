@@ -100,6 +100,10 @@ generic_unexpected_by_kind() {
   case "$1" in
     bearer-credential) grep -a -v -E 'Bearer eyJ' || true ;;
     basic-url-credential) grep -a -v -E '^[^:]*fs/opt/kobe/egress-env\.sh:|://[^:/]+:eyJ' || true ;;
+    # The skills store's directories are `sk-<sha256>` (sandbox-agent skills/store.ts): since
+    # Kobe's catalog skills (KOBE-317) every run's prompt, so Pi's session files, names them. A
+    # provider key is never 64 lowercase hex digits, and the real keys are matched by value above.
+    openai-or-anthropic-key) grep -a -v -E ':sk-[0-9a-f]{64}$' || true ;;
     *) cat ;;
   esac
 }

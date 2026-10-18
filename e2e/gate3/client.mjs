@@ -331,7 +331,12 @@ async function skillReview() {
     const r = await admin.call(
       "POST",
       `/v1/team/skill-review/${config.skillId}/versions/${config.version}`,
-      { decision: config.decision, note: "Gate 3: reviewed the network call" },
+      {
+        decision: config.decision,
+        note: "Gate 3: reviewed the network call",
+        // The admin read the findings listed above and accepts exactly those (KOBE-312).
+        ...(row?.findingsDigest ? { acknowledgedFindings: row.findingsDigest } : {}),
+      },
     );
     out("decision", `${r.status}:${r.json.review?.status ?? r.json.code ?? "-"}`);
   }
