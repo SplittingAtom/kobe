@@ -1,5 +1,5 @@
 {
-  "id": "3ff6e8bd-df62-4806-bf89-2950ad075e21",
+  "id": "5b63c210-ee45-46ce-a0e1-14ebe77e3ff6",
   "prevId": "9ed18fe4-1b44-4a0a-8ca7-9269b08c744b",
   "version": "7",
   "dialect": "postgresql",
@@ -9628,9 +9628,9 @@
           "notNull": true,
           "default": "now()"
         },
-        "rule_set_version": {
-          "name": "rule_set_version",
-          "type": "text",
+        "rule_set": {
+          "name": "rule_set",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -9639,9 +9639,31 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "suspension_notified_at": {
+          "name": "suspension_notified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "personal_skill_scans_rule_set_idx": {
+          "name": "personal_skill_scans_rule_set_idx",
+          "columns": [
+            {
+              "expression": "rule_set",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "personal_skill_scans_version_fk": {
           "name": "personal_skill_scans_version_fk",
@@ -9759,14 +9781,20 @@
           "notNull": true,
           "default": "now()"
         },
-        "rule_set_version": {
-          "name": "rule_set_version",
-          "type": "text",
+        "rule_set": {
+          "name": "rule_set",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
         "suspended_at": {
           "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suspension_notified_at": {
+          "name": "suspension_notified_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -9814,6 +9842,27 @@
             },
             {
               "expression": "scanned_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "team_skill_reviews_rule_set_idx": {
+          "name": "team_skill_reviews_rule_set_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "rule_set",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -16640,6 +16689,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "rule_set": {
+          "name": "rule_set",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "rule_set_version": {
           "name": "rule_set_version",
           "type": "text",
@@ -16710,7 +16765,7 @@
           "name": "skill_rescan_runs_rule_set_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "rule_set_version"
+            "rule_set"
           ]
         }
       },

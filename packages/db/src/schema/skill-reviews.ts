@@ -51,16 +51,22 @@ export const personalSkillScans = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** The scanner rule set of this scan (KOBE-313); null: an older one, so it is rescanned. */
-    ruleSetVersion: text(),
+    /**
+     * The scanner rule set's ordinal (`RULE_SET`, KOBE-313); null: before KOBE-313. A scan under
+     * an older rule set is rescanned; rescans only move it forward.
+     */
+    ruleSet: integer(),
     /**
      * A rescan turned this unreviewed (Pass) version Block (KOBE-313, SK32): it now needs each
      * team's approval, and runs omit it as `suspended` until then.
      */
     suspendedAt: timestamp({ withTimezone: true }),
+    /** The suspension's emails went out (the outbox: null while `suspended_at` is set = to send). */
+    suspensionNotifiedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.skillId, t.version] }),
+    index("personal_skill_scans_rule_set_idx").on(t.ruleSet),
     foreignKey({
       name: "personal_skill_scans_version_fk",
       columns: [t.skillId, t.version],
@@ -95,13 +101,18 @@ export const teamSkillReviews = pgTable(
     scripts: jsonb().$type<string[]>().notNull(),
     skipped: jsonb().$type<string[]>().notNull(),
     scannedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** The scanner rule set of this scan (KOBE-313); null: an older one, so it is rescanned. */
-    ruleSetVersion: text(),
+    /**
+     * The scanner rule set's ordinal (`RULE_SET`, KOBE-313); null: before KOBE-313. A scan under
+     * an older rule set is rescanned; rescans only move it forward.
+     */
+    ruleSet: integer(),
     /**
      * A rescan turned this approved version Block (KOBE-313, SK32): it went back to `pending` and
      * runs omit the skill as `suspended` until it is decided again (the decision clears this).
      */
     suspendedAt: timestamp({ withTimezone: true }),
+    /** The suspension's emails went out (the outbox: null while `suspended_at` is set = to send). */
+    suspensionNotifiedAt: timestamp({ withTimezone: true }),
     // Users are deactivated, never deleted (NO ACTION).
     reviewedBy: uuid().references(() => users.id),
     reviewedAt: timestamp({ withTimezone: true }),
@@ -111,6 +122,8 @@ export const teamSkillReviews = pgTable(
     primaryKey({ columns: [t.teamId, t.skillId, t.version] }),
     // The review queue: one status, flagged first, oldest scan first.
     index("team_skill_reviews_queue_idx").on(t.teamId, t.status, t.flagged.desc(), t.scannedAt),
+    // Rescans (KOBE-313): rows under an older rule set, per team.
+    index("team_skill_reviews_rule_set_idx").on(t.teamId, t.ruleSet),
     check("team_skill_reviews_scope", sql`${t.scope} IN ('team', 'personal')`),
     check(
       "team_skill_reviews_decided",

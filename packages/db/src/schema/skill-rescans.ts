@@ -18,14 +18,19 @@ export const skillRescanStatus = ["running", "done", "failed"] as const;
 
 /**
  * Site-wide (†): one rescan of every stored skill scan under a scanner rule set (KOBE-313, SK32),
- * one row per rule set. A replica that holds the rescan lease runs it; the row is its progress and
- * result for the Site console. Counts, ids and slugs only: never findings or content.
+ * one row per rule set. A replica that holds the rescan lease runs it, and keeps checking for rows
+ * under an older rule set (pods of the previous release write them during a rolling deploy). The
+ * row is its progress (written per batch) and result for the Site console. Counts, ids and slugs
+ * only: never findings or content.
  */
 export const skillRescanRuns = pgTable(
   "skill_rescan_runs",
   {
     id: uuid().primaryKey().defaultRandom(),
-    ruleSetVersion: text().notNull().unique("skill_rescan_runs_rule_set_unique"),
+    /** The rule set's ordinal (`RULE_SET`): rescans only ever move scans forward. */
+    ruleSet: integer().notNull().unique("skill_rescan_runs_rule_set_unique"),
+    /** Its name (`RULE_SET_VERSION`), for the console. */
+    ruleSetVersion: text().notNull(),
     status: text().$type<(typeof skillRescanStatus)[number]>().notNull().default("running"),
     startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp({ withTimezone: true }),
