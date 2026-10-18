@@ -17,11 +17,28 @@ export interface ScanOptions {
    * only queue behind the others (they run one at a time anyway).
    */
   readonly owner?: string;
+  /**
+   * A Workbench scan preview (KOBE-321 review S1/S2): same worker, limits and rules as a save, so
+   * the verdicts agree, but it never waits (no free slot: {@link ScanBusyError} `global`) and it
+   * gives its slot up to any upload, save or rescan that arrives while it runs (rejected with
+   * {@link ScanCancelledError}). Previews never delay real scans.
+   */
+  readonly preview?: boolean;
+  /** Aborting it while the scan runs stops the worker ({@link ScanCancelledError}). */
+  readonly signal?: AbortSignal;
 }
 
 export interface ScanPool {
   /** Rejects with {@link ScanBusyError} when the queue (or the owner's share) is full. */
   scan(zip: Uint8Array, options?: ScanOptions): Promise<ScanResult>;
+}
+
+/** A scan stopped before its result: its caller aborted it, or a real scan took its slot. */
+export class ScanCancelledError extends Error {
+  constructor(readonly reason: "aborted" | "preempted") {
+    super(`skill scan cancelled (${reason})`);
+    this.name = "ScanCancelledError";
+  }
 }
 
 /** The scan queue is full: try again later (`owner`: this caller's share; `global`: everyone's). */
@@ -101,10 +118,16 @@ export const resourcesExceededScan = () =>
 
 type Reply = { ok: true; result: ScanResult } | { ok: false; message: string };
 
+interface Running {
+  readonly preview: boolean;
+  cancel: (reason: ScanCancelledError["reason"]) => void;
+}
+
 function runInWorker(
   zip: Uint8Array,
   timeoutMs: number,
   resourceLimits: NonNullable<ConstructorParameters<typeof Worker>[1]>["resourceLimits"],
+  job: { cancel?: (reason: ScanCancelledError["reason"]) => void },
 ): Promise<ScanResult> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(WORKER_URL, { resourceLimits });
@@ -116,6 +139,7 @@ function runInWorker(
       void worker.terminate();
       finish();
     };
+    job.cancel = (reason) => settle(() => reject(new ScanCancelledError(reason)));
     const timer = setTimeout(() => settle(() => resolve(incompleteScan())), timeoutMs);
     worker.once("message", (reply: Reply) =>
       settle(() =>
@@ -162,20 +186,50 @@ export function createScanPool(
     if (next) next();
     else active -= 1;
   };
+  const running = new Set<Running>();
+  /** A real scan found every slot taken: the first running preview gives its slot up. */
+  const preemptPreview = () => {
+    for (const job of running) {
+      if (job.preview) {
+        job.cancel("preempted");
+        return;
+      }
+    }
+  };
   return {
     async scan(zip, scanOptions = {}) {
-      const owner = scanOptions.owner;
+      const { owner, preview = false, signal } = scanOptions;
+      if (signal?.aborted) throw new ScanCancelledError("aborted");
       if (owner !== undefined && (owners.get(owner) ?? 0) >= perOwner)
         throw new ScanBusyError("owner");
-      // Background scans (no owner) wait their turn; callers who asked are turned away when full.
-      if (owner !== undefined && active >= concurrency && waiting.length >= maxQueued)
+      // A preview takes a free slot or none; it never queues.
+      if (preview && active >= concurrency) throw new ScanBusyError("global");
+      const previewRunning = [...running].some((j) => j.preview);
+      // Background scans (no owner) wait their turn; callers who asked are turned away when full,
+      // unless a preview holds a slot they can take.
+      if (
+        owner !== undefined &&
+        active >= concurrency &&
+        waiting.length >= maxQueued &&
+        !previewRunning
+      )
         throw new ScanBusyError("global");
       if (owner !== undefined) owners.set(owner, (owners.get(owner) ?? 0) + 1);
       try {
-        await acquire();
+        const slot = acquire();
+        if (!preview && active >= concurrency && waiting.length > 0) preemptPreview();
+        await slot;
+        const job: Running = { preview, cancel: () => undefined };
+        const onAbort = () => job.cancel("aborted");
+        running.add(job);
         try {
-          return await runInWorker(zip, timeoutMs, limits);
+          const result = runInWorker(zip, timeoutMs, limits, job);
+          signal?.addEventListener("abort", onAbort, { once: true });
+          if (signal?.aborted) onAbort();
+          return await result;
         } finally {
+          signal?.removeEventListener("abort", onAbort);
+          running.delete(job);
           release();
         }
       } finally {
@@ -200,34 +254,5 @@ export function scanPool(): ScanPool {
 export function setScanPool(pool: ScanPool | undefined): ScanPool | undefined {
   const previous = shared;
   shared = pool;
-  return previous;
-}
-
-/**
- * Workbench scan previews (KOBE-321, SK12): their own pool, so live previews never queue behind
- * or ahead of uploads, saves and rescans. One worker with a smaller heap (a draft holds at most
- * 5 MiB), few waiting, one preview per user at a time, a shorter deadline: a preview that can't
- * finish is Block `scan-incomplete`, and the save scans again in the main pool. With the main
- * pool's two workers the pod's worker heaps stay well under its 1 GiB limit.
- */
-export const PREVIEW_SCAN_POOL = {
-  concurrency: 1,
-  maxQueued: 2,
-  perOwner: 1,
-  timeoutMs: 10_000,
-  resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 16 },
-} as const;
-
-let preview: ScanPool | undefined;
-/** The process-wide preview pool. */
-export function previewScanPool(): ScanPool {
-  preview ??= createScanPool(PREVIEW_SCAN_POOL);
-  return preview;
-}
-
-/** Replaces the preview pool (tests); returns the previous one. */
-export function setPreviewScanPool(pool: ScanPool | undefined): ScanPool | undefined {
-  const previous = preview;
-  preview = pool;
   return previous;
 }
