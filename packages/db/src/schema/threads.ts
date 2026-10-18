@@ -131,6 +131,21 @@ export const threads = pgTable(
      * SQL-only (migration `0087_schedules_rls.sql`): drizzle cannot null one column of a key.
      */
     scheduleId: uuid(),
+    /**
+     * A Workbench test chat (KOBE-323, SK13): an ordinary thread (listed in the rail's Workbench
+     * group, under team retention) whose runs load only its draft's current revision. Stays true
+     * when the draft is gone (`skill_draft_id` cleared): its runs then refuse, never widening to
+     * the member's usual skills. Never a builder test thread (`is_test`).
+     */
+    skillTest: boolean().notNull().default(false),
+    /**
+     * The draft a test chat runs (KOBE-323). SQL-only (`0144_thread_skill_test_checks.sql`, like
+     * `schedule_id`): foreign key (team_id, skill_draft_id) → skill_drafts ON DELETE SET NULL
+     * (skill_draft_id), so it never names another team's draft; checks `threads_skill_draft_test`
+     * (set only on a test chat) and `threads_skill_test_not_builder`; index
+     * `threads_skill_draft_idx` (team_id, skill_draft_id) WHERE skill_draft_id IS NOT NULL.
+     */
+    skillDraftId: uuid(),
     /** When the owner pinned the thread (CE19; the Pinned group sorts by it). Null = not pinned. */
     pinnedAt: timestamp({ withTimezone: true }),
     /** When the thread was archived (CE19): out of the normal groups, retention unchanged. */
