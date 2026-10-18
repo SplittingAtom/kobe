@@ -16,6 +16,7 @@ import { useThreadGroups } from "./thread-groups";
 import { InlineLink } from "./text-links";
 import chat from "../chat/chat.module.css";
 import styles from "./rail.module.css";
+import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
 const HINTS: Partial<Readonly<Record<GroupKind, ReactNode>>> = {
   scheduled: (
@@ -152,7 +153,13 @@ export function RailThreads({ listError }: { readonly listError: ApiError | null
             Threads
           </h3>
           <ThreadListPrimitive.New asChild>
-            <IconAction command="new-thread" size="sm" side="right" />
+            <IconAction
+              command="new-thread"
+              size="sm"
+              side="right"
+              variant={RAIL_ACTION_VARIANT}
+              className={RAIL_ACTION}
+            />
           </ThreadListPrimitive.New>
           <IconAction
             command="export-threads"
@@ -161,6 +168,8 @@ export function RailThreads({ listError }: { readonly listError: ApiError | null
             description="This team's, as Pi sessions and Markdown in a zip"
             size="sm"
             side="right"
+            variant={RAIL_ACTION_VARIANT}
+            className={RAIL_ACTION}
           />
         </div>
         <div className={styles.scroll}>
