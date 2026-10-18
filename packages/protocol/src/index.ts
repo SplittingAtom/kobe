@@ -30,3 +30,4 @@ export * from "./feedback.js";
 export * from "./eval-cases.js";
 export * from "./thinking.js";
 export * from "./thinking-models.js";
+export * from "./skill-package/index.js";

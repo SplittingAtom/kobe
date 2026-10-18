@@ -1,0 +1,13 @@
+# The spec's example (SK19), with real ids.
+apiVersion: kobe.dev/skill/v1
+name: quarterly-report
+version: 1.3.0
+summary: Builds the quarterly revenue workbook from a sales export.
+tags: [finance, documents]
+license: Apache-2.0
+maintainers: [user:7f3c2a10-1b2c-4d5e-8f90-0a1b2c3d4e5f, user:a19d0000-0000-4000-8000-000000000001]
+capabilities:
+  egress: [pypi.org, files.pythonhosted.org]
+  packages: { pip: ["openpyxl==3.1.*"] }
+compatibility: { kobe: ">=1.2", pi: "1.0.x" }
+changelog: "Adds a totals row per region."

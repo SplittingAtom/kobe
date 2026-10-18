@@ -1,0 +1,8 @@
+apiVersion: kobe.dev/skill/v1
+name: internal-billing
+version: 2.0.0
+summary: Internal billing runbook.
+license: Proprietary
+capabilities:
+  packages:
+    npm: ["left-pad@^1.3.0", "@scope/tool@2"]
