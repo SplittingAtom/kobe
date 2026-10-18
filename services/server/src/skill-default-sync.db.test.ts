@@ -4,7 +4,7 @@ import { logger } from "./logger.js";
 import { defaultSyncOnce } from "./skills/default-sync.js";
 import { queueDefaultSync } from "./skills/default-sync.js";
 import { newestApproved } from "./skills/default-target.js";
-import { changeTeamInstall } from "./skills/team-installs.js";
+import { changeTeamSkillInstall } from "./skills/team-installs.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
@@ -354,15 +354,17 @@ describe("moving Default installs to a new major (SK6; ac-3)", () => {
     const newTeam = (await h.admin.query(`SELECT id FROM teams WHERE slug = 'new-team'`)).rows[0]
       ?.id as string;
     const db = h.deps.database.db;
-    expect(await changeTeamInstall(db, newTeam, skill, { pinMode: "pinned" })).toBe(true);
-    expect(await changeTeamInstall(db, newTeam, skill, { pinMode: "within_major" })).toBe(true);
+    expect(await changeTeamSkillInstall(db, newTeam, skill, { pinMode: "pinned" })).toBe(true);
+    expect(await changeTeamSkillInstall(db, newTeam, skill, { pinMode: "within_major" })).toBe(
+      true,
+    );
     const touch = await as.site.post("/v1/site/teams", {
       slug: "touch-team",
       name: "Touch team",
       adminUserId: ids.ops,
     });
     const touchTeam = touch.json.team.id as string;
-    expect(await changeTeamInstall(db, touchTeam, skill, { access: "available" })).toBe(true);
+    expect(await changeTeamSkillInstall(db, touchTeam, skill, { access: "available" })).toBe(true);
     const r = await as.site.post(`/v1/site/skills/catalog/${skill}/default/move-major`, { to: 2 });
     expect(r.status, JSON.stringify(r.json)).toBe(202);
     expect(r.json.semver).toBe("2.0.0");

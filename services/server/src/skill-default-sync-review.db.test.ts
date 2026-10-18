@@ -67,7 +67,7 @@ async function job(
   );
 }
 
-const installOf = async (teamId: string, skill: string) =>
+const skillInstallOf = async (teamId: string, skill: string) =>
   (
     await h.admin.query(
       `SELECT v.semver FROM team_skill_installs i JOIN registry_versions v ON v.id = i.version_id
@@ -107,9 +107,9 @@ describe("Default sync review fixes", () => {
       );
     await job(c.skill, "add", 1, c.ids["1.0.0"] as string);
     await sync();
-    expect(await installOf(clashing, c.skill)).toBeUndefined();
-    expect(await installOf(archived, c.skill)).toEqual({ semver: "1.0.0" });
-    expect(await installOf(plain, c.skill)).toEqual({ semver: "1.0.0" });
+    expect(await skillInstallOf(clashing, c.skill)).toBeUndefined();
+    expect(await skillInstallOf(archived, c.skill)).toEqual({ semver: "1.0.0" });
+    expect(await skillInstallOf(plain, c.skill)).toEqual({ semver: "1.0.0" });
     const audit = await h.admin.query(
       `SELECT team_id, target->>'change' AS change FROM audit_log
        WHERE action = 'skill.default.applied' AND target->>'skillId' = $1 ORDER BY seq`,
@@ -159,12 +159,12 @@ describe("Default sync review fixes", () => {
     );
     await job(c.skill, "move_major", 2, c.ids["2.0.0"] as string);
     await sync();
-    expect(await installOf(teamId, c.skill)).toBeUndefined();
+    expect(await skillInstallOf(teamId, c.skill)).toBeUndefined();
     await h.admin.query(
       `UPDATE skill_default_syncs SET next_attempt_at = now() WHERE skill_id = $1 AND kind = 'add'`,
       [c.skill],
     );
     await sync();
-    expect(await installOf(teamId, c.skill)).toEqual({ semver: "2.0.0" });
+    expect(await skillInstallOf(teamId, c.skill)).toEqual({ semver: "2.0.0" });
   });
 });

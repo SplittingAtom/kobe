@@ -21,7 +21,7 @@ export async function lockDefaultSet(tx: KobeTx, mode: "shared" | "exclusive"): 
     : tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${DEFAULT_SET_LOCK}, 0))`));
 }
 
-export async function lockInstall(tx: KobeTx, teamId: string, skillId: string): Promise<void> {
+export async function lockSkillInstall(tx: KobeTx, teamId: string, skillId: string): Promise<void> {
   const key = `kobe.skills.install:${teamId}:${skillId}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }

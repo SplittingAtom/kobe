@@ -5,7 +5,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import {
   installCatalogSkill,
-  listTeamInstalls,
+  listTeamSkillInstalls,
   reinstallDefault,
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
@@ -24,7 +24,10 @@ function parseOptionalJson(text: string): unknown {
     return null;
   }
 }
-const NOT_INSTALLED = { code: "not_found", message: "The team has no install of that skill." };
+const SKILL_INSTALL_MISSING = {
+  code: "not_found",
+  message: "The team has no install of that skill.",
+};
 
 /**
  * A team's catalog installs (`/v1/team/skills`, KOBE-314, SK6, SK7): any member reads them and the
@@ -37,7 +40,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   app.use(requireTeam(deps));
 
   app.get("/installs", requireTeamPermission("team.read"), async (c) =>
-    c.json(await listTeamInstalls(db, c.get("team").id)),
+    c.json(await listTeamSkillInstalls(db, c.get("team").id)),
   );
 
   // Team admins, and Builders while "Builders may install catalog skills" is on (SK25); a Builder
@@ -97,7 +100,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
         userId: c.get("user").id,
         ...(body.data.reason ? { reason: body.data.reason } : {}),
       });
-      return r.ok ? c.json({ optedOut: r.optedOut }) : c.json(NOT_INSTALLED, 404);
+      return r.ok ? c.json({ optedOut: r.optedOut }) : c.json(SKILL_INSTALL_MISSING, 404);
     },
   );
 

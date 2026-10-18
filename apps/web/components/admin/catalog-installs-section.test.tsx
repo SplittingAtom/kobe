@@ -67,7 +67,7 @@ describe("Catalog installs in the team console (KOBE-314, SK7)", () => {
 });
 
 describe("Changing installs (KOBE-316)", () => {
-  const TEAM_INSTALL = {
+  const TEAM_SKILL_INSTALL = {
     ...INSTALLS.installs[0],
     skillId: "s-3",
     name: "pdf-kit",
@@ -75,7 +75,7 @@ describe("Changing installs (KOBE-316)", () => {
     isDefault: false,
     access: "available",
   };
-  const LIST = { installs: [...INSTALLS.installs, TEAM_INSTALL], removedDefaults: [] };
+  const LIST = { installs: [...INSTALLS.installs, TEAM_SKILL_INSTALL], removedDefaults: [] };
   const SWITCHES = (on: boolean) => ({
     personal_skills_disabled: false,
     members_may_add_catalog: true,

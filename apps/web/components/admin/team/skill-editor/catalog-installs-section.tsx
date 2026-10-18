@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  listTeamInstalls,
+  listTeamSkillInstalls,
   reinstallDefault,
   uninstallCatalogSkill,
   type CatalogInstall,
@@ -24,7 +24,7 @@ import {
 } from "../../../ui/console";
 import { getCatalogSwitches } from "../../../../lib/admin/api/team/skill-review";
 import { useTeamAccess } from "../../console-context";
-import { InstallChangeForm } from "./install-change";
+import { SkillInstallChangeForm } from "./skill-install-change";
 import { MutationStatus } from "../../error-notice";
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
@@ -64,7 +64,7 @@ export function CatalogInstallsSection() {
     switches.state.data?.buildersMayInstallCatalog === true;
   const mayChange = (i: CatalogInstall) =>
     canManage || (builderMay && i.access !== "required" && i.origin !== "default_tag");
-  const { state, reload } = useResource(() => listTeamInstalls(teamId));
+  const { state, reload } = useResource(() => listTeamSkillInstalls(teamId));
   const mutation = useMutation();
   const [confirm, confirmDialog] = useConfirm();
 
@@ -143,7 +143,7 @@ export function CatalogInstallsSection() {
                       {(canManage || builderMay) && (
                         <TableCell>
                           {mayChange(i) && (
-                            <InstallChangeForm
+                            <SkillInstallChangeForm
                               teamId={teamId}
                               install={i}
                               mayRequire={canManage}

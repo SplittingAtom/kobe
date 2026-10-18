@@ -49,7 +49,7 @@ export function SkillTagsPage() {
     <>
       <PageHeader
         title="Skill tags"
-        description="Topic tags drive catalog browsing. The Default system tag installs a skill in every team (On by default, tracking its major) except teams that removed it; new teams get it too. Removing Default leaves every install in place as a team install."
+        description="Topic tags drive catalog browsing. The Default system tag installs a skill in every team (On by default, tracking its major) except teams that removed it; new teams get it too. Removing Default keeps the skill installed in each team, as a team install."
       />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <Section id="topic-tags" title="Topic tags">

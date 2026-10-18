@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import {
-  putTeamInstall,
+  putTeamSkillInstall,
   type CatalogInstall,
-  type InstallResult,
+  type SkillInstallResult,
 } from "../../../../lib/admin/api/team/skill-installs";
 import { Button, Field, FormRow, Select, TextInput } from "../../../ui/console";
 
@@ -21,7 +21,7 @@ const PIN_LABEL: Record<CatalogInstall["pinMode"], string> = {
 };
 
 /** What the install answer says, with the warning from 5 Required skills (SK27). */
-export function installNotice(name: string, r: InstallResult): string {
+export function skillInstallNotice(name: string, r: SkillInstallResult): string {
   const base = `${name} is set to ${r.semver}${r.deprecated ? " (deprecated)" : ""}.`;
   return r.warning === "many_required"
     ? `${base} The team now has ${r.requiredCount} Required skills: they load in every run and count first against the limit of 64.`
@@ -33,7 +33,7 @@ export function installNotice(name: string, r: InstallResult): string {
  * "Builders may install catalog skills" is on. Builders get no Required option; the server also
  * refuses them deprecated versions and installs a Team admin or the Site default made.
  */
-export function InstallChangeForm({
+export function SkillInstallChangeForm({
   teamId,
   install,
   mayRequire,
@@ -45,8 +45,8 @@ export function InstallChangeForm({
   readonly mayRequire: boolean;
   readonly pending: boolean;
   readonly run: (
-    action: () => ReturnType<typeof putTeamInstall>,
-    notice: (r: InstallResult) => string,
+    action: () => ReturnType<typeof putTeamSkillInstall>,
+    notice: (r: SkillInstallResult) => string,
   ) => Promise<boolean>;
 }) {
   const [version, setVersion] = useState(install.semver);
@@ -59,8 +59,8 @@ export function InstallChangeForm({
         onSubmit={(e) => {
           e.preventDefault();
           void run(
-            () => putTeamInstall(teamId, install.skillId, { version, pinMode, access }),
-            (r) => installNotice(install.name, r),
+            () => putTeamSkillInstall(teamId, install.skillId, { version, pinMode, access }),
+            (r) => skillInstallNotice(install.name, r),
           );
         }}
       >

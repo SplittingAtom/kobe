@@ -16,7 +16,7 @@ import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
 import { endSharesOf } from "../threads/share-scope.js";
-import { installDefaultsInNewTeam } from "../skills/default-sync-team.js";
+import { seedDefaultSkillInstalls } from "../skills/default-sync-team.js";
 
 export interface TeamMember {
   readonly userId: string;
@@ -192,7 +192,7 @@ export async function createTeamWithAdmin(
         .insert(teamMembers)
         .values({ teamId: team.id, userId: adminUserId, role: "team_admin" });
       // Every Default skill is installed in a new team at creation (KOBE-314, SK8).
-      await installDefaultsInNewTeam(inner, team.id);
+      await seedDefaultSkillInstalls(inner, team.id);
       await recordAudit(inner, {
         action: "identity.team.created",
         teamId: team.id,

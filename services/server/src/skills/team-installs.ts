@@ -8,7 +8,7 @@ import {
   defaultVersion,
   isDefaultSkill,
   lockDefaultSet,
-  lockInstall,
+  lockSkillInstall,
   lockTeamSkillNames,
 } from "./default-target.js";
 
@@ -17,7 +17,7 @@ import {
  * Removed defaults, and the two Team admin acts this ticket adds: uninstall (on a Default skill it
  * records a sticky opt-out) and Reinstall of a removed default (clears the opt-out).
  */
-export interface InstallRow {
+export interface SkillInstallRow {
   readonly skillId: string;
   readonly name: string;
   readonly versionId: string;
@@ -50,7 +50,7 @@ export interface RemovedDefault {
 async function builderMay(
   tx: KobeTx,
   teamId: string,
-  access: InstallRow["access"],
+  access: SkillInstallRow["access"],
   state: string,
   previous: { access: string; origin: string; by_admin: boolean } | undefined,
 ): Promise<boolean> {
@@ -69,10 +69,10 @@ async function hasOwnSkillNamed(tx: KobeTx, teamId: string, name: string): Promi
 
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
 
-export async function listTeamInstalls(
+export async function listTeamSkillInstalls(
   db: KobeDb,
   teamId: string,
-): Promise<{ installs: InstallRow[]; removedDefaults: RemovedDefault[] }> {
+): Promise<{ installs: SkillInstallRow[]; removedDefaults: RemovedDefault[] }> {
   return withTeam(db, teamId, async (tx) => {
     const installs = await tx.execute<Record<string, unknown>>(sql`
       SELECT i.skill_id, s.name, i.version_id, v.semver, i.pin_mode, i.access, i.origin,
@@ -95,9 +95,9 @@ export async function listTeamInstalls(
         name: String(r.name),
         versionId: String(r.version_id),
         semver: String(r.semver),
-        pinMode: r.pin_mode as InstallRow["pinMode"],
-        access: r.access as InstallRow["access"],
-        origin: r.origin as InstallRow["origin"],
+        pinMode: r.pin_mode as SkillInstallRow["pinMode"],
+        access: r.access as SkillInstallRow["access"],
+        origin: r.origin as SkillInstallRow["origin"],
         installedBy: r.installed_by === null ? null : String(r.installed_by),
         updatedAt: iso(r.updated_at),
         isDefault: Boolean(r.is_default),
@@ -134,7 +134,7 @@ export async function uninstallCatalogSkill(
   const { teamId, skillId } = input;
   return withTeam(db, teamId, async (tx): Promise<UninstallResult> => {
     await lockDefaultSet(tx, "shared");
-    await lockInstall(tx, teamId, skillId);
+    await lockSkillInstall(tx, teamId, skillId);
     const removed = await tx.execute<{ origin: "team" | "default_tag"; name: string }>(sql`
       DELETE FROM team_skill_installs i USING registry_skills s
       WHERE i.team_id = ${teamId} AND i.skill_id = ${skillId} AND s.id = i.skill_id
@@ -178,7 +178,7 @@ export async function reinstallDefault(
   return withTeam(db, teamId, async (tx): Promise<ReinstallResult> => {
     await lockDefaultSet(tx, "shared");
     // The install lock before any read: two concurrent Reinstalls run one after the other.
-    await lockInstall(tx, teamId, skillId);
+    await lockSkillInstall(tx, teamId, skillId);
     await lockTeamSkillNames(tx, teamId);
     const [target] = await defaultTargets(tx, skillId);
     const optout = await tx.execute(sql`
@@ -203,9 +203,9 @@ export async function reinstallDefault(
   });
 }
 
-export interface InstallChange {
-  readonly pinMode?: InstallRow["pinMode"] | undefined;
-  readonly access?: InstallRow["access"] | undefined;
+export interface SkillInstallChange {
+  readonly pinMode?: SkillInstallRow["pinMode"] | undefined;
+  readonly access?: SkillInstallRow["access"] | undefined;
 }
 
 /**
@@ -217,14 +217,14 @@ export interface InstallChange {
  * It has no Builder or Required gate (review N2 of KOBE-316): only a Team admin's act may call it;
  * a Builder path must apply the checks of `installCatalogSkill` (`builderMay`).
  */
-export async function changeTeamInstall(
+export async function changeTeamSkillInstall(
   db: KobeDb,
   teamId: string,
   skillId: string,
-  change: InstallChange,
+  change: SkillInstallChange,
 ): Promise<boolean> {
   return withTeam(db, teamId, async (tx) => {
-    await lockInstall(tx, teamId, skillId);
+    await lockSkillInstall(tx, teamId, skillId);
     const r = await tx.execute(sql`
       UPDATE team_skill_installs SET
         pin_mode = coalesce(${change.pinMode ?? null}::skill_pin_mode, pin_mode),
@@ -236,7 +236,7 @@ export async function changeTeamInstall(
   });
 }
 
-export type InstallResult =
+export type SkillInstallResult =
   | {
       readonly ok: true;
       readonly semver: string;
@@ -266,8 +266,8 @@ export async function installCatalogSkill(
     readonly skillId: string;
     readonly userId: string;
     readonly version: string;
-    readonly pinMode: InstallRow["pinMode"];
-    readonly access: InstallRow["access"];
+    readonly pinMode: SkillInstallRow["pinMode"];
+    readonly access: SkillInstallRow["access"];
     /**
      * The caller is a Builder, not a Team admin (SK25): allowed only while the team's switch
      * "Builders may install catalog skills" is on, and never for Required (set or changed) or a
@@ -275,11 +275,11 @@ export async function installCatalogSkill(
      */
     readonly asBuilder?: boolean;
   },
-): Promise<InstallResult> {
+): Promise<SkillInstallResult> {
   const { teamId, skillId } = input;
-  return withTeam(db, teamId, async (tx): Promise<InstallResult> => {
+  return withTeam(db, teamId, async (tx): Promise<SkillInstallResult> => {
     await lockDefaultSet(tx, "shared");
-    await lockInstall(tx, teamId, skillId);
+    await lockSkillInstall(tx, teamId, skillId);
     // The team's skill-name lock (store.ts uploads take it too): the name-clash checks on both
     // sides see each other's commits (review R-N1).
     await lockTeamSkillNames(tx, teamId);
@@ -345,8 +345,8 @@ export async function installCatalogSkill(
           ? {
               previous: {
                 semver: previous.semver,
-                pinMode: previous.pin_mode as InstallRow["pinMode"],
-                access: previous.access as InstallRow["access"],
+                pinMode: previous.pin_mode as SkillInstallRow["pinMode"],
+                access: previous.access as SkillInstallRow["access"],
               },
             }
           : {}),

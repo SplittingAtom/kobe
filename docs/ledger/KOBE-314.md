@@ -36,7 +36,7 @@ and Team console section, with tests.
   tag after it. A per-(team, skill) lock orders sync steps against uninstall/reinstall, so an
   opt-out is never overwritten by an install.
 - **Default major:** the major Default installs follow is the newest `add`/`move_major` job's
-  (`defaultTargets`). New teams (`installDefaultsInNewTeam`, inside `createTeamWithAdmin`) and
+  (`defaultTargets`). New teams (`seedDefaultSkillInstalls`, inside `createTeamWithAdmin`) and
   Reinstall get the newest approved version in that major. Adding Default needs an approved
   version (409 `no_version`) and starts at the newest approved version's major.
 - **Opt-out rule:** uninstalling a skill that carries the Default tag records an opt-out whatever
@@ -79,7 +79,7 @@ catalog/:id/default/move-major, default-syncs}`; `/v1/team/skills/{installs, ins
     only while Default, `remove` only once not Default (a stale remove leaves installs and
     opt-outs), `move_major` only while its major is the Default's. A fast on-off toggle installs
     nothing. Tests: `skill-default-sync-races.db.test.ts`.
-  - Touched (coordinator): `team_skill_installs.team_changed_at`; `changeTeamInstall` (the only
+  - Touched (coordinator): `team_skill_installs.team_changed_at`; `changeTeamSkillInstall` (the only
     way later routes change pin mode or access) sets it; `move_major` moves only installs with
     origin `default_tag`, `team_changed_at` null and `within_major`. A pin and un-pin, or an access
     change, stick.

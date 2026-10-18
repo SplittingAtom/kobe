@@ -30,7 +30,7 @@
   - After changing routes or events, run `UPDATE_OPENAPI=1 npx vitest run
 src/openapi/document.test.ts`, then prettier on `openapi.json`.
   - `seededRandom` (testing) seeds from the clock; use label-seeded generators for fixtures.
-  - Lock order: Default set (shared), then install (`lockInstall`), then team skill names
+  - Lock order: Default set (shared), then install (`lockSkillInstall`), then team skill names
     (`lockTeamSkillNames`, the upload lock). Uploads take only names.
   - DB tests: `KOBE_TEST_DATABASE_URL` from `CLAUDE.local.md`; run `@kobe/db` and
     `@kobe/server` `test:db`. There's no pg_dump locally (the backup tests skip).
@@ -43,7 +43,7 @@ src/openapi/document.test.ts`, then prettier on `openapi.json`.
     `sizesByHash` and `locateBundle`.
   - Kobe-published versions: requester NULL plus `publisher = 'kobe'`, enforced by a CHECK. No
     fake system user.
-  - Default installs come from `addInTeam` / `installDefaultsInNewTeam`.
+  - Default installs come from `addInTeam` / `seedDefaultSkillInstalls`.
 - **For 318 (agent publish freezes local skill versions):**
   - Named local skills resolve to the newest approved version: `teamSkillStates` through
     `catalogNamed` / `loadSkillFacts` in `runs/resolver-input.ts`.
@@ -142,7 +142,7 @@ selector, the catalog switches route and Builder installs, the web, and tests.
   or Default installs. The warning from 5 Required skills shows.
 - **N1:** Builders change only installs a Builder or member made: never Required, Default or
   Team-admin-made ones (`builderMay`). Team admins change everything.
-- **N2:** documented on `changeTeamInstall`.
+- **N2:** documented on `changeTeamSkillInstall`.
 - **N3:** `/access` refuses archived skills (404), and the cap counts only unarchived ones.
 - **N4:** a new team takes every install lock, then the names lock, before its steps.
 - Suites after the fixes: `@kobe/db` test:db 56 / 1325; `@kobe/server` test:db 129 / 1722.

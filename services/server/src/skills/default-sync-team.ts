@@ -4,7 +4,7 @@ import {
   defaultTargets,
   defaultVersion,
   lockDefaultSet,
-  lockInstall,
+  lockSkillInstall,
   lockTeamSkillNames,
   type TargetVersion,
 } from "./default-target.js";
@@ -61,7 +61,7 @@ export async function addInTeam(
   /** Null: Kobe's own Default sync (a Kobe-published skill, KOBE-317); the row says `by_kobe`. */
   installedBy: string | null,
 ): Promise<TeamStepResult> {
-  await lockInstall(tx, teamId, skillId);
+  await lockSkillInstall(tx, teamId, skillId);
   await lockTeamSkillNames(tx, teamId);
   const blocked = await tx.execute(sql`
     SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
@@ -103,7 +103,7 @@ export async function removeInTeam(
   teamId: string,
   skillId: string,
 ): Promise<TeamStepResult> {
-  await lockInstall(tx, teamId, skillId);
+  await lockSkillInstall(tx, teamId, skillId);
   const own = await tx.execute(sql`
     SELECT 1 FROM team_skill_installs
     WHERE team_id = ${teamId} AND skill_id = ${skillId} AND origin = 'team'`);
@@ -134,7 +134,7 @@ export async function moveInTeam(
   skillId: string,
   version: TargetVersion,
 ): Promise<TeamStepResult> {
-  await lockInstall(tx, teamId, skillId);
+  await lockSkillInstall(tx, teamId, skillId);
   const moved = await tx.execute(sql`
     UPDATE team_skill_installs i SET version_id = ${version.id}, updated_at = now()
     FROM registry_versions v
@@ -188,12 +188,12 @@ export async function auditApplied(
  * against tag changes: a tag change that commits first is seen here; one that commits later queues
  * a job that sees this team.
  */
-export async function installDefaultsInNewTeam(tx: KobeTx, teamId: string): Promise<number> {
+export async function seedDefaultSkillInstalls(tx: KobeTx, teamId: string): Promise<number> {
   await lockDefaultSet(tx, "shared");
   const targets = await defaultTargets(tx);
   // The lock order of every other path (Default set, install, names): every install lock first,
   // then the names lock, before any step re-takes them (review N4 of KOBE-316).
-  for (const target of targets) await lockInstall(tx, teamId, target.skillId);
+  for (const target of targets) await lockSkillInstall(tx, teamId, target.skillId);
   await lockTeamSkillNames(tx, teamId);
   let installed = 0;
   for (const target of targets) {

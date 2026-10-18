@@ -41,7 +41,7 @@ export interface CatalogFacts {
   readonly offeredOmissions: readonly SkillOmission[];
 }
 
-type InstallRow = {
+type SkillInstallRow = {
   readonly skill_id: string;
   readonly name: string;
   readonly version_id: string;
@@ -146,7 +146,7 @@ export async function loadCatalogFacts(
   const notBlocked = (skill: ReturnType<typeof sql>) => sql`NOT EXISTS (
     SELECT 1 FROM team_skill_blocks b WHERE b.team_id = ${args.teamId} AND b.skill_id = ${skill})`;
   const installs = (
-    await tx.execute<InstallRow>(sql`
+    await tx.execute<SkillInstallRow>(sql`
       SELECT i.skill_id, s.name, i.version_id, i.pin_mode::text AS pin_mode, i.access::text AS access
       FROM team_skill_installs i JOIN registry_skills s ON s.id = i.skill_id
       WHERE i.team_id = ${args.teamId} AND ${notBlocked(sql`i.skill_id`)}`)
@@ -205,7 +205,10 @@ export async function loadCatalogFacts(
     if (r.omission) omissions.push(r.omission);
   };
   const installed = new Map(installs.map((i) => [i.name, i]));
-  const pinOf = (i: InstallRow): CatalogPin => ({ pinMode: i.pin_mode, versionId: i.version_id });
+  const pinOf = (i: SkillInstallRow): CatalogPin => ({
+    pinMode: i.pin_mode,
+    versionId: i.version_id,
+  });
 
   // Step 2: the agent's catalog names at the team's pin (a member add is not an install).
   const named = new Set(args.namedCatalog);

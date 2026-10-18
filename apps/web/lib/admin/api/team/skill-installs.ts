@@ -30,14 +30,14 @@ export interface RemovedDefault {
   readonly at: string;
 }
 
-export interface TeamInstalls {
+export interface TeamSkillInstalls {
   readonly installs: readonly CatalogInstall[];
   readonly removedDefaults: readonly RemovedDefault[];
 }
 
 export const OPT_OUT_REASON_MAX = 500;
 
-export function listTeamInstalls(teamId: string): Promise<ApiResult<TeamInstalls>> {
+export function listTeamSkillInstalls(teamId: string): Promise<ApiResult<TeamSkillInstalls>> {
   return apiRequest(`${BASE}/installs`, { teamId });
 }
 
@@ -64,13 +64,13 @@ export function reinstallDefault(
   });
 }
 
-export interface InstallChange {
+export interface SkillInstallChange {
   readonly version: string;
   readonly pinMode: CatalogInstall["pinMode"];
   readonly access: CatalogInstall["access"];
 }
 
-export interface InstallResult {
+export interface SkillInstallResult {
   readonly semver: string;
   /** The version is deprecated: installed with a warning (SK31). */
   readonly deprecated: boolean;
@@ -83,10 +83,10 @@ export interface InstallResult {
  * Installs a catalog skill or changes its install (KOBE-315/316): Team admins, and Builders
  * while the team allows it (never Required, never a deprecated version).
  */
-export function putTeamInstall(
+export function putTeamSkillInstall(
   teamId: string,
   skillId: string,
-  change: InstallChange,
-): Promise<ApiResult<InstallResult>> {
+  change: SkillInstallChange,
+): Promise<ApiResult<SkillInstallResult>> {
   return apiRequest(`${BASE}/installs/${enc(skillId)}`, { teamId, method: "PUT", json: change });
 }
