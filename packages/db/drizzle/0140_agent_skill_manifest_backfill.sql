@@ -43,18 +43,21 @@ UPDATE "team_agent_versions" AS v
                   END) WITH ORDINALITY AS e(name, ord)
           ORDER BY e.name, e.ord
        ) AS n
+       -- Through the team's skill of that name (unique (team_id, slug)), then its review rows by
+       -- primary key, newest first: a name the team has no skill of has none. Same rows as
+       -- reviews by slug alone (`teamSkillStates`), without scanning every review row of the team.
        CROSS JOIN LATERAL (
          SELECT tr.skill_id, tr.version
-           FROM "team_skill_reviews" tr
-          WHERE tr.team_id = v.team_id AND tr.scope = 'team' AND tr.slug = n.name
+           FROM "team_skills" ts
+           JOIN "team_skill_reviews" tr ON tr.team_id = ts.team_id AND tr.skill_id = ts.id
+          WHERE ts.team_id = v.team_id AND ts.slug = n.name
+            AND tr.scope = 'team' AND tr.slug = n.name
             AND (tr.status = 'approved' OR tr.suspended_at IS NOT NULL)
           ORDER BY tr.version DESC
           LIMIT 1
        ) AS r
       WHERE n.name NOT IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review',
                            'skill-creator')
-        AND EXISTS (
-          SELECT 1 FROM "team_skills" s WHERE s.team_id = v.team_id AND s.slug = n.name)
         AND NOT (
           EXISTS (
             SELECT 1 FROM "team_skills" s
