@@ -41,6 +41,7 @@ import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
+import { SavedSkillNotice } from "./saved-skill-notice";
 import { ThreadActivityWatch } from "./thread-activity";
 import { ThreadView } from "./thread-view";
 import { useViewportHeight } from "./use-viewport-height";
@@ -219,6 +220,7 @@ function ChatWorkspace({
       {/* What each action does now: the `/` menu (KOBE-224), the palette and keys (KOBE-225). */}
       <CommandBindingsProvider>
         <RetentionNotice />
+        <SavedSkillNotice />
         <ThreadGroupsProvider fetchFn={fetchFn}>
           <RailProvider preferences={layout.preferences} onSave={layout.save}>
             <DetailProvider preferences={layout.preferences} onSave={layout.save}>

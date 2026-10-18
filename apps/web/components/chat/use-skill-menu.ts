@@ -2,11 +2,10 @@
 
 import { useAui } from "@assistant-ui/react";
 import { useEffect, useState } from "react";
-import { xhrUploadTransport } from "../../lib/chat/uploads";
 import { startSkillFromConversation } from "../../lib/skills/from-conversation";
 import { saveWorkspaceSkill } from "../../lib/skills/drafts-api";
+import { showSavedSkill } from "../../lib/skills/saved-notice";
 import type { MenuBindings } from "../../lib/shell/menu";
-import { draftHref } from "../skills/draft-href";
 import { useChatSession } from "./kobe-runtime";
 import type { Notice } from "./use-thread-menu";
 
@@ -44,9 +43,11 @@ function useSkillFolders(open: boolean): Folders {
 }
 
 /**
- * The thread menu's skill actions (KOBE-322, SK10): "Make a skill from this" starts a Workbench
- * conversation with skill-creator and this one attached; "Save skill to Workbench" lists the
- * folders under /workspace/skills and makes the chosen one a draft that records this conversation.
+ * The thread menu's skill actions (KOBE-322, SK10): "Make a skill from this" opens a Workbench
+ * conversation with this one attached and the request to skill-creator in its composer (sent by
+ * the member, not by the menu); "Save skill to Workbench" lists the folders under
+ * /workspace/skills and makes the chosen one a draft that records this conversation. The chat
+ * stays open and shows a link to the draft (SavedSkillNotice).
  */
 export function useSkillMenu(input: {
   readonly threadId: string | undefined;
@@ -65,9 +66,8 @@ export function useSkillMenu(input: {
     void startSkillFromConversation(
       {
         api: session.api,
-        teamId: session.teamId,
-        upload: xhrUploadTransport,
-        newKey: () => crypto.randomUUID(),
+        attach: (thread, file) => session.attachments.add(thread, [file], thread),
+        prefill: (thread, text) => session.setComposerDraft(thread, text),
       },
       { threadId, title },
     ).then((res) => {
@@ -79,7 +79,7 @@ export function useSkillMenu(input: {
       aui.threads.switchToThread(res.data.threadId);
       notify({
         short: "Skill conversation",
-        full: `Opened a conversation with skill-creator and “${title}” attached.`,
+        full: `Opened a conversation for skill-creator with “${title}” attached: review the request and send it.`,
       });
     });
   };
@@ -91,7 +91,7 @@ export function useSkillMenu(input: {
         return;
       }
       notify({ short: "Saved", full: `Saved ${res.data.name} to your Workbench.` });
-      window.location.assign(draftHref(res.data.id));
+      showSavedSkill({ draftId: res.data.id, name: res.data.name, updated: res.status === 200 });
     });
   };
 

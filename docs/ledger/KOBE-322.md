@@ -80,10 +80,27 @@
   `services/server/builtin-skills/` in KOBE-317; unchanged here.
 - Save version change (manifest number) touches 320's `save.ts`, needed for forks.
 
-## Open questions (for Chris or the coordinator)
+## Review fixes (review-322.md)
 
-1. Save to Workbench navigates to the draft (leaves the chat). Stay in the chat with a link?
-2. Should "Make a skill from this" ask before spending a model turn (it sends the first message)?
+- **S1** previews claim the author's slot synchronously, before the rate or any wait
+  (`scan-preview.ts`): a request sent alongside cancels the older and waits for it, so one
+  author runs at most one preview (test: three drafts at once, never two scans running).
+- **S2** fork charges the shared `skill-upload` rate (429 past it; tested).
+- **S3** cross-team tests: another team's skill, its catalog install, its conversation and the
+  caller's workspace there are all not found; submitted/withdrawn/revoked catalog versions too.
+- **S4** (coordinator) a personal save whose runtime hash equals any version of one of **this**
+  team's skills is 409 `team_content` (the 320 message). Other teams are never looked at (no
+  existence oracle); catalog content may become personal. **Accepted limit:** an edited copy
+  (one byte changed) still passes; the scan applies as to every personal save.
+- **S5** the server/client guard follows plain barrels (`export {..} from`, `export * from`)
+  and dynamic `import()` for traversal; no real offender found. Known gaps are in its comment.
+- **N1** workspace objects are read capped at the manifest size; a mismatch names key and path.
+  **N3** `skill.draft.created` records the fork's parent (kind, skill, semver) or `fromThreadId`.
+  Not done: N2 (same-conversation race; needs a unique index), N4 (archived catalog skill or a
+  block: left open for C7), N5 (UX).
+- **Coordinator UX:** Save skill to Workbench stays in the chat with a banner linking the draft
+  (`SavedSkillNotice`); Make a skill from this attaches the source and prefills the composer, and
+  the member sends it.
 
 ## Evidence (acceptance criteria → test or command output)
 

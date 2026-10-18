@@ -217,6 +217,44 @@ describe("scan preview (ac-2)", () => {
     expect((await older).json.code).toBe("scan_busy");
   });
 
+  it("runs one preview per author at a time, even for requests sent together (review S1)", async () => {
+    const drafts = await Promise.all(
+      ["together-a", "together-b", "together-c"].map((n) => draftWith(author, n)),
+    );
+    let running = 0;
+    let most = 0;
+    usePool({
+      canStartPreview: () => true,
+      scan: (_zip, options = {}) => {
+        running += 1;
+        most = Math.max(most, running);
+        return new Promise((resolve, reject) => {
+          const done = setTimeout(() => {
+            running -= 1;
+            resolve({
+              verdict: "pass" as const,
+              ruleSetVersion: "test",
+              scripts: [],
+              findings: [],
+              skipped: [],
+            });
+          }, 150);
+          options.signal?.addEventListener("abort", () => {
+            clearTimeout(done);
+            running -= 1;
+            reject(new ScanCancelledError("aborted"));
+          });
+        });
+      },
+    });
+    const answers = await Promise.all(
+      drafts.map((d) => author.get(`/v1/skills/drafts/${d.id}/scan`)),
+    );
+    expect(most).toBe(1);
+    expect(answers.filter((a) => a.status === 200).length).toBeGreaterThanOrEqual(1);
+    for (const a of answers) expect([200, 429]).toContain(a.status);
+  });
+
   it("says busy before reading files or counting the rate when the pool has no free slot", async () => {
     const d = await draftWith(author, "full-pool-preview");
     let scans = 0;

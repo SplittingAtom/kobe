@@ -13,9 +13,11 @@ import type { DraftContext } from "./service.js";
  *  1. a cheap read of the draft's revision (visibility first: one the caller can't see is not
  *     found); a scan of that revision already made, or running, is reused, for free;
  *  2. busy when the pool has no free slot (and the caller holds none to take back);
- *  3. only then the rate limit (`admit`), so polling or a busy pod costs nothing;
- *  4. the caller's older preview (another revision) is cancelled: the newest request wins, so a
- *     slow scan never holds a typist's next one back;
+ *  3. the caller's slot is claimed (synchronously, before any wait), then the rate limit
+ *     (`admit`), so polling or a busy pod costs nothing;
+ *  4. the caller's older preview (another revision or draft) is cancelled and awaited: the
+ *     newest request wins, so a slow scan never holds a typist's next one back, and one author
+ *     runs at most one preview at a time (previews are outside the pool's per-owner share);
  *  5. the files are read and zipped, and the scan runs.
  *
  * Only complete scans are cached. A scan that ran out of time or memory is `unavailable` (the
@@ -36,8 +38,13 @@ const CACHE_MAX = 128;
 const cache = new Map<string, ScanResult>();
 /** Scans running now, per (team, draft, revision): a second request for one joins it. */
 const inflight = new Map<string, Promise<PreviewScan>>();
+interface Claim {
+  readonly key: string;
+  readonly abort: AbortController;
+  readonly done: Promise<PreviewScan>;
+}
 /** Each caller's newest preview, per (team, user): a newer one cancels it. */
-const newest = new Map<string, { key: string; abort: AbortController; done: Promise<unknown> }>();
+const newest = new Map<string, Claim>();
 
 function remember(key: string, scan: ScanResult): void {
   cache.set(key, scan);
@@ -79,25 +86,47 @@ export async function previewDraftScan(
   if (running) return running;
   const owner = `${ctx.teamId}/${ctx.viewer.userId}`;
   const older = newest.get(owner);
+  // The caller's own request for this revision, still waiting to start: join it.
+  if (older?.key === key) return older.done;
   // No slot and none of the caller's own to take back: busy, before the rate or any file read.
   if (!older && scanPool().canStartPreview?.() === false) return { ok: false, error: "busy" };
-  if (!(await options.admit())) return { ok: false, error: "rate_limited" };
 
-  if (older && older.key !== key) {
+  // The caller's slot is claimed before any wait (review S1): a request sent alongside this one
+  // finds it and cancels it, so one author never runs two previews at once.
+  const abort = new AbortController();
+  options.signal?.addEventListener("abort", () => abort.abort(), { once: true });
+  const done = startPreview(ctx, id, draft.rev, key, older, abort.signal, options.admit);
+  const mine = { key, abort, done };
+  newest.set(owner, mine);
+  try {
+    return await done;
+  } finally {
+    if (newest.get(owner) === mine) newest.delete(owner);
+  }
+}
+
+/** The rate, then the older preview's end, then the scan (unless a newer request took over). */
+async function startPreview(
+  ctx: DraftContext,
+  id: string,
+  rev: number,
+  key: string,
+  older: Claim | undefined,
+  signal: AbortSignal,
+  admit: () => Promise<boolean>,
+): Promise<PreviewScan> {
+  if (!(await admit())) return { ok: false, error: "rate_limited" };
+  if (older) {
     older.abort.abort();
     await older.done.catch(() => undefined);
   }
-  const abort = new AbortController();
-  options.signal?.addEventListener("abort", () => abort.abort(), { once: true });
-  const scan = runPreview(ctx, id, draft.rev, abort.signal);
-  const mine = { key, abort, done: scan };
+  if (signal.aborted) return { ok: false, error: "busy" };
+  const scan = runPreview(ctx, id, rev, signal);
   inflight.set(key, scan);
-  newest.set(owner, mine);
   try {
     return await scan;
   } finally {
     if (inflight.get(key) === scan) inflight.delete(key);
-    if (newest.get(owner) === mine) newest.delete(owner);
   }
 }
 

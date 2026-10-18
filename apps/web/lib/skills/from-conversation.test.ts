@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatApi } from "../chat/api";
-import type { UploadRequest } from "../chat/uploads";
 import { SOURCE_FILE, skillPrompt, startSkillFromConversation } from "./from-conversation";
 
-/** KOBE-322 (SK10 start 2): a Kobe-agent thread with the source attached and skill-creator asked. */
+/**
+ * KOBE-322 (SK10 start 2): a Kobe-agent thread with the source attached and the request to
+ * skill-creator in its composer, not sent: the member reads it and sends it (coordinator).
+ */
 function fakeApi(agents: { id: string; galleryKey?: string }[]) {
   const api = {
     getThread: vi.fn(async () => ({
@@ -25,14 +27,12 @@ function fakeApi(agents: { id: string; galleryKey?: string }[]) {
 }
 
 describe("startSkillFromConversation", () => {
-  it("opens a Kobe conversation, attaches the source read-only and asks skill-creator", async () => {
+  it("opens a Kobe conversation, attaches the source and prefills the request without sending", async () => {
     const api = fakeApi([{ id: "a-team" }, { id: "a-kobe", galleryKey: "kobe" }]);
-    const upload = vi.fn(async (_request: UploadRequest) => ({
-      ok: true as const,
-      file: { fileId: "f-1", name: SOURCE_FILE, mimeType: "text/markdown", sizeBytes: 10 },
-    }));
+    const attach = vi.fn();
+    const prefill = vi.fn();
     const res = await startSkillFromConversation(
-      { api, teamId: "t-1", upload, newKey: () => "k-1" },
+      { api, attach, prefill },
       { threadId: "s-1", title: "Monthly close" },
     );
     expect(res).toEqual({ ok: true, status: 201, data: { threadId: "w-1" } });
@@ -40,20 +40,17 @@ describe("startSkillFromConversation", () => {
       agentId: "a-kobe",
       test: false,
     });
-    const sent = upload.mock.calls[0]?.[0];
-    expect([sent?.file.name, sent?.threadId]).toEqual([SOURCE_FILE, "w-1"]);
-    expect(api.sendMessage).toHaveBeenCalledWith(
-      "w-1",
-      { content: skillPrompt("Monthly close"), fileIds: ["f-1"] },
-      "k-1",
-    );
+    const [thread, file] = attach.mock.calls[0] ?? [];
+    expect([thread, (file as File | undefined)?.name]).toEqual(["w-1", SOURCE_FILE]);
+    expect(prefill).toHaveBeenCalledWith("w-1", skillPrompt("Monthly close"));
+    expect(api.sendMessage).not.toHaveBeenCalled();
     expect(skillPrompt("x")).toMatch(/skill-creator.*\/workspace\/skills\/<name>\//);
   });
 
   it("refuses when the team has no Kobe agent", async () => {
     const api = fakeApi([{ id: "a-team" }]);
     const res = await startSkillFromConversation(
-      { api, teamId: "t-1", upload: vi.fn(), newKey: () => "k" },
+      { api, attach: vi.fn(), prefill: vi.fn() },
       { threadId: "s-1", title: "T" },
     );
     expect(res.ok).toBe(false);

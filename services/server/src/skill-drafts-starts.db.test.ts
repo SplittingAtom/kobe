@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { strToU8, zipSync } from "fflate";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -24,6 +24,7 @@ let h: Harness;
 let author: TestBrowser;
 let builder: TestBrowser;
 let authorId = "";
+let builderId = "";
 let sync: WorkspaceSync;
 const silent = { error: () => {}, warn: () => {}, info: () => {} };
 const workspaceObjects = new MemoryObjects();
@@ -58,13 +59,14 @@ beforeAll(async () => {
   });
   const ids = await Promise.all(["author", "builder"].map((n) => h.createUser(`${n}@starts.test`)));
   authorId = ids[0] ?? "";
+  builderId = ids[1] ?? "";
   await h.admin.query(
     `INSERT INTO teams (id, slug, name) VALUES ($1, 'starts', 'Finance'), ($2, 'starts-2', 'Other')`,
     [team, otherTeam],
   );
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES
-       ($1, $2, 'member'), ($1, $3, 'builder'), ($4, $2, 'member')`,
+       ($1, $2, 'member'), ($1, $3, 'builder'), ($4, $2, 'builder')`,
     [team, ids[0], ids[1], otherTeam],
   );
   author = await h.signIn("author@starts.test");
@@ -216,6 +218,16 @@ describe("fork (ac-1, ac-3)", () => {
       },
     });
     expect(await filesOf(author, fork.json.draft.id)).toEqual(["SKILL.md", "kobe.skill.yaml"]);
+    // The team's audit names the version copied (review N3).
+    const audit = await h.admin.query<{ target: Record<string, unknown> }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'skill.draft.created'
+          AND target ->> 'draftId' = $2`,
+      [team, fork.json.draft.id],
+    );
+    expect(audit.rows[0]?.target).toMatchObject({
+      startedFrom: "fork",
+      parent: { kind: "team", skillId: saved.skill.id, semver: "0.1.0" },
+    });
     // The team's content stays the team's: no personal save of it (the KOBE-320 contract).
     const personal = await saveAs(author, fork.json.draft.id, "personal", "0.1.0");
     expect([personal.status, personal.json.code]).toEqual([409, "team_content"]);
@@ -324,13 +336,13 @@ describe("fork (ac-1, ac-3)", () => {
 });
 
 /** Seeds a synced workspace file of `userId` in the team, as a sandbox push would leave it. */
-async function seedWorkspace(userId: string, path: string, content: string) {
+async function seedWorkspace(userId: string, path: string, content: string, inTeam = team) {
   const data = Buffer.from(content);
-  const owner = { teamId: team, userId };
+  const owner = { teamId: inTeam, userId };
   const hash = createHash("sha256").update(data).digest("hex");
   const key = workspaceBlobKey("", owner, hash);
   workspaceObjects.objects.set(key, data);
-  await withTeam(h.deps.database.db, team, (tx) =>
+  await withTeam(h.deps.database.db, inTeam, (tx) =>
     sync.putServerFile(tx, owner, { path, sha256: hash, size: data.length, blobKey: key }, "user"),
   );
 }
@@ -359,6 +371,11 @@ describe("from a conversation: Save to Workbench (ac-1, ac-2)", () => {
       [first.json.draft.id],
     );
     expect(rows[0]?.from_thread_id).toBe(threadId);
+    const audit = await h.admin.query<{ target: Record<string, unknown> }>(
+      `SELECT target FROM audit_log WHERE action = 'skill.draft.created' AND target ->> 'draftId' = $1`,
+      [first.json.draft.id],
+    );
+    expect(audit.rows[0]?.target).toMatchObject({ startedFrom: "thread", fromThreadId: threadId });
     // Saving again from the same conversation updates that draft.
     await seedWorkspace(authorId, "skills/close-helper/references/more.md", "More.");
     const again = await author.post("/v1/skills/drafts/from-workspace", {
@@ -411,5 +428,207 @@ describe("from a conversation: Save to Workbench (ac-1, ac-2)", () => {
     expect(
       (await author.post("/v1/skills/drafts/from-workspace", { threadId, folder: "../x" })).status,
     ).toBe(400);
+  });
+});
+
+/** Runs `fn` with the author's active team set to the other team, then back. */
+async function inOtherTeam<T>(fn: () => Promise<T>): Promise<T> {
+  expect((await author.put("/v1/me/teams/active", { teamId: otherTeam })).status).toBe(200);
+  author.team = otherTeam;
+  try {
+    return await fn();
+  } finally {
+    expect((await author.put("/v1/me/teams/active", { teamId: team })).status).toBe(200);
+    author.team = team;
+  }
+}
+
+describe("teams are walls (review S3)", () => {
+  it("forks nothing of another team: its skill, its catalog install, its versions", async () => {
+    await seedKobeSkills({
+      db: h.deps.database.db,
+      blobs: h.deps.blobs as NonNullable<typeof h.deps.blobs>,
+      log: silent,
+    });
+    const other = await inOtherTeam(() => upload(author, "team", zip("other-team-skill")));
+    const local = await author.post("/v1/skills/drafts/fork", {
+      source: { kind: "team", skillId: other.skill.id, version: 1 },
+    });
+    expect(local.status).toBe(404);
+    const { rows } = await h.admin.query<{ skill_id: string; version_id: string }>(
+      `SELECT s.id AS skill_id, v.id AS version_id FROM registry_skills s
+         JOIN registry_versions v ON v.skill_id = s.id
+        WHERE s.name = 'charts' ORDER BY v.seq DESC LIMIT 1`,
+    );
+    const charts = rows[0];
+    if (!charts) throw new Error("Kobe skills not seeded");
+    await h.admin.query(
+      `INSERT INTO team_skill_installs (team_id, skill_id, version_id, pin_mode, access, installed_by)
+       VALUES ($1, $2, $3, 'pinned', 'available', $4) ON CONFLICT DO NOTHING`,
+      [otherTeam, charts.skill_id, charts.version_id, authorId],
+    );
+    const catalog = await author.post("/v1/skills/drafts/fork", {
+      source: { kind: "catalog", skillId: charts.skill_id },
+    });
+    expect(catalog.status).toBe(404);
+  });
+
+  it("copies only published catalog versions: submitted, withdrawn or revoked ones are not found", async () => {
+    await seedKobeSkills({
+      db: h.deps.database.db,
+      blobs: h.deps.blobs as NonNullable<typeof h.deps.blobs>,
+      log: silent,
+    });
+    const { rows } = await h.admin.query<{ id: string; skill_id: string }>(
+      `SELECT v.id, v.skill_id FROM registry_skills s JOIN registry_versions v ON v.skill_id = s.id
+        WHERE s.name = 'skill-creator' ORDER BY v.seq DESC LIMIT 1`,
+    );
+    const latest = rows[0];
+    if (!latest) throw new Error("Kobe skills not seeded");
+    await h.admin.query(
+      `INSERT INTO team_skill_installs (team_id, skill_id, version_id, pin_mode, access, installed_by)
+       VALUES ($1, $2, $3, 'pinned', 'available', $4) ON CONFLICT DO NOTHING`,
+      [team, latest.skill_id, latest.id, authorId],
+    );
+    const states = ["submitted", "withdrawn", "revoked"] as const;
+    for (const [i, state] of states.entries()) {
+      await h.admin.query(
+        `INSERT INTO registry_versions (skill_id, publisher, semver, seq, runtime_hash, package_hash,
+           runtime_storage_key, runtime_size_bytes, package_storage_key, manifest, provenance, state,
+           source, scan, verdict, approved_at)
+         SELECT skill_id, publisher, $2, seq + 100 + $3, runtime_hash, package_hash,
+           runtime_storage_key, runtime_size_bytes, package_storage_key, manifest, provenance,
+           $4::registry_version_state, source, scan, verdict,
+           CASE WHEN $4 = 'submitted' THEN NULL ELSE now() END
+           FROM registry_versions WHERE id = $1`,
+        [latest.id, `9.9.${i}`, i, state],
+      );
+      const fork = await author.post("/v1/skills/drafts/fork", {
+        source: { kind: "catalog", skillId: latest.skill_id, semver: `9.9.${i}` },
+      });
+      expect([state, fork.status]).toEqual([state, 404]);
+    }
+  });
+
+  it("saves nothing from another team's conversation or the caller's workspace there", async () => {
+    const otherThread = await inOtherTeam(async () => {
+      const res = await author.post("/v1/threads", { title: "Elsewhere" });
+      expect(res.status, JSON.stringify(res.json)).toBe(201);
+      return res.json.thread_id as string;
+    });
+    await seedWorkspace(authorId, "skills/walled/SKILL.md", skillMd("walled"), otherTeam);
+    const theirs = await author.post("/v1/skills/drafts/from-workspace", {
+      threadId: otherThread,
+      folder: "walled",
+    });
+    expect(theirs.status).toBe(404);
+    const ownThread = (await author.post("/v1/threads", { title: "Here" })).json
+      .thread_id as string;
+    const mine = await author.post("/v1/skills/drafts/from-workspace", {
+      threadId: ownThread,
+      folder: "walled",
+    });
+    expect([mine.status, mine.json.code]).toEqual([404, "folder_empty"]);
+  });
+});
+
+describe("start rates (review S2)", () => {
+  it("charges a fork to the upload rate, as the other heavy starts are", async () => {
+    const mine = await upload(builder, "personal", zip("rated-fork"));
+    const key = `kobe:skill-upload:${builderId}`;
+    const count = async () =>
+      (
+        await h.admin.query<{ count: number }>(`SELECT count FROM rate_limits WHERE key = $1`, [
+          key,
+        ])
+      ).rows[0]?.count ?? 0;
+    const before = await count();
+    const fork = await builder.post("/v1/skills/drafts/fork", {
+      source: { kind: "personal", skillId: mine.skill.id },
+    });
+    expect(fork.status, JSON.stringify(fork.json)).toBe(201);
+    expect(await count()).toBe(before + 1);
+    await h.admin.query(`UPDATE rate_limits SET count = 1000 WHERE key = $1`, [key]);
+    const refused = await builder.post("/v1/skills/drafts/fork", {
+      source: { kind: "personal", skillId: mine.skill.id },
+    });
+    expect([refused.status, refused.json.code]).toEqual([429, "rate_limited"]);
+    await h.admin.query(`DELETE FROM rate_limits WHERE key = $1`, [key]);
+  });
+});
+
+describe("personal saves of the team's skills (review S4)", () => {
+  // The file's earlier starts used up most of the shared upload rate.
+  beforeEach(async () => {
+    await h.admin.query(`DELETE FROM rate_limits WHERE key = ANY($1)`, [
+      [authorId, builderId].map((id) => `kobe:skill-upload:${id}`),
+    ]);
+  });
+  const confirmed = async (id: string) => {
+    const rev = (await author.get(`/v1/skills/drafts/${id}`)).json.draft.rev as number;
+    return author.request(
+      "POST",
+      `/v1/skills/drafts/${id}/versions`,
+      { destination: "personal", semver: "0.1.0", changelog: "Mine.", confirmPersonal: true },
+      ifMatch(rev),
+    );
+  };
+  const uploadDraft = async (body: RawBody) => {
+    const res = await author.request("POST", "/v1/skills/drafts/upload?kind=zip", body);
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    return res.json.draft.id as string;
+  };
+
+  it("refuses a verbatim copy of a team version, uploaded or saved from a conversation", async () => {
+    const files = { "references/how.md": "How the team does it." };
+    await upload(builder, "team", zip("verbatim-team", files));
+    const uploaded = await uploadDraft(zip("verbatim-team", files));
+    const viaUpload = await confirmed(uploaded);
+    expect([viaUpload.status, viaUpload.json.code]).toEqual([409, "team_content"]);
+    expect(viaUpload.json.message).toContain("can't become a personal skill");
+
+    const threadId = (await author.post("/v1/threads", { title: "Copy" })).json.thread_id as string;
+    await seedWorkspace(authorId, "skills/verbatim-team/SKILL.md", skillMd("verbatim-team"));
+    await seedWorkspace(
+      authorId,
+      "skills/verbatim-team/references/how.md",
+      files["references/how.md"],
+    );
+    const saved = await author.post("/v1/skills/drafts/from-workspace", {
+      threadId,
+      folder: "verbatim-team",
+    });
+    expect(saved.status, JSON.stringify(saved.json)).toBe(201);
+    const viaWorkspace = await confirmed(saved.json.draft.id as string);
+    expect([viaWorkspace.status, viaWorkspace.json.code]).toEqual([409, "team_content"]);
+  });
+
+  it("matches any version of the team's skill, not only the latest", async () => {
+    await upload(
+      builder,
+      "team",
+      zip("older-team", { "kobe.skill.yaml": MANIFEST("older-team", "0.1.0") }),
+    );
+    await upload(
+      builder,
+      "team",
+      zip("older-team", {
+        "kobe.skill.yaml": MANIFEST("older-team", "0.2.0"),
+        "references/new.md": "New.",
+      }),
+    );
+    const res = await confirmed(await uploadDraft(zip("older-team")));
+    expect([res.status, res.json.code]).toEqual([409, "team_content"]);
+  });
+
+  it("lets an edited copy through (accepted limit) and never looks at another team's skills", async () => {
+    await upload(builder, "team", zip("edited-copy"));
+    const edited = await confirmed(
+      await uploadDraft(zip("edited-copy", { "references/extra.md": "One more line." })),
+    );
+    expect(edited.status, JSON.stringify(edited.json)).toBe(201);
+    await inOtherTeam(() => upload(author, "team", zip("elsewhere-skill")));
+    const elsewhere = await confirmed(await uploadDraft(zip("elsewhere-skill")));
+    expect(elsewhere.status, JSON.stringify(elsewhere.json)).toBe(201);
   });
 });

@@ -67,15 +67,28 @@ async function readFolder(
     const object = await sync.objects.get(entry.blobKey as string);
     // Collected since the listing (the file changed meanwhile): the caller saves again.
     if (!object) return { ok: false, error: "folder_changed" };
-    const chunks: Buffer[] = [];
-    for await (const chunk of object.body) chunks.push(Buffer.from(chunk as Uint8Array));
-    const bytes = Buffer.concat(chunks);
+    const bytes = await readCapped(object.body, entry.size);
     // Content-addressed: bytes that don't match the manifest's hash are not the synced file.
-    if (createHash("sha256").update(bytes).digest("hex") !== entry.sha256)
-      throw new Error(`workspace object for ${path} does not match its hash`);
+    if (!bytes || createHash("sha256").update(bytes).digest("hex") !== entry.sha256)
+      throw new Error(
+        `workspace object ${entry.blobKey} for ${path} does not match its size or hash`,
+      );
     files.set(path.slice(base.length + 1), new Uint8Array(bytes));
   }
   return files;
+}
+
+/** An object's bytes, or null once it holds more than the manifest's size (review N1). */
+async function readCapped(body: AsyncIterable<unknown>, size: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of body) {
+    const b = Buffer.from(chunk as Uint8Array);
+    total += b.length;
+    if (total > size) return null;
+    chunks.push(b);
+  }
+  return Buffer.concat(chunks);
 }
 
 /** The caller's draft started from this conversation under `name`, if there is one. */

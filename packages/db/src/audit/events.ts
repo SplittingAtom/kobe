@@ -1520,6 +1520,16 @@ export const AUDIT_EVENTS = {
     draftId: id,
     name: catalogName,
     startedFrom: z.enum(["blank", "template", "thread", "fork", "upload", "git"]),
+    /** A fork's parent: the version copied (KOBE-322 review N3). */
+    parent: z
+      .strictObject({
+        kind: z.enum(["team", "personal", "catalog"]),
+        skillId: id,
+        semver: z.string().max(32),
+      })
+      .optional(),
+    /** Save to Workbench: the conversation the files came from. */
+    fromThreadId: id.optional(),
   }),
   /** A draft's author shared it with the team's Builders and Team admins, or stopped sharing. */
   "skill.draft.shared": event("team", { draftId: id, shared: z.boolean() }),

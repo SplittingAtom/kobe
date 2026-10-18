@@ -234,6 +234,9 @@ export function skillDraftRoutes(
     const store = skillStore();
     if (!store || !deps.blobs)
       return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    // A fork reads, verifies and unzips a package: the same rate as the other heavy starts.
+    if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
+      return error(c, 429, "rate_limited", "Too many copies. Wait a few minutes and try again.");
     const result = await startFork(
       ctxOf(c),
       { store, blobs: deps.blobs },

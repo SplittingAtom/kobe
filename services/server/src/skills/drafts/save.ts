@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { canonicalZip } from "@kobe/protocol";
-import { withTeam } from "@kobe/db";
+import { and, eq, teamSkillVersions, withTeam } from "@kobe/db";
 import { teamRoleAllows } from "../../authz/permissions.js";
 import { validateZipBundle, type BundleError } from "../bundle.js";
 import { SKILL_LIMITS } from "../limits.js";
@@ -20,7 +21,10 @@ import type { DraftContext } from "./service.js";
  *
  * Personal skills load in every team of their author (D5: teams are walls), so a personal save:
  *  - is refused for a draft holding the team's content: a fork of a team (or another member's)
- *    version; the way out of the team for that is promotion, or a team save;
+ *    version, or files whose runtime hash is that of any version of one of this team's skills
+ *    (a verbatim upload or workspace copy, review S4; only this team's, so the refusal says
+ *    nothing about other teams). The way out of the team for that is promotion, or a team save.
+ *    An edited copy still passes: an accepted limit (the scan applies, as to every save);
  *  - needs `confirmPersonal` for a draft started from a team conversation (SK11) or changed by
  *    team members (co-edited);
  *  - is always recorded in the team's audit log (`skill.draft.personalized`), with the version.
@@ -88,6 +92,8 @@ export async function saveDraftVersion(
   const packaged = withSavedNumber(files, request.semver, request.changelog);
   const valid = validateZipBundle(canonicalZip(packaged), DRAFT_BUNDLE_LIMITS);
   if (!valid.ok) return bundleRefusal(valid.error);
+  if (personal && (await isTeamVersion(ctx, valid.value.zip)))
+    return refuse(409, "team_content", teamContentMessage(ctx.teamName));
   const numbering = numberingFrom(request, valid.value);
   if (!numbering.ok) return refuse(400, "invalid_request", numbering.message);
   const location: SkillLocation = personal
@@ -131,11 +137,7 @@ function personalRefusal(
   if (!teamRoleAllows(ctx.viewer.role, "team.personal.create"))
     return refuse(403, "forbidden", "Your team role doesn't allow personal skills.");
   if (draft.startedFrom === "fork" && parentIsTeamContent(draft.parentRef, draft.ownerUserId))
-    return refuse(
-      409,
-      "team_content",
-      `This draft was forked from a ${ctx.teamName} skill, so it holds the team's content and can't become a personal skill. Promote it, or save it as a team skill.`,
-    );
+    return refuse(409, "team_content", teamContentMessage(ctx.teamName));
   const reasons = [
     ...(draft.startedFrom === "thread" || draft.fromThreadId !== null
       ? [`was started from a ${ctx.teamName} conversation`]
@@ -149,6 +151,22 @@ function personalRefusal(
       `This draft ${reasons.join(" and ")}; personal skills go with you to every team. Confirm to save it as your personal skill.`,
     );
   return null;
+}
+
+const teamContentMessage = (teamName: string) =>
+  `This draft was forked from a ${teamName} skill, so it holds the team's content and can't become a personal skill. Promote it, or save it as a team skill.`;
+
+/** Whether a runtime zip is, byte for byte, a version of one of this team's skills (RLS too). */
+async function isTeamVersion(ctx: DraftContext, runtimeZip: Uint8Array): Promise<boolean> {
+  const hash = createHash("sha256").update(runtimeZip).digest("hex");
+  const rows = await withTeam(ctx.db, ctx.teamId, (tx) =>
+    tx
+      .select({ version: teamSkillVersions.version })
+      .from(teamSkillVersions)
+      .where(and(eq(teamSkillVersions.teamId, ctx.teamId), eq(teamSkillVersions.contentHash, hash)))
+      .limit(1),
+  );
+  return rows.length > 0;
 }
 
 function refuse(

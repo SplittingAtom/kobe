@@ -2,13 +2,14 @@
  * "Make a skill from this" (KOBE-322, spec SK10 start 2): a new conversation with the Kobe agent
  * (which carries skill-creator), with the source conversation attached as a Markdown file. An
  * attachment lands read-only in the new thread's `/workspace/uploads/<thread>/`, so the source
- * thread itself is never touched. The first message asks skill-creator to build the skill under
- * `/workspace/skills/<name>/`; Save to Workbench (the thread menu) then makes it a draft.
+ * thread itself is never touched. The composer is prefilled with the request to skill-creator
+ * (build the skill under `/workspace/skills/<name>/`) and the file attached, but nothing is sent:
+ * the member reads it and sends it, so no model turn is spent unasked (coordinator, KOBE-322
+ * review). Save to Workbench (the thread menu) then makes the result a draft.
  */
 import type { ApiResult } from "../api/client";
 import type { ChatApi } from "../chat/api";
 import { conversationMarkdown } from "../chat/thread-copy";
-import type { UploadTransport } from "../chat/uploads";
 
 export const KOBE_AGENT_KEY = "kobe";
 export const SOURCE_FILE = "source-conversation.md";
@@ -28,12 +29,13 @@ const failed = (message: string): ApiResult<never> => ({
 
 export interface FromConversationDeps {
   readonly api: ChatApi;
-  readonly teamId: string;
-  readonly upload: UploadTransport;
-  readonly newKey: () => string;
+  /** Attaches a file to the thread's composer draft (it uploads at once, as a picked file). */
+  readonly attach: (threadId: string, file: File) => void;
+  /** Puts text in the thread's composer, for when it opens. */
+  readonly prefill: (threadId: string, text: string) => void;
 }
 
-/** Starts the Workbench conversation; its id once the first message is sent. */
+/** Makes the Workbench conversation, its composer ready to send; the new thread's id. */
 export async function startSkillFromConversation(
   deps: FromConversationDeps,
   source: { readonly threadId: string; readonly title: string },
@@ -53,19 +55,7 @@ export async function startSkillFromConversation(
   if (!thread.ok) return thread;
   const threadId = thread.data.threadId;
   const file = new File([copied.data.markdown], SOURCE_FILE, { type: "text/markdown" });
-  const uploaded = await deps.upload({
-    teamId: deps.teamId,
-    file,
-    threadId,
-    onProgress: () => undefined,
-    signal: new AbortController().signal,
-  });
-  if (!uploaded.ok) return failed(uploaded.error.message);
-  const sent = await api.sendMessage(
-    threadId,
-    { content: skillPrompt(source.title), fileIds: [uploaded.file.fileId] },
-    deps.newKey(),
-  );
-  if (!sent.ok) return sent;
+  deps.attach(threadId, file);
+  deps.prefill(threadId, skillPrompt(source.title));
   return { ok: true, status: 201, data: { threadId } };
 }

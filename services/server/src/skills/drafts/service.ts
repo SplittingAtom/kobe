@@ -99,6 +99,15 @@ export function startFilesProblem(files: ReadonlyMap<string, Uint8Array>): Draft
   return null;
 }
 
+const PARENT_KINDS = ["team", "personal", "catalog"] as const;
+
+/** The parent's identity for the audit log: kind, skill and number (never an owner's id). */
+function auditParent(ref: Readonly<Record<string, unknown>>) {
+  const kind = PARENT_KINDS.find((k) => k === ref.kind);
+  if (!kind || typeof ref.skillId !== "string" || typeof ref.semver !== "string") return {};
+  return { parent: { kind, skillId: ref.skillId, semver: ref.semver } };
+}
+
 /** A new draft, private to its author, under the per-author cap (every start goes here). */
 export async function createDraft(
   ctx: DraftContext,
@@ -126,7 +135,14 @@ export async function createDraft(
     await recordAudit(tx, {
       action: "skill.draft.created",
       teamId: ctx.teamId,
-      target: { draftId: draft.id, name: draft.name, startedFrom: draft.startedFrom },
+      target: {
+        draftId: draft.id,
+        name: draft.name,
+        startedFrom: draft.startedFrom,
+        // What was copied (review N3): the fork's parent version, or the conversation.
+        ...(draft.parentRef ? auditParent(draft.parentRef) : {}),
+        ...(draft.fromThreadId ? { fromThreadId: draft.fromThreadId } : {}),
+      },
     });
     return { ok: true, draft };
   });
