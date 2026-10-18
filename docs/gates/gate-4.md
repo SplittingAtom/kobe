@@ -215,7 +215,7 @@ KOBE_S3_ENDPOINT=<S3 URL> KOBE_S3_BUCKET=<bucket> KOBE_S3_ACCESS_KEY_ID=<id> KOB
 | `KOBE_GATE4_RESTORE_COPY_SECRETS`      | none                              | `namespace` only: Secrets (`ns/name`) copied into both namespaces.                                         |
 | `KOBE_GATE4_RESTORE_HOST`              | the values file's                 | `namespace` only: the ingress host of both sites (one after the other; same host, as passkeys need).       |
 | `KOBE_GATE4_RESTORE_CLI`               | `node packages/cli/dist/cli.js`   | The operator CLI, run on this machine through `kubectl port-forward`.                                      |
-| `KOBE_GATE4_INSTALL_BUDGET`            | `1200`                            | Seconds allowed from `helm install` to the first assistant token (spec §8: 20 minutes).                    |
+| `KOBE_GATE4_SETUP_BUDGET`              | `1200`                            | Seconds allowed from `helm install` to the first assistant token (spec §8: 20 minutes).                    |
 
 **What it does.** (1) Installs a source site from clean state (k3d: `dev/postgres.yaml`,
 `dev/s3.yaml`, `dev/mailpit.yaml` as the external Postgres, S3 and SMTP; the chart with

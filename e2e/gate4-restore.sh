@@ -47,7 +47,7 @@ FAKE=1 # the scripted model (e2e/gate1's fake upstream): `bash: ...`, `tool: ...
 OWNER_EMAIL="${KOBE_GATE4_RESTORE_OWNER_EMAIL:-owner@gate4r.test}"
 OWNER_PASSWORD="${KOBE_GATE4_RESTORE_OWNER_PASSWORD:-gate4 restore owner password}"
 CLI="${KOBE_GATE4_RESTORE_CLI:-node packages/cli/dist/cli.js}"
-INSTALL_BUDGET="${KOBE_GATE4_INSTALL_BUDGET:-1200}" # spec §8: clean install → first chat ≤ 20 min
+SETUP_BUDGET="${KOBE_GATE4_SETUP_BUDGET:-1200}" # spec §8: clean install → first chat ≤ 20 min
 SBX_WAIT="${KOBE_GATE4_RESTORE_SANDBOX_WAIT:-240}"
 LLM_NS=kobe-e2e-llm
 LLM="http://llm.$LLM_NS.svc.cluster.local"
@@ -282,9 +282,9 @@ first_at=$(field first_token_at "$first")
 contains "the member's first chat completes (a new sandbox under gVisor)" '^terminal=run.completed$' "$first"
 if [[ "$first_at" =~ ^[0-9]{13}$ ]]; then
   took=$((first_at / 1000 - install_start))
-  echo "     helm install → first assistant token: ${took} s (budget ${INSTALL_BUDGET} s)"
-  if ((took <= INSTALL_BUDGET)); then ok "helm install → first assistant token in ${took} s (≤ ${INSTALL_BUDGET} s)"
-  else fail "helm install → first assistant token in ${took} s (> ${INSTALL_BUDGET} s)"; fi
+  echo "     helm install → first assistant token: ${took} s (budget ${SETUP_BUDGET} s)"
+  if ((took <= SETUP_BUDGET)); then ok "helm install → first assistant token in ${took} s (≤ ${SETUP_BUDGET} s)"
+  else fail "helm install → first assistant token in ${took} s (> ${SETUP_BUDGET} s)"; fi
 else
   fail "the first chat produced an assistant token (got [$first_at])"
 fi
@@ -572,7 +572,7 @@ fi
 
 echo "==> install: timing"
 echo "     cluster with gVisor and agent-sandbox (scripts/dev-cluster.sh): ${CLUSTER_SECONDS:-not measured here} s"
-echo "     helm install → first assistant token: ${took:-not measured} s; budget ${INSTALL_BUDGET} s (spec §8)"
+echo "     helm install → first assistant token: ${took:-not measured} s; budget ${SETUP_BUDGET} s (spec §8)"
 if ((failed)); then
   echo "Gate 4 restore: FAILED"
   exit 1
