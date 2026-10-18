@@ -189,8 +189,13 @@ export async function auditApplied(
  */
 export async function installDefaultsInNewTeam(tx: KobeTx, teamId: string): Promise<number> {
   await lockDefaultSet(tx, "shared");
+  const targets = await defaultTargets(tx);
+  // The lock order of every other path (Default set, install, names): every install lock first,
+  // then the names lock, before any step re-takes them (review N4 of KOBE-316).
+  for (const target of targets) await lockInstall(tx, teamId, target.skillId);
+  await lockTeamSkillNames(tx, teamId);
   let installed = 0;
-  for (const target of await defaultTargets(tx)) {
+  for (const target of targets) {
     const version = await defaultVersion(tx, target);
     if (!version) continue;
     const step = await addInTeam(tx, teamId, target.skillId, version, target.requestedBy);

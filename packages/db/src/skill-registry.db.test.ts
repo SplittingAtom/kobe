@@ -335,6 +335,54 @@ describe("registry invariants", () => {
     });
   });
 
+  it("a personal toggle names the member's own personal skill, once, alone (KOBE-316)", async () => {
+    const mine = randomUUID();
+    const theirs = randomUUID();
+    const ownTeamSkill = randomUUID();
+    await withClient(database().adminUrl, async (c) => {
+      await c.query(
+        `INSERT INTO personal_skills (id, owner_user_id, slug, description)
+         VALUES ($1, $3, 'mine-316', 'd'), ($2, $4, 'theirs-316', 'd')`,
+        [mine, theirs, ids.user, ids.other],
+      );
+      await c.query(
+        `INSERT INTO team_skills (team_id, id, owner_user_id, slug, description)
+         VALUES ($1, $2, $3, 'own-316', 'd')`,
+        [ids.team, ownTeamSkill, ids.other],
+      );
+    });
+    await inTeam(async (c) => {
+      const add = (personal: string, team: string | null = null, pin: string | null = null) =>
+        c.query(
+          `INSERT INTO member_skill_enablements (team_id, user_id, personal_skill_id, team_skill_id,
+             enabled, version_id, pin_mode) VALUES ($1, $2, $3, $4, false, $5, $6)`,
+          [ids.team, ids.user, personal, team, pin === null ? null : versionId, pin],
+        );
+      expect(await refused(c, () => add(theirs))).toMatchObject({
+        constraint: "member_skill_enablements_personal_skill_fk",
+      });
+      expect(await refused(c, () => add(mine, ownTeamSkill))).toMatchObject({
+        constraint: "member_skill_enablements_one_skill",
+      });
+      expect(await refused(c, () => add(mine, null, "pinned"))).toMatchObject({
+        constraint: "member_skill_enablements_pin",
+      });
+      await add(mine);
+      expect(await refused(c, () => add(mine))).toMatchObject({
+        constraint: "member_skill_enablements_personal_unique",
+      });
+    });
+    // Deleting the personal skill takes its toggles with it (cascade, as the table owner).
+    await withClient(database().adminUrl, async (c) => {
+      await c.query(`DELETE FROM personal_skills WHERE id = $1`, [mine]);
+      const left = await c.query(
+        `SELECT 1 FROM member_skill_enablements WHERE personal_skill_id = $1`,
+        [mine],
+      );
+      expect(left.rows).toEqual([]);
+    });
+  });
+
   it("removes members' adds of a skill the team blocks, and refuses new ones (S2)", async () => {
     await inTeam(async (c) => {
       await c.query(

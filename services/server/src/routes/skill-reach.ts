@@ -72,6 +72,14 @@ export function skillReachRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const result = await setOfferToAll(db, c.get("team").id, skill.id, body.offerToAll);
     if (result.ok) return c.json({ offerToAll: result.offerToAll });
     if (result.error === "not_found") return notFound(c);
+    if (result.error === "access_mode")
+      return c.json(
+        {
+          code: "access_mode",
+          message: "This skill is Required or Hidden: change it with its Access setting.",
+        },
+        409,
+      );
     return c.json(
       {
         code: "offer_limit",

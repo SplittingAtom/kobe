@@ -2,21 +2,56 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-## Handoff (for the agent continuing from KOBE-317)
+## Handoff (for the fresh agent doing KOBE-317 and KOBE-318)
 
-- **Branch state:** `group-skills-a` holds KOBE-307..316 and KOBE-423. 316 is waiting for
-  review. Migrations run 0128..0136; the next free number is 0137. Nothing is pushed.
-- **Conventions and traps:** as in the KOBE-313 and KOBE-315 handoffs. Also:
-  - drizzle-kit orders a new UNIQUE constraint after the FK that needs it: check generated SQL
-    and move the constraint first (0136 did).
-  - `docs/audit-log.md` must list every audit action (`events.test.ts`).
-  - Columns with "install" in their names go into `site-rename-migration.db.test.ts`.
-  - The team's skill-name lock is `lockTeamSkillNames` (`default-target.ts`), the same key as a
-    team skill upload's lock. Take it after the Default-set and install locks.
-- **For 317:** built-ins are still `isBuiltinSkillName` (protocol) and resolve outside the
-  catalog. `bundleRefsWithGaps` reports catalog versions as `unavailable` until 317 stores them.
-- **For 318:** named local skills still resolve to the newest approved version
-  (`teamSkillStates`, through `catalogNamed` in `runs/resolver-input.ts`).
+- **Branch state:** `group-skills-a` (worktree `../Kobe-skA`) holds KOBE-307..316 and KOBE-423,
+  all reviewed; the 316 review fixes are the last commit. Migrations 0128..0136 are unreleased;
+  the next free number is 0137. Nothing is pushed; one PR at the end. Read the ledgers of 313,
+  315 and this one first (their handoffs and decisions), `docs/skill-package.md` and
+  BRIEF-317/318 (untracked; never commit them). Reviews land in the session scratchpad as
+  `review-<N>.md`.
+- **Conventions:**
+  - A migration commit holds `packages/db/drizzle/*` plus the schema TS it encodes, so each
+    commit passes `db:check`. Generated SQL and custom SQL go in separate migrations.
+  - Edit an unreleased migration by removing it (sql, snapshot, journal entry), regenerating
+    with `drizzle-kit generate --name <same>`, and restoring the journal `when`.
+  - Backfills on FORCE-RLS tables lift FORCE inside the migration, with an upgrade test that
+    has rows and runs as the non-superuser owner (see `skill-registry.db.test.ts`).
+  - Seeded tables go in `packages/cli/src/seeded.ts`. New object-key columns go in
+    `BLOB_REF_COLUMNS` (guard test, KOBE-423).
+- **Traps:**
+  - Rebuild `@kobe/db` (and protocol/scanner) before the server typecheck or tests: dependants
+    read `dist`.
+  - drizzle-kit orders a new UNIQUE constraint after the FK that needs it: check the generated
+    SQL (0136 was reordered by hand).
+  - `docs/audit-log.md` must list every audit action (`events.test.ts`). The KOBE-255 test
+    forbids "install" in action names, and columns with "install" in their names go into
+    `site-rename-migration.db.test.ts`.
+  - After changing routes or events, run `UPDATE_OPENAPI=1 npx vitest run
+src/openapi/document.test.ts`, then prettier on `openapi.json`.
+  - `seededRandom` (testing) seeds from the clock; use label-seeded generators for fixtures.
+  - Lock order: Default set (shared), then install (`lockInstall`), then team skill names
+    (`lockTeamSkillNames`, the upload lock). Uploads take only names.
+  - DB tests: `KOBE_TEST_DATABASE_URL` from `CLAUDE.local.md`; run `@kobe/db` and
+    `@kobe/server` `test:db`. There's no pg_dump locally (the backup tests skip).
+- **For 317 (built-ins as Kobe-published Default catalog skills):**
+  - Built-ins are still `isBuiltinSkillName` (protocol), baked into the sandbox image. They
+    resolve outside the catalog and claim their names after step 2 (`resolve.ts`; review N5
+    of 315 is open: Required or offered skills named like a built-in still load alongside).
+  - Catalog versions have no stored bundle: `bundleRefsWithGaps` (`skills/materialize.ts`)
+    reports them as `unavailable`. 317 stores the bytes and adds a catalog branch to
+    `sizesByHash` and `locateBundle`.
+  - Kobe-published versions: requester NULL plus `publisher = 'kobe'`, enforced by a CHECK. No
+    fake system user.
+  - Default installs come from `addInTeam` / `installDefaultsInNewTeam`.
+- **For 318 (agent publish freezes local skill versions):**
+  - Named local skills resolve to the newest approved version: `teamSkillStates` through
+    `catalogNamed` / `loadSkillFacts` in `runs/resolver-input.ts`.
+  - Frozen versions must still check the team review status and `suspended_at` (KOBE-313
+    ledger), and Revoke or blocklist omits them with a notice.
+- **Open items carried:** 315 nits N2 (markers cost and name-only keys), N4, N5, N6. From 316's
+  review: N5 (Hidden toggle answers 409, not 404), N6 (no archived filter on personal skills),
+  N7 (the toggle list shows the install's state, not a member add's).
 
 - **Status:** in review (group branch, Skills v1.2 Phase A)
 - **Branch / worktree:** `group-skills-a` in `../Kobe-skA`
@@ -92,6 +127,27 @@ selector, the catalog switches route and Builder installs, the web, and tests.
   - Team Skills page: a "Catalog settings" section, which only Team admins can change.
 - Docs: `docs/audit-log.md` gains the three new actions and `name_conflict`. `docs/install.md`
   has the upgrade note.
+
+## Review fixes (review-316)
+
+- **S1:** the legacy `PUT /offer` goes through `setTeamSkillAccess` (On by default or
+  Available): the same cap, plus a `skill.access.changed` audit. A Required or Hidden skill gets
+  409 `access_mode`, never a silent change.
+- **S2:** the skill switches take a per-team advisory lock, and the upsert writes only the changed
+  columns. Two admins changing different switches both stick.
+- **S3:** `skill-registry.db.test.ts` covers the personal FK, the unique index, the one-skill and
+  pin checks, and the cascade.
+- **S4:** each install row has a "Change" form (version, pin mode, access). Team admins see it
+  always. Builders see it while the setting allows, with no Required option, and not on Required
+  or Default installs. The warning from 5 Required skills shows.
+- **N1:** Builders change only installs a Builder or member made: never Required, Default or
+  Team-admin-made ones (`builderMay`). Team admins change everything.
+- **N2:** documented on `changeTeamInstall`.
+- **N3:** `/access` refuses archived skills (404), and the cap counts only unarchived ones.
+- **N4:** a new team takes every install lock, then the names lock, before its steps.
+- Suites after the fixes: `@kobe/db` test:db 56 / 1325; `@kobe/server` test:db 129 / 1722.
+  Under load, two unrelated files (artifacts, project-propose) and two hooks timed out once;
+  rerun singly they pass. Unit suites, lint and typecheck: green.
 
 ## Open questions (for Chris or the coordinator)
 

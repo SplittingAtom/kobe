@@ -1,4 +1,4 @@
-import { eq, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { eq, sql, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 
 /**
@@ -6,6 +6,12 @@ import { recordAudit } from "../audit/record.js";
  * team's runs, and the catalog switches "Members may add catalog skills for themselves" and
  * "Builders may install catalog skills" (both on by default). No row means the defaults.
  */
+
+/** One writer of the team's skill switches at a time (the row may not exist yet). */
+async function lockSettings(tx: KobeTx, teamId: string): Promise<void> {
+  const key = `kobe.skills.settings:${teamId}`;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+}
 
 export interface CatalogSwitches {
   readonly membersMayAdd: boolean;
@@ -43,6 +49,7 @@ export function setPersonalSkillsDisabled(
   disabled: boolean,
 ): Promise<boolean> {
   return withTeam(db, teamId, async (tx) => {
+    await lockSettings(tx, teamId);
     if ((await readPersonalSkillsDisabled(tx, teamId)) === disabled) return disabled;
     await tx
       .insert(teamSkillSettings)
@@ -76,6 +83,9 @@ export function setCatalogSwitches(
   change: Partial<CatalogSwitches>,
 ): Promise<CatalogSwitches> {
   return withTeam(db, teamId, async (tx) => {
+    // Two admins changing different switches at once: the second reads the first's commit, and
+    // only changed columns are written (review S2 of KOBE-316).
+    await lockSettings(tx, teamId);
     const before = await readCatalogSwitches(tx, teamId);
     const after = { ...before, ...change };
     const changed = {
@@ -87,17 +97,13 @@ export function setCatalogSwitches(
         : {}),
     };
     if (Object.keys(changed).length === 0) return before;
-    const values = {
-      membersMayAddCatalog: after.membersMayAdd,
-      buildersMayInstallCatalog: after.buildersMayInstall,
-      updatedBy: userId,
-    };
+    const set = { ...changed, updatedBy: userId };
     await tx
       .insert(teamSkillSettings)
-      .values({ teamId, ...values })
+      .values({ teamId, ...set })
       .onConflictDoUpdate({
         target: teamSkillSettings.teamId,
-        set: { ...values, updatedAt: new Date() },
+        set: { ...set, updatedAt: new Date() },
       });
     await recordAudit(tx, { action: "skill.catalog_switches.changed", teamId, target: changed });
     return after;

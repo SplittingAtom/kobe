@@ -22,7 +22,9 @@ import {
   eventTrigger,
   useConfirm,
 } from "../../../ui/console";
+import { getCatalogSwitches } from "../../../../lib/admin/api/team/skill-review";
 import { useTeamAccess } from "../../console-context";
+import { InstallChangeForm } from "./install-change";
 import { MutationStatus } from "../../error-notice";
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
@@ -40,13 +42,28 @@ const PIN: Record<CatalogInstall["pinMode"], string> = {
 };
 
 /**
- * The team's catalog installs and its Removed defaults (KOBE-314, SK6, SK7). Team admins
- * uninstall (a Site default is then kept out of the team until reinstalled) and reinstall.
+ * The team's catalog installs and its Removed defaults (KOBE-314, SK6, SK7). Team admins change
+ * an install (version, pin mode, access; KOBE-316), uninstall (a Site default is then kept out of
+ * the team until reinstalled) and reinstall; Builders change installs while the team allows it.
  */
 export function CatalogInstallsSection() {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const canManage = access.permissions.includes("team.skills.installs.manage");
+  // Builders change installs while the team allows it (KOBE-316, SK25): never Required or the
+  // Site default's own installs (the server also refuses those a Team admin made).
+  const isBuilder = !canManage && access.permissions.includes("team.skills.publish");
+  const switches = useResource(() =>
+    isBuilder
+      ? getCatalogSwitches(teamId)
+      : Promise.resolve({ ok: true as const, data: null, status: 200 }),
+  );
+  const builderMay =
+    isBuilder &&
+    switches.state.status === "ready" &&
+    switches.state.data?.buildersMayInstallCatalog === true;
+  const mayChange = (i: CatalogInstall) =>
+    canManage || (builderMay && i.access !== "required" && i.origin !== "default_tag");
   const { state, reload } = useResource(() => listTeamInstalls(teamId));
   const mutation = useMutation();
   const [confirm, confirmDialog] = useConfirm();
@@ -97,7 +114,7 @@ export function CatalogInstallsSection() {
                     <TableHeader>Version</TableHeader>
                     <TableHeader>Access</TableHeader>
                     <TableHeader>Updated</TableHeader>
-                    {canManage && (
+                    {(canManage || builderMay) && (
                       <TableHeader>
                         <span className="sr-only">Actions</span>
                       </TableHeader>
@@ -123,16 +140,31 @@ export function CatalogInstallsSection() {
                       <TableCell className="whitespace-nowrap">
                         <DateTime value={i.updatedAt} />
                       </TableCell>
-                      {canManage && (
+                      {(canManage || builderMay) && (
                         <TableCell>
-                          <Button
-                            variant="danger"
-                            disabled={mutation.pending}
-                            aria-label={`Uninstall ${i.name}`}
-                            onClick={(e) => void uninstall(i, eventTrigger(e))}
-                          >
-                            Uninstall
-                          </Button>
+                          {mayChange(i) && (
+                            <InstallChangeForm
+                              teamId={teamId}
+                              install={i}
+                              mayRequire={canManage}
+                              pending={mutation.pending}
+                              run={async (action, notice) => {
+                                const done = await mutation.run(action, notice);
+                                if (done) reload();
+                                return done;
+                              }}
+                            />
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="danger"
+                              disabled={mutation.pending}
+                              aria-label={`Uninstall ${i.name}`}
+                              onClick={(e) => void uninstall(i, eventTrigger(e))}
+                            >
+                              Uninstall
+                            </Button>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
@@ -147,7 +179,7 @@ export function CatalogInstallsSection() {
                     <TableHeader>Skill</TableHeader>
                     <TableHeader>Reason</TableHeader>
                     <TableHeader>Removed</TableHeader>
-                    {canManage && (
+                    {(canManage || builderMay) && (
                       <TableHeader>
                         <span className="sr-only">Actions</span>
                       </TableHeader>

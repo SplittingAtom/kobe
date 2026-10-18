@@ -65,3 +65,77 @@ describe("Catalog installs in the team console (KOBE-314, SK7)", () => {
     );
   });
 });
+
+describe("Changing installs (KOBE-316)", () => {
+  const TEAM_INSTALL = {
+    ...INSTALLS.installs[0],
+    skillId: "s-3",
+    name: "pdf-kit",
+    origin: "team",
+    isDefault: false,
+    access: "available",
+  };
+  const LIST = { installs: [...INSTALLS.installs, TEAM_INSTALL], removedDefaults: [] };
+  const SWITCHES = (on: boolean) => ({
+    personal_skills_disabled: false,
+    members_may_add_catalog: true,
+    builders_may_install_catalog: on,
+  });
+
+  it("a Team admin makes an install Required and sees the warning from 5", async () => {
+    const calls = stubApi({
+      "GET /v1/team/skills/installs": [200, LIST],
+      "PUT /v1/team/skills/installs/s-3": [
+        200,
+        { semver: "1.1.0", deprecated: false, required_count: 5, warning: "many_required" },
+      ],
+    });
+    renderTeam(<CatalogInstallsSection />, { permissions: ["team.skills.installs.manage"] });
+    await screen.findByRole("table", { name: "Catalog installs" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Access of pdf-kit" }), {
+      target: { value: "required" },
+    });
+    const form = screen.getByRole("combobox", { name: "Access of pdf-kit" }).closest("form");
+    if (!form) throw new Error("no form");
+    fireEvent.submit(form);
+    expect((await screen.findByText(/5 Required skills/)).textContent).toMatch(/limit of 64/);
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({
+      version: "1.1.0",
+      pinMode: "within_major",
+      access: "required",
+    });
+  });
+
+  it("a Builder changes team installs while allowed, without Required or Default ones", async () => {
+    stubApi({
+      "GET /v1/team/skills/installs": [200, LIST],
+      "GET /v1/team/skill-review/settings": [200, SWITCHES(true)],
+    });
+    renderTeam(<CatalogInstallsSection />, {
+      role: "builder",
+      permissions: ["team.skills.publish"],
+    });
+    const access = await screen.findByRole("combobox", { name: "Access of pdf-kit" });
+    const options = [...(access as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).not.toContain("required");
+    // The Site default's own install is the Team admins' to change; no uninstall for Builders.
+    expect(screen.queryByRole("combobox", { name: "Access of xlsx-pro" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Uninstall/ })).toBeNull();
+  });
+
+  it("a Builder gets no controls while the team doesn't allow Builder installs", async () => {
+    stubApi({
+      "GET /v1/team/skills/installs": [200, LIST],
+      "GET /v1/team/skill-review/settings": [200, SWITCHES(false)],
+    });
+    renderTeam(<CatalogInstallsSection />, {
+      role: "builder",
+      permissions: ["team.skills.publish"],
+    });
+    await screen.findByRole("table", { name: "Catalog installs" });
+    await waitFor(() =>
+      expect(screen.queryByRole("combobox", { name: "Access of pdf-kit" })).toBeNull(),
+    );
+  });
+});

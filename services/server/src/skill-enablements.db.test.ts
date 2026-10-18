@@ -257,3 +257,94 @@ describe("the team's catalog switches and Builder installs", () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe("review fixes (KOBE-316 review)", () => {
+  it("the legacy offer route never changes Required or Hidden, and audits as access", async () => {
+    const w = await f.world();
+    const t = tag();
+    const ids: Record<string, string> = {};
+    for (const access of ["required", "hidden", "available"] as const)
+      ids[access] = await seed.teamSkill(w.team, w.owner.id, `${access}-${t}`, access);
+    const offer = (id: string | undefined, offerToAll: boolean) =>
+      f.on(0, w.owner).put(`/v1/skills/${id}/offer`, { offerToAll });
+    for (const access of ["required", "hidden"]) {
+      for (const on of [true, false]) {
+        const res = await offer(ids[access], on);
+        expect([res.status, res.json.code], access).toEqual([409, "access_mode"]);
+      }
+      const row = await admin().query(`SELECT access FROM team_skills WHERE id = $1`, [
+        ids[access],
+      ]);
+      expect(row.rows).toEqual([{ access }]);
+    }
+    expect((await offer(ids.available, true)).json).toEqual({ offerToAll: true });
+    expect(await audits(w.team, "skill.access.changed")).toEqual([
+      {
+        skillId: ids.available,
+        slug: `available-${t}`,
+        access: "default_on",
+        previous: "available",
+      },
+    ]);
+    expect((await audits(w.team, "skill.offer.changed")).length).toBe(1);
+  });
+
+  it("two admins changing different switches at once both stick", async () => {
+    const w = await f.world();
+    const other = await f.member(w.team);
+    await admin().query(
+      `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+      [w.team, other.id],
+    );
+    const [a, b] = await Promise.all([
+      f.on(0, w.owner).put("/v1/team/skill-review/settings", { membersMayAddCatalog: false }),
+      f.on(0, other).put("/v1/team/skill-review/settings", { buildersMayInstallCatalog: false }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const now = await f.on(0, w.owner).get("/v1/team/skill-review/settings");
+    expect(now.json).toMatchObject({
+      membersMayAddCatalog: false,
+      buildersMayInstallCatalog: false,
+    });
+    expect((await audits(w.team, "skill.catalog_switches.changed")).length).toBe(2);
+  });
+
+  it("Builders change only installs a Builder or member made, never Default ones", async () => {
+    const w = await f.world();
+    const reviewer = (await f.world()).owner.id;
+    const builder = await f.member(w.team);
+    await role(w.team, builder, "builder");
+    const t = tag();
+    const byAdmin = await seed.catalogSkill(`adm-${t}`, w.owner.id, reviewer, [
+      ["1.0.0", "approved"],
+    ]);
+    const byDefault = await seed.catalogSkill(`dft-${t}`, w.owner.id, reviewer, [
+      ["1.0.0", "approved"],
+    ]);
+    const own = await seed.catalogSkill(`own-${t}`, w.owner.id, reviewer, [["1.0.0", "approved"]]);
+    await seed.install(w.team, w.owner.id, byAdmin, "1.0.0", "pinned", "default_on");
+    await admin().query(
+      `INSERT INTO team_skill_installs (team_id, skill_id, version_id, pin_mode, access, origin,
+         installed_by) VALUES ($1, $2, $3, 'within_major', 'default_on', 'default_tag', $4)`,
+      [w.team, byDefault.skill, byDefault.ids["1.0.0"], builder.id],
+    );
+    const put = (skill: string) =>
+      f.on(0, builder).put(`/v1/team/skills/installs/${skill}`, {
+        version: "1.0.0",
+        pinMode: "pinned",
+        access: "hidden",
+      });
+    expect((await put(byAdmin.skill)).status).toBe(403);
+    expect((await put(byDefault.skill)).status).toBe(403);
+    expect((await put(own.skill)).status).toBe(200);
+    expect((await put(own.skill)).status).toBe(200);
+  });
+
+  it("the access of an archived skill is not changed", async () => {
+    const w = await f.world();
+    const id = await seed.teamSkill(w.team, w.owner.id, `old-${tag()}`);
+    await admin().query(`UPDATE team_skills SET archived_at = now() WHERE id = $1`, [id]);
+    const res = await f.on(0, w.owner).put(`/v1/skills/${id}/access`, { access: "default_on" });
+    expect(res.status).toBe(404);
+  });
+});

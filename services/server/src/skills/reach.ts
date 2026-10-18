@@ -6,7 +6,6 @@ import {
   isNull,
   siteAgents,
   siteAgentVersions,
-  sql,
   teamAgents,
   teamAgentVersions,
   teamSkills,
@@ -17,7 +16,7 @@ import {
 } from "@kobe/db";
 import { agentAccess, type AgentScope } from "../agents/access.js";
 import { siteVisibleTo } from "../agents/versions.js";
-import { recordAudit } from "../audit/record.js";
+import { setTeamSkillAccess } from "./access.js";
 import { approvedTeamSkills } from "./review.js";
 
 /**
@@ -201,70 +200,36 @@ export function skillReach(
   });
 }
 
-/**
- * Most team skills one team may offer to all agents (KOBE-297). With an agent's own (at most 32,
- * agent file) a run stays near the run.start cap; the resolver still caps the run itself.
- */
-export const MAX_OFFERED_SKILLS = 32;
+export { MAX_OFFERED_SKILLS } from "./access.js";
 
 export type OfferResult =
   | { readonly ok: true; readonly offerToAll: boolean }
-  | { readonly ok: false; readonly error: "not_found" | "offer_limit" };
+  | { readonly ok: false; readonly error: "not_found" | "offer_limit" | "access_mode" };
 
 /**
- * Turns "Offer to all agents" on or off; audits a real change. Turning it on is refused once the
- * team offers {@link MAX_OFFERED_SKILLS}; a team-wide advisory lock makes the count exact.
+ * The legacy "Offer to all agents" (KOBE-297), kept for older pages since KOBE-316: on is On by
+ * default, off is Available, through {@link setTeamSkillAccess} (the same cap and the
+ * `skill.access.changed` audit, plus `skill.offer.changed`). A Required or Hidden skill is refused
+ * (`access_mode`): the old toggle can't express them, and must never silently change them (review
+ * S1 of KOBE-316).
  */
-export function setOfferToAll(
+export async function setOfferToAll(
   db: KobeDb,
   teamId: string,
   skillId: string,
   offerToAll: boolean,
 ): Promise<OfferResult> {
-  return withTeam(db, teamId, async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skill_offer:${teamId}`}, 0))`,
-    );
-    const [skill] = await tx
-      .select({
-        slug: teamSkills.slug,
-        offerToAll: teamSkills.offerToAll,
-        access: teamSkills.access,
-      })
-      .from(teamSkills)
-      .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)))
-      .for("update");
-    if (!skill) return { ok: false, error: "not_found" };
-    // The access mode follows the offer (KOBE-308) until the resolver reads `access` (SK27).
-    const access = offerToAll ? "default_on" : "available";
-    if (skill.offerToAll === offerToAll) {
-      // Not a change of the offer (no audit), but a save repairs an access mode left behind by
-      // a release that wrote only `offer_to_all` (a rollback across KOBE-308).
-      if (skill.access !== access)
-        await tx
-          .update(teamSkills)
-          .set({ access })
-          .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)));
-      return { ok: true, offerToAll };
-    }
-    if (offerToAll) {
-      const offered = await tx
-        .select({ id: teamSkills.id })
-        .from(teamSkills)
-        .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.offerToAll, true)));
-      if (offered.length >= MAX_OFFERED_SKILLS) return { ok: false, error: "offer_limit" };
-    }
-    await tx
-      .update(teamSkills)
-      .set({ offerToAll, access })
-      .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)));
-    await recordAudit(tx, {
-      action: "skill.offer.changed",
-      teamId,
-      target: { skillId, slug: skill.slug, offerToAll },
-    });
-    return { ok: true, offerToAll };
+  const result = await setTeamSkillAccess(db, {
+    teamId,
+    skillId,
+    access: offerToAll ? "default_on" : "available",
+    mayRequire: false,
+    onlyFrom: ["available", "default_on"],
+    offerAudit: true,
   });
+  if (result.ok) return { ok: true, offerToAll };
+  if (result.code === "forbidden") return { ok: false, error: "access_mode" };
+  return { ok: false, error: result.code };
 }
 
 /** Names of agents by id, for usage rows (only agents the viewer may see get a name). */

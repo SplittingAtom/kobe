@@ -62,3 +62,30 @@ export function reinstallDefault(
     json: {},
   });
 }
+
+export interface InstallChange {
+  readonly version: string;
+  readonly pinMode: CatalogInstall["pinMode"];
+  readonly access: CatalogInstall["access"];
+}
+
+export interface InstallResult {
+  readonly semver: string;
+  /** The version is deprecated: installed with a warning (SK31). */
+  readonly deprecated: boolean;
+  /** Required team skills and installs now; the console warns from 5. */
+  readonly requiredCount: number;
+  readonly warning?: "many_required";
+}
+
+/**
+ * Installs a catalog skill or changes its install (KOBE-315/316): Team admins, and Builders
+ * while the team allows it (never Required, never a deprecated version).
+ */
+export function putTeamInstall(
+  teamId: string,
+  skillId: string,
+  change: InstallChange,
+): Promise<ApiResult<InstallResult>> {
+  return apiRequest(`${BASE}/installs/${enc(skillId)}`, { teamId, method: "PUT", json: change });
+}
