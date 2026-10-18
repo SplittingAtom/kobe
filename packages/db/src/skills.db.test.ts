@@ -49,6 +49,8 @@ async function sqlState(promise: Promise<unknown>): Promise<string | undefined> 
 
 const version = (n: number) => ({
   version: n,
+  semver: `0.${n}.0`,
+  seq: n,
   frontmatter: { name: "demo", description: "d" },
   source: "zip" as const,
   contentHash: String(n).repeat(64).slice(0, 64),

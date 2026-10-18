@@ -216,7 +216,8 @@ describe("personal skills rename migration on an existing database (KOBE-307)", 
           WHERE c.relname = ANY($1) ORDER BY 1`,
         [Object.values(RENAMED_TABLES)],
       );
-      expect(cons.rows.map((r) => r.name)).toEqual(EXPECTED_CONSTRAINTS);
+      // The test migrates to the end: later migrations (KOBE-308) add constraints of their own.
+      expect(cons.rows.map((r) => r.name)).toEqual(expect.arrayContaining(EXPECTED_CONSTRAINTS));
       const triggers = await c.query<{ name: string }>(
         `SELECT c.relname || '.' || tg.tgname AS name FROM pg_trigger tg
            JOIN pg_class c ON c.oid = tg.tgrelid

@@ -66,7 +66,7 @@ export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
                     {area === "team" && (
                       <TableCell>{s.scope === "team" ? "Team" : "Personal"}</TableCell>
                     )}
-                    <TableCell>v{s.latestVersion}</TableCell>
+                    <TableCell>v{s.latestSemver}</TableCell>
                     <TableCell>
                       <DateTime value={s.updatedAt} />
                     </TableCell>

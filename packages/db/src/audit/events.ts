@@ -1292,6 +1292,8 @@ export const AUDIT_EVENTS = {
     scope: z.enum(["team", "personal"]),
     slug,
     version,
+    /** The version's semver (KOBE-308); absent on uploads recorded before. */
+    semver: z.string().max(32).optional(),
     bundleHash: z.string().regex(/^[0-9a-f]{64}$/),
     bytes: count,
     files: count,

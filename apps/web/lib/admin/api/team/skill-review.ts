@@ -19,6 +19,8 @@ export interface SkillReview {
   readonly skillId: string;
   readonly slug: string;
   readonly version: number;
+  /** MAJOR.MINOR.PATCH (KOBE-308): what the UI shows; `version` addresses the API. */
+  readonly semver: string;
   readonly contentHash: string;
   /** `personal`: a member's personal skill that needs this team's approval. */
   readonly scope: "team" | "personal";

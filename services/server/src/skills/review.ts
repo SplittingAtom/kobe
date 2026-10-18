@@ -24,6 +24,7 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { isBlocked } from "./blocklist.js";
+import { legacySemver } from "./semver.js";
 
 /**
  * Scan results and team-admin review of team skill versions (KOBE-80, spec D22). Every new team
@@ -71,6 +72,8 @@ export interface ReviewRecord {
   readonly skillId: string;
   readonly slug: string;
   readonly version: number;
+  /** The version's semver (KOBE-308). */
+  readonly semver: string;
   readonly contentHash: string;
   readonly scope: "team" | "personal";
   readonly unscanned: boolean;
@@ -192,12 +195,61 @@ export function listReviews(
           inArray(teamSkillReviews.skillId, [...new Set(pageKeys.map((k) => k.skillId))]),
         ),
       );
-    const byKey = new Map(rows.map((r) => [`${r.skillId}:${r.version}`, r]));
+    const semvers = await semversOf(tx, teamId, rows);
+    const byKey = new Map(
+      rows.map((r) => {
+        const key = `${r.skillId}:${r.version}`;
+        return [key, { ...r, semver: semvers.get(key) ?? legacySemver(r.version) }];
+      }),
+    );
     return {
       reviews: pageKeys.flatMap((k) => byKey.get(`${k.skillId}:${k.version}`) ?? []),
       nextCursor,
     };
   });
+}
+
+/**
+ * Semvers of reviewed versions by `skillId:version` (KOBE-308): team versions from the team's
+ * table (inside `withTeam`), personal ones from the site-wide table.
+ */
+async function semversOf(
+  tx: KobeTx,
+  teamId: string,
+  rows: readonly { skillId: string; version: number; scope: "team" | "personal" }[],
+): Promise<Map<string, string>> {
+  const ids = (scope: "team" | "personal") => [
+    ...new Set(rows.filter((r) => r.scope === scope).map((r) => r.skillId)),
+  ];
+  const team = ids("team");
+  const personal = ids("personal");
+  const found = [
+    ...(team.length === 0
+      ? []
+      : await tx
+          .select({
+            skillId: teamSkillVersions.skillId,
+            version: teamSkillVersions.version,
+            semver: teamSkillVersions.semver,
+          })
+          .from(teamSkillVersions)
+          .where(
+            and(eq(teamSkillVersions.teamId, teamId), inArray(teamSkillVersions.skillId, team)),
+          )),
+    ...(personal.length === 0
+      ? []
+      : await tx
+          .select({
+            skillId: personalSkillVersions.skillId,
+            version: personalSkillVersions.version,
+            semver: personalSkillVersions.semver,
+          })
+          .from(personalSkillVersions)
+          .where(inArray(personalSkillVersions.skillId, personal))),
+  ];
+  return new Map(
+    found.map((r) => [`${r.skillId}:${r.version}`, r.semver ?? legacySemver(r.version)]),
+  );
 }
 
 /** Review state of the versions of one team skill, by version number. */
@@ -264,8 +316,10 @@ export function decideReview(
         flagged: current.flagged,
       },
     });
+    const semvers = await semversOf(tx, teamId, [current]);
     const review: ReviewRecord = {
       ...current,
+      semver: semvers.get(`${current.skillId}:${current.version}`) ?? legacySemver(current.version),
       status: decision.status,
       reviewedBy: decision.reviewerId,
       reviewedAt,

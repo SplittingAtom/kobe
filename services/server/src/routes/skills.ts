@@ -15,6 +15,7 @@ import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
+import { changelogSchema, parseSemver, semverSchema } from "../skills/semver.js";
 import {
   discardAttemptBundle,
   putSkillBundle,
@@ -44,7 +45,18 @@ const ZIP_TYPES = new Set([
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown", "text/plain"]);
 const scopeSchema = z.enum(["team", "personal"]);
 const idSchema = z.uuid();
-const versionSchema = z.coerce.number().int().positive().max(2147483647);
+const seqSchema = z.coerce.number().int().positive().max(2147483647);
+/** A version in a path: its number (seq) or its semver (KOBE-308). */
+const versionRef = (value: string | undefined): number | string | null => {
+  if (value !== undefined && parseSemver(value)) return value;
+  const seq = seqSchema.safeParse(value);
+  return seq.success ? seq.data : null;
+};
+/** Optional numbering of an upload (KOBE-308, SK14), in the query beside `scope`. */
+const numberingSchema = z.strictObject({
+  semver: semverSchema.optional(),
+  changelog: changelogSchema.optional(),
+});
 
 const error = (
   c: Ctx,
@@ -53,7 +65,10 @@ const error = (
   message: string,
 ) => c.json({ code, message }, status);
 
-const UPLOAD_ERRORS: Record<UploadError | "blocklisted_download", string> = {
+const UPLOAD_ERRORS: Record<
+  Exclude<UploadError, "semver_not_increasing"> | "blocklisted_download",
+  string
+> = {
   blocklisted_download: "This skill version is on the site's blocklist and can't be opened.",
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
@@ -67,6 +82,9 @@ const skillJson = (s: SkillRecord) => ({
   slug: s.slug,
   description: s.description,
   latestVersion: s.latestVersion,
+  latestSemver: s.latestSemver,
+  access: s.access,
+  archivedAt: s.archivedAt,
   ownerUserId: s.ownerUserId,
   createdAt: s.createdAt,
   updatedAt: s.updatedAt,
@@ -80,6 +98,10 @@ interface ReviewState {
 
 const versionJson = (v: SkillVersionRecord, review: ReviewState | null = null) => ({
   version: v.version,
+  seq: v.seq,
+  semver: v.semver,
+  changelog: v.changelog,
+  packageHash: v.packageHash,
   frontmatter: v.frontmatter,
   source: v.source,
   contentHash: v.contentHash,
@@ -94,7 +116,8 @@ const versionJson = (v: SkillVersionRecord, review: ReviewState | null = null) =
 /**
  * Skill bundles (spec D19, §6.1, KOBE-78) from the active team's point of view: the team's skills
  * and the caller's personal ones. `POST /?scope=team|personal` takes a zip (or a bare SKILL.md as
- * text/markdown) and stores it as the next immutable version of the skill its frontmatter names;
+ * text/markdown) and stores it as the next immutable version of the skill its frontmatter names,
+ * numbered `semver` (query; default: the next minor) with an optional `changelog` (KOBE-308);
  * `GET /`, `GET /:id`, `GET /:id/versions[/:n]` read them. Each upload is scanned (KOBE-80); a team
  * version starts `pending` review and is unusable until a team admin approves it.
  */
@@ -151,6 +174,17 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         scope.data === "team" ? "team.skills.publish" : "team.personal.create",
       );
       if (!allowed) return error(c, 403, "forbidden", "Your team role doesn't allow that upload.");
+      const numbering = numberingSchema.safeParse({
+        semver: c.req.query("semver"),
+        changelog: c.req.query("changelog"),
+      });
+      if (!numbering.success)
+        return error(
+          c,
+          400,
+          "invalid_request",
+          "Give semver as MAJOR.MINOR.PATCH (for example 1.2.0) and a changelog of 1 to 1024 characters.",
+        );
       if (!deps.blobs)
         return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
       if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
@@ -190,12 +224,21 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         uncompressedBytes: bundle.uncompressedBytes,
         uploadedBy: c.get("user").id,
         scan,
+        ...(numbering.data.semver ? { semver: numbering.data.semver } : {}),
+        ...(numbering.data.changelog ? { changelog: numbering.data.changelog } : {}),
       }).catch(async (err: unknown) => {
         await discard();
         throw err;
       });
       if (!result.ok) {
         await discard();
+        if (result.error === "semver_not_increasing")
+          return error(
+            c,
+            409,
+            result.error,
+            `Version ${numbering.data.semver ?? ""} must be higher than the latest version, ${result.latest}.`,
+          );
         return result.error === "blocklisted"
           ? error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted)
           : error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
@@ -227,9 +270,9 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
 
   app.get("/:id/versions/:version", async (c) => {
     const found = await visible(c);
-    const n = versionSchema.safeParse(c.req.param("version"));
-    if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
-    const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
+    const ref = versionRef(c.req.param("version"));
+    if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, ref);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
     const reviews = await reviewsFor(c, found);
     return c.json({
@@ -241,9 +284,9 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
   /** The stored canonical zip of one version, for the browser editor (KOBE-83). Reads are not audited. */
   app.get("/:id/versions/:version/bundle", async (c) => {
     const found = await visible(c);
-    const n = versionSchema.safeParse(c.req.param("version"));
-    if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
-    const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
+    const ref = versionRef(c.req.param("version"));
+    if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, ref);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
     if (await db.transaction((tx) => isBlocked(tx, version.contentHash)))
       return error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted_download);
@@ -255,7 +298,7 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       headers: {
         "content-type": "application/zip",
         "content-length": String(object.size),
-        "content-disposition": `attachment; filename="${found.skill.slug}-v${version.version}.zip"`,
+        "content-disposition": `attachment; filename="${found.skill.slug}-v${version.semver}.zip"`,
         "x-content-type-options": "nosniff",
         "cache-control": "private, no-store",
       },

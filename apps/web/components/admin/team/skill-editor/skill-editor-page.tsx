@@ -148,7 +148,7 @@ function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly are
         if (res.ok) setSkill(res.data.skill);
         return res;
       },
-      (data) => (skill ? `Saved as v${data.version.version}.` : "Skill created."),
+      (data) => (skill ? `Saved as v${data.version.semver}.` : "Skill created."),
     );
     setAttempted(false);
   }
@@ -256,7 +256,7 @@ function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly are
           </Button>
           {skill && (
             <span className="text-sm text-console-muted">
-              Current version: v{skill.latestVersion}.
+              Current version: v{skill.latestSemver}.
             </span>
           )}
         </div>

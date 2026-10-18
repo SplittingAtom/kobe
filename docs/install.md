@@ -589,6 +589,17 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Skill version numbers (KOBE-308, migrations `0129_skill_semver` and
+  `0130_skill_semver_backfill`).** Every team and personal skill version gets a semver: version
+  n uploaded before becomes `0.n.0` (with `seq` n), and the Job log says how many
+  (`kobe: … skill versions numbered 0.<n>.0`). New uploads take the next minor unless the
+  uploader gives a higher number. Team skills set to "Offer to all agents" get the access mode
+  `default_on`, the others `available`. No row is removed or renumbered. Server pods of the
+  previous release can't store skill uploads once the Job has run (a version without a semver is
+  refused), from the end of the Job until Helm replaces them, and for as long as a `helm rollback`
+  keeps the previous release running; run starts and reads keep working. A team admin who turns
+  "Offer to all agents" on or off on a rolled-back release leaves the access mode behind: switch
+  it once more after upgrading again.
 - **Personal skill tables (KOBE-307, migration `0128_personal_skills_rename`).** Personal skills
   are no longer named after the Site: `site_skills`, `site_skill_versions` and `site_skill_scans`
   become `personal_skills`, `personal_skill_versions` and `personal_skill_scans`, with their

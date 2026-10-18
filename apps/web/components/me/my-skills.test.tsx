@@ -17,13 +17,21 @@ const SKILL = {
   slug: "my-notes",
   description: "Notes",
   latest_version: 1,
+  latest_semver: "0.1.0",
   owner_user_id: "u-me",
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-02T10:00:00Z",
 };
 const SAVED = {
   skill: SKILL,
-  version: { version: 1, content_hash: "h", size_bytes: 1, file_count: 1, uploaded_at: "x" },
+  version: {
+    version: 1,
+    semver: "0.1.0",
+    content_hash: "h",
+    size_bytes: 1,
+    file_count: 1,
+    uploaded_at: "x",
+  },
 };
 const BUNDLE = zipSync({
   "SKILL.md": strToU8("---\nname: my-notes\ndescription: Notes\n---\nBe brief.\n"),
@@ -75,14 +83,14 @@ describe("My skill editor", () => {
       "GET /v1/skills/s-1/versions/1/bundle": [200, BUNDLE],
       "POST /v1/skills?scope=personal": [
         201,
-        { ...SAVED, version: { ...SAVED.version, version: 2 } },
+        { ...SAVED, version: { ...SAVED.version, version: 2, semver: "0.2.0" } },
       ],
     });
     renderTeam(<SkillEditorPage area="my" skillId="s-1" />, MEMBER);
     const body = await screen.findByLabelText("Instructions (SKILL.md body)");
     await userEvent.type(body, "More.");
     await userEvent.click(screen.getByRole("button", { name: "Save as new version" }));
-    await waitFor(() => expect(screen.getByText("Saved as v2.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Saved as v0.2.0.")).toBeTruthy());
     expect(calls.some((c) => c.method === "POST")).toBe(true);
   });
 

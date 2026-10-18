@@ -64,8 +64,8 @@ async function seedTeamSkill(
     const hash = hashOf(`${team}:${slug}`, i + 1);
     await admin.query(
       `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
-         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
-       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5)`,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5, '0.' || $3::int || '.0', $3::int)`,
       [team, skillId, i + 1, hash, ownerId],
     );
     await admin.query(

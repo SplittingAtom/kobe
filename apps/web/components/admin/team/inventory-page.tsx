@@ -98,7 +98,7 @@ function SkillsTable({ skills }: { readonly skills: readonly SkillSummary[] }) {
                 <div className="text-sm font-normal text-console-muted">{s.description}</div>
               )}
             </TableRowHeader>
-            <TableCell>v{s.latestVersion}</TableCell>
+            <TableCell>v{s.latestSemver}</TableCell>
             <TableCell>
               <DateTime value={s.updatedAt} />
             </TableCell>

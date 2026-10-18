@@ -127,7 +127,7 @@ function ReviewList({
       review.flagged &&
       !(await confirm(
         {
-          title: `Approve ${review.slug} v${review.version} anyway?`,
+          title: `Approve ${review.slug} v${review.semver} anyway?`,
           description: `It was flagged by the scan (${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}).`,
           confirmLabel: "Approve anyway",
         },
@@ -138,7 +138,7 @@ function ReviewList({
     }
     const done = await mutation.run(
       () => decideSkillReview(teamId, review, decision),
-      () => `${review.slug} v${review.version} ${decision}.`,
+      () => `${review.slug} v${review.semver} ${decision}.`,
     );
     if (done) reload();
   }
@@ -181,12 +181,12 @@ function ReviewItem({
 }) {
   return (
     <article
-      aria-label={`${review.slug} version ${review.version}`}
+      aria-label={`${review.slug} version ${review.semver}`}
       className="box-border rounded-lg border border-console-border bg-console-bg p-3"
     >
       <h3 className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-base font-semibold">
         <span>
-          {review.slug} v{review.version}
+          {review.slug} v{review.semver}
         </span>
         {review.scope === "personal" && <em className="font-normal">(personal skill)</em>}
         {review.flagged && <Badge tone="attention">Flagged: {review.findings.length}</Badge>}

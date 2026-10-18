@@ -32,6 +32,7 @@ const reviewJson = (r: ReviewRecord) => ({
   skillId: r.skillId,
   slug: r.slug,
   version: r.version,
+  semver: r.semver,
   contentHash: r.contentHash,
   scope: r.scope,
   unscanned: r.unscanned,

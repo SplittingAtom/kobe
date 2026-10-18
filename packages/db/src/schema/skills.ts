@@ -34,9 +34,24 @@ const DESCRIPTION_MAX = 1024;
 const FRONTMATTER_MAX_BYTES = 32 * 1024;
 /** Backstop for bundle sizes; the server enforces its (lower, configurable) caps first. */
 const BUNDLE_MAX_BYTES = 64 * 1024 * 1024;
+/** Mirrors `CHANGELOG_MAX` in the server's skills/semver.ts. */
+const CHANGELOG_MAX = 1024;
 
 export const skillSource = pgEnum("skill_source", ["zip", "skill_md"]);
 export type SkillSource = (typeof skillSource.enumValues)[number];
+
+/**
+ * How a team's members get a team skill (SK14/SK27, KOBE-308): `available` (members opt in),
+ * `default_on` (on unless a member turns it off), `required` (always loaded) or `hidden` (only
+ * for agents that name it). Team installs of catalog skills use the same modes.
+ */
+export const skillAccess = pgEnum("skill_access", [
+  "available",
+  "default_on",
+  "required",
+  "hidden",
+]);
+export type SkillAccess = (typeof skillAccess.enumValues)[number];
 
 const skillColumns = () => ({
   /** The SKILL.md frontmatter `name` of the latest upload; unique per team or owner. */
@@ -49,7 +64,19 @@ const skillColumns = () => ({
 });
 
 const versionColumns = () => ({
+  /** The version's sequence number: 1, 2, 3, ... per skill (`seq` repeats it). */
   version: integer().notNull(),
+  // KOBE-308 (SK14). Nullable here only so the columns could be added to existing rows: the
+  // custom migration 0130_skill_semver_backfill backfills them (n -> "0.n.0", seq n) and then
+  // requires `semver` and `seq` with SQL-only checks (`*_semver_format`, `*_seq_matches`).
+  /** MAJOR.MINOR.PATCH, strictly increasing with `seq`; versions uploaded before read `0.<n>.0`. */
+  semver: text(),
+  /** Ordering key: equals `version` for local skills; catalog versions have their own. */
+  seq: integer(),
+  /** The author's changelog line (null for versions uploaded before KOBE-308). */
+  changelog: text(),
+  /** SHA-256 of the whole package (KOBE-309); null until package builds record it. */
+  packageHash: text(),
   /** SKILL.md frontmatter as uploaded (name, description and any other keys). */
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
   source: skillSource().notNull(),
@@ -81,7 +108,14 @@ const skillChecks = (
 const versionChecks = (
   prefix: string,
   t: Record<
-    "version" | "frontmatter" | "contentHash" | "sizeBytes" | "fileCount" | "uncompressedBytes",
+    | "version"
+    | "frontmatter"
+    | "contentHash"
+    | "packageHash"
+    | "changelog"
+    | "sizeBytes"
+    | "fileCount"
+    | "uncompressedBytes",
     AnyPgColumn
   >,
 ) => [
@@ -91,6 +125,14 @@ const versionChecks = (
     sql`jsonb_typeof(${t.frontmatter}) = 'object' AND octet_length(${t.frontmatter}::text) <= ${sql.raw(String(FRONTMATTER_MAX_BYTES))}`,
   ),
   check(`${prefix}_content_hash_format`, sql`${t.contentHash} ~ '^[0-9a-f]{64}$'`),
+  check(
+    `${prefix}_package_hash_format`,
+    sql`${t.packageHash} IS NULL OR ${t.packageHash} ~ '^[0-9a-f]{64}$'`,
+  ),
+  check(
+    `${prefix}_changelog_size`,
+    sql`${t.changelog} IS NULL OR char_length(${t.changelog}) BETWEEN 1 AND ${sql.raw(String(CHANGELOG_MAX))}`,
+  ),
   check(
     `${prefix}_sizes`,
     sql`${t.sizeBytes} > 0 AND ${t.sizeBytes} <= ${sql.raw(String(BUNDLE_MAX_BYTES))} AND ${t.fileCount} > 0 AND ${t.uncompressedBytes} >= 0`,
@@ -115,6 +157,13 @@ export const teamSkills = pgTable(
      * personal skills). Changed by team admins only.
      */
     offerToAll: boolean().notNull().default(false),
+    /**
+     * Access mode (KOBE-308, SK27). Backfilled from `offer_to_all` (true -> `default_on`); the
+     * server keeps the two in step until the resolver reads `access`.
+     */
+    access: skillAccess().notNull().default("available"),
+    /** Archived (SK33): hidden from new use; versions stay resolvable for frozen agents. */
+    archivedAt: timestamp({ withTimezone: true }),
   },
   (t): PgTableExtraConfigValue[] => [
     // (team_id, id): other team tables reference a skill with team_id included (KOBE-29 rule).
@@ -158,6 +207,7 @@ export const teamSkillVersions = pgTable(
       columns: [t.teamId, t.skillId],
       foreignColumns: [teamSkills.teamId, teamSkills.id],
     }),
+    unique("team_skill_versions_semver_unique").on(t.teamId, t.skillId, t.semver),
     ...versionChecks("team_skill_versions", t),
   ],
 );
@@ -176,6 +226,7 @@ export const personalSkillVersions = pgTable(
       columns: [t.skillId],
       foreignColumns: [personalSkills.id],
     }),
+    unique("personal_skill_versions_semver_unique").on(t.skillId, t.semver),
     ...versionChecks("personal_skill_versions", t),
   ],
 );

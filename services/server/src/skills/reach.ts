@@ -221,7 +221,8 @@ export function setOfferToAll(
     }
     await tx
       .update(teamSkills)
-      .set({ offerToAll })
+      // The access mode follows the offer (KOBE-308) until the resolver reads `access` (SK27).
+      .set({ offerToAll, access: offerToAll ? "default_on" : "available" })
       .where(and(eq(teamSkills.teamId, teamId), eq(teamSkills.id, skillId)));
     await recordAudit(tx, {
       action: "skill.offer.changed",

@@ -119,6 +119,7 @@ describe("uploading", () => {
           scope: "team",
           slug: "report-writer",
           version: 1,
+          semver: "0.1.0",
           bundleHash: hash,
           bytes: canonical.length,
           files: 2,
@@ -226,8 +227,8 @@ describe("failed uploads and limits", () => {
     );
     await h.admin.query(
       `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
-         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
-       VALUES ($1, $2, 500, '{}', 'zip', $3, 'k', 1, 1, 1, $4)`,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+       VALUES ($1, $2, 500, '{}', 'zip', $3, 'k', 1, 1, 1, $4, '0.500.0', 500)`,
       [finance, maxed.rows[0]?.id, "e".repeat(64), uid],
     );
     const bytes = zipOf("maxed", { "x.md": "new" });
@@ -330,7 +331,7 @@ describe("bundle download", () => {
       expect(sha256Hex(res.bytes)).toBe(hash);
       expect(res.headers.get("content-type")).toBe("application/zip");
       expect(res.headers.get("content-disposition")).toMatch(
-        /^attachment; filename="dl-team-v1\.zip"$/,
+        /^attachment; filename="dl-team-v0\.1\.0\.zip"$/,
       );
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
       expect(res.headers.get("cache-control")).toBe("private, no-store");

@@ -10,7 +10,10 @@ export interface SkillSummary {
   readonly scope: SkillScope;
   readonly slug: string;
   readonly description: string;
+  /** Sequence number of the latest version (paths and downloads use it). */
   readonly latestVersion: number;
+  /** MAJOR.MINOR.PATCH of the latest version (KOBE-308): what the UI shows. */
+  readonly latestSemver: string;
   readonly ownerUserId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -18,6 +21,7 @@ export interface SkillSummary {
 
 export interface SkillVersionInfo {
   readonly version: number;
+  readonly semver: string;
   readonly contentHash: string;
   readonly sizeBytes: number;
   readonly fileCount: number;

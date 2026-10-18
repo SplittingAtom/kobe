@@ -11,19 +11,22 @@ import {
   withTeam,
   type KobeDb,
   type KobeTx,
+  type SkillAccess,
   type SkillSource,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
 import { isBlocked } from "./blocklist.js";
 import { recordPendingReview, recordPersonalScan } from "./review.js";
+import { legacySemver, nextSemver, parseSemver } from "./semver.js";
 
 /**
  * Skill bundles in the database (KOBE-78). Team skills live in RLS tables and are always touched
  * inside `withTeam`; personal skills live in site-wide tables, where the owner filter below is
  * the only wall between users, so every personal query applies it. Each upload is one immutable
  * version (the database refuses to change or delete it); uploads to a location are serialized by
- * an advisory lock, so version numbers are consecutive and the slug cap holds.
+ * an advisory lock, so version numbers are consecutive and the slug cap holds. Each version also
+ * has a semver (KOBE-308, SK14) that must rise with its sequence number (`seq`, the version number).
  */
 export type SkillLocation =
   | { readonly scope: "team"; readonly teamId: string }
@@ -37,13 +40,23 @@ export interface SkillRecord {
   readonly slug: string;
   readonly description: string;
   readonly latestVersion: number;
+  /** Semver of the latest version (KOBE-308). */
+  readonly latestSemver: string;
+  /** Access mode of a team skill (KOBE-308, SK27); null for personal skills. */
+  readonly access: SkillAccess | null;
+  readonly archivedAt: Date | null;
   readonly ownerUserId: string;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
 
 export interface SkillVersionRecord {
+  /** The version number; `seq` is the same number under the name catalog versions share. */
   readonly version: number;
+  readonly seq: number;
+  readonly semver: string;
+  readonly changelog: string | null;
+  readonly packageHash: string | null;
   readonly frontmatter: Record<string, unknown>;
   readonly source: SkillSource;
   readonly contentHash: string;
@@ -68,12 +81,17 @@ export interface NewSkillVersion {
   readonly uploadedBy: string;
   /** Scanner result for these exact bytes (KOBE-80). */
   readonly scan: ScanResult;
+  /** Requested semver; by default the next minor of the latest (0.1.0 for a new skill). */
+  readonly semver?: string;
+  readonly changelog?: string;
 }
 
-export type UploadError = "unchanged" | "skill_limit" | "version_limit" | "blocklisted";
+export type UploadError =
+  "unchanged" | "skill_limit" | "version_limit" | "blocklisted" | "semver_not_increasing";
 export type UploadResult =
   | { readonly ok: true; readonly skill: SkillRecord; readonly version: SkillVersionRecord }
-  | { readonly ok: false; readonly error: UploadError };
+  | { readonly ok: false; readonly error: Exclude<UploadError, "semver_not_increasing"> }
+  | { readonly ok: false; readonly error: "semver_not_increasing"; readonly latest: string };
 
 function inLocation<T>(db: KobeDb, location: SkillLocation, fn: (tx: KobeTx) => Promise<T>) {
   return location.scope === "team"
@@ -87,13 +105,21 @@ const lockKey = (l: SkillLocation) =>
 type TeamRow = typeof teamSkills.$inferSelect;
 type PersonalRow = typeof personalSkills.$inferSelect;
 
-function toRecord(scope: SkillScope, row: TeamRow | PersonalRow): SkillRecord {
+function toRecord(
+  scope: SkillScope,
+  row: TeamRow | PersonalRow,
+  latestSemver: string | null,
+): SkillRecord {
+  const team = "access" in row ? row : null;
   return {
     id: row.id,
     scope,
     slug: row.slug,
     description: row.description,
     latestVersion: row.latestVersion,
+    latestSemver: latestSemver ?? legacySemver(row.latestVersion),
+    access: team?.access ?? null,
+    archivedAt: team?.archivedAt ?? null,
     ownerUserId: row.ownerUserId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -110,19 +136,26 @@ export function uploadSkillVersion(
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`);
     if (await isBlocked(tx, input.contentHash)) return { ok: false, error: "blocklisted" };
     const existing = await findBySlug(tx, location, input.slug);
+    const latest = existing
+      ? await versionOf(tx, location, existing.id, existing.latestVersion)
+      : null;
     if (existing) {
-      const latest = await versionOf(tx, location, existing.id, existing.latestVersion);
       if (latest?.contentHash === input.contentHash) return { ok: false, error: "unchanged" };
       if (existing.latestVersion >= MAX_SKILL_VERSIONS)
         return { ok: false, error: "version_limit" };
     } else if ((await countSkills(tx, location)) >= MAX_LIVE_SKILLS) {
       return { ok: false, error: "skill_limit" };
     }
+    const semver = nextSemver(latest?.semver ?? null, input.semver);
+    if (!semver.ok) return { ok: false, error: "semver_not_increasing", latest: semver.latest };
     const skill = existing
-      ? await bumpSkill(tx, location, existing, input)
-      : await insertSkill(tx, location, input);
+      ? await bumpSkill(tx, location, existing, input, semver.semver)
+      : await insertSkill(tx, location, input, semver.semver);
     const number = skill.latestVersion;
-    const version = await insertVersion(tx, location, skill.id, number, input);
+    const version = await insertVersion(tx, location, skill.id, number, {
+      ...input,
+      semver: semver.semver,
+    });
     if (location.scope === "team") {
       await recordPendingReview(
         tx,
@@ -146,6 +179,7 @@ export function uploadSkillVersion(
         scope: location.scope,
         slug: skill.slug,
         version: number,
+        semver: version.semver,
         bundleHash: input.contentHash,
         bytes: input.sizeBytes,
         files: input.fileCount,
@@ -163,17 +197,41 @@ async function findBySlug(
   slug: string,
 ): Promise<SkillRecord | null> {
   if (location.scope === "team") {
-    const [row] = await tx.select().from(teamSkills).where(eq(teamSkills.slug, slug));
-    return row ? toRecord("team", row) : null;
+    const [row] = await selectTeamSkills(tx).where(eq(teamSkills.slug, slug));
+    return row ? toRecord("team", row.skill, row.semver) : null;
   }
-  const [row] = await tx
-    .select()
-    .from(personalSkills)
-    .where(
-      and(eq(personalSkills.ownerUserId, location.ownerUserId), eq(personalSkills.slug, slug)),
-    );
-  return row ? toRecord("personal", row) : null;
+  const [row] = await selectPersonalSkills(tx).where(
+    and(eq(personalSkills.ownerUserId, location.ownerUserId), eq(personalSkills.slug, slug)),
+  );
+  return row ? toRecord("personal", row.skill, row.semver) : null;
 }
+
+/** Team skills with their latest version's semver (RLS: inside `withTeam`). */
+const selectTeamSkills = (tx: KobeTx) =>
+  tx
+    .select({ skill: teamSkills, semver: teamSkillVersions.semver })
+    .from(teamSkills)
+    .leftJoin(
+      teamSkillVersions,
+      and(
+        eq(teamSkillVersions.teamId, teamSkills.teamId),
+        eq(teamSkillVersions.skillId, teamSkills.id),
+        eq(teamSkillVersions.version, teamSkills.latestVersion),
+      ),
+    );
+
+/** Personal skills with their latest version's semver; callers add the owner filter. */
+const selectPersonalSkills = (tx: KobeTx) =>
+  tx
+    .select({ skill: personalSkills, semver: personalSkillVersions.semver })
+    .from(personalSkills)
+    .leftJoin(
+      personalSkillVersions,
+      and(
+        eq(personalSkillVersions.skillId, personalSkills.id),
+        eq(personalSkillVersions.version, personalSkills.latestVersion),
+      ),
+    );
 
 async function countSkills(tx: KobeTx, location: SkillLocation): Promise<number> {
   const rows =
@@ -190,6 +248,7 @@ async function insertSkill(
   tx: KobeTx,
   location: SkillLocation,
   input: NewSkillVersion,
+  semver: string,
 ): Promise<SkillRecord> {
   const values = { slug: input.slug, description: input.description };
   const [row] =
@@ -203,7 +262,7 @@ async function insertSkill(
           .values({ ...values, ownerUserId: location.ownerUserId })
           .returning();
   if (!row) throw new Error("skill insert returned no row");
-  return toRecord(location.scope, row);
+  return toRecord(location.scope, row, semver);
 }
 
 async function bumpSkill(
@@ -211,6 +270,7 @@ async function bumpSkill(
   location: SkillLocation,
   skill: SkillRecord,
   input: NewSkillVersion,
+  semver: string,
 ): Promise<SkillRecord> {
   const set = {
     description: input.description,
@@ -231,7 +291,7 @@ async function bumpSkill(
           )
           .returning();
   if (!row) throw new Error("skill update returned no row");
-  return toRecord(location.scope, row);
+  return toRecord(location.scope, row, semver);
 }
 
 async function insertVersion(
@@ -239,11 +299,14 @@ async function insertVersion(
   location: SkillLocation,
   skillId: string,
   version: number,
-  input: NewSkillVersion,
+  input: NewSkillVersion & { readonly semver: string },
 ): Promise<SkillVersionRecord> {
   const values = {
     skillId,
     version,
+    seq: version,
+    semver: input.semver,
+    changelog: input.changelog ?? null,
     frontmatter: input.frontmatter,
     source: input.source,
     contentHash: input.contentHash,
@@ -267,6 +330,11 @@ async function insertVersion(
 function toVersion(row: typeof personalSkillVersions.$inferSelect): SkillVersionRecord {
   return {
     version: row.version,
+    // Never null after migration 0130 (SQL checks); the fallbacks only satisfy the types.
+    seq: row.seq ?? row.version,
+    semver: row.semver ?? legacySemver(row.version),
+    changelog: row.changelog,
+    packageHash: row.packageHash,
     frontmatter: row.frontmatter,
     source: row.source,
     contentHash: row.contentHash,
@@ -283,13 +351,11 @@ export function listSkills(db: KobeDb, location: SkillLocation): Promise<SkillRe
   return inLocation(db, location, async (tx) => {
     const rows =
       location.scope === "team"
-        ? await tx.select().from(teamSkills).orderBy(teamSkills.slug)
-        : await tx
-            .select()
-            .from(personalSkills)
+        ? await selectTeamSkills(tx).orderBy(teamSkills.slug)
+        : await selectPersonalSkills(tx)
             .where(eq(personalSkills.ownerUserId, location.ownerUserId))
             .orderBy(personalSkills.slug);
-    return rows.map((r) => toRecord(location.scope, r));
+    return rows.map((r) => toRecord(location.scope, r.skill, r.semver));
   });
 }
 
@@ -303,17 +369,16 @@ export function findSkill(
 
 async function findById(tx: KobeTx, location: SkillLocation, id: string) {
   if (location.scope === "team") {
-    const [row] = await tx.select().from(teamSkills).where(eq(teamSkills.id, id));
-    return row ? toRecord("team", row) : null;
+    const [row] = await selectTeamSkills(tx).where(eq(teamSkills.id, id));
+    return row ? toRecord("team", row.skill, row.semver) : null;
   }
-  const [row] = await tx
-    .select()
-    .from(personalSkills)
-    .where(and(eq(personalSkills.id, id), eq(personalSkills.ownerUserId, location.ownerUserId)));
-  return row ? toRecord("personal", row) : null;
+  const [row] = await selectPersonalSkills(tx).where(
+    and(eq(personalSkills.id, id), eq(personalSkills.ownerUserId, location.ownerUserId)),
+  );
+  return row ? toRecord("personal", row.skill, row.semver) : null;
 }
 
-/** Versions of a skill, newest first; empty if the caller can't see the skill. */
+/** Versions of a skill, newest (highest seq) first; empty if the caller can't see the skill. */
 export function listSkillVersions(
   db: KobeDb,
   location: SkillLocation,
@@ -327,25 +392,52 @@ export function listSkillVersions(
             .select()
             .from(teamSkillVersions)
             .where(eq(teamSkillVersions.skillId, skillId))
-            .orderBy(desc(teamSkillVersions.version))
+            .orderBy(desc(teamSkillVersions.seq))
         : await tx
             .select()
             .from(personalSkillVersions)
             .where(eq(personalSkillVersions.skillId, skillId))
-            .orderBy(desc(personalSkillVersions.version));
+            .orderBy(desc(personalSkillVersions.seq));
     return rows.map(toVersion);
   });
 }
 
+/** A version by its number (seq) or its semver; null if absent or the caller can't see it. */
 export function getSkillVersion(
   db: KobeDb,
   location: SkillLocation,
   skillId: string,
-  version: number,
+  version: number | string,
 ): Promise<SkillVersionRecord | null> {
-  return inLocation(db, location, async (tx) =>
-    (await findById(tx, location, skillId)) ? versionOf(tx, location, skillId, version) : null,
-  );
+  return inLocation(db, location, async (tx) => {
+    if (!(await findById(tx, location, skillId))) return null;
+    if (typeof version === "number") return versionOf(tx, location, skillId, version);
+    return parseSemver(version) ? versionBySemver(tx, location, skillId, version) : null;
+  });
+}
+
+async function versionBySemver(
+  tx: KobeTx,
+  location: SkillLocation,
+  skillId: string,
+  semver: string,
+): Promise<SkillVersionRecord | null> {
+  const [row] =
+    location.scope === "team"
+      ? await tx
+          .select()
+          .from(teamSkillVersions)
+          .where(and(eq(teamSkillVersions.skillId, skillId), eq(teamSkillVersions.semver, semver)))
+      : await tx
+          .select()
+          .from(personalSkillVersions)
+          .where(
+            and(
+              eq(personalSkillVersions.skillId, skillId),
+              eq(personalSkillVersions.semver, semver),
+            ),
+          );
+  return row ? toVersion(row) : null;
 }
 
 async function versionOf(
