@@ -28,6 +28,7 @@ import { useModalLayer } from "./use-modal-layer";
 import { RailTeam, RailTeamIcon } from "./rail-team";
 import { RailThreads } from "./rail-threads";
 import styles from "./rail.module.css";
+import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
 const SECTION_IDS = { threads: "kobe-rail-threads", files: "kobe-rail-files" } as const;
 
@@ -69,16 +70,25 @@ function CollapsedIcons({
     <div className={styles.icons} hidden={!rail.collapsed}>
       <RailTeamIcon teams={teams} teamName={teamName} />
       <ThreadListPrimitive.New asChild>
-        <IconAction command="new-thread" side="right" />
+        <IconAction
+          command="new-thread"
+          side="right"
+          variant={RAIL_ACTION_VARIANT}
+          className={RAIL_ACTION}
+        />
       </ThreadListPrimitive.New>
       <IconAction
         command="show-threads"
         side="right"
+        variant={RAIL_ACTION_VARIANT}
+        className={RAIL_ACTION}
         onClick={() => rail.reveal("threads", { toggle: true })}
       />
       <IconAction
         command="show-files"
         side="right"
+        variant={RAIL_ACTION_VARIANT}
+        className={RAIL_ACTION}
         onClick={() => rail.reveal("files", { toggle: true })}
       />
     </div>
@@ -94,7 +104,8 @@ function PanelToggle({ rail, section }: { readonly rail: RailApi; readonly secti
       command={section === "threads" ? "rail-threads" : "rail-files"}
       size="sm"
       side="bottom"
-      className="size-7"
+      variant={RAIL_ACTION_VARIANT}
+      className={`size-7 ${RAIL_ACTION}`}
       shortcut={section === "files" ? shortcutOf("files") : null}
       aria-pressed={on}
       aria-controls={SECTION_IDS[section]}
@@ -109,7 +120,15 @@ function PanelToggle({ rail, section }: { readonly rail: RailApi; readonly secti
 function TeamConsoleLink() {
   const consoles = useOpenConsoles();
   if (!consoles.includes("team")) return null;
-  return <IconAction command="team-console" size="sm" side="bottom" className="size-7" />;
+  return (
+    <IconAction
+      command="team-console"
+      size="sm"
+      side="bottom"
+      variant={RAIL_ACTION_VARIANT}
+      className={`size-7 ${RAIL_ACTION}`}
+    />
+  );
 }
 
 /**
@@ -138,7 +157,8 @@ function RailHeader({
             label={rail.drawer ? "Close the workspace" : undefined}
             side="right"
             size="sm"
-            className="size-7"
+            variant={RAIL_ACTION_VARIANT}
+            className={`size-7 ${RAIL_ACTION}`}
             aria-expanded
             aria-controls="kobe-rail-sections"
             onClick={() => rail.toggle(true)}
@@ -210,7 +230,14 @@ function RailFiles({
           Files
         </h3>
         {rail.filesRequests > 0 && (
-          <IconAction command="refresh-files" size="sm" side="right" onClick={request} />
+          <IconAction
+            command="refresh-files"
+            size="sm"
+            side="right"
+            variant={RAIL_ACTION_VARIANT}
+            className={RAIL_ACTION}
+            onClick={request}
+          />
         )}
       </div>
       <RailDropNotice status={drop} />
