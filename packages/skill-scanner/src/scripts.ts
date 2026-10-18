@@ -40,19 +40,37 @@ const RUNS = new RegExp(
     String.raw`(?:^|[;&|(\x60"'])[ \t]*(?:source|\.)[ \t]+[\w./~$"']`,
     String.raw`(?:^|[\s;&|(\x60"'])\.\/\w`,
   ].join("|"),
+  "i",
 );
 /** Path-shaped tokens on such a line. */
 const PATH_TOKEN = /[\w.\-/]{1,256}/g;
-const MAX_LINE_SCAN = 4096;
+/** Lines are read in windows of this many characters (overlapping), never cut. */
+const WINDOW = 4096;
+const WINDOW_OVERLAP = 512;
 const MAX_REFERENCES = 1000;
 
-const normalise = (p: string) => p.replace(/^(?:\.\/)+/, "");
+/** `./a//b.txt.` → `a/b.txt`: leading `./`, doubled slashes and trailing punctuation dropped. */
+const normalise = (p: string) =>
+  p
+    .replace(/\/{2,}/g, "/")
+    .replace(/^(?:\.\/)+/, "")
+    .replace(/[.,:;)]+$/, "");
+
+function* windows(line: string): Generator<string> {
+  for (let at = 0; at < line.length; at += WINDOW - WINDOW_OVERLAP) {
+    yield line.slice(at, at + WINDOW);
+    if (at + WINDOW >= line.length) return;
+  }
+}
 
 /**
  * The bundle files that some text in the bundle runs, directly or as an interpreter's input: a
  * path of the bundle named on a line that runs something, as written, relative (`./x`), or under
- * an install directory (`/skills/demo/x`). Bounded: the first {@link MAX_LINE_SCAN} characters
- * of each line, at most {@link MAX_REFERENCES} hits.
+ * an install directory (`/skills/demo/x`). Bounded: lines in windows of {@link WINDOW}
+ * characters, at most {@link MAX_REFERENCES} hits. This only decides which files are listed as
+ * scripts (and whether a Markdown file gets the script rules): every other text file gets the
+ * script rules anyway (KOBE-313 review A-S1), since whether prose "runs" a file can't be inferred
+ * completely.
  */
 export function runReferences(texts: Iterable<string>, paths: readonly string[]): Set<string> {
   const known = new Set(paths);
@@ -69,16 +87,27 @@ export function runReferences(texts: Iterable<string>, paths: readonly string[])
   };
   for (const text of texts) {
     for (const full of text.split(/\r?\n/)) {
-      const line = full.slice(0, MAX_LINE_SCAN);
-      if (!RUNS.test(line)) continue;
-      for (const [token] of line.matchAll(PATH_TOKEN)) {
-        const hit = match(token);
-        if (hit) found.add(hit);
-        if (found.size >= MAX_REFERENCES) return found;
+      for (const line of windows(full)) {
+        if (!RUNS.test(line)) continue;
+        for (const [token] of line.matchAll(PATH_TOKEN)) {
+          const hit = match(token);
+          if (hit) found.add(hit);
+          if (found.size >= MAX_REFERENCES) return found;
+        }
       }
     }
   }
   return found;
+}
+
+const MARKDOWN = new Set(["md", "markdown", "mdx"]);
+
+/**
+ * Whether the script rules (network, installs, obfuscation) run on a text file: every file but
+ * Markdown prose, which gets them only when it is itself a script (KOBE-313 review A-S1).
+ */
+export function getsScriptRules(file: ScanFile, refs: ReadonlySet<string>): boolean {
+  return !MARKDOWN.has(extensionOf(file.path)) || isScript(file, refs);
 }
 
 export function isScript(file: ScanFile, refs: ReadonlySet<string>): boolean {

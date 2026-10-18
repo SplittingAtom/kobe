@@ -1,6 +1,6 @@
 import { extensionOf, fileTypeRule, isAssetExtension } from "./files.js";
 import { INVISIBLE } from "./prose.js";
-import { isScript, runReferences } from "./scripts.js";
+import { getsScriptRules, isScript, runReferences } from "./scripts.js";
 import { scanText } from "./text.js";
 import {
   RULE_SET_VERSION,
@@ -114,14 +114,16 @@ export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
     .filter((f) => texts.has(f.path) && isScript(f, refs))
     .map((f) => f.path)
     .sort();
-  const scriptSet = new Set(scripts);
+  const scriptRules = new Set(
+    files.filter((f) => texts.has(f.path) && getsScriptRules(f, refs)).map((f) => f.path),
+  );
   for (const [path, text] of texts) {
     const budget = SCAN_LIMITS.maxFindings - c.cautions.length;
     if (budget <= 0) {
       c.truncatedAt ??= path;
       continue;
     }
-    const r = scanText(path, text, scriptSet.has(path), budget);
+    const r = scanText(path, text, scriptRules.has(path), budget);
     c.cautions.push(...r.findings);
     if (r.truncated) c.truncatedAt ??= path;
   }

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { unzipSync } from "fflate";
 import { z } from "zod";
-import { scanSkillBundle, storedVerdict, type ScanResult, type Verdict } from "@kobe/skill-scanner";
+import { RULE_SET, storedVerdict, type ScanResult, type Verdict } from "@kobe/skill-scanner";
 import {
   and,
   asc,
@@ -27,6 +26,7 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { blockedAmong, isBlocked } from "./blocklist.js";
+import { scanPool } from "./scan-pool.js";
 import { legacySemver } from "./semver.js";
 
 /**
@@ -40,10 +40,12 @@ import { legacySemver } from "./semver.js";
  * (versions are immutable), so the queue reads one table.
  */
 
-/** Scans the files of a canonical zip (the exact bytes that are stored and hashed). */
-export function scanCanonicalZip(zip: Uint8Array): ScanResult {
-  const entries = unzipSync(zip);
-  return scanSkillBundle(Object.entries(entries).map(([path, bytes]) => ({ path, bytes })));
+/**
+ * Scans the files of a canonical zip (the exact bytes that are stored and hashed), in a worker
+ * thread off the event loop (KOBE-313 review A-S2); a scan that runs out of time is Block.
+ */
+export function scanCanonicalZip(zip: Uint8Array): Promise<ScanResult> {
+  return scanPool().scan(zip);
 }
 
 /** The columns a scan fills in a review row or personal scan row. */
@@ -52,7 +54,8 @@ export const storedScan = (scan: ScanResult) => ({
   findings: scan.findings.map((f) => ({ ...f })),
   scripts: [...scan.scripts],
   skipped: [...scan.skipped],
-  ruleSetVersion: scan.ruleSetVersion,
+  // The rule set this process scans with (KOBE-313): its ordinal, so rescans compare and move forward.
+  ruleSet: RULE_SET,
 });
 
 /** Creates the pending review row of a just-inserted team version (inside its transaction). */
@@ -527,7 +530,7 @@ export async function personalSkillUsage(
         findings: personalSkillScans.findings,
         scripts: personalSkillScans.scripts,
         skipped: personalSkillScans.skipped,
-        ruleSetVersion: personalSkillScans.ruleSetVersion,
+        ruleSet: personalSkillScans.ruleSet,
         suspendedAt: personalSkillScans.suspendedAt,
       },
     })
@@ -594,7 +597,7 @@ export async function personalSkillUsage(
             findings: r.scan?.findings ?? [],
             scripts: r.scan?.scripts ?? [],
             skipped: r.scan?.skipped ?? [],
-            ruleSetVersion: r.scan?.ruleSetVersion ?? null,
+            ruleSet: r.scan?.ruleSet ?? null,
           })),
         )
         .onConflictDoNothing();
@@ -678,7 +681,7 @@ export async function scanUnscanned(db: KobeDb, blobs: BlobStore, teamId: string
     try {
       const bytes = await readBytes(blobs, row.key);
       if (!bytes) continue;
-      const scan = storedScan(scanCanonicalZip(bytes));
+      const scan = storedScan(await scanCanonicalZip(bytes));
       await withTeam(db, teamId, (tx) =>
         tx
           .update(teamSkillReviews)

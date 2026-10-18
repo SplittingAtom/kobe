@@ -10,6 +10,8 @@ export interface RescanSuspension {
 }
 
 export interface SkillRescan {
+  /** The rule set's ordinal. */
+  readonly ruleSet: number;
   readonly ruleSetVersion: string;
   readonly status: "running" | "done" | "failed";
   readonly startedAt: string;

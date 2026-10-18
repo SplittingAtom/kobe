@@ -1,48 +1,49 @@
-import { RULE_SET_VERSION, storedVerdict, type ScanResult } from "@kobe/skill-scanner";
+import { RULE_SET, RULE_SET_VERSION } from "@kobe/skill-scanner";
 import {
   RESCAN_SUSPENDED_MAX,
-  SYSTEM_ACTOR,
-  and,
-  asc,
   eq,
-  personalSkillScans,
-  personalSkills,
-  personalSkillVersions,
+  gt,
   skillRescanRuns,
   sql,
-  teamSkillReviews,
-  teamSkillVersions,
   teams,
-  withTeam,
   type KobeDatabase,
   type KobeDb,
   type RescanSuspension,
-  type StoredFinding,
 } from "@kobe/db";
 import type { Logger } from "pino";
-import { recordAudit } from "../audit/record.js";
 import type { Mailer } from "../mail/mailer.js";
 import type { BlobStore } from "../retention/blobs.js";
-import { readVerified } from "./blob-read.js";
-import { notifySuspensions, type SuspendedVersion } from "./rescan-notify.js";
-import { scanCanonicalZip, storedScan } from "./review.js";
+import { ScanCache } from "./rescan-cache.js";
+import { sendPendingPersonal, sendPendingTeam, type SuspendedVersion } from "./rescan-notify.js";
+import {
+  anyStale,
+  emptyTally,
+  personalBatch,
+  teamBatch,
+  type RowContext,
+  type Tally,
+} from "./rescan-rows.js";
 
 /**
- * Rescans on a scanner rule-set change (KOBE-313, spec SK32). Every stored scan records its rule
- * set; one whose rule set is not the current one (null: before KOBE-313) is redone from the stored
- * bundle: personal versions' own scans, then every team's review rows (team versions, and personal
- * versions reviewed in that team). Catalog versions have no stored bundle yet (their submission
- * flow comes with the Registry review); `registry_versions.suspended_at` is ready for them.
+ * Rescans on a scanner rule-set change (KOBE-313, spec SK32). Every stored scan records the rule
+ * set's ordinal (`RULE_SET`); a scan under an older one (null: before KOBE-313) is redone from the
+ * stored bundle: personal versions' own scans, then every team's review rows (team versions, and
+ * personal versions reviewed in that team). Catalog versions have no stored bundle yet (KOBE-333).
  *
- * One rescan per rule set across replicas: a session advisory lock (the lease) and a
- * `skill_rescan_runs` row per rule set, which holds progress and the result for the Site console.
+ * Lease: a session advisory lock on a dedicated connection, so one replica at a time. Each tick
+ * runs a pass, even after the rule set's run is `done`: pods of the previous release keep writing
+ * old-rule scans during a rolling deploy, and a pass with nothing to do costs one query per team.
+ * A pod whose rule set is older than the newest recorded run does nothing, and rows only ever move
+ * forward, so an old pod never rescans rows down. Progress (counts, suspensions) is written to the
+ * `skill_rescan_runs` row after every batch, and suspension emails go out of the row outbox after
+ * every batch, so a crash loses neither.
+ *
  * A version a rescan newly turns Block is suspended: an approved review row goes back to `pending`
- * with `suspended_at` (runs omit the skill as `suspended` until it is decided again), a personal
- * version that ran unreviewed (Pass) gets `suspended_at` on its scan (it now needs each team's
- * approval). Each suspension is audited, and its author and team admins are emailed.
+ * with `suspended_at` (runs omit the skill as `suspended` until it is decided again); a personal
+ * version that ran unreviewed (Pass) gets `suspended_at` on its scan (it then needs each team's
+ * approval). Each suspension is audited (`skill.rescan.suspended`).
  */
 const RESCAN_LOCK = "kobe.skills.rescan";
-const BATCH = 50;
 
 export interface RescanDeps {
   readonly database: KobeDatabase;
@@ -51,298 +52,20 @@ export interface RescanDeps {
   readonly mailer?: Mailer;
   readonly publicUrl?: string;
   /** The rule set to rescan to (tests); defaults to the scanner's. */
+  readonly ruleSet?: number;
   readonly ruleSetVersion?: string;
 }
 
 export interface RescanReport {
+  readonly ruleSet: number;
   readonly ruleSetVersion: string;
-  /** False when this rule set's rescan was already done (nothing to do). */
+  /** False when this pod's rule set is older than the newest recorded rescan (nothing done). */
   readonly ran: boolean;
+  /** Scans redone by this pass. */
   readonly scanned: number;
-  readonly changed: number;
   readonly suspended: number;
   readonly failed: number;
-}
-
-/** What one pass did; written to the run row after every batch. */
-interface Pass {
-  scanned: number;
-  changed: number;
-  failed: number;
-  readonly suspended: SuspendedVersion[];
-}
-
-interface StoredBundle {
-  readonly storageKey: string;
-  readonly packageStorageKey: string | null;
-  readonly contentHash: string;
-  readonly packageHash: string | null;
-  readonly sizeBytes: number;
-}
-
-/** Scans a stored version's whole package (or its runtime zip), verified; null if unreadable. */
-async function scanStored(
-  blobs: BlobStore,
-  v: StoredBundle,
-  cache: Map<string, ScanResult | null>,
-): Promise<ScanResult | null> {
-  const key = v.packageStorageKey ?? v.storageKey;
-  if (cache.has(key)) return cache.get(key) ?? null;
-  const bytes =
-    v.packageStorageKey && v.packageHash
-      ? await readVerified(blobs, v.packageStorageKey, v.packageHash, null)
-      : await readVerified(blobs, v.storageKey, v.contentHash, v.sizeBytes);
-  const result = bytes ? scanCanonicalZip(bytes) : null;
-  cache.set(key, result);
-  return result;
-}
-
-const stale = (
-  column: typeof teamSkillReviews.ruleSetVersion | typeof personalSkillScans.ruleSetVersion,
-  v: string,
-) => sql`${column} IS DISTINCT FROM ${v}`;
-
-const bundleColumns = (t: typeof teamSkillVersions | typeof personalSkillVersions) => ({
-  storageKey: t.storageKey,
-  packageStorageKey: t.packageStorageKey,
-  contentHash: t.contentHash,
-  packageHash: t.packageHash,
-  sizeBytes: t.sizeBytes,
-});
-
-/** Personal versions' own scans (site-wide). */
-async function rescanPersonal(
-  deps: RescanDeps,
-  v: string,
-  pass: Pass,
-  cache: Map<string, ScanResult | null>,
-) {
-  const db = deps.database.db;
-  let after: { skillId: string; version: number } | undefined;
-  for (;;) {
-    const rows = await db
-      .select({
-        skillId: personalSkillScans.skillId,
-        version: personalSkillScans.version,
-        findings: personalSkillScans.findings,
-        skipped: personalSkillScans.skipped,
-        slug: personalSkills.slug,
-        ownerId: personalSkills.ownerUserId,
-        ...bundleColumns(personalSkillVersions),
-      })
-      .from(personalSkillScans)
-      .innerJoin(
-        personalSkillVersions,
-        and(
-          eq(personalSkillVersions.skillId, personalSkillScans.skillId),
-          eq(personalSkillVersions.version, personalSkillScans.version),
-        ),
-      )
-      .innerJoin(personalSkills, eq(personalSkills.id, personalSkillScans.skillId))
-      .where(
-        and(
-          stale(personalSkillScans.ruleSetVersion, v),
-          after
-            ? sql`(${personalSkillScans.skillId}, ${personalSkillScans.version}) > (${after.skillId}::uuid, ${after.version})`
-            : undefined,
-        ),
-      )
-      .orderBy(asc(personalSkillScans.skillId), asc(personalSkillScans.version))
-      .limit(BATCH);
-    if (rows.length === 0) return;
-    for (const row of rows) {
-      const scan = await scanStored(deps.blobs, row, cache).catch(() => null);
-      if (!scan) {
-        pass.failed += 1;
-        continue;
-      }
-      const before = storedVerdict(row);
-      // A Pass version ran in every team without review: Block now needs each team's approval.
-      const suspend = before === "pass" && scan.verdict === "block";
-      await db.transaction(async (tx) => {
-        const updated = await tx
-          .update(personalSkillScans)
-          .set({
-            ...storedScan(scan),
-            ruleSetVersion: v,
-            scannedAt: new Date(),
-            ...(suspend ? { suspendedAt: new Date() } : {}),
-          })
-          .where(
-            and(
-              eq(personalSkillScans.skillId, row.skillId),
-              eq(personalSkillScans.version, row.version),
-              stale(personalSkillScans.ruleSetVersion, v),
-            ),
-          )
-          .returning({ skillId: personalSkillScans.skillId });
-        if (updated.length === 0) return;
-        pass.scanned += 1;
-        if (before !== scan.verdict) pass.changed += 1;
-        if (!suspend) return;
-        const at = { skillId: row.skillId, slug: row.slug, version: row.version };
-        await recordAudit(tx, {
-          action: "skill.rescan.suspended",
-          actor: SYSTEM_ACTOR,
-          target: { ...at, scope: "personal", ruleSetVersion: v },
-        });
-        pass.suspended.push({ ...at, scope: "personal", authorId: row.ownerId });
-      });
-    }
-    const last = rows.at(-1);
-    after = last ? { skillId: last.skillId, version: last.version } : undefined;
-  }
-}
-
-interface ReviewRow {
-  readonly skillId: string;
-  readonly version: number;
-  readonly scope: "team" | "personal";
-  readonly slug: string;
-  readonly status: string;
-  readonly findings: StoredFinding[];
-  readonly skipped: string[];
-}
-
-/** The bundle and author of one review row's version (team table inside `withTeam`). */
-async function versionOf(db: KobeDb, teamId: string, row: ReviewRow) {
-  if (row.scope === "team") {
-    const [v] = await withTeam(db, teamId, (tx) =>
-      tx
-        .select({ ...bundleColumns(teamSkillVersions), authorId: teamSkillVersions.uploadedBy })
-        .from(teamSkillVersions)
-        .where(
-          and(
-            eq(teamSkillVersions.teamId, teamId),
-            eq(teamSkillVersions.skillId, row.skillId),
-            eq(teamSkillVersions.version, row.version),
-          ),
-        ),
-    );
-    return v;
-  }
-  const [v] = await db
-    .select({ ...bundleColumns(personalSkillVersions), authorId: personalSkills.ownerUserId })
-    .from(personalSkillVersions)
-    .innerJoin(personalSkills, eq(personalSkills.id, personalSkillVersions.skillId))
-    .where(
-      and(
-        eq(personalSkillVersions.skillId, row.skillId),
-        eq(personalSkillVersions.version, row.version),
-      ),
-    );
-  return v;
-}
-
-/** One team's review rows, under its RLS. */
-async function rescanTeam(
-  deps: RescanDeps,
-  v: string,
-  teamId: string,
-  pass: Pass,
-  cache: Map<string, ScanResult | null>,
-) {
-  const db = deps.database.db;
-  const key = (r: { skillId: string; version: number }) =>
-    and(
-      eq(teamSkillReviews.teamId, teamId),
-      eq(teamSkillReviews.skillId, r.skillId),
-      eq(teamSkillReviews.version, r.version),
-    );
-  let after: { skillId: string; version: number } | undefined;
-  for (;;) {
-    const rows: ReviewRow[] = await withTeam(db, teamId, (tx) =>
-      tx
-        .select({
-          skillId: teamSkillReviews.skillId,
-          version: teamSkillReviews.version,
-          scope: teamSkillReviews.scope,
-          slug: teamSkillReviews.slug,
-          status: teamSkillReviews.status,
-          findings: teamSkillReviews.findings,
-          skipped: teamSkillReviews.skipped,
-        })
-        .from(teamSkillReviews)
-        .where(
-          and(
-            eq(teamSkillReviews.teamId, teamId),
-            eq(teamSkillReviews.unscanned, false),
-            stale(teamSkillReviews.ruleSetVersion, v),
-            after
-              ? sql`(${teamSkillReviews.skillId}, ${teamSkillReviews.version}) > (${after.skillId}::uuid, ${after.version})`
-              : undefined,
-          ),
-        )
-        .orderBy(asc(teamSkillReviews.skillId), asc(teamSkillReviews.version))
-        .limit(BATCH),
-    );
-    if (rows.length === 0) return;
-    for (const row of rows) {
-      const version = await versionOf(db, teamId, row);
-      const scan = version ? await scanStored(deps.blobs, version, cache).catch(() => null) : null;
-      if (!version || !scan) {
-        pass.failed += 1;
-        continue;
-      }
-      const before = storedVerdict(row);
-      const suspend = row.status === "approved" && scan.verdict === "block" && before !== "block";
-      await withTeam(db, teamId, async (tx) => {
-        const updated = await tx
-          .update(teamSkillReviews)
-          .set({
-            ...storedScan(scan),
-            ruleSetVersion: v,
-            scannedAt: new Date(),
-            ...(suspend
-              ? {
-                  status: "pending" as const,
-                  reviewedBy: null,
-                  reviewedAt: null,
-                  suspendedAt: new Date(),
-                }
-              : {}),
-          })
-          .where(
-            and(
-              key(row),
-              stale(teamSkillReviews.ruleSetVersion, v),
-              sql`${teamSkillReviews.status} = ${row.status}`,
-            ),
-          )
-          .returning({ skillId: teamSkillReviews.skillId });
-        if (updated.length === 0) return;
-        pass.scanned += 1;
-        if (before !== scan.verdict) pass.changed += 1;
-        if (!suspend) return;
-        const at = { skillId: row.skillId, slug: row.slug, version: row.version };
-        await recordAudit(tx, {
-          action: "skill.rescan.suspended",
-          actor: SYSTEM_ACTOR,
-          teamId,
-          target: { ...at, scope: row.scope, ruleSetVersion: v },
-        });
-        pass.suspended.push({ ...at, scope: row.scope, teamId, authorId: version.authorId });
-      });
-    }
-    const last = rows.at(-1);
-    after = last ? { skillId: last.skillId, version: last.version } : undefined;
-  }
-}
-
-/** The run row of this rule set: created, or reopened when an earlier pass left failures. */
-async function openRun(db: KobeDb, v: string) {
-  await db.insert(skillRescanRuns).values({ ruleSetVersion: v }).onConflictDoNothing();
-  const [run] = await db
-    .select()
-    .from(skillRescanRuns)
-    .where(eq(skillRescanRuns.ruleSetVersion, v));
-  if (!run) throw new Error("skills: rescan run row missing");
-  if (run.status === "done") return run;
-  await db
-    .update(skillRescanRuns)
-    .set({ status: "running", finishedAt: null, failed: 0 })
-    .where(eq(skillRescanRuns.id, run.id));
-  return { ...run, status: "running" as const, failed: 0 };
+  readonly status: "running" | "done" | "failed";
 }
 
 const suspensionOf = (s: SuspendedVersion): RescanSuspension => ({
@@ -353,64 +76,115 @@ const suspensionOf = (s: SuspendedVersion): RescanSuspension => ({
   slug: s.slug,
 });
 
-/** One full pass for the rule set, when no other replica holds the lease. */
-async function runPass(deps: RescanDeps, v: string): Promise<RescanReport> {
-  const db = deps.database.db;
-  const run = await openRun(db, v);
-  if (run.status === "done") {
-    const { scanned, changed, suspended, failed } = run;
-    return { ruleSetVersion: v, ran: false, scanned, changed, suspended, failed };
-  }
-  const pass: Pass = { scanned: 0, changed: 0, failed: 0, suspended: [] };
-  const cache = new Map<string, ScanResult | null>();
-  await rescanPersonal(deps, v, pass, cache);
-  for (const team of await db.select({ id: teams.id }).from(teams)) {
-    await rescanTeam(deps, v, team.id, pass, cache);
-  }
-  const suspensions = [...(run.suspensions ?? []), ...pass.suspended.map(suspensionOf)].slice(
-    0,
-    RESCAN_SUSPENDED_MAX,
-  );
-  const [done] = await db
+/** The run row of this rule set (created on first use); null when a newer rule set has one. */
+async function openRun(db: KobeDb, ruleSet: number, ruleSetVersion: string) {
+  const [newer] = await db
+    .select({ ruleSet: skillRescanRuns.ruleSet })
+    .from(skillRescanRuns)
+    .where(gt(skillRescanRuns.ruleSet, ruleSet))
+    .limit(1);
+  if (newer) return null;
+  await db.insert(skillRescanRuns).values({ ruleSet, ruleSetVersion }).onConflictDoNothing();
+  const [run] = await db.select().from(skillRescanRuns).where(eq(skillRescanRuns.ruleSet, ruleSet));
+  if (!run) throw new Error("skills: rescan run row missing");
+  return run;
+}
+
+/** Adds one batch's work to the run row (the console's progress); the run is `running` again. */
+async function flush(db: KobeDb, runId: string, tally: Tally): Promise<void> {
+  if (tally.scanned === 0 && tally.failed === 0 && tally.suspended.length === 0) return;
+  const added = JSON.stringify(tally.suspended.map(suspensionOf));
+  await db
     .update(skillRescanRuns)
     .set({
-      status: pass.failed > 0 ? "failed" : "done",
-      finishedAt: new Date(),
-      scanned: sql`${skillRescanRuns.scanned} + ${pass.scanned}`,
-      changed: sql`${skillRescanRuns.changed} + ${pass.changed}`,
-      suspended: sql`${skillRescanRuns.suspended} + ${pass.suspended.length}`,
-      failed: pass.failed,
-      suspensions,
+      status: "running",
+      finishedAt: null,
+      scanned: sql`${skillRescanRuns.scanned} + ${tally.scanned}`,
+      changed: sql`${skillRescanRuns.changed} + ${tally.changed}`,
+      suspended: sql`${skillRescanRuns.suspended} + ${tally.suspended.length}`,
+      suspensions: sql`coalesce((SELECT jsonb_agg(e) FROM (
+          SELECT e FROM jsonb_array_elements(${skillRescanRuns.suspensions} || ${added}::jsonb) e
+          LIMIT ${RESCAN_SUSPENDED_MAX}) kept), '[]'::jsonb)`,
     })
-    .where(eq(skillRescanRuns.id, run.id))
-    .returning();
-  deps.log.info(
-    {
-      ruleSetVersion: v,
-      scanned: pass.scanned,
-      suspended: pass.suspended.length,
-      failed: pass.failed,
-    },
-    "skills: rescan pass finished",
-  );
-  if (deps.mailer && deps.publicUrl)
-    await notifySuspensions({ db, mailer: deps.mailer, publicUrl: deps.publicUrl }, pass.suspended);
-  return {
-    ruleSetVersion: v,
-    ran: true,
-    scanned: done?.scanned ?? pass.scanned,
-    changed: done?.changed ?? pass.changed,
-    suspended: done?.suspended ?? pass.suspended.length,
-    failed: pass.failed,
+    .where(eq(skillRescanRuns.id, runId));
+}
+
+/** One pass under the lease. */
+async function runPass(
+  deps: RescanDeps,
+  ruleSet: number,
+  ruleSetVersion: string,
+): Promise<RescanReport> {
+  const db = deps.database.db;
+  const run = await openRun(db, ruleSet, ruleSetVersion);
+  if (!run) {
+    deps.log.warn({ ruleSet }, "skills: a newer scanner rule set has rescanned; this pod skips");
+    return {
+      ruleSet,
+      ruleSetVersion,
+      ran: false,
+      scanned: 0,
+      suspended: 0,
+      failed: 0,
+      status: "done",
+    };
+  }
+  const ctx: RowContext = {
+    db,
+    blobs: deps.blobs,
+    log: deps.log,
+    ruleSet,
+    ruleSetVersion,
+    cache: new ScanCache(),
   };
+  const notify =
+    deps.mailer && deps.publicUrl ? { db, mailer: deps.mailer, publicUrl: deps.publicUrl } : null;
+  const totals = { scanned: 0, suspended: 0, failed: 0 };
+  const batchDone = async (tally: Tally, teamId?: string) => {
+    await flush(db, run.id, tally);
+    totals.scanned += tally.scanned;
+    totals.suspended += tally.suspended.length;
+    totals.failed += tally.failed;
+    if (notify) await (teamId ? sendPendingTeam(notify, teamId) : sendPendingPersonal(notify));
+  };
+
+  let after: { skillId: string; version: number } | undefined;
+  do {
+    const tally = emptyTally();
+    after = await personalBatch(ctx, tally, after);
+    await batchDone(tally);
+  } while (after);
+  const teamIds = (await db.select({ id: teams.id }).from(teams)).map((t) => t.id);
+  for (const teamId of teamIds) {
+    let next: { skillId: string; version: number } | undefined;
+    do {
+      const tally = emptyTally();
+      next = await teamBatch(ctx, teamId, tally, next);
+      await batchDone(tally, teamId);
+    } while (next);
+  }
+
+  // Rows written meanwhile (or left by failures) keep the run open; the next tick takes them.
+  const left = await anyStale(ctx, teamIds);
+  const status = totals.failed > 0 ? "failed" : left ? "running" : "done";
+  if (totals.scanned > 0 || totals.failed > 0 || run.status !== status) {
+    await db
+      .update(skillRescanRuns)
+      .set({ status, finishedAt: status === "running" ? null : new Date(), failed: totals.failed })
+      .where(eq(skillRescanRuns.id, run.id));
+  }
+  if (totals.scanned > 0 || totals.failed > 0)
+    deps.log.info({ ruleSet, ...totals, status }, "skills: rescan pass finished");
+  return { ruleSet, ruleSetVersion, ran: true, ...totals, status };
 }
 
 /**
- * The rescan for the current rule set, on this replica if no other holds the lease (a session
- * advisory lock on a dedicated connection). Null when another replica holds it.
+ * One rescan pass for the current rule set, on this replica if no other holds the lease (a
+ * session advisory lock on a dedicated connection). Null when another replica holds it.
  */
 export async function rescanOnce(deps: RescanDeps): Promise<RescanReport | null> {
-  const v = deps.ruleSetVersion ?? RULE_SET_VERSION;
+  const ruleSet = deps.ruleSet ?? RULE_SET;
+  const ruleSetVersion = deps.ruleSetVersion ?? RULE_SET_VERSION;
   const client = await deps.database.pool.connect();
   let destroy = false;
   try {
@@ -420,7 +194,7 @@ export async function rescanOnce(deps: RescanDeps): Promise<RescanReport | null>
     );
     if (!rows[0]?.locked) return null;
     try {
-      return await runPass(deps, v);
+      return await runPass(deps, ruleSet, ruleSetVersion);
     } finally {
       await client
         .query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [RESCAN_LOCK])
@@ -434,7 +208,7 @@ export async function rescanOnce(deps: RescanDeps): Promise<RescanReport | null>
   }
 }
 
-/** How often each server checks whether the current rule set's rescan is done (cheap once it is). */
+/** How often each server runs a pass (cheap when nothing is stale). */
 export const RESCAN_EVERY_MS = 10 * 60_000;
 
 /** Runs {@link rescanOnce} now and every {@link RESCAN_EVERY_MS}; returns a stop function. */

@@ -1,4 +1,4 @@
-import { RULE_SET_VERSION } from "@kobe/skill-scanner";
+import { RULE_SET, RULE_SET_VERSION } from "@kobe/skill-scanner";
 import { desc, skillRescanRuns } from "@kobe/db";
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
@@ -19,11 +19,13 @@ export function siteSkillRescanRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     const rows = await deps.database.db
       .select()
       .from(skillRescanRuns)
-      .orderBy(desc(skillRescanRuns.startedAt))
+      .orderBy(desc(skillRescanRuns.ruleSet))
       .limit(SHOWN);
     return c.json({
       current: RULE_SET_VERSION,
+      currentRuleSet: RULE_SET,
       rescans: rows.map((r) => ({
+        ruleSet: r.ruleSet,
         ruleSetVersion: r.ruleSetVersion,
         status: r.status,
         startedAt: r.startedAt,

@@ -2,8 +2,15 @@ import {
   and,
   eq,
   inArray,
+  isNotNull,
   isNull,
+  or,
+  personalSkillScans,
+  personalSkills,
+  sql,
   teamMembers,
+  teamSkillReviews,
+  teamSkillVersions,
   teams,
   users,
   withTeam,
@@ -14,7 +21,12 @@ import { CONSOLE_PATHS } from "../mail/console-paths.js";
 import type { Mailer, MailMessage } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 
-/** One suspended version and who is told about it (KOBE-313). */
+/**
+ * Emails about versions a rescan suspended (KOBE-313). The rows are the outbox: a suspension sets
+ * `suspended_at` with `suspension_notified_at` null, and these senders email every such row and then
+ * stamp it, so a crash between the suspension and the email loses neither (at least once). Ids,
+ * slugs and versions only; never findings or content.
+ */
 export interface SuspendedVersion {
   readonly scope: "team" | "personal";
   /** The team whose approved review row was suspended; absent for a personal version's own scan. */
@@ -26,9 +38,20 @@ export interface SuspendedVersion {
   readonly authorId: string;
 }
 
-const MAX_LINES = 20;
+export interface NotifyDeps {
+  readonly db: KobeDb;
+  readonly mailer: Mailer;
+  readonly publicUrl: string;
+}
 
-/** Recipients by user id: the author, and the team's admins for a team review row. */
+const MAX_LINES = 20;
+const OUTBOX_BATCH = 100;
+
+/**
+ * Recipients by user id: the author, and for a team row the team's admins. An author who is no
+ * longer a member of that team is not told about it (the email names the team). Teams are read
+ * one after another, each under its own RLS.
+ */
 async function recipients(
   db: KobeDb,
   items: readonly SuspendedVersion[],
@@ -36,25 +59,33 @@ async function recipients(
   const byUser = new Map<string, SuspendedVersion[]>();
   const add = (userId: string, item: SuspendedVersion) =>
     byUser.set(userId, [...(byUser.get(userId) ?? []), item]);
-  const teamIds = [...new Set(items.flatMap((i) => (i.teamId ? [i.teamId] : [])))];
-  // Memberships are team rows: read each team's admins under its own RLS.
-  const admins = (
-    await Promise.all(
-      teamIds.map((teamId) =>
-        withTeam(db, teamId, (tx) =>
-          tx
-            .select({ teamId: teamMembers.teamId, userId: teamMembers.userId })
-            .from(teamMembers)
-            .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.role, "team_admin"))),
+  const members = new Map<string, { userId: string; role: string }[]>();
+  for (const teamId of new Set(items.flatMap((i) => (i.teamId ? [i.teamId] : [])))) {
+    const authors = items.filter((i) => i.teamId === teamId).map((i) => i.authorId);
+    const rows = await withTeam(db, teamId, (tx) =>
+      tx
+        .select({ userId: teamMembers.userId, role: teamMembers.role })
+        .from(teamMembers)
+        .where(
+          and(
+            eq(teamMembers.teamId, teamId),
+            or(eq(teamMembers.role, "team_admin"), inArray(teamMembers.userId, authors)),
+          ),
         ),
-      ),
-    )
-  ).flat();
+    );
+    members.set(teamId, rows);
+  }
   for (const item of items) {
-    const people = new Set([
-      item.authorId,
-      ...admins.filter((a) => a.teamId === item.teamId).map((a) => a.userId),
-    ]);
+    if (!item.teamId) {
+      add(item.authorId, item);
+      continue;
+    }
+    const team = members.get(item.teamId) ?? [];
+    const people = new Set(
+      team
+        .filter((m) => m.role === "team_admin" || m.userId === item.authorId)
+        .map((m) => m.userId),
+    );
     for (const userId of people) add(userId, item);
   }
   return byUser;
@@ -86,44 +117,131 @@ export function suspensionMessage(
   };
 }
 
-/**
- * Emails each author and each affected team's admins once per rescan pass about the versions it
- * suspended (ids, slugs and versions; never findings or content). Best effort: a failed send is
- * logged (the audit log and the Site console keep the record). Returns the emails sent.
- */
+/** Emails each recipient once about their items. Returns the emails sent; failures are logged. */
 export async function notifySuspensions(
-  deps: { readonly db: KobeDb; readonly mailer: Mailer; readonly publicUrl: string },
+  deps: NotifyDeps,
   items: readonly SuspendedVersion[],
 ): Promise<number> {
   if (items.length === 0) return 0;
-  try {
-    const byUser = await recipients(deps.db, items);
-    const people = await deps.db
-      .select({ id: users.id, email: users.email })
-      .from(users)
-      .where(and(inArray(users.id, [...byUser.keys()]), isNull(users.deactivatedAt)));
-    const teamIds = [...new Set(items.flatMap((i) => (i.teamId ? [i.teamId] : [])))];
-    const names =
-      teamIds.length === 0
-        ? []
-        : await deps.db
-            .select({ id: teams.id, name: teams.name })
-            .from(teams)
-            .where(inArray(teams.id, teamIds));
-    const teamNames = new Map(names.map((t) => [t.id, t.name]));
-    let sent = 0;
-    for (const person of people) {
-      try {
-        const mine = byUser.get(person.id) ?? [];
-        await deps.mailer.send(suspensionMessage(deps.publicUrl, mine, teamNames, person.email));
-        sent += 1;
-      } catch (err) {
-        logger.warn({ err, userId: person.id }, "skills: rescan suspension email failed");
-      }
+  const byUser = await recipients(deps.db, items);
+  if (byUser.size === 0) return 0;
+  const people = await deps.db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(and(inArray(users.id, [...byUser.keys()]), isNull(users.deactivatedAt)));
+  const teamIds = [...new Set(items.flatMap((i) => (i.teamId ? [i.teamId] : [])))];
+  const names =
+    teamIds.length === 0
+      ? []
+      : await deps.db
+          .select({ id: teams.id, name: teams.name })
+          .from(teams)
+          .where(inArray(teams.id, teamIds));
+  const teamNames = new Map(names.map((t) => [t.id, t.name]));
+  let sent = 0;
+  for (const person of people) {
+    try {
+      const mine = byUser.get(person.id) ?? [];
+      await deps.mailer.send(suspensionMessage(deps.publicUrl, mine, teamNames, person.email));
+      sent += 1;
+    } catch (err) {
+      logger.warn({ err, userId: person.id }, "skills: rescan suspension email failed");
     }
-    return sent;
-  } catch (err) {
-    logger.error({ err }, "skills: rescan suspension notices failed");
-    return 0;
   }
+  return sent;
+}
+
+/** Sends the pending emails of personal versions' own suspensions, then stamps them. */
+export async function sendPendingPersonal(deps: NotifyDeps): Promise<number> {
+  const rows = await deps.db
+    .select({
+      skillId: personalSkillScans.skillId,
+      version: personalSkillScans.version,
+      slug: personalSkills.slug,
+      authorId: personalSkills.ownerUserId,
+    })
+    .from(personalSkillScans)
+    .innerJoin(personalSkills, eq(personalSkills.id, personalSkillScans.skillId))
+    .where(
+      and(
+        isNotNull(personalSkillScans.suspendedAt),
+        isNull(personalSkillScans.suspensionNotifiedAt),
+      ),
+    )
+    .limit(OUTBOX_BATCH);
+  if (rows.length === 0) return 0;
+  const sent = await notifySuspensions(
+    deps,
+    rows.map((r) => ({ ...r, scope: "personal" as const })),
+  );
+  for (const r of rows)
+    await deps.db
+      .update(personalSkillScans)
+      .set({ suspensionNotifiedAt: new Date() })
+      .where(
+        and(
+          eq(personalSkillScans.skillId, r.skillId),
+          eq(personalSkillScans.version, r.version),
+          isNull(personalSkillScans.suspensionNotifiedAt),
+        ),
+      );
+  return sent;
+}
+
+/** Sends the pending emails of a team's suspended review rows, then stamps them. */
+export async function sendPendingTeam(deps: NotifyDeps, teamId: string): Promise<number> {
+  const rows = await withTeam(deps.db, teamId, (tx) =>
+    tx
+      .select({
+        skillId: teamSkillReviews.skillId,
+        version: teamSkillReviews.version,
+        scope: teamSkillReviews.scope,
+        slug: teamSkillReviews.slug,
+        teamAuthor: teamSkillVersions.uploadedBy,
+        personalAuthor: personalSkills.ownerUserId,
+      })
+      .from(teamSkillReviews)
+      .leftJoin(
+        teamSkillVersions,
+        and(
+          eq(teamSkillVersions.teamId, teamSkillReviews.teamId),
+          eq(teamSkillVersions.skillId, teamSkillReviews.skillId),
+          eq(teamSkillVersions.version, teamSkillReviews.version),
+        ),
+      )
+      .leftJoin(personalSkills, eq(personalSkills.id, teamSkillReviews.skillId))
+      .where(
+        and(
+          eq(teamSkillReviews.teamId, teamId),
+          isNotNull(teamSkillReviews.suspendedAt),
+          isNull(teamSkillReviews.suspensionNotifiedAt),
+        ),
+      )
+      .limit(OUTBOX_BATCH),
+  );
+  if (rows.length === 0) return 0;
+  const items = rows.flatMap((r) => {
+    const authorId = r.scope === "team" ? r.teamAuthor : r.personalAuthor;
+    return authorId
+      ? [{ teamId, skillId: r.skillId, version: r.version, slug: r.slug, scope: r.scope, authorId }]
+      : [];
+  });
+  const sent = await notifySuspensions(deps, items);
+  await withTeam(deps.db, teamId, (tx) =>
+    tx
+      .update(teamSkillReviews)
+      .set({ suspensionNotifiedAt: new Date() })
+      .where(
+        and(
+          eq(teamSkillReviews.teamId, teamId),
+          isNotNull(teamSkillReviews.suspendedAt),
+          isNull(teamSkillReviews.suspensionNotifiedAt),
+          sql`(${teamSkillReviews.skillId}, ${teamSkillReviews.version}) IN (${sql.join(
+            rows.map((r) => sql`(${r.skillId}::uuid, ${r.version})`),
+            sql`, `,
+          )})`,
+        ),
+      ),
+  );
+  return sent;
 }

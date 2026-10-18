@@ -24,7 +24,13 @@ export type Verdict = "pass" | Severity;
  * The rule set the findings come from. Bump it whenever a rule, its severity or a limit changes:
  * stored scans from another rule set are rescanned (SK32).
  */
-export const RULE_SET_VERSION = "2026.10.18.3";
+export const RULE_SET_VERSION = "2026.10.18.4";
+
+/**
+ * The rule set's ordinal: bump it with {@link RULE_SET_VERSION}. Stored scans compare by it, and
+ * rescans only ever move a scan forward (a pod with an older scanner never rescans rows down).
+ */
+export const RULE_SET = 4;
 
 export interface ScanFile {
   readonly path: string;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { zipSync, strToU8 } from "fflate";
-import { RULE_SET_VERSION } from "@kobe/skill-scanner";
+import { RULE_SET, RULE_SET_VERSION } from "@kobe/skill-scanner";
 import { withTeam } from "@kobe/db";
 import { logger } from "./logger.js";
 import { loadSkillFacts } from "./runs/resolver-input.js";
@@ -40,19 +40,20 @@ const zipOf = (name: string, extra: Record<string, Uint8Array> = {}) =>
 async function asOldScan(table: "team_skill_reviews" | "personal_skill_scans", skillId: string) {
   await h.admin.query(
     `UPDATE ${table} SET findings = '[]', flagged = false, skipped = '["assets/logo.png"]',
-       rule_set_version = NULL WHERE skill_id = $1`,
+       rule_set = NULL WHERE skill_id = $1`,
     [skillId],
   );
 }
 
-const rescan = (ruleSetVersion: string) =>
+const rescan = (ruleSet: number) =>
   rescanOnce({
     database: h.deps.database,
     blobs: h.deps.blobs as NonNullable<typeof h.deps.blobs>,
     log: logger,
     mailer: h.mailer,
     publicUrl: "https://kobe.test",
-    ruleSetVersion,
+    ruleSet,
+    ruleSetVersion: `test-${ruleSet}`,
   });
 
 async function facts(userId: string, names: string[]) {
@@ -109,15 +110,15 @@ describe("scans record their rule set", () => {
     expect(mine.status, JSON.stringify(mine.json)).toBe(201);
     personalSkill = mine.json.skill.id;
     const team = await h.admin.query(
-      `SELECT rule_set_version FROM team_skill_reviews WHERE skill_id = $1`,
+      `SELECT rule_set FROM team_skill_reviews WHERE skill_id = $1`,
       [teamSkill],
     );
     const personal = await h.admin.query(
-      `SELECT rule_set_version FROM personal_skill_scans WHERE skill_id = $1`,
+      `SELECT rule_set FROM personal_skill_scans WHERE skill_id = $1`,
       [personalSkill],
     );
-    expect(team.rows).toEqual([{ rule_set_version: RULE_SET_VERSION }]);
-    expect(personal.rows).toEqual([{ rule_set_version: RULE_SET_VERSION }]);
+    expect(team.rows).toEqual([{ rule_set: RULE_SET }]);
+    expect(personal.rows).toEqual([{ rule_set: RULE_SET }]);
   });
 });
 
@@ -147,33 +148,29 @@ describe("rescan on a rule-set change", () => {
     expect(before.agent.map((s) => s.name)).toEqual(["hidden-elf"]);
     expect(before.user.map((s) => s.name)).toEqual(["my-helper"]);
 
-    // Two replicas at once: one rescan.
-    const reports = await Promise.all([rescan("test-2"), rescan("test-2")]);
-    const ran = reports.filter((r) => r?.ran);
-    expect(ran).toHaveLength(1);
+    // Two replicas at once: one rescan (the second waits out the lease or finds nothing left).
+    await Promise.all([rescan(1000), rescan(1000)]);
     const runs = await h.admin.query(
-      `SELECT rule_set_version, status, scanned, suspended, failed, suspensions
-         FROM skill_rescan_runs WHERE rule_set_version = 'test-2'`,
+      `SELECT rule_set, status, scanned, suspended, failed, suspensions
+         FROM skill_rescan_runs WHERE rule_set = 1000`,
     );
     expect(runs.rows).toHaveLength(1);
-    expect(runs.rows[0]).toMatchObject({ status: "done", failed: 0, suspended: 2 });
-    const scanned = runs.rows[0].scanned as number;
-    expect(scanned).toBeGreaterThanOrEqual(4);
-    expect((await rescan("test-2"))?.ran ?? false).toBe(false);
+    expect(runs.rows[0]).toMatchObject({ status: "done", failed: 0, suspended: 2, scanned: 4 });
+    expect((await rescan(1000))?.scanned).toBe(0);
     const again = await h.admin.query(
-      `SELECT scanned FROM skill_rescan_runs WHERE rule_set_version = 'test-2'`,
+      `SELECT scanned FROM skill_rescan_runs WHERE rule_set = 1000`,
     );
-    expect(again.rows[0].scanned).toBe(scanned);
+    expect(again.rows[0].scanned).toBe(4);
 
     const row = await h.admin.query(
-      `SELECT status, suspended_at IS NOT NULL AS suspended, rule_set_version, flagged
+      `SELECT status, suspended_at IS NOT NULL AS suspended, rule_set, flagged
          FROM team_skill_reviews WHERE skill_id = $1 AND version = 2`,
       [teamSkill],
     );
     expect(row.rows[0]).toEqual({
       status: "pending",
       suspended: true,
-      rule_set_version: "test-2",
+      rule_set: 1000,
       flagged: true,
     });
     const after = await facts(ids.member, ["hidden-elf"]);
@@ -226,9 +223,7 @@ describe("rescan on a rule-set change", () => {
     expect((await as.admin.get("/v1/site/skill-rescans")).status).toBe(403);
     const res = await as.site.get("/v1/site/skill-rescans");
     expect(res.status, JSON.stringify(res.json)).toBe(200);
-    const run = (res.json.rescans as { ruleSetVersion: string }[]).find(
-      (r) => r.ruleSetVersion === "test-2",
-    );
+    const run = (res.json.rescans as { ruleSet: number }[]).find((r) => r.ruleSet === 1000);
     expect(run).toMatchObject({
       status: "done",
       suspended: 2,
@@ -239,5 +234,85 @@ describe("rescan on a rule-set change", () => {
       ]),
     });
     expect(res.json.current).toBe(RULE_SET_VERSION);
+  });
+});
+
+describe("rescans keep up and only move forward (KOBE-313 review B-S1, B-S4, B-S5)", () => {
+  const reviewRow = (skillId: string) =>
+    h.admin.query(
+      `SELECT status, rule_set, suspended_at IS NOT NULL AS suspended,
+              suspension_notified_at IS NOT NULL AS notified, findings
+         FROM team_skill_reviews WHERE skill_id = $1 ORDER BY version DESC LIMIT 1`,
+      [skillId],
+    );
+
+  it("rescans rows an old pod writes after the run is done", async () => {
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET rule_set = NULL WHERE skill_id = $1 AND version = 1`,
+      [teamSkill],
+    );
+    const report = await rescan(1000);
+    expect(report?.scanned).toBe(1);
+    const row = await h.admin.query(
+      `SELECT rule_set FROM team_skill_reviews WHERE skill_id = $1 AND version = 1`,
+      [teamSkill],
+    );
+    expect(row.rows[0].rule_set).toBe(1000);
+  });
+
+  it("never lets an older rule set rescan rows down", async () => {
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET rule_set = NULL WHERE skill_id = $1 AND version = 1`,
+      [teamSkill],
+    );
+    expect(await rescan(999)).toMatchObject({ ran: false, scanned: 0 });
+    const rows = await h.admin.query(
+      `SELECT rule_set FROM team_skill_reviews WHERE skill_id = $1 ORDER BY version`,
+      [teamSkill],
+    );
+    expect(rows.rows.map((r) => r.rule_set)).toEqual([null, 1000]);
+    await rescan(1000);
+  });
+
+  it("blocks and suspends a version whose stored bundle fails its integrity check", async () => {
+    const up = await as.builder.post("/v1/skills?scope=team", zipOf("tampered"));
+    expect(up.status, JSON.stringify(up.json)).toBe(201);
+    const skillId = up.json.skill.id as string;
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET status = 'approved', reviewed_by = $2, reviewed_at = now(),
+         rule_set = NULL WHERE skill_id = $1`,
+      [skillId, ids.admin],
+    );
+    const { rows } = await h.admin.query(
+      `SELECT coalesce(package_storage_key, storage_key) AS key FROM team_skill_versions
+        WHERE skill_id = $1`,
+      [skillId],
+    );
+    const objects = (h.deps.blobs?.objects as MemoryObjects).objects;
+    const stored = [...objects.keys()].find((k) => k.endsWith(rows[0].key as string));
+    expect(stored).toBeTruthy();
+    objects.set(stored as string, Buffer.from("not the bundle"));
+    await rescan(1000);
+    const row = await reviewRow(skillId);
+    expect(row.rows[0]).toMatchObject({ status: "pending", rule_set: 1000, suspended: true });
+    expect(row.rows[0].findings.map((f: { rule: string }) => f.rule)).toEqual(["bundle-integrity"]);
+  });
+
+  it("sends suspension emails a crash left unsent (the row outbox)", async () => {
+    const up = await as.builder.post("/v1/skills?scope=team", zipOf("unsent"));
+    const skillId = up.json.skill.id as string;
+    // Suspended and audited, then the pod died before emailing.
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET suspended_at = now(), suspension_notified_at = NULL
+        WHERE skill_id = $1`,
+      [skillId],
+    );
+    const before = h.mailer.sent.length;
+    await rescan(1000);
+    const told = h.mailer.sent.slice(before).filter((m) => m.text.includes("unsent"));
+    expect(told.map((m) => m.to).sort()).toEqual(["admin@rescan.test", "builder@rescan.test"]);
+    expect((await reviewRow(skillId)).rows[0].notified).toBe(true);
+    await rescan(1000);
+    expect(h.mailer.sent.slice(before).filter((m) => m.text.includes("unsent"))).toHaveLength(2);
   });
 });

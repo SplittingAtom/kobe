@@ -18,6 +18,7 @@ describe("Skill rescans in the Site console (KOBE-313, ac-3)", () => {
           current: "2026.10.18.3",
           rescans: [
             {
+              ruleSet: 4,
               ruleSetVersion: "2026.10.18.3",
               status: "done",
               startedAt: "2026-10-18T10:00:00.000Z",

@@ -183,7 +183,7 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       const requested = numberingFrom(numbering, bundle);
       if (!requested.ok) return error(c, 400, "invalid_request", requested.message);
       // The whole tree is scanned (SK32), evals/ fixtures included.
-      const scan = scanCanonicalZip(bundle.packageZip ?? bundle.zip);
+      const scan = await scanCanonicalZip(bundle.packageZip ?? bundle.zip);
       const location = locationFor(c, scope.data);
       const result = await store.putPackage(location, {
         bundle,
