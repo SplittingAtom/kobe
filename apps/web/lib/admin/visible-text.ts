@@ -5,8 +5,9 @@
  * (@kobe/skill-scanner prose.ts): format and bidi controls, zero-width characters, the BOM, tag
  * characters and variation selectors (all, here: a diff isn't the place for emoji presentation).
  */
-// eslint-disable-next-line no-misleading-character-class
 const INVISIBLE =
+  // The combining marks in the class are matched one at a time, on purpose.
+  // eslint-disable-next-line no-misleading-character-class
   /[\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\u2066-\u2069\u3164\ufe00-\ufe0f\ufeff\uffa0\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 
 export interface TextPart {
