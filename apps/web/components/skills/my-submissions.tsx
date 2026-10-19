@@ -1,9 +1,14 @@
 "use client";
 
-import { listMySubmissions, type Submission } from "../../lib/skills/submissions-api";
-import { Badge, Section, type BadgeTone } from "../ui/console";
+import {
+  listMySubmissions,
+  retractSubmission,
+  type Submission,
+} from "../../lib/skills/submissions-api";
+import { Badge, Button, Section, eventTrigger, useConfirm, type BadgeTone } from "../ui/console";
+import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
-import { useResource } from "../admin/use-resource";
+import { useMutation, useResource } from "../admin/use-resource";
 
 const STATES: Readonly<Record<string, { label: string; tone: BadgeTone }>> = {
   submitted: { label: "Waiting for a reviewer", tone: "accent" },
@@ -11,7 +16,10 @@ const STATES: Readonly<Record<string, { label: string; tone: BadgeTone }>> = {
   changes_requested: { label: "Changes requested", tone: "attention" },
   approved: { label: "In the Site catalog", tone: "done" },
   rejected: { label: "Rejected", tone: "failed" },
+  retracted: { label: "Withdrawn", tone: "neutral" },
 };
+
+const OPEN = new Set(["submitted", "in_review", "changes_requested"]);
 
 const NOTE_LABELS: Readonly<Record<string, string>> = {
   changes_requested: "Changes requested",
@@ -20,7 +28,13 @@ const NOTE_LABELS: Readonly<Record<string, string>> = {
   approved: "Approved",
 };
 
-function Row({ s }: { readonly s: Submission }) {
+function Row({
+  s,
+  onWithdraw,
+}: {
+  readonly s: Submission;
+  readonly onWithdraw: (s: Submission, trigger: HTMLElement | null) => void;
+}) {
   const state = STATES[s.state] ?? { label: s.state, tone: "neutral" as const };
   return (
     <li className="mt-2">
@@ -28,6 +42,14 @@ function Row({ s }: { readonly s: Submission }) {
         {s.name} {s.semver}
       </strong>{" "}
       <Badge tone={state.tone}>{state.label}</Badge>{" "}
+      {s.selfApproved && (
+        <Badge
+          tone="attention"
+          title="Approved on a single-admin Site by its submitter or confirming Team admin"
+        >
+          Self-approved
+        </Badge>
+      )}{" "}
       <span className="text-console-muted">
         submitted <DateTime value={s.submittedAt} />
       </span>
@@ -39,6 +61,11 @@ function Row({ s }: { readonly s: Submission }) {
             </li>
           ))}
         </ul>
+      )}
+      {OPEN.has(s.state) && (
+        <Button size="sm" className="ms-2" onClick={(e) => onWithdraw(s, eventTrigger(e))}>
+          Withdraw
+        </Button>
       )}
       {s.state === "changes_requested" && (
         <p className="text-console-muted">
@@ -54,7 +81,27 @@ function Row({ s }: { readonly s: Submission }) {
  * reviewer's note with every decision, so Request changes comes back to where skills are written.
  */
 export function MySubmissions() {
-  const { state } = useResource(() => listMySubmissions());
+  const { state, reload } = useResource(() => listMySubmissions());
+  const mutation = useMutation();
+  const [confirm, confirmDialog] = useConfirm();
+  async function withdraw(s: Submission, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Withdraw ${s.name} ${s.semver} from the Site Registry?`,
+        description: "Reviewers stop reviewing it. A name never approved becomes free for others.",
+        confirmLabel: "Withdraw",
+      },
+      trigger,
+    );
+    if (!yes) return;
+    if (
+      await mutation.run(
+        () => retractSubmission(s.id),
+        () => "Withdrawn.",
+      )
+    )
+      reload();
+  }
   return (
     <Section
       title="My Site submissions"
@@ -67,12 +114,14 @@ export function MySubmissions() {
           ) : (
             <ul className="list-none ps-0">
               {submissions.map((s) => (
-                <Row key={s.id} s={s} />
+                <Row key={s.id} s={s} onWithdraw={(x, t) => void withdraw(x, t)} />
               ))}
             </ul>
           )
         }
       </ResourceView>
+      <MutationStatus error={mutation.error} notice={mutation.notice} />
+      {confirmDialog}
     </Section>
   );
 }

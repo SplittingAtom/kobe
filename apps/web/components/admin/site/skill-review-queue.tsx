@@ -40,6 +40,7 @@ export const FILTER_LABELS: Readonly<Record<QueueFilter, string>> = {
   changes_requested: "Changes requested",
   approved: "Approved",
   rejected: "Rejected",
+  retracted: "Withdrawn by their authors",
   all: "All",
 };
 
@@ -52,6 +53,7 @@ export const STATE_LABELS: Readonly<Record<string, string>> = {
   deprecated: "Deprecated",
   withdrawn: "Withdrawn",
   revoked: "Revoked",
+  retracted: "Withdrawn by its author",
 };
 
 const STATE_TONES: Readonly<Record<string, BadgeTone>> = {
@@ -171,6 +173,11 @@ function QueueRow({ item }: { readonly item: QueueItem }) {
       </TableCell>
       <TableCell>
         <StateBadge state={item.state} />
+        {item.selfApproved && (
+          <Badge tone="attention" className="ms-2">
+            self-approved
+          </Badge>
+        )}
         {item.claimedBy && (
           <span className="ms-2 text-console-muted">claimed by {item.claimedBy.name}</span>
         )}

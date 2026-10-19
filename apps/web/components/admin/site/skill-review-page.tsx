@@ -27,6 +27,8 @@ const ACTIONS: Readonly<Record<string, string>> = {
   changes_requested: "requested changes",
   rejected: "rejected it",
   rejected_and_blocked: "rejected and blocked it",
+  finding_acknowledged: "acknowledged a finding",
+  retracted: "withdrew it",
 };
 
 /**
@@ -73,7 +75,7 @@ export function SkillReviewPage({ versionId }: { readonly versionId: string }) {
               </ResourceView>
             </Section>
             <Section title="Evidence">
-              <ReviewEvidence detail={d} />
+              <ReviewEvidence detail={d} mutation={mutation} onChanged={detail.reload} />
             </Section>
             <ReviewActions
               detail={d}
@@ -149,7 +151,8 @@ function History({ detail }: { readonly detail: ReviewDetail }) {
       </ol>
       <p className="text-console-muted">
         State now: {STATE_LABELS[detail.state] ?? detail.state}
-        {detail.selfApproved && " (approved by its submitter on a single-admin Site)"}
+        {detail.selfApproved &&
+          " (self-approved: by its submitter or confirming Team admin on a single-admin Site)"}
       </p>
     </Section>
   );

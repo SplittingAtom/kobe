@@ -14,6 +14,7 @@ export const QUEUE_FILTERS = [
   "changes_requested",
   "approved",
   "rejected",
+  "retracted",
   "all",
 ] as const;
 export type QueueFilter = (typeof QUEUE_FILTERS)[number];
@@ -38,6 +39,7 @@ export interface QueueItem {
   readonly submittedAt: string;
   readonly claimedBy: Person | null;
   readonly authoritativeScorecard: boolean;
+  readonly selfApproved: boolean;
 }
 
 export interface DiffHunk {
@@ -78,6 +80,17 @@ export interface ScanFinding {
   readonly message?: string;
 }
 
+/** A scan finding; a Caution one is acknowledged before Approve (SK32). */
+export interface ReviewFinding {
+  readonly key: string;
+  readonly rule: string;
+  readonly file: string;
+  readonly line: number;
+  readonly severity: "caution" | "block";
+  readonly category: string | null;
+  readonly acknowledged: { readonly by: Person; readonly at: string } | null;
+}
+
 export interface ReviewEvent {
   readonly action: string;
   readonly actor: Person | null;
@@ -104,6 +117,7 @@ export interface ReviewDetail {
   readonly bump: Bump;
   readonly verdict: string;
   readonly scan: { readonly findings?: readonly ScanFinding[]; readonly rulesVersion?: string };
+  readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
   readonly manifest: Record<string, unknown>;
@@ -161,6 +175,17 @@ export function commentOn(id: string, note: string): Promise<ApiResult<StateAnsw
   return apiRequest(`${BASE}/${encodeURIComponent(id)}/comments`, {
     method: "POST",
     json: { note },
+  });
+}
+
+/** Acknowledges one Caution finding by its key (KOBE-334 review M1). */
+export function acknowledgeFinding(
+  id: string,
+  finding: string,
+): Promise<ApiResult<{ finding: string; acknowledged: boolean }>> {
+  return apiRequest(`${BASE}/${encodeURIComponent(id)}/acknowledgements`, {
+    method: "POST",
+    json: { finding },
   });
 }
 

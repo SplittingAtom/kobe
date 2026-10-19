@@ -1,7 +1,13 @@
 "use client";
 
-import type { ReviewDetail } from "../../../lib/admin/api/site/skill-review";
-import { Badge, EmptyState, Notice, Section } from "../../ui/console";
+import {
+  acknowledgeFinding,
+  type ReviewDetail,
+  type ReviewFinding,
+} from "../../../lib/admin/api/site/skill-review";
+import { visibleParts } from "../../../lib/admin/visible-text";
+import { Badge, Button, EmptyState, Notice, Section } from "../../ui/console";
+import type { Mutation } from "../use-resource";
 import { VERDICT_TONES } from "./skill-review-queue";
 
 const percent = (v: unknown) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "—");
@@ -41,9 +47,67 @@ function Scorecard({ card }: { readonly card: Record<string, unknown> }) {
  * The evidence beside the diff (SK23): scan verdict and findings, the scorecards, capabilities
  * against the site egress ceiling, provenance and similar-name hints.
  */
-export function ReviewEvidence({ detail }: { readonly detail: ReviewDetail }) {
-  const findings = detail.scan.findings ?? [];
+const shown = (text: string) =>
+  visibleParts(text)
+    .map((p) => p.text)
+    .join("");
+
+function Finding({
+  f,
+  open,
+  mutation,
+  onAcknowledge,
+}: {
+  readonly f: ReviewFinding;
+  readonly open: boolean;
+  readonly mutation: Mutation;
+  readonly onAcknowledge: (key: string) => void;
+}) {
+  return (
+    <li>
+      <code>
+        {shown(f.file)}
+        {f.line ? `:${f.line}` : ""}
+      </code>{" "}
+      {f.rule} <Badge tone={f.severity === "block" ? "failed" : "attention"}>{f.severity}</Badge>{" "}
+      {f.severity === "caution" &&
+        (f.acknowledged ? (
+          <span className="text-console-muted">acknowledged by {f.acknowledged.by.name}</span>
+        ) : open ? (
+          <Button
+            size="sm"
+            disabled={mutation.pending}
+            onClick={() => onAcknowledge(f.key)}
+            aria-label={`Acknowledge ${f.rule} in ${shown(f.file)}${f.line ? ` line ${f.line}` : ""}`}
+          >
+            Acknowledge
+          </Button>
+        ) : null)}
+    </li>
+  );
+}
+
+export function ReviewEvidence({
+  detail,
+  mutation,
+  onChanged,
+}: {
+  readonly detail: ReviewDetail;
+  readonly mutation: Mutation;
+  readonly onChanged: () => void;
+}) {
+  const findings = detail.findings;
+  const open = detail.state === "submitted" || detail.state === "in_review";
   const p = detail.provenance as { fromConversation?: boolean };
+  const acknowledge = async (key: string) => {
+    if (
+      await mutation.run(
+        () => acknowledgeFinding(detail.id, key),
+        () => "Acknowledged.",
+      )
+    )
+      onChanged();
+  };
   return (
     <>
       <Section title="Scan" level={3}>
@@ -56,17 +120,20 @@ export function ReviewEvidence({ detail }: { readonly detail: ReviewDetail }) {
         {findings.length === 0 ? (
           <p>No findings.</p>
         ) : (
-          <ul className="list-disc ps-6">
-            {findings.map((f, i) => (
-              <li key={i}>
-                <code>
-                  {f.file}
-                  {f.line ? `:${f.line}` : ""}
-                </code>{" "}
-                {f.rule} {f.message ? `: ${f.message}` : ""}
-              </li>
-            ))}
-          </ul>
+          <>
+            <p>Acknowledge each Caution finding before approving.</p>
+            <ul className="list-disc ps-6">
+              {findings.map((f) => (
+                <Finding
+                  key={f.key}
+                  f={f}
+                  open={open}
+                  mutation={mutation}
+                  onAcknowledge={(k) => void acknowledge(k)}
+                />
+              ))}
+            </ul>
+          </>
         )}
       </Section>
       <Section title="Scorecards" level={3}>

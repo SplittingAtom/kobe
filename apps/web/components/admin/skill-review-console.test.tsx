@@ -45,6 +45,17 @@ const detail = (over: Record<string, unknown> = {}) => ({
     findings: [{ file: "SKILL.md", line: 3, rule: "prerequisite-step" }],
     rules_version: "3",
   },
+  findings: [
+    {
+      key: "prerequisite-step@SKILL.md:3",
+      rule: "prerequisite-step",
+      file: "SKILL.md",
+      line: 3,
+      severity: "caution",
+      category: "prose",
+      acknowledged: null,
+    },
+  ],
   scorecard: { cases: 5, pass_rate_with: 0.8, lift: 0.2 },
   authoritative_scorecard: null,
   manifest: {},
@@ -222,5 +233,27 @@ describe("the review screen (ac-1, ac-2)", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
       `${BASE}/${ID}/claim`,
     ]);
+  });
+
+  it("acknowledges a Caution finding", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}/${ID}`]: [200, detail()],
+      [`GET ${BASE}/${ID}/diff`]: [200, diff],
+      [`POST ${BASE}/${ID}/acknowledgements`]: [
+        200,
+        { finding: "prerequisite-step@SKILL.md:3", acknowledged: true },
+      ],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Acknowledge prerequisite-step in SKILL.md line 3",
+      }),
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith("/acknowledgements"))?.body).toBe(
+        JSON.stringify({ finding: "prerequisite-step@SKILL.md:3" }),
+      ),
+    );
   });
 });
