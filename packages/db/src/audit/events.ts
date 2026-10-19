@@ -658,15 +658,10 @@ export const AUDIT_EVENTS = {
 
   // ── mcp: tool calls through the MCP proxy (KOBE-58, D27, D29); metadata only, never inputs ──
   /**
-   * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
-   * allowed call is recorded before the proxy forwards it; denied calls are throttled per sandbox.
-   * `reason` is the deciding policy reason code (`approval_granted` when a signed approval was
-   * verified and consumed); `approvalFailure` says why an approval did not authorise the call.
-   */
-  /**
    * An MCP App's own `tools/call` under the viewing member's browser principal (KOBE-436, spec §6):
-   * read-only, app-visible tools of the app's connector only. Every decision is recorded, the
-   * denials with their reason. Never arguments, results or credentials.
+   * read-only, app-visible tools of the app's connector only. Every decision is recorded (denials
+   * throttled per member and reason, rate-limit refusals once a minute). Never arguments, results
+   * or credentials.
    */
   "mcp.app_call": event("team", {
     connectorId: id,
@@ -684,6 +679,12 @@ export const AUDIT_EVENTS = {
       .regex(/^[0-9a-f]{64}$/)
       .optional(),
   }),
+  /**
+   * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
+   * allowed call is recorded before the proxy forwards it; denied calls are throttled per sandbox.
+   * `reason` is the deciding policy reason code (`approval_granted` when a signed approval was
+   * verified and consumed); `approvalFailure` says why an approval did not authorise the call.
+   */
   "mcp.tool_call": event("team", {
     sandboxId: id,
     userId: id,

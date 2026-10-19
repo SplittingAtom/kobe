@@ -335,7 +335,7 @@ describe("app template review (KOBE-434)", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("srcdoc")).toBeNull();
     expect(frame.getAttribute("src")).toBe(
-      `${BASE}/c-1/templates/frame?uri=${encodeURIComponent("ui://c/explorer")}&version=live`,
+      `${BASE}/c-1/templates/frame?uri=${encodeURIComponent("ui://c/explorer")}&version=live&sha256=${"3".repeat(64)}`,
     );
     expect(within(card).getByText("3".repeat(64))).toBeTruthy();
 

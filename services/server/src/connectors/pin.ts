@@ -7,6 +7,7 @@ import {
   type PinnedToolUi,
 } from "@kobe/db";
 import { z } from "zod";
+import { schemaWithinLimits } from "./schema-limits.js";
 
 /**
  * Pinning (KOBE-101, spec D27 "rug-pull resistant tool surfaces"): turns a server's live
@@ -116,6 +117,8 @@ export function buildSnapshot(connectorName: string, listed: readonly unknown[])
       const tool = listedToolSchema.safeParse(raw);
       if (!tool.success) return { ok: false, failure: "invalid_tool" };
       const t = tool.data;
+      // Abusive schemas are refused before anyone can approve them (KOBE-436 review HIGH-1).
+      if (!schemaWithinLimits(t.inputSchema)) return { ok: false, failure: "invalid_tool" };
       const ui = uiOf(t._meta);
       const candidate = {
         name: t.name,

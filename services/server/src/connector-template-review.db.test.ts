@@ -143,6 +143,19 @@ describe("template review (KOBE-434)", () => {
     expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
     expect(frame.text).toBe("<p>v2</p>");
     expect((await root.get(frameUrl("ui://r/app", "approved"))).status).toBe(200);
+    // Exactly the bytes the source read showed (review LOW-2), and only into a frame (LOW-1).
+    expect(
+      (await root.get(`${frameUrl("ui://r/app", "live")}&sha256=${sha("<p>v2</p>")}`)).status,
+    ).toBe(200);
+    expect((await root.get(`${frameUrl("ui://r/app", "live")}&sha256=${sha("v1")}`)).status).toBe(
+      409,
+    );
+    expect(
+      (await root.get(frameUrl("ui://r/app", "live"), { "sec-fetch-dest": "document" })).status,
+    ).toBe(403);
+    expect(
+      (await root.get(frameUrl("ui://r/app", "live"), { "sec-fetch-dest": "iframe" })).status,
+    ).toBe(200);
     expect((await root.get(frameUrl("ui://r/bad", "live"))).status).toBe(404);
     expect(
       (await root.get(frameUrl("ui://r/app", "live"), { "sec-fetch-site": "cross-site" })).status,

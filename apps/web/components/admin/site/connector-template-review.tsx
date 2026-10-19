@@ -174,7 +174,10 @@ function TemplateCard({
           <p className="m-0 mt-2 text-sm text-console-muted">
             Preview: the app cannot call any tool here and reaches no server.
           </p>
-          <TemplatePreview uri={t.uri} src={templateFrameUrl(connectorId, t.uri, "live")} />
+          <TemplatePreview
+            uri={t.uri}
+            src={templateFrameUrl(connectorId, t.uri, "live", source.live.sha256)}
+          />
         </>
       ) : null}
     </Card>

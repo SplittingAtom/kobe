@@ -154,8 +154,14 @@ export interface TemplateSource {
  * The admin preview frame of one version (review M2): served by Kobe as text/html with a
  * sandboxing header CSP (opaque origin, no network), like D25 artifacts; never `srcdoc`.
  */
-export const templateFrameUrl = (id: string, uri: string, version: "live" | "approved") =>
-  `${BASE}/${encodeURIComponent(id)}/templates/frame?uri=${encodeURIComponent(uri)}&version=${version}`;
+export const templateFrameUrl = (
+  id: string,
+  uri: string,
+  version: "live" | "approved",
+  /** The bytes the admin's source read showed; the route answers 409 if they changed. */
+  sha256: string,
+) =>
+  `${BASE}/${encodeURIComponent(id)}/templates/frame?uri=${encodeURIComponent(uri)}&version=${version}&sha256=${sha256}`;
 
 export async function listConnectorTemplates(
   id: string,

@@ -53,6 +53,17 @@ const TOOLS = [
   t("preview_table", { ...READ, _meta: { ui: { visibility: ["app"] } } }),
   t("query_sql", { ...READ, _meta: { ui: { visibility: ["model"] } } }),
   t("drop_table", { annotations: { destructiveHint: true } }),
+  {
+    name: "search",
+    description: "search tool",
+    // The review's catastrophic pattern (HIGH-1): exponential on "a"×n + "!".
+    inputSchema: {
+      type: "object",
+      properties: { q: { type: "string", pattern: "^(\\w+\\s?)*$" } },
+    },
+    ...READ,
+    _meta: { ui: { visibility: ["app"] } },
+  },
 ];
 const TEMPLATE = "<!doctype html><p>explorer</p>";
 const RESOURCES = [{ uri: "ui://cat/explorer", mimeType: MIME, text: TEMPLATE, meta: {} }];
@@ -297,6 +308,29 @@ describe("app calls (ac-1, ac-4)", () => {
     await h.admin.query(`DELETE FROM tool_rules WHERE id = $1`, [ask.rows[0]?.id]);
     await rule("team", "deny", "mcp__apps4_rules__*");
     expect((await appCall(alice, appId, "preview_table")).json.error.code).toBe("team_deny_rule");
+  });
+});
+
+describe("hostile inputs (review HIGH-1, MEDIUM-1)", () => {
+  it("refuses a catastrophic pattern within the deadline, audited, and the server keeps answering", async () => {
+    const id = await connector("apps4-redos");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const started = Date.now();
+    const res = await appCall(alice, appId, "search", { q: `${"a".repeat(50)}!` });
+    expect([res.status, res.json.error?.code]).toEqual([422, "invalid_arguments"]);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect((await appCall(alice, appId, "search", { q: "fine words" })).status).toBe(200);
+    expect((await audits(id)).map((r) => r.target.reason)).toEqual([
+      "invalid_arguments",
+      "allowed",
+    ]);
+  });
+
+  it("refuses a body over 96 KiB before parsing it", async () => {
+    const id = await connector("apps4-big");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const res = await appCall(alice, appId, "preview_table", { table: "x".repeat(100 * 1024) });
+    expect(res.status).toBe(413);
   });
 });
 

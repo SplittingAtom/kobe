@@ -15,6 +15,7 @@ import {
   type PinnedTool,
 } from "@kobe/db";
 import { urlSha256 } from "../connectors/site-key.js";
+import { servedTemplate } from "../connectors/template-store.js";
 import { appVisible } from "../connectors/visibility.js";
 import type { TeamConnector } from "../mcp/catalog.js";
 import { loadUserGrantFacts, type GrantFact } from "../runs/run-mcp.js";
@@ -42,7 +43,6 @@ export interface MemberApp {
   readonly connector: MemberAppConnector;
   readonly uri: string;
   readonly sha256: string;
-  readonly html: string;
   /** The tool that opens it: one with no required arguments that apps may call, if any. */
   readonly tool: PinnedTool;
 }
@@ -131,13 +131,15 @@ export function canCall(
   c: MemberAppConnector,
   grants: readonly GrantFact[],
   siteKeys: ReadonlySet<string>,
-  now: Date,
 ): boolean {
   if (c.authKind === "none") return true;
   if (c.credentialSource === "site") return siteKeys.has(c.id);
   const g = grants.find((x) => x.connectorId === c.id);
   if (g === undefined || g.kind !== c.authKind) return false;
-  return g.kind !== "oauth" || g.expiresAt === null || g.expiresAt.getTime() > now.getTime();
+  // An expired OAuth access token may still refresh (MA8, review LOW-4): the grant's sealed bundle
+  // says whether it can, and only the reveal at call time opens it, refreshes, or refuses
+  // (`credential_unavailable`). So any grant of the connector's kind counts here.
+  return true;
 }
 
 const requiredArgs = (t: PinnedTool): number => {
@@ -156,23 +158,17 @@ function openingTool(c: MemberAppConnector, uri: string): PinnedTool | undefined
   return [...candidates].sort((a, b) => rank(a) - rank(b) || (a.name < b.name ? -1 : 1))[0];
 }
 
-/** Every app live for the member in the team (MA8), with its connector and approved bytes. */
-export async function memberApps(
-  db: KobeDb,
-  teamId: string,
-  userId: string,
-  now: Date = new Date(),
-): Promise<MemberApp[]> {
+/** Every app live for the member in the team (MA8), with its connector (no template bytes). */
+export async function memberApps(db: KobeDb, teamId: string, userId: string): Promise<MemberApp[]> {
   const { rows, grants } = await enabledConnectors(db, teamId, userId);
   const siteKeys = await liveSiteKeys(db, rows);
-  const callable = rows.filter((c) => canCall(c, grants, siteKeys, now));
+  const callable = rows.filter((c) => canCall(c, grants, siteKeys));
   if (callable.length === 0) return [];
   const templates = await db
     .select({
       connectorId: connectorUiResources.connectorId,
       uri: connectorUiResources.uri,
       sha256: connectorUiResources.sha256,
-      html: connectorUiResources.html,
     })
     .from(connectorUiResources)
     .where(
@@ -197,7 +193,6 @@ export async function memberApps(
       connector,
       uri: t.uri,
       sha256: t.sha256,
-      html: t.html,
       tool,
     });
   }
@@ -214,10 +209,28 @@ export async function memberApp(
   return (await memberApps(db, teamId, userId)).find((a) => a.appId === appId);
 }
 
+/** The approved bytes of a member's app (only `/template` reads them; review LOW-3). */
+export async function memberAppHtml(db: KobeDb, app: MemberApp): Promise<string | undefined> {
+  return (await servedTemplate(db, app.connector.id, app.uri))?.html;
+}
+
+/**
+ * appId → connectorId per database (review LOW-3): hits are served for a minute; a miss reads
+ * the ids again (URIs only, no bytes). Callers are behind the per-member rate limit, and the
+ * rate-limited path asks at most once a minute per member.
+ */
+const APP_ID_TTL_MS = 60_000;
+const appIdCache = new WeakMap<KobeDb, { at: number; ids: Map<string, string> }>();
+
 /** The connector an app id names, site-wide (for auditing a refusal), or undefined. */
 export async function appConnectorOf(db: KobeDb, appId: string): Promise<string | undefined> {
+  const cached = appIdCache.get(db);
+  const age = cached ? Date.now() - cached.at : Infinity;
+  if (cached && age < APP_ID_TTL_MS && cached.ids.has(appId)) return cached.ids.get(appId);
   const rows = await db
     .select({ connectorId: connectorUiResources.connectorId, uri: connectorUiResources.uri })
     .from(connectorUiResources);
-  return rows.find((r) => appIdOf(r.connectorId, r.uri) === appId)?.connectorId;
+  const ids = new Map(rows.map((r) => [appIdOf(r.connectorId, r.uri), r.connectorId]));
+  appIdCache.set(db, { at: Date.now(), ids });
+  return ids.get(appId);
 }

@@ -6,6 +6,7 @@ import type { McpService } from "../mcp/service.js";
 import type { PolicyRuleSource } from "../policy/engine.js";
 import type { RateLimiter } from "../sandbox/rate-limit.js";
 import type { AppCaller } from "./app-caller.js";
+import type { SchemaValidator } from "./validate-pool.js";
 import { appConnectorOf, memberApp, type MemberApp } from "./catalog.js";
 import { appBridgeDecision, checkAppTool, validateArguments } from "./decide.js";
 
@@ -15,7 +16,8 @@ import { appBridgeDecision, checkAppTool, validateArguments } from "./decide.js"
  * run, so it can never obtain an approval. Checked in order, failing closed, with one
  * `mcp.app_call` audit row per decision (allowed rows before the call is forwarded):
  *
- * 0. a per-member rate limit (burst 30, then 5 per second);
+ * 0. a per-member rate limit (burst 30, then 5 per second), taken by the route before the
+ *    body is read ({@link takeRateToken});
  * 1. the app is live for the member (MA8) and the tool is of the app's connector;
  * 2. the tool is pinned, read-only, app-visible and in the team's exposure;
  * 3. the arguments are a JSON object of at most 64 KiB valid against the pinned schema;
@@ -30,9 +32,13 @@ export interface AppCallDeps {
   readonly mcp: Pick<McpService, "revealForMember">;
   readonly rules: PolicyRuleSource;
   readonly caller: AppCaller;
+  /** Runs pinned schemas off the event loop with a deadline (review HIGH-1). */
+  readonly validator: SchemaValidator;
   readonly limiter: RateLimiter;
   /** Throttles the audit of rate-limited refusals (one per member per window). */
   readonly limitedAudits: RateLimiter;
+  /** Throttles denial audits per member and reason (burst 20, then one per 3 s). */
+  readonly deniedAudits: RateLimiter;
   readonly now?: () => Date;
 }
 
@@ -137,7 +143,8 @@ async function deny(
   what: Audited,
   reason: AppCallReason,
 ): Promise<AppCallOutcome> {
-  await audit(deps.db, p, what, reason);
+  // Like `mcp.tool_call` denials (review LOW-5): a burst of denials is audited, a flood is not.
+  if (deps.deniedAudits.take(`${p.userId}:${reason}`) === 0) await audit(deps.db, p, what, reason);
   return refused(reason);
 }
 
@@ -153,12 +160,30 @@ async function decide(
   const checked = checkAppTool(app.connector, toolName);
   if (!checked.ok) return { ok: false, reason: checked.reason };
   const input = toolInputSchema.safeParse(args ?? {});
-  if (!input.success || !validateArguments(checked.tool, input.data)) {
+  if (!input.success || !(await validateArguments(deps.validator, checked.tool, input.data))) {
     return { ok: false, reason: "invalid_arguments" };
   }
   const rules = await deps.rules.load(p.teamId, p.userId, now);
   const bridge = appBridgeDecision(app.connector.id, checked.tool, input.data, rules, now);
   return bridge.allowed ? { ok: true, args: input.data } : { ok: false, reason: bridge.reason };
+}
+
+/**
+ * Step 0 (review MEDIUM-1, LOW-5): the per-member rate limit, taken before the request body is
+ * read. Keyed by the user (not team and user), per server pod: with N pods a member gets at most
+ * N times the burst. A refusal is audited at most once a minute per member.
+ */
+export async function takeRateToken(
+  deps: AppCallDeps,
+  p: BrowserPrincipal,
+  appId: string,
+): Promise<AppCallOutcome | undefined> {
+  if (deps.limiter.take(p.userId) === 0) return undefined;
+  if (deps.limitedAudits.take(p.userId) === 0) {
+    const connectorId = await appConnectorOf(deps.db, appId);
+    if (connectorId) await audit(deps.db, p, { connectorId, tool: "rate_limited" }, "rate_limited");
+  }
+  return refused("rate_limited");
 }
 
 export async function callApp(
@@ -168,14 +193,6 @@ export async function callApp(
   request: { readonly tool: string; readonly arguments?: unknown },
 ): Promise<AppCallOutcome> {
   const now = deps.now?.() ?? new Date();
-  const member = `${p.teamId}:${p.userId}`;
-  if (deps.limiter.take(member) !== 0) {
-    const connectorId = await appConnectorOf(deps.db, appId);
-    if (connectorId && deps.limitedAudits.take(member) === 0) {
-      await audit(deps.db, p, { connectorId, tool: request.tool }, "rate_limited");
-    }
-    return refused("rate_limited");
-  }
   const app = await memberApp(deps.db, p.teamId, p.userId, appId);
   if (!app) {
     // Not live for this member (connector not enabled, no key, drifted template, ...): audited

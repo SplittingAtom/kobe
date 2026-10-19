@@ -176,3 +176,43 @@ describe("visibility (KOBE-435)", () => {
     expect(pinned(["app", "model"])?.sha256).toBe(toolHash(tool));
   });
 });
+
+describe("schema complexity caps (KOBE-436 review HIGH-1)", () => {
+  const withSchema = (inputSchema: Record<string, unknown>) =>
+    buildSnapshot("jira", [{ ...tool, inputSchema }]);
+
+  it("pins ordinary schemas, including patterns a safe-regex check would refuse", () => {
+    expect(
+      withSchema({
+        type: "object",
+        properties: { q: { type: "string", pattern: "^(\\w+\\s?)*$" } },
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("refuses schemas too deep, too large, with too many patterns or refs, or a huge pattern", () => {
+    let deep: Record<string, unknown> = { type: "string" };
+    for (let i = 0; i < 40; i += 1) deep = { type: "object", properties: { x: deep } };
+    expect(withSchema(deep)).toEqual({ ok: false, failure: "invalid_tool" });
+    const wide = Object.fromEntries(
+      Array.from({ length: 3000 }, (_, i) => [`p${i}`, { type: "string" }]),
+    );
+    expect(withSchema({ type: "object", properties: wide })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    const patterned = Object.fromEntries(
+      Array.from({ length: 101 }, (_, i) => [`p${i}`, { type: "string", pattern: "a" }]),
+    );
+    expect(withSchema({ type: "object", properties: patterned })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    expect(withSchema({ type: "string", pattern: "a".repeat(2000) })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    const refs = Array.from({ length: 201 }, () => ({ $ref: "#" }));
+    expect(withSchema({ anyOf: refs })).toEqual({ ok: false, failure: "invalid_tool" });
+  });
+});

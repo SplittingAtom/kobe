@@ -1,9 +1,12 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { APP_ID_PATTERN } from "../apps/app-id.js";
-import { callApp, type AppCallDeps } from "../apps/call.js";
-import { memberApp, memberApps, viewOf } from "../apps/catalog.js";
+import { callApp, takeRateToken, type AppCallDeps, type BrowserPrincipal } from "../apps/call.js";
+import { createValidatorPool, type SchemaValidator } from "../apps/validate-pool.js";
+import { DENIED_AUDIT_RATE } from "../mcp/service.js";
+import { memberApp, memberAppHtml, memberApps, viewOf } from "../apps/catalog.js";
 import type { ServerDeps } from "../deps.js";
 import { createDbRuleSource } from "../policy/rule-store.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
@@ -21,6 +24,14 @@ import { parseBody } from "../teams/http.js";
  *   message}}`, decided and audited by `callApp`.
  */
 export const APP_CALL_RATE = { capacity: 30, refillPerSecond: 5 } as const;
+/** 64 KiB of arguments plus the JSON envelope (review MEDIUM-1). */
+export const APP_CALL_BODY_MAX = 96 * 1024;
+
+const principal = (c: Context<{ Variables: TeamVariables }>): BrowserPrincipal => ({
+  kind: "browser",
+  userId: c.get("user").id,
+  teamId: c.get("team").id,
+});
 
 const callSchema = z.strictObject({
   tool: z.string().min(1).max(128),
@@ -32,13 +43,21 @@ const NOT_FOUND = { code: "app_not_available", message: "This app is not availab
 export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
+  // Workers start on the first call, not for every app instance (tests build many).
+  let pool: SchemaValidator | undefined;
+  const validator: SchemaValidator = {
+    validate: (schema, instance) => (pool ??= createValidatorPool()).validate(schema, instance),
+    close: async () => pool?.close(),
+  };
   const callDeps: AppCallDeps = {
     db,
     mcp: deps.mcp,
     rules: createDbRuleSource(db),
     caller: deps.appCaller,
+    validator,
     limiter: createRateLimiter(APP_CALL_RATE),
     limitedAudits: createRateLimiter({ capacity: 1, refillPerSecond: 1 / 60 }),
+    deniedAudits: createRateLimiter(DENIED_AUDIT_RATE),
   };
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
@@ -59,18 +78,37 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const found = APP_ID_PATTERN.test(appId)
       ? await memberApp(db, c.get("team").id, c.get("user").id, appId)
       : undefined;
-    if (!found) return c.json(NOT_FOUND, 404);
+    const html = found ? await memberAppHtml(db, found) : undefined;
+    if (!found || html === undefined) return c.json(NOT_FOUND, 404);
     return c.json({
-      html: found.html,
+      html,
       sha256: found.sha256,
       connectorId: found.connector.id,
       uri: found.uri,
     });
   });
 
-  app.post("/:appId/calls", async (c) => {
+  // Review MEDIUM-1: the rate-limit token is taken before the body is read, and the body is
+  // capped (64 KiB of arguments plus the envelope).
+  app.post("/:appId/calls", async (c, next) => {
     const appId = c.req.param("appId");
     if (!APP_ID_PATTERN.test(appId)) return c.json({ error: NOT_FOUND }, 404);
+    const limited = await takeRateToken(callDeps, principal(c), appId);
+    if (limited && !limited.ok) {
+      return c.json({ error: { code: limited.code, message: limited.message } }, limited.status);
+    }
+    await next();
+  });
+  app.post(
+    "/:appId/calls",
+    bodyLimit({
+      maxSize: APP_CALL_BODY_MAX,
+      onError: (c) =>
+        c.json({ error: { code: "too_large", message: "The call is too large." } }, 413),
+    }),
+  );
+  app.post("/:appId/calls", async (c) => {
+    const appId = c.req.param("appId");
     const body = await parseBody(c, callSchema);
     if (!body) {
       return c.json(
@@ -78,12 +116,7 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
         400,
       );
     }
-    const outcome = await callApp(
-      callDeps,
-      { kind: "browser", userId: c.get("user").id, teamId: c.get("team").id },
-      appId,
-      body,
-    );
+    const outcome = await callApp(callDeps, principal(c), appId, body);
     if (outcome.ok) return c.json({ result: outcome.result });
     return c.json({ error: { code: outcome.code, message: outcome.message } }, outcome.status);
   });

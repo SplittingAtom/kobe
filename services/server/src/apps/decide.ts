@@ -1,9 +1,9 @@
-import { Validator } from "@cfworker/json-schema";
 import type { AppCallReason, PinnedTool } from "@kobe/db";
 import type { JsonObject } from "@kobe/protocol";
 import { appVisible } from "../connectors/visibility.js";
 import { describePinnedTool, type TeamConnector } from "../mcp/catalog.js";
 import { matchingRules, type PolicyRuleSet } from "../policy/rules.js";
+import type { SchemaValidator } from "./validate-pool.js";
 
 /**
  * The server's decision for an MCP App's own `tools/call` (KOBE-436, spec §6 and MA5). Pure:
@@ -13,8 +13,8 @@ import { matchingRules, type PolicyRuleSet } from "../policy/rules.js";
  *   `readOnlyHint: true`, visible to apps, and in the team's exposure (`custom`: ticked). App
  *   visibility, not model visibility: an app-only tool is callable here.
  * - Rule 3 ({@link validateArguments}): a JSON object of at most 64 KiB that validates against
- *   the pinned `inputSchema` (JSON Schema 2020-12; an interpreter, no generated code), one
- *   compiled validator per pinned tool hash.
+ *   the pinned `inputSchema` (JSON Schema 2020-12; an interpreter, no generated code), in a
+ *   worker pool with a hard deadline (`validate-pool.ts`, review HIGH-1).
  * - Rule 4 ({@link appBridgeDecision}), MA5's order at the `app_bridge` enforcement point:
  *   site deny → team deny → site or team ask (→ deny `app_no_prompt`: the browser principal has
  *   no run and is never prompted) → risk class (anything but `read` → deny `app_read_only`) →
@@ -45,29 +45,18 @@ export function checkAppTool(connector: TeamConnector, name: string): ToolCheck 
 
 /** Largest serialized arguments an app may send (spec T10). */
 export const APP_ARGUMENTS_MAX_BYTES = 64 * 1024;
-const MAX_VALIDATORS = 256;
-const validators = new Map<string, Validator>();
 
-function validatorFor(tool: PinnedTool): Validator {
-  const found = validators.get(tool.sha256);
-  if (found) return found;
-  const created = new Validator(tool.input_schema as object, "2020-12", true);
-  if (validators.size >= MAX_VALIDATORS) {
-    const oldest = validators.keys().next().value;
-    if (oldest !== undefined) validators.delete(oldest);
-  }
-  validators.set(tool.sha256, created);
-  return created;
-}
-
-export function validateArguments(tool: PinnedTool, args: JsonObject): boolean {
+/**
+ * Rule 3: at most 64 KiB, valid against the pinned schema. The schema runs only in the worker
+ * pool with a deadline (review HIGH-1): a timeout or failure refuses the call.
+ */
+export async function validateArguments(
+  validator: SchemaValidator,
+  tool: PinnedTool,
+  args: JsonObject,
+): Promise<boolean> {
   if (Buffer.byteLength(JSON.stringify(args), "utf8") > APP_ARGUMENTS_MAX_BYTES) return false;
-  try {
-    return validatorFor(tool).validate(args).valid;
-  } catch {
-    // A schema the validator cannot use refuses every call (fail closed).
-    return false;
-  }
+  return validator.validate(tool.input_schema, args);
 }
 
 export type BridgeDecision =

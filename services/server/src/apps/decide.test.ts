@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { PinnedTool } from "@kobe/db";
 import type { TeamConnector } from "../mcp/catalog.js";
 import type { PolicyRule, PolicyRuleSet } from "../policy/rules.js";
 import { pinnedTool } from "../testing/mcp-fixtures.js";
 import { appBridgeDecision, checkAppTool, validateArguments } from "./decide.js";
+import { createValidatorPool } from "./validate-pool.js";
+
+const pool = createValidatorPool();
+afterAll(() => pool.close());
 
 const ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NOW = new Date("2026-10-19T12:00:00Z");
@@ -59,15 +63,15 @@ describe("validateArguments (rule 3)", () => {
       additionalProperties: false,
     },
   };
-  it("validates against the pinned JSON Schema", () => {
-    expect(validateArguments(tool, { table: "t" })).toBe(true);
-    expect(validateArguments(tool, {})).toBe(false);
-    expect(validateArguments(tool, { table: 1 })).toBe(false);
-    expect(validateArguments(tool, { table: "t", x: 1 })).toBe(false);
+  it("validates against the pinned JSON Schema", async () => {
+    expect(await validateArguments(pool, tool, { table: "t" })).toBe(true);
+    expect(await validateArguments(pool, tool, {})).toBe(false);
+    expect(await validateArguments(pool, tool, { table: 1 })).toBe(false);
+    expect(await validateArguments(pool, tool, { table: "t", x: 1 })).toBe(false);
   });
-  it("refuses more than 64 KiB of arguments", () => {
+  it("refuses more than 64 KiB of arguments", async () => {
     const open = { ...read, input_schema: { type: "object" } };
-    expect(validateArguments(open, { x: "y".repeat(64 * 1024) })).toBe(false);
+    expect(await validateArguments(pool, open, { x: "y".repeat(64 * 1024) })).toBe(false);
   });
 });
 
