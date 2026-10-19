@@ -14,6 +14,8 @@ import {
   skillEvalSubjectSchema,
   startSkillEvalBodySchema,
   teamEvalCapSchema,
+  withoutSkillEvalCosts,
+  type SkillEvalRun,
 } from "./entry.js";
 
 const ID = "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e01";
@@ -214,5 +216,28 @@ describe("eval run API shapes", () => {
     expect(ok(0)).toBe(false);
     expect(teamEvalCapSchema.safeParse({ tokens: 1 }).success).toBe(true);
     expect(teamEvalCapSchema.safeParse(null).success).toBe(true);
+  });
+});
+
+describe("eval costs for a viewer who may not see them (KOBE-328)", () => {
+  it("drops every cost field at any depth and keeps the rest", () => {
+    const run = {
+      id: "r",
+      scorecard: {
+        costUsd: 1,
+        judgeCostUsd: 0.1,
+        passRate: 0.5,
+        with: { meanCostUsd: 0.2, passed: 1 },
+        details: [{ with: { costUsd: 1, totalCostUsd: 2, judgeCostUsd: 0, turns: 3 } }],
+      },
+      startedBy: "u",
+    } as unknown as SkillEvalRun;
+    expect(withoutSkillEvalCosts(run)).toEqual({
+      id: "r",
+      scorecard: { passRate: 0.5, with: { passed: 1 }, details: [{ with: { turns: 3 } }] },
+      startedBy: "u",
+      costsHidden: true,
+    });
+    expect((run as unknown as { scorecard: { costUsd: number } }).scorecard.costUsd).toBe(1);
   });
 });

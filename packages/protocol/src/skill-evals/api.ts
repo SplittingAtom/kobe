@@ -189,3 +189,43 @@ export const teamEvalCapSchema = z
   ])
   .nullable();
 export type TeamEvalCap = z.infer<typeof teamEvalCapSchema>;
+
+/** The money fields of a run's scorecard (and its executions and mode summaries). */
+export const SKILL_EVAL_COST_KEYS = [
+  "costUsd",
+  "totalCostUsd",
+  "judgeCostUsd",
+  "meanCostUsd",
+] as const;
+type CostKey = (typeof SKILL_EVAL_COST_KEYS)[number];
+
+/** `T` with every cost field optional, at any depth (a run whose costs a viewer may not see). */
+export type WithoutCosts<T> = T extends readonly (infer U)[]
+  ? readonly WithoutCosts<U>[]
+  : T extends object
+    ? { readonly [K in keyof T as K extends CostKey ? never : K]: WithoutCosts<T[K]> } & {
+        readonly [K in keyof T & CostKey]?: T[K];
+      }
+    : T;
+
+/**
+ * An eval run as the API serves it (KOBE-328, coordinator decision with the KOBE-327 estimate):
+ * its costs only for Team admins and its starter; for anyone else every cost field is left out
+ * and `costsHidden` is true. The scorecard's other numbers and the starter's id stay.
+ */
+export type SkillEvalRunView = WithoutCosts<SkillEvalRun> & { readonly costsHidden?: true };
+
+function stripCosts(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripCosts);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([k]) => !(SKILL_EVAL_COST_KEYS as readonly string[]).includes(k))
+      .map(([k, v]) => [k, stripCosts(v)]),
+  );
+}
+
+/** The run without any cost field, marked `costsHidden` (never mutates `run`). */
+export function withoutSkillEvalCosts(run: SkillEvalRun): SkillEvalRunView {
+  return { ...(stripCosts(run) as WithoutCosts<SkillEvalRun>), costsHidden: true };
+}
