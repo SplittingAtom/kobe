@@ -88,7 +88,7 @@ export const EVAL_READ_MAX_TOTAL_BYTES = 1024 * 1024;
  * `outputs.ts`). The request names only paths and walked sizes: nothing of the judge's messages,
  * rubric or nonce ever reaches the sandbox. For each file the agent opens it with `O_NOFOLLOW` and
  * `O_NONBLOCK`, refuses it unless no segment on the way is a link and `fstat` shows a regular file
- * of exactly `size` bytes, and reads at most `EVAL_OUTPUT_READ_MAX_BYTES` of it, in order, while
+ * of exactly `size` bytes with one link, on the workspace volume, and reads at most `EVAL_OUTPUT_READ_MAX_BYTES` of it, in order, while
  * the whole reply stays within {@link EVAL_READ_MAX_TOTAL_BYTES} (later files are `skipped`).
  */
 export const evalReadFrameSchema = frame("eval.read", {
@@ -100,8 +100,17 @@ export const evalReadFrameSchema = frame("eval.read", {
     .max(EVAL_READ_MAX_FILES),
 });
 
-/** Why a file was not read: a link on the way, not a regular file, another size, unopenable. */
-export const EVAL_READ_REFUSALS = ["link", "not_regular", "size_changed", "unreadable"] as const;
+/**
+ * Why a file was not read: a link on the way or a hard link (`nlink > 1`), not a regular file,
+ * another size, not on the workspace volume, unopenable.
+ */
+export const EVAL_READ_REFUSALS = [
+  "link",
+  "not_regular",
+  "size_changed",
+  "off_volume",
+  "unreadable",
+] as const;
 
 /** What a successful `eval.read` returns in `command.result.data` (untrusted: checked again). */
 export const evalReadResultSchema = z.strictObject({
