@@ -96,6 +96,19 @@ what the browser does with `RTCPeerConnection` (a `webrtc` annotation). `KOBE_AL
 adds Firefox and WebKit projects for this spec (`npx playwright install firefox webkit` once).
 No tokens; it changes nothing: `npx playwright test app-frame`.
 
+## The Kobe Explorer Gate (KOBE-441)
+
+`gate-apps/explorer.spec.ts` drives an MCP App in the conversation (the model's call renders it in
+the tool card; one app call per click; the context chip; "Use in chat" inserts and never sends;
+the send carries the fenced block; reload rebuilds with no app call; Expand and back), then from
+the rail (a card with no run that the next run sees; a launch during a run waits as a chip), the
+test app's probes (fetch out, `ui/open-link`, the write tool: k3d only) and that no credential is
+in any answer the browser received. One spec for both runs: `KOBE_APPS_CONNECTOR` (default
+`e2e-apps`), `KOBE_APPS_OPEN` (the prompt), `KOBE_APPS_PATH` (tree items to click, comma
+separated), `KOBE_APPS_ITEM_ROLE` (`button` or `treeitem`), `KOBE_APPS_USE_LABEL`,
+`KOBE_APPS_USE_TEXT`, `KOBE_APPS_PROBES=1`, `KOBE_APPS_SECRET`. k3d: `e2e/gate-apps.sh` sets them;
+the gate install: `docs/gates/gate-apps-runbook.md`. A few model turns.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),

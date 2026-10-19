@@ -189,7 +189,10 @@ function callResult(name, args) {
   if (name === "open_explorer") {
     return {
       content: [
-        { type: "text", text: `e2e explorer: catalog c (depth ${JSON.stringify(args.depth ?? null)})` },
+        {
+          type: "text",
+          text: `e2e explorer: catalog c (depth ${JSON.stringify(args.depth ?? null)})`,
+        },
       ],
       structuredContent: { roots: ["c"], depth: args.depth ?? null, note: "e2e-structured-only" },
     };
@@ -254,7 +257,11 @@ http
         const args = m.params.arguments ?? {};
         console.log("CALL " + m.params.name + " " + JSON.stringify(m.params.arguments));
         calls.push({ name: m.params.name, arguments: m.params.arguments ?? null });
-        reply({ result: APPS ? callResult(m.params.name, args) : { content: [{ type: "text", text: "fake:" + m.params.name }] } });
+        reply({
+          result: APPS
+            ? callResult(m.params.name, args)
+            : { content: [{ type: "text", text: "fake:" + m.params.name }] },
+        });
       } else if (APPS && m.method === "tools/list") {
         reply({ result: { tools: TOOLS } });
       } else if (APPS && m.method === "resources/list") {
