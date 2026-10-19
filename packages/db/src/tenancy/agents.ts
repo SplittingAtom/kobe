@@ -24,6 +24,9 @@ export const agents = defineDomain({
     "skill_draft_files",
     "skill_draft_history",
     "skill_draft_file_history",
+    // Skill eval runs and their executions (KOBE-325).
+    "skill_eval_runs",
+    "skill_eval_results",
   ],
   siteWide: [
     "skill_blocklist",

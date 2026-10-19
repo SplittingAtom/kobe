@@ -64,6 +64,15 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   skill_draft_file_history:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
     `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")}) OR (written_by = ${g("user_id")})))`,
+  // Skill eval runs (KOBE-325): team grants, user grants by the starter.
+  skill_eval_runs:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (started_by = ${g("user_id")})))`,
+  skill_eval_results:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM skill_eval_runs r ` +
+    `WHERE ((r.team_id = skill_eval_results.team_id) AND (r.id = skill_eval_results.eval_run_id) ` +
+    `AND (r.started_by = ${g("user_id")}))))))`,
   // Memory is not thread content (KOBE-154): team grants only, user grants by owner.
   memory_docs:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +

@@ -75,7 +75,7 @@ describe("thread skill_test upgrade (KOBE-323)", () => {
       // 0144's objects exist, and the NOT VALID key still holds every new row (review N4).
       const objects = await c.query<{ name: string }>(
         `SELECT conname AS name FROM pg_constraint WHERE conrelid = 'threads'::regclass
-           AND conname LIKE 'threads_skill_%'
+           AND conname LIKE 'threads_skill_%' AND conname NOT LIKE 'threads_skill_eval%'
          UNION ALL SELECT indexname FROM pg_indexes WHERE indexname = 'threads_skill_draft_idx'
          ORDER BY 1`,
       );

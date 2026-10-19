@@ -7,6 +7,8 @@ import {
   skillDraftFiles,
   skillDraftHistory,
   skillDrafts,
+  skillEvalResults,
+  skillEvalRuns,
   teamMembers,
   teamSkillBlocks,
   teamSkillInstalls,
@@ -305,7 +307,54 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       writtenAt: new Date(),
     });
   },
+  skill_eval_runs: async (tx, teamId) => {
+    await probeEvalRun(tx, teamId);
+  },
+  skill_eval_results: async (tx, teamId) => {
+    // A done execution and a queued one (KOBE-325).
+    const evalRunId = await probeEvalRun(tx, teamId);
+    const now = new Date();
+    await tx.insert(skillEvalResults).values([
+      {
+        teamId,
+        evalRunId,
+        caseId: "probe-case",
+        withSkill: true,
+        state: "done",
+        execution: { caseId: "probe-case", status: "passed" },
+        startedAt: now,
+        finishedAt: now,
+        deadlineAt: now,
+      },
+      { teamId, evalRunId, caseId: "probe-case", withSkill: false },
+    ]);
+  },
 };
+
+/** A queued skill eval run of a draft (KOBE-325). */
+async function probeEvalRun(tx: Parameters<ProbeFixture>[0], teamId: string): Promise<string> {
+  const userId = await probeUser(tx);
+  const [run] = await tx
+    .insert(skillEvalRuns)
+    .values({
+      teamId,
+      startedBy: userId,
+      subjectKind: "draft",
+      subjectId: randomUUID(),
+      subjectRev: 1,
+      skillName: "probe",
+      packageHash: "a".repeat(64),
+      runtimeHash: "b".repeat(64),
+      bundleKey: "skills/evals/probe.zip",
+      mode: "full",
+      suite: { cases: [] },
+      limits: {},
+      progressTotal: 2,
+    })
+    .returning({ id: skillEvalRuns.id });
+  if (!run) throw new Error("probe eval run insert returned no row");
+  return run.id;
+}
 
 async function probeUser(tx: Parameters<ProbeFixture>[0]): Promise<string> {
   const userId = randomUUID();
