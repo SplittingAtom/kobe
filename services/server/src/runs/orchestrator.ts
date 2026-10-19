@@ -482,6 +482,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
+    // As for a send (re-review LOW-M): only the server writes app context.
+    if (imitatesAppContext(body.content)) throw new RunError("invalid_content");
     const { run, message } = await this.#threadTx(actor, async (tx, viewer) => {
       const found = await ownedRun(tx, viewer, runId, false);
       await this.#assertMayRun(tx, actor, false);

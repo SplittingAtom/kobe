@@ -54,13 +54,15 @@ async function unclaimed(tx: KobeTx, claims: CaptureClaims): Promise<number> {
 /**
  * The run, locked (KOBE-439 review LOW-A, LOW-B): a run end waits for this store to commit, so its
  * cleanup (0160) sees the row; a store that waited on an ended run finds it inactive and refuses;
- * and reports of one run are serialised, so the unclaimed cap is exact.
+ * and reports of one run are serialised, so the unclaimed cap is exact. `FOR NO KEY UPDATE`, never
+ * `FOR UPDATE` (KOBE-266, re-review LOW-K): foreign-key checks of the run's events and approvals
+ * take `FOR KEY SHARE` and must not wait on a store.
  */
 async function runActive(tx: KobeTx, claims: CaptureClaims): Promise<boolean> {
   const res = await tx.execute<{ status: string }>(sql`
     SELECT status FROM runs
      WHERE team_id = ${claims.teamId} AND id = ${claims.runId} AND thread_id = ${claims.threadId}
-     FOR UPDATE`);
+     FOR NO KEY UPDATE`);
   const status = res.rows[0]?.status;
   return status === "running" || status === "waiting_approval";
 }

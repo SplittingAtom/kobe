@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
 import { appIdOf } from "./apps/app-id.js";
@@ -473,6 +474,24 @@ describe("review fixes (KOBE-438 review)", () => {
     expect(answers.filter((a) => a.status === 201)).toHaveLength(20);
     expect(answers.filter((a) => a.status === 429)).toHaveLength(5);
     expect(await rows(w.team)).toHaveLength(20);
+  });
+
+  it("a store does not wait on a foreign-key check of its run (KOBE-439 re-review LOW-K)", async () => {
+    const w = await world();
+    const ticket = (await decide(w)).json.app_capture.ticket as string;
+    // An event writer's open transaction: its foreign-key check holds FOR KEY SHARE on the run.
+    const holder = new pg.Client({ connectionString: fx.database.adminUrl });
+    await holder.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM runs WHERE id = $1 FOR KEY SHARE", [w.runId]);
+      const waited = new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 3_000));
+      const stored = report(w, ticket, RESULT).then((a) => a.status);
+      expect(await Promise.race([stored, waited])).toBe(201);
+    } finally {
+      await holder.query("ROLLBACK");
+      await holder.end();
+    }
   });
 
   it("caps a run's unclaimed results (MEDIUM-1)", async () => {
