@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import {
   listMemberships,
   sql,
@@ -22,8 +23,8 @@ import { pickCatalogVersion, type CatalogVersion } from "../resolver/catalog-pin
  * A team's contribution: whether it installed the skill and which version its install ran when
  * the window was computed, a Default opt-out, and per version the runs that read the skill, the
  * members whose runs did (the thread's owner: runs record no starter, review L5) and the thumbs on
- * those runs' answers. Team and user ids stay on the server (the minimum-count rule needs them,
- * `usage-views.ts`); nothing here is returned as is. Each team is read in its own transaction
+ * those runs' answers. Team ids and salted member keys stay on the server (the minimum-count rule
+ * needs them, `usage-views.ts`); nothing here is returned as is. A row lives at most two windows. Each team is read in its own transaction
  * under its RLS (review L3); the Registry team, test chats and eval threads don't count.
  */
 export const USAGE_WINDOW_DAYS = 30;
@@ -48,6 +49,12 @@ export interface UsageSnapshot {
   readonly from: string;
   readonly to: string;
   readonly computedAt: string;
+  /**
+   * The window's random salt (340 review N2): members and raters are stored as
+   * {@link userKey}(salt, user id), never as user ids; the rule only needs distinct counts and
+   * "is it the viewer".
+   */
+  readonly salt: string;
   /** skill id → team id → its part. */
   readonly skills: ReadonlyMap<string, ReadonlyMap<string, TeamUse>>;
 }
@@ -143,12 +150,18 @@ async function readCatalog(db: KobeDb): Promise<Catalog> {
 
 type UseRow = { user_id: string; used: RunSkillUse[]; refs: RunSkillRef[] };
 
+/** A member's key in one window's snapshot: not their id, and different in every window. */
+export function userKey(salt: string, userId: string): string {
+  return createHash("sha256").update(`${salt}:${userId}`).digest("hex").slice(0, 32);
+}
+
 /** One team's part, read inside its own RLS context. */
 async function teamPart(
   tx: KobeTx,
   teamId: string,
   window: UsageWindow,
   catalog: Catalog,
+  salt: string,
 ): Promise<Map<string, TeamUse>> {
   const uses = new Map<string, TeamUse>();
   const of = (skillId: string) => {
@@ -185,7 +198,7 @@ async function teamPart(
     for (const [skillId, semver] of catalogUses(r.used, r.refs, catalog.idByName)) {
       const u = of(skillId);
       bump(u.runs, semver);
-      add(u.members, semver, r.user_id);
+      add(u.members, semver, userKey(salt, r.user_id));
     }
   // Ratings of the window's runs that used a skill (the run's window, so a rating changed later
   // can't move a closed window: it was computed once).
@@ -202,7 +215,7 @@ async function teamPart(
     for (const [skillId, semver] of catalogUses(r.used, r.refs, catalog.idByName)) {
       const u = of(skillId);
       bump(r.rating === "up" ? u.up : u.down, semver);
-      add(u.raters, semver, r.user_id);
+      add(u.raters, semver, userKey(salt, r.user_id));
     }
   return uses;
 }
@@ -216,16 +229,17 @@ export async function computeUsageSnapshot(
   const teams = await db.execute<{ id: string }>(
     sql`SELECT id FROM teams WHERE NOT registry ORDER BY id`,
   );
+  const salt = randomBytes(16).toString("hex");
   const skills = new Map<string, Map<string, TeamUse>>();
   for (const team of teams.rows) {
-    const uses = await withTeam(db, team.id, (tx) => teamPart(tx, team.id, window, catalog));
+    const uses = await withTeam(db, team.id, (tx) => teamPart(tx, team.id, window, catalog, salt));
     for (const [skillId, use] of uses) {
       const per = skills.get(skillId) ?? new Map<string, TeamUse>();
       per.set(team.id, use);
       skills.set(skillId, per);
     }
   }
-  return { ...window, computedAt: now.toISOString(), skills };
+  return { ...window, computedAt: now.toISOString(), salt, skills };
 }
 
 // --- storage: the payload is plain JSON of the maps ------------------------------------------
@@ -240,13 +254,14 @@ type StoredUse = {
   down: Record<string, number>;
   raters: Record<string, string[]>;
 };
-type Payload = { skills: Record<string, Record<string, StoredUse>> };
+type Payload = { salt?: string; skills: Record<string, Record<string, StoredUse>> };
 
 const toObj = <V, W>(m: ReadonlyMap<string, V>, f: (v: V) => W) =>
   Object.fromEntries([...m].map(([k, v]) => [k, f(v)]));
 
 export function toPayload(s: UsageSnapshot): Payload {
   return {
+    salt: s.salt,
     skills: toObj(s.skills, (teams) =>
       toObj(teams, (u) => ({
         i: u.installed,
@@ -270,6 +285,7 @@ export function fromPayload(
   p: Payload,
   window: UsageWindow & { computedAt: string },
 ): UsageSnapshot {
+  const salt = p.salt ?? "";
   const skills = new Map<string, Map<string, TeamUse>>();
   for (const [skillId, teams] of Object.entries(p.skills ?? {}))
     skills.set(
@@ -290,7 +306,7 @@ export function fromPayload(
         ]),
       ),
     );
-  return { ...window, skills };
+  return { ...window, salt, skills };
 }
 
 const iso = (v: unknown) => new Date(v as string | Date).toISOString();
@@ -373,7 +389,12 @@ export async function usageSnapshot(db: KobeDb, now: Date = new Date()): Promise
   if (cache?.key === window.from) return cache.snapshot;
   if (cache && now.getTime() - cache.checkedAt < RECHECK_MS) return cache.snapshot;
   const stored = (await storedRow(db, window.from)) ?? (await storedRow(db, null));
-  const snapshot = stored ?? { ...window, computedAt: now.toISOString(), skills: new Map() };
+  const snapshot = stored ?? {
+    ...window,
+    computedAt: now.toISOString(),
+    salt: "",
+    skills: new Map(),
+  };
   cache = { key: stored?.from ?? "", snapshot, checkedAt: now.getTime() };
   return snapshot;
 }
@@ -383,14 +404,25 @@ export function forgetUsageSnapshot(): void {
   cache = null;
 }
 
-/** The teams the viewer belongs to now (review M3), plus the active one. */
+/**
+ * The teams whose numbers the viewer could know (review M3, 340 review N1): those they belong to
+ * now, the active one, and every team they left since `since` (the served window's start), so a
+ * viewer can't join a team, read its own-team numbers, leave and subtract it from a site total.
+ * Departures come from the team audit's `identity.member.removed` rows (audit rows are kept).
+ */
 export async function viewerTeamsOf(
   db: KobeDb,
   userId: string,
+  since: string,
   activeTeamId?: string,
 ): Promise<Set<string>> {
   const teams = new Set((await listMemberships(db, userId)).map((m) => m.teamId));
   if (activeTeamId) teams.add(activeTeamId);
+  const left = await db.execute<{ team_id: string }>(sql`
+    SELECT DISTINCT team_id FROM audit_log
+     WHERE action = 'identity.member.removed' AND team_id IS NOT NULL
+       AND target ->> 'userId' = ${userId} AND at >= ${since}::timestamptz`);
+  for (const r of left.rows) teams.add(r.team_id);
   return teams;
 }
 

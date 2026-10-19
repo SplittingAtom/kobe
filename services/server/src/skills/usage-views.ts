@@ -1,5 +1,5 @@
 import { FEEDBACK_MIN_RATERS } from "@kobe/protocol";
-import type { TeamUse, UsageSnapshot, UsageWindow } from "./usage-snapshot.js";
+import { userKey, type TeamUse, type UsageSnapshot, type UsageWindow } from "./usage-snapshot.js";
 
 /**
  * Who sees which usage numbers (KOBE-339, SK26), from the last closed window's snapshot:
@@ -263,23 +263,25 @@ export function teamSkillUsage(
   viewerId: string,
 ): TeamSkillUsage[] {
   const out: TeamSkillUsage[] = [];
+  // Members are stored by their window key, never by id (340 review N2).
+  const me = userKey(s.salt, viewerId);
   for (const [skillId, teams] of s.skills) {
     const u = teams.get(teamId);
     if (!u || (!u.installed && u.runs.size === 0 && u.raters.size === 0)) continue;
-    const total = ownTeam(u, viewerId, ALL);
+    const total = ownTeam(u, me, ALL);
     const semvers = [...u.runs.keys()].sort();
-    const cells = semvers.map((v) => ({ semver: v, ...ownTeam(u, viewerId, (x) => x === v) }));
+    const cells = semvers.map((v) => ({ semver: v, ...ownTeam(u, me, (x) => x === v) }));
     const withheld = cells.some(
       (c) => (c.runs.raw > 0 && c.runs.shown === "few") || c.members.shown === "few",
     );
     const vt = [...u.raters.keys()]
       .sort()
-      .map((v) => ({ semver: v, thumbs: teamThumbs(u, viewerId, (x) => x === v) }));
+      .map((v) => ({ semver: v, thumbs: teamThumbs(u, me, (x) => x === v) }));
     out.push({
       skillId,
       runs: total.runs.shown,
       members: total.members.shown,
-      thumbs: teamThumbs(u, viewerId, ALL),
+      thumbs: teamThumbs(u, me, ALL),
       versions: withheld
         ? null
         : cells.map((c) => ({ semver: c.semver, runs: c.runs.shown, members: c.members.shown })),

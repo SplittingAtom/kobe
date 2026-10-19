@@ -60,7 +60,7 @@ export function skillUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
         snapshot,
         id.data,
         versions.rows.map((v) => v.semver),
-        await viewerTeamsOf(db, userId),
+        await viewerTeamsOf(db, userId, snapshot.from),
       ),
     );
   });

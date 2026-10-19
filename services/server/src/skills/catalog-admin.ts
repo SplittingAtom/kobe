@@ -52,7 +52,7 @@ export async function listSiteCatalog(db: KobeDb, viewerId: string): Promise<Sit
     FROM registry_skills s ORDER BY s.name`);
   const majors = new Map((await defaultTargets(db)).map((t) => [t.skillId, t.major]));
   const snapshot = await usageSnapshot(db);
-  const viewer = await viewerTeamsOf(db, viewerId);
+  const viewer = await viewerTeamsOf(db, viewerId, snapshot.from);
   return rows.map((r) => ({
     id: r.id,
     name: r.name,

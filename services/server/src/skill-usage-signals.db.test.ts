@@ -230,11 +230,16 @@ describe("members see site-wide numbers under the minimum-count rule (ac-1, ac-3
   it("reads the viewer's teams now, not when the window was computed (review M3)", async () => {
     await member(t3, "v1");
     expect(await card("v1")).toMatchObject({ teamsInstalled: "few" });
-    await h.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
-      t3,
-      ids.v1,
-    ]);
-    expect(await card("v1")).toMatchObject({ teamsInstalled: 4 });
+  });
+
+  it("keeps a team the viewer left since the window opened as theirs (340 review N1)", async () => {
+    // Team 3's admin removes v1 again (audited): joining, reading and leaving gains nothing.
+    const removed = await (as.admin3 as TestBrowser).request(
+      "DELETE",
+      `/v1/team/members/${ids.v1}`,
+    );
+    expect(removed.status, JSON.stringify(removed.json)).toBeLessThan(300);
+    expect(await card("v1")).toMatchObject({ teamsInstalled: "few" });
   });
 });
 

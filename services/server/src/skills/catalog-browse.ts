@@ -90,7 +90,7 @@ async function usageFor(
 ): Promise<UsageOf> {
   const snapshot = await usageSnapshot(db);
   // The viewer's teams now (review M3), not when the window was computed.
-  const viewer = await viewerTeamsOf(db, who.userId, who.teamId);
+  const viewer = await viewerTeamsOf(db, who.userId, snapshot.from, who.teamId);
   return Object.assign((skillId: string) => cardUsage(snapshot, skillId, viewer), {
     window: { from: snapshot.from, to: snapshot.to },
   });

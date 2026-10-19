@@ -51,8 +51,14 @@
 - A run's member is its **thread's owner** (review L5): runs record no starter; in a shared
   thread another member's run counts to the owner. Ratings count by their run's window.
 - Installs and opt-outs are as they stood when the window was computed (just after it closed).
-- **Residual (accepted):** a member who left a team during the window still knows its numbers,
-  but it no longer counts as theirs; teams are walls, and departed memberships aren't kept.
+- **Departed teams stay "own"** (340 review N1): the viewer's teams are their memberships now,
+  the active team, and every team they left since the served window opened (the team audit's
+  `identity.member.removed` rows), so joining, reading and leaving gains nothing.
+- **No user ids stored** (340 review N2): members and raters are kept as
+  `sha256(window salt : user id)`; each window has its own random salt, and a row lives at most
+  two windows (60 days).
+- **Residual (accepted, 340 review N3):** teams installed and opt-outs are states, so two
+  consecutive windows' values can differ by one team's change over 30 days.
 - `catalog.db.test.ts` was missing `skill_promotion_requests`' break-glass clause (KOBE-333);
   added.
 

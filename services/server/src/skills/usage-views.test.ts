@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { TeamUse, UsageSnapshot } from "./usage-snapshot.js";
+import { userKey, type TeamUse, type UsageSnapshot } from "./usage-snapshot.js";
 import { cardUsage, optOutCount, siteSkillUsage, teamSkillUsage } from "./usage-views.js";
 
 /** KOBE-339 (SK26): the minimum-count rule on the nightly snapshot. */
 const SKILL = "skill-1";
+const SALT = "salt";
 
 function use(over: {
   installed?: boolean;
@@ -15,8 +16,9 @@ function use(over: {
   down?: Record<string, number>;
   raters?: Record<string, string[]>;
 }): TeamUse {
+  // Stored as window keys, never ids (340 review N2).
   const sets = (r?: Record<string, string[]>) =>
-    new Map(Object.entries(r ?? {}).map(([k, v]) => [k, new Set(v)]));
+    new Map(Object.entries(r ?? {}).map(([k, v]) => [k, new Set(v.map((u) => userKey(SALT, u)))]));
   return {
     installed: over.installed ?? false,
     running: over.running ?? null,
@@ -34,6 +36,7 @@ function snapshot(teams: Record<string, TeamUse>) {
     from: "2026-08-22T00:00:00.000Z",
     to: "2026-09-21T00:00:00.000Z",
     computedAt: "2026-09-21T00:05:00.000Z",
+    salt: SALT,
     skills: new Map([[SKILL, new Map(Object.entries(teams))]]),
   } satisfies UsageSnapshot;
 }

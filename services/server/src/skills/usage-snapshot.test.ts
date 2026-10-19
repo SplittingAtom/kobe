@@ -24,6 +24,7 @@ describe("the usage window", () => {
       from: "a",
       to: "b",
       computedAt: "c",
+      salt: "x",
       skills: new Map([
         [
           "s",
