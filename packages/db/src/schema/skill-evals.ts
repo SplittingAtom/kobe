@@ -50,7 +50,11 @@ export const SKILL_EVAL_RESULT_STATES = [
   "done",
 ] as const;
 export type SkillEvalResultState = (typeof SKILL_EVAL_RESULT_STATES)[number];
-export const SKILL_EVAL_SUBJECT_KINDS = ["draft", "team", "personal"] as const;
+/**
+ * `registry`: a Registry version re-run in the Registry team for its authoritative scorecard
+ * (KOBE-335, SK23); `subject_id` the registry version, `subject_rev` its seq.
+ */
+export const SKILL_EVAL_SUBJECT_KINDS = ["draft", "team", "personal", "registry"] as const;
 export type SkillEvalSubjectKind = (typeof SKILL_EVAL_SUBJECT_KINDS)[number];
 /** 25 cases, each with and without the skill (the contract's ceiling). */
 export const SKILL_EVAL_MAX_EXECUTIONS = 50;

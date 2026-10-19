@@ -1135,6 +1135,13 @@
       "when": 1792421360323,
       "tag": "0161_registry_review_guard_confirmer",
       "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1792421990432,
+      "tag": "0162_skill_eval_runs_registry_subject",
+      "breakpoints": true
     }
   ]
 }
