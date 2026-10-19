@@ -25,7 +25,11 @@ import {
 import { runMcpContextSchema } from "./mcp-config.js";
 import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
 import { traceSpansFrameSchema, wireTraceContextSchema } from "./trace-frames.js";
-import { evalPrepareFrameSchema, evalSnapshotFrameSchema } from "./eval-frames.js";
+import {
+  evalPrepareFrameSchema,
+  evalReadFrameSchema,
+  evalSnapshotFrameSchema,
+} from "./eval-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
@@ -622,6 +626,7 @@ export const serverToSandboxFrameSchema = z.union([
   threadCompactFrameSchema,
   evalPrepareFrameSchema,
   evalSnapshotFrameSchema,
+  evalReadFrameSchema,
   piUiResponseFrameSchema,
   policyPendingFrameSchema,
   policyResultFrameSchema,

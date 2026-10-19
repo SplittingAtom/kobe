@@ -106,6 +106,12 @@ export const skillEvalExecutionSchema = z
     checks: z.array(skillEvalCheckResultSchema).max(SKILL_EVAL_CHECKS.length),
     /** The alias the case ran on (SK17: reported on the case). */
     model: alias,
+    /**
+     * The suite's `model:` when the team hasn't enabled it (KOBE-326, SK17: a missing alias is
+     * reported on the case, never a silent fallback): `model` is the team default that ran
+     * instead. Absent when the suite names no model or the team enabled it. Optional (format 1).
+     */
+    requestedModel: alias.optional(),
     costUsd: usd,
     totalCostUsd: usd,
     judgeCostUsd: usd,
@@ -135,6 +141,8 @@ export const skillEvalExecutionSchema = z
       fail("the final attempt is part of the totals");
     if (e.attempts === 1 && (e.costUsd !== e.totalCostUsd || e.durationMs !== e.totalDurationMs))
       fail("one attempt, one cost and duration");
+    if (e.requestedModel !== undefined && e.requestedModel === e.model)
+      fail("requestedModel is the alias that did not run");
   });
 export type SkillEvalExecution = z.infer<typeof skillEvalExecutionSchema>;
 
@@ -222,6 +230,11 @@ export const skillEvalScorecardSchema = z
         fail(`${d.caseId}: without is its own baseline`);
       const baseline = s.mode === "full" && d.kind === "behaviour";
       if (baseline !== (d.without !== null)) fail(`${d.caseId}: a baseline exactly when planned`);
+      // Every case ran on the card's model and reports the alias it fell back from (KOBE-326).
+      const missing = s.runModel.fellBack ? (s.runModel.requested ?? undefined) : undefined;
+      for (const e of d.without ? [d.with, d.without] : [d.with])
+        if (e.model !== s.runModel.used || e.requestedModel !== missing)
+          fail(`${d.caseId}: the case reports the card's run model and any fallback`);
     }
     if (s.mode === "with_only" && (s.without || s.baselinePassRate !== null || s.lift !== null))
       fail("a with_only run has no baseline");

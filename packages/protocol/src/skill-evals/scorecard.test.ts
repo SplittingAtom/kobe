@@ -57,6 +57,27 @@ describe("the scorecard (KOBE-324)", () => {
     expect(verifySkillEvalScorecard(GOLDEN, SUITE)).toMatchObject({ ok: true });
   });
 
+  it("reports a missing run model alias on every case (KOBE-326, SK17)", () => {
+    const card = clone(GOLDEN);
+    const fellBack = { requested: "huge", used: "smart", fellBack: true };
+    const marked = executions(card).map((e) => ({ ...e, requestedModel: "huge" }));
+    const out = computeSkillEvalScorecard(input(card, { runModel: fellBack, executions: marked }));
+    expect(out.runModel).toEqual(fellBack);
+    for (const e of executions(out))
+      expect(e).toMatchObject({ model: "smart", requestedModel: "huge" });
+    // A fallback no case reports, a case that reports one the card hasn't, or another model: refused.
+    expect(() => computeSkillEvalScorecard(input(card, { runModel: fellBack }))).toThrow(
+      /reports the card's run model/,
+    );
+    expect(() => computeSkillEvalScorecard(input(card, { executions: marked }))).toThrow(
+      /reports the card's run model/,
+    );
+    const other = executions(card).map((e) => ({ ...e, model: "fast" }));
+    expect(() => computeSkillEvalScorecard(input(card, { executions: other }))).toThrow(
+      /reports the card's run model/,
+    );
+  });
+
   it("computes lift over the cases that ran in both modes", () => {
     const card = clone(GOLDEN);
     const q3 = card.details[0];
