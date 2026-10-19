@@ -694,6 +694,15 @@ app.kubernetes.io/instance=<release>`; server, model gateway, MCP proxy and egre
   Apps), and templates are not checked. The new table and columns are ignored and kept. Before a
   rollback, disable (or remove from teams) every connector whose tools the registry review shows
   as visible to "apps only".
+- **MCP Apps in the conversation (KOBE-438, migrations `0157_thread_app_results` and
+  `0158_thread_app_results_rls`).** When the model calls a tool that opens an approved app
+  template, the MCP proxy reports the upstream's full result to the server (internal port, with
+  a signed ticket from the server's allow) and the tool card renders the app from it. The
+  migrations add a new team table (RLS, legal-hold guards) and touch no existing table. **During
+  the rollout**, any mix of pods is safe: a previous-release proxy ignores the ticket (nothing is
+  stored, so those cards show text), and a previous-release server never sends one. Stored
+  results count toward the team's storage quota. **A `helm rollback`** leaves the table in
+  place, unused; the cards show text.
 - **Agents freeze their skill versions (KOBE-318, migrations `0139_agent_skill_manifest` and
   `0140_agent_skill_manifest_backfill`).** A published team agent version now runs the exact team
   skill versions it named at publish, not the newest approved one: approving a newer version
