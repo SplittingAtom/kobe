@@ -1,6 +1,9 @@
 import type { SkillDraftSaveFrame, SKILL_DRAFT_SAVE_ERROR_CODES } from "@kobe/protocol";
 import { getMembership, sql, withTeam, type KobeDb, type SKILL_DRAFT_REFUSALS } from "@kobe/db";
 import { runWithAuditContext } from "../../audit/context.js";
+import { appendRunEventsInTx, withAppendTx } from "../../event-stream/append.js";
+import { logger } from "../../logger.js";
+import { WIRE_DEFAULTS } from "../../sandbox-wire/constants.js";
 import { teamRoleAllows } from "../../authz/permissions.js";
 import { hitRateLimit } from "../../rate-limit.js";
 import type { WorkspaceSync } from "../../workspace-sync/index.js";
@@ -28,6 +31,7 @@ export type SkillDraftToolResult =
       readonly created: boolean;
       readonly rev: number;
       readonly fileCount: number;
+      readonly newBecause?: "shared" | "edited";
     }
   | {
       readonly ok: false;
@@ -106,13 +110,60 @@ function refusalOf(result: Extract<WorkspaceSaveResult, { ok: false }>, folder: 
         "You have as many drafts as allowed. Delete one in the Workbench first.",
         "draft_limit",
       );
+    case "name_mismatch":
+      return fail(
+        "invalid_skill",
+        `SKILL.md names the skill ${result.name}; it must be named after its folder, ${folder}.`,
+        "invalid_skill",
+      );
     case "forbidden":
     case "stale_revision":
+    case "name_taken":
+    case "not_sync_target":
       return fail("not_allowed", "That draft can't be updated from this conversation.");
   }
 }
 
-export function createSkillDraftTool(db: KobeDb): SkillDraftTool {
+/**
+ * The server's own record of the save (review L4): a `skill.draft_saved` event on the run, which
+ * the web's Open in Workbench card reads (never the tool result the sandbox relays). Kept clear
+ * of the run's event cap like `file.shared`; the draft is saved either way.
+ */
+async function recordSaved(
+  db: KobeDb,
+  runMaxEvents: number,
+  teamId: string,
+  frame: SkillDraftSaveFrame,
+  saved: Extract<SkillDraftToolResult, { ok: true }>,
+): Promise<void> {
+  try {
+    await withAppendTx(db, teamId, async (tx) => {
+      const run = await tx.execute<{ last_seq: number }>(sql`
+        SELECT last_seq FROM runs WHERE team_id = ${teamId} AND id = ${frame.run_id}`);
+      if ((run.rows[0]?.last_seq ?? runMaxEvents) + 2 > runMaxEvents) return;
+      await appendRunEventsInTx(tx, teamId, frame.run_id, [
+        {
+          type: "skill.draft_saved",
+          payload: {
+            tool_call_id: frame.tool_call_id,
+            draft_id: saved.draftId,
+            name: saved.name,
+            created: saved.created,
+            ...(saved.newBecause ? { new_because: saved.newBecause } : {}),
+          },
+        },
+      ]);
+    });
+  } catch (err) {
+    logger.warn({ err, run_id: frame.run_id }, "skill.draft_saved event not recorded");
+  }
+}
+
+export function createSkillDraftTool(
+  db: KobeDb,
+  options: { readonly runMaxEvents?: number } = {},
+): SkillDraftTool {
+  const runMaxEvents = options.runMaxEvents ?? WIRE_DEFAULTS.runMaxEvents;
   let sync: WorkspaceSync | undefined;
   return {
     use(store) {
@@ -140,18 +191,22 @@ export function createSkillDraftTool(db: KobeDb): SkillDraftTool {
             folder: frame.input.folder,
             pinned: frame.files,
             via: "tool",
+            toolCall: { runId: frame.run_id, toolCallId: frame.tool_call_id },
           }),
       );
       if (!result.ok) return refusalOf(result, frame.input.folder);
       const { draft } = result;
-      return {
-        ok: true,
+      const saved = {
+        ok: true as const,
         draftId: draft.id,
         name: draft.name,
         created: result.created !== false,
         rev: draft.rev,
         fileCount: draft.fileCount,
+        ...(result.newBecause ? { newBecause: result.newBecause } : {}),
       };
+      await recordSaved(db, runMaxEvents, target.teamId, frame, saved);
+      return saved;
     },
   };
 }

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPABILITY_SKILL_DRAFTS, type PolicyEngine } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
+import { RawBody } from "./testing/browser.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { createWorkspaceSync, workspaceBlobKey } from "./workspace-sync/index.js";
@@ -344,5 +345,174 @@ describe("save_skill_draft: decided by the server (ac-3, ac-5)", () => {
       [w.team, stranger.team],
     );
     expect(Number(n[0]?.n)).toBe(0);
+  });
+});
+
+/** A save frame as the agent sends it, for calling the tool directly (no wire). */
+const frameOf = (w: World, callId: string, folder: string, files: readonly Pushed[]) => ({
+  v: 1 as const,
+  type: "skill.draft_save" as const,
+  request_id: `d${seq++}`,
+  run_id: w.runId,
+  thread_id: w.threadId,
+  tool_call_id: callId,
+  tool: "save_skill_draft" as const,
+  input: { folder },
+  files: [...files],
+});
+const tool = () => fx.replica(0).deps.skillDraftTool;
+const target = (w: World) => ({ teamId: w.team, userId: w.owner.id });
+const draftsOf = (w: World) =>
+  rows<{ id: string; synced_rev: number | null; shared: boolean }>(
+    `SELECT id, synced_rev, shared FROM skill_drafts WHERE team_id = $1 ORDER BY created_at`,
+    [w.team],
+  );
+const ifMatch = (rev: number) => ({ "if-match": `"${rev}"` });
+
+describe("save_skill_draft: review fixes (KOBE-442 review)", () => {
+  it("H1: two saves at once from one conversation make one draft and one update", async () => {
+    const w = await world();
+    const md = await push(w.team, w.owner.id, "skills/race-one/SKILL.md", skillMd("race-one"));
+    const [a, b] = await Promise.all([
+      tool().save(target(w), frameOf(w, "r1", "race-one", [md])),
+      tool().save(target(w), frameOf(w, "r2", "race-one", [md])),
+    ]);
+    expect([a, b].map((r) => r.ok)).toEqual([true, true]);
+    expect([a, b].map((r) => (r.ok ? r.created : null)).sort()).toEqual([false, true]);
+    expect(await draftsOf(w)).toHaveLength(1);
+  });
+
+  it("M1: one allowed call is one save; a replay with other files is refused and audited", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const md = await push(w.team, w.owner.id, "skills/once/SKILL.md", skillMd("once"));
+    expect((await allowedSave(sb, w, "call-1", "once", [md])).ok).toBe(true);
+    const other = await push(w.team, w.owner.id, "skills/once/SKILL.md", skillMd("once", "Other."));
+    expect(errorCode(await save(sb, w, "call-1", "once", [other]))).toBe("not_allowed");
+    expect(await refusals(w.team)).toEqual(["replayed"]);
+    const [draft] = await draftsOf(w);
+    const md2 = await w.owner.browser.get(
+      `/v1/skills/drafts/${must(draft, "draft").id}/files/SKILL.md`,
+    );
+    expect(md2.text).not.toContain("Other.");
+  });
+
+  it("M2: a shared or edited draft is left alone; the save makes a new private draft and says why", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const md = await push(w.team, w.owner.id, "skills/kept/SKILL.md", skillMd("kept"));
+    const first = (await allowedSave(sb, w, "k1", "kept", [md])) as {
+      draft_id: string;
+      rev: number;
+    };
+    // The member shares it: the tool may not write into it any more.
+    const shared = await w.owner.browser.request(
+      "PATCH",
+      `/v1/skills/drafts/${first.draft_id}`,
+      { shared: true },
+      ifMatch(first.rev),
+    );
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    const second = await allowedSave(sb, w, "k2", "kept", [md]);
+    expect(second).toMatchObject({ ok: true, created: true, new_because: "shared" });
+    const secondId = (second as { draft_id: string }).draft_id;
+    expect(secondId).not.toBe(first.draft_id);
+    // The member edits the new one by hand: the next save makes another, saying so.
+    const draft = await w.owner.browser.get(`/v1/skills/drafts/${secondId}`);
+    const edited = await w.owner.browser.request(
+      "PUT",
+      `/v1/skills/drafts/${secondId}/files/references/note.md`,
+      new RawBody("Mine.", "text/plain; charset=utf-8"),
+      ifMatch(draft.json.draft.rev as number),
+    );
+    expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+    const third = await allowedSave(sb, w, "k3", "kept", [md]);
+    expect(third).toMatchObject({ ok: true, created: true, new_because: "edited" });
+    const drafts = await draftsOf(w);
+    expect(drafts.map((d) => [d.shared, d.synced_rev !== null])).toEqual([
+      [true, false],
+      [false, false],
+      [false, true],
+    ]);
+    // The server's record, which the card reads, says why.
+    const saves = await w.owner.browser.get(`/v1/skills/drafts/saves?threadId=${w.threadId}`);
+    expect(saves.status).toBe(200);
+    expect(
+      (saves.json.saves as { toolCallId: string; newBecause?: string }[]).map((s) => [
+        s.toolCallId,
+        s.newBecause ?? null,
+      ]),
+    ).toEqual([
+      ["k1", null],
+      ["k2", "shared"],
+      ["k3", "edited"],
+    ]);
+  });
+
+  it("L1, L3: the skill must be named after its folder; success audits name the tool call", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const md = await push(w.team, w.owner.id, "skills/folder-a/SKILL.md", skillMd("other-name"));
+    expect(errorCode(await allowedSave(sb, w, "n1", "folder-a", [md]))).toBe("invalid_skill");
+    const ok = await push(w.team, w.owner.id, "skills/folder-b/SKILL.md", skillMd("folder-b"));
+    expect((await allowedSave(sb, w, "n2", "folder-b", [ok])).ok).toBe(true);
+    const audit = await rows<{ target: Record<string, unknown> }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'skill.draft.created'`,
+      [w.team],
+    );
+    expect(audit.map((a) => [a.target.runId, a.target.toolCallId])).toEqual([[w.runId, "n2"]]);
+  });
+
+  it("a rename into another saved draft's name is refused (name_taken)", async () => {
+    const w = await world();
+    const a = await push(w.team, w.owner.id, "skills/one-a/SKILL.md", skillMd("one-a"));
+    const b = await push(w.team, w.owner.id, "skills/one-b/SKILL.md", skillMd("one-b"));
+    expect((await tool().save(target(w), frameOf(w, "x1", "one-a", [a]))).ok).toBe(true);
+    const second = await tool().save(target(w), frameOf(w, "x2", "one-b", [b]));
+    if (!second.ok) throw new Error(second.message);
+    const renamed = await w.owner.browser.request(
+      "PUT",
+      `/v1/skills/drafts/${second.draftId}/files/SKILL.md`,
+      new RawBody(skillMd("one-a"), "text/plain; charset=utf-8"),
+      ifMatch(second.rev),
+    );
+    expect([renamed.status, renamed.json.code]).toEqual([409, "name_taken"]);
+  });
+
+  it("refuses a run of another member or another thread, a spent rate and a full draft cap", async () => {
+    const w = await world();
+    const md = await push(w.team, w.owner.id, "skills/caps/SKILL.md", skillMd("caps"));
+    // Another member of the team naming the owner's run.
+    const other = await fx.person(`m${randomBytes(2).toString("hex")}`);
+    await fx.addMember(w.team, other);
+    await push(w.team, other.id, "skills/caps/SKILL.md", skillMd("caps"));
+    const theirs = await tool().save(
+      { teamId: w.team, userId: other.id },
+      frameOf(w, "o1", "caps", [md]),
+    );
+    expect(theirs).toMatchObject({ ok: false, code: "not_allowed", refusal: "run_not_active" });
+    // A thread that is not the run's.
+    const elsewhere = { ...frameOf(w, "o2", "caps", [md]), thread_id: randomUUID() };
+    expect(await tool().save(target(w), elsewhere)).toMatchObject({ code: "not_allowed" });
+    // The member's draft cap.
+    await fx.admin.query(
+      `INSERT INTO skill_drafts (team_id, owner_user_id, name, updated_by)
+       SELECT $1, $2, 'filler-' || g, $2 FROM generate_series(1, 50) g`,
+      [w.team, w.owner.id],
+    );
+    expect(await tool().save(target(w), frameOf(w, "o3", "caps", [md]))).toMatchObject({
+      ok: false,
+      code: "draft_limit",
+    });
+    // The shared upload rate (30 per 10 minutes, review L2: shared on purpose).
+    await fx.admin.query(
+      `INSERT INTO rate_limits (key, count, last_request) VALUES ($1, 1000, $2)
+       ON CONFLICT (key) DO UPDATE SET count = 1000, last_request = $2`,
+      [`kobe:skill-upload:${w.owner.id}`, Date.now()],
+    );
+    expect(await tool().save(target(w), frameOf(w, "o4", "caps", [md]))).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
   });
 });

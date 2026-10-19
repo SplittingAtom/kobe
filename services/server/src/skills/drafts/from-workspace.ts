@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalZip, SkillPackageError } from "@kobe/protocol";
-import { and, eq, skillDrafts, withTeam, type KobeTx } from "@kobe/db";
+import { and, eq, isNotNull, skillDrafts, withTeam, type KobeTx } from "@kobe/db";
 import { findThread } from "../../threads/repository.js";
 import { viewerProjectIds } from "../../threads/references.js";
 import { liveFilesUnder } from "../../workspace-files/browse.js";
@@ -10,7 +10,15 @@ import { validateZipBundle, type BundleError } from "../bundle.js";
 import { SKILL_LIMITS } from "../limits.js";
 import { DRAFT_LIMITS } from "./files.js";
 import { packageFiles } from "./starts.js";
-import { createDraft, replaceDraftFiles, type DraftContext, type DraftOutcome } from "./service.js";
+import {
+  createDraft,
+  isSyncNameClash,
+  replaceDraftFiles,
+  type DraftContext,
+  type DraftOutcome,
+  type DraftStartInput,
+  type ToolCallRef,
+} from "./service.js";
 import type { DraftRecord } from "./records.js";
 
 /**
@@ -25,7 +33,12 @@ import type { DraftRecord } from "./records.js";
  */
 
 export type WorkspaceSaveResult =
-  | (DraftOutcome<{ draft: DraftRecord }> & { readonly created?: boolean })
+  | (DraftOutcome<{ draft: DraftRecord }> & {
+      readonly created?: boolean;
+      /** A new draft although the conversation had one: it was shared or edited (KOBE-442 M2). */
+      readonly newBecause?: "shared" | "edited";
+    })
+  | { readonly ok: false; readonly error: "name_mismatch"; readonly name: string }
   | {
       readonly ok: false;
       readonly error: "thread_not_found" | "folder_empty" | "folder_changed" | "outside_folder";
@@ -49,6 +62,8 @@ export interface WorkspaceSaveInput {
    */
   readonly pinned?: readonly PinnedFile[];
   readonly via?: "tool";
+  /** The agent's call, for the audit events (review L3). */
+  readonly toolCall?: ToolCallRef;
 }
 
 type Owner = { readonly teamId: string; readonly userId: string };
@@ -151,8 +166,8 @@ async function readCapped(body: AsyncIterable<unknown>, size: number): Promise<B
   return Buffer.concat(chunks);
 }
 
-/** The caller's draft started from this conversation under `name`, if there is one. */
-async function existingDraft(ctx: DraftContext, threadId: string, name: string) {
+/** The caller's draft this conversation saves `name` into, if there is one. */
+async function syncTarget(ctx: DraftContext, threadId: string, name: string) {
   return withTeam(ctx.db, ctx.teamId, async (tx) => {
     const [row] = await tx
       .select({ id: skillDrafts.id })
@@ -163,11 +178,67 @@ async function existingDraft(ctx: DraftContext, threadId: string, name: string) 
           eq(skillDrafts.ownerUserId, ctx.viewer.userId),
           eq(skillDrafts.fromThreadId, threadId),
           eq(skillDrafts.name, name),
+          isNotNull(skillDrafts.syncedRev),
         ),
       )
       .limit(1);
     return row?.id ?? null;
   });
+}
+
+/** A new draft from the conversation; "clash" when a concurrent save made the target first. */
+async function tryCreate(ctx: DraftContext, start: DraftStartInput) {
+  try {
+    return await createDraft(ctx, start);
+  } catch (err) {
+    if (isSyncNameClash(err)) return "clash" as const;
+    throw err;
+  }
+}
+
+/** How often a save looks for the target again after losing a race to a concurrent one. */
+const SAVE_ATTEMPTS = 3;
+
+/**
+ * Writes `files` into the conversation's draft of `name`, or makes it (KOBE-322, KOBE-442). The
+ * unique save target per (author, conversation, name) makes concurrent saves meet on one draft:
+ * the loser of a create looks again and updates the winner. The agent's tool updates only a
+ * private draft nobody changed since its last save; otherwise it makes a new private draft (the
+ * old one keeps its files and is no longer saved into) and says why.
+ */
+async function writeTarget(
+  ctx: DraftContext,
+  input: WorkspaceSaveInput,
+  name: string,
+  files: ReadonlyMap<string, Uint8Array>,
+): Promise<WorkspaceSaveResult> {
+  const tool = input.via
+    ? { via: input.via, ...(input.toolCall ? { toolCall: input.toolCall } : {}) }
+    : {};
+  const start = {
+    name,
+    startedFrom: "thread" as const,
+    fromThreadId: input.threadId,
+    files,
+    ...tool,
+  };
+  for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {
+    const target = await syncTarget(ctx, input.threadId, name);
+    if (target) {
+      const replaced = await replaceDraftFiles(ctx, target, files, {
+        fromThreadId: input.threadId,
+        ...tool,
+      });
+      if (replaced.ok || replaced.error !== "not_sync_target")
+        return { ...replaced, created: false };
+      const made = await tryCreate(ctx, { ...start, detach: target });
+      if (made === "clash") continue;
+      return { ...made, created: true, newBecause: replaced.because };
+    }
+    const made = await tryCreate(ctx, start);
+    if (made !== "clash") return { ...made, created: true };
+  }
+  return { ok: false, error: "folder_changed" };
 }
 
 export async function saveWorkspaceSkill(
@@ -200,19 +271,8 @@ export async function saveWorkspaceSkill(
   }
   const valid = validateZipBundle(zip, DRAFT_BUNDLE_LIMITS);
   if (!valid.ok) return { ok: false, error: "invalid_bundle", bundle: valid.error };
-  const files = packageFiles(valid.value);
-  const existing = await existingDraft(ctx, input.threadId, valid.value.name);
-  const via = input.via ? { via: input.via } : {};
-  if (existing) {
-    const source = { fromThreadId: input.threadId, ...via };
-    return { ...(await replaceDraftFiles(ctx, existing, files, source)), created: false };
-  }
-  const made = await createDraft(ctx, {
-    name: valid.value.name,
-    startedFrom: "thread",
-    fromThreadId: input.threadId,
-    files,
-    ...via,
-  });
-  return { ...made, created: true };
+  // The tool's policy decision saw the folder: the skill must be named after it (review L1).
+  if (input.via === "tool" && valid.value.name !== input.folder)
+    return { ok: false, error: "name_mismatch", name: valid.value.name };
+  return writeTarget(ctx, input, valid.value.name, packageFiles(valid.value));
 }

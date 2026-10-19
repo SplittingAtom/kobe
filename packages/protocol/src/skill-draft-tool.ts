@@ -86,6 +86,8 @@ export const skillDraftSaveOkFields = {
   created: z.boolean(),
   rev: z.number().int().positive(),
   file_count: z.number().int().positive(),
+  /** A new draft although the conversation had one: shared, or edited since (KOBE-442 M2). */
+  new_because: z.enum(["shared", "edited"]).optional(),
 } as const;
 export const skillDraftSaveFailFields = {
   ok: z.literal(false),

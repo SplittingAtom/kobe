@@ -186,6 +186,7 @@ export const SKILL_DRAFT_REFUSALS = [
   "too_large",
   "draft_limit",
   "rate_limited",
+  "replayed",
 ] as const;
 
 /** Why the server refused a `memory.put` / `memory.read` (audit `sandbox.memory_refused`, KOBE-156). */
@@ -1586,6 +1587,9 @@ export const AUDIT_EVENTS = {
     fromThreadId: id.optional(),
     /** `tool`: the agent's `save_skill_draft` (KOBE-442); absent: the member in the web app. */
     via: z.enum(["tool"]).optional(),
+    /** The agent's call behind a `via: tool` save (KOBE-442 review L3). */
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
   }),
   /**
    * Save to Workbench again from the same conversation (KOBE-322) or `save_skill_draft`
@@ -1595,6 +1599,8 @@ export const AUDIT_EVENTS = {
     draftId: id,
     fromThreadId: id.optional(),
     via: z.enum(["tool"]).optional(),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
   }),
   /** A draft's author shared it with the team's Builders and Team admins, or stopped sharing. */
   "skill.draft.shared": event("team", { draftId: id, shared: z.boolean() }),

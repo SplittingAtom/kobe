@@ -33,6 +33,8 @@ export interface DraftRecord {
   readonly fromThreadId: string | null;
   /** Someone besides the author changed it (sticky, kept by the database). */
   readonly coEdited: boolean;
+  /** The revision the conversation's last save wrote; null: no conversation saves into it. */
+  readonly syncedRev: number | null;
   readonly rev: number;
   readonly sizeBytes: number;
   readonly fileCount: number;
@@ -69,6 +71,7 @@ const columns = {
   parentRef: skillDrafts.parentRef,
   fromThreadId: skillDrafts.fromThreadId,
   coEdited: skillDrafts.coEdited,
+  syncedRev: skillDrafts.syncedRev,
   rev: skillDrafts.rev,
   sizeBytes: skillDrafts.sizeBytes,
   fileCount: skillDrafts.fileCount,
@@ -180,6 +183,8 @@ export async function insertDraft(
   if (!row) throw new Error("draft insert returned no row");
   for (const [path, bytes] of files)
     await putFile(tx, draft.teamId, row.id, path, bytes, draft.ownerUserId);
+  // A start from a conversation is that conversation's save target (KOBE-442).
+  if (draft.fromThreadId) await markSynced(tx, draft.teamId, row.id);
   const [saved] = await tx.select(columns).from(skillDrafts).where(byId(draft.teamId, row.id));
   if (!saved) throw new Error("draft vanished after insert");
   return saved;
@@ -308,6 +313,19 @@ export async function bumpRevision(
     .returning(columns);
   if (!row) throw new Error("locked draft vanished");
   return row;
+}
+
+/** The draft's current revision is what its conversation saved (KOBE-442). */
+export async function markSynced(tx: KobeTx, teamId: string, id: string): Promise<void> {
+  await tx
+    .update(skillDrafts)
+    .set({ syncedRev: sql`${skillDrafts.rev}` })
+    .where(byId(teamId, id));
+}
+
+/** Its conversation no longer saves into the draft (it was shared or edited since; KOBE-442). */
+export async function detachSynced(tx: KobeTx, teamId: string, id: string): Promise<void> {
+  await tx.update(skillDrafts).set({ syncedRev: null }).where(byId(teamId, id));
 }
 
 export async function deleteDraft(tx: KobeTx, teamId: string, id: string): Promise<void> {

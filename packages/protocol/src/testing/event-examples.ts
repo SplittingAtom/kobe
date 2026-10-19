@@ -95,6 +95,12 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     size: 48_213,
     mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   },
+  "skill.draft_saved": {
+    tool_call_id: "call_7",
+    draft_id: "7a1e2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
+    name: "close-helper",
+    created: true,
+  },
   "entry.committed": {
     entry_id: "b2c3d4e5",
     parent_id: "a1b2c3d4",

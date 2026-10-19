@@ -119,3 +119,15 @@ describe("save_skill_draft contract (KOBE-442)", () => {
     ).toBe(true);
   });
 });
+
+describe("skill.draft_saved event (KOBE-442 review L4, M2)", () => {
+  it("is the server's record of a save, with why a new draft was made", async () => {
+    const { EVENT_PAYLOAD_SCHEMAS } = await import("./events.js");
+    const schema = EVENT_PAYLOAD_SCHEMAS["skill.draft_saved"];
+    const ok = { tool_call_id: "call_1", draft_id: DRAFT, name: "x", created: true };
+    expect(schema.safeParse(ok).success).toBe(true);
+    expect(schema.safeParse({ ...ok, new_because: "shared" }).success).toBe(true);
+    expect(schema.safeParse({ ...ok, new_because: "other" }).success).toBe(false);
+    expect(schema.safeParse({ ...ok, name: "Not A Name" }).success).toBe(false);
+  });
+});

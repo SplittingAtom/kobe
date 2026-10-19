@@ -368,7 +368,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     : undefined;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
   const projectMounts = createProjectMounts(database.db, logger);
-  const skillDraftTool = createSkillDraftTool(database.db);
+  const skillDraftTool = createSkillDraftTool(database.db, {
+    ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
+      ? {}
+      : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
+  });
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,

@@ -8,7 +8,7 @@ import type { SandboxTarget } from "./types.js";
 /**
  * `skill.draft_save` (KOBE-442) on one connection: accepted only if it announced `skill_drafts`,
  * the run is leased here and active, and this `save_skill_draft` call was allowed here with the
- * same canonical input hash (D-3, as `share_file`). The save itself is `ctx.skillDrafts`. Every
+ * same canonical input hash (D-3), taken once: a replay of the call is refused (review M1). The save itself is `ctx.skillDrafts`. Every
  * refusal is audited (no names, paths or content) and answered with `skill.draft_save_result`.
  */
 export interface SkillDraftSaveConnection {
@@ -19,7 +19,8 @@ export interface SkillDraftSaveConnection {
   readonly hasCapability: boolean;
   /** `#checkToolRun` for this frame; "violation" was already answered and the frame dropped. */
   readonly runCheck: () => "ok" | "ended" | "violation";
-  readonly verdict: () => AllowedVerdict;
+  /** Takes the allowance (single use): a second frame for the call is "replayed". */
+  readonly verdict: () => AllowedVerdict | "replayed";
   /** Saves in flight on this connection, and the cap. */
   readonly inFlight: { count: number };
   send(frame: ServerToSandboxFrame): boolean;
@@ -60,7 +61,9 @@ export function onSkillDraftSave(c: SkillDraftSaveConnection, frame: SkillDraftS
       verdict,
       verdict === "input_mismatch"
         ? "The folder differs from the call that was allowed."
-        : "This tool call was not allowed for this tool.",
+        : verdict === "replayed"
+          ? "This tool call was already used to save a skill."
+          : "This tool call was not allowed for this tool.",
     );
     return;
   }
@@ -98,6 +101,7 @@ export function onSkillDraftSave(c: SkillDraftSaveConnection, frame: SkillDraftS
           created: result.created,
           rev: result.rev,
           file_count: result.fileCount,
+          ...(result.newBecause ? { new_because: result.newBecause } : {}),
         });
         return;
       }

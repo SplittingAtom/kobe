@@ -43,6 +43,7 @@ import { startFromTemplate, startFromUpload, type StartResult } from "../skills/
 import { TEMPLATE_IDS, templates } from "../skills/drafts/templates.js";
 import { saveWorkspaceSkill } from "../skills/drafts/from-workspace.js";
 import { startFork } from "../skills/drafts/fork.js";
+import { recordedSaves } from "../skills/drafts/saves.js";
 import type { WorkspaceSync } from "../workspace-sync/index.js";
 import { skillJson, versionJson } from "./skill-json.js";
 
@@ -180,6 +181,10 @@ export function skillDraftRoutes(
       case "draft_too_large":
       case "file_too_large":
         return error(c, 413, f.error, f.message);
+      case "name_taken":
+        return error(c, 409, "name_taken", f.message);
+      case "not_sync_target":
+        return error(c, 409, "not_sync_target", "This draft is no longer saved into.");
     }
   };
 
@@ -279,6 +284,15 @@ export function skillDraftRoutes(
     if (result.ok && result.created === false)
       return c.json({ draft: draftJson(result.draft, c.get("user").id), created: false });
     return started(c, result as StartResult);
+  });
+
+  // The conversation's save_skill_draft saves, as the server recorded them (KOBE-442 review L4).
+  app.get("/saves", async (c) => {
+    const threadId = idSchema.safeParse(c.req.query("threadId"));
+    if (!threadId.success) return error(c, 400, "invalid_request", "Give threadId.");
+    const saves = await recordedSaves(ctxOf(c), threadId.data);
+    if (!saves) return error(c, 404, "not_found", "No such conversation.");
+    return c.json({ saves });
   });
 
   app.get("/templates", (c) =>

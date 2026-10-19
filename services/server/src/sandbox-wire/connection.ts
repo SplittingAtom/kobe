@@ -855,7 +855,8 @@ export class SandboxConnection implements RegisteredConnection {
         hasCapability: this.hasCapability(CAPABILITY_SKILL_DRAFTS),
         runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "skill.draft_save"),
         verdict: () =>
-          this.#allowedArtifacts.check(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+          // Single use (review M1): one allowed call, or one approval, is one save.
+          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
         inFlight: this.#skillDraftSaves,
         send: (out) => this.send(out),
       },
