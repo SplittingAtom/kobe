@@ -67,6 +67,25 @@ describe("the verdict (ac-3)", () => {
     expect(raisedVerdict("pass", info)).toBe("pass");
     expect(raisedVerdict("caution", raising)).toBe("caution");
     expect(raisedVerdict("block", raising)).toBe("block");
-    expect(raisedVerdict("pass", { status: "failed", reason: "x", finishedAt: "" })).toBe("pass");
+    // A scan that didn't complete raises Pass to Caution too (review-341 M2), never Block.
+    for (const status of ["failed", "skipped", "unavailable"] as const) {
+      expect(raisedVerdict("pass", { status, reason: "x", finishedAt: "" })).toBe("caution");
+      expect(raisedVerdict("block", { status, reason: "x", finishedAt: "" })).toBe("block");
+    }
+    expect(raisedVerdict("pass", { status: "queued", queuedAt: "" })).toBe("pass");
+  });
+
+  it("makes an incomplete scan one Caution item to acknowledge (review-341 M2)", () => {
+    const scan = { external: { status: "skipped", reason: "too_large", finishedAt: "" } };
+    expect(externalCautionFindings(scan)).toEqual([
+      expect.objectContaining({
+        rule: "cisco:scan_incomplete",
+        file: "",
+        line: 0,
+        severity: "caution",
+        title: expect.stringContaining("too_large"),
+      }),
+    ]);
+    expect(externalCautionFindings({ external: { status: "queued", queuedAt: "" } })).toEqual([]);
   });
 });

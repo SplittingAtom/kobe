@@ -17,7 +17,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "toolExecutor" (dict "enabled" false)
   "skillEval" (dict "maxConcurrentPerTeam" 4 "workspaceSize" "2Gi")
   "orbitEval" (dict "deadlineSeconds" 900 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
-  "skillScan" (dict "deadlineSeconds" 300 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
+  "skillScan" (dict "enabled" false "deadlineSeconds" 300 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
 {{- end -}}
@@ -84,7 +84,7 @@ pod labels and port for the team NetworkPolicy).
 {{- range $k, $v := $s.teamQuota -}}
 {{- $_ := set $quota $k (toString $v) -}}
 {{- end -}}
-{{- toJson (dict
+{{- $cfg := (dict
   "image" (include "kobe.image" (dict "root" . "name" "sandbox"))
   "imagePullPolicy" .Values.global.imagePullPolicy
   "imagePullSecrets" $pullSecrets
@@ -114,13 +114,17 @@ pod labels and port for the team NetworkPolicy).
     "deadlineSeconds" (int $s.orbitEval.deadlineSeconds)
     "resources" (dict
       "requests" (dict "cpu" (toString $s.orbitEval.resources.requests.cpu) "memory" (toString $s.orbitEval.resources.requests.memory))
-      "limits" (dict "cpu" (toString $s.orbitEval.resources.limits.cpu) "memory" (toString $s.orbitEval.resources.limits.memory))))
-  "skillScan" (dict
+      "limits" (dict "cpu" (toString $s.orbitEval.resources.limits.cpu) "memory" (toString $s.orbitEval.resources.limits.memory))))) -}}
+{{- /* The external skill scanner's image only when the install has it (KOBE-341, review L10). */ -}}
+{{- if $s.skillScan.enabled -}}
+{{- $_ := set $cfg "skillScan" (dict
     "image" (include "kobe.image" (dict "root" . "name" "skill-scan"))
     "deadlineSeconds" (int $s.skillScan.deadlineSeconds)
     "resources" (dict
       "requests" (dict "cpu" (toString $s.skillScan.resources.requests.cpu) "memory" (toString $s.skillScan.resources.requests.memory))
-      "limits" (dict "cpu" (toString $s.skillScan.resources.limits.cpu) "memory" (toString $s.skillScan.resources.limits.memory))))) -}}
+      "limits" (dict "cpu" (toString $s.skillScan.resources.limits.cpu) "memory" (toString $s.skillScan.resources.limits.memory)))) -}}
+{{- end -}}
+{{- toJson $cfg -}}
 {{- end -}}
 
 {{/* KOBE-27 workspace sync settings; maxWorkspaceSize is omitted when empty (the volume size). */}}

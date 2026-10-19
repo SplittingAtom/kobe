@@ -4,7 +4,7 @@ import { listMaintainers, type Maintainer } from "./maintainers.js";
 import { similarCatalogNames } from "./names-db.js";
 import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
 import { acknowledgements, findingKey, type Acknowledgement } from "./review-findings.js";
-import type { ExternalFinding } from "./external-scan-result.js";
+import { externalFindings } from "./external-scan-result.js";
 import { rerunHistory, type RerunEntry } from "./rerun.js";
 import {
   approvedVersion,
@@ -123,11 +123,7 @@ async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unkn
       source: "kobe",
     };
   });
-  const ext = v.scan.external as { status?: unknown; findings?: unknown } | undefined;
-  const external =
-    ext?.status === "done" && Array.isArray(ext.findings)
-      ? (ext.findings as ExternalFinding[])
-      : [];
+  const external = externalFindings(v.scan);
   return [
     ...own,
     ...external.map((f): ReviewFinding => {

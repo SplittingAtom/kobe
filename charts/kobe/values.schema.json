@@ -224,6 +224,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
             "deadlineSeconds": {
               "type": "integer",
               "minimum": 60,

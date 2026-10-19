@@ -115,6 +115,10 @@ sandbox:
   # the Registry team's namespace: gVisor/Kata, no service account token, no Secret, no DNS and a
   # NetworkPolicy that allows no traffic at all. Its findings are advisory (Caution at most).
   skillScan:
+    # Off: the server has no scanner image, and a Site admin who turns the scanner on sees each
+    # scan recorded "unavailable" (a Caution item to acknowledge). On: the kobe-skill-scan image
+    # must be in the registry (it is not published with the other images).
+    enabled: false
     # activeDeadlineSeconds of the Job; a scan that runs longer is recorded as failed.
     deadlineSeconds: 300
     resources:

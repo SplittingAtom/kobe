@@ -337,6 +337,41 @@ describe("the review screen (ac-1, ac-2)", () => {
     ).toBeTruthy();
   });
 
+  it("makes a scan that did not complete an item to acknowledge (review-341 M2)", async () => {
+    stubApi({
+      [`GET ${BASE}/${ID}`]: [
+        200,
+        detail({
+          scan: {
+            findings: [],
+            external: { status: "skipped", reason: "too_large", finished_at: "x" },
+          },
+          findings: [
+            {
+              key: "cisco:scan_incomplete@:0",
+              rule: "cisco:scan_incomplete",
+              file: "",
+              line: 0,
+              severity: "caution",
+              category: null,
+              acknowledged: null,
+              source: "external",
+              title:
+                "The external scan did not complete (too_large): judge the package without it.",
+              external_severity: "incomplete",
+            },
+          ],
+        }),
+      ],
+      [`GET ${BASE}/${ID}/diff`]: [200, diff],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    expect(
+      await screen.findByText(/External scanner: skipped \(the package is too large/),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Acknowledge cisco:scan_incomplete" })).toBeTruthy();
+  });
+
   it("re-runs the evals in the Registry team and shows the latest run (KOBE-335)", async () => {
     const entry = (over: Record<string, unknown>) => ({
       eval_run_id: "e-0",

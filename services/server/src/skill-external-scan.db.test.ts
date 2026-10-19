@@ -3,8 +3,8 @@ import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { validateZipBundle } from "./skills/bundle.js";
 import { ensureObject } from "./skills/kobe-seed.js";
-import { ExternalScanRunner } from "./skills/registry/external-scan.js";
-import { SCAN_MARKER } from "./skills/registry/external-scan-result.js";
+import { ExternalScanRunner, markNoRunner } from "./skills/registry/external-scan.js";
+import { SCAN_MARKER, externalScannerOn } from "./skills/registry/external-scan-result.js";
 import { reviewDetail } from "./skills/registry/review-detail.js";
 import { sha256Hex } from "./skills/storage.js";
 import type { SandboxSettings } from "./sandbox/config.js";
@@ -98,11 +98,17 @@ async function submitted(verdict = "pass", extra?: Uint8Array): Promise<string> 
     `INSERT INTO registry_skills (name, summary) VALUES ($1, 'S.') RETURNING id`,
     [name],
   );
+  // As the submission writes it: the external scan queued while the Site has it on.
+  const on = await externalScannerOn(h.deps.database.db);
+  const scanDoc = JSON.stringify({
+    findings: [],
+    ...(on ? { external: { status: "queued", queuedAt: new Date().toISOString() } } : {}),
+  });
   const v = await h.admin.query<{ id: string }>(
     `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash,
        runtime_storage_key, runtime_size_bytes, package_storage_key, manifest, provenance, source,
        scan, verdict, submitted_by)
-     VALUES ($1, '1.0.0', 1, $2, $3, $4, $5, $6, '{}', '{}', '{}', '{"findings": []}',
+     VALUES ($1, '1.0.0', 1, $2, $3, $4, $5, $6, '{}', '{}', '{}', $9::jsonb,
        $7::scan_verdict, $8)
      RETURNING id`,
     [
@@ -114,6 +120,7 @@ async function submitted(verdict = "pass", extra?: Uint8Array): Promise<string> 
       packageKey,
       verdict,
       ids.submitter,
+      scanDoc,
     ],
   );
   return v.rows[0]?.id as string;
@@ -176,8 +183,9 @@ describe("a scan per submission (ac-1 to ac-4)", () => {
     const pod = (job?.spec as { template: { spec: Record<string, unknown> } }).template.spec;
     expect(pod).toMatchObject({ automountServiceAccountToken: false, dnsPolicy: "None" });
     expect(JSON.stringify(job)).not.toMatch(/secret|"env"/i);
-    const cm = kube.all("ConfigMap").find((c) => c.metadata.name === `skill-scan-${id}`);
-    expect(Object.keys((cm as { binaryData?: object }).binaryData ?? {})).toEqual(["package.zip"]);
+    const cm = kube.all("ConfigMap").find((c) => c.metadata.name === `skill-scan-${id}-0`);
+    expect(Object.keys((cm as { binaryData?: object }).binaryData ?? {})).toEqual(["part-000"]);
+    expect(cm?.metadata.ownerReferences?.[0]).toMatchObject({ kind: "Job" });
     const policy = kube.all("NetworkPolicy").find((p) => p.metadata.name === "kobe-skill-scan");
     expect(policy?.spec).toMatchObject({ ingress: [], egress: [] });
 
@@ -207,29 +215,68 @@ describe("a scan per submission (ac-1 to ac-4)", () => {
     expect((await stored(low))?.verdict).toBe("pass");
   });
 
-  it("records failures, a package too large, and a missing image; Approve waits while it runs", async () => {
+  it("an incomplete scan is a Caution item to acknowledge; a large package is scanned in parts (review-341 M2)", async () => {
     output = "the scanner crashed\n";
     const broken = await submitted();
     expect(await runner().run(broken)).toMatchObject({ status: "failed", reason: "no_result" });
-    expect((await stored(broken))?.verdict).toBe("pass");
+    expect((await stored(broken))?.verdict).toBe("caution");
+    const detail = await reviewDetail(h.deps.database.db, broken, ids.reviewer);
+    expect(detail?.findings).toEqual([
+      expect.objectContaining({ key: "cisco:scan_incomplete@:0", severity: "caution" }),
+    ]);
+    expect(detail?.approveProblems.map((p) => p.code)).toContain("findings_unacknowledged");
 
+    output = resultLine([]);
     const big = await submitted("pass", randomBytes(800 * 1024));
-    expect(await runner().run(big)).toMatchObject({ status: "skipped", reason: "too_large" });
+    expect(await runner().run(big)).toMatchObject({ status: "done" });
+    const parts = kube
+      .all("ConfigMap")
+      .filter((c) => c.metadata.name.startsWith(`skill-scan-${big}-`));
+    expect(parts.map((c) => c.metadata.name).sort()).toEqual([
+      `skill-scan-${big}-0`,
+      `skill-scan-${big}-1`,
+    ]);
     const noImage = await submitted();
     expect(await runner(SETTINGS).run(noImage)).toMatchObject({ status: "unavailable" });
-
-    const running = await submitted();
-    await h.admin.query(
-      `UPDATE registry_versions SET scan = jsonb_set(scan, '{external}', $2::jsonb) WHERE id = $1`,
-      [running, JSON.stringify({ status: "running", startedAt: "2026-01-01T00:00:00Z", job: "x" })],
-    );
-    const detail = await reviewDetail(h.deps.database.db, running, ids.reviewer);
-    expect(detail?.approveProblems.map((p) => p.code)).toContain("external_scan_running");
-    // The sweep finishes a scan whose driver died (no Job left): failed, Approve no longer waits.
-    expect(await runner().sweep()).toBeGreaterThanOrEqual(1);
-    expect((await stored(running))?.scan.external).toMatchObject({
-      status: "failed",
-      reason: "interrupted",
+    expect((await stored(noImage))?.verdict).toBe("caution");
+    // A server without a runner says so at submission (review-341 M1).
+    const noRunner = await submitted();
+    await markNoRunner(h.deps.database.db, noRunner);
+    expect((await stored(noRunner))?.scan.external).toMatchObject({
+      status: "unavailable",
+      reason: "no_runner",
     });
+  });
+
+  it("Approve waits from submission; the sweep starts a lost scan; at most two run (review-341 M1, L9)", async () => {
+    output = resultLine([]);
+    const queued = await submitted();
+    const waiting = await reviewDetail(h.deps.database.db, queued, ids.reviewer);
+    expect(waiting?.approveProblems.map((p) => p.code)).toContain("external_scan_running");
+
+    // Two scans running elsewhere: this one stays queued.
+    const others = [await submitted(), await submitted()];
+    for (const o of others)
+      await h.admin.query(
+        `UPDATE registry_versions SET scan = jsonb_set(scan, '{external}', $2::jsonb) WHERE id = $1`,
+        [o, JSON.stringify({ status: "running", startedAt: "2026-01-01T00:00:00Z", job: "x" })],
+      );
+    expect(await runner().run(queued)).toBeNull();
+    expect((await stored(queued))?.scan.external).toMatchObject({ status: "queued" });
+
+    // The sweep fails the two orphans (no Job), then starts the queued one once it is due.
+    await h.admin.query(
+      `UPDATE registry_versions SET scan = jsonb_set(scan, '{external,queuedAt}', '"2026-01-01T00:00:00Z"') WHERE id = $1`,
+      [queued],
+    );
+    const sweeper = runner();
+    await sweeper.sweep();
+    for (const o of others)
+      expect((await stored(o))?.scan.external).toMatchObject({
+        status: "failed",
+        reason: "interrupted",
+      });
+    await sweeper.sweep();
+    await expect.poll(async () => (await stored(queued))?.scan.external?.status).toBe("done");
   });
 });

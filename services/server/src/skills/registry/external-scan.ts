@@ -16,6 +16,7 @@ import { jobOutcome } from "../../agents/eval/service.js";
 import {
   SCAN_CONTAINER,
   SCAN_MAX_PACKAGE_BYTES,
+  packageParts,
   scanConfigMapManifest,
   scanJobManifest,
   scanJobName,
@@ -38,6 +39,8 @@ const POLL_MS = 3_000;
 /** The driver gives up this long after the Job's own deadline (image pull and scheduling lag). */
 const DRIVER_SLACK_SECONDS = 120;
 const OPEN_STATES = ["submitted", "in_review"];
+/** Scan Jobs running at once across the Site (review L9); more wait queued. */
+export const MAX_CONCURRENT_SCANS = 2;
 
 export interface ExternalScanOptions {
   readonly db: KobeDb;
@@ -67,6 +70,7 @@ type VersionRow = {
   runtime_hash: string;
   runtime_storage_key: string | null;
   runtime_size_bytes: number | null;
+  external: string | null;
 };
 
 export class ExternalScanRunner {
@@ -87,13 +91,16 @@ export class ExternalScanRunner {
     );
   }
 
-  /** Scans one submission, when the Site turned the scanner on. */
+  /**
+   * Scans one submission whose scan is due (`queued`, written with the submission when the Site
+   * has the scanner on). At most {@link MAX_CONCURRENT_SCANS} run at once across the Site (review
+   * L9): over the cap the scan stays queued and the sweep starts it later.
+   */
   async run(versionId: string): Promise<ExternalScan | null> {
     const { db } = this.options;
-    const site = await readRegistrySettings(db);
-    if (!site.scanner.external) return null;
     const v = await this.version(versionId);
-    if (!v || !OPEN_STATES.includes(v.state)) return null;
+    if (!v || !OPEN_STATES.includes(v.state) || v.external !== "queued") return null;
+    const site = await readRegistrySettings(db);
     const scan = this.options.settings.skillScan;
     const at = () => this.now().toISOString();
     if (!scan)
@@ -110,16 +117,16 @@ export class ExternalScanRunner {
     if (!zip) return this.record(v, { status: "failed", reason: "no_package", finishedAt: at() });
     if (zip.length > SCAN_MAX_PACKAGE_BYTES)
       return this.record(v, { status: "skipped", reason: "too_large", finishedAt: at() });
-    const team: TeamRef = { id: site.registryTeam.id, slug: site.registryTeam.slug };
     const startedAt = at();
+    if (!(await this.claim(v.id, startedAt))) return null;
+    const team: TeamRef = { id: site.registryTeam.id, slug: site.registryTeam.slug };
+    let namespace: string | null = null;
     try {
       const verified = await this.options.isolation.require();
-      const namespace = await this.options.provider.ensureTeam(team, verified);
+      namespace = await this.options.provider.ensureTeam(team, verified);
       await this.options.kube.apply(skillScanNetworkPolicyManifest(namespace));
-      await this.options.kube.apply(
-        scanConfigMapManifest({ namespace, teamId: team.id, versionId: v.id, packageZip: zip }),
-      );
-      await this.record(v, { status: "running", startedAt, job: scanJobName(v.id) });
+      const parts = packageParts(zip);
+      // The Job first, then its parts owned by it (review L5): nothing outlives the Job.
       const job = await this.options.kube.create(
         scanJobManifest({
           namespace,
@@ -128,30 +135,69 @@ export class ExternalScanRunner {
           isolation: verified,
           sandbox: this.options.settings,
           scan,
+          parts: parts.length,
         }),
       );
       const uid = job.metadata.uid;
-      if (uid)
-        await this.options.kube.patch(ref("ConfigMap", scanJobName(v.id), namespace), {
-          metadata: {
-            ownerReferences: [
-              { apiVersion: "batch/v1", kind: "Job", name: scanJobName(v.id), uid },
-            ],
-          },
-        });
+      if (!uid) throw new Error("the scan Job has no uid");
+      for (const [part, bytes] of parts.entries())
+        await this.options.kube.apply(
+          scanConfigMapManifest({
+            namespace,
+            teamId: team.id,
+            versionId: v.id,
+            part,
+            bytes,
+            owner: { name: scanJobName(v.id), uid },
+          }),
+        );
       const outcome = await this.waitForJob(namespace, v.id, scan.deadlineSeconds);
       return await this.conclude(v.id, namespace, outcome, startedAt);
     } catch (err) {
       logger.error({ err, versionId }, "external skill scan could not run");
+      if (namespace)
+        await this.options.kube
+          .delete(ref("Job", scanJobName(v.id), namespace, "batch/v1"))
+          .catch(() => undefined);
       const failed: ExternalScan = { status: "failed", reason: "job_error", finishedAt: at() };
       return this.record(v, failed);
     }
   }
 
+  /** Marks the scan running if fewer than the cap run now (one claimer at a time). */
+  private async claim(versionId: string, startedAt: string): Promise<boolean> {
+    return this.options.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.skills.external-scan', 0))`,
+      );
+      const running = await tx.execute<{ n: number }>(sql`
+        SELECT count(*)::int AS n FROM registry_versions
+         WHERE scan #>> '{external,status}' = 'running'`);
+      if (Number(running.rows[0]?.n ?? 0) >= MAX_CONCURRENT_SCANS) return false;
+      const claimed = await tx.execute(sql`
+        UPDATE registry_versions
+           SET scan = jsonb_set(scan, '{external}', ${JSON.stringify({
+             status: "running",
+             startedAt,
+             job: scanJobName(versionId),
+           })}::jsonb)
+         WHERE id = ${versionId} AND scan #>> '{external,status}' = 'queued'
+        RETURNING 1`);
+      return claimed.rows.length > 0;
+    });
+  }
+
   /** Finishes scans nobody is driving any more (the server restarted mid-scan). */
   async sweep(): Promise<number> {
+    // Due scans (a lost start, or over the cap): started now, oldest first (review M1, L9).
+    const due = await this.options.db.execute<{ id: string }>(sql`
+      SELECT id FROM registry_versions
+       WHERE scan #>> '{external,status}' = 'queued'
+         AND (scan #>> '{external,queuedAt}')::timestamptz < now() - interval '1 minute'
+       ORDER BY scan #>> '{external,queuedAt}' LIMIT ${MAX_CONCURRENT_SCANS}`);
+    for (const row of due.rows) this.start(row.id);
     const scan = this.options.settings.skillScan;
-    if (!scan) return 0;
+    if (!scan) return due.rows.length;
     const before = new Date(
       this.now().getTime() - (scan.deadlineSeconds + 2 * DRIVER_SLACK_SECONDS) * 1000,
     ).toISOString();
@@ -187,7 +233,8 @@ export class ExternalScanRunner {
   private async version(id: string): Promise<VersionRow | undefined> {
     const r = await this.options.db.execute<VersionRow>(sql`
       SELECT id, state::text AS state, verdict::text AS verdict, package_hash,
-        package_storage_key, runtime_hash, runtime_storage_key, runtime_size_bytes
+        package_storage_key, runtime_hash, runtime_storage_key, runtime_size_bytes,
+        scan #>> '{external,status}' AS external
         FROM registry_versions WHERE id = ${id} AND publisher = 'maintainer'`);
     return r.rows[0];
   }
@@ -259,3 +306,19 @@ export class ExternalScanRunner {
 }
 
 const EMPTY: KubeObject = { apiVersion: "", kind: "", metadata: { name: "" } };
+
+/**
+ * A submission made while the scanner is on but this server has no runner (no sandbox provider
+ * or object storage, review M1): recorded `unavailable`, which the review treats as incomplete.
+ */
+export async function markNoRunner(db: KobeDb, versionId: string): Promise<void> {
+  await db.execute(sql`
+    UPDATE registry_versions
+       SET scan = jsonb_set(scan, '{external}', ${JSON.stringify({
+         status: "unavailable",
+         reason: "no_runner",
+         finishedAt: new Date().toISOString(),
+       })}::jsonb),
+           verdict = CASE WHEN verdict = 'pass' THEN 'caution'::scan_verdict ELSE verdict END
+     WHERE id = ${versionId} AND scan #>> '{external,status}' = 'queued'`);
+}

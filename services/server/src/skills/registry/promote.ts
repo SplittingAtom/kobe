@@ -1,4 +1,5 @@
 import { PROVENANCE_API_VERSION, provenanceSchema, type SkillProvenance } from "@kobe/protocol";
+import { externalScannerOn, queuedScan } from "./external-scan-result.js";
 import {
   and,
   eq,
@@ -240,6 +241,12 @@ async function submitInTeam(
       seq: plan.seq,
       semver: plan.semver,
     };
+    // The optional external scan is due from this moment (KOBE-341 review M1): recorded `queued`
+    // with the submission, so Approve waits for it and a lost start shows.
+    const scanDoc = {
+      ...scanDocument(plan.scan),
+      ...((await externalScannerOn(tx)) ? { external: queuedScan(now) } : {}),
+    };
     const inserted = await tx.execute<{ id: string }>(sql`
       INSERT INTO registry_versions (skill_id, publisher, semver, seq, runtime_hash, package_hash,
         runtime_storage_key, runtime_size_bytes, package_storage_key, manifest, provenance, source,
@@ -248,7 +255,7 @@ async function submitInTeam(
         ${plan.runtimeHash}, ${bundle.packageHash}, ${runtimeKey}, ${bundle.zip.length},
         ${packageKey}, ${JSON.stringify(bundle.manifest ?? {})}::jsonb,
         ${JSON.stringify(provenance)}::jsonb, ${JSON.stringify(sourceDoc)}::jsonb,
-        ${JSON.stringify(scanDocument(plan.scan))}::jsonb, ${plan.scan.verdict}::scan_verdict,
+        ${JSON.stringify(scanDoc)}::jsonb, ${plan.scan.verdict}::scan_verdict,
         ${plan.scorecard ? JSON.stringify(plan.scorecard) : null}::jsonb, 'submitted',
         ${submitterId})
       RETURNING id`);

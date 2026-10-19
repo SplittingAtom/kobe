@@ -222,7 +222,7 @@ function Finding({
             size="sm"
             disabled={mutation.pending}
             onClick={() => onAcknowledge(f.key)}
-            aria-label={`Acknowledge ${f.rule} in ${shown(f.file)}${f.line ? ` line ${f.line}` : ""}`}
+            aria-label={`Acknowledge ${f.rule}${f.file ? ` in ${shown(f.file)}` : ""}${f.line ? ` line ${f.line}` : ""}`}
           >
             Acknowledge
           </Button>
@@ -237,6 +237,9 @@ const EXTERNAL_REASONS: Readonly<Record<string, string>> = {
   registry_not_ready: "the Registry team is missing",
   interrupted: "the scan was interrupted",
   timeout: "the scan timed out",
+  no_runner: "this server can't run scan Jobs",
+  job_error: "its Job could not run",
+  no_result: "it gave no result",
 };
 
 /**
@@ -257,15 +260,34 @@ function ExternalScan({
   readonly onAcknowledge: (key: string) => void;
 }) {
   if (!state) return null;
-  if (state.status === "running")
-    return <p>External scanner: scanning. Approve waits for its findings.</p>;
+  if (state.status === "running" || state.status === "queued")
+    return (
+      <p>
+        External scanner: {state.status === "queued" ? "waiting to scan" : "scanning"}. Approve
+        waits for its findings.
+      </p>
+    );
   if (state.status !== "done")
     return (
-      <p className="text-console-muted">
-        External scanner: {state.status}
-        {EXTERNAL_REASONS[state.reason] ? ` (${EXTERNAL_REASONS[state.reason]})` : ""}. Kobe&apos;s
-        own scan above still stands.
-      </p>
+      <>
+        <p>
+          External scanner: {state.status}
+          {EXTERNAL_REASONS[state.reason] ? ` (${EXTERNAL_REASONS[state.reason]})` : ""}.
+          Acknowledge that the package goes without it before approving; Kobe&apos;s own scan above
+          still stands.
+        </p>
+        <ul className="list-disc ps-6">
+          {findings.map((f) => (
+            <Finding
+              key={f.key}
+              f={f}
+              open={open}
+              mutation={mutation}
+              onAcknowledge={onAcknowledge}
+            />
+          ))}
+        </ul>
+      </>
     );
   return (
     <>

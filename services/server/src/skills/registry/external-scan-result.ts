@@ -1,3 +1,4 @@
+import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { z } from "zod";
 
 /**
@@ -43,6 +44,7 @@ export interface ExternalFinding {
 }
 
 export type ExternalScan =
+  | { readonly status: "queued"; readonly queuedAt: string }
   | { readonly status: "running"; readonly startedAt: string; readonly job: string }
   | {
       readonly status: "done";
@@ -98,15 +100,62 @@ export function parseScanLog(
   };
 }
 
-/** The verdict after the external findings: Pass rises to Caution; never Block. */
+/** The scan isn't finished: Approve waits (`external_scan_running`). */
+export const PENDING_STATUSES: ReadonlySet<string> = new Set(["queued", "running"]);
+/** The scan ended without a result: a Caution item the reviewer acknowledges (review M2). */
+const INCOMPLETE_STATUSES: ReadonlySet<string> = new Set(["failed", "skipped", "unavailable"]);
+export const INCOMPLETE_RULE = `${EXTERNAL_RULE_PREFIX}scan_incomplete`;
+
+export const queuedScan = (now: Date): ExternalScan => ({
+  status: "queued",
+  queuedAt: now.toISOString(),
+});
+
+/** Is the Site's external scanner on (inside the submission's transaction)? */
+export async function externalScannerOn(tx: KobeDb | KobeTx): Promise<boolean> {
+  const r = await tx.execute<{ on: boolean | null }>(sql`
+    SELECT (scanner ->> 'external')::boolean AS on FROM site_skill_settings WHERE id = 1`);
+  return r.rows[0]?.on === true;
+}
+
+/** The one Caution item of a scan that didn't complete: why, for the reviewer to weigh. */
+function incompleteFinding(reason: unknown): ExternalFinding {
+  return {
+    rule: INCOMPLETE_RULE,
+    file: "",
+    line: 0,
+    severity: "caution",
+    externalSeverity: "incomplete",
+    category: null,
+    title: `The external scan did not complete (${String(reason ?? "unknown").slice(0, 40)}): judge the package without it.`,
+  };
+}
+
+/**
+ * The verdict after the external scan: Pass rises to Caution on a MEDIUM-or-higher finding, or
+ * when the scan did not complete (review M2); never Block.
+ */
 export function raisedVerdict(verdict: string, scan: ExternalScan): string {
-  const raises = scan.status === "done" && scan.findings.some((f) => f.severity === "caution");
+  const raises =
+    (scan.status === "done" && scan.findings.some((f) => f.severity === "caution")) ||
+    INCOMPLETE_STATUSES.has(scan.status);
   return raises && verdict === "pass" ? "caution" : verdict;
+}
+
+/**
+ * The external scan's findings as the review shows them: its own, or the one "incomplete" item
+ * when it failed, was skipped or couldn't run (review M2).
+ */
+export function externalFindings(scan: Record<string, unknown>): readonly ExternalFinding[] {
+  const ext = scan.external as
+    { status?: unknown; findings?: unknown; reason?: unknown } | undefined;
+  if (!ext || typeof ext.status !== "string") return [];
+  if (INCOMPLETE_STATUSES.has(ext.status)) return [incompleteFinding(ext.reason)];
+  if (ext.status !== "done" || !Array.isArray(ext.findings)) return [];
+  return ext.findings as ExternalFinding[];
 }
 
 /** The external Caution findings stored in a scan document (for acknowledgements). */
 export function externalCautionFindings(scan: Record<string, unknown>): readonly ExternalFinding[] {
-  const ext = scan.external as { status?: unknown; findings?: unknown } | undefined;
-  if (!ext || ext.status !== "done" || !Array.isArray(ext.findings)) return [];
-  return (ext.findings as ExternalFinding[]).filter((f) => f.severity === "caution");
+  return externalFindings(scan).filter((f) => f.severity === "caution");
 }

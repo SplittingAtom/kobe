@@ -124,6 +124,7 @@ export interface ReviewFinding {
 
 /** The optional external scanner's state on the version (KOBE-341). */
 export type ExternalScanState =
+  | { readonly status: "queued"; readonly queuedAt: string }
   | { readonly status: "running"; readonly startedAt: string }
   | {
       readonly status: "done";

@@ -16,19 +16,22 @@ import { isUuid, type KubeObject } from "../../sandbox/manifests.js";
  * one Job in the Registry team's namespace, as isolated as an Orbit eval and more: the pod runs
  * under the verified gVisor/Kata RuntimeClass, meets Pod Security "restricted", has no service
  * account token, no Secret volume or env, no environment at all, no DNS, and a NetworkPolicy that
- * allows no traffic (`skillScanNetworkPolicyManifest`). It reads the package and prints its result.
+ * allows no traffic (`skillScanNetworkPolicyManifest`). It reads the package (its parts, from
+ * ConfigMaps the Job owns) and prints its result.
  */
 
 export const SCAN_CONTAINER = "scan";
 export const SCAN_INPUT_DIR = "/input";
-export const SCAN_INPUT_FILE = "package.zip";
 /** Finished Jobs (and their ConfigMaps, which they own) are garbage collected after this. */
 export const SCAN_TTL_SECONDS = 15 * 60;
 /**
- * The largest package the scan takes: a ConfigMap holds at most 1 MiB, base64 included. A larger
- * package is not scanned (recorded as skipped); Kobe's own scanner still covers it.
+ * A ConfigMap holds at most 1 MiB, base64 included, so the package is split into parts of this
+ * size across several ConfigMaps, mounted together (a projected volume) and joined by the runner.
  */
-export const SCAN_MAX_PACKAGE_BYTES = 700 * 1024;
+export const SCAN_PART_BYTES = 700 * 1024;
+/** Parts: enough for the largest package a skill may be (5 MiB, `skills/limits.ts`). */
+export const SCAN_MAX_PARTS = 8;
+export const SCAN_MAX_PACKAGE_BYTES = SCAN_PART_BYTES * SCAN_MAX_PARTS;
 const TMP_SIZE = "256Mi";
 const SCAN_EPHEMERAL = { request: "128Mi", limit: "512Mi" } as const;
 
@@ -36,7 +39,9 @@ export const scanJobName = (versionId: string): string => {
   if (!isUuid(versionId)) throw new TypeError("registry version id must be a lowercase uuid");
   return `skill-scan-${versionId}`;
 };
-export const scanConfigMapName = scanJobName;
+export const scanConfigMapName = (versionId: string, part: number): string =>
+  `${scanJobName(versionId)}-${String(part)}`;
+const partKey = (part: number) => `part-${String(part).padStart(3, "0")}`;
 
 const labels = (teamId: string, versionId: string): Record<string, string> => ({
   [LABEL_MANAGED_BY]: MANAGED_BY,
@@ -44,21 +49,38 @@ const labels = (teamId: string, versionId: string): Record<string, string> => ({
   [LABEL_SKILL_SCAN]: versionId,
 });
 
+/** The package's parts, in order. */
+export function packageParts(zip: Uint8Array): Uint8Array[] {
+  const parts: Uint8Array[] = [];
+  for (let i = 0; i < zip.length; i += SCAN_PART_BYTES)
+    parts.push(zip.subarray(i, i + SCAN_PART_BYTES));
+  return parts;
+}
+
+/**
+ * One part of the package as a ConfigMap, owned by its Job from creation (review L5): the Job is
+ * created first, so a part never outlives it (the pod waits for its volume meanwhile).
+ */
 export function scanConfigMapManifest(input: {
   readonly namespace: string;
   readonly teamId: string;
   readonly versionId: string;
-  readonly packageZip: Uint8Array;
+  readonly part: number;
+  readonly bytes: Uint8Array;
+  readonly owner: { readonly name: string; readonly uid: string };
 }): KubeObject {
   return {
     apiVersion: "v1",
     kind: "ConfigMap",
     metadata: {
-      name: scanConfigMapName(input.versionId),
+      name: scanConfigMapName(input.versionId, input.part),
       namespace: input.namespace,
       labels: labels(input.teamId, input.versionId),
+      ownerReferences: [
+        { apiVersion: "batch/v1", kind: "Job", name: input.owner.name, uid: input.owner.uid },
+      ],
     },
-    binaryData: { [SCAN_INPUT_FILE]: Buffer.from(input.packageZip).toString("base64") },
+    binaryData: { [partKey(input.part)]: Buffer.from(input.bytes).toString("base64") },
   };
 }
 
@@ -71,6 +93,8 @@ export interface ScanJobInput {
   readonly isolation: VerifiedIsolation;
   readonly sandbox: SandboxSettings;
   readonly scan: SkillScanSettings;
+  /** How many ConfigMaps the package is split into. */
+  readonly parts: number;
 }
 
 export function scanPodSpec(input: ScanJobInput): Record<string, unknown> {
@@ -106,7 +130,7 @@ export function scanPodSpec(input: ScanJobInput): Record<string, unknown> {
         name: SCAN_CONTAINER,
         image: scan.image,
         imagePullPolicy: s.imagePullPolicy,
-        args: ["--package", `${SCAN_INPUT_DIR}/${SCAN_INPUT_FILE}`],
+        args: ["--parts", SCAN_INPUT_DIR],
         // No env: no credential, no endpoint (the image sets what the scanner needs offline).
         resources: {
           requests: { ...scan.resources.requests, "ephemeral-storage": SCAN_EPHEMERAL.request },
@@ -128,7 +152,12 @@ export function scanPodSpec(input: ScanJobInput): Record<string, unknown> {
     volumes: [
       {
         name: "input",
-        configMap: { name: scanConfigMapName(input.versionId), defaultMode: 0o444 },
+        projected: {
+          defaultMode: 0o444,
+          sources: Array.from({ length: input.parts }, (_, i) => ({
+            configMap: { name: scanConfigMapName(input.versionId, i) },
+          })),
+        },
       },
       { name: "tmp", emptyDir: { sizeLimit: TMP_SIZE } },
     ],

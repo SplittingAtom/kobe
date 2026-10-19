@@ -1,4 +1,6 @@
 import { Hono, type Context } from "hono";
+import type { KobeDb } from "@kobe/db";
+import { markNoRunner } from "../skills/registry/external-scan.js";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -44,9 +46,17 @@ export interface ExternalScanStarter {
   start(registryVersionId: string): void;
 }
 
-function answer(c: Ctx, r: PromoteResult, scans?: ExternalScanStarter) {
+async function answer(
+  c: Ctx,
+  r: PromoteResult,
+  scans: ExternalScanStarter | undefined,
+  db: KobeDb,
+) {
   if (r.ok && r.kind === "submitted") {
-    scans?.start(r.registryVersionId);
+    // The scan is queued with the submission when the Site has it on (review-341 M1); a server
+    // without a runner says so on the version instead of leaving it queued.
+    if (scans) scans.start(r.registryVersionId);
+    else await markNoRunner(db, r.registryVersionId);
     return c.json({ state: "submitted", registryVersionId: r.registryVersionId }, 201);
   }
   if (r.ok) return c.json({ state: "requested", requestId: r.requestId }, 202);
@@ -113,6 +123,7 @@ export function skillPromotionRoutes(
       c,
       await promote(p, { ...body, teamId: team.id }, { userId: c.get("user").id, role: team.role }),
       scans,
+      deps.database.db,
     );
   });
 
@@ -156,7 +167,12 @@ export function teamSkillPromotionRoutes(
     if (!p) return c.json(UNAVAILABLE, 503);
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return c.json({ code: "not_found", message: "No such request." }, 404);
-    return answer(c, await confirmRequest(p, c.get("team").id, id.data, c.get("user").id), scans);
+    return answer(
+      c,
+      await confirmRequest(p, c.get("team").id, id.data, c.get("user").id),
+      scans,
+      deps.database.db,
+    );
   });
 
   app.post("/:id/decline", async (c) => {
