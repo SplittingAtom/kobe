@@ -111,6 +111,8 @@ export const REGISTRY_REVIEW_ACTIONS = [
   "withdrawn",
   "revoked",
   "unrevoked",
+  /** A maintainer or Site admin undid a version's deprecation (KOBE-340). */
+  "undeprecated",
   /** A reviewer acknowledged one Caution finding before approving (SK32). */
   "finding_acknowledged",
   "retracted",
