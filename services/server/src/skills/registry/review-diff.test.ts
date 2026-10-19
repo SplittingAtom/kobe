@@ -144,10 +144,33 @@ describe("diffPackages (KOBE-334, SK23)", () => {
     expect(rawFile(zip({ "a.txt": "hi\n" }), "a.txt")).toEqual({
       path: "a.txt",
       size: 3,
+      sha256: "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4",
+      encoding: "text",
       text: "hi\n",
       truncated: false,
     });
-    expect(rawFile(zip({ "b.bin": new Uint8Array([0, 1]) }), "b.bin")?.text).toBeNull();
+    expect(rawFile(zip({ "b.bin": new Uint8Array([0, 1, 0x41]) }), "b.bin")).toMatchObject({
+      encoding: "hex",
+      text: "00000000  00 01 41" + " ".repeat(39) + "  ..A",
+    });
     expect(rawFile(zip({}), "x")).toBeNull();
+  });
+
+  it("diffs and shows a script with one invalid byte (review-336 M1)", () => {
+    const before = zip({ "scripts/run.sh": "echo hi\n" });
+    const after = zip({
+      "scripts/run.sh": new Uint8Array([...strToU8("echo h"), 0xe9, ...strToU8("\n")]),
+    });
+    const d = diffPackages(before, after);
+    expect(d.files[0]).toMatchObject({
+      path: "scripts/run.sh",
+      binary: false,
+      notUtf8: true,
+    });
+    expect(d.files[0]?.hunks[0]?.lines).toEqual(["-echo hi", "+echo h\uFFFD"]);
+    expect(rawFile(after, "scripts/run.sh")).toMatchObject({
+      encoding: "escaped",
+      text: "echo h\\xE9\n",
+    });
   });
 });

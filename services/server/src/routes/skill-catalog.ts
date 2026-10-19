@@ -42,7 +42,7 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
     const id = idSchema.safeParse(c.req.param("skillId"));
     const notFound = { code: "not_found", message: "No such catalog skill." };
     if (!id.success) return c.json(notFound, 404);
-    const who = { teamId: c.get("team").id, userId: c.get("user").id };
+    const who = { teamId: c.get("team").id, userId: c.get("user").id, role: c.get("team").role };
     const detail = await catalogDetail(db, deps.blobs ?? null, who, id.data);
     return detail ? c.json(detail) : c.json(notFound, 404);
   });

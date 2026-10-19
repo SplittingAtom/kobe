@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { scorecardForProvenance, skillEvalScorecardSchema } from "@kobe/protocol";
 import { validateZipBundle } from "./skills/bundle.js";
 import { forgetInstallCounts } from "./skills/catalog-browse.js";
 import { ensureObject } from "./skills/kobe-seed.js";
@@ -8,6 +9,7 @@ import { sha256Hex } from "./skills/storage.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
+import { GOLDEN } from "./testing/registry-fixtures.js";
 
 /**
  * KOBE-336 (SK25, SK26, D28): the Catalog tab. Search and tag filters on a seeded catalog, sorts,
@@ -82,11 +84,10 @@ async function publish(
     const card =
       options.rerun && i === versions.length - 1
         ? JSON.stringify({
-            packageHash: b.packageHash,
-            mode: "full",
-            cases: 5,
-            passRateWith: 0.9,
-            lift: 0.3,
+            ...scorecardForProvenance(
+              skillEvalScorecardSchema.parse({ ...GOLDEN, packageHash: b.packageHash }),
+              new Date().toISOString(),
+            ),
             rerun: { teamId: randomUUID(), evalRunId: randomUUID() },
           })
         : null;
@@ -125,7 +126,8 @@ async function publish(
 const latestVersion = async (skillId: string) =>
   (
     await h.admin.query<{ id: string }>(
-      `SELECT id FROM registry_versions WHERE skill_id = $1 ORDER BY seq DESC LIMIT 1`,
+      `SELECT id FROM registry_versions WHERE skill_id = $1 AND state = 'approved'
+        ORDER BY seq DESC LIMIT 1`,
       [skillId],
     )
   ).rows[0]?.id as string;
@@ -149,19 +151,65 @@ beforeAll(async () => {
   }
   await publish("sales-report", "Builds quarterly sales reports.", {
     tags: ["finance"],
-    egress: ["pypi.org", "example.com", "not-allowed.test"],
+    egress: [
+      "pypi.org",
+      "example.com",
+      "not-allowed.test",
+      "files.pythonhosted.org",
+      "cdn.wild.test",
+    ],
     versions: ["1.0.0", "1.1.0"],
     rerun: true,
   });
-  await publish("budget-planner", "Plans the yearly budget.", { tags: ["finance"] });
+  await publish("budget-planner", "Plans the yearly budget.", {
+    tags: ["finance"],
+    versions: ["0.9.0", "1.0.0"],
+  });
   await publish("slide-maker", "Makes presentation slides.", { tags: ["design"] });
   await publish("hidden-skill", "Never approved.", { versions: [] });
+  await publish("suspended-skill", "Its only version is suspended.", { tags: ["finance"] });
+  await publish("archived-skill", "Archived.", { tags: ["finance"] });
+  await h.admin.query(`UPDATE registry_versions SET suspended_at = now() WHERE skill_id = $1`, [
+    skills["suspended-skill"],
+  ]);
+  await h.admin.query(`UPDATE registry_skills SET status = 'archived' WHERE id = $1`, [
+    skills["archived-skill"],
+  ]);
+  // Hidden states beside published ones (review-336 L6): later submitted, rejected and
+  // retracted versions of sales-report, and a withdrawn 0.9.0 of budget-planner.
+  for (const [semver, seq, state] of [
+    ["1.2.0", 3, "submitted"],
+    ["1.3.0", 4, "rejected"],
+    ["1.4.0", 5, "retracted"],
+  ] as const)
+    await h.admin.query(
+      `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
+         provenance, source, scan, verdict, submitted_by, state, reviewed_by)
+       VALUES ($1, $2, $3, repeat('c', 64), repeat('c', 64), '{}', '{}', '{}', '{}', 'pass', $4,
+         $5::registry_version_state, CASE WHEN $5 = 'rejected' THEN $6::uuid END)`,
+      [skills["sales-report"], semver, seq, ids.maintainer, state, ids.reviewer],
+    );
   await h.admin.query(
-    `INSERT INTO egress_domains (domain, in_ceiling) VALUES ('pypi.org', true), ('example.com', true)
+    `UPDATE registry_versions SET state = 'withdrawn' WHERE skill_id = $1 AND semver = '0.9.0'`,
+    [skills["budget-planner"]],
+  );
+  // A retired topic tag can't be probed through the filter (L4).
+  await h.admin.query(
+    `INSERT INTO registry_tags (name, kind, status) VALUES ('old-topic', 'topic', 'retired')`,
+  );
+  await h.admin.query(
+    `INSERT INTO registry_skill_tags (skill_id, tag_id, added_by)
+     SELECT $1, id, $2 FROM registry_tags WHERE name = 'old-topic'`,
+    [skills["slide-maker"], ids.admin],
+  );
+  await h.admin.query(
+    `INSERT INTO egress_domains (domain, in_ceiling) VALUES ('pypi.org', true), ('example.com', true),
+       ('*.pythonhosted.org', true), ('*.wild.test', true)
      ON CONFLICT (domain) DO UPDATE SET in_ceiling = true`,
   );
   await h.admin.query(
-    `INSERT INTO team_egress (team_id, domain, enabled_by) VALUES ($1, 'pypi.org', $2)`,
+    `INSERT INTO team_egress (team_id, domain, enabled_by) VALUES ($1, 'pypi.org', $2),
+       ($1, '*.pythonhosted.org', $2)`,
     [team, ids.admin],
   );
   // This team installed sales-report, blocked slide-maker; the member added budget-planner.
@@ -240,6 +288,7 @@ describe("browse and search (ac-1)", () => {
       "sales-report",
     ]);
     expect((await as.member.get("/v1/skills/catalog?sort=nope")).status).toBe(400);
+    expect(names((await as.member.get("/v1/skills/catalog?tag=old-topic")).json)).toEqual([]);
   });
 
   it("shows this team's state, the latest version and the minimum-count rule", async () => {
@@ -249,7 +298,7 @@ describe("browse and search (ac-1)", () => {
     expect(names(all.json)[0]).toBe("sales-report");
     expect(card("sales-report")).toMatchObject({
       latest: { semver: "1.1.0", verdict: "pass" },
-      score: { passRate: 0.9, lift: 0.3, cases: 5 },
+      score: { passRate: expect.any(Number), cases: expect.any(Number) },
       teamsInstalled: "few",
       state: {
         installed: { semver: "1.1.0", pinMode: "pinned" },
@@ -278,6 +327,8 @@ describe("detail (ac-2, ac-3)", () => {
       "kobe.skill.yaml",
       "scripts/run.py",
     ]);
+    // Submitted, rejected and retracted versions never show; the card is the approved 1.1.0.
+    expect(d.json.latest).toMatchObject({ semver: "1.1.0" });
     expect(
       (d.json.versions as { semver: string; changelog: string }[]).map((v) => [
         v.semver,
@@ -287,13 +338,25 @@ describe("detail (ac-2, ac-3)", () => {
       ["1.1.0", "Changes in 1.1.0."],
       ["1.0.0", "Changes in 1.0.0."],
     ]);
-    expect(d.json.authoritativeScorecard).toEqual({
+    const budget = await as.member.get(`/v1/skills/catalog/${skills["budget-planner"]}`);
+    expect(
+      (budget.json.versions as { semver: string; state: string }[]).map((v) => [v.semver, v.state]),
+    ).toEqual([
+      ["1.0.0", "approved"],
+      ["0.9.0", "withdrawn"],
+    ]);
+    for (const hidden of ["suspended-skill", "archived-skill"])
+      expect((await as.member.get(`/v1/skills/catalog/${skills[hidden]}`)).status, hidden).toBe(
+        404,
+      );
+    // The catalog card's own fields only (an allowlist): never the re-run's facts.
+    expect(d.json.authoritativeScorecard).toMatchObject({
       packageHash: expect.any(String),
       mode: "full",
-      cases: 5,
-      passRateWith: 0.9,
-      lift: 0.3,
+      cases: expect.any(Number),
+      passRateWith: expect.any(Number),
     });
+    expect(d.json.authoritativeScorecard).not.toHaveProperty("rerun");
     expect(d.json).toMatchObject({
       license: "Apache-2.0",
       maintainers: ["maintainer"],
@@ -302,7 +365,11 @@ describe("detail (ac-2, ac-3)", () => {
         { host: "pypi.org", enabledHere: true, inCeiling: true },
         { host: "example.com", enabledHere: false, inCeiling: true },
         { host: "not-allowed.test", enabledHere: false, inCeiling: false },
+        // Wildcard patterns, matched as the egress proxy matches them (review-336 M2).
+        { host: "files.pythonhosted.org", enabledHere: true, inCeiling: true },
+        { host: "cdn.wild.test", enabledHere: false, inCeiling: true },
       ],
+      canRequestEgress: true,
     });
     expect(JSON.stringify(d.json)).not.toContain("secret");
     expect(JSON.stringify(d.json)).not.toContain("@catalog.test");

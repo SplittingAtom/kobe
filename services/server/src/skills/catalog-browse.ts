@@ -1,8 +1,11 @@
 import { unzipSync } from "fflate";
-import { scanTeams, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { catalogSkillEvalScorecardSchema } from "@kobe/protocol";
+import { scanTeams, sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
+import { teamRoleAllows } from "../authz/permissions.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { readVerified } from "./blob-read.js";
 import { MIN_TEAMS } from "./catalog-admin.js";
+import { hostStandings } from "../egress/host-standing.js";
 import { readPackage } from "./registry/review-diff.js";
 
 /**
@@ -121,14 +124,27 @@ const LATEST = sql`
    WHERE v.skill_id = s.id AND v.state = 'approved' AND v.suspended_at IS NULL
    ORDER BY v.seq DESC LIMIT 1`;
 
+/** The most cards one page shows. */
+export const CATALOG_LIMIT = 500;
+
 /** The rows of the cards, filtered (inside the team's transaction). */
 async function cardRows(
   tx: KobeTx,
   who: { readonly teamId: string; readonly userId: string },
   query: CatalogQuery,
   skillId?: string,
+  teamRanks?: ReadonlyMap<string, number>,
 ): Promise<CardRow[]> {
   const search = query.q.trim();
+  // Sorted in SQL before the limit (review-336 L5). "Teams installed" ranks by the shown counts
+  // ("few" ranks as 1), so the order reveals nothing the cards don't.
+  const ranks = JSON.stringify(Object.fromEntries(teamRanks ?? []));
+  const order =
+    query.sort === "updated"
+      ? sql`s.updated_at DESC, s.name`
+      : query.sort === "teams"
+        ? sql`COALESCE((${ranks}::jsonb ->> s.id::text)::int, 0) DESC, s.name`
+        : sql`s.name`;
   const res = await tx.execute<CardRow>(sql`
     SELECT s.id, s.name, s.summary, s.publisher::text AS publisher, s.status::text AS status,
       s.updated_at, l.id AS version_id, l.semver, l.verdict, l.approved_at,
@@ -158,11 +174,12 @@ async function cardRows(
          query.tag
            ? sql`AND EXISTS (SELECT 1 FROM registry_skill_tags st
                                JOIN registry_tags t ON t.id = st.tag_id
-                              WHERE st.skill_id = s.id AND t.name = ${query.tag})`
+                              WHERE st.skill_id = s.id AND t.name = ${query.tag}
+                                AND t.kind = 'topic' AND t.status = 'active')`
            : sql``
        }
-     ORDER BY s.name
-     LIMIT 500`);
+     ORDER BY ${order}
+     LIMIT ${CATALOG_LIMIT}`);
   return res.rows;
 }
 
@@ -205,19 +222,10 @@ export async function browseCatalog(
   who: { readonly teamId: string; readonly userId: string },
   query: CatalogQuery,
 ): Promise<CatalogPage> {
-  const rows = await withTeam(db, who.teamId, (tx) => cardRows(tx, who, query));
   const counts = await teamsInstalled(db);
-  const cards = rows.map((r) => toCard(r, counts));
-  const updated = new Map(rows.map((r) => [r.id, new Date(r.updated_at).getTime()]));
-  const sorted =
-    query.sort === "updated"
-      ? [...cards].sort((a, b) => (updated.get(b.id) ?? 0) - (updated.get(a.id) ?? 0))
-      : query.sort === "teams"
-        ? [...cards].sort(
-            (a, b) =>
-              rank(b.teamsInstalled) - rank(a.teamsInstalled) || a.name.localeCompare(b.name),
-          )
-        : cards;
+  const ranks = new Map([...counts].map(([id, n]) => [id, rank(shown(n))]));
+  const rows = await withTeam(db, who.teamId, (tx) => cardRows(tx, who, query, undefined, ranks));
+  const sorted = rows.map((r) => toCard(r, counts));
   const tags = await db.execute<{ name: string }>(sql`
     SELECT name FROM registry_tags WHERE kind = 'topic' AND status = 'active' ORDER BY name`);
   return { skills: sorted, tags: tags.rows.map((t) => t.name) };
@@ -252,6 +260,8 @@ export interface CatalogDetail extends CatalogCard {
   readonly maintainers: readonly string[];
   /** This team's agents whose current version names the skill. */
   readonly agents: readonly { readonly id: string; readonly name: string }[];
+  /** The caller may ask the Team admins for a host (D28 needs `team.chat`, review-336 L3). */
+  readonly canRequestEgress: boolean;
 }
 
 const PUBLISHED = ["approved", "deprecated", "withdrawn", "revoked"];
@@ -265,7 +275,9 @@ async function versionsOf(db: KobeDb, skillId: string): Promise<CatalogVersion[]
     manifest: Record<string, unknown>;
     verdict: string;
   }>(sql`
-    SELECT id, semver, state::text AS state, approved_at, manifest, verdict::text AS verdict
+    SELECT id, semver,
+      CASE WHEN suspended_at IS NOT NULL THEN 'suspended' ELSE state::text END AS state,
+      approved_at, manifest, verdict::text AS verdict
       FROM registry_versions
      WHERE skill_id = ${skillId} AND state::text IN (${sql.join(
        PUBLISHED.map((s) => sql`${s}`),
@@ -305,6 +317,10 @@ async function versionFiles(
       FROM registry_versions WHERE id = ${versionId}`);
   const v = res.rows[0];
   if (!v?.runtime_storage_key) return { skillMd: null, files: [] };
+  // Versions are immutable: one read and unzip per package (review-336 L1).
+  const key = `${v.runtime_hash}:${v.package_hash}`;
+  const cached = filesCache.get(key);
+  if (cached) return cached;
   const runtime = await readVerified(
     blobs,
     v.runtime_storage_key,
@@ -325,31 +341,20 @@ async function versionFiles(
         .map(([path, bytes]) => ({ path, size: bytes.length }))
         .sort((a, b) => (a.path < b.path ? -1 : 1))
     : [];
-  return { skillMd: md ? skillMdBody(new TextDecoder().decode(md)) : null, files };
+  const out = { skillMd: md ? skillMdBody(new TextDecoder().decode(md)) : null, files };
+  if (runtime && pkg) {
+    if (filesCache.size >= FILES_CACHE_MAX)
+      filesCache.delete(filesCache.keys().next().value as string);
+    filesCache.set(key, out);
+  }
+  return out;
 }
 
-/** The skill's capabilities from its latest manifest, checked against this team's egress. */
-async function egressNeeds(tx: KobeTx, teamId: string, hosts: readonly string[]) {
-  if (hosts.length === 0) return [];
-  const res = await tx.execute<{ domain: string; in_ceiling: boolean; enabled: boolean }>(sql`
-    SELECT d.domain, d.in_ceiling,
-      EXISTS (SELECT 1 FROM team_egress te WHERE te.team_id = ${teamId} AND te.domain = d.domain)
-        AS enabled
-      FROM egress_domains d
-     WHERE d.domain IN (${sql.join(
-       hosts.map((h) => sql`${h}`),
-       sql`, `,
-     )})`);
-  const byHost = new Map(res.rows.map((r) => [r.domain, r]));
-  return hosts.map((host): EgressNeed => {
-    const r = byHost.get(host);
-    return {
-      host,
-      inCeiling: r?.in_ceiling ?? false,
-      enabledHere: !!r && r.in_ceiling && r.enabled,
-    };
-  });
-}
+const filesCache = new Map<
+  string,
+  { skillMd: string | null; files: { path: string; size: number }[] }
+>();
+const FILES_CACHE_MAX = 100;
 
 /** This team's agents (current version, not archived) that name the skill. */
 async function agentsUsing(tx: KobeTx, teamId: string, name: string) {
@@ -368,7 +373,7 @@ async function agentsUsing(tx: KobeTx, teamId: string, name: string) {
 export async function catalogDetail(
   db: KobeDb,
   blobs: BlobStore | null,
-  who: { readonly teamId: string; readonly userId: string },
+  who: { readonly teamId: string; readonly userId: string; readonly role: TeamRole },
   skillId: string,
 ): Promise<CatalogDetail | null> {
   const found = await withTeam(db, who.teamId, async (tx) => {
@@ -389,7 +394,7 @@ export async function catalogDetail(
         caps.packages && typeof caps.packages === "object"
           ? (caps.packages as Record<string, unknown>)
           : {},
-      egress: await egressNeeds(tx, who.teamId, hosts),
+      hosts,
       agents: await agentsUsing(tx, who.teamId, row.name),
     };
   });
@@ -400,9 +405,12 @@ export async function catalogDetail(
     SELECT u.name FROM registry_maintainers m JOIN users u ON u.id = m.user_id
      WHERE m.skill_id = ${skillId} AND u.deactivated_at IS NULL ORDER BY u.name`);
   const { skillMd, files } = await versionFiles(db, blobs, row.version_id);
-  const authoritative = row.authoritative_scorecard
-    ? Object.fromEntries(Object.entries(row.authoritative_scorecard).filter(([k]) => k !== "rerun"))
+  // An allowlist (review-336 L2): only the catalog card's own fields, as its schema parses them.
+  const { rerun: _rerun, ...cardOnly } = row.authoritative_scorecard ?? {};
+  const parsed = row.authoritative_scorecard
+    ? catalogSkillEvalScorecardSchema.safeParse(cardOnly)
     : null;
+  const authoritative = parsed?.success ? (parsed.data as Record<string, unknown>) : null;
   return {
     ...card,
     skillMd,
@@ -410,9 +418,10 @@ export async function catalogDetail(
     versions: await versionsOf(db, skillId),
     authoritativeScorecard: authoritative,
     license: typeof manifest.license === "string" ? manifest.license : null,
-    egress: found.egress,
+    egress: await hostStandings(db, who.teamId, found.hosts),
     packages: found.packages,
     maintainers: maintainers.rows.map((r) => r.name),
     agents: found.agents,
+    canRequestEgress: teamRoleAllows(who.role, "team.chat"),
   };
 }

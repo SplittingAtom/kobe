@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { structuredPatch } from "diff";
 import { unzipSync } from "fflate";
 import type { BlobStore } from "../../retention/blobs.js";
@@ -34,8 +35,13 @@ export interface FileDiff {
   readonly path: string;
   readonly status: FileStatus;
   readonly size: number;
-  /** Not UTF-8 text: only the status is shown. */
+  /** Has a NUL byte on either side: no line diff; the raw view shows a hex dump. */
   readonly binary: boolean;
+  /**
+   * Text with bytes that aren't valid UTF-8 (review-336 M1): diffed with each bad byte shown as
+   * U+FFFD; the raw view shows them escaped (`\xE9`), so nothing hides behind "binary".
+   */
+  readonly notUtf8?: true;
   /**
    * Why a changed text file has no line diff (review H1): `too_large` (over {@link MAX_TEXT_BYTES}
    * or {@link MAX_DIFF_LINES} lines), `too_different` (the diff gave up at its time or edit
@@ -81,17 +87,24 @@ function filesOf(zip: Uint8Array | null): Map<string, Uint8Array> {
   return new Map(Object.entries(unzipSync(zip)).filter(([path]) => !path.endsWith("/")));
 }
 
-const decoder = new TextDecoder("utf-8", { fatal: true });
+const strict = new TextDecoder("utf-8", { fatal: true });
+const lossy = new TextDecoder("utf-8");
 
-/** The file as text, or null when it is binary (a NUL, invalid UTF-8). */
+/** Whether `bytes` are valid UTF-8. */
+export function isUtf8(bytes: Uint8Array): boolean {
+  try {
+    strict.decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The file as text (invalid bytes as U+FFFD), or null when it is binary (has a NUL byte). */
 function textOf(bytes: Uint8Array | undefined): string | null {
   if (!bytes) return "";
   if (bytes.includes(0)) return null;
-  try {
-    return decoder.decode(bytes);
-  } catch {
-    return null;
-  }
+  return lossy.decode(bytes);
 }
 
 /** Over {@link MAX_TEXT_BYTES}, or more lines than {@link MAX_DIFF_LINES} (newline bytes). */
@@ -137,10 +150,13 @@ const ORDER: Readonly<Record<FileStatus, number>> = {
  * What a reviewer must read first (review-335 M2): the instructions and manifest, then scripts,
  * then everything else; so decoy data files can't use up the request's budget before them.
  */
+/** Files an agent may run, by extension (review-336 L7). */
+const CODE = /\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|lua|r|go|rs)$/i;
+
 export function readingRank(path: string): number {
   if (path === "SKILL.md") return 0;
   if (path === "kobe.skill.yaml") return 1;
-  if (path.startsWith("scripts/")) return 2;
+  if (path.startsWith("scripts/") || path.startsWith("bin/") || CODE.test(path)) return 2;
   return 3;
 }
 
@@ -156,15 +172,19 @@ function fileDiff(
   const textA = textOf(a);
   const textB = textOf(b);
   const binary = textA === null || textB === null;
-  if (binary || status === "unchanged") return { path, status, size, binary, hunks: [] };
+  const notUtf8 =
+    !binary && ((a && !isUtf8(a)) || (b && !isUtf8(b))) ? ({ notUtf8: true } as const) : {};
+  if (binary || status === "unchanged")
+    return { path, status, size, binary, ...notUtf8, hunks: [] };
   if (tooLarge(a) || tooLarge(b))
-    return { path, status, size, binary, notDiffed: "too_large", hunks: [] };
+    return { path, status, size, binary, ...notUtf8, notDiffed: "too_large", hunks: [] };
   const patch = structuredPatch(path, path, textA, textB, "", "", {
     context: CONTEXT_LINES,
     timeout: Math.max(1, timeoutMs),
     maxEditLength: MAX_EDIT_LENGTH,
   });
-  if (!patch) return { path, status, size, binary, notDiffed: "too_different", hunks: [] };
+  if (!patch)
+    return { path, status, size, binary, ...notUtf8, notDiffed: "too_different", hunks: [] };
   const hunks = patch.hunks.map((h) => ({
     oldStart: h.oldStart,
     oldLines: h.oldLines,
@@ -172,7 +192,7 @@ function fileDiff(
     newLines: h.newLines,
     lines: h.lines,
   }));
-  return { path, status, size, binary, hunks };
+  return { path, status, size, binary, ...notUtf8, hunks };
 }
 
 /**
@@ -241,21 +261,90 @@ export const MAX_RAW_BYTES = 1024 * 1024;
 export interface RawFile {
   readonly path: string;
   readonly size: number;
-  /** Null for a binary file. */
-  readonly text: string | null;
+  /** SHA-256 of the whole file, to compare with what runs. */
+  readonly sha256: string;
+  /**
+   * `text`: valid UTF-8; `escaped`: text with each invalid byte as `\xNN`; `hex`: a hex dump (the
+   * file has a NUL byte).
+   */
+  readonly encoding: "text" | "escaped" | "hex";
+  readonly text: string;
+  /** Only the first {@link MAX_RAW_BYTES} are shown. */
   readonly truncated: boolean;
 }
 
-/** A file of the submitted package as text, for a reviewer to read whole; null when absent. */
+/** `bytes` as text with every byte that isn't part of valid UTF-8 written `\xNN`. */
+export function escapeInvalid(bytes: Uint8Array): string {
+  let out = "";
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i] as number;
+    const len =
+      b < 0x80
+        ? 1
+        : b >= 0xc2 && b < 0xe0
+          ? 2
+          : b >= 0xe0 && b < 0xf0
+            ? 3
+            : b >= 0xf0 && b < 0xf5
+              ? 4
+              : 0;
+    const seq = len > 0 ? bytes.subarray(i, i + len) : null;
+    if (seq && seq.length === len && isUtf8(seq)) {
+      out += strict.decode(seq);
+      i += len;
+    } else {
+      out += `\\x${b.toString(16).toUpperCase().padStart(2, "0")}`;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/** A hex dump: offset, 16 bytes, and their printable ASCII. */
+export function hexDump(bytes: Uint8Array): string {
+  const lines: string[] = [];
+  for (let at = 0; at < bytes.length; at += 16) {
+    const row = bytes.subarray(at, at + 16);
+    const hex = [...row].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    const ascii = [...row]
+      .map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "."))
+      .join("");
+    lines.push(`${at.toString(16).padStart(8, "0")}  ${hex.padEnd(47)}  ${ascii}`);
+  }
+  return lines.join("\n");
+}
+
+/** Largest hex dump the raw view returns (a dump is about 4 times the bytes). */
+export const MAX_HEX_BYTES = 64 * 1024;
+
+/**
+ * A file of the submitted package for a reviewer to read whole (review-335 M2, review-336 M1):
+ * text, escaped text or a hex dump, with its hash; null when absent.
+ */
 export function rawFile(after: Uint8Array, path: string): RawFile | null {
   const bytes = filesOf(after).get(path);
   if (!bytes) return null;
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (bytes.includes(0)) {
+    const head = bytes.subarray(0, MAX_HEX_BYTES);
+    return {
+      path,
+      size: bytes.length,
+      sha256,
+      encoding: "hex",
+      text: hexDump(head),
+      truncated: bytes.length > MAX_HEX_BYTES,
+    };
+  }
   const head = bytes.subarray(0, MAX_RAW_BYTES);
-  if (head.includes(0)) return { path, size: bytes.length, text: null, truncated: false };
+  const valid = isUtf8(bytes);
   return {
     path,
     size: bytes.length,
-    text: new TextDecoder("utf-8").decode(head),
+    sha256,
+    encoding: valid ? "text" : "escaped",
+    text: valid ? lossy.decode(head) : escapeInvalid(head),
     truncated: bytes.length > MAX_RAW_BYTES,
   };
 }

@@ -114,15 +114,22 @@ export async function cancelRerun(
   const teamId = await registryTeamFor(db);
   if (!teamId) return fromProblem(PROBLEMS.registry_not_ready, 409);
   const outcome = await withTeam(db, teamId, async (tx) => {
-    const run = await tx.execute(sql`
-      SELECT 1 FROM skill_eval_runs WHERE team_id = ${teamId} AND id = ${evalRunId}
+    const run = await tx.execute<{ done: number; total: number }>(sql`
+      SELECT progress_done AS done, progress_total AS total FROM skill_eval_runs
+       WHERE team_id = ${teamId} AND id = ${evalRunId}
          AND subject_kind = 'registry' AND subject_id = ${v.id}`);
-    if (run.rows.length === 0) return "not_found" as const;
+    const at = run.rows[0];
+    if (!at) return "not_found" as const;
     if (!(await cancelEvalRun(tx, teamId, evalRunId))) return "ended" as const;
     await tx.execute(sql`
       INSERT INTO registry_review_events (version_id, actor_id, action, checklist)
       VALUES (${v.id}, ${userId}, 'evals_rerun',
-        ${JSON.stringify({ evalRunId, cancelled: true })}::jsonb)`);
+        ${JSON.stringify({
+          evalRunId,
+          cancelled: true,
+          // How far it had got, kept with the cancel (review-336 L7).
+          progress: { done: Number(at.done), total: Number(at.total) },
+        })}::jsonb)`);
     await recordAudit(tx, {
       action: "registry.rerun_cancelled",
       target: { registryVersionId: v.id, evalRunId },

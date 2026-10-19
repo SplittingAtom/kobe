@@ -1,4 +1,5 @@
 import { sql, type KobeDb } from "@kobe/db";
+import { hostStandings } from "../../egress/host-standing.js";
 import { listMaintainers, type Maintainer } from "./maintainers.js";
 import { similarCatalogNames } from "./names-db.js";
 import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
@@ -99,17 +100,6 @@ function capabilitiesOf(manifest: Record<string, unknown>) {
   return { egress, packages };
 }
 
-async function inCeiling(db: KobeDb, hosts: readonly string[]): Promise<Set<string>> {
-  if (hosts.length === 0) return new Set();
-  const res = await db.execute<{ domain: string }>(sql`
-    SELECT domain FROM egress_domains WHERE in_ceiling
-       AND domain IN (${sql.join(
-         hosts.map((h) => sql`${h}`),
-         sql`, `,
-       )})`);
-  return new Set(res.rows.map((r) => r.domain));
-}
-
 async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unknown> }) {
   const raw = Array.isArray(v.scan.findings) ? (v.scan.findings as Record<string, unknown>[]) : [];
   const acks = await acknowledgements(db, v.id);
@@ -143,7 +133,7 @@ export async function reviewDetail(
   if (!v || v.publisher !== "maintainer") return null;
   const approved = await approvedVersion(db, v.skillId, v.id);
   const caps = capabilitiesOf(v.manifest);
-  const ceiling = await inCeiling(db, caps.egress);
+  const standing = await hostStandings(db, null, caps.egress);
   const confirmer = confirmerOf(v);
   const who = await userNames(db, [v.submittedBy, v.claimedBy, confirmer]);
   // Read-only, in a transaction of its own: the separation-of-duties check takes the site
@@ -169,7 +159,7 @@ export async function reviewDetail(
     reruns: await rerunHistory(db, v),
     manifest: v.manifest,
     capabilities: {
-      egress: caps.egress.map((host) => ({ host, inCeiling: ceiling.has(host) })),
+      egress: standing.map((s) => ({ host: s.host, inCeiling: s.inCeiling })),
       packages: caps.packages,
     },
     provenance: v.provenance,
