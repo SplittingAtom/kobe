@@ -461,6 +461,7 @@ const internalServer =
           fetch: createInternalApp({
             internalKey: config.mcpProxyInternalKey,
             mcp: deps.mcp,
+            appResults: deps.appResults,
             auth: {
               db: deps.database.db,
               sessionKey: sandbox.sessionKeys["kobe.mcp-proxy"],

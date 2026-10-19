@@ -59,6 +59,8 @@ import {
   type ConnectorUrlPolicy,
 } from "./connectors/url-policy.js";
 import { NO_PROBE, type ConnectorProbe } from "./connectors/probe.js";
+import type { AppResultsDeps } from "./apps/results.js";
+import { captureKey } from "./apps/capture-ticket.js";
 import { createMcpService, type McpService } from "./mcp/service.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
@@ -71,7 +73,7 @@ import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
-import type { UploadSettings } from "./uploads/settings.js";
+import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "./uploads/settings.js";
 import type { ScoreSink } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
 
@@ -268,6 +270,8 @@ export interface ServerDeps {
   readonly blobs: BlobStore | undefined;
   /** Upload limits (KOBE-143); undefined: the contract defaults. */
   readonly uploads: UploadSettings | undefined;
+  /** MCP Apps results captured by mcp-proxy (KOBE-438): ticket key and storage. */
+  readonly appResults: AppResultsDeps;
   /** Output limit and context window of models without their own (KOBE-259). */
   readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
@@ -429,6 +433,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),
     ...(options.envelope ? { envelope: options.envelope } : {}),
     ...(options.mcp?.now ? { now: options.mcp.now } : {}),
+    captureKey: captureKey(options.authSecret),
   });
   const budgets = new BudgetMonitor({
     db: database.db,
@@ -505,6 +510,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     budgets,
     blobs: options.blobs,
     uploads: options.uploads,
+    appResults: {
+      key: captureKey(options.authSecret),
+      store: {
+        db: database.db,
+        blobs: options.blobs,
+        defaultQuotaBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+      },
+    },
     modelTokenDefaults,
     projectMounts,
     feedbackScores,

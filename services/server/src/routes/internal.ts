@@ -1,10 +1,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { honoTracing } from "@kobe/telemetry";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { idSchema, uuidSchema } from "@kobe/protocol";
 import { logger } from "../logger.js";
+import { reportCapturedResult, resultReportSchema, type AppResultsDeps } from "../apps/results.js";
 import { authenticateSandbox, type McpAuthDeps } from "../mcp/principal.js";
 import type { McpService } from "../mcp/service.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
@@ -25,12 +26,16 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
  * 401 `unauthorized` (internal key), 401 `sandbox_unauthorized` (token, liveness, membership),
  * POST /internal/v1/mcp/connectors/{id}/grant → 200 `{kind: "api_key", api_key}` for the sandbox's own
  *      user only (KOBE-108); 404 `not_connected` | `connector_not_available`, 503 `unavailable`
+ * POST /internal/v1/mcp/connectors/{id}/results `{ticket, result}` (KOBE-438) → 201 `{storage}`;
+ *      403 `ticket_invalid`, 409 `run_not_active` (the allow's `app_capture.ticket`, MCP Apps)
  * 429 `rate_limited` (per sandbox, `DECIDE_RATE`),
  * 404 `connector_not_available`, 400 `invalid_request`.
  */
 export const INTERNAL_KEY_MIN_LENGTH = 32;
 /** Tool inputs are at most 1 MiB at the proxy; the envelope adds a little. */
 export const INTERNAL_BODY_LIMIT = 1_200_000;
+/** A captured result (KOBE-438): the proxy's 4 MiB response cap, the ticket and the envelope. */
+export const RESULT_REPORT_BODY_LIMIT = 4 * 1024 * 1024 + 16 * 1024;
 /**
  * Decisions per sandbox, across all proxy replicas of this server replica (review L5): a backstop
  * behind the proxy's own per-replica rate limit (burst 60, then 10/s).
@@ -43,6 +48,8 @@ export interface InternalAppDeps {
   /** Shared with the MCP proxy (chart-generated Secret). */
   readonly internalKey: string;
   readonly mcp: McpService;
+  /** MCP Apps result reports (KOBE-438); unset: refused as not available. */
+  readonly appResults?: AppResultsDeps;
   readonly auth: McpAuthDeps;
   readonly decideLimiter?: RateLimiter;
 }
@@ -77,12 +84,12 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     c.header("Cache-Control", "no-store");
     await next();
   });
-  mcp.use(
-    bodyLimit({
-      maxSize: INTERNAL_BODY_LIMIT,
-      onError: (c) => c.json({ code: "invalid_request", message: "Body too large." }, 413),
-    }),
-  );
+  const tooLarge = (c: Context) =>
+    c.json({ code: "invalid_request", message: "Body too large." }, 413);
+  const callLimit = bodyLimit({ maxSize: INTERNAL_BODY_LIMIT, onError: tooLarge });
+  const reportLimit = bodyLimit({ maxSize: RESULT_REPORT_BODY_LIMIT, onError: tooLarge });
+  // A result report carries up to the proxy's 4 MiB response cap; everything else 1.2 MB.
+  mcp.use((c, next) => (c.req.path.endsWith("/results") ? reportLimit : callLimit)(c, next));
 
   const principalOf = async (token: string | undefined) => {
     const result = await authenticateSandbox(deps.auth, token);
@@ -158,6 +165,23 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
       ...(body.data.tool_call_id === undefined ? {} : { toolCallId: body.data.tool_call_id }),
     });
     return c.json(decision);
+  });
+
+  // MCP Apps (KOBE-438): the proxy reports a UI tool's full upstream result under the ticket the
+  // allow carried. 201 `{storage}`; 403 `ticket_invalid`; 409 `run_not_active`.
+  mcp.post("/connectors/:id/results", async (c) => {
+    const id = connectorId(c.req.param("id"));
+    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    if (!deps.appResults) return c.json({ code: "not_available", message: "Not stored." }, 404);
+    const body = resultReportSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "invalid_request", message: "Invalid report." }, 400);
+    const auth = await principalOf(c.req.header("kobe-sandbox-token"));
+    if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const stored = await reportCapturedResult(deps.appResults, auth.principal, id.data, body.data);
+    if (stored.ok) return c.json({ storage: stored.storage }, 201);
+    return stored.code === "ticket_invalid"
+      ? c.json({ code: "ticket_invalid", message: "Not a capture of this sandbox." }, 403)
+      : c.json({ code: "run_not_active", message: "The run has ended." }, 409);
   });
 
   app.route("/internal/v1/mcp", mcp);

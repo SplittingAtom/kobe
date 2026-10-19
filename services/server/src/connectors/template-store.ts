@@ -151,6 +151,32 @@ export interface ServedTemplate {
 }
 
 /**
+ * The served template's hash only (no bytes): pinned, approved, of an active connector. MCP Apps
+ * capture (KOBE-438) binds a stored result to it.
+ */
+export async function servedTemplateHash(
+  db: Db,
+  connectorId: string,
+  uri: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ sha256: connectorUiResources.sha256 })
+    .from(connectorUiResources)
+    .innerJoin(connectors, eq(connectors.id, connectorUiResources.connectorId))
+    .where(
+      and(
+        eq(connectorUiResources.connectorId, connectorId),
+        eq(connectorUiResources.uri, uri),
+        eq(connectorUiResources.status, "pinned"),
+        eq(connectorUiResources.approved, true),
+        eq(connectors.status, "active"),
+        isNull(connectors.deletedAt),
+      ),
+    );
+  return row?.sha256;
+}
+
+/**
  * The template Kobe may render: pinned (never drifted) and approved, of an active, not deleted
  * connector.
  * Visibility to a member and the template's tool are checked by the callers (MA-4, MA-8).

@@ -12,6 +12,7 @@ import { failureInfo } from "../runs/failure-codes.js";
 import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
 import { recordSkillUsesInTx } from "../skills/usage.js";
+import { claimAppResultsInTx } from "../apps/claim.js";
 import type { RunTranslator } from "./translate.js";
 
 /** What the ingest needs from its connection. */
@@ -346,8 +347,10 @@ export class RunIngest {
         if (counters.last_seq + all.length + 1 > runMaxEvents)
           throw new LimitExceeded("run_events");
         if (Number(counters.sandbox_bytes) > runMaxBytes) throw new LimitExceeded("run_bytes");
-        for (let i = 0; i < all.length; i += MAX_APPEND_BATCH) {
-          await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
+        // KOBE-438: MCP Apps results mcp-proxy stored for this run's calls get their marker.
+        const marked = await claimAppResultsInTx(tx, teamId, runId, all);
+        for (let i = 0; i < marked.length; i += MAX_APPEND_BATCH) {
+          await appendRunEventsInTx(tx, teamId, runId, marked.slice(i, i + MAX_APPEND_BATCH));
         }
         // KOBE-297: a successful read of one of the run's SKILL.md files is a skill use.
         await recordSkillUsesInTx(tx, teamId, runId, events);

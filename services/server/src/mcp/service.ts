@@ -53,6 +53,8 @@ export interface McpServiceOptions {
   readonly now?: () => Date;
   /** Pinned-address client for OAuth token refresh (KOBE-110); unset: expired tokens are not refreshed. */
   readonly oauthIo?: OauthIo;
+  /** MCP Apps capture tickets (KOBE-438); unset: results are never captured. */
+  readonly captureKey?: Buffer;
 }
 
 /** A `tools/list` for a connector the team has not enabled: audited, throttled like denied calls. */
@@ -92,6 +94,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
     approvals: options.approvals ?? DENY_UNVERIFIED_APPROVALS,
     mayAuditDenied: (sandboxId: string) => deniedAudits.take(sandboxId) === 0,
     ...(options.now ? { now: options.now } : {}),
+    ...(options.captureKey ? { captureKey: options.captureKey } : {}),
   };
   const reveal = (teamId: string, userId: string, connectorId: string): Promise<RevealOutcome> =>
     options.envelope
