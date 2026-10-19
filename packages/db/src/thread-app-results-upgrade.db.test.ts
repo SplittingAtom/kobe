@@ -165,6 +165,42 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     }
   });
 
+  it("keeps a claimed result when its run goes (run_id cleared), and takes a fork's copy", async () => {
+    const { adminUrl } = database();
+    const run2 = randomUUID();
+    await withClient(adminUrl, (c) =>
+      c.query(
+        `INSERT INTO runs (id, team_id, thread_id, trigger, status, started_at, ended_at)
+         VALUES ($1, $2, $3, 'user', 'completed', now(), now())`,
+        [run2, teamId, threadId],
+      ),
+    );
+    const claimed = await asTeam(teamId, async (c) => {
+      const { rows } = await insert(c, { run_id: run2 });
+      const id = (rows[0] as { id: string }).id;
+      await c.query(
+        `UPDATE thread_app_results SET tool_call_id = 'tc1', prompt_entry_id = 'e1' WHERE id = $1`,
+        [id],
+      );
+      // A fork's copy: placed by prompt entry and tool call, no run.
+      await c.query(
+        `INSERT INTO thread_app_results
+           (team_id, thread_id, tool_call_id, prompt_entry_id, connector_id, tool, template_uri,
+            template_sha256, app_id, storage, result, bytes)
+         VALUES ($1, $2, 'tc1', 'e2', $3, 'open', 'ui://c/app', $4, $4, 'inline', '{}', 2)`,
+        [teamId, threadId, randomUUID(), HEX],
+      );
+      return id;
+    });
+    await withClient(adminUrl, (c) => c.query(`DELETE FROM runs WHERE id = $1`, [run2]));
+    await asTeam(teamId, async (c) => {
+      const { rows } = await c.query(`SELECT run_id FROM thread_app_results WHERE id = $1`, [
+        claimed,
+      ]);
+      expect(rows).toEqual([{ run_id: null }]);
+    });
+  });
+
   it("refuses deleting a held thread's results and TRUNCATE during a hold; a thread delete cascades", async () => {
     const { adminUrl } = database();
     const hold = await withClient(adminUrl, async (c) => {
