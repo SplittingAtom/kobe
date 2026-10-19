@@ -15,6 +15,11 @@ const connector = (over: Record<string, unknown> = {}) => ({
   status: "active",
   toolCount: 0,
   driftedCount: 0,
+  credentialSource: "member",
+  siteKeyHint: null,
+  siteKeyStale: false,
+  refreshSkipped: null,
+  refreshedAt: null,
   createdAt: "2026-10-05T10:00:00.000Z",
   updatedAt: "2026-10-05T10:00:00.000Z",
   ...over,
@@ -69,6 +74,7 @@ describe("Connector registry (KOBE-100)", () => {
       url: "https://mcp.github.example/mcp",
       iconUrl: "https://cdn.example/gh.png",
       authKind: "oauth",
+      credentialSource: "member",
     });
   });
 
@@ -220,5 +226,142 @@ describe("Tool drift re-approval (KOBE-102)", () => {
       "changed_tool",
       "fresh_tool",
     ]);
+  });
+});
+
+describe("refresh skips (KOBE-431)", () => {
+  it("tells admins a connector is not checked for changes and whose key it needs", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              refreshSkipped: "auth_required",
+              refreshedAt: "2026-10-19T01:28:16.000Z",
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText("Not checked for changes: needs a key")).toBeTruthy();
+    expect(screen.getByText(/own key of the site admin who last pinned or approved/)).toBeTruthy();
+  });
+
+  it("says nothing when the last refresh ran", async () => {
+    stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
+    renderSite(<ConnectorsPage />);
+    await screen.findByRole("rowheader", { name: "github" });
+    expect(screen.queryByText(/Not checked for changes/)).toBeNull();
+  });
+});
+
+describe("site-wide key (KOBE-303)", () => {
+  it("registers an API-key connector with a site-wide key", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [] }],
+      [`POST ${BASE}`]: [201, { connector: connector({ authKind: "api_key" }) }],
+    });
+    renderSite(<ConnectorsPage />);
+    await screen.findByText("No connectors are registered.");
+    expect(screen.queryByLabelText("Whose key")).toBeNull();
+    await userEvent.type(screen.getByLabelText("Name"), "catalyst");
+    await userEvent.type(screen.getByLabelText("Server URL"), "https://c.example/mcp");
+    await userEvent.selectOptions(screen.getByLabelText("Authentication"), "api_key");
+    await userEvent.selectOptions(screen.getByLabelText("Whose key"), "site");
+    await userEvent.click(screen.getByRole("button", { name: "Register connector" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = calls.find((c) => c.method === "POST");
+    expect(JSON.parse(String(post?.body))).toMatchObject({
+      authKind: "api_key",
+      credentialSource: "site",
+    });
+  });
+
+  it("sets the key once, shows only its hint and warns about shared attribution", async () => {
+    const site = connector({ authKind: "api_key", credentialSource: "site" });
+    const withKey = { ...site, siteKeyHint: "••••wxyz" };
+    const calls = stubApi({
+      [`GET ${BASE}`]: [
+        [200, { connectors: [site] }],
+        [200, { connectors: [withKey] }],
+      ],
+      [`PUT ${BASE}/c-1/site-key`]: [200, { connector: withKey, replaced: false }],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText("Site-wide key: not set")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Site key/ }));
+    expect(screen.getByText(/Shared attribution/)).toBeTruthy();
+    const input = screen.getByLabelText("API key");
+    await userEvent.type(input, "secret-key-0123456789wxyz");
+    await userEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(await screen.findByText("Site-wide key ••••wxyz")).toBeTruthy();
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({ api_key: "secret-key-0123456789wxyz" });
+    expect((input as HTMLInputElement).value).toBe("");
+    expect(document.body.textContent).not.toContain("secret-key-0123456789wxyz");
+  });
+
+  it("removes the key after a confirmation", async () => {
+    const withKey = connector({
+      authKind: "api_key",
+      credentialSource: "site",
+      siteKeyHint: "••••wxyz",
+    });
+    const calls = stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [withKey] }],
+      [`DELETE ${BASE}/c-1/site-key`]: [204, null],
+    });
+    renderSite(<ConnectorsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Site key/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove key" }));
+    await answerConfirm(/Remove the site-wide key/, "Remove key");
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
+  });
+});
+
+describe("site-wide key review follow-ups", () => {
+  it("says to re-enter a key whose server URL changed (M2)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              credentialSource: "site",
+              siteKeyHint: "••••wxyz",
+              siteKeyStale: true,
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText(/re-enter it \(the server URL changed\)/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Site key/ }));
+    expect(screen.getByText(/enter the key again/)).toBeTruthy();
+  });
+
+  it("tells admins of a skipped site-key connector to set the site key (L2)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              credentialSource: "site",
+              refreshSkipped: "auth_required",
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText(/Set the site-wide key\./)).toBeTruthy();
+    expect(screen.queryByText(/My connector keys/)).toBeNull();
   });
 });

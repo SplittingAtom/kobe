@@ -32,6 +32,8 @@ export interface TeamConnectorView {
   readonly id: string;
   readonly name: string;
   readonly auth_kind: "oauth" | "api_key" | "none";
+  /** `site`: the organization provides the key (KOBE-303); members add none. */
+  readonly credential_source: "member" | "site";
   readonly status: "active" | "disabled";
   readonly icon_url: string | null;
   readonly enabled: boolean;
@@ -48,6 +50,7 @@ function view(row: Row, e: Enablement | undefined): TeamConnectorView {
     id: row.id,
     name: row.name,
     auth_kind: row.authKind,
+    credential_source: row.credentialSource,
     status: row.status,
     icon_url: row.iconUrl,
     enabled: e !== undefined,

@@ -66,21 +66,36 @@ export function MyConnectorsPage() {
           }
           return (
             <div className="flex flex-col gap-3">
-              {needKey.map((c) => (
-                <KeyCard
-                  key={c.id}
-                  teamId={teamId}
-                  connector={c}
-                  grant={data.grants.find((g) => g.connectorId === c.id) ?? null}
-                  mutation={mutation}
-                  onChanged={reload}
-                />
-              ))}
+              {needKey.map((c) =>
+                c.credentialSource === "site" ? (
+                  <ProvidedCard key={c.id} connector={c} />
+                ) : (
+                  <KeyCard
+                    key={c.id}
+                    teamId={teamId}
+                    connector={c}
+                    grant={data.grants.find((g) => g.connectorId === c.id) ?? null}
+                    mutation={mutation}
+                    onChanged={reload}
+                  />
+                ),
+              )}
             </div>
           );
         }}
       </ResourceView>
     </>
+  );
+}
+
+/** A connector whose key the site admins set for everyone (KOBE-303): nothing to do here. */
+function ProvidedCard({ connector: c }: { readonly connector: TeamConnector }) {
+  return (
+    <Card role="article" aria-label={c.name} title={c.name} level={2}>
+      <p className="m-0 text-sm text-console-muted">
+        Provided by your organization: you need no key of your own.
+      </p>
+    </Card>
   );
 }
 

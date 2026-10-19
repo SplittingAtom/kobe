@@ -43,12 +43,17 @@ async function teamsUsing(db: KobeDb, connectorId: string): Promise<string[]> {
   return using;
 }
 
-export async function driftRecipients(db: KobeDb, connectorId: string): Promise<DriftRecipient[]> {
-  const siteAdmins = await db
+/** Active site owners and admins. */
+export function siteAdminIds(db: KobeDb): Promise<DriftRecipient[]> {
+  return db
     .select({ userId: users.id, email: users.email })
     .from(siteRoles)
     .innerJoin(users, eq(users.id, siteRoles.userId))
     .where(isNull(users.deactivatedAt));
+}
+
+export async function driftRecipients(db: KobeDb, connectorId: string): Promise<DriftRecipient[]> {
+  const siteAdmins = await siteAdminIds(db);
   const using = await teamsUsing(db, connectorId);
   const teamAdmins: DriftRecipient[] = [];
   for (const teamId of using) {
@@ -78,6 +83,11 @@ export interface DriftNotice {
   readonly name: string;
   /** Names of the tools awaiting re-approval (changed or new), never their definitions. */
   readonly tools: string[];
+  /**
+   * Site admins only (KOBE-431): the refresh cannot check this connector for changes, because it
+   * asks for credentials and no site key or admin key is usable.
+   */
+  readonly refreshSkipped?: "auth_required";
 }
 
 /** Connectors with tools awaiting re-approval that this user is told about (the in-app notice). */
@@ -86,19 +96,24 @@ export async function driftNoticesFor(
   user: { readonly id: string; readonly siteRole: "owner" | "admin" | null },
 ): Promise<DriftNotice[]> {
   const rows = await db
-    .select({ id: connectors.id, name: connectors.name, snapshot: connectors.toolsSnapshot })
+    .select({
+      id: connectors.id,
+      name: connectors.name,
+      snapshot: connectors.toolsSnapshot,
+      skipped: connectors.refreshSkipped,
+    })
     .from(connectors)
     .where(and(eq(connectors.status, "active"), isNull(connectors.deletedAt)))
     .orderBy(asc(connectors.name));
-  const drifted = rows
-    .map((r) => ({
-      connectorId: r.id,
-      name: r.name,
-      tools: parseToolsSnapshot(r.snapshot)
-        .filter((t) => t.status === "drifted")
-        .map((t) => t.name),
-    }))
-    .filter((r) => r.tools.length > 0);
+  const notices = rows.map((r): DriftNotice => {
+    const tools = parseToolsSnapshot(r.snapshot)
+      .filter((t) => t.status === "drifted")
+      .map((t) => t.name);
+    return r.skipped === "auth_required" && user.siteRole !== null
+      ? { connectorId: r.id, name: r.name, tools, refreshSkipped: "auth_required" }
+      : { connectorId: r.id, name: r.name, tools };
+  });
+  const drifted = notices.filter((n) => n.tools.length > 0 || n.refreshSkipped !== undefined);
   if (user.siteRole !== null || drifted.length === 0) return drifted;
 
   const adminOf = (await listMemberships(db, user.id)).filter((m) => m.role === "team_admin");

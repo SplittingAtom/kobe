@@ -4,6 +4,8 @@ import {
   PROVIDER_KEY_PURPOSE,
   SecretBox,
   VIRTUAL_KEY_PURPOSE,
+  connectorSiteKeys,
+  connectors,
   modelGatewayKeys,
   modelProviders,
   providerKeyContext,
@@ -11,6 +13,7 @@ import {
   withTeam,
 } from "@kobe/db";
 import pino from "pino";
+import { siteKeyContext, urlSha256 } from "./connectors/site-key.js";
 import { checkSealedKeys, sealedFamilies, unknownKeys } from "./startup/sealed-keys.js";
 import { EventStreamFixture } from "./testing/event-stream-fixture.js";
 
@@ -55,6 +58,28 @@ beforeAll(async () => {
     keyRevision: 1,
     createdBy: ann.id,
   });
+  // A connector's site-wide key (KOBE-303) is checked like the other envelope-sealed values.
+  const [connector] = await f.db
+    .insert(connectors)
+    .values({
+      name: `sealed-${Date.now()}`,
+      url: "https://sealed.invalid/mcp",
+      authKind: "api_key",
+      credentialSource: "site",
+    })
+    .returning({ id: connectors.id });
+  const connectorId = (connector as { id: string }).id;
+  const sealed = new Envelope(SOURCE.envelope).seal(
+    "site-secret",
+    siteKeyContext(connectorId, "https://sealed.invalid/mcp"),
+  );
+  await f.db.insert(connectorSiteKeys).values({
+    connectorId,
+    sealed,
+    keyId: Envelope.keyIdOf(sealed),
+    urlSha256: urlSha256("https://sealed.invalid/mcp"),
+    hint: "••••",
+  });
   await withTeam(f.db, teamId, (tx) =>
     tx.insert(modelGatewayKeys).values({
       teamId,
@@ -84,15 +109,18 @@ describe("the sealed key check at start (KOBE-425)", () => {
     expect(findings.map((x) => [x.name, x.rows])).toEqual([
       ["model provider API keys", 1],
       ["members' model gateway virtual keys", 1],
+      ["connector site-wide keys", 1],
     ]);
     expect(findings[0]?.secret).toContain("provider-keys");
     expect(findings[1]?.secret).toContain("virtual-keys");
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
+    expect(findings[2]?.secret).toContain("envelope");
     expect(String(lines[0]?.msg)).toContain("cannot be opened");
     expect(String(lines[0]?.msg)).toContain("docs/backup-restore.md");
     // Nothing secret in the log: key ids are derived and public, values never read.
     expect(JSON.stringify(lines)).not.toContain("sk-test");
     expect(JSON.stringify(lines)).not.toContain(OTHER.provider);
+    expect(JSON.stringify(lines)).not.toContain("site-secret");
   });
 
   it("accepts a previous key during a rotation (the value opens with it)", async () => {
@@ -101,7 +129,10 @@ describe("the sealed key check at start (KOBE-425)", () => {
       providerKeyIds: new SecretBox([OTHER.provider, SOURCE.provider], PROVIDER_KEY_PURPOSE).keyIds,
     };
     const findings = await checkSealedKeys(f.db, sealedFamilies(rotated), capture().logger);
-    expect(findings.map((x) => x.name)).toEqual(["members' model gateway virtual keys"]);
+    expect(findings.map((x) => x.name)).toEqual([
+      "members' model gateway virtual keys",
+      "connector site-wide keys",
+    ]);
   });
 });
 
