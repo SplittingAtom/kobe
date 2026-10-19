@@ -2,12 +2,26 @@
 
 import {
   acknowledgeFinding,
+  cancelRerun,
   rerunEvals,
   type ReviewDetail,
   type ReviewFinding,
 } from "../../../lib/admin/api/site/skill-review";
 import { visibleParts } from "../../../lib/admin/visible-text";
-import { Badge, Button, EmptyState, Notice, Section } from "../../ui/console";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Notice,
+  Section,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../ui/console";
+import { DateTime } from "../parts";
 import type { Mutation } from "../use-resource";
 import { VERDICT_TONES } from "./skill-review-queue";
 
@@ -57,7 +71,12 @@ const RERUN_STATES: Readonly<Record<string, string>> = {
   budget_stopped: "stopped by the Registry team's budget",
 };
 
-/** Re-run evals (KOBE-335): a full eval in the Registry team, judged by the Site judge. */
+const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)}%`);
+
+/**
+ * Re-run evals (KOBE-335) and every re-run so far (review-335 M3): who started it, how it ended,
+ * its numbers; the one whose card counts, and earlier ones that scored lower, are marked.
+ */
 function RerunControl({
   detail,
   open,
@@ -69,35 +88,92 @@ function RerunControl({
   readonly mutation: Mutation;
   readonly onChanged: () => void;
 }) {
-  const r = detail.rerun;
-  const running = r?.status === "queued" || r?.status === "running";
-  const start = async () => {
-    if (
-      await mutation.run(
-        () => rerunEvals(detail.id),
-        () => "Re-run started in the Registry team. Refresh to follow it.",
-      )
-    )
-      onChanged();
+  const runs = detail.reruns;
+  const running = runs.some((r) => r.status === "queued" || r.status === "running");
+  const run = async (fn: () => ReturnType<typeof rerunEvals>, notice: string) => {
+    if (await mutation.run(fn, () => notice)) onChanged();
   };
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      {r && (
-        <span>
-          Latest re-run: {RERUN_STATES[r.status] ?? r.status} ({r.progress.done} of{" "}
-          {r.progress.total} executions)
-        </span>
+    <div className="mt-2">
+      {runs.length > 0 && (
+        <Table caption="Re-runs" hideCaption>
+          <TableHead>
+            <TableRow>
+              <TableHeader>Started</TableHeader>
+              <TableHeader>By</TableHeader>
+              <TableHeader>Outcome</TableHeader>
+              <TableHeader>Pass rate</TableHeader>
+              <TableHeader>
+                <span className="sr-only">Actions</span>
+              </TableHeader>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {runs.map((r) => (
+              <TableRow key={r.evalRunId}>
+                <TableCell>
+                  <DateTime value={r.startedAt} compact />
+                </TableCell>
+                <TableCell>{r.startedBy?.name ?? "—"}</TableCell>
+                <TableCell>
+                  {RERUN_STATES[r.status] ?? r.status}
+                  {r.cancelledBy && ` by ${r.cancelledBy.name}`}
+                  {r.progress &&
+                    r.status !== "completed" &&
+                    ` (${r.progress.done} of ${r.progress.total})`}
+                  {r.current && (
+                    <Badge tone="done" className="ms-2">
+                      the authoritative card
+                    </Badge>
+                  )}
+                  {r.lowerThanCurrent && (
+                    <Badge tone="attention" className="ms-2">
+                      scored lower
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell>{pct(r.passRate)}</TableCell>
+                <TableCell>
+                  {(r.status === "queued" || r.status === "running") && (
+                    <Button
+                      size="sm"
+                      disabled={mutation.pending}
+                      onClick={() =>
+                        void run(
+                          () => cancelRerun(detail.id, r.evalRunId),
+                          "Re-run cancelled; it stays in the history.",
+                        )
+                      }
+                    >
+                      Cancel re-run
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {open && (
-        <Button disabled={mutation.pending || running} onClick={() => void start()}>
-          Re-run evals
-        </Button>
-      )}
-      {running && (
-        <Button disabled={mutation.pending} onClick={onChanged}>
-          Refresh
-        </Button>
-      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {open && (
+          <Button
+            disabled={mutation.pending || running}
+            onClick={() =>
+              void run(
+                () => rerunEvals(detail.id),
+                "Re-run started in the Registry team. Refresh to follow it.",
+              )
+            }
+          >
+            Re-run evals
+          </Button>
+        )}
+        {running && (
+          <Button disabled={mutation.pending} onClick={onChanged}>
+            Refresh
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

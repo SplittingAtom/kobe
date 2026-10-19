@@ -80,6 +80,27 @@ export interface ScanFinding {
   readonly message?: string;
 }
 
+/** One re-run of a version (KOBE-335): who started it, how it ended, its numbers. */
+export interface RerunEntry {
+  readonly evalRunId: string;
+  readonly startedBy: Person | null;
+  readonly startedAt: string;
+  readonly status: string;
+  readonly cancelledBy: Person | null;
+  readonly progress: { readonly done: number; readonly total: number } | null;
+  readonly passRate: number | null;
+  readonly lift: number | null;
+  readonly current: boolean;
+  readonly lowerThanCurrent: boolean;
+}
+
+export interface RawFile {
+  readonly path: string;
+  readonly size: number;
+  readonly text: string | null;
+  readonly truncated: boolean;
+}
+
 /** A scan finding; a Caution one is acknowledged before Approve (SK32). */
 export interface ReviewFinding {
   readonly key: string;
@@ -120,13 +141,8 @@ export interface ReviewDetail {
   readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
-  /** The latest re-run in the Registry team (KOBE-335). */
-  readonly rerun: {
-    readonly evalRunId: string;
-    readonly status: string;
-    readonly progress: { readonly done: number; readonly total: number };
-    readonly startedAt: string;
-  } | null;
+  /** Every re-run in the Registry team, oldest first (KOBE-335). */
+  readonly reruns: readonly RerunEntry[];
   readonly manifest: Record<string, unknown>;
   readonly capabilities: {
     readonly egress: readonly { readonly host: string; readonly inCeiling: boolean }[];
@@ -183,6 +199,27 @@ export function commentOn(id: string, note: string): Promise<ApiResult<StateAnsw
     method: "POST",
     json: { note },
   });
+}
+
+/** One file's diff on its own ("Load diff" for a skipped file, review-335 M2). */
+export function getFileDiff(id: string, path: string): Promise<ApiResult<FileDiff>> {
+  return apiRequest(`${BASE}/${encodeURIComponent(id)}/diff?path=${encodeURIComponent(path)}`);
+}
+
+/** A submitted file's text (to 1 MiB), for one too large or too different to diff. */
+export function getRawFile(id: string, path: string): Promise<ApiResult<RawFile>> {
+  return apiRequest(`${BASE}/${encodeURIComponent(id)}/file?path=${encodeURIComponent(path)}`);
+}
+
+/** Cancels one re-run; the history keeps it (review-335 M3). */
+export function cancelRerun(
+  id: string,
+  evalRunId: string,
+): Promise<ApiResult<{ evalRunId: string }>> {
+  return apiRequest(
+    `${BASE}/${encodeURIComponent(id)}/reruns/${encodeURIComponent(evalRunId)}/cancel`,
+    { method: "POST", json: {} },
+  );
 }
 
 /** Re-runs the version's evals in the Registry team with the Site judge (KOBE-335). */

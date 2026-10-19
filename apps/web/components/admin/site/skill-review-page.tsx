@@ -71,7 +71,7 @@ export function SkillReviewPage({ versionId }: { readonly versionId: string }) {
             <MutationStatus error={mutation.error} notice={mutation.notice} />
             <Section title="Diff">
               <ResourceView state={diff.state} label="the diff">
-                {(x) => <ReviewDiff diff={x} />}
+                {(x) => <ReviewDiff diff={x} versionId={versionId} />}
               </ResourceView>
             </Section>
             <Section title="Evidence">

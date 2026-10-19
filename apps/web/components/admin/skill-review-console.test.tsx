@@ -58,7 +58,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
   ],
   scorecard: { cases: 5, pass_rate_with: 0.8, lift: 0.2 },
   authoritative_scorecard: null,
-  rerun: null,
+  reruns: [],
   manifest: {},
   capabilities: {
     egress: [
@@ -259,13 +259,30 @@ describe("the review screen (ac-1, ac-2)", () => {
   });
 
   it("re-runs the evals in the Registry team and shows the latest run (KOBE-335)", async () => {
+    const entry = (over: Record<string, unknown>) => ({
+      eval_run_id: "e-0",
+      started_by: { id: "u-r", name: "Rae" },
+      started_at: "2026-10-19T11:00:00Z",
+      status: "completed",
+      cancelled_by: null,
+      progress: { done: 5, total: 5 },
+      pass_rate: 0.4,
+      lift: 0,
+      current: false,
+      lower_than_current: true,
+      ...over,
+    });
     const running = detail({
-      rerun: {
-        eval_run_id: "e-1",
-        status: "running",
-        progress: { done: 1, total: 5 },
-        started_at: "2026-10-19T12:00:00Z",
-      },
+      reruns: [
+        entry({}),
+        entry({
+          eval_run_id: "e-1",
+          status: "running",
+          progress: { done: 1, total: 5 },
+          pass_rate: null,
+          lower_than_current: false,
+        }),
+      ],
     });
     const calls = stubApi({
       [`GET ${BASE}/${ID}`]: [
@@ -277,12 +294,65 @@ describe("the review screen (ac-1, ac-2)", () => {
     });
     renderReviewer(<SkillReviewPage versionId={ID} />);
     await userEvent.click(await screen.findByRole("button", { name: "Re-run evals" }));
-    expect(await screen.findByText(/Latest re-run: running \(1 of 5 executions\)/)).toBeTruthy();
+    expect(await screen.findByText("scored lower")).toBeTruthy();
+    expect(screen.getByText(/running \(1 of 5\)/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel re-run" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Re-run evals" }).hasAttribute("disabled")).toBe(
       true,
     );
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
       `${BASE}/${ID}/rerun-evals`,
     ]);
+  });
+
+  it("loads a skipped file's diff and shows a too-large file whole (review-335 M2)", async () => {
+    const skippedDiff = {
+      ...diff,
+      truncated: true,
+      files: [
+        {
+          path: "SKILL.md",
+          status: "changed",
+          size: 10,
+          binary: false,
+          not_diffed: "skipped",
+          hunks: [],
+        },
+        {
+          path: "data.csv",
+          status: "changed",
+          size: 9,
+          binary: false,
+          not_diffed: "too_large",
+          hunks: [],
+        },
+      ],
+    };
+    const calls = stubApi({
+      [`GET ${BASE}/${ID}`]: [200, detail()],
+      [`GET ${BASE}/${ID}/diff`]: [200, skippedDiff],
+      [`GET ${BASE}/${ID}/diff?path=SKILL.md`]: [
+        200,
+        {
+          path: "SKILL.md",
+          status: "changed",
+          size: 10,
+          binary: false,
+          hunks: [
+            { old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, lines: ["+loaded line"] },
+          ],
+        },
+      ],
+      [`GET ${BASE}/${ID}/file?path=data.csv`]: [
+        200,
+        { path: "data.csv", size: 9, text: "a,b\u202E\n", truncated: false },
+      ],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Load diff of SKILL.md" }));
+    expect(await screen.findByText("+loaded line")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "View data.csv" }));
+    expect(await screen.findByText("⟨U+202E⟩")).toBeTruthy();
+    expect(calls.map((c) => c.url)).toContain(`${BASE}/${ID}/file?path=data.csv`);
   });
 });
