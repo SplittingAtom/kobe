@@ -4,6 +4,7 @@ import {
   CONNECTOR_NAME_PATTERN,
   CONNECTOR_URL_MAX,
   connectorSiteKeys,
+  connectorUiResources,
   and,
   asc,
   connectors,
@@ -99,6 +100,7 @@ export interface ConnectorView {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  readonly templatesDriftedCount: number;
   /** Why the last periodic refresh was skipped (e.g. `auth_required`, KOBE-431); null when it ran. */
   readonly refreshSkipped: string | null;
   /** When the periodic refresh last probed it; null before the first pass. */
@@ -124,6 +126,11 @@ const columns = {
   toolCount: sql<number>`jsonb_array_length(${connectors.toolsSnapshot})`.mapWith(Number),
   driftedCount:
     sql<number>`(SELECT count(*) FROM jsonb_array_elements(${connectors.toolsSnapshot}) AS t WHERE t->>'status' = 'drifted')`.mapWith(
+      Number,
+    ),
+  /** MCP Apps templates awaiting review (KOBE-434). */
+  templatesDriftedCount:
+    sql<number>`(SELECT count(*) FROM ${connectorUiResources} WHERE ${connectorUiResources.connectorId} = ${connectors.id} AND ${connectorUiResources.status} = 'drifted')`.mapWith(
       Number,
     ),
   refreshSkipped: connectors.refreshSkipped,

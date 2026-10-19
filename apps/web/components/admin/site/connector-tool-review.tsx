@@ -10,6 +10,7 @@ import {
 import { Button, Card, Section } from "../../ui/console";
 import { ResourceView } from "../parts";
 import { useResource, type Mutation } from "../use-resource";
+import { TemplateReviewSection } from "./connector-template-review";
 
 function Definition({ label, def }: { readonly label: string; readonly def: ToolDefinition }) {
   return (
@@ -102,6 +103,7 @@ export function ToolReviewPanel({
           );
         }}
       </ResourceView>
+      <TemplateReviewSection connector={connector} mutation={mutation} onChanged={onChanged} />
     </Section>
   );
 }

@@ -23,6 +23,8 @@ export interface Connector {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  /** MCP Apps templates awaiting review (KOBE-434). */
+  readonly templatesDriftedCount?: number;
   /** Why the last periodic refresh was skipped (`auth_required`, `unreachable`, ...; KOBE-431). */
   readonly refreshSkipped: string | null;
   readonly refreshedAt: string | null;
@@ -112,6 +114,60 @@ export const approveConnectorTools = (
   apiRequest(`${BASE}/${encodeURIComponent(id)}/tools/approve`, {
     method: "POST",
     json: { tools },
+  });
+
+/** One version of an MCP Apps template (KOBE-434): never its bytes. */
+export interface TemplateVersion {
+  readonly sha256: string;
+  readonly pinnedHash: string;
+  readonly bytes: number;
+  readonly mimeType: string;
+  readonly meta: Record<string, unknown>;
+}
+
+export interface TemplateReview {
+  readonly uri: string;
+  readonly status: "pinned" | "drifted";
+  readonly change: "changed" | "added" | "invalid" | null;
+  readonly approved?: TemplateVersion;
+  readonly live?: TemplateVersion;
+  readonly invalid?: string;
+}
+
+/** A template's bytes as text, for the escaped diff and the stubbed preview. */
+export interface TemplateSource {
+  readonly uri: string;
+  readonly approved?: string;
+  readonly live?: string;
+}
+
+export async function listConnectorTemplates(
+  id: string,
+): Promise<ApiResult<readonly TemplateReview[]>> {
+  const res = await apiRequest<{ templates: readonly TemplateReview[] }>(
+    `${BASE}/${encodeURIComponent(id)}/templates`,
+  );
+  return res.ok ? { ...res, data: res.data.templates } : res;
+}
+
+export async function getTemplateSource(
+  id: string,
+  uri: string,
+): Promise<ApiResult<TemplateSource>> {
+  const res = await apiRequest<{ source: TemplateSource }>(
+    `${BASE}/${encodeURIComponent(id)}/templates/source?uri=${encodeURIComponent(uri)}`,
+  );
+  return res.ok ? { ...res, data: res.data.source } : res;
+}
+
+/** Approve the reviewed live templates; each names the pinned hash that was shown. */
+export const approveConnectorTemplates = (
+  id: string,
+  templates: readonly { readonly uri: string; readonly pinnedHash: string }[],
+): Promise<ApiResult<{ approved: readonly string[] }>> =>
+  apiRequest(`${BASE}/${encodeURIComponent(id)}/templates/approve`, {
+    method: "POST",
+    json: { templates },
   });
 
 /** Sets or replaces the site-wide key (KOBE-303); the key never comes back, only a hint. */

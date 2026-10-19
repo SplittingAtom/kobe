@@ -85,6 +85,8 @@ describe("template review (KOBE-434)", () => {
       { ...template("ui://r/bad", "x"), mimeType: "text/plain" },
     ];
     await refresh(id);
+    const listed = await root.get(`${BASE}/${id}`);
+    expect(listed.json.connector.templatesDriftedCount).toBe(3);
 
     const review = await root.get(`${BASE}/${id}/templates`);
     expect(review.status).toBe(200);

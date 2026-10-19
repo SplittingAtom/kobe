@@ -229,6 +229,78 @@ describe("Tool drift re-approval (KOBE-102)", () => {
   });
 });
 
+describe("app template review (KOBE-434)", () => {
+  const version = (sha: string, pinnedHash: string, bytes: number) => ({
+    sha256: sha,
+    pinnedHash,
+    bytes,
+    mimeType: "text/html;profile=mcp-app",
+    meta: { prefersBorder: false },
+  });
+  const templates = [
+    {
+      uri: "ui://c/explorer",
+      status: "drifted",
+      change: "changed",
+      approved: version("1".repeat(64), "a".repeat(64), 10),
+      live: version("2".repeat(64), "b".repeat(64), 30),
+    },
+    {
+      uri: "ui://c/broken",
+      status: "drifted",
+      change: "invalid",
+      invalid: "ui_resource_hash_mismatch",
+    },
+  ];
+  const routes = {
+    [`GET ${BASE}`]: [
+      200,
+      { connectors: [connector({ toolCount: 1, driftedCount: 0, templatesDriftedCount: 2 })] },
+    ] as const,
+    [`GET ${BASE}/c-1/tools`]: [200, { tools: [] }] as const,
+    [`GET ${BASE}/c-1/templates`]: [200, { templates }] as const,
+    [`GET ${BASE}/c-1/templates/source?uri=${encodeURIComponent("ui://c/explorer")}`]: [
+      200,
+      {
+        source: {
+          uri: "ui://c/explorer",
+          approved: "<p>old</p>",
+          live: "<p>old</p>\n<script>alert(1)</script>",
+        },
+      },
+    ] as const,
+    [`POST ${BASE}/c-1/templates/approve`]: [200, { approved: ["ui://c/explorer"] }] as const,
+  };
+
+  it("shows hashes, an escaped source diff and a sandboxed preview, and approves by hash", async () => {
+    const calls = stubApi(routes);
+    renderSite(<ConnectorsPage />);
+    await screen.findByText(/2 app templates awaiting approval/);
+    await userEvent.click(screen.getByRole("button", { name: /Review/ }));
+    const card = await screen.findByRole("article", { name: "ui://c/explorer" });
+    expect(within(card).getByText("2".repeat(64))).toBeTruthy();
+    await userEvent.click(within(card).getByRole("button", { name: /Show source/ }));
+    const diff = await within(card).findByLabelText("Source changes of ui://c/explorer");
+    // Shown as text: the script is a line of the diff, not an element.
+    expect(diff.textContent).toContain("+ <script>alert(1)</script>");
+    expect(diff.querySelector("script")).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: /^Preview/ }));
+    const frame = within(card).getByTitle("Preview of ui://c/explorer");
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("srcdoc")).toMatch(/Content-Security-Policy.*connect-src 'none'/);
+
+    const broken = screen.getByRole("article", { name: "ui://c/broken" });
+    expect(within(broken).getByText("Cannot be approved")).toBeTruthy();
+    expect(within(broken).queryByRole("button", { name: /Approve/ })).toBeNull();
+
+    await userEvent.click(within(card).getByRole("button", { name: /Approve/ }));
+    const post = calls.find((c) => c.method === "POST");
+    expect(JSON.parse(String(post?.body))).toEqual({
+      templates: [{ uri: "ui://c/explorer", pinnedHash: "b".repeat(64) }],
+    });
+  });
+});
+
 describe("refresh skips (KOBE-431)", () => {
   it("tells admins a connector is not checked for changes and whose key it needs", async () => {
     stubApi({
