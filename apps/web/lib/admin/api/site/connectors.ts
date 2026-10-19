@@ -88,6 +88,10 @@ export interface ToolDefinition {
   readonly title?: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
+  /** Risk hints (KOBE-434 review M4). */
+  readonly annotations?: Record<string, unknown>;
+  /** MCP Apps: the template it opens and who may see it (KOBE-433/435). */
+  readonly ui?: { readonly resourceUri?: string; readonly visibility?: readonly string[] };
 }
 
 /** One tool of a connector; a drifted one carries the live definition awaiting approval. */

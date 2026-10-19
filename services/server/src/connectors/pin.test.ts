@@ -168,7 +168,9 @@ describe("visibility (KOBE-435)", () => {
     expect(pinned(["model", "app", "app", "user"])?.ui).toBeUndefined();
     expect(pinned(["model", "x"])?.ui).toEqual({ visibility: ["model"] });
     expect(pinned([])?.ui).toEqual({ visibility: [] });
-    expect(pinned("app")?.ui).toBeUndefined();
+    // Malformed (not an array): the model only, never apps (review L4).
+    expect(pinned("app")?.ui).toEqual({ visibility: ["model"] });
+    expect(pinned({ app: true })?.ui).toEqual({ visibility: ["model"] });
     expect(pinned(["app"])?.sha256).not.toBe(pinned(["model"])?.sha256);
     // Spelling out the default is no change.
     expect(pinned(["app", "model"])?.sha256).toBe(toolHash(tool));

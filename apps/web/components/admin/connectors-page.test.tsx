@@ -216,6 +216,44 @@ describe("Tool drift re-approval (KOBE-102)", () => {
     });
   });
 
+  it("shows a visibility and template change of a tool (KOBE-434 review M4)", async () => {
+    stubApi({
+      ...routes([]),
+      [`GET ${BASE}/c-1/tools`]: [
+        200,
+        {
+          tools: [
+            {
+              name: "open_explorer",
+              status: "drifted",
+              change: "changed",
+              approved: {
+                description: "same",
+                inputSchema: { type: "object" },
+                annotations: { readOnlyHint: true },
+                ui: { visibility: ["app"] },
+              },
+              live: {
+                ...live("c".repeat(64), "same"),
+                annotations: { readOnlyHint: true },
+                ui: { resourceUri: "ui://c/explorer" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Review/ }));
+    const article = await screen.findByRole("article", { name: "open_explorer" });
+    const approved = within(article).getByRole("region", { name: "Approved" });
+    const now = within(article).getByRole("region", { name: "Now" });
+    expect(within(approved).getByText("apps only")).toBeTruthy();
+    expect(within(now).getByText("the model and apps (default)")).toBeTruthy();
+    expect(within(now).getByText("ui://c/explorer")).toBeTruthy();
+    expect(within(approved).getByText("readOnlyHint: true")).toBeTruthy();
+  });
+
   it("approves all pending tools at once", async () => {
     const calls = stubApi(routes(["changed_tool", "fresh_tool"]));
     renderSite(<ConnectorsPage />);

@@ -34,11 +34,17 @@ const UI_URI_MAX = 2048;
 /** The `ui://` template a listed tool names, if any (anything else is not an app). */
 /**
  * A declared `_meta.ui.visibility` (KOBE-435, MA6), normalized: known values only, sorted, and
- * undefined when it says the default (`["model", "app"]`, or nothing), so a server spelling out
+ * undefined when it is absent or says the default (`["model", "app"]`), so a server spelling out
  * the default is not drift. An array of nothing Kobe knows means visible to neither.
+ *
+ * A value that is present but not an array is malformed (review L4) and pins as `["model"]`:
+ * the tool stays what it was before MCP Apps (offered to the model, as any host without apps
+ * would) and gains no app access. Kobe does not reject it, because one malformed field would
+ * then fail the whole snapshot and stop the connector's refresh and drift checks.
  */
 function visibilityOf(value: unknown): PinnedToolUi["visibility"] {
-  if (!Array.isArray(value)) return undefined;
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return ["model"];
   const known = [
     ...new Set(value.filter((v): v is "app" | "model" => v === "app" || v === "model")),
   ].sort();
