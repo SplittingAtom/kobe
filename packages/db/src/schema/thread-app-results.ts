@@ -66,6 +66,12 @@ export const threadAppResults = pgTable(
     templateUri: text().notNull(),
     templateSha256: text().notNull(),
     appId: text().notNull(),
+    /**
+     * The call's canonical input as the upstream ran it (KOBE-438 review LOW-2): the proxy reports
+     * it with the result and the server checks it against the ticket's digest. The app's
+     * `tool-input` comes from here, never from Pi's entry. At most 64 KiB (the MA-4 cap).
+     */
+    input: jsonb().$type<Record<string, unknown>>(),
     storage: text().$type<ThreadAppResultStorage>().notNull(),
     result: jsonb().$type<Record<string, unknown>>(),
     blobRef: text(),
@@ -119,5 +125,9 @@ export const threadAppResults = pgTable(
         AND (${t.inputSha256} IS NULL OR ${t.inputSha256} ~ '${sql.raw(HEX64)}')`,
     ),
     check("thread_app_results_uri", sql`${t.templateUri} LIKE 'ui://%'`),
+    check(
+      "thread_app_results_input_size",
+      sql`${t.input} IS NULL OR octet_length(${t.input}::text) <= 65536`,
+    ),
   ],
 );

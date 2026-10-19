@@ -152,6 +152,23 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     });
   });
 
+  it("keeps the call's input up to 64 KiB (0159)", async () => {
+    await asTeam(teamId, async (c) => {
+      const { rows } = await insert(c);
+      const id = (rows[0] as { id: string }).id;
+      await c.query(`UPDATE thread_app_results SET input = $2::jsonb WHERE id = $1`, [
+        id,
+        JSON.stringify({ q: "tables" }),
+      ]);
+      await expect(
+        c.query(`UPDATE thread_app_results SET input = $2::jsonb WHERE id = $1`, [
+          id,
+          JSON.stringify({ q: "x".repeat(70_000) }),
+        ]),
+      ).rejects.toThrow(/check constraint/);
+    });
+  });
+
   it("holds the table's checks", async () => {
     const bad: Record<string, unknown>[] = [
       { storage: "inline", result: null },
