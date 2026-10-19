@@ -6,13 +6,15 @@ import { Button, PageHeader } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
+import { SkillEvalHistory } from "../../../skills/skill-eval-history";
 import { SkillReachPanel } from "./skill-reach";
 
 const WORKBENCH = "/me/skills?tab=workbench";
 
 /**
  * A team skill in the Team console (KOBE-321): its admin view only (access mode, the agents it
- * reaches, usage). Skills are written in the member's Workbench (spec SK9), not here.
+ * reaches, usage) and its eval scorecards per saved version (KOBE-328). Skills are written in
+ * the member's Workbench (spec SK9), not here.
  */
 export function SkillAdminPage({ skillId }: { readonly skillId: string }) {
   const teamId = useTeamAccess().team.id;
@@ -33,6 +35,12 @@ export function SkillAdminPage({ skillId }: { readonly skillId: string }) {
           />
           {/* Keyed by the version: a new version may change the review state the panel shows. */}
           <SkillReachPanel key={skill.latestVersion} skill={skill} />
+          <SkillEvalHistory
+            teamId={teamId}
+            scope="team"
+            skillId={skill.id}
+            semverOf={(seq) => (seq === skill.latestVersion ? skill.latestSemver : undefined)}
+          />
         </>
       )}
     </ResourceView>

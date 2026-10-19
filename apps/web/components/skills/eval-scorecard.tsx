@@ -152,29 +152,29 @@ export function EvalScorecard({ card }: { readonly card: SkillEvalScorecard }) {
         </dd>
       </dl>
       <Table>
-        <TableHeader>
+        <TableHead>
           <TableRow>
-            <TableHead>Mode</TableHead>
-            <TableHead>Pass rate</TableHead>
-            <TableHead>Results</TableHead>
-            <TableHead>Mean cost</TableHead>
-            <TableHead>Mean duration</TableHead>
-            <TableHead>Denied tool calls</TableHead>
+            <TableHeader>Mode</TableHeader>
+            <TableHeader>Pass rate</TableHeader>
+            <TableHeader>Results</TableHeader>
+            <TableHeader>Mean cost</TableHeader>
+            <TableHeader>Mean duration</TableHeader>
+            <TableHeader>Denied tool calls</TableHeader>
           </TableRow>
-        </TableHeader>
+        </TableHead>
         <TableBody>
           <Summary label="With the skill" s={card.with} />
           <Summary label="Without (baseline)" s={card.without} />
         </TableBody>
       </Table>
       <Table>
-        <TableHeader>
+        <TableHead>
           <TableRow>
-            <TableHead>Case</TableHead>
-            <TableHead>With the skill</TableHead>
-            <TableHead>Without</TableHead>
+            <TableHeader>Case</TableHeader>
+            <TableHeader>With the skill</TableHeader>
+            <TableHeader>Without</TableHeader>
           </TableRow>
-        </TableHeader>
+        </TableHead>
         <TableBody>
           {card.details.map((d) => (
             <TableRow key={d.caseId}>

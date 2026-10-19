@@ -35,13 +35,16 @@
   suggestion button (structured add). A field-by-field case form is left out to keep the PR small.
 - **Progress by polling** the history (2 s, only while an eval is open) rather than the SSE stream:
   one request covers every eval of the draft and its scorecard.
-- **History per version:** per draft revision here; `listSkillEvals` (scope + skill id) is in
-  `lib/skills/evals-api.ts` for saved versions' pages (none show evals yet).
+- **History per version:** per draft revision in the Workbench, and **per saved version** on the
+  team skill's view (Team admin › Skills › a skill: "Evals by version", `skill-eval-history.tsx`,
+  `GET /v1/skill-evals?scope=team&skill_id=`): each version's evals newest first (status, mode,
+  pass rate, baseline, lift, precision/recall, cost), each linking to its full scorecard
+  (`/me/skills/evals/<id>`, `eval-run-page.tsx`). Personal skills have no version view yet.
+- **Tables:** column headers are `TableHeader` (th) inside `TableHead` (thead), as elsewhere.
 
 ## Open questions (for the reviewer / coordinator)
 
-- Should saved team/personal versions get an eval history view now (the API exists), or with the
-  Registry submission screens (Phase C)?
+- Personal skills have no version view to put their eval history on; add one?
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -54,6 +57,9 @@
   `skills/kobe-packages.test.ts` (skill-creator asks for a negative case, with examples).
 - **ac-3** panel test "lists the draft's evals by revision, shows live progress and the picked
   scorecard"; "shows why a budget-stopped eval ended".
+- **ac-3 (saved versions)** `apps/web/components/skills/skill-eval-history.test.tsx` (grouped by
+  version newest first, links to each scorecard, drafts left out, empty state, on the team skill's
+  view; the scorecard page and a stopped eval).
 - **Cap form** `apps/web/components/admin/budgets-pages.test.tsx` "team eval cap" (spend by kind,
   sub-cent refused, tokens saved, removal; hidden without the permission).
 - Commands: see the final report (typecheck, lint, web 1925, server unit, built-in DB tests).

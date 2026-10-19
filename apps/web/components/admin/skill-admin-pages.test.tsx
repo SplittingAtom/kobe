@@ -47,6 +47,7 @@ describe("Team console skills (admin view)", () => {
         { offer_to_all: false, access: "available", approved: true, agents: [] },
       ],
       "GET /v1/skills/s-1/usage": [200, { uses: 0, last_used_at: null, agents: [] }],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />);
     expect(await screen.findByRole("heading", { level: 1, name: "report-writer" })).toBeDefined();

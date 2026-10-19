@@ -95,6 +95,7 @@ describe("team skill reach (KOBE-297)", () => {
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [200, USAGE],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     expect(rows(await reachList())).toEqual(["Named Team · names it"]);
@@ -112,6 +113,7 @@ describe("team skill reach (KOBE-297)", () => {
         [200, OFFERED],
       ],
       "GET /v1/skills/s-1/usage": [200, USAGE],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
       "PUT /v1/skills/s-1/access": [200, { access: "default_on", required_count: 0 }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
@@ -137,6 +139,7 @@ describe("team skill reach (KOBE-297)", () => {
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [200, USAGE],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
       "PUT /v1/skills/s-1/access": [
         200,
         { access: "required", required_count: 5, warning: "many_required" },
@@ -153,6 +156,7 @@ describe("team skill reach (KOBE-297)", () => {
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [200, USAGE],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
       "PUT /v1/skills/s-1/access": [
         409,
         { code: "offer_limit", message: "A team can have at most 32 skills On by default." },
@@ -169,6 +173,7 @@ describe("team skill reach (KOBE-297)", () => {
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, REACH],
       "GET /v1/skills/s-1/usage": [403, { code: "forbidden", message: "no" }],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />, {
       role: "builder",
@@ -198,6 +203,7 @@ describe("team skill reach (KOBE-297)", () => {
       ...BASE,
       "GET /v1/skills/s-1/reach": [200, { ...REACH, approved: false }],
       "GET /v1/skills/s-1/usage": [200, { uses: 0, last_used_at: null, agents: [] }],
+      "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />, ADMIN);
     await reachList();

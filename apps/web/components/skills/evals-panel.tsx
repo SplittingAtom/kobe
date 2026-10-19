@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { evalHref } from "../../lib/skills/eval-href";
 import type { ApiError } from "../../lib/api/client";
 import { appendCases, caseIdsOf, suggestTriggerCases } from "../../lib/skills/case-suggestions";
 import { readDraftText } from "../../lib/skills/drafts-api";
@@ -134,23 +136,25 @@ export function EvalsPanel({
       {error && <ErrorNotice error={error} />}
       {runs && runs.length > 0 && (
         <Table aria-label="Eval history">
-          <TableHeader>
+          <TableHead>
             <TableRow>
-              <TableHead>Of</TableHead>
-              <TableHead>Started</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Pass rate</TableHead>
-              <TableHead>Lift</TableHead>
-              <TableHead>
+              <TableHeader>Of</TableHeader>
+              <TableHeader>Started</TableHeader>
+              <TableHeader>Status</TableHeader>
+              <TableHeader>Pass rate</TableHeader>
+              <TableHeader>Lift</TableHeader>
+              <TableHeader>
                 <span className="sr-only">Show</span>
-              </TableHead>
+              </TableHeader>
             </TableRow>
-          </TableHeader>
+          </TableHead>
           <TableBody>
             {runs.map((r) => (
               <TableRow key={r.id} aria-current={shown?.id === r.id ? "true" : undefined}>
                 <TableCell>{subjectLabel(r)}</TableCell>
-                <TableCell>{new Date(r.startedAt).toLocaleString()}</TableCell>
+                <TableCell>
+                  <Link href={evalHref(r.id)}>{new Date(r.startedAt).toLocaleString()}</Link>
+                </TableCell>
                 <TableCell>
                   {STATUS_TEXT[r.status]}
                   {OPEN.has(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
