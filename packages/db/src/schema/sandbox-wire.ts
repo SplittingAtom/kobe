@@ -9,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
@@ -20,6 +21,15 @@ import { threads } from "./threads.js";
 // D11) holds one WebSocket to one server replica; any replica may route a command to it. Postgres
 // is the record (these tables), LISTEN/NOTIFY only a hint that carries ids. Team tables: every key
 // and foreign key includes team_id (KOBE-29 convention).
+
+/**
+ * Which sandbox of a (team, user) a row is about (KOBE-325): `''` the member's own sandbox (D11),
+ * `e-<thread id>` the ephemeral sandbox of one skill-eval thread. A connection's slot comes from
+ * the claim the server finds at connect; a command's from its thread.
+ */
+export const SANDBOX_SLOT_PATTERN =
+  "^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$";
+const slot = () => text().notNull().default("");
 
 const teamRef = () =>
   uuid()
@@ -39,6 +49,7 @@ export const sandboxConnections = pgTable(
     userId: uuid()
       .notNull()
       .references(() => users.id),
+    slot: slot(),
     /** agent-sandbox claim UID (session token `sub`, KOBE-22). */
     sandboxId: uuid().notNull(),
     connectionId: uuid().notNull(),
@@ -49,7 +60,10 @@ export const sandboxConnections = pgTable(
     closedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
-    primaryKey({ columns: [t.teamId, t.userId] }),
+    // The key (a unique index, not a primary key: a key that gains a column can't be swapped in
+    // one generated migration). Every column is NOT NULL, so it identifies a row as a key does.
+    uniqueIndex("sandbox_connections_key").on(t.teamId, t.userId, t.slot),
+    check("sandbox_connections_slot", sql`${t.slot} ~ '${sql.raw(SANDBOX_SLOT_PATTERN)}'`),
     check("sandbox_connections_replica_id", sql`char_length(${t.replicaId}) BETWEEN 1 AND 64`),
   ],
 );
@@ -84,6 +98,7 @@ export const sandboxCommands = pgTable(
     teamId: teamRef(),
     id: uuid().notNull().defaultRandom(),
     userId: uuid().notNull(),
+    slot: slot(),
     threadId: uuid().notNull(),
     runId: uuid(),
     kind: text().$type<SandboxCommandKind>().notNull(),
@@ -106,13 +121,14 @@ export const sandboxCommands = pgTable(
     }).onDelete("cascade"),
     // Delivery order per sandbox (pending first) and the expiry sweep.
     index("sandbox_commands_open_idx")
-      .on(t.teamId, t.userId, t.createdAt)
+      .on(t.teamId, t.userId, t.slot, t.createdAt)
       .where(sql`${t.status} IN ('pending', 'delivered')`),
     index("sandbox_commands_expiry_idx").on(t.teamId, t.expiresAt),
     check(
       "sandbox_commands_kind",
       sql`${t.kind} IN (${sql.raw(SANDBOX_COMMAND_KINDS.map((k) => `'${k}'`).join(", "))})`,
     ),
+    check("sandbox_commands_slot", sql`${t.slot} ~ '${sql.raw(SANDBOX_SLOT_PATTERN)}'`),
     check("sandbox_commands_requester", sql`char_length(${t.requesterReplica}) BETWEEN 1 AND 64`),
     check("sandbox_commands_frame_object", sql`jsonb_typeof(${t.frame}) = 'object'`),
     check(
@@ -134,6 +150,7 @@ export const sandboxRunLeases = pgTable(
     teamId: teamRef(),
     runId: uuid().notNull(),
     userId: uuid().notNull(),
+    slot: slot(),
     threadId: uuid().notNull(),
     sandboxId: uuid().notNull(),
     leasedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -150,6 +167,7 @@ export const sandboxRunLeases = pgTable(
       columns: [t.teamId, t.threadId],
       foreignColumns: [threads.teamId, threads.id],
     }).onDelete("cascade"),
-    index("sandbox_run_leases_user_idx").on(t.teamId, t.userId),
+    index("sandbox_run_leases_user_idx").on(t.teamId, t.userId, t.slot),
+    check("sandbox_run_leases_slot", sql`${t.slot} ~ '${sql.raw(SANDBOX_SLOT_PATTERN)}'`),
   ],
 );

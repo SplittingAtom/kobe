@@ -146,6 +146,18 @@ export const threads = pgTable(
      * `threads_skill_draft_idx` (team_id, skill_draft_id) WHERE skill_draft_id IS NOT NULL.
      */
     skillDraftId: uuid(),
+    /**
+     * An eval thread (KOBE-325, SK16): one execution of a skill eval, run by the eval runner in its
+     * own ephemeral sandbox (wire slot `e-<thread id>`), never by a member's send. Stays true when
+     * the eval run is gone (`skill_eval_run_id` cleared). Never a test chat or builder thread.
+     */
+    skillEval: boolean().notNull().default(false),
+    /**
+     * The eval run this thread belongs to (KOBE-325). SQL-only (`*_skill_evals_rls.sql`): foreign
+     * key (team_id, skill_eval_run_id) → skill_eval_runs ON DELETE SET NULL (skill_eval_run_id);
+     * checks `threads_skill_eval_run` (set only on an eval thread) and `threads_skill_eval_only`.
+     */
+    skillEvalRunId: uuid(),
     /** When the owner pinned the thread (CE19; the Pinned group sorts by it). Null = not pinned. */
     pinnedAt: timestamp({ withTimezone: true }),
     /** When the thread was archived (CE19): out of the normal groups, retention unchanged. */

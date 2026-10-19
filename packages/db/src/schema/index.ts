@@ -50,3 +50,4 @@ export * from "./installs.js";
 export * from "./skill-rescans.js";
 export * from "./skill-default-syncs.js";
 export * from "./skill-drafts.js";
+export * from "./skill-evals.js";
