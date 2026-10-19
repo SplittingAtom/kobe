@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-335 (0153): an install with eval runs upgrades; old runs keep their subjects and a run may
+ * KOBE-335 (0158): an install with eval runs upgrades; old runs keep their subjects and a run may
  * now evaluate a Registry version; any other kind is still refused.
  */
 const MARKER = `'draft', 'team', 'personal', 'registry'`;

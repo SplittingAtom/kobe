@@ -6,7 +6,7 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-297 (`runs.skills_used`, `skill_refs` with semver), KOBE-275 (ratings and
   its minimum-raters rule), KOBE-336 (catalog cards), KOBE-338
-- **Migrations (review M1):** 0153 `skill_usage_snapshots` (generated; site table, app role
+- **Migrations (review M1):** 0158 `skill_usage_snapshots` (generated; site table, app role
   SELECT/INSERT/DELETE, a startup seed); upgrade test
   `packages/db/src/skill-usage-snapshots-upgrade.db.test.ts`
 

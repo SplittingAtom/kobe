@@ -10,7 +10,7 @@ import {
   type TestDatabase,
 } from "./test-support/database.js";
 
-/** KOBE-340 (0153): review events upgrade; an undo of a deprecation is a review event. */
+/** KOBE-340 (0158): review events upgrade; an undo of a deprecation is a review event. */
 const MARKER = `ADD VALUE 'undeprecated'`;
 
 let db: TestDatabase | undefined;
@@ -64,7 +64,7 @@ afterAll(async () => {
   if (oldMigrations) rmSync(oldMigrations, { recursive: true, force: true });
 });
 
-describe("undeprecated (0153)", () => {
+describe("undeprecated (0158)", () => {
   it("keeps the old events and records an undo", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {

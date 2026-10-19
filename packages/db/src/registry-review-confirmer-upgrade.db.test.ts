@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-334 review M2 (0153, 0158): an install with reviewed catalog versions upgrades; afterwards
+ * KOBE-334 review M2 (0158, 0163): an install with reviewed catalog versions upgrades; afterwards
  * the Team admin who confirmed a promotion approves it only on a single-admin Site, and the
  * version is flagged `self_approved`; the confirmer may still reject; a second reviewer takes the
  * exception away.

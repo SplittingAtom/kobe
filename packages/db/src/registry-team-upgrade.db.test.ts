@@ -12,7 +12,7 @@ import {
 
 /**
  * KOBE-330 review H1: a site that named an ordinary team as the Registry team migrates through
- * 0153 (`teams.registry`) and 0155 as the non-superuser owner. The designation is cleared (the
+ * 0158 (`teams.registry`) and 0160 as the non-superuser owner. The designation is cleared (the
  * Registry is not ready) and the team is otherwise untouched; afterwards only a dedicated registry
  * team can be named, a team's flag never changes, and there is at most one registry team.
  */

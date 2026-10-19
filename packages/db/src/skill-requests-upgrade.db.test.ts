@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-338 review (0153): an install with notifications upgrades. `team_skill_requests` is
+ * KOBE-338 review (0158): an install with notifications upgrades. `team_skill_requests` is
  * created with forced row security (the app role sees only the team in force); an existing pause
  * notification keeps its shape; a skill notification names a catalog skill and nothing else.
  */
@@ -88,7 +88,7 @@ afterAll(async () => {
   if (oldMigrations) rmSync(oldMigrations, { recursive: true, force: true });
 });
 
-describe("team_skill_requests (0153, 0159)", () => {
+describe("team_skill_requests (0158, 0164)", () => {
   it("is a team table with forced row security", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {
@@ -122,7 +122,7 @@ describe("team_skill_requests (0153, 0159)", () => {
   });
 });
 
-describe("skill notifications (0153)", () => {
+describe("skill notifications (0158)", () => {
   it("keeps the old pause and takes a skill notification with a skill only", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {

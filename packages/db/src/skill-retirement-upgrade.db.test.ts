@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-340 (0153, regenerated with the rest of Phase C): an install with notifications upgrades;
+ * KOBE-340 (0158, regenerated with the rest of Phase C): an install with notifications upgrades;
  * a pause keeps its shape; a retirement notice names its skill, and a version one its version.
  */
 const MARKER = `ADD COLUMN "skill_semver"`;
@@ -61,7 +61,7 @@ afterAll(async () => {
   if (oldMigrations) rmSync(oldMigrations, { recursive: true, force: true });
 });
 
-describe("retirement notifications (0153)", () => {
+describe("retirement notifications (0158)", () => {
   it("keeps the pause and takes retirement notices with their skill and version", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {

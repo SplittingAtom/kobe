@@ -6,7 +6,7 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-311 (the `site_skill_settings` row and its columns), KOBE-325/326 (eval
   limits, judge alias readers)
-- **Migrations (review):** 0153 `teams.registry` + one-registry-team index (generated), 0155
+- **Migrations (review):** 0158 `teams.registry` + one-registry-team index (generated), 0160
   (custom) clears an ordinary team's designation and adds the guard triggers; upgrade test
   `packages/db/src/registry-team-upgrade.db.test.ts`
 
@@ -47,7 +47,7 @@
   `POST /v1/site/skills/registry/team {name, slug}` creates it flagged `teams.registry` (at most
   one; the flag is fixed at creation by trigger), with the creating Site admin as team admin and
   every active Skill reviewer as a member, and names it, in one transaction. `registryTeamId` is
-  no longer a setting; the database refuses naming any other team (trigger, 23514). 0155 clears
+  no longer a setting; the database refuses naming any other team (trigger, 23514). 0160 clears
   an existing designation of an ordinary team (a NOTICE in the migration log names it); its
   members are untouched. Deleting the Registry team leaves "not ready"; a new one can be created.
 - **M1** a mirror URL with userinfo, query or fragment is refused (the token lives in a Secret).

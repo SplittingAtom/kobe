@@ -8,10 +8,10 @@
   Phase C (Chris's gate review after it; KOBE-342 is not ours). Done and reviewed: KOBE-442,
   330, 331, 332, 333 (ledgers in `docs/ledger/`). G10 (PR #317) and MCP Apps add migrations too:
   run `pnpm --filter @kobe/db db:rebase` at PR time.
-- **Migrations on this branch:** 0153 `skill_drafts.synced_rev`, 0154 its backfill (custom), 0153
-  partial unique save target, 0153 `teams.registry`, 0155 dedicated-Registry-team guard (custom),
-  0153 `team_members.added_via`, 0153 `skill_promotion_requests` + `builders_may_promote`, 0156 its
-  RLS (custom), 0153 `*_skill_versions.from_conversation`, 0157 its backfill (custom). Each alone in
+- **Migrations on this branch:** 0158 `skill_drafts.synced_rev`, 0159 its backfill (custom), 0158
+  partial unique save target, 0158 `teams.registry`, 0160 dedicated-Registry-team guard (custom),
+  0158 `team_members.added_via`, 0158 `skill_promotion_requests` + `builders_may_promote`, 0161 its
+  RLS (custom), 0158 `*_skill_versions.from_conversation`, 0162 its backfill (custom). Each alone in
   its commit, generated and custom apart, upgrade tests in `packages/db/src/*-upgrade.db.test.ts`.
 - **Decisions in force (coordinator / Chris):**
   - The Registry team is a dedicated team Kobe creates (`POST /v1/site/skills/registry/team`,
@@ -59,8 +59,8 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-330 (settings, rules), KOBE-332 (`submissionRight`), KOBE-310 (SkillStore
   `export`), KOBE-324 (catalog scorecard), KOBE-309 (provenance)
-- **Migrations:** 0153 `skill_promotion_requests` + `team_skill_settings.builders_may_promote`
-  (generated), 0156 its RLS (custom: ENABLE + FORCE, team policy, break-glass read by team or
+- **Migrations:** 0158 `skill_promotion_requests` + `team_skill_settings.builders_may_promote`
+  (generated), 0161 its RLS (custom: ENABLE + FORCE, team policy, break-glass read by team or
   requester). New, empty table and a defaulted column: no backfill. Probe suite fixture and
   `BREAK_GLASS_READABLE_TABLES` entry added.
 
@@ -101,9 +101,9 @@
 
 ## Decisions
 
-- **From-conversation flag** (review C4-M3): stored on the version at save (0153), from the draft
+- **From-conversation flag** (review C4-M3): stored on the version at save (0158), from the draft
   (`startedFrom thread` or a thread id) or a fork's parent version (team, personal or catalog
-  provenance); 0157 backfills older versions from the audit log (forks before it not traced).
+  provenance); 0162 backfills older versions from the audit log (forks before it not traced).
 - The eval that counts must have run in the **active** (source) team: eval transcripts never
   leave a team, and the scorecard comes from that team's run.
 - The "one automatic retry per failing case" rule is the eval runner's to apply (KOBE-325); it is
@@ -117,10 +117,10 @@
   the version; C4-L3 `kobe.skill.yaml` listed as leaving. Tests: team-rejected and unreviewed
   refused, decline-then-confirm and racing decisions, true path for a conversation draft, its
   fork and a personal skill promoted from another team; a direct upload is false.
-- Re-review LOW-R1 (0157 team bound) and LOW-R2 (team review re-checked in `submit`) are done
+- Re-review LOW-R1 (0162 team bound) and LOW-R2 (team review re-checked in `submit`) are done
   with KOBE-334 (see its ledger); must-dos 1 to 5 above are built there.
 - L-a (pre-review reviewers left in an ordinary team): no install ran that code (gate1 was
-  checked: no designation, no grants), so nothing is migrated; 0155's comment overstates that
+  checked: no designation, no grants), so nothing is migrated; 0160's comment overstates that
   nothing was recorded (the memberships were made, never marked).
 
 ## Open questions (for Chris or the coordinator)

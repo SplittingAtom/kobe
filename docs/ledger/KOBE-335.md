@@ -6,7 +6,7 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-334 (Approve's `authoritativeScorecardProblem` hook), KOBE-325/326/327
   (eval runner, judge, budgets), KOBE-330 (Registry team, Site judge alias)
-- **Migrations:** 0153 `skill_eval_runs_subject_kind` adds `registry` (generated); upgrade test
+- **Migrations:** 0158 `skill_eval_runs_subject_kind` adds `registry` (generated); upgrade test
   `packages/db/src/skill-eval-registry-subject-upgrade.db.test.ts`
 
 ## What shipped
@@ -69,7 +69,7 @@
   `not_registry_member` message (see the question). **L6** documented: re-runs read no personal
   key, but the Registry team's own connectors connect, so it should enable no keyed connector.
   **L7** tests: the Registry team's open-eval limit, the package guard on a completing card,
-  0158's refusal as the app role. Not added: a budget-cap re-run test and a personal-connector
+  0163's refusal as the app role. Not added: a budget-cap re-run test and a personal-connector
   re-run test (both go through the shared eval start and `withSkillEvals`, tested by
   `skill-eval-budget` and the runner tests).
 

@@ -11,8 +11,8 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-333 review C4-M3: versions saved before 0153 get `from_conversation` from the audit log
- * (0157, run as the non-superuser owner with FORCE and the immutability triggers lifted for it):
+ * KOBE-333 review C4-M3: versions saved before 0158 get `from_conversation` from the audit log
+ * (0162, run as the non-superuser owner with FORCE and the immutability triggers lifted for it):
  * a team version saved from a conversation draft, a personal version saved (personalized) from
  * one, and nothing else; FORCE and the triggers are back afterwards.
  */

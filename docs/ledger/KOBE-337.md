@@ -9,12 +9,12 @@
   KOBE-442, 330–337 (ledgers in `docs/ledger/`; reviews in the coordinator's scratchpad,
   `review-*.md`). At PR time run `pnpm --filter @kobe/db db:rebase` (G10 PR #317 and MCP Apps add
   migrations too).
-- **Migrations on this branch** (after `db:rebase` on main 05a92778): 0153 every schema change
+- **Migrations on this branch** (after `db:rebase` on main 20486949): 0158 every schema change
   of Phase C (generated, one migration: drafts sync, `teams.registry`, `team_members.added_via`,
   promotion requests, `from_conversation`, review states and the confirmer CHECK, eval subject
   `registry`, `team_skill_requests`, skill notifications, `skill_usage_snapshots`, `undeprecated`),
-  then custom: 0154 synced-rev backfill, 0155 dedicated-Registry guard, 0156 promotion requests
-  RLS, 0157 `from_conversation` backfill, 0158 review guard for the confirmer, 0159
+  then custom: 0159 synced-rev backfill, 0160 dedicated-Registry guard, 0161 promotion requests
+  RLS, 0162 `from_conversation` backfill, 0163 review guard for the confirmer, 0164
   `team_skill_requests` RLS. Upgrade tests in `packages/db/src/*-upgrade.db.test.ts`. The
   scanner's rule set is 5 (rescans).
 - **Decisions in force (coordinator / Chris):**
@@ -23,7 +23,7 @@
     (flagged `selfGranted`).
   - Separation of duties for every act that weighs a version (Approve, acknowledging Caution
     findings, starting or cancelling re-runs): never the submitter or the confirming Team admin,
-    except the single admin (DB flags `self_approved`, 0158).
+    except the single admin (DB flags `self_approved`, 0163).
   - Approve fails closed: Registry team, row lock, authoritative card (this package, current
     Registry team and Site judge alias/model, ≤ 30 days, not all errored), blocklist, Block
     override with a note (Site admins), every Caution finding acknowledged, live skill, active

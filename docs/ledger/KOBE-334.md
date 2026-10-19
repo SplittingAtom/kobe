@@ -7,11 +7,11 @@
 - **Depends on:** KOBE-330 (Registry team, `requireRegistryTeam`), KOBE-331 (`skillReviewAllows`),
   KOBE-332 (`recordFirstMaintainer`, `submissionRight`), KOBE-333 (submissions); KOBE-335 fills
   the authoritative scorecard Approve needs
-- **Migrations (review):** 0153 `retracted` state, `finding_acknowledged`/`retracted` actions
-  (generated); 0153 `registry_versions_review` CHECK covers the confirmer (generated); 0158 the
+- **Migrations (review):** 0158 `retracted` state, `finding_acknowledged`/`retracted` actions
+  (generated); 0158 `registry_versions_review` CHECK covers the confirmer (generated); 0163 the
   review guard treats the confirmer as the submitter (custom); upgrade test
   `packages/db/src/registry-review-confirmer-upgrade.db.test.ts`. New dependency `diff` 9.0.0 (jsdiff, BSD-3-Clause; inventory regenerated)
-- **Also here (KOBE-333 re-review LOWs):** R1 0157 joins the draft row in the version's own team
+- **Also here (KOBE-333 re-review LOWs):** R1 0162 joins the draft row in the version's own team
   (edited in place: the migration is unreleased; upgrade test adds a look-alike row in a second
   team); R2 `submit` re-reads the team review `FOR SHARE` inside its transaction and refuses
   `team_review` (test: a rejection landing between the check and the submit)
@@ -87,7 +87,7 @@ changes_requested|rejected{blocked}`.
   (`rule@file:line`) per call, a `finding_acknowledged` event and `registry.finding_acknowledged`
   audit; Approve 409 `findings_unacknowledged` until all are; the UI has one button per finding.
 - **M2** (coordinator) the DB flags the confirmer's single-admin approval `self_approved`
-  (0153/0158) and refuses it otherwise; the Workbench and queue show "Self-approved" (the catalog
+  (0158/0163) and refuses it otherwise; the Workbench and queue show "Self-approved" (the catalog
   card is KOBE-336's).
 - **M3** (coordinator) Reject/Reject and block also act on Changes requested; the author withdraws
   (`POST /v1/me/skill-submissions/:id/retract`, state `retracted`, Workbench button). Either frees

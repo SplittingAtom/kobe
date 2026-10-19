@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-339 review M1 (0153): an install upgrades to `skill_usage_snapshots`; existing data is
+ * KOBE-339 review M1 (0158): an install upgrades to `skill_usage_snapshots`; existing data is
  * untouched; the app role writes a window once and purges old ones, never rewrites one.
  */
 const MARKER = `CREATE TABLE "skill_usage_snapshots"`;
@@ -47,7 +47,7 @@ afterAll(async () => {
   if (oldMigrations) rmSync(oldMigrations, { recursive: true, force: true });
 });
 
-describe("skill_usage_snapshots (0153)", () => {
+describe("skill_usage_snapshots (0158)", () => {
   it("keeps existing data; the app role inserts, reads and purges, never updates", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {
