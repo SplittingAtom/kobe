@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { Worker } from "node:worker_threads";
 import { afterAll, describe, expect, it } from "vitest";
 import { WORKER_RESOURCE_LIMITS, createValidatorPool } from "./validate-pool.js";
@@ -79,6 +82,23 @@ describe("fair use (re-review R-LOW-1)", () => {
       expect(await queued).toBe("valid");
     } finally {
       await p.close();
+    }
+  });
+
+  it("answers busy in bounded time when no worker ever starts (re-check LOW)", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "kobe-pool-"));
+    const hang = path.join(dir, "hang.cjs");
+    writeFileSync(hang, "for (;;) {}\n");
+    const stuck = createValidatorPool({ size: 1, waitMs: 300, library: hang });
+    try {
+      const started = Date.now();
+      expect(await stuck.validate(schema, { q: "ok" }, "u1")).toBe("busy");
+      expect(Date.now() - started).toBeLessThan(2_000);
+      // The member is free again: the next call is judged on its own (busy again here).
+      expect(await stuck.validate(schema, { q: "ok" }, "u1")).toBe("busy");
+    } finally {
+      await stuck.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

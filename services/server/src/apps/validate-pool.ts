@@ -72,6 +72,8 @@ interface Task {
   readonly instance: unknown;
   readonly owner: string;
   readonly resolve: (ok: boolean) => void;
+  /** Gives up waiting for a worker (none ready in time): the caller hears `busy`. */
+  wait: NodeJS.Timeout | undefined;
 }
 
 interface Slot {
@@ -85,10 +87,20 @@ interface Slot {
 /** A worker that is not ready after this long is replaced (it never takes a task meanwhile). */
 const STARTUP_MS = 15_000;
 
+/**
+ * Longest a call waits for a ready worker (re-check LOW): with workers that never start, calls
+ * answer `busy` (`validation_busy`, 503) in bounded time instead of hanging.
+ */
+export const QUEUE_WAIT_MS = 5_000;
+
 export interface ValidatorPoolOptions {
   readonly size?: number;
   readonly deadlineMs?: number;
   readonly maxQueue?: number;
+  /** How long a call waits for a ready worker; default {@link QUEUE_WAIT_MS}. */
+  readonly waitMs?: number;
+  /** Tests only: the module each worker loads instead of the validator library. */
+  readonly library?: string;
   /** Tests only: sees each worker as it is spawned. */
   readonly onSpawn?: (worker: Worker) => void;
 }
@@ -105,7 +117,7 @@ export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaV
   const spawn = (): Worker => {
     const worker = new Worker(WORKER_SOURCE, {
       eval: true,
-      workerData: { library: LIBRARY },
+      workerData: { library: options.library ?? LIBRARY },
       resourceLimits: { ...WORKER_RESOURCE_LIMITS },
     });
     worker.unref();
@@ -163,6 +175,7 @@ export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaV
     for (const slot of slots) {
       if (!slot.ready || slot.busy || queue.length === 0 || closed) continue;
       const task = queue.shift() as Task;
+      if (task.wait) clearTimeout(task.wait);
       slot.busy = task;
       // Missed deadline: terminate (a busy regex cannot be interrupted otherwise) and refuse.
       slot.timer = setTimeout(() => replace(slot), deadline);
@@ -188,13 +201,33 @@ export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaV
           owners.delete(owner);
           resolve(ok ? "valid" : "invalid");
         };
-        queue.push({ id: nextId++, key, schema, instance, owner, resolve: done });
+        const task: Task = {
+          id: nextId++,
+          key,
+          schema,
+          instance,
+          owner,
+          resolve: done,
+          wait: undefined,
+        };
+        task.wait = setTimeout(() => {
+          const at = queue.indexOf(task);
+          if (at < 0) return;
+          queue.splice(at, 1);
+          owners.delete(owner);
+          resolve("busy");
+        }, options.waitMs ?? QUEUE_WAIT_MS);
+        task.wait.unref();
+        queue.push(task);
         pump();
       });
     },
     async close() {
       closed = true;
-      for (const task of queue.splice(0)) task.resolve(false);
+      for (const task of queue.splice(0)) {
+        if (task.wait) clearTimeout(task.wait);
+        task.resolve(false);
+      }
       await Promise.all(slots.map((s) => s.worker.terminate()));
     },
   };
