@@ -61,6 +61,19 @@ export interface TeamBudgets {
   };
   readonly effectiveRequestsPerMinute: number;
   readonly members: readonly MemberBudget[];
+  /** This month's spend by usage kind (KOBE-327): runs, titles, follow-ups, evals, eval judge. */
+  readonly spentByKind?: readonly {
+    readonly kind: string;
+    readonly usd: number;
+    readonly tokens: number;
+  }[];
+  /** The team eval cap (KOBE-327, set in the skill settings) and this month's eval spend. */
+  readonly evalCap?: {
+    readonly usd: number | null;
+    readonly tokens: number | null;
+    readonly monthUsd: number;
+    readonly monthTokens: number;
+  };
 }
 
 export type BudgetState = "ok" | "warning" | "exhausted";
