@@ -34,6 +34,8 @@ export interface CatalogCard {
       readonly access: string;
     } | null;
     readonly addedByMe: boolean;
+    /** The caller's own Add for me here (KOBE-338). */
+    readonly myAdd?: { readonly semver: string; readonly pinMode: string } | null;
     readonly blocked: boolean;
   };
 }
@@ -41,6 +43,8 @@ export interface CatalogCard {
 export interface CatalogPage {
   readonly skills: readonly CatalogCard[];
   readonly tags: readonly string[];
+  /** The team switch "Members may add catalog skills for themselves" (KOBE-338). */
+  readonly membersMayAdd?: boolean;
 }
 
 export interface CatalogDetail extends CatalogCard {
@@ -66,6 +70,10 @@ export interface CatalogDetail extends CatalogCard {
   readonly agents: readonly { readonly id: string; readonly name: string }[];
   /** The caller may ask the Team admins for a host (D28). */
   readonly canRequestEgress: boolean;
+  /** The team switch "Members may add catalog skills for themselves" (KOBE-338). */
+  readonly membersMayAdd?: boolean;
+  /** The caller may block the skill in this team (Team admins). */
+  readonly canBlock?: boolean;
 }
 
 export interface CatalogFilter {
@@ -94,4 +102,57 @@ export function getCatalogSkill(teamId: string, id: string): Promise<ApiResult<C
 /** Asks this team's admins to enable `domain` (D28): the same request as the chat's notice. */
 export function requestEgress(teamId: string, domain: string): Promise<ApiResult<unknown>> {
   return apiRequest("/v1/egress/requests", { method: "POST", json: { domain }, teamId });
+}
+
+export type PinMode = "pinned" | "within_major" | "latest";
+
+/** Add for me (KOBE-338, SK25): the skill loads only in the caller's runs in this team. */
+export function addForMe(
+  teamId: string,
+  skillId: string,
+  body: { readonly version: string; readonly pinMode: PinMode },
+): Promise<ApiResult<{ semver: string; pinMode: PinMode; runs: string | null }>> {
+  return apiRequest(`/v1/me/skills/adds/${encodeURIComponent(skillId)}`, {
+    method: "PUT",
+    json: body,
+    teamId,
+  });
+}
+
+export function removeMyAdd(teamId: string, skillId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/me/skills/adds/${encodeURIComponent(skillId)}`, {
+    method: "DELETE",
+    teamId,
+  });
+}
+
+/** Request for team: asks this team's admins to install the skill. */
+export function requestForTeam(
+  teamId: string,
+  skillId: string,
+): Promise<ApiResult<{ requested: boolean; alreadyRequested: boolean }>> {
+  return apiRequest(`/v1/skills/catalog/${encodeURIComponent(skillId)}/request`, {
+    method: "POST",
+    json: {},
+    teamId,
+  });
+}
+
+/** A Team admin's block of the skill in this team (removes members' adds, refuses new ones). */
+export function blockInTeam(
+  teamId: string,
+  skillId: string,
+): Promise<ApiResult<{ blocked: boolean; changed: boolean; addsRemoved: number }>> {
+  return apiRequest(`/v1/team/skills/blocks/${encodeURIComponent(skillId)}`, {
+    method: "PUT",
+    json: {},
+    teamId,
+  });
+}
+
+export function unblockInTeam(teamId: string, skillId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/team/skills/blocks/${encodeURIComponent(skillId)}`, {
+    method: "DELETE",
+    teamId,
+  });
 }

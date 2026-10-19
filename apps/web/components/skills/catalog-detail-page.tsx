@@ -21,6 +21,7 @@ import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource, type Mutation } from "../admin/use-resource";
 import { CatalogInstall } from "./catalog-install";
+import { CatalogMemberActions } from "./catalog-member";
 import { TeamStateBadges } from "./catalog-tab";
 import { visibleText } from "../../lib/admin/visible-text";
 
@@ -120,6 +121,7 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
               ))}
             </p>
             <MutationStatus error={mutation.error} notice={mutation.notice} />
+            <CatalogMemberActions detail={d} teamId={teamId} mutation={mutation} onDone={reload} />
             {mayInstall && (
               <CatalogInstall
                 detail={d}

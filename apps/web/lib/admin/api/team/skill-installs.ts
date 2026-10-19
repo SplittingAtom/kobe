@@ -158,3 +158,61 @@ export function rollbackInstall(
     json: {},
   });
 }
+
+/** A member's Add for me, as the Team console lists it (KOBE-338, SK25). */
+export interface MemberAdd {
+  readonly userId: string;
+  readonly memberName: string;
+  readonly skillId: string;
+  readonly name: string;
+  readonly semver: string;
+  readonly pinMode: "pinned" | "within_major" | "latest";
+  /** The version the member's runs load now; null when none can. */
+  readonly runs: string | null;
+  readonly updatedAt: string;
+}
+
+export interface TeamBlock {
+  readonly skillId: string;
+  readonly name: string;
+  readonly blockedBy: string;
+  readonly blockedByName: string;
+  readonly at: string;
+}
+
+export interface InstallRequest {
+  readonly skillId: string;
+  readonly name: string;
+  readonly requesters: readonly { readonly userId: string; readonly name: string }[];
+  readonly count: number;
+  readonly lastAt: string;
+}
+
+export function listMemberAdds(teamId: string): Promise<ApiResult<{ adds: MemberAdd[] }>> {
+  return apiRequest(`${BASE}/member-adds`, { teamId });
+}
+
+export function listTeamBlocks(teamId: string): Promise<ApiResult<{ blocks: TeamBlock[] }>> {
+  return apiRequest(`${BASE}/blocks`, { teamId });
+}
+
+export function unblockSkill(teamId: string, skillId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`${BASE}/blocks/${enc(skillId)}`, { teamId, method: "DELETE" });
+}
+
+export function listInstallRequests(
+  teamId: string,
+): Promise<ApiResult<{ requests: InstallRequest[] }>> {
+  return apiRequest(`${BASE}/install-requests`, { teamId });
+}
+
+export function dismissInstallRequests(
+  teamId: string,
+  skillId: string,
+): Promise<ApiResult<unknown>> {
+  return apiRequest(`${BASE}/install-requests/${enc(skillId)}/dismiss`, {
+    teamId,
+    method: "POST",
+    json: {},
+  });
+}

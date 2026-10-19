@@ -17,6 +17,7 @@ import {
 import { useTeamAccess } from "../../console-context";
 import { CatalogInstallsSection } from "./catalog-installs-section";
 import { CatalogSwitchesSection } from "./catalog-switches";
+import { MemberAddsSection } from "./member-adds-section";
 import { PromotionRequestsSection } from "./promotion-requests-section";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
@@ -27,7 +28,9 @@ import { useResource } from "../../use-resource";
  * member's Workbench (spec SK9).
  */
 export function SkillsPage() {
-  const teamId = useTeamAccess().team.id;
+  const access = useTeamAccess();
+  const teamId = access.team.id;
+  const canManage = access.permissions.includes("team.skills.installs.manage");
   const { state } = useResource(() => listSkills(teamId, "team"));
   return (
     <>
@@ -72,6 +75,7 @@ export function SkillsPage() {
         }
       </ResourceView>
       <CatalogInstallsSection />
+      {canManage && <MemberAddsSection />}
       <CatalogSwitchesSection />
       <PromotionRequestsSection />
     </>
