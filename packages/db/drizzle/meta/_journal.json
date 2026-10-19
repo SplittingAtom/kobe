@@ -1072,6 +1072,13 @@
       "when": 1792412581708,
       "tag": "0152_teams_registry",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1792412599237,
+      "tag": "0153_registry_team_dedicated",
+      "breakpoints": true
     }
   ]
 }
