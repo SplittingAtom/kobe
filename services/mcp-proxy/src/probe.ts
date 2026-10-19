@@ -1,8 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { apiKeyHeaders } from "./credentials.js";
+import { keyMatches } from "./internal-key.js";
 import type { UpstreamClient } from "./upstream.js";
 
 /**
@@ -33,13 +33,6 @@ const bodySchema = z.strictObject({
   ui_resources: z.literal(true).optional(),
 });
 
-function keyMatches(presented: string | undefined, expected: string): boolean {
-  if (presented === undefined) return false;
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 export function probeRoutes(deps: ProbeDeps): Hono {
   const app = new Hono();
   app.post(
@@ -50,12 +43,7 @@ export function probeRoutes(deps: ProbeDeps): Hono {
     }),
     async (c) => {
       c.header("Cache-Control", "no-store");
-      if (
-        !keyMatches(
-          /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1],
-          deps.internalKey,
-        )
-      ) {
+      if (!keyMatches(c.req.header("authorization"), deps.internalKey)) {
         return c.json({ code: "unauthorized" }, 401);
       }
       const body = bodySchema.safeParse(await c.req.json().catch(() => undefined));
