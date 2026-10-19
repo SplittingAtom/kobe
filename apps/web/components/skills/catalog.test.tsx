@@ -101,6 +101,7 @@ describe("Catalog detail", () => {
           packages: {},
           maintainers: ["Mia"],
           agents: [{ id: "a", name: "Reporter" }],
+          can_request_egress: true,
         },
       ],
       "POST /v1/egress/requests": [201, { request: {} }],

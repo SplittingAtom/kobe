@@ -13,6 +13,7 @@ import { Badge, Button, EmptyState, Field, FormRow, Select, TextInput } from "..
 import { useTeamAccess } from "../admin/console-context";
 import { ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
+import { visibleText } from "../../lib/admin/visible-text";
 
 export const catalogHref = (id: string) => `/me/skills/catalog/${encodeURIComponent(id)}`;
 
@@ -46,11 +47,11 @@ function Card({ card }: { readonly card: CatalogCard }) {
     <li className="rounded-md border border-console-border p-3">
       <h3 className="m-0 text-base font-medium">
         <Link href={catalogHref(card.id)} className="underline">
-          {card.name}
+          {visibleText(card.name)}
         </Link>{" "}
         <span className="text-console-muted">{card.latest.semver}</span>
       </h3>
-      <p className="mt-1 mb-2">{card.summary}</p>
+      <p className="mt-1 mb-2">{visibleText(card.summary)}</p>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-console-muted">
           {card.publisher === "kobe" ? "By Kobe" : "By its maintainers"}

@@ -55,6 +55,8 @@ export interface FileDiff {
   readonly status: "added" | "removed" | "changed" | "unchanged";
   readonly size: number;
   readonly binary: boolean;
+  /** Text with bytes that aren't valid UTF-8 (shown as U+FFFD in the diff). */
+  readonly notUtf8?: true;
   readonly notDiffed?: "too_large" | "too_different" | "skipped";
   readonly hunks: readonly DiffHunk[];
 }
@@ -97,7 +99,10 @@ export interface RerunEntry {
 export interface RawFile {
   readonly path: string;
   readonly size: number;
-  readonly text: string | null;
+  readonly sha256: string;
+  /** `escaped`: invalid bytes as `\xNN`; `hex`: a hex dump (the file has a NUL byte). */
+  readonly encoding: "text" | "escaped" | "hex";
+  readonly text: string;
   readonly truncated: boolean;
 }
 

@@ -21,6 +21,7 @@ import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource, type Mutation } from "../admin/use-resource";
 import { TeamStateBadges } from "./catalog-tab";
+import { visibleText } from "../../lib/admin/visible-text";
 
 const pct = (v: unknown) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "—");
 
@@ -57,7 +58,7 @@ function EgressCheck({
             <Badge tone="done" className="ms-2">
               enabled here
             </Badge>
-          ) : e.inCeiling ? (
+          ) : e.inCeiling && detail.canRequestEgress ? (
             <>
               {" "}
               — not enabled here{" "}
@@ -74,6 +75,8 @@ function EgressCheck({
                 Request access to {e.host}
               </Button>
             </>
+          ) : e.inCeiling ? (
+            " — not enabled here: a Team admin can enable it."
           ) : (
             " — not allowed on this Site: only a Site admin can add it."
           )}
@@ -102,7 +105,10 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
       <ResourceView state={state} label="the skill">
         {(d) => (
           <>
-            <PageHeader title={`${d.name} ${d.latest.semver}`} description={d.summary} />
+            <PageHeader
+              title={`${visibleText(d.name)} ${d.latest.semver}`}
+              description={visibleText(d.summary)}
+            />
             <p className="flex flex-wrap gap-2">
               <TeamStateBadges card={d} />
               {d.topics.map((t) => (

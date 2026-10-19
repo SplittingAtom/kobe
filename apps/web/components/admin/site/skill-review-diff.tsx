@@ -11,6 +11,9 @@ import {
 import { visibleParts } from "../../../lib/admin/visible-text";
 import { Badge, Button, EmptyState, Notice, type BadgeTone } from "../../ui/console";
 
+/** Files an agent may run, by extension (as the server's reading order). */
+const CODE = /\.(sh|bash|zsh|py|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|lua|r|go|rs)$/i;
+
 const NOT_DIFFED: Readonly<Record<NonNullable<FileDiff["notDiffed"]>, string>> = {
   too_large: "too large to diff",
   too_different: "too different to diff line by line",
@@ -108,7 +111,9 @@ function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly vers
     }
   };
   const shown = extra?.kind === "diff" ? extra.file : file;
-  const canRead = file.status !== "removed" && !file.binary;
+  // Every changed file can be read whole: text, escaped bytes or a hex dump (review-336 M1).
+  const canRead = file.status !== "removed" && file.status !== "unchanged";
+  const code = /^(scripts|bin)\//.test(file.path) || CODE.test(file.path);
   return (
     <details open={file.status !== "unchanged"} className="mt-3">
       <summary className="cursor-pointer">
@@ -119,6 +124,12 @@ function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly vers
         {file.binary && file.status !== "unchanged" && (
           <span className="ms-2 text-console-muted">binary</span>
         )}
+        {file.notUtf8 && <span className="ms-2 text-console-muted">not valid UTF-8</span>}
+        {code && (file.binary || file.notUtf8) && (
+          <Badge tone="attention" className="ms-2">
+            code that isn&apos;t plain text: read it whole
+          </Badge>
+        )}
         {shown.notDiffed && (
           <span className="ms-2 text-console-muted">{NOT_DIFFED[shown.notDiffed]}</span>
         )}
@@ -128,20 +139,34 @@ function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly vers
           Load diff of {file.path}
         </Button>
       )}
-      {shown.notDiffed && shown.notDiffed !== "skipped" && canRead && extra?.kind !== "raw" && (
+      {canRead && extra?.kind !== "raw" && (
         <Button size="sm" className="mt-2" disabled={busy} onClick={() => void load("raw")}>
           View {file.path}
         </Button>
       )}
       {extra?.kind === "error" && <Notice tone="error">{extra.message}</Notice>}
       {extra?.kind === "raw" && (
-        <pre
-          aria-label={`${file.path}, whole file`}
-          className="mt-2 max-h-[40rem] overflow-auto rounded border border-console-border p-2 font-mono text-xs whitespace-pre-wrap"
-        >
-          {extra.file.text === null ? "Binary file." : <Visible text={extra.file.text} />}
-          {extra.file.truncated && "\n… (the first 1 MiB)"}
-        </pre>
+        <>
+          <p className="mt-2 text-sm">
+            {extra.file.encoding === "hex"
+              ? "Hex dump (the file has NUL bytes)."
+              : extra.file.encoding === "escaped"
+                ? "Bytes that aren't UTF-8 are shown as \\xNN."
+                : "The whole file."}{" "}
+            SHA-256 <code>{extra.file.sha256}</code>, {extra.file.size} bytes.
+          </p>
+          {extra.file.truncated && (
+            <Notice tone="warn">
+              Only the beginning of {file.path} is shown: it is larger than the viewer reads.
+            </Notice>
+          )}
+          <pre
+            aria-label={`${file.path}, whole file`}
+            className="mt-2 max-h-[40rem] overflow-auto rounded border border-console-border p-2 font-mono text-xs whitespace-pre-wrap"
+          >
+            <Visible text={extra.file.text} />
+          </pre>
+        </>
       )}
       <Hunks file={shown} />
     </details>

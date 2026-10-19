@@ -64,6 +64,8 @@ export interface CatalogDetail extends CatalogCard {
   readonly packages: Record<string, unknown>;
   readonly maintainers: readonly string[];
   readonly agents: readonly { readonly id: string; readonly name: string }[];
+  /** The caller may ask the Team admins for a host (D28). */
+  readonly canRequestEgress: boolean;
 }
 
 export interface CatalogFilter {

@@ -345,7 +345,14 @@ describe("the review screen (ac-1, ac-2)", () => {
       ],
       [`GET ${BASE}/${ID}/file?path=data.csv`]: [
         200,
-        { path: "data.csv", size: 9, text: "a,b\u202E\n", truncated: false },
+        {
+          path: "data.csv",
+          size: 9,
+          sha256: "ab".repeat(32),
+          encoding: "text",
+          text: "a,b\u202E\n",
+          truncated: false,
+        },
       ],
     });
     renderReviewer(<SkillReviewPage versionId={ID} />);
@@ -353,6 +360,37 @@ describe("the review screen (ac-1, ac-2)", () => {
     expect(await screen.findByText("+loaded line")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "View data.csv" }));
     expect(await screen.findByText("⟨U+202E⟩")).toBeTruthy();
+    expect(screen.getByText("ab".repeat(32))).toBeTruthy();
     expect(calls.map((c) => c.url)).toContain(`${BASE}/${ID}/file?path=data.csv`);
+  });
+
+  it("reads a script with a bad byte whole, escaped, and flags it (review-336 M1)", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}/${ID}`]: [200, detail()],
+      [`GET ${BASE}/${ID}/diff`]: [
+        200,
+        {
+          ...diff,
+          files: [{ path: "scripts/run.sh", status: "changed", size: 9, binary: true, hunks: [] }],
+        },
+      ],
+      [`GET ${BASE}/${ID}/file?path=scripts%2Frun.sh`]: [
+        200,
+        {
+          path: "scripts/run.sh",
+          size: 9,
+          sha256: "cd".repeat(32),
+          encoding: "hex",
+          text: "00000000  00 41",
+          truncated: true,
+        },
+      ],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    expect(await screen.findByText(/code that isn.t plain text/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "View scripts/run.sh" }));
+    expect(await screen.findByText(/Hex dump/)).toBeTruthy();
+    expect(screen.getByText(/Only the beginning of scripts\/run.sh is shown/)).toBeTruthy();
+    expect(calls.map((c) => c.url)).toContain(`${BASE}/${ID}/file?path=scripts%2Frun.sh`);
   });
 });

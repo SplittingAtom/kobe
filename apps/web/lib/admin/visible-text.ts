@@ -32,3 +32,10 @@ export function visibleParts(text: string): TextPart[] {
   if (last < text.length) parts.push({ text: text.slice(last), hidden: false });
   return parts;
 }
+
+/** `text` with every hidden character replaced by its marker, as plain text (names, summaries). */
+export function visibleText(text: string): string {
+  return visibleParts(text)
+    .map((p) => p.text)
+    .join("");
+}
