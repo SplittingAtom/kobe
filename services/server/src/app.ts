@@ -38,6 +38,7 @@ import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
 import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
 import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
+import { skillCatalogRoutes } from "./routes/skill-catalog.js";
 import { skillPromotionRoutes, teamSkillPromotionRoutes } from "./routes/skill-promotions.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
@@ -212,6 +213,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
   api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
   api.route("/skills/catalog", catalogMaintainerRoutes(deps));
+  api.route("/skills/catalog", skillCatalogRoutes(deps));
   api.route("/skills/promotions", skillPromotionRoutes(deps));
   api.route("/team/skill-promotions", teamSkillPromotionRoutes(deps));
   api.route("/skills", skillRoutes(deps));
