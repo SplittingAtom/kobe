@@ -87,6 +87,7 @@ CREATE TABLE "sandbox_eval_connections" (
 	CONSTRAINT "sandbox_eval_connections_replica_id" CHECK (char_length("sandbox_eval_connections"."replica_id") BETWEEN 1 AND 64)
 );
 --> statement-breakpoint
+ALTER TABLE "sandbox_commands" DROP CONSTRAINT "sandbox_commands_kind";--> statement-breakpoint
 ALTER TABLE "threads" ADD COLUMN "skill_eval" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "threads" ADD COLUMN "skill_eval_run_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox_commands" ADD COLUMN "slot" text DEFAULT '' NOT NULL;--> statement-breakpoint
@@ -103,4 +104,5 @@ CREATE INDEX "skill_eval_runs_subject_idx" ON "skill_eval_runs" USING btree ("te
 CREATE INDEX "skill_eval_runs_open_idx" ON "skill_eval_runs" USING btree ("team_id","started_at") WHERE "skill_eval_runs"."status" IN ('queued', 'running');--> statement-breakpoint
 CREATE INDEX "skill_eval_runs_starter_idx" ON "skill_eval_runs" USING btree ("team_id","started_by");--> statement-breakpoint
 CREATE INDEX "sandbox_eval_connections_user_idx" ON "sandbox_eval_connections" USING btree ("team_id","user_id");--> statement-breakpoint
-CREATE INDEX "sandbox_eval_connections_sandbox_idx" ON "sandbox_eval_connections" USING btree ("team_id","sandbox_id");
+CREATE INDEX "sandbox_eval_connections_sandbox_idx" ON "sandbox_eval_connections" USING btree ("team_id","sandbox_id");--> statement-breakpoint
+ALTER TABLE "sandbox_commands" ADD CONSTRAINT "sandbox_commands_kind" CHECK ("sandbox_commands"."kind" IN ('run.start', 'run.steer', 'run.stop', 'pi.command', 'thread.compact', 'eval.prepare', 'eval.snapshot'));

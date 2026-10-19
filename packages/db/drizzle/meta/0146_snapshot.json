@@ -1,6 +1,6 @@
 {
-  "id": "28ae7f22-7a89-4c7b-9719-8be5bb557ffe",
-  "prevId": "20c3a456-d6f4-40b2-9861-a5bbb01625a4",
+  "id": "babae48b-6a7b-4f03-bade-50c26fe07d6b",
+  "prevId": "6b0f9bae-8e11-4c63-a061-b9bed921a4b5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4953,7 +4953,7 @@
       "checkConstraints": {
         "sandbox_commands_kind": {
           "name": "sandbox_commands_kind",
-          "value": "\"sandbox_commands\".\"kind\" IN ('run.start', 'run.steer', 'run.stop', 'pi.command', 'thread.compact')"
+          "value": "\"sandbox_commands\".\"kind\" IN ('run.start', 'run.steer', 'run.stop', 'pi.command', 'thread.compact', 'eval.prepare', 'eval.snapshot')"
         },
         "sandbox_commands_requester": {
           "name": "sandbox_commands_requester",

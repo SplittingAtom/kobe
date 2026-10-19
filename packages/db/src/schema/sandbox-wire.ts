@@ -79,6 +79,9 @@ export const SANDBOX_COMMAND_KINDS = [
   "run.stop",
   "pi.command",
   "thread.compact",
+  // A skill eval's own sandbox only (KOBE-325): fixtures in, workspace snapshot out.
+  "eval.prepare",
+  "eval.snapshot",
 ] as const;
 export type SandboxCommandKind = (typeof SANDBOX_COMMAND_KINDS)[number];
 
