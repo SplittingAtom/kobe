@@ -64,10 +64,9 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
         ),
       );
     }
-    return c.json({
-      state: r.retired.state,
-      notified: notified ? { teams: notified.teams, members: notified.members } : null,
-    });
+    // Whether the notices went out, never how many (review-340 M1): a count of the teams that
+    // run a version is a cross-team number under SK26, and acting again would make it live.
+    return c.json({ state: r.retired.state, notified: notified !== null });
   }
 
   // The published versions to act on (Site console): Site admins and the skill's maintainers.

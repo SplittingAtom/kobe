@@ -19,7 +19,8 @@ export interface RetirableVersions {
 
 export interface Retired {
   readonly state: string;
-  readonly notified: { readonly teams: number; readonly members: number } | null;
+  /** Whether the notices went out (never how many: SK26). */
+  readonly notified: boolean;
 }
 
 const base = (skillId: string) => `/v1/site/skills/catalog/${encodeURIComponent(skillId)}`;

@@ -165,7 +165,8 @@ describe("Deprecate (ac-1, ac-3)", () => {
     expect((await act("reviewer", "1.1.0", "deprecate")).status).toBe(403);
     const r = await act("maintainer", "1.1.0", "deprecate", { note: "Use 1.2.0." });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
-    expect(r.json).toMatchObject({ state: "deprecated", notified: { teams: 1, members: 1 } });
+    // No counts in the answer (review M1): only that the notices went out.
+    expect(r.json).toEqual({ state: "deprecated", notified: true });
     // Team 1 pins it: its admin is told; team 2 runs 1.2.0: not.
     expect(await notices(teams.t1, ids.a1)).toEqual(["skill.version.deprecated@1.1.0"]);
     expect(await notices(teams.t2, ids.a2)).toEqual([]);

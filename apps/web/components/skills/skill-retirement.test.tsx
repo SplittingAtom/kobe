@@ -30,11 +30,11 @@ describe("the retire panel", () => {
       "GET /v1/site/skills/catalog/s1/versions": [200, VERSIONS(true)],
       "POST /v1/site/skills/catalog/s1/versions/1.0.0/revoke": [
         200,
-        { state: "revoked", notified: { teams: 2, members: 3 } },
+        { state: "revoked", notified: true },
       ],
       "POST /v1/site/skills/catalog/s1/versions/2.0.0/unrevoke": [
         200,
-        { state: "approved", notified: { teams: 1, members: 1 } },
+        { state: "approved", notified: true },
       ],
     });
     render(<RetirePanel skillId="s1" name="sales" candidates={[]} />);
@@ -64,7 +64,7 @@ describe("the retire panel", () => {
     fireEvent.click(within(row("1.0.0")).getByRole("button", { name: "Revoke" }));
     await answerConfirm(/Revoke sales 1\.0\.0/, "Revoke");
     expect(
-      await screen.findByText("sales 1.0.0 is revoked; 2 teams and 3 people were told."),
+      await screen.findByText("sales 1.0.0 is revoked; the teams and people with it were told."),
     ).toBeTruthy();
     const post = calls.find((c) => c.method === "POST");
     expect(JSON.parse(String(post?.body))).toEqual({ note: "Leaks data." });
@@ -78,10 +78,7 @@ describe("the retire panel", () => {
   it("offers a maintainer Deprecate only, and deprecating the skill with a replacement", async () => {
     const calls = stubApi({
       "GET /v1/site/skills/catalog/s1/versions": [200, VERSIONS(false)],
-      "POST /v1/site/skills/catalog/s1/deprecate": [
-        200,
-        { state: "deprecated", notified: { teams: 1, members: 1 } },
-      ],
+      "POST /v1/site/skills/catalog/s1/deprecate": [200, { state: "deprecated", notified: true }],
     });
     render(
       <RetirePanel skillId="s1" name="sales" candidates={[{ id: "s2", name: "sales-next" }]} />,

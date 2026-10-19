@@ -51,9 +51,7 @@ const EFFECT: Readonly<Record<RetireAct, string>> = {
 };
 
 const told = (r: Retired) =>
-  r.notified
-    ? `; ${r.notified.teams} team${r.notified.teams === 1 ? "" : "s"} and ${r.notified.members} ${r.notified.members === 1 ? "person was" : "people were"} told.`
-    : ".";
+  r.notified ? "; the teams and people with it were told." : "; the notices could not be sent.";
 
 /**
  * Deprecate, Withdraw, Revoke and Unrevoke a catalog skill's versions, and deprecate the whole
