@@ -1,4 +1,4 @@
-"""Validate a skill folder and pack it into a zip Kobe accepts, then print how to add it.
+"""Validate a skill folder and pack it into a zip Kobe accepts.
 
 python package.py SKILL_DIR [--out /workspace/NAME.zip]
 SKILL.md sits at the zip's root; evals/, caches and hidden files are left out. Refuses to package
@@ -27,14 +27,11 @@ def write_zip(root, files, out):
 
 def print_how_to_add(root, files, out):
     fields, _ = k.parse_frontmatter((root / "SKILL.md").read_text("utf-8"))
-    extra = [f for f in files if f.as_posix() != "SKILL.md"]
     print(f"\nwrote {out} ({out.stat().st_size} bytes, {len(files)} files)")
-    print("\nTo add it in Kobe: My skills -> New skill (or a team's Skills -> New skill), then fill in")
     print(f"  Name:         {fields.get('name', '')}")
     print(f"  Description:  {fields.get('description', '')}")
-    print(f"  Instructions: the body of {root / 'SKILL.md'} (everything after the closing ---)")
-    for rel in extra:
-        print(f"  Add file:     path {rel.as_posix()}, contents of {root / rel}")
+    print("\nTo work on it in Kobe, save the folder with the save_skill_draft tool (or Save skill")
+    print("to Workbench in this conversation); the zip is a copy, or for the Workbench's upload start.")
 
 
 def main():
