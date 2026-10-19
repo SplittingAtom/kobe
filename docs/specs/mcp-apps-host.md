@@ -131,7 +131,14 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
   captured by mcp-proxy from the upstream response and reported to the server under the internal
   key (MA10). The sandbox, Pi and the model cannot forge or alter it: a compromised sandbox can
   only affect Pi's own text entry, which renders as text. A rail-launched card's result comes from
-  the server's own call (§6).
+  the server's own call (§6). The app's `tool-input` is the input the upstream ran, stored with
+  the result, never Pi's entry. (Amended 2026-10-19, KOBE-438 review: the proxy cannot see Pi's
+  tool-call id, so a result is stored under a server-signed capture ticket and claimed by the
+  run's `tool.result` as described in MA10.) What a compromised sandbox can still do: attach a
+  genuine upstream result of its own run to a tool call id of its choosing, and, because it names
+  the thread on each call (as for every MCP call since KOBE-62), store it under another active run
+  of the same member in the same sandbox. Either way the data is the member's own, from the
+  upstream.
 - **T12. Each viewer acts as themselves.** A stored result is shown to whoever can already read
   the thread (it is team data, like the text result). The app's further calls always run under the
   **viewer's** browser principal, never the author's. A viewer who cannot call the connector, or a
@@ -157,7 +164,10 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
   could get past the removal script, for example from another realm, and leak tool results or
   tool input over STUN or TURN (a server name, a username, UDP). The mitigations are the site
   admin's review of the hash-pinned template (T1, §5), the removal script, and `webrtc 'block'`
-  where browsers enforce it. The KOBE-437 browser test records what each browser does.
+  where browsers enforce it. The KOBE-437 browser test records what each browser does: in
+  Chromium and WebKit the constructor is gone and a fresh `about:blank` realm is blocked
+  (`frame-src`/`child-src 'none'`), so "another realm" is theoretical there today; Firefox is
+  measured at the gate.
 
 ## 4. Decisions
 
@@ -262,10 +272,16 @@ most 300 KB by its own CI (M19).
   plus a `blob_ref` for larger output, D15), and Pi's MCP client keeps only the text. For a call
   to a pinned tool whose `_meta.ui` names a pinned, non-drifted template, **mcp-proxy** reports the
   upstream's full result to the server (`POST /internal/v1/mcp/connectors/{id}/results`,
-  internal key, keyed by the sandbox token and the `tool_call_id` the proxy already receives for
-  approval checks). This happens before the proxy returns the result to Pi. The report carries
-  `structuredContent` and `content`. The result is untrusted upstream data and is never taken
-  from the sandbox (T11).
+  internal key and the sandbox's own token). This happens before the proxy returns the result to
+  Pi. The result is untrusted upstream data and is never taken from the sandbox (T11).
+  _As built (amended 2026-10-19, KOBE-438):_ Pi's MCP client sends no tool-call id, so the
+  server's allow carries a **capture ticket** (an HMAC over team, user, sandbox, thread, run,
+  connector, tool, the input's canonical digest and the template). The report sends the ticket,
+  the input (its digest must match) and the result; it is stored **unclaimed**. When the run's
+  `tool.result` arrives (always after its own report), it claims the row with the same run, tool
+  and input digest **only if exactly one** is pending: two identical calls in parallel stay text,
+  because the reports' order need not be Pi's. A run's unclaimed rows (and blobs) are dropped when
+  the run ends, in any end state, and at most 20 may wait per run.
 - **Storage.** A team table `thread_app_results (team_id, thread_id, tool_call_id | entry_id,
 connector_id, tool, template_uri, template_sha256, result jsonb | blob_ref, bytes,
 created_at)` with `team_id NOT NULL`, ENABLE and FORCE RLS, and a policy through `withTeam()`.

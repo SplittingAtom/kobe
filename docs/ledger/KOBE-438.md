@@ -101,13 +101,34 @@ db unit 598, probe 657, upgrade 4; server unit 2,112; server DB `app-results` (1
 `thread-fork`, `uploads`, `workspace-sync-team-quota`, `connector-template-review`; proxy 128;
 web 2,028; typecheck, lint, format, `license:check`.
 
-## Notes and questions for review
+## Review fixes (review-ma9: MEDIUM-1, LOW-1..9), `39bce30f..`
 
-- Not yet tried end to end: the claim relies on Pi passing an MCP tool's arguments to the proxy
-  unchanged (same canonical digest as its `tool_execution_start` args). The gate (MA-8) will
-  show it; if Pi rewrites them, the fallback is "the oldest unclaimed row of this run and tool".
-- A replayed ticket (only the proxy holds the internal key) could store a second unclaimed row,
-  which counts in quota until the thread is purged. Unclaimed rows are never shown.
-- `thread_app_results.connector_id` has no foreign key (a removed connector keeps its history;
-  views then say `template_changed`).
-- `docs/install.md` has the rollout note (any pod mix: old proxy ignores the ticket → text).
+- **MEDIUM-1:** migration **0160** (custom): an `AFTER UPDATE OF status` trigger on `runs`
+  drops a run's unclaimed rows and queues their blobs (due now) when it leaves the active
+  states, in every end state (upgrade test per state); held threads keep them. At most 20
+  unclaimed rows per run (429 `too_many_unclaimed`).
+- **LOW-1:** the claim is exact or nothing: with more than one pending candidate for (run, tool,
+  digest), none is claimed (text). No "oldest row of the tool" fallback. (The proxy cannot carry
+  a per-call nonce Pi would echo, so ambiguity falls back to text.)
+- **LOW-2:** migration **0159** (generated): `input jsonb` (≤ 64 KiB). The report carries the
+  input (digest must equal the ticket's); `GET …/:ref` answers `{input, result}`; the app's
+  `tool-input` comes from there. Fork copies it.
+- **LOW-3:** `FrameInstance` posts `ui/resource-teardown` in a layout cleanup (iframe still
+  attached) on every removal; the card still awaits it before an inline removal.
+- **LOW-4:** an expanded app keeps its card's slot; a forced retire closes its tab.
+- **LOW-5:** `readAppResult` decides only its row; two blob reads per member per pod.
+- **LOW-6:** `thread.purged` / `retention.purged` carry `appResults` (when non-zero); DB test
+  purges a thread with a blob result and checks the queue and the count.
+- **LOW-7:** a fork copies only results whose tool call is on its path, and only within the
+  team's quota (else text).
+- **LOW-8, LOW-9:** spec T11 and MA10 amended (ticket, exact claim, run-end cleanup, what a
+  compromised sandbox can still do); the WebRTC note says what Chromium and WebKit do.
+- MA-5 nit: the WebRTC guard follows a doctype even after leading comments (standards mode).
+
+## Notes for review
+
+- The claim relies on Pi passing an MCP tool's arguments unchanged (same canonical digest). The
+  review's MA-8 check: a schema default and a coercible argument (`"5"` for an integer); a
+  mismatch fails safe (text) and the row goes at run end.
+- The protocol commit (`92f6279c`) is separate for its own PR; the coordinator decides whether
+  it ships ahead of the group PR.
