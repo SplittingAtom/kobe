@@ -29,3 +29,27 @@ Group G10, step 2. A spec, not code.
   MA-4 browser principal and app calls · MA-5 bridge and frame (with the AppBridge spike) · MA-6
   rail Apps and the artifact tab · MA-7 composer and model context · MA-8 the Kobe Explorer Gate.
 - **Questions for Chris:** Q1–Q6 in spec §12.
+
+## v0.2 (2026-10-19, Chris): the conversation is the main surface
+
+- **MA3 rewritten.** Apps render in tool cards. The rail is a launcher that inserts an app card.
+  The artifact column is only "expand".
+- **MA10 (ticket MA-9), new.**
+  - mcp-proxy captures the full upstream result and stores it in `thread_app_results`, a team
+    table with RLS (inline up to 256 KiB, S3 up to 4 MiB).
+  - `tool.result` gains an `app` marker (protocol PR first).
+  - Reload rebuilds the app from the stored result.
+  - Text fallbacks: drift, no access, break-glass, visibility without `"app"`, too large.
+  - Retention, legal hold and fork cover the rows; exports are text only.
+  - Performance: 360 px default height, Expand, lazy frames, at most 3 live frames per thread.
+- **MA11, new (Chris decided the rail inserts an app card).**
+  - The card is an `app_card` thread entry with no run.
+  - It is mirrored to Pi as a `custom_message`, so the model sees fenced untrusted text.
+  - With no current thread, a new thread starts.
+  - During an active run the launch is **queued** (D17); refusing was rejected.
+- **Threat model:** T11 (results come from the upstream, not the sandbox), T12 (each viewer acts
+  as themselves), T13 (frame limits), T14 (only the card's text enters context).
+- **Ticket order:** MA-1..5 → MA-9 → MA-7 → MA-6 → MA-8. The gate proves the in-conversation path
+  first.
+- **Questions:** Q2 became Q2a–c. Q7 (shared-thread viewers) is new.
+- Hadron spec 7119888c: description, architecture and goals patched; it stays in **review**.

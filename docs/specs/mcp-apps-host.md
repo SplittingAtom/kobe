@@ -1,8 +1,9 @@
 # Kobe — MCP Apps Host (companion to Catalyst spec 0612ef17)
 
 Status: **in review, pending Chris's approval** (Hadron project `kobe`, spec
-`7119888c-0058-419c-b6df-37ae09687433`, KOBE-432). Version 0.1,
-2026-10-19.
+`7119888c-0058-419c-b6df-37ae09687433`, KOBE-432). Version 0.2, 2026-10-19: per Chris, the
+**conversation is where apps render**. The rail is a launcher that inserts an app card into the
+thread, and the artifact column is only the "expand" view.
 
 Contract: Catalyst spec `0612ef17-bc24-40e4-a40d-c1bba08ca2ce` ("Catalyst MCP Server — Go Rebuild &
 MCP Apps", v1.0 agreed 2026-10-18), §8 "Requirements on the Kobe Host", plus M6, M10–M13 and the
@@ -14,31 +15,41 @@ Depends on KOBE-431 (probe credentials, done in G10) and KOBE-303 (site-wide key
 ## 1. Summary
 
 Kobe becomes a host for MCP Apps (the `io.modelcontextprotocol/ui` extension of MCP 2026-07-28).
-A connector's `ui://` templates are pinned like its tools. A member opens an app from the Workspace
-Rail. Kobe renders it in a sandboxed, network-less iframe and answers its `tools/call` requests
-through the same server-side decision as every other MCP call. The first app is Catalyst's
-**Lakehouse Explorer**. Kobe carries no Catalyst-specific code: any connector that follows the
-same rules gets the same treatment.
+A connector's `ui://` templates are pinned like its tools.
 
-The app runs with exactly the member's own authority over **read-only** tools of **its own
-connector**. It cannot reach the network, Kobe's origin, other connectors, the sandbox or the
-model directly. Anything it wants to put in front of the model goes through the member: either
-as text in the composer that the member sends themselves, or as a context chip they can see and
-remove before sending.
+**Apps render in the conversation.** When the model calls a tool that carries `_meta.ui`, the
+tool's card in the thread renders the pinned template with the tool's full result, captured by
+Kobe's MCP proxy straight from the upstream. When a member launches an app from the Workspace
+Rail, Kobe inserts an **app card** into the current thread: a thread entry with no model turn,
+which the model sees in its history as an untrusted text result. Either card can be expanded into
+the artifact column. Kobe renders apps in a sandboxed, network-less iframe and answers their
+`tools/call` requests through the same server-side decision as every other MCP call.
+
+The first app is Catalyst's **Lakehouse Explorer**. Kobe carries no Catalyst-specific code: any
+connector that follows the same rules gets the same treatment.
+
+An app runs with exactly the authority of the member viewing it, over **read-only** tools of
+**its own connector**. It cannot reach the network, Kobe's origin, other connectors, the sandbox
+or the model directly. Anything it wants to put in front of the model goes through the member:
+either as text in the composer that the member sends themselves, or as a context chip they can
+see and remove before sending.
 
 ## 2. Where this sits among the Kobe decisions (D1–D32)
 
-| Decision                       | How this spec relates to it                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **D27** MCP                    | It extends D27. D27 lists "MCP resources/prompts UI" as _later_. This spec brings forward **only `ui://` templates rendered as apps**, and keeps everything else D27 says. Resources stay unavailable to Pi, and data is never read through `resources/read` (Catalyst M13 agrees). Templates are pinned and drift exactly like tools. **Chris must approve this amendment (Q1).** |
-| **D29** Policy                 | Unchanged. App calls go through the same decision, at a new enforcement point `app_bridge`, in a mode stricter than `auto`: allowed only if read-only and not denied. Nothing is ever prompted.                                                                                                                                                                                    |
-| **D25** Artifacts              | The same isolation pattern: an opaque-origin `srcdoc` iframe with a strict CSP injected into it. It is stricter here: `allow-scripts` only, without `allow-forms`.                                                                                                                                                                                                                 |
-| **D9** One active team         | An app belongs to the active team. Switching team destroys every open app frame.                                                                                                                                                                                                                                                                                                   |
-| **D10** Break-glass            | Break-glass grants are never used to call connectors, so they never open apps.                                                                                                                                                                                                                                                                                                     |
-| **D32** Schedules, skill evals | Not involved. Apps run only in a member's browser session.                                                                                                                                                                                                                                                                                                                         |
-| **D31** Audit                  | Every app call is audited. So are pins, drift and approvals of templates.                                                                                                                                                                                                                                                                                                          |
-| **D3** Licences                | Only MIT and Apache-2.0 libraries are used (§9).                                                                                                                                                                                                                                                                                                                                   |
-| CE2/CE5/CE6/CE13               | The rail gets an "Apps" section. Apps open as a tab in the artifact column. Icons have tooltips.                                                                                                                                                                                                                                                                                   |
+| Decision                              | How this spec relates to it                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D27** MCP                           | It extends D27. D27 lists "MCP resources/prompts UI" as _later_. This spec brings forward **only `ui://` templates rendered as apps**, and keeps everything else D27 says. Resources stay unavailable to Pi, and data is never read through `resources/read` (Catalyst M13 agrees). Templates are pinned and drift exactly like tools. **Chris must approve this amendment (Q1).** |
+| **D29** Policy                        | Unchanged. App calls go through the same decision, at a new enforcement point `app_bridge`, in a mode stricter than `auto`: allowed only if read-only and not denied. Nothing is ever prompted.                                                                                                                                                                                    |
+| **D25** Artifacts                     | The same isolation pattern: an opaque-origin `srcdoc` iframe with a strict CSP injected into it. It is stricter here: `allow-scripts` only, without `allow-forms`.                                                                                                                                                                                                                 |
+| **D9** One active team                | An app belongs to the active team. Switching team destroys every open app frame.                                                                                                                                                                                                                                                                                                   |
+| **D10** Break-glass                   | Break-glass grants are never used to call connectors, so they never open apps.                                                                                                                                                                                                                                                                                                     |
+| **D32** Schedules, skill evals        | Not involved. Apps run only in a member's browser session.                                                                                                                                                                                                                                                                                                                         |
+| **D31** Audit                         | Every app call is audited. So are pins, drift and approvals of templates.                                                                                                                                                                                                                                                                                                          |
+| **D3** Licences                       | Only MIT and Apache-2.0 libraries are used (§9).                                                                                                                                                                                                                                                                                                                                   |
+| **D15** Persistence, **D16** wire     | Full structured results of UI tools are stored with the thread entry, and a rail launch is a new kind of thread entry (MA11). `tool.result` gains an `app` marker. Postgres stays the record.                                                                                                                                                                                      |
+| **D17** Mid-run input                 | A rail launch during a run is queued like a message and inserted when the run ends (MA11).                                                                                                                                                                                                                                                                                         |
+| **D18** Retention, legal hold, export | App results and app cards follow the thread: purged with it, held by legal hold, copied by fork. Exports carry only the text (MA10).                                                                                                                                                                                                                                               |
+| CE2/CE5/CE6/CE12/CE13                 | Tool cards (CE12) render apps inline. The rail gets an "Apps" launcher. The artifact column (CE6) is only the "expand" view. Icons have tooltips.                                                                                                                                                                                                                                  |
 
 ## 3. Threat model
 
@@ -101,12 +112,29 @@ frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-ac
   model without a member action, and it is fenced as untrusted when it does (§8).
 - **T9. Spoofing.** The app's frame always sits under a host-drawn header that Kobe renders
   outside the iframe ("App from _connector name_", with the connector icon). The app can never
-  cover Kobe's chrome: its "fullscreen" display mode means the artifact column at full width,
-  never the window. This means the frame can never pass for a Kobe sign-in or approval dialog.
+  cover Kobe's chrome: its "fullscreen" display mode means the expanded view in the artifact
+  column, never the window. This means the frame can never pass for a Kobe sign-in or approval dialog.
 - **T10. Limits and audit.** Tool arguments are capped at 64 KiB and results at 4 MiB (the
   proxy's existing cap). App calls are rate-limited per member: a burst of 30, then 5 per second.
   Each one is audited as `mcp.app_call` (team scope: connector, tool, user, decision, reason,
   template hash; never arguments or results).
+
+- **T11. Results come from the upstream, not the sandbox.** The full result an app renders is
+  captured by mcp-proxy from the upstream response and reported to the server under the internal
+  key (MA10). The sandbox, Pi and the model cannot forge or alter it: a compromised sandbox can
+  only affect Pi's own text entry, which renders as text. A rail-launched card's result comes from
+  the server's own call (§6).
+- **T12. Each viewer acts as themselves.** A stored result is shown to whoever can already read
+  the thread (it is team data, like the text result). The app's further calls always run under the
+  **viewer's** browser principal, never the author's. A viewer who cannot call the connector, or a
+  thread whose template drifted or was removed, gets the text card (MA10). Break-glass readers
+  (D10) always get the text card.
+- **T13. Many frames.** A thread can hold many app cards. Frames are created only near the
+  viewport, at most 3 run live per thread, and each frame keeps the T4 limits, so a long thread
+  cannot exhaust the browser or flood the server.
+- **T14. What the model sees of an app card** is the opening tool's **text** result, fenced as
+  untrusted data and marked as opened by the member (MA11). The structured result and the
+  template never enter the model's context.
 
 **What remains (accepted):**
 
@@ -117,6 +145,8 @@ frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-ac
   The upstream's own authorization applies, as it does for model-initiated calls.
 
 ## 4. Decisions
+
+Decisions are numbered MA1, MA2, …; the proposed tickets in §10 are MA-1, MA-2, ….
 
 **MA1. Scope: `ui://` templates rendered as apps; no other resources.** Kobe probes
 `resources/list` and reads only the `ui://` resources that pinned tools reference through
@@ -138,14 +168,27 @@ ext-apps "sandbox proxy" double-iframe on a second origin, because it needs a se
 TLS certificate (D25 removed the artifact hostname for this reason), and a single opaque-origin
 iframe with a meta CSP gives the same isolation for templates that need no network.
 
-**MA3. Rail placement and rendering location.** The rail gets an **Apps** section (CE5 order:
-Threads, Apps, Files; collapsed by default when empty, hidden when the team has no app). In the
-collapsed rail (48 px) Apps gets an icon. Clicking an app opens it as a **tab in the artifact
-column** (CE6), of a new tab kind `app`. The tab is transient: it is not an artifact, has no
-versions and is not saved to S3. It is remembered per thread in the browser like the other tabs,
-and it survives switching threads in the same team as an "app" tab. Below 768 px it opens as the
-artifact full-screen sheet (CE8). _Rejected:_ rendering inside the 280 px rail, which is too narrow
-for a tree and a preview (Catalyst's own breakpoint is 480 px).
+**MA3. Apps render in the conversation; the rail launches; the artifact column expands.**
+(Chris, 2026-10-19.)
+
+- **In the conversation (primary).** A tool card (CE12) whose tool carries `_meta.ui` with a
+  pinned template renders the app inline under the card's header (MA10).
+- **The rail "Apps" section (secondary)** is a launcher. It sits in CE5 order Threads, Apps,
+  Files; it is hidden when the team has no app and has an icon in the 48 px collapsed rail.
+  Clicking an app inserts an **app card** into the current thread (MA11). It does not open the
+  artifact column.
+- **Expand (secondary).** Every app card, whether from a tool or from the rail, has an "Expand"
+  control. It moves the live frame into the artifact column (CE6) as a transient tab of kind
+  `app`: not an artifact, no versions, nothing stored. The card in the thread shows "Opened in the
+  side column" until the tab closes, and the frame then returns to the card. There is only ever
+  one live frame per card. Below 768 px, expand opens the full-screen sheet (CE8).
+
+_Rejected:_
+
+- The artifact column as the main surface: an app's output belongs to the moment in the
+  conversation that produced it, and the model refers to it there.
+- Rendering inside the 280 px rail: too narrow for a tree and a preview (Catalyst's own breakpoint
+  is 480 px).
 
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
@@ -173,8 +216,8 @@ A change of visibility is a change to the pinned definition, so it is drift.
 context injection (the member could not see what the app told the model) and auto-sending
 `ui/message` (an app could otherwise drive the model without the member).
 
-**MA8. Who sees an app (§8.7).** An app shows in the rail for a member only when all of these
-hold:
+**MA8. Who sees an app (§8.7).** An app is live for a member (shown in the rail, rendered in a
+card) only when all of these hold:
 
 - the connector is active and enabled for the active team, with an exposure that includes the
   opening tool;
@@ -183,12 +226,107 @@ hold:
   is set and not stale, or the member holds a live grant of the connector's kind (an API key, or
   an OAuth token that is not expired or can be refreshed).
 
-Otherwise the app is absent. A connector whose app is missing only because the member has no key
+Otherwise the app is absent from the rail, and cards render as text (MA10). A connector whose app is missing only because the member has no key
 shows an "Add your key" hint linking to My connector keys.
 
 **MA9. Template size and type.** At most 512 KiB, `mimeType` exactly `text/html;profile=mcp-app`,
 and valid UTF-8. Anything else fails to pin, with `ui_resource_invalid`. Catalyst's file is at
 most 300 KB by its own CI (M19).
+
+**MA10. Apps in the conversation: full results, stored with the thread (ticket MA-9).**
+
+- **Capture.** Today the web gets only a text preview of at most 64 KiB (`tool.result.preview`,
+  plus a `blob_ref` for larger output, D15), and Pi's MCP client keeps only the text. For a call
+  to a pinned tool whose `_meta.ui` names a pinned, non-drifted template, **mcp-proxy** reports the
+  upstream's full result to the server (`POST /internal/v1/mcp/connectors/{id}/results`,
+  internal key, keyed by the sandbox token and the `tool_call_id` the proxy already receives for
+  approval checks). This happens before the proxy returns the result to Pi. The report carries
+  `structuredContent` and `content`. The result is untrusted upstream data and is never taken
+  from the sandbox (T11).
+- **Storage.** A team table `thread_app_results (team_id, thread_id, tool_call_id | entry_id,
+connector_id, tool, template_uri, template_sha256, result jsonb | blob_ref, bytes,
+created_at)` with `team_id NOT NULL`, ENABLE and FORCE RLS, and a policy through `withTeam()`.
+  Results of up to 256 KiB are stored inline; anything larger, up to the proxy's 4 MiB cap, goes
+  to S3 under the team's prefix (`blob_ref`, D15); anything bigger is not stored and the card
+  renders as text. Rows are written only for calls that ran (allowed by policy), are linked to
+  the thread entry by `tool_call_id`, and are counted in the team storage quota (D26).
+- **Protocol.** `tool.result` gains an optional `app: {connector_id, app_id, template_sha256,
+result_ref}` marker, and `thread_entries` projections expose the same marker. This change goes
+  to `packages/protocol` in **its own PR**, agreed before the feature PRs
+  (`docs/parallel-work.md`). The web fetches the result with
+  `GET /v1/threads/{threadId}/app-results/{ref}` (thread read permission; `no-store`; JSON) and
+  the template with `GET /v1/team/apps/{appId}/template?sha256=…`.
+- **Retention, legal hold, export, fork (D18).** Rows and blobs are purged with their thread
+  (retention period, Trash purge, the nightly job counts them in the audited purge) and are held
+  by legal hold like entries. A **fork** copies the rows of the copied entries into the new
+  thread (same team). **Exports** (Pi JSONL and Markdown) carry only the text result: never the
+  structured result, never the template.
+- **Rendering.** The tool card renders the template with the stored result in the MA-5 frame.
+  The host sends `ui/notifications/tool-input` and `tool-result` from the stored data, so a
+  reload **rebuilds** the app from the record without calling the upstream. The app's own later
+  calls go through §6 under the **viewer's** browser principal, read-only.
+- **Text fallback.** The card shows Pi's text result (today's tool card) instead of the app when
+  any of these holds:
+  - the template drifted or was removed, or its pinned hash differs from the result's
+    `template_sha256`;
+  - the viewer cannot call the connector (MA8), or is reading through break-glass;
+  - the tool's visibility lacks `"app"` (MA6);
+  - the result was too large to store;
+  - the frame cap (below) is reached and the card has not been asked to load.
+
+  The card says which of these applies in one line ("This app changed and is waiting for review",
+  "Connect Catalyst to use this app", and so on).
+
+- **Shared threads and forks.** A viewer of a shared thread (KOBE-163) sees the app if they can
+  call the connector in the thread's team, acting as themselves (T12); otherwise they see the text.
+- **Performance.**
+  - A fixed default height of 360 px, which the app may grow to at most 720 px inline through
+    `size-changed` (beyond that it scrolls or offers Expand).
+  - Frames are created only when the card is within one viewport of the visible area
+    (IntersectionObserver) and are torn down when they leave it by more than three viewports. A
+    torn-down card keeps a static snapshot: the last height and a "Loading app" placeholder.
+  - At most **3 live frames per thread**. Further cards show "Show app" and load on click, which
+    retires the frame least recently in view.
+
+**MA11. Rail launch inserts an app card: a thread entry with no model turn.** (Chris,
+2026-10-19.)
+
+- **What happens.** Clicking an app in the rail calls its opening tool under the member's browser
+  principal (§6) with no arguments, stores the result (MA10, keyed by `entry_id`) and appends an
+  **`app_card` thread entry** to the current thread. Its parent is the thread's leaf, and it
+  becomes the new leaf. It carries `{connector_id, app_id, tool, template_sha256, result_ref,
+opened_by: user_id}` and the text result. It is not a run: no run row, no `run_events`, no
+  model call, no budget spend.
+- **Pi and the model.** The entry is mirrored into Pi's session as a `custom_message` entry
+  (custom type `kobe.app_card`), so the **model sees it in the next run's history**. Its content
+  is the opening tool's text result, capped at 8 KiB, fenced as
+  `<app-card source="connector:<name>" tool="<tool>" opened_by_member="true" untrusted="true">…</app-card>`
+  after one fixed sentence saying it is data a member opened, not instructions. This mirrors how a
+  model-initiated tool result reads. The structured result stays out of context (T14). The
+  sandbox agent appends the entry while the thread's Pi is stopped, as it already does for branch
+  markers (`appendBranchMarker`). The server writes the Postgres entry at once and the agent
+  catches the session file up at the next run start, so a launch never wakes a sandbox (D14).
+  _Verify in the ticket:_ the exact Pi 1.0.x `custom_message` shape, and that it enters the
+  model's context (the branch marker's `custom` type does not).
+- **No current thread** (the new-thread view): Kobe **starts a new thread** in the active team
+  with the team's default agent, titled after the app ("Lakehouse Explorer"). The app card is its
+  first entry. The member's first message then continues that thread.
+- **During an active run: queue (chosen).** A launch while the thread has an active run joins the
+  thread's queue (D17), shown as a chip "App: _name_ (waits for the run)". It is inserted when the
+  run ends, under the same one-active-run advisory lock, before the next queued message starts its
+  run, and the opening tool is called at insertion time, so the data is current. The chip can be
+  removed like a queued message, and while it waits the member may **Expand** it into the
+  artifact column (a transient view, not an entry).
+
+  _Why queue:_ it is what Enter does during a run (D17), so the member's click is never lost. It
+  also keeps the entry tree linear: inserting mid-run would add a sibling under a leaf Pi is still
+  writing to and fork the thread.
+
+  _Rejected:_ refusing while a run is active, which forces the member to wait and click again for
+  no safety gain, since the queue gives the same ordering guarantee.
+
+- **Removing.** An app card is deleted like other member content: hidden from the model's next
+  run by a `context_edit` entry (D15), so history keeps the record.
 
 ## 5. Pinning `ui://` resources (§8.1)
 
@@ -237,8 +375,11 @@ thread or run. It needs the `team.chat` permission. A deactivated user's session
 - `GET /v1/team/apps/{appId}/template` returns `{html, sha256, connectorId, uri}`
   (JSON only, MA4).
 - `POST /v1/team/apps/{appId}/calls {tool, arguments}` returns
-  `{result} | {error: {code, message}}`. It serves both the rail launch and the app's
-  `tools/call`.
+  `{result} | {error: {code, message}}`. It serves the app's own `tools/call` from any card.
+- `POST /v1/threads/{threadId}/app-cards {appId}` (or `POST /v1/threads/app-cards {appId}`,
+  which starts a new thread) performs the rail launch (MA11). It answers `{entryId}` when it
+  inserted the card, or `{queued: true}` during a run.
+- `GET /v1/threads/{threadId}/app-results/{ref}` returns the stored result (MA10).
 
 **Server checks for each call**, in order (fail closed, one audit row each):
 
@@ -273,21 +414,22 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
 | `tools/list`                                                                                                         | Only the tools the app may call (§6 rules 1–2).                                                                                                                                                                                                                                                                        |
 | `ui/message`                                                                                                         | §8: inserted into the composer draft, never sent.                                                                                                                                                                                                                                                                      |
 | `ui/update-model-context`                                                                                            | §8: a context chip, last write wins per app.                                                                                                                                                                                                                                                                           |
-| `ui/request-display-mode`                                                                                            | `inline` or `fullscreen` (the artifact column at full width); anything else is refused.                                                                                                                                                                                                                                |
+| `ui/request-display-mode`                                                                                            | `inline` (the card) or `fullscreen` (Expand into the artifact column); anything else is refused.                                                                                                                                                                                                                       |
 | `ui/notifications/size-changed`                                                                                      | Honoured within the column; height capped at 4,000 px.                                                                                                                                                                                                                                                                 |
 | `notifications/message` (logging)                                                                                    | Dropped. A debug counter only.                                                                                                                                                                                                                                                                                         |
 | `ui/open-link`, `ui/download-file`, `resources/read`, `resources/list`, `sampling/*`, `elicitation/*`, anything else | **Denied** (JSON-RPC error `-32601`, with a Kobe-specific `data.reason: "not_allowed_in_kobe"`).                                                                                                                                                                                                                       |
 
-| Host → app                                                       | When                                                                     |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `ui/notifications/tool-input` and `ui/notifications/tool-result` | After a rail launch: the opening tool's arguments (`{}`) and result.     |
-| `ui/notifications/host-context-changed`                          | On a theme change or resize.                                             |
-| `ui/resource-teardown`                                           | On tab close, team switch, sign-out or drift. The frame is then removed. |
+| Host → app                                                       | When                                                                                                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/notifications/tool-input` and `ui/notifications/tool-result` | When a frame loads: the card's stored arguments and result (a model's tool call, or a rail launch with `{}`).                    |
+| `ui/notifications/host-context-changed`                          | On a theme change or resize.                                                                                                     |
+| `ui/resource-teardown`                                           | When the card scrolls far out of view, the expanded tab closes, or on team switch, sign-out or drift. The frame is then removed. |
 
 ## 8. `ui/message` and `ui/update-model-context` (§8.6)
 
 - **`ui/message`** with role `user` and text content inserts the text **at the cursor of the
-  composer draft** of the thread on screen, or of the new-thread composer if no thread is open.
+  composer draft of the thread the card is in** (always the thread on screen, since frames run
+  only for visible cards).
   It **never sends**. Text is capped at 4 KiB, other content types are ignored, and the composer
   flashes and receives focus. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
   for the member to send or edit.
@@ -302,8 +444,8 @@ data}`. It is stored in the user's thread entry, so it is visible in history and
   preceded by one fixed sentence saying it is data from an app, not instructions. After the send
   the chip clears, and a later selection makes a new chip. The context goes only to the thread it
   was sent with, and never to schedules or other threads.
-- Neither path runs a model turn by itself. That is the point of the Kobe Explorer Gate: rail
-  click, then a member action, then a run.
+- Neither path runs a model turn by itself. That is the point of the Kobe Explorer Gate: the app
+  in the conversation, then a member action, then a run.
 
 ## 9. Licences (D3, `docs/licensing.md`)
 
@@ -322,9 +464,22 @@ template is content, not a Kobe dependency: Kobe neither ships nor builds it.
 
 ## 10. Proposed implementation tickets (not filed; the coordinator files them after approval)
 
-Group order: MA-1 → MA-2 → MA-3 → MA-4 → MA-5 → MA-6 → MA-7 → MA-8 (gate). One migration per
-schema ticket, generated and custom SQL kept separate, with upgrade tests. The cross-team probe
-suite must stay green.
+**Order:**
+
+1. MA-1 pin templates.
+2. MA-2 template review.
+3. MA-3 visibility.
+4. MA-4 browser principal.
+5. MA-5 frame and bridge.
+6. **MA-9 apps in the conversation.**
+7. MA-7 composer and model context.
+8. MA-6 rail launcher and app cards.
+9. MA-8 the gate.
+
+The conversation path (MA-9, MA-7) lands before the rail launcher (MA-6). The `packages/protocol`
+changes of MA-9 and MA-6 go in their own PRs, ahead of the feature PRs. There is one migration per
+schema ticket, with generated and custom SQL kept separate, and upgrade tests. The cross-team
+probe suite must stay green.
 
 **MA-1. Pin `ui://` templates (server, proxy, db).** The proxy probe gains `ui_resources`.
 `connector_ui_resources` is added (a generated migration; site-wide). The pin, refresh and drift
@@ -369,8 +524,8 @@ hidden from Pi's catalog and from the proxy's `tools/list`, and refused at `/cal
 **MA-5. Host bridge and app frame (web).** A spike decides between AppBridge and Kobe's own
 bridge (MA2) and records the result in the ticket ledger. Then: `AppFrame` (srcdoc,
 `sandbox="allow-scripts"`, the injected CSP shared with D25, a host header, no `allow`
-permissions), the bridge (source and origin check, zod per method, the §7 table, per-frame limits)
-and the licence inventory.
+permissions, inline and expanded placement), the bridge (source and origin check, zod per method,
+the §7 table, per-frame limits) and the licence inventory.
 
 - ac-1: from inside the frame, `fetch`, `XMLHttpRequest`, `WebSocket`, `img` to a remote host,
   form submission, `window.open`, top navigation and reading `document.cookie` all fail
@@ -379,70 +534,125 @@ and the licence inventory.
 - ac-3: `ui/open-link`, `ui/download-file` and `resources/read` are denied.
 - ac-4: `pnpm license:check` is green.
 
-**MA-6. Rail "Apps" and the artifact-column app tab (web).** The rail section (MA3, MA8) with icons
-and tooltips (CE13), the launch (calls the opening tool through `POST …/calls`, then renders the
-result with the template), the app tab kind, the fullscreen mode and the narrow-screen sheet.
+**MA-9. Apps in the conversation (proxy, server, db, protocol, web).** MA10:
 
-- ac-1: an app appears only under the MA8 conditions, and the "Add your key" hint shows when a
-  key is missing.
-- ac-2: clicking it renders the app with the opening tool's result and runs no model turn
-  (no run is created).
-- ac-3: a team switch tears down the frames.
+- result capture at mcp-proxy;
+- the `thread_app_results` team table (generated migration; RLS policy in a separate custom
+  migration; probe fixtures) and S3 offload;
+- the `tool.result` `app` marker (protocol PR first);
+- the result endpoint;
+- retention, legal hold, fork and export handling;
+- the tool card rendering the app in the MA-5 frame, the reload rebuild, the text fallbacks,
+  Expand, lazy loading and the live-frame cap.
+
+- ac-1: a model call to a UI tool stores the upstream's full `structuredContent` and `content`
+  (inline up to 256 KiB, S3 up to 4 MiB, above that text only). The stored result comes from
+  mcp-proxy, and a sandbox cannot write or change it (test with a forged report).
+- ac-2: the tool card renders the pinned template with that result. The app's own calls go
+  through MA-4 under the viewer, read-only, and are audited as the viewer.
+- ac-3: a reload rebuilds the app from the stored result with no upstream call. A drifted or
+  removed template, a viewer who cannot call the connector, a break-glass reader and a tool whose
+  visibility lacks `"app"` each get the text card with the right one-line reason.
+- ac-4: a viewer of a shared thread without access gets text. A fork copies the results. An
+  export contains text only. Retention purge and legal hold cover the rows and blobs, and the
+  cross-team probe suite covers the table.
+- ac-5: the card's height defaults to 360 px and is capped at 720 px inline. Frames load only near
+  the viewport. At most 3 are live per thread. Expand moves the frame to the artifact column and
+  back.
 
 **MA-7. `ui/message` and model context (web, server, protocol).** Composer insertion, the context
 chip, the `app_context` message part (a protocol type in `packages/protocol`, agreed in its own
 PR, as `docs/parallel-work.md` requires), its storage in the thread entry, and its rendering as a
 fenced untrusted block for Pi.
 
-- ac-1: `ui/message` never sends.
+- ac-1: `ui/message` never sends, and it targets the card's own thread.
 - ac-2: the chip is visible and removable, and only what it shows is sent.
 - ac-3: the block reaches Pi fenced and marked untrusted, and is in thread history and exports.
 - ac-4: sizes are capped.
+
+**MA-6. Rail launcher and app cards (web, server, protocol, sandbox-agent).** The rail section
+(MA3, MA8) with icons and tooltips (CE13); `POST …/app-cards`; the `app_card` thread entry
+(protocol PR first) and its Pi `custom_message` mirror; the new-thread case; queueing during a
+run (D17 queue, removable chip, Expand while waiting).
+
+- ac-1: an app appears in the rail only under the MA8 conditions, and the "Add your key" hint
+  shows when a key is missing.
+- ac-2: a click inserts an app card into the current thread with no run, no model call and no
+  spend. The card renders the app. From the new-thread view, a new thread starts with the card as
+  its first entry.
+- ac-3: the next run's model context contains the card's text result, fenced and marked
+  untrusted, and opened by the member. The structured result and the template are absent.
+- ac-4: during an active run the launch is queued and inserted when the run ends, before the next
+  queued message. Removing the chip cancels it. A launch never wakes a sandbox.
+- ac-5: a team switch tears down every frame.
 
 **MA-8. Gate: the Kobe Explorer Gate.** See §11.
 
 ## 11. The Kobe Explorer Gate
 
-Two runs, both required.
+Two runs, both required. Each proves the **in-conversation path first**, then the rail launcher.
 
 **(a) In CI on k3d** (`e2e/run.sh` and a Playwright spec in `e2e/browser`). The fake MCP server
 (`e2e/lib/fake-mcp.js`) gains `tools/list`, an opening tool with `_meta.ui` and no required
 arguments, two read-only app-visible tools, a write tool, and one `ui://` template (a small test
-app). Then:
+app). The fake LLM gains a scripted turn that calls the opening tool.
+
+**In the conversation:**
 
 1. Pin.
-2. A member opens the app from the rail. The tree renders and no run is created.
+2. The member asks for the explorer and the model calls the opening tool. The tool card renders
+   the app.
 3. Expanding a node makes exactly one app call, audited as `mcp.app_call` with the member's id.
 4. Selecting an item shows the context chip.
 5. "Use in chat" inserts the exact text into the composer and does not send.
 6. The member sends. The run's prompt contains the fenced context block, and the answer is
    streamed.
+7. A reload rebuilds the app with no upstream call.
+8. Expand moves it to the artifact column and back.
 
-Negative checks:
+**From the rail:**
+
+9. Clicking the app inserts an app card and creates no run. The next run's prompt contains the
+   fenced card text.
+10. A launch during a run is queued and inserted after it.
+
+**Negative checks:**
 
 - The app's attempts to `fetch` out, `ui/open-link` and call the write tool fail.
-- A changed template drifts and the app disappears.
-- A member without a key sees no app.
+- A forged result report from the sandbox is refused.
+- A changed template drifts: cards fall back to text and the rail hides the app.
+- A member without a key sees text cards and no rail app.
 - No key appears in the browser's network log or in the frame.
+- An export of the thread contains text only.
 
 **(b) On the gate install against Catalyst** (the usual gate browser check, run from the
 coordinator's local notes; no host names here):
 
 1. The Catalyst connector (site-wide key or the member's key) is pinned with
    `ui://catalyst/lakehouse-explorer`.
-2. In the rail, open Lakehouse Explorer. The tree loads.
+2. **In the conversation:** "Open the lakehouse explorer". The model calls
+   `open_lakehouse_explorer`, and the card shows the tree.
 3. Select a table: the schema and preview show, and the chip appears.
 4. "Use in chat" inserts `` Use table `c.n.t` ``.
 5. Send: the run answers using the table.
+6. Reload: the tree is rebuilt.
+7. **From the rail:** launch Lakehouse Explorer in another thread. An app card appears with no
+   run, and the next question can refer to it.
 
-Evidence: screenshots, audit rows and the run's thread entry. This closes KOBE-432 ac-2 together
+Evidence: screenshots, audit rows and the thread's entries. This closes KOBE-432 ac-2 together
 with Catalyst M24.
 
 ## 12. Questions for Chris
 
 - **Q1.** Do you approve amending D27 ("MCP resources/prompts UI later") to allow `ui://`
   templates rendered as apps now, and only those (MA1)?
-- **Q2.** Should apps render as a tab in the artifact column (MA3, proposed), or somewhere else?
+- **Q2.** (Changed in 0.2.) Decided by Chris: apps render in the conversation; the rail inserts
+  an app card into the current thread; the artifact column is only "expand" (MA3, MA11). Still
+  open within it:
+  - **Q2a.** Should the model see an app card as fenced untrusted text in the next run (MA11,
+    proposed: yes)?
+  - **Q2b.** During an active run, should a launch be queued (proposed) or refused?
+  - **Q2c.** Should the cap be 3 live frames per thread, with a 360 px default height (proposed)?
 - **Q3.** Should model context go with the next message as a visible, removable chip (MA7,
   proposed), or be added silently (the Catalyst spec allows either)?
 - **Q4.** Should "the member holds a grant" (§8.7) also count a KOBE-303 site key (MA8, proposed:
@@ -451,3 +661,5 @@ with Catalyst M24.
   remembered" (MA5, proposed: yes, in v1)?
 - **Q6.** Declared `_meta.ui.csp` domains are ignored in v1, so no app gets network access. Is
   that acceptable until a later spec (proposed: yes)?
+- **Q7.** Should a viewer of a shared thread who can call the connector get the live app, acting
+  as themselves (MA10 and T12, proposed: yes), or always the text?
