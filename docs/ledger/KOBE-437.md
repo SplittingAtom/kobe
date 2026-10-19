@@ -105,12 +105,8 @@ sandbox="allow-scripts" referrerPolicy="no-referrer">` with no `allow`, `src` = 
 
 ## Review items carried here
 
-- MA-4 review LOW-1 (`Sec-Fetch-Dest: iframe`): on both frame routes (`mayLoadAppFrame`).
-- MA-2/3 review L2 (self-navigation inside Kobe's origin): no `/v1` GET route writes (all
-  writes are PUT/PATCH/POST/DELETE; Better Auth sign-out is a POST), so a frame navigating
-  itself to a Kobe URL changes nothing and reads nothing (opaque, XFO DENY on pages).
-- The admin preview's browser test (script runs, fetch fails) is the same mechanism and
-  headers; `app-frame.spec.ts` covers it for the member route.
+MA-4 LOW-1 (`Sec-Fetch-Dest: iframe`) is on both frame routes. MA-2/3 L2: no `/v1` GET writes,
+and Better Auth sign-out is a POST, so a frame navigating itself inside Kobe changes nothing.
 
 ## Tests and checks
 
@@ -120,14 +116,35 @@ app-frame.test.tsx` (5); all web 2,010 passed.
   tests), `connector-template-review.db`, `mcp.db`: 59 passed.
 - `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `license:check`: green.
 
-## Notes and questions for review
+## Review fixes (review-ma5: MEDIUM-1, MEDIUM-2, LOW-1..8), 0dd6d460..bd32ad7b
 
-- `AppFrame` cannot send `ui/resource-teardown` from its own unmount (the frame is already gone
-  by then). Owners (MA-9 cards, MA-6, team switch) call `HostBridge.teardown(ms)` before they
-  remove a frame; MA-9 should expose the bridge from `AppFrame` for that.
-- `ui/message` and model context answer "refused" until MA-7 wires the composer
-  (`onMessage`/`onModelContext`); `ui/message` replies `{isError: true}` without a composer.
-- The frame route serves a member's app without an audit row (the template is not team data and
-  calls are audited). Say if a read audit is wanted.
-- Should the e2e spec also run the admin preview route (needs a site admin and a drifted
-  template)? Left out: same headers and helpers.
+- **MEDIUM-1:** `AppFrame` renders a keyed `FrameInstance` (`frameKey`: app, team, template
+  hash, `cardKey`), so any change is a fresh iframe; the bridge binds to its first window and
+  posts nothing after `detach` (late answers dropped). Tests in `app-frame.test.tsx` and
+  `host-bridge.test.ts`.
+- **MEDIUM-2 (coordinator decision):** CSP adds `child-src 'none'` and `webrtc 'block'`; every
+  frame document (both routes) starts with `WEBRTC_GUARD` after its doctype, removing
+  `RTCPeerConnection`, `webkit`/`moz` variants and `RTCDataChannel` (pinned bytes and hashes
+  unchanged). Spec T3 and §3 residual risks amended. Browser results (local harness):
+  Chromium (Playwright 1.55, build 1187) and WebKit 26: constructor absent in the frame; a fresh `about:blank` realm
+  throws `SecurityError` (child frames blocked); both with and without the `sandbox`
+  attribute. Firefox: not run (Playwright's Firefox does not start on this Mac); run
+  `KOBE_ALL_BROWSERS=1` in the Playwright container at the gate.
+- **LOW-1/2:** 40 messages per second per frame, counted before measuring or parsing
+  (cheap length check for strings and buffers); `initialized` honoured once.
+- **LOW-3:** calls one at a time per frame, 4 admitted; `validation_busy` retried once (250 ms).
+- **LOW-4:** `AppFrameHandle.teardown(ms)` (ref); any answer counts as torn down.
+- **LOW-5:** `host-bridge.interop.test.ts` drives the real ext-apps `App` 2.0.3 against the
+  bridge (initialize, tool-input, tools/call, message, context, display mode, open-link and
+  resources/read refused, teardown). ext-apps, `@modelcontextprotocol/core`/`client` 2.3.1 are
+  web **devDependencies** only (MIT/Apache-2.0, `licenses:update` run).
+- **LOW-6:** `KOBE_REQUIRE_APP=1` fails instead of skipping; CSP parsed (`sandbox` exactly
+  `allow-scripts`, no `allow-same-origin`); a second frame without the attribute.
+- **LOW-7:** `ui/message` capped at 4 KiB of UTF-8. **LOW-8:** frame-route tests for a member
+  without a key (404) and a removed member (403); `/tools` takes the calls' rate limit.
+
+## Notes for MA-9
+
+- Owners call `AppFrameHandle.teardown()` before removing a frame; pass a `cardKey`.
+- `ui/message` and model context answer "refused" until MA-7 wires the composer.
+- The frame route writes no audit row (coordinator decision 1).
