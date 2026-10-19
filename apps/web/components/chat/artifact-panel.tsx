@@ -27,6 +27,7 @@ import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
 import { FileTabContent } from "../files/file-tab";
 import { AppFrame } from "../apps/app-frame";
+import { useAppComposer } from "../apps/use-app-composer";
 import { isAppTab, type AppTabSpec } from "../../lib/apps/app-tabs";
 import { ErrorNotice } from "../admin/error-notice";
 import { ArtifactResizeHandle } from "../shell/artifact-resize";
@@ -247,6 +248,12 @@ function FileTab({
  */
 function AppTab({ spec }: { readonly spec: AppTabSpec }) {
   const session = useChatSession();
+  const composer = useAppComposer({
+    appId: spec.app.appId,
+    connectorId: spec.connectorId,
+    templateSha256: spec.app.sha256,
+    title: spec.app.title,
+  });
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2" id={artifactTitleId(`app:${spec.cardKey}`)}>
       <AppFrame
@@ -256,6 +263,8 @@ function AppTab({ spec }: { readonly spec: AppTabSpec }) {
         placement="expanded"
         toolInput={spec.toolInput}
         toolResult={spec.toolResult}
+        onMessage={composer.onMessage}
+        onModelContext={composer.onModelContext}
       />
     </div>
   );

@@ -1,5 +1,7 @@
 "use client";
 
+import { AppContextChips } from "../apps/app-context-chips";
+import { appContextBody, insertAt } from "../../lib/apps/app-context";
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { MicIcon } from "lucide-react";
 import {
@@ -10,6 +12,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
@@ -126,6 +129,7 @@ export function Composer({
   const readOnly = extras.state.summary?.readOnly === true;
   // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
   const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
+  const appInsert = useAppInserts(input, text, !readOnly && !inTrash);
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const onDragOver = (e: DragEvent) => {
     if (rowDrop.over(e) || !hasFiles(e)) return;
@@ -149,9 +153,11 @@ export function Composer({
     dictation.stop();
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
-    if (await controller.send(text.trim(), undefined, attach, mentions)) {
+    const contexts = appContextBody(session.appContexts.forDraft(draft));
+    if (await controller.send(text.trim(), undefined, attach, mentions, contexts)) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
+      session.appContexts.clear(draft);
       aui.composer.setText("");
     }
   };
@@ -235,6 +241,7 @@ export function Composer({
           data-running={running || undefined}
           data-dragging={dragging || undefined}
           data-mention-drop={rowDrop.rowDrop ?? undefined}
+          data-app-insert={appInsert || undefined}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDrop}
@@ -247,6 +254,7 @@ export function Composer({
           <SlashMenu input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
+          <AppContextChips draft={draft} />
           <label htmlFor="kobe-composer" className="sr-only">
             Message
           </label>
@@ -353,4 +361,45 @@ export function Composer({
       </ComposerPrimitive.Root>
     </ComposerPrimitive.TriggerPopoverRoot>
   );
+}
+
+/** How long the composer flashes after an app put text in it. */
+const INSERT_FLASH_MS = 600;
+
+/**
+ * An app's `ui/message` (KOBE-439, spec §8): the text goes in at the caret of this composer, which
+ * takes the focus and flashes; it is never sent. Only a writable composer listens.
+ */
+function useAppInserts(
+  input: RefObject<HTMLTextAreaElement | null>,
+  text: string,
+  writable: boolean,
+): boolean {
+  const aui = useAui();
+  const session = useChatSession();
+  const [flash, setFlash] = useState(false);
+  const latest = useRef(text);
+  latest.current = text;
+  useEffect(() => {
+    if (!writable) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = session.composerInserts.listen((insert) => {
+      const el = input.current;
+      const next = insertAt(latest.current, el?.selectionEnd ?? latest.current.length, insert);
+      aui.composer.setText(next.text);
+      requestAnimationFrame(() => {
+        input.current?.focus();
+        input.current?.setSelectionRange(next.caret, next.caret);
+      });
+      setFlash(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => setFlash(false), INSERT_FLASH_MS);
+      return true;
+    });
+    return () => {
+      stop();
+      clearTimeout(timer);
+    };
+  }, [session, aui, input, writable]);
+  return flash;
 }

@@ -11,6 +11,7 @@ import { useArtifactPanel } from "../chat/artifact-state";
 import { useKobeExtras } from "../chat/kobe-runtime";
 import { AppFrame, INLINE_HEIGHT, TEARDOWN_MS, type AppFrameHandle } from "./app-frame";
 import { useThreadApps, type ThreadApps } from "./thread-apps";
+import { useAppComposer } from "./use-app-composer";
 
 /**
  * An MCP App in its tool card (KOBE-438, spec MA3, MA10): the pinned template rendered with the
@@ -197,8 +198,20 @@ function LiveApp({ apps, view }: { readonly apps: ThreadApps; readonly view: App
   const expand = useCallback(() => {
     if (!panel || result === null || result === "failed") return;
     take(cardKey, true);
-    panel.openApp({ cardKey, app, toolInput: input, toolResult: result });
-  }, [panel, result, cardKey, app, input, take]);
+    panel.openApp({
+      cardKey,
+      app,
+      connectorId: view.connectorId,
+      toolInput: input,
+      toolResult: result,
+    });
+  }, [panel, result, cardKey, app, input, take, view.connectorId]);
+  const composer = useAppComposer({
+    appId: view.appId,
+    connectorId: view.connectorId,
+    templateSha256: view.templateSha256,
+    title: app.title,
+  });
 
   let body;
   if (expanded) {
@@ -218,6 +231,8 @@ function LiveApp({ apps, view }: { readonly apps: ThreadApps; readonly view: App
         cardKey={cardKey}
         placement="inline"
         toolInput={input}
+        onMessage={composer.onMessage}
+        onModelContext={composer.onModelContext}
         toolResult={result}
         initialHeight={height}
         onHeight={setHeight}

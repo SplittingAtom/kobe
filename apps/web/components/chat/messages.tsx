@@ -1,5 +1,6 @@
 "use client";
 
+import { splitAppContext } from "../../lib/apps/app-context";
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -44,7 +45,24 @@ import styles from "./chat.module.css";
 
 /** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
-  return <span>{text}</span>;
+  // MCP Apps context sent with the message (KOBE-439): shown as chips, the JSON one click away.
+  const { contexts, rest } = splitAppContext(text);
+  if (contexts.length === 0) return <span>{text}</span>;
+  return (
+    <>
+      <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
+        {contexts.map((c, i) => (
+          <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
+            <details>
+              <summary className="cursor-pointer">Context from {c.source} (untrusted data)</summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+      <span>{rest}</span>
+    </>
+  );
 }
 
 function Problem({ data }: DataMessagePartProps) {

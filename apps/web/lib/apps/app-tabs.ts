@@ -14,6 +14,8 @@ export const isAppTab = (id: string): boolean => id.startsWith(PREFIX);
 export interface AppTabSpec {
   readonly cardKey: string;
   readonly app: AppFrameApp;
+  /** For the app's context chip (KOBE-439). */
+  readonly connectorId: string;
   readonly toolInput?: Record<string, unknown> | undefined;
   readonly toolResult: Record<string, unknown>;
 }
