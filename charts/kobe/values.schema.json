@@ -284,6 +284,17 @@
             }
           }
         },
+        "skillEval": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxConcurrentPerTeam": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
+            }
+          }
+        },
         "workspaceSync": {
           "type": "object",
           "additionalProperties": false,

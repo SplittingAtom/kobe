@@ -129,6 +129,14 @@ export const sandboxSettingsSchema = z.strictObject({
   toolExecutor: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),
   /** Pre-publish eval gate (KOBE-93). Unset: publishing under an enabled gate fails closed. */
   orbitEval: orbitEvalSettingsSchema.optional(),
+  /**
+   * Skill eval sandboxes (KOBE-325): at most `maxConcurrentPerTeam` per team (the Site setting
+   * may lower it). Each team gets a quota of that many sandbox pods for them, added to
+   * `teamQuota`, so evals never take what members' sandboxes need; more evals wait their turn.
+   */
+  skillEval: z
+    .strictObject({ maxConcurrentPerTeam: z.number().int().min(1).max(16) })
+    .default({ maxConcurrentPerTeam: 4 }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 

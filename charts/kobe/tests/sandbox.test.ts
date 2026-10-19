@@ -6,6 +6,7 @@ import { ISOLATION_HANDLER } from "../../../services/server/src/isolation/runtim
 import { loadSandboxConfig } from "../../../services/server/src/sandbox/config.js";
 import {
   BOOTSTRAP_TOKEN_AUDIENCE,
+  EVAL_PRIORITY_CLASS,
   LABEL_TEAM_NAMESPACE,
   TEAM_NAMESPACE_PREFIX,
 } from "../../../services/server/src/sandbox/constants.js";
@@ -230,6 +231,19 @@ describe("server sandbox configuration", () => {
     });
     expect(sandboxConfig(render({ sandbox: "null" })).toolExecutor).toEqual({ enabled: false });
     expect(renderError({ "sandbox.toolExecutor.enabled": "maybe" })).toMatch(/enabled|boolean/);
+  });
+
+  it("caps skill eval sandboxes per team and ships their low, non-preempting priority (KOBE-325)", () => {
+    expect(sandboxConfig(ms).skillEval).toEqual({ maxConcurrentPerTeam: 4 });
+    expect(
+      sandboxConfig(render({ "sandbox.skillEval.maxConcurrentPerTeam": "2" })).skillEval,
+    ).toEqual({ maxConcurrentPerTeam: 2 });
+    expect(sandboxConfig(render({ sandbox: "null" })).skillEval).toEqual({
+      maxConcurrentPerTeam: 4,
+    });
+    expect(renderError({ "sandbox.skillEval.maxConcurrentPerTeam": "40" })).toMatch(/maximum/);
+    const pc = find(ms, "PriorityClass", EVAL_PRIORITY_CLASS);
+    expect(pc).toMatchObject({ value: -100, preemptionPolicy: "Never", globalDefault: false });
   });
 
   it("defaults the sandbox key so `helm upgrade --reuse-values` keeps working", () => {

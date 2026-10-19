@@ -81,6 +81,7 @@ export const SETTINGS: SandboxSettings = {
     collectSeconds: 3600,
   },
   toolExecutor: { enabled: false },
+  skillEval: { maxConcurrentPerTeam: 4 },
 };
 
 export const KEYS: SessionKeys = {

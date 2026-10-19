@@ -6,9 +6,12 @@ import {
 import type { SandboxSettings } from "./config.js";
 import { isIsolationHandler } from "../isolation/runtime-class.js";
 import {
+  ANNOTATION_EVAL_RUN,
+  ANNOTATION_EVAL_THREAD,
   ANNOTATION_TEAM_ID,
   ANNOTATION_USER_ID,
   BOOTSTRAP_TOKEN_AUDIENCE,
+  LABEL_SKILL_EVAL,
   KOBE_ENDPOINTS,
   LABEL_CLAIM_UID,
   LABEL_TEAM_ID,
@@ -41,6 +44,15 @@ import {
   type KubeObject,
   type TeamRef,
 } from "./manifests.js";
+import {
+  evalClaimManifest,
+  evalClaimName,
+  evalResourceQuotaManifest,
+  evalSandboxTemplateManifest,
+  evalThreadOfClaim,
+  evalWarmPoolManifest,
+  type EvalClaimSpec,
+} from "./eval-manifests.js";
 import { logger } from "../logger.js";
 import { diagnoseStall, isPodReady, type StallDiagnosis } from "./stall-diagnosis.js";
 import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
@@ -199,6 +211,17 @@ export interface ReconcileResult {
   readonly reason?: string;
 }
 
+/** An eval sandbox claim as the reaper sees it (KOBE-325). */
+export interface EvalSandboxInfo {
+  readonly teamId: string;
+  readonly namespace: string;
+  readonly claimName: string;
+  readonly threadId: string;
+  readonly userId: string | undefined;
+  readonly evalRunId: string | undefined;
+  readonly createdAt: number;
+}
+
 export interface SandboxProvider {
   /** Creates or converges the team's namespace and everything in it; returns the namespace. */
   ensureTeam(team: TeamRef, isolation: VerifiedIsolation): Promise<string>;
@@ -232,7 +255,8 @@ export interface SandboxProvider {
    * the team namespace with that UID, is not being deleted, and is annotated for that team and
    * user. The sandbox wire (KOBE-24) checks it at connect and while connected. API errors throw.
    */
-  isLive(team: TeamRef, userId: string, sandboxId: string): Promise<boolean>;
+  /** With `evalThreadId` (KOBE-325): whether `sandboxId` is that eval thread's claim instead. */
+  isLive(team: TeamRef, userId: string, sandboxId: string, evalThreadId?: string): Promise<boolean>;
   /**
    * Offboarding (KOBE-28, D12): deletes the (team, user) claim, Sandbox and pod at once. With
    * `retainVolume` the `/workspace` PVC is first detached from its owner (agent-sandbox would
@@ -249,6 +273,16 @@ export interface SandboxProvider {
   deleteVolume(team: TeamRef, pvcName: string): Promise<void>;
   /** Verifies a sandbox pod's bootstrap token (TokenReview) and resolves who it is. */
   identifyBootstrapToken(token: string): Promise<BootstrapIdentity>;
+  /**
+   * KOBE-325: creates a skill eval execution's ephemeral sandbox (claim `e-<thread>`, the eval
+   * template, its own quota) after a fresh isolation check, and waits up to `podWaitMs` for its
+   * pod under the verified RuntimeClass (the same read-back check as a member's sandbox).
+   */
+  createEvalSandbox(team: TeamRef, spec: EvalClaimSpec, podWaitMs?: number): Promise<SandboxHandle>;
+  /** Deletes an eval thread's sandbox claim (its pod goes with it); a missing one is fine. */
+  deleteEvalSandbox(team: TeamRef, threadId: string): Promise<boolean>;
+  /** Every eval sandbox claim in every team namespace (the reaper's list). */
+  listEvalSandboxes(): Promise<EvalSandboxInfo[]>;
   /**
    * Deletes pods in team namespaces that do not run under the verified RuntimeClass, or predate
    * the current RuntimeClass object. If isolation is definitively gone (class deleted or not
@@ -423,6 +457,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     await applyWithRbacRetry(networkPolicyManifest(namespace, settings));
     await applyWithRbacRetry(evalNetworkPolicyManifest(namespace, settings));
     await kube.apply(resourceQuotaManifest(namespace, settings));
+    await kube.apply(evalResourceQuotaManifest(namespace, settings));
     await kube.apply(limitRangeManifest(namespace, settings));
     await kube.apply(sandboxServiceAccountManifest(namespace));
     for (const name of settings.imagePullSecrets) {
@@ -437,6 +472,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const addresses = await endpointAddresses();
     await kube.apply(sandboxTemplateManifest(namespace, verified, settings, addresses));
     await kube.apply(warmPoolManifest(namespace, settings));
+    await kube.apply(evalSandboxTemplateManifest(namespace, verified, settings, addresses));
+    await kube.apply(evalWarmPoolManifest(namespace));
     return namespace;
   };
 
@@ -509,12 +546,17 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     namespace: string,
     team: TeamRef,
     userId: string,
+    evalSpec?: EvalClaimSpec,
   ): Promise<KubeObject> => {
-    const name = claimName(userId);
+    const name = evalSpec ? evalClaimName(evalSpec.threadId) : claimName(userId);
     let claim = await kube.get(CLAIM(namespace, name));
     if (!claim) {
       try {
-        claim = await kube.create(sandboxClaimManifest(namespace, team, userId));
+        claim = await kube.create(
+          evalSpec
+            ? evalClaimManifest(namespace, team, evalSpec)
+            : sandboxClaimManifest(namespace, team, userId),
+        );
         if (claim.metadata.uid) {
           await emit({
             action: "sandbox.created",
@@ -535,7 +577,11 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       throw new SandboxProvisioningError(`Sandbox ${namespace}/${name} is being deleted; retry`);
     }
     const annotations = claim.metadata.annotations ?? {};
-    if (annotations[ANNOTATION_TEAM_ID] !== team.id || annotations[ANNOTATION_USER_ID] !== userId) {
+    if (
+      annotations[ANNOTATION_TEAM_ID] !== team.id ||
+      annotations[ANNOTATION_USER_ID] !== userId ||
+      annotations[ANNOTATION_EVAL_THREAD] !== evalSpec?.threadId
+    ) {
       throw new SandboxProvisioningError(
         `SandboxClaim ${namespace}/${name} does not belong to this user and team`,
       );
@@ -581,18 +627,20 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     team: TeamRef,
     userId: string,
     wake: boolean,
+    evalSpec?: EvalClaimSpec,
+    podWaitMs: number = podWaitTimeoutMs,
   ): Promise<{ handle: SandboxHandle; resumed: boolean }> => {
     assertTeamRef(team);
     assertUserId(userId);
     // KOBE-9: a fresh check immediately before creating anything that runs agent code.
     const verified = await isolation.require();
     const namespace = await ensureTeam(team, verified);
-    const claim = await getOrCreateClaim(namespace, team, userId);
+    const claim = await getOrCreateClaim(namespace, team, userId, evalSpec);
     const name = claim.metadata.name;
     const sandboxId = claim.metadata.uid as string;
     const owner = { teamId: team.id, userId, sandboxId };
 
-    const deadline = now() + podWaitTimeoutMs;
+    const deadline = now() + podWaitMs;
     let resumed = false;
     for (let attempt = 0; ; attempt++) {
       const current = await kube.get(CLAIM(namespace, name));
@@ -675,7 +723,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       }
       if (now() >= deadline) {
         throw new SandboxProvisioningError(
-          `Sandbox ${namespace}/${name} has no pod after ${podWaitTimeoutMs} ms (quota or capacity?)`,
+          `Sandbox ${namespace}/${name} has no pod after ${podWaitMs} ms (quota or capacity?)`,
         );
       }
       await sleep(Math.min(100 * 2 ** attempt, 1000));
@@ -836,11 +884,16 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
 
     const claimUid = pod.metadata.labels?.[LABEL_CLAIM_UID];
     const userId = pod.metadata.annotations?.[ANNOTATION_USER_ID];
+    // KOBE-325: an eval sandbox's pod names its eval thread; its claim is `e-<thread>`, never the
+    // member's, and the claim (found by name, matched by UID below) must name the same thread.
+    const evalThreadId = pod.metadata.annotations?.[ANNOTATION_EVAL_THREAD];
     const unassigned = { state: "unassigned", namespace, podName } as const;
     if (!claimUid || !userId) return unassigned;
-    if (!isUuid(userId))
-      throw new SandboxAuthError(`pod ${namespace}/${podName} has a malformed user id`);
-    const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+    if (!isUuid(userId) || (evalThreadId !== undefined && !isUuid(evalThreadId)))
+      throw new SandboxAuthError(`pod ${namespace}/${podName} has a malformed identity`);
+    const claim = await kube.get(
+      CLAIM(namespace, evalThreadId ? evalClaimName(evalThreadId) : claimName(userId)),
+    );
     const controller = pod.metadata.ownerReferences?.find((o) => o.controller);
     if (
       !claim ||
@@ -852,7 +905,11 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       return unassigned;
     }
     const annotations = claim.metadata.annotations ?? {};
-    if (annotations[ANNOTATION_TEAM_ID] !== teamId || annotations[ANNOTATION_USER_ID] !== userId) {
+    if (
+      annotations[ANNOTATION_TEAM_ID] !== teamId ||
+      annotations[ANNOTATION_USER_ID] !== userId ||
+      annotations[ANNOTATION_EVAL_THREAD] !== evalThreadId
+    ) {
       throw new SandboxAuthError(`claim ${namespace}/${claim.metadata.name} identity mismatch`);
     }
     if (
@@ -869,7 +926,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     }
     return {
       state: "assigned",
-      principal: { sandboxId: claimUid, teamId, userId },
+      principal: { sandboxId: claimUid, teamId, userId, ...(evalThreadId ? { evalThreadId } : {}) },
       namespace,
       podName,
     };
@@ -896,8 +953,10 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const userId = annotated && isUuid(annotated) ? annotated : undefined;
     const claimUid = pod.metadata.labels?.[LABEL_CLAIM_UID];
     const sandboxId = claimUid && isUuid(claimUid) ? claimUid : undefined;
+    const evalThread = pod.metadata.annotations?.[ANNOTATION_EVAL_THREAD];
     if (withClaim && userId) {
-      const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+      const name = evalThread && isUuid(evalThread) ? evalClaimName(evalThread) : claimName(userId);
+      const claim = await kube.get(CLAIM(namespace, name));
       if (claim && claim.metadata.uid === claimUid) {
         await deleteWithRetry(CLAIM(namespace, claim.metadata.name));
       }
@@ -960,15 +1019,75 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     };
   };
 
-  const isLive = async (team: TeamRef, userId: string, sandboxId: string): Promise<boolean> => {
+  const isLive = async (
+    team: TeamRef,
+    userId: string,
+    sandboxId: string,
+    evalThreadId?: string,
+  ): Promise<boolean> => {
     if (!isUuid(userId) || !isUuid(sandboxId)) return false;
-    const claim = await kube.get(CLAIM(teamNamespaceName(team), claimName(userId)));
+    if (evalThreadId !== undefined && !isUuid(evalThreadId)) return false;
+    const name = evalThreadId ? evalClaimName(evalThreadId) : claimName(userId);
+    const claim = await kube.get(CLAIM(teamNamespaceName(team), name));
     if (!claim || claim.metadata.uid !== sandboxId || claim.metadata.deletionTimestamp)
       return false;
     const annotations = claim.metadata.annotations ?? {};
     return (
-      annotations[ANNOTATION_TEAM_ID] === team.id && annotations[ANNOTATION_USER_ID] === userId
+      annotations[ANNOTATION_TEAM_ID] === team.id &&
+      annotations[ANNOTATION_USER_ID] === userId &&
+      annotations[ANNOTATION_EVAL_THREAD] === evalThreadId
     );
+  };
+
+  const createEvalSandbox = async (
+    team: TeamRef,
+    spec: EvalClaimSpec,
+    podWaitMs?: number,
+  ): Promise<SandboxHandle> => {
+    const { handle } = await provision(team, spec.userId, false, spec, podWaitMs);
+    if (handle.state !== "running") {
+      throw new SandboxProvisioningError(`Eval sandbox ${handle.claimName} is not running`);
+    }
+    return handle;
+  };
+
+  const deleteEvalSandbox = async (team: TeamRef, threadId: string): Promise<boolean> =>
+    deleteWithRetry(CLAIM(teamNamespaceName(team), evalClaimName(threadId)));
+
+  const listEvalSandboxes = async (): Promise<EvalSandboxInfo[]> => {
+    const namespaces = await kube.list(
+      "v1",
+      "Namespace",
+      undefined,
+      `${LABEL_TEAM_NAMESPACE}=true`,
+    );
+    const out: EvalSandboxInfo[] = [];
+    for (const ns of namespaces) {
+      const teamId = ns.metadata.labels?.[LABEL_TEAM_ID];
+      if (!teamId || !isUuid(teamId) || !ns.metadata.name.startsWith(TEAM_NAMESPACE_PREFIX))
+        continue;
+      const claims = await kube.list(
+        CLAIM(ns.metadata.name, "x").apiVersion,
+        "SandboxClaim",
+        ns.metadata.name,
+        `${LABEL_SKILL_EVAL}=true`,
+      );
+      for (const c of claims) {
+        const threadId = evalThreadOfClaim(c.metadata.name);
+        if (!threadId) continue;
+        const a = c.metadata.annotations ?? {};
+        out.push({
+          teamId,
+          namespace: ns.metadata.name,
+          claimName: c.metadata.name,
+          threadId,
+          userId: a[ANNOTATION_USER_ID],
+          evalRunId: a[ANNOTATION_EVAL_RUN],
+          createdAt: Date.parse(c.metadata.creationTimestamp ?? "") || 0,
+        });
+      }
+    }
+    return out;
   };
 
   const reconcileTeams = async (): Promise<TeamReconcileSummary> => {
@@ -993,5 +1112,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     identifyBootstrapToken,
     reconcileIsolation,
     isLive,
+    createEvalSandbox,
+    deleteEvalSandbox,
+    listEvalSandboxes,
   };
 }
