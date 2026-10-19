@@ -9,6 +9,7 @@ import {
   skillDrafts,
   skillEvalResults,
   skillEvalRuns,
+  skillPromotionRequests,
   teamMembers,
   teamSkillBlocks,
   teamSkillInstalls,
@@ -305,6 +306,18 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       size: 10,
       change: "overwritten",
       writtenAt: new Date(),
+    });
+  },
+  skill_promotion_requests: async (tx, teamId) => {
+    // A Builder's pending Promote to Site (KOBE-333).
+    const { userId, skillId } = await probeSkill(tx, teamId);
+    await tx.insert(skillPromotionRequests).values({
+      teamId,
+      skillId,
+      version: 1,
+      semver: "0.1.0",
+      packageHash: "0".repeat(64),
+      requestedBy: userId,
     });
   },
   skill_eval_runs: async (tx, teamId) => {

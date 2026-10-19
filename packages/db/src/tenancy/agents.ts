@@ -27,6 +27,8 @@ export const agents = defineDomain({
     // Skill eval runs and their executions (KOBE-325).
     "skill_eval_runs",
     "skill_eval_results",
+    // Builders' Promote to Site requests (KOBE-333).
+    "skill_promotion_requests",
   ],
   siteWide: [
     "skill_blocklist",
