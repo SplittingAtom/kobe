@@ -80,6 +80,33 @@ describe("Run evals (Workbench)", () => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("starts once however fast Run is clicked, and waits while an eval is open", async () => {
+    const calls = stubApi({
+      "GET /v1/skills/drafts/d-1/evals/estimate?mode=full": [200, ESTIMATE()],
+      "POST /v1/skills/drafts/d-1/evals": [
+        202,
+        { eval_run_id: "e-1", estimate: ESTIMATE().estimate },
+      ],
+    });
+    let release: () => void = () => undefined;
+    const flush = vi.fn(() => new Promise<null>((r) => (release = () => r(null))));
+    const view = renderTeam(<EvalRun teamId="t-1" draftId="d-1" rev={1} flush={flush} />, MEMBER);
+    const button = await screen.findByRole("button", { name: "Run evals" });
+    await screen.findByLabelText("Estimate");
+    button.click();
+    button.click();
+    release();
+    await screen.findByText("Eval started.");
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    view.rerender(<EvalRun teamId="t-1" draftId="d-1" rev={1} flush={flush} running />);
+    expect((screen.getByRole("button", { name: "Run evals" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    // Once that eval is no longer open, the notice goes and Run is back.
+    view.rerender(<EvalRun teamId="t-1" draftId="d-1" rev={1} flush={flush} running={false} />);
+    await waitFor(() => expect(screen.queryByText("Eval started.")).toBeNull());
+  });
+
   it("marks an estimate from the suite's size as rough", () => {
     expect(estimateText({ executions: 2, costUsd: 0.05, minutes: 2, basis: "suite_size" })).toBe(
       "≈ $0.05, ≈ 2 min · 2 runs (rough: from the suite's size, no history yet)",

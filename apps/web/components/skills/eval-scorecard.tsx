@@ -5,7 +5,17 @@ import type {
   SkillEvalExecution,
   SkillEvalModeSummary,
   SkillEvalScorecard,
+  WithoutCosts,
 } from "@kobe/protocol";
+import Link from "next/link";
+import {
+  CHECK_REASON_TEXT,
+  CHECK_TEXT,
+  EXECUTION_STATUS_TEXT,
+  liftText,
+  pct,
+  usd,
+} from "../../lib/skills/eval-format";
 import {
   Badge,
   Table,
@@ -25,8 +35,6 @@ import {
  * the stored card's (`computeSkillEvalScorecard`), never recomputed here.
  */
 
-const pct = (x: number | null) => (x === null ? "—" : `${Math.round(x * 100)} %`);
-const usd = (x: number) => (x < 0.01 && x > 0 ? `$${x.toFixed(4)}` : `$${x.toFixed(2)}`);
 const secs = (ms: number) =>
   ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 60_000).toFixed(1)} min`;
 
@@ -45,18 +53,23 @@ const KIND_LABEL: Readonly<Record<SkillEvalCaseDetail["kind"], string>> = {
 /** Where an eval thread opens (team content; hidden from the member's thread list). */
 export const evalThreadHref = (threadId: string) => `/?thread=${threadId.toLowerCase()}`;
 
-function lift(card: SkillEvalScorecard): string {
+/** A scorecard as served: its costs only for its starter and Team admins (KOBE-328). */
+export type ScorecardView = WithoutCosts<SkillEvalScorecard>;
+type ExecutionView = WithoutCosts<SkillEvalExecution>;
+
+function lift(card: ScorecardView): string {
   if (card.lift === null) return `— (${LIFT_WHY[card.liftUnavailable ?? ""] ?? "unavailable"})`;
-  const points = Math.round(card.lift * 100);
-  return `${points > 0 ? "+" : ""}${points} points`;
+  return liftText(card.lift);
 }
 
 function Summary({
   label,
   s,
+  costs,
 }: {
   readonly label: string;
-  readonly s: SkillEvalModeSummary | null;
+  readonly s: WithoutCosts<SkillEvalModeSummary> | null;
+  readonly costs: boolean;
 }) {
   if (!s) return null;
   return (
@@ -67,27 +80,40 @@ function Summary({
         {s.passed} passed, {s.failed} failed, {s.errored} errored, {s.timedOut} timed out (of{" "}
         {s.executions})
       </TableCell>
-      <TableCell>{usd(s.meanCostUsd)}</TableCell>
+      {costs && <TableCell>{usd(s.meanCostUsd)}</TableCell>}
       <TableCell>{secs(s.meanDurationMs)}</TableCell>
       <TableCell>{s.deniedToolCalls}</TableCell>
     </TableRow>
   );
 }
 
-function ExecutionCell({ e }: { readonly e: SkillEvalExecution | null }) {
+function ExecutionCell({
+  e,
+  caseId,
+  baseline,
+}: {
+  readonly e: ExecutionView | null;
+  readonly caseId: string;
+  readonly baseline: boolean;
+}) {
   if (!e) return <TableCell>—</TableCell>;
   const failed = e.checks.filter((c) => !c.passed);
+  const cost =
+    e.totalCostUsd === undefined
+      ? ""
+      : ` · ${usd(e.totalCostUsd)}${e.judgeCostUsd ? ` + judge ${usd(e.judgeCostUsd)}` : ""}`;
   return (
     <TableCell>
       <Badge tone={e.status === "passed" ? "done" : e.status === "failed" ? "failed" : "attention"}>
-        {e.status.replace("_", " ")}
+        {EXECUTION_STATUS_TEXT[e.status]}
       </Badge>
       {e.attempts === 2 && <span className="ml-1 text-xs">(retried)</span>}
       {failed.length > 0 && (
         <ul className="m-0 mt-1 list-none p-0 text-xs">
           {failed.map((c) => (
             <li key={c.check}>
-              {c.check}: {c.reason}
+              {CHECK_TEXT[c.check] ?? c.check}:{" "}
+              {c.reason ? (CHECK_REASON_TEXT[c.reason] ?? c.reason) : "failed"}
               {c.detail ? ` (${c.detail})` : ""}
             </li>
           ))}
@@ -95,25 +121,28 @@ function ExecutionCell({ e }: { readonly e: SkillEvalExecution | null }) {
       )}
       <div className="mt-1 text-xs">
         {e.model}
-        {e.requestedModel && ` (the team hasn't enabled ${e.requestedModel})`} ·{" "}
-        {usd(e.totalCostUsd)}
-        {e.judgeCostUsd > 0 && ` + judge ${usd(e.judgeCostUsd)}`} · {secs(e.totalDurationMs)} ·{" "}
-        {e.turns} turns · {e.deniedToolCalls} denied
+        {e.requestedModel && ` (the team hasn't enabled ${e.requestedModel})`}
+        {cost} · {secs(e.totalDurationMs)} · {e.turns} turns · {e.deniedToolCalls} denied
         {e.triggered !== null && ` · ${e.triggered ? "triggered" : "not triggered"}`}
       </div>
       {e.threadId && (
-        <a className="text-xs" href={evalThreadHref(e.threadId)}>
+        <Link
+          className="text-xs"
+          href={evalThreadHref(e.threadId)}
+          aria-label={`Open the ${baseline ? "baseline " : ""}run of ${caseId}`}
+        >
           Open the run
-        </a>
+        </Link>
       )}
     </TableCell>
   );
 }
 
-export function EvalScorecard({ card }: { readonly card: SkillEvalScorecard }) {
+export function EvalScorecard({ card }: { readonly card: ScorecardView }) {
   const t = card.triggerCounts;
+  const costs = card.costUsd !== undefined;
   return (
-    <div aria-label="Scorecard">
+    <section aria-label="Scorecard">
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt>Pass rate</dt>
         <dd>{pct(card.passRate)}</dd>
@@ -131,7 +160,9 @@ export function EvalScorecard({ card }: { readonly card: SkillEvalScorecard }) {
         </dd>
         <dt>Cost</dt>
         <dd>
-          {usd(card.costUsd)} runs + {usd(card.judgeCostUsd)} judge
+          {costs
+            ? `${usd(card.costUsd)} runs + ${usd(card.judgeCostUsd)} judge`
+            : "Shown to its starter and Team admins"}
         </dd>
         <dt>Cases</dt>
         <dd>
@@ -151,23 +182,23 @@ export function EvalScorecard({ card }: { readonly card: SkillEvalScorecard }) {
             : "none (no rubric)"}
         </dd>
       </dl>
-      <Table>
+      <Table caption="Results by mode" hideCaption>
         <TableHead>
           <TableRow>
             <TableHeader>Mode</TableHeader>
             <TableHeader>Pass rate</TableHeader>
             <TableHeader>Results</TableHeader>
-            <TableHeader>Mean cost</TableHeader>
+            {costs && <TableHeader>Mean cost</TableHeader>}
             <TableHeader>Mean duration</TableHeader>
             <TableHeader>Denied tool calls</TableHeader>
           </TableRow>
         </TableHead>
         <TableBody>
-          <Summary label="With the skill" s={card.with} />
-          <Summary label="Without (baseline)" s={card.without} />
+          <Summary label="With the skill" s={card.with} costs={costs} />
+          <Summary label="Without (baseline)" s={card.without} costs={costs} />
         </TableBody>
       </Table>
-      <Table>
+      <Table caption="Results by case" hideCaption>
         <TableHead>
           <TableRow>
             <TableHeader>Case</TableHeader>
@@ -182,12 +213,12 @@ export function EvalScorecard({ card }: { readonly card: SkillEvalScorecard }) {
                 {d.caseId}
                 <div className="text-xs">{KIND_LABEL[d.kind]}</div>
               </TableRowHeader>
-              <ExecutionCell e={d.with} />
-              <ExecutionCell e={d.without} />
+              <ExecutionCell e={d.with} caseId={d.caseId} baseline={false} />
+              <ExecutionCell e={d.without} caseId={d.caseId} baseline />
             </TableRow>
           ))}
         </TableBody>
       </Table>
-    </div>
+    </section>
   );
 }

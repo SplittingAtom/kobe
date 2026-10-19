@@ -7,6 +7,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderTeam, stubApi } from "../admin/testing";
 import { EvalScorecard, evalThreadHref } from "./eval-scorecard";
+import { FakeEvalStream } from "../../lib/skills/testing/fake-event-source";
+import { EVAL_POLL_MS } from "../../lib/skills/use-live-eval";
+import { must } from "../../lib/testing/must";
 import { CASES_PATH, EvalsPanel } from "./evals-panel";
 import type { DraftEditor } from "./use-draft-editor";
 
@@ -96,7 +99,7 @@ describe("the scorecard (ac-1)", () => {
     expect(within(card).getByRole("rowheader", { name: "With the skill" })).toBeDefined();
     expect(within(card).getByRole("rowheader", { name: "Without (baseline)" })).toBeDefined();
     for (const d of GOLDEN.details) expect(within(card).getByText(d.caseId)).toBeDefined();
-    const links = within(card).getAllByRole("link", { name: "Open the run" });
+    const links = within(card).getAllByRole("link", { name: /^Open the (baseline )?run of / });
     const threads = GOLDEN.details.flatMap((d) => [d.with, d.without]).filter((e) => e?.threadId);
     expect(links).toHaveLength(threads.length);
     expect(links[0]?.getAttribute("href")).toBe(
@@ -164,8 +167,10 @@ describe("the evals panel", () => {
     expect(within(history).getByText("Running (1 of 5)")).toBeDefined();
     // The newest completed eval is shown by default; picking the running one shows its progress.
     expect(screen.getByLabelText("Eval of revision 3")).toBeDefined();
-    const rows = within(history).getAllByRole("button", { name: "Show" });
+    const rows = within(history).getAllByRole("button", { name: /^Show the eval of / });
+    expect(rows[1]?.getAttribute("aria-pressed")).toBe("true");
     await userEvent.click(rows[0] as HTMLElement);
+    expect(rows[0]?.getAttribute("aria-pressed")).toBe("true");
     expect((await screen.findByLabelText("Eval of revision 4")).textContent).toContain(
       "1 of 5 runs done",
     );
@@ -190,9 +195,79 @@ describe("the evals panel", () => {
       ],
     });
     renderTeam(<EvalsPanel teamId="t-1" editor={editor()} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Show" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Show the eval of / }));
     expect(
       await screen.findByText("Your team's monthly eval cap ($5.00) is used up."),
     ).toBeDefined();
+  });
+
+  it("reads again on the eval stream's events, and polls when the stream fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const stream = new FakeEvalStream();
+      const running = run({
+        id: "e-7",
+        status: "running",
+        scorecard: null,
+        progress: { done: 0, total: 5 },
+      });
+      const calls = stubApi({
+        "GET /v1/skill-evals?draft_id=d-1": [
+          [200, { evals: [running] }],
+          [200, { evals: [{ ...running, progress: { done: 2, total: 5 } }] }],
+          [200, { evals: [{ ...running, progress: { done: 3, total: 5 } }] }],
+        ],
+      });
+      renderTeam(<EvalsPanel teamId="t-1" editor={editor()} eventSource={stream.factory} />);
+      await screen.findByText("Running (0 of 5)");
+      await waitFor(() => expect(stream.urls).toEqual(["/v1/skill-evals/e-7/events"]));
+      must(stream.sources[0]).emit("skill.eval.progress", { done: 2 });
+      await screen.findByText("Running (2 of 5)");
+      // The stream breaks: polling takes over.
+      must(stream.sources[0]).fail();
+      await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
+      await screen.findByText("Running (3 of 5)");
+      expect(
+        calls.filter((c) => c.url.startsWith("/v1/skill-evals?")).length,
+      ).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears a failed read once a later one works, and disables Run while an eval is open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const stream = new FakeEvalStream();
+      const queued = run({
+        id: "e-8",
+        status: "queued",
+        scorecard: null,
+        progress: { done: 0, total: 5 },
+      });
+      stubApi({
+        "GET /v1/skill-evals?draft_id=d-1": [
+          [200, { evals: [queued] }],
+          [500, { code: "internal", message: "down" }],
+          [200, { evals: [queued] }],
+        ],
+        "GET /v1/skills/drafts/d-1/evals/estimate?mode=full": [200, ESTIMATE],
+      });
+      const ed = editor({
+        files: [{ path: "SKILL.md" }, { path: CASES_PATH }] as unknown as DraftEditor["files"],
+      });
+      renderTeam(<EvalsPanel teamId="t-1" editor={ed} eventSource={stream.factory} />);
+      await screen.findByText("Queued (0 of 5)");
+      await waitFor(() => expect(stream.sources).toHaveLength(1));
+      must(stream.sources[0]).fail();
+      await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
+      expect(await screen.findByRole("alert")).toBeDefined();
+      await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      const button = await screen.findByRole("button", { name: "Run evals" });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

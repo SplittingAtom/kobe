@@ -251,7 +251,7 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
   their own (`own_history`), never another member's. Without eval history on the model, ordinary
   runs on it stand in; without any, the suite's own token sizes at the catalog's prices
   (`suite_size`). Unpriced models: cost null.
-- **Team eval cap** (Team admin: `PUT /v1/team/skill-review/settings {evalCap: {usd} | {tokens}
+- **Team eval cap** (Team admins with the budget permission: `PUT /v1/team/budgets/eval-cap {evalCap: {usd} | {tokens}
 | null}`, audited `skill.eval_cap.changed`): monthly, counted from the eval kinds only
   (`model_spend_daily.eval_*`). Enforced on every eval and eval judge call by the gateway in
   `kobe_reserve_budget` (an `eval` line beside the member's budgets: atomic across replicas, no
@@ -271,7 +271,10 @@ skill-creator (1.1.0) proposes the same shape in a chat. Then the estimate and *
 (baseline on or off), live progress while an eval is queued or running, the history of every
 eval of the draft by revision, and the scorecard of the picked one: every metric of
 `SkillEvalScorecard` and each case's executions with a link to their eval threads. The team eval
-cap is edited in Team admin › Budgets.
+cap is edited in Team admin › Budgets. Progress follows the eval's SSE stream (polling only if
+it fails), in the panel, the version history and an eval's own page. An eval's costs are served
+only to its starter and Team admins (`costsHidden` for anyone else). A second start of the same
+revision and mode while one is open is refused (409 `eval_already_running`).
 
 ## Limits and settings
 

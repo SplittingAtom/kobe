@@ -1,13 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { evalHref } from "../../lib/skills/eval-href";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiError } from "../../lib/api/client";
+import type { EventSourceFactory } from "../../lib/chat/stream";
 import { appendCases, caseIdsOf, suggestTriggerCases } from "../../lib/skills/case-suggestions";
 import { readDraftText } from "../../lib/skills/drafts-api";
+import { evalHref } from "../../lib/skills/eval-href";
+import { RUN_STATUS_TEXT, isOpen, liftText, pct } from "../../lib/skills/eval-format";
 import { listDraftEvals, subjectLabel, type SkillEvalRun } from "../../lib/skills/evals-api";
 import { SKILL_MD, splitSkillMd } from "../../lib/skills/skill-md";
+import { useLiveEval } from "../../lib/skills/use-live-eval";
 import {
   Button,
   Notice,
@@ -25,31 +28,21 @@ import type { DraftEditor } from "./use-draft-editor";
 
 /**
  * The Workbench evals panel (KOBE-328, SK15–SK18): suggest trigger cases into
- * `evals/cases.yaml` (edited as YAML in the file pane), the estimate and Run, live progress, the
- * scorecard of the run picked, and the history of every eval of this draft by revision.
+ * `evals/cases.yaml` (edited as YAML in the file pane), the estimate and Run, live progress (the
+ * eval stream, polling if it fails), the scorecard of the run picked, and the history of every
+ * eval of this draft by revision.
  */
 export const CASES_PATH = "evals/cases.yaml";
-/** How often an open eval's progress is read again. */
-export const EVAL_POLL_MS = 2_000;
-
-const OPEN = new Set(["queued", "running"]);
-const pct = (x: number | null | undefined) =>
-  x === null || x === undefined ? "—" : `${Math.round(x * 100)} %`;
-const STATUS_TEXT: Readonly<Record<SkillEvalRun["status"], string>> = {
-  queued: "Queued",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  budget_stopped: "Stopped by a budget",
-};
 
 export function EvalsPanel({
   teamId,
   editor,
+  eventSource,
 }: {
   readonly teamId: string;
   readonly editor: DraftEditor;
+  /** Tests inject the event stream. */
+  readonly eventSource?: EventSourceFactory;
 }) {
   const { draft } = editor;
   const [runs, setRuns] = useState<readonly SkillEvalRun[] | null>(null);
@@ -57,24 +50,29 @@ export function EvalsPanel({
   const [picked, setPicked] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const hasCases = editor.files.some((f) => f.path === CASES_PATH);
+  // Only the newest read counts, and none after the draft changed or the panel went (review M2).
+  const seq = useRef(0);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (): Promise<boolean> => {
+    const mine = ++seq.current;
     const res = await listDraftEvals(teamId, draft.id);
-    if (res.ok) setRuns(res.data);
-    else setError(res.error);
+    if (mine !== seq.current) return res.ok;
+    if (res.ok) {
+      setRuns(res.data);
+      setError(null);
+    } else setError(res.error);
+    return res.ok;
   }, [teamId, draft.id]);
 
   useEffect(() => {
     void reload();
+    return () => {
+      seq.current += 1;
+    };
   }, [reload]);
 
-  // Live progress: read again while any eval of this draft is queued or running.
-  const anyOpen = runs?.some((r) => OPEN.has(r.status)) ?? false;
-  useEffect(() => {
-    if (!anyOpen) return;
-    const timer = setInterval(() => void reload(), EVAL_POLL_MS);
-    return () => clearInterval(timer);
-  }, [anyOpen, reload]);
+  const openIds = (runs ?? []).filter((r) => isOpen(r.status)).map((r) => r.id);
+  useLiveEval(openIds, reload, eventSource);
 
   async function suggest() {
     setNotice(null);
@@ -86,11 +84,7 @@ export function EvalsPanel({
       if (!read.ok) return setError(read.error);
       current = read.data;
     }
-    const cases = suggestTriggerCases({
-      name: draft.name,
-      description,
-      taken: caseIdsOf(current),
-    });
+    const cases = suggestTriggerCases({ name: draft.name, description, taken: caseIdsOf(current) });
     const next = appendCases(current, cases);
     if (next === null)
       return setNotice(`${CASES_PATH} isn't a list of cases yet: fix it, then suggest again.`);
@@ -107,10 +101,16 @@ export function EvalsPanel({
 
   const shown =
     runs?.find((r) => r.id === picked) ?? runs?.find((r) => r.status === "completed") ?? null;
+  // A picked eval that is no longer listed: back to the default (review L6).
+  useEffect(() => {
+    if (picked && runs && !runs.some((r) => r.id === picked)) setPicked(null);
+  }, [picked, runs]);
 
   return (
-    <section aria-label="Eval suite" className="mt-6">
-      <h2 className="m-0 mb-2 text-base font-semibold">Evals</h2>
+    <section aria-labelledby="evals-heading" className="mt-6">
+      <h2 id="evals-heading" className="m-0 mb-2 text-base font-semibold">
+        Evals
+      </h2>
       <Button type="button" variant="secondary" onClick={() => void suggest()}>
         Suggest trigger cases
       </Button>
@@ -125,6 +125,7 @@ export function EvalsPanel({
           draftId={draft.id}
           rev={draft.rev}
           flush={editor.flush}
+          running={openIds.length > 0}
           onStarted={(id) => {
             setPicked(id);
             void reload();
@@ -135,7 +136,7 @@ export function EvalsPanel({
       )}
       {error && <ErrorNotice error={error} />}
       {runs && runs.length > 0 && (
-        <Table aria-label="Eval history">
+        <Table caption="Eval history">
           <TableHead>
             <TableRow>
               <TableHeader>Of</TableHeader>
@@ -150,23 +151,26 @@ export function EvalsPanel({
           </TableHead>
           <TableBody>
             {runs.map((r) => (
-              <TableRow key={r.id} aria-current={shown?.id === r.id ? "true" : undefined}>
+              <TableRow key={r.id}>
                 <TableCell>{subjectLabel(r)}</TableCell>
                 <TableCell>
                   <Link href={evalHref(r.id)}>{new Date(r.startedAt).toLocaleString()}</Link>
                 </TableCell>
                 <TableCell>
-                  {STATUS_TEXT[r.status]}
-                  {OPEN.has(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
+                  {RUN_STATUS_TEXT[r.status]}
+                  {isOpen(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
                 </TableCell>
                 <TableCell>{pct(r.scorecard?.passRate)}</TableCell>
+                <TableCell>{liftText(r.scorecard?.lift)}</TableCell>
                 <TableCell>
-                  {r.scorecard?.lift === null || r.scorecard?.lift === undefined
-                    ? "—"
-                    : `${r.scorecard.lift > 0 ? "+" : ""}${Math.round(r.scorecard.lift * 100)}`}
-                </TableCell>
-                <TableCell>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setPicked(r.id)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={shown?.id === r.id}
+                    aria-label={`Show the eval of ${subjectLabel(r)} started ${new Date(r.startedAt).toLocaleString()}`}
+                    onClick={() => setPicked(r.id)}
+                  >
                     Show
                   </Button>
                 </TableCell>
@@ -180,24 +184,25 @@ export function EvalsPanel({
   );
 }
 
-function ShownRun({ run }: { readonly run: SkillEvalRun }) {
+/** One eval: its scorecard, its progress, or why it ended without one. */
+export function ShownRun({ run }: { readonly run: SkillEvalRun }) {
+  const title = `Eval of ${subjectLabel(run)}`;
   return (
-    <div className="mt-4" aria-label={`Eval of ${subjectLabel(run)}`}>
+    <section className="mt-4" aria-label={title}>
       <h3 className="m-0 mb-2 text-sm font-semibold">
-        Eval of {subjectLabel(run)} ·{" "}
-        {run.mode === "full" ? "with a baseline" : "with the skill only"}
+        {title} · {run.mode === "full" ? "with a baseline" : "with the skill only"}
       </h3>
       {run.scorecard ? (
         <EvalScorecard card={run.scorecard} />
-      ) : OPEN.has(run.status) ? (
+      ) : isOpen(run.status) ? (
         <p role="status" className="text-sm">
           {run.progress.done} of {run.progress.total} runs done…
         </p>
       ) : (
         <Notice tone={run.status === "cancelled" ? "info" : "error"}>
-          <p>{run.failure?.message ?? STATUS_TEXT[run.status]}</p>
+          <p>{run.failure?.message ?? RUN_STATUS_TEXT[run.status]}</p>
         </Notice>
       )}
-    </div>
+    </section>
   );
 }

@@ -165,9 +165,9 @@ export function parseTokens(text: string): number | null | undefined {
 /** The team eval cap (KOBE-327, SK18): monthly dollars or tokens, or null for none. */
 export type TeamEvalCap = { readonly usd: number } | { readonly tokens: number } | null;
 
-/** Sets or removes the team eval cap (Team admin; the team skill settings, KOBE-327). */
+/** Sets or removes the team eval cap (`team.budgets.manage`, KOBE-327). */
 export function setTeamEvalCap(teamId: string, cap: TeamEvalCap): Promise<ApiResult<unknown>> {
-  return apiRequest("/v1/team/skill-review/settings", {
+  return apiRequest("/v1/team/budgets/eval-cap", {
     method: "PUT",
     json: { evalCap: cap },
     teamId,

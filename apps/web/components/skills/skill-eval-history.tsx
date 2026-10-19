@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { listSkillEvals, type SkillEvalRun } from "../../lib/skills/evals-api";
 import { evalHref } from "../../lib/skills/eval-href";
+import { RUN_STATUS_TEXT, isOpen, liftText, pct, usd } from "../../lib/skills/eval-format";
+import { useLiveEval } from "../../lib/skills/use-live-eval";
+import type { EventSourceFactory } from "../../lib/chat/stream";
 import { ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
 import {
@@ -22,17 +25,6 @@ import {
  * newest version first, with its headline numbers and a link to the full scorecard. The evals of
  * a version are started from the API (or, for its draft, the Workbench) and stay in the team.
  */
-const pct = (x: number | null | undefined) =>
-  x === null || x === undefined ? "—" : `${Math.round(x * 100)} %`;
-const STATUS: Readonly<Record<SkillEvalRun["status"], string>> = {
-  queued: "Queued",
-  running: "Running",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  budget_stopped: "Stopped by a budget",
-};
-
 /** The runs of saved versions, by version seq, newest version first. */
 export function byVersion(runs: readonly SkillEvalRun[]): [number, SkillEvalRun[]][] {
   const out = new Map<number, SkillEvalRun[]>();
@@ -43,26 +35,33 @@ export function byVersion(runs: readonly SkillEvalRun[]): [number, SkillEvalRun[
   return [...out.entries()].sort((a, b) => b[0] - a[0]);
 }
 
-function lift(r: SkillEvalRun): string {
-  const l = r.scorecard?.lift;
-  if (l === null || l === undefined) return "—";
-  const p = Math.round(l * 100);
-  return `${p > 0 ? "+" : ""}${p} points`;
-}
-
 export function SkillEvalHistory({
   teamId,
   scope,
   skillId,
   semverOf,
+  eventSource,
 }: {
   readonly teamId: string;
   readonly scope: "team" | "personal";
   readonly skillId: string;
   /** Version seq → its semver, when the page knows them ("v1.2.0"; else "version 3"). */
   readonly semverOf?: (seq: number) => string | undefined;
+  /** Tests inject the event stream. */
+  readonly eventSource?: EventSourceFactory;
 }) {
-  const { state } = useResource(() => listSkillEvals(teamId, scope, skillId));
+  const { state, reload } = useResource(() => listSkillEvals(teamId, scope, skillId));
+  // A running eval updates here too (its stream, else polling).
+  const openIds =
+    state.status === "ready" ? state.data.filter((r) => isOpen(r.status)).map((r) => r.id) : [];
+  useLiveEval(
+    openIds,
+    async () => {
+      reload();
+      return true;
+    },
+    eventSource,
+  );
   return (
     <Section
       id="skill-evals"
@@ -101,23 +100,22 @@ export function SkillEvalHistory({
                             </Link>
                           </TableRowHeader>
                           <TableCell>
-                            {STATUS[r.status]}
-                            {(r.status === "queued" || r.status === "running") &&
-                              ` (${r.progress.done} of ${r.progress.total})`}
+                            {RUN_STATUS_TEXT[r.status]}
+                            {isOpen(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
                           </TableCell>
                           <TableCell>
                             {r.mode === "full" ? "With baseline" : "Skill only"}
                           </TableCell>
                           <TableCell>{pct(r.scorecard?.passRate)}</TableCell>
                           <TableCell>{pct(r.scorecard?.baselinePassRate)}</TableCell>
-                          <TableCell>{lift(r)}</TableCell>
+                          <TableCell>{liftText(r.scorecard?.lift)}</TableCell>
                           <TableCell>
                             {pct(r.scorecard?.triggerPrecision)} / {pct(r.scorecard?.triggerRecall)}
                           </TableCell>
                           <TableCell>
-                            {r.scorecard
-                              ? `$${(r.scorecard.costUsd + r.scorecard.judgeCostUsd).toFixed(2)}`
-                              : "—"}
+                            {r.scorecard?.costUsd === undefined
+                              ? "—"
+                              : usd(r.scorecard.costUsd + (r.scorecard.judgeCostUsd ?? 0))}
                           </TableCell>
                         </TableRow>
                       ))}

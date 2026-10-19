@@ -9,8 +9,8 @@ import { Button, Field, FormRow, Section, Select, TextInput } from "../../ui/con
 /**
  * The team eval cap (KOBE-327, SK18), beside the budgets: monthly, in dollars or tokens, or none.
  * Skill evals and their judge count toward it (and toward the budgets); other runs never do. At
- * the cap new evals are refused and running ones stop. Team admins only (the page and the
- * settings route both require it).
+ * the cap new evals are refused and running ones stop. Team admins with the budget permission
+ * only (the page and `PUT /v1/team/budgets/eval-cap` both require it).
  */
 export function EvalCapForm({
   teamId,

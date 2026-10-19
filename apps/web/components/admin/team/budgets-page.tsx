@@ -205,8 +205,8 @@ function Body({
   const [invalid, setInvalid] = useState<string | null>(null);
   const siteRpm = budgets.site.userRequestsPerMinute;
   const [confirm, confirmDialog] = useConfirm();
-  // The cap lives in the team skill settings: Team admins (`team.skills.review`) set it.
-  const canSetCap = useTeamAccess().permissions.includes("team.skills.review");
+  // A spend cap: the budget permission, as every budget on this page (never the review one).
+  const canSetCap = useTeamAccess().permissions.includes("team.budgets.manage");
 
   async function removeBudget(m: TeamBudgets["members"][number], trigger: HTMLElement | null) {
     const yes = await confirm(
@@ -314,7 +314,13 @@ function Body({
 
       <SpendByKind budgets={budgets} />
       {budgets.evalCap && canSetCap && (
-        <EvalCapForm teamId={teamId} cap={budgets.evalCap} run={run} />
+        // Keyed by the cap: after a save or a removal the form shows what the server holds.
+        <EvalCapForm
+          key={JSON.stringify([budgets.evalCap.usd, budgets.evalCap.tokens])}
+          teamId={teamId}
+          cap={budgets.evalCap}
+          run={run}
+        />
       )}
 
       <Section

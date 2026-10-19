@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ApiError } from "../../lib/api/client";
 import {
   estimateDraftEval,
@@ -26,6 +26,7 @@ export function EvalRun({
   rev,
   flush,
   onStarted,
+  running = false,
 }: {
   readonly teamId: string;
   readonly draftId: string;
@@ -34,12 +35,22 @@ export function EvalRun({
   readonly flush: () => Promise<unknown>;
   /** Told the new eval's id once it started. */
   readonly onStarted?: (evalRunId: string) => void;
+  /** An eval of this draft is queued or running: Run waits (no double start, review L5). */
+  readonly running?: boolean;
 }) {
   const [mode, setMode] = useState<EvalMode>("full");
   const [view, setView] = useState<EvalEstimateView | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [started, setStarted] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A click while a start is on its way does nothing (state updates may not have landed yet).
+  const starting = useRef(false);
+  // "Eval started." goes once that eval is no longer running (review L5).
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running) setStarted(null);
+    wasRunning.current = running;
+  }, [running]);
 
   // Debounced (review-327 L6): an autosave per keystroke must not reload the package each time.
   useEffect(() => {
@@ -58,6 +69,8 @@ export function EvalRun({
   }, [teamId, draftId, mode, rev]);
 
   async function run() {
+    if (starting.current) return;
+    starting.current = true;
     setBusy(true);
     try {
       await flush();
@@ -73,13 +86,13 @@ export function EvalRun({
         message: "Your latest edits aren't saved yet: try again.",
       });
     } finally {
+      starting.current = false;
       setBusy(false);
     }
   }
 
   return (
-    <section aria-label="Evals" className="mt-4">
-      <h2 className="m-0 mb-2 text-base font-semibold">Evals</h2>
+    <div className="mt-4">
       <label className="mr-3 text-sm">
         <input
           type="checkbox"
@@ -104,7 +117,12 @@ export function EvalRun({
           <p>{view.blocked.message}</p>
         </Notice>
       ) : (
-        <Button type="button" variant="primary" disabled={busy || !view} onClick={() => void run()}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={busy || running || !view}
+          onClick={() => void run()}
+        >
           Run evals
         </Button>
       )}
@@ -114,6 +132,6 @@ export function EvalRun({
         </p>
       )}
       {error && <ErrorNotice error={error} />}
-    </section>
+    </div>
   );
 }

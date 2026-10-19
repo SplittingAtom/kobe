@@ -42,6 +42,29 @@
   (`/me/skills/evals/<id>`, `eval-run-page.tsx`). Personal skills have no version view yet.
 - **Tables:** column headers are `TableHeader` (th) inside `TableHead` (thead), as elsewhere.
 
+## Review-328 fixes (`review-328.md`) and coordinator decisions
+
+- **Cap permission (decision 1):** the cap moved to `PUT /v1/team/budgets/eval-cap`
+  (`team.budgets.manage`); the skill review settings refuse it (400). Today both permissions are
+  Team admin, so a reviewer without budget rights can't exist yet; the route test checks a member
+  gets 403 and the review route can't set it. The web form needs `team.budgets.manage`.
+- **Live progress (decision 2):** `useLiveEval` follows `GET /v1/skill-evals/{id}/events`
+  (`skill.eval.progress`, `skill.eval.completed`), falls back to polling on a stream error (paused
+  while the tab is hidden, stopped after 5 failed reads), in the panel, the version history and
+  the eval page.
+- **Costs (coordinator):** `GET /v1/skill-evals/:id` and the history lists leave out every cost
+  field unless the viewer started the eval or holds `team.budgets.manage` (`costsHidden`;
+  `withoutSkillEvalCosts` in the protocol); the UI says who sees costs. Route test in
+  `skill-eval-budget.db.test.ts`.
+- **Double start:** the server refuses a second start of the same revision and mode while one is
+  open (409 `eval_already_running`, before the scan and under the team lock); the client guards
+  with a ref, and Run is disabled while an eval of the draft is open.
+- M1 errors clear on the next good read; M2 a request sequence drops stale reads; M3 the cap form
+  is keyed by the cap; M4 one "Evals" heading and region. L1 regions with names; L2 captions on
+  the scorecard tables; L3 `next/link` with a per-case name; L4 statuses and check reasons in
+  words (`lib/skills/eval-format.ts`, shared); L5 as above; L6 `aria-pressed` and a named Show; a
+  vanished pick falls back; L7 the stream.
+
 ## Open questions (for the reviewer / coordinator)
 
 - Personal skills have no version view to put their eval history on; add one?

@@ -286,7 +286,7 @@ describe("team eval cap (KOBE-327, KOBE-328)", () => {
     const calls = stubApi({
       "GET /v1/team/budgets": [200, WITH_CAP],
       "GET /v1/team/members": [200, MEMBERS],
-      "PUT /v1/team/skill-review/settings": [200, {}],
+      "PUT /v1/team/budgets/eval-cap": [200, {}],
     });
     renderTeam(<TeamBudgetsPage />, ADMIN);
     expect(await screen.findByRole("rowheader", { name: "Skill evals" })).toBeTruthy();
@@ -313,12 +313,12 @@ describe("team eval cap (KOBE-327, KOBE-328)", () => {
     });
   });
 
-  it("is not offered without the Team admin's skill settings permission", async () => {
+  it("is not offered to a skills reviewer without the budget permission", async () => {
     stubApi({
       "GET /v1/team/budgets": [200, WITH_CAP],
       "GET /v1/team/members": [200, MEMBERS],
     });
-    renderTeam(<TeamBudgetsPage />, { permissions: ["team.budgets.manage"] });
+    renderTeam(<TeamBudgetsPage />, { permissions: ["team.skills.review"] });
     await screen.findByRole("rowheader", { name: "Skill evals" });
     expect(screen.queryByRole("form", { name: "Team eval cap" })).toBeNull();
   });

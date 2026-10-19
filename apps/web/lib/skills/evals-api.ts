@@ -2,10 +2,11 @@
  * Skill evals over the API (KOBE-325, KOBE-327; contract `@kobe/protocol` skill-evals `api.ts`):
  * the estimate before Run and the start. Responses arrive camelized.
  */
-import type { SkillEvalRun } from "@kobe/protocol";
+import type { SkillEvalRunView } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../api/client";
 
-export type { SkillEvalRun };
+/** An eval as the API serves it: its costs only for its starter and Team admins. */
+export type SkillEvalRun = SkillEvalRunView;
 
 export type EvalMode = "full" | "with_only";
 

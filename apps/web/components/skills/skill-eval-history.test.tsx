@@ -2,9 +2,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SkillEvalScorecard } from "@kobe/protocol";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SkillAdminPage } from "../admin/team/skill-editor/skill-admin-page";
+import { FakeEvalStream } from "../../lib/skills/testing/fake-event-source";
 import { renderTeam, stubApi } from "../admin/testing";
 import { EvalRunPage } from "./eval-run-page";
 import { SkillEvalHistory, byVersion } from "./skill-eval-history";
@@ -126,10 +127,28 @@ describe("one eval's full scorecard", () => {
   it("opens the scorecard of the linked eval", async () => {
     stubApi({ "GET /v1/skill-evals/e-2": [200, run("e-2", 2)] });
     renderTeam(<EvalRunPage evalRunId="e-2" />);
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Eval of version 2" }),
-    ).toBeDefined();
-    expect(screen.getByLabelText("Scorecard")).toBeDefined();
+    expect(await screen.findByRole("region", { name: "Eval of version 2" })).toBeDefined();
+    expect(screen.getByRole("region", { name: "Scorecard" })).toBeDefined();
+  });
+
+  it("follows a running eval on its stream until it completes", async () => {
+    const stream = new FakeEvalStream();
+    const calls = stubApi({
+      "GET /v1/skill-evals/e-5": [
+        [
+          200,
+          run("e-5", 2, { status: "running", scorecard: null, progress: { done: 1, total: 5 } }),
+        ],
+        [200, run("e-5", 2)],
+      ],
+    });
+    renderTeam(<EvalRunPage evalRunId="e-5" eventSource={stream.factory} />);
+    expect(await screen.findByText(/1 of 5 runs done/)).toBeDefined();
+    await waitFor(() => expect(stream.urls).toEqual(["/v1/skill-evals/e-5/events"]));
+    must(stream.sources[0]).emit("skill.eval.completed", { status: "completed" });
+    expect(await screen.findByRole("region", { name: "Scorecard" })).toBeDefined();
+    expect(must(stream.sources[0]).closed).toBe(true);
+    expect(calls.filter((c) => c.url === "/v1/skill-evals/e-5")).toHaveLength(2);
   });
 
   it("explains an eval that stopped", async () => {
