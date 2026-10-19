@@ -26,7 +26,7 @@ import {
 } from "../../../ui/console";
 import { getCatalogSwitches } from "../../../../lib/admin/api/team/skill-review";
 import { useTeamAccess } from "../../console-context";
-import { InstallUpdatesPanel } from "./install-updates";
+import { SkillInstallUpdatesPanel } from "./skill-install-updates";
 import { SkillInstallChangeForm } from "./skill-install-change";
 import { MutationStatus } from "../../error-notice";
 import { DateTime, ResourceView } from "../../parts";
@@ -178,7 +178,7 @@ export function CatalogInstallsSection() {
                               }}
                             />
                           )}
-                          <InstallUpdatesPanel
+                          <SkillInstallUpdatesPanel
                             teamId={teamId}
                             install={i}
                             mayMove={mayChange(i)}

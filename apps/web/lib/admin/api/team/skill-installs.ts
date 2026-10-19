@@ -119,7 +119,7 @@ export function putTeamSkillInstall(
 }
 
 /** A newer version of an installed catalog skill (KOBE-337, SK25). */
-export interface InstallUpdate {
+export interface SkillInstallUpdate {
   readonly versionId: string;
   readonly semver: string;
   readonly changelog: string | null;
@@ -131,24 +131,24 @@ export interface InstallUpdate {
   readonly evalDelta: { readonly passRate: number | null; readonly lift: number | null };
 }
 
-export interface InstallUpdates {
+export interface SkillInstallUpdates {
   readonly skillId: string;
   readonly name: string;
   readonly pinMode: CatalogInstall["pinMode"];
   readonly pinned: { readonly versionId: string; readonly semver: string };
   readonly running: { readonly versionId: string; readonly semver: string } | null;
-  readonly updates: readonly InstallUpdate[];
+  readonly updates: readonly SkillInstallUpdate[];
   readonly rollbackTo: string | null;
 }
 
-export function getInstallUpdates(
+export function getSkillInstallUpdates(
   teamId: string,
   skillId: string,
-): Promise<ApiResult<InstallUpdates>> {
+): Promise<ApiResult<SkillInstallUpdates>> {
   return apiRequest(`${BASE}/installs/${enc(skillId)}/updates`, { teamId });
 }
 
-export function getInstallDiff(
+export function getSkillInstallDiff(
   teamId: string,
   skillId: string,
   to: string,
@@ -157,7 +157,7 @@ export function getInstallDiff(
 }
 
 /** Move pin: the install runs `version` from the next run of every thread (audited). */
-export function moveInstallPin(
+export function moveSkillInstallPin(
   teamId: string,
   skillId: string,
   version: string,
@@ -170,7 +170,7 @@ export function moveInstallPin(
 }
 
 /** Roll back: the install returns to the version it ran before its last change (audited). */
-export function rollbackInstall(
+export function rollbackSkillInstall(
   teamId: string,
   skillId: string,
 ): Promise<ApiResult<SkillInstallResult>> {
@@ -203,7 +203,7 @@ export interface TeamBlock {
   readonly at: string;
 }
 
-export interface InstallRequest {
+export interface SkillInstallRequest {
   readonly skillId: string;
   readonly name: string;
   readonly requesters: readonly { readonly userId: string; readonly name: string }[];
@@ -225,13 +225,13 @@ export function unblockSkill(teamId: string, skillId: string): Promise<ApiResult
   return apiRequest(`${BASE}/blocks/${enc(skillId)}`, { teamId, method: "DELETE" });
 }
 
-export function listInstallRequests(
+export function listSkillInstallRequests(
   teamId: string,
-): Promise<ApiResult<{ requests: InstallRequest[] }>> {
+): Promise<ApiResult<{ requests: SkillInstallRequest[] }>> {
   return apiRequest(`${BASE}/install-requests`, { teamId });
 }
 
-export function dismissInstallRequests(
+export function dismissSkillInstallRequests(
   teamId: string,
   skillId: string,
 ): Promise<ApiResult<unknown>> {

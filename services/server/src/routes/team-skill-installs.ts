@@ -11,7 +11,7 @@ import {
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
-import { installDiff, installUpdates } from "../skills/install-updates.js";
+import { skillInstallDiff, skillInstallUpdates } from "../skills/skill-install-updates.js";
 import { semverSchema } from "../skills/semver.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { REQUIRED_WARN_AT } from "../skills/access.js";
@@ -35,7 +35,7 @@ const SKILL_INSTALL_MISSING = {
 type Ctx = Context<{ Variables: TeamVariables }>;
 
 /** The answer to an install, a Move pin or a Roll back. */
-function installAnswer(c: Ctx, r: SkillInstallResult) {
+function skillInstallAnswer(c: Ctx, r: SkillInstallResult) {
   if (r.ok)
     return c.json({
       semver: r.semver,
@@ -93,7 +93,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
       asBuilder: !teamRoleAllows(c.get("team").role, "team.skills.installs.manage"),
       ...body,
     });
-    return installAnswer(c, r);
+    return skillInstallAnswer(c, r);
   });
 
   // Updates of an install (KOBE-337, SK25): what runs, newer versions with changelog and eval
@@ -101,7 +101,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   app.get("/installs/:skillId/updates", requireTeamPermission("team.read"), async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));
     if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
-    const u = await installUpdates(db, c.get("team").id, id.data);
+    const u = await skillInstallUpdates(db, c.get("team").id, id.data);
     return u ? c.json(u) : c.json(SKILL_INSTALL_MISSING, 404);
   });
 
@@ -115,7 +115,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
         { code: "storage_unavailable", message: "Skill storage is not configured." },
         503,
       );
-    const d = await installDiff(db, deps.blobs, c.get("team").id, id.data, to.data);
+    const d = await skillInstallDiff(db, deps.blobs, c.get("team").id, id.data, to.data);
     return d
       ? c.json(d)
       : c.json({ code: "not_found", message: "No such install or version." }, 404);
@@ -135,7 +135,7 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
       version,
       act,
     });
-    return installAnswer(c, r);
+    return skillInstallAnswer(c, r);
   };
 
   app.post("/installs/:skillId/move", requireTeamPermission("team.skills.publish"), async (c) => {
@@ -150,11 +150,14 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
     async (c) => {
       const id = idSchema.safeParse(c.req.param("skillId"));
       if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
-      const u = await installUpdates(db, c.get("team").id, id.data);
+      const u = await skillInstallUpdates(db, c.get("team").id, id.data);
       if (!u) return c.json(SKILL_INSTALL_MISSING, 404);
       if (!u.rollbackTo)
         return c.json(
-          { code: "no_rollback", message: "This install has no earlier version to go back to." },
+          {
+            code: "no_rollback",
+            message: "This skill has no earlier version installed to go back to.",
+          },
           409,
         );
       return moveTo(c, u.rollbackTo, "rollback");

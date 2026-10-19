@@ -1,6 +1,10 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { BlobStore } from "../retention/blobs.js";
-import { publishedVersions, runningVersion, type PublishedVersion } from "./install-versions.js";
+import {
+  publishedVersions,
+  runningVersion,
+  type PublishedVersion,
+} from "./skill-install-versions.js";
 import { cardScore, type CardScore } from "./catalog-browse.js";
 import { diffPackages, readPackage, type PackageDiff } from "./registry/review-diff.js";
 import { compareSemver } from "./semver.js";
@@ -15,7 +19,7 @@ import { compareSemver } from "./semver.js";
  * install ran before its last change in the team's own audit log.
  */
 
-export interface InstallUpdate {
+export interface SkillInstallUpdate {
   readonly versionId: string;
   readonly semver: string;
   readonly changelog: string | null;
@@ -32,7 +36,7 @@ export interface InstallUpdate {
   readonly score: CardScore | null;
 }
 
-export interface InstallUpdates {
+export interface SkillInstallUpdates {
   readonly skillId: string;
   readonly name: string;
   readonly pinMode: "pinned" | "within_major" | "latest";
@@ -41,7 +45,7 @@ export interface InstallUpdates {
   /** The version runs load now; null when none can run (revoked, suspended). */
   readonly running: { readonly versionId: string; readonly semver: string } | null;
   /** Newer approved versions, newest first. */
-  readonly updates: readonly InstallUpdate[];
+  readonly updates: readonly SkillInstallUpdate[];
   /** The version a Roll back returns to; null when there is none. */
   readonly rollbackTo: string | null;
 }
@@ -90,7 +94,7 @@ export async function rollbackTarget(
   return null;
 }
 
-async function installRow(tx: KobeTx, teamId: string, skillId: string) {
+async function skillInstallRow(tx: KobeTx, teamId: string, skillId: string) {
   const res = await tx.execute<{
     name: string;
     version_id: string;
@@ -129,13 +133,13 @@ async function rollbackOf(
   return rollbackTarget(tx, teamId, skillId, pinned.semver);
 }
 
-export async function installUpdates(
+export async function skillInstallUpdates(
   db: KobeDb,
   teamId: string,
   skillId: string,
-): Promise<InstallUpdates | null> {
+): Promise<SkillInstallUpdates | null> {
   return withTeam(db, teamId, async (tx) => {
-    const install = await installRow(tx, teamId, skillId);
+    const install = await skillInstallRow(tx, teamId, skillId);
     if (!install) return null;
     const versions = await publishedVersions(tx, skillId);
     const pinned = versions.find((v) => v.id === install.version_id);
@@ -159,7 +163,7 @@ export async function installUpdates(
           compareSemver(v.semver, base.semver) > 0,
       )
       .sort((a, b) => compareSemver(b.semver, a.semver))
-      .map((v): InstallUpdate => {
+      .map((v): SkillInstallUpdate => {
         const score = cardScore(v.authoritativeScorecard);
         return {
           versionId: v.id,
@@ -191,14 +195,14 @@ export async function installUpdates(
  * The file diff from the version the install runs now (its pinned one when none can run) to
  * `toSemver` (published versions only).
  */
-export async function installDiff(
+export async function skillInstallDiff(
   db: KobeDb,
   blobs: BlobStore,
   teamId: string,
   skillId: string,
   toSemver: string,
 ): Promise<PackageDiff | null> {
-  const state = await installUpdates(db, teamId, skillId);
+  const state = await skillInstallUpdates(db, teamId, skillId);
   if (!state) return null;
   const fromId = state.running?.versionId ?? state.pinned.versionId;
   const found = await withTeam(db, teamId, async (tx) => {

@@ -16,7 +16,7 @@ import { lockSkillInstall } from "./default-target.js";
  * Limits (review M1, M2): a member asks for a skill at most once a day (counted from the last time
  * they asked, whether or not a Team admin dismissed it since), and for at most
  * {@link REQUESTS_PER_DAY} skills a day. Installing (newly) or blocking the skill answers its requests
- * (`installAnswers`, `blockCatalogSkill`); they leave with the membership (cascade).
+ * (`skillInstallAnswers`, `blockCatalogSkill`); they leave with the membership (cascade).
  *
  * The admins are emailed after the request commits, off the request path, best effort: the console
  * list is the durable record.
@@ -35,7 +35,7 @@ export type RequestResult =
     }
   | { readonly ok: false; readonly code: "not_found" | "blocked" | "request_limit" };
 
-export interface InstallRequest {
+export interface SkillInstallRequest {
   readonly skillId: string;
   readonly name: string;
   /** Members who asked, newest first. */
@@ -105,7 +105,10 @@ export function requestForTeam(
  * The open requests per skill: not dismissed, from the last {@link REQUEST_WINDOW_DAYS} days, by
  * active members (review L2). Older rows are purged here (live state, not history).
  */
-export function listInstallRequests(db: KobeDb, teamId: string): Promise<InstallRequest[]> {
+export function listSkillInstallRequests(
+  db: KobeDb,
+  teamId: string,
+): Promise<SkillInstallRequest[]> {
   return withTeam(db, teamId, async (tx) => {
     await tx.execute(sql`
       DELETE FROM team_skill_requests
@@ -143,7 +146,7 @@ export function listInstallRequests(db: KobeDb, teamId: string): Promise<Install
 }
 
 /** Dismisses the open requests for a skill (they leave the list until someone asks again). */
-export function dismissInstallRequests(
+export function dismissSkillInstallRequests(
   db: KobeDb,
   input: { readonly teamId: string; readonly skillId: string },
 ): Promise<boolean> {

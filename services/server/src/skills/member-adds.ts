@@ -1,6 +1,10 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { publishedVersions, runningVersion, type PublishedVersion } from "./install-versions.js";
+import {
+  publishedVersions,
+  runningVersion,
+  type PublishedVersion,
+} from "./skill-install-versions.js";
 import { lockSkillInstall, lockTeamSkillNames } from "./default-target.js";
 import { readCatalogSwitches } from "./settings.js";
 import {
@@ -21,7 +25,7 @@ import {
  * never), no add while the team blocks the skill (the database refuses it too, 0133), none of a
  * skill the team installed in any mode (the install governs; Request for team asks for another
  * version, review M3), and none whose name is one of the team's own skills (SK27). Installing
- * turns existing adds into the members' "on" choice for the install (`installAnswers`).
+ * turns existing adds into the members' "on" choice for the install (`skillInstallAnswers`).
  */
 export type PinMode = "pinned" | "within_major" | "latest";
 

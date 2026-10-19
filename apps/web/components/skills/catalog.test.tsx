@@ -183,7 +183,7 @@ describe("Catalog detail", () => {
       "0.9.0",
     );
     await userEvent.selectOptions(screen.getByLabelText("Access"), "default_on");
-    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    await userEvent.click(screen.getByRole("button", { name: "Install skill" }));
     expect(await screen.findByText("sales-report is set to 1.1.0.")).toBeTruthy();
     const put = calls.find((c) => c.method === "PUT");
     expect(JSON.parse(String(put?.body))).toEqual({

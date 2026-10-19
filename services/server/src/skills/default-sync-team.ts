@@ -1,5 +1,5 @@
 import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
-import { installAnswers } from "./install-answers.js";
+import { skillInstallAnswers } from "./skill-install-answers.js";
 import { recordAudit } from "../audit/record.js";
 import {
   defaultTargets,
@@ -97,7 +97,7 @@ export async function addInTeam(
     ON CONFLICT (team_id, skill_id) DO NOTHING
     RETURNING 1`);
   if (inserted.rows.length > 0) {
-    await installAnswers(tx, teamId, skillId);
+    await skillInstallAnswers(tx, teamId, skillId);
     return { ...NOTHING, installed: 1 };
   }
   const existing = await tx.execute<{ origin: string }>(sql`

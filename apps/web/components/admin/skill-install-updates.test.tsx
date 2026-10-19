@@ -2,11 +2,11 @@
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InstallUpdatesPanel } from "./team/skill-editor/install-updates";
+import { SkillInstallUpdatesPanel } from "./team/skill-editor/skill-install-updates";
 import { renderTeam, stubApi } from "./testing";
 
 /** KOBE-337 (SK25): Update available, the diff, Move pin and Roll back. */
-const INSTALL = {
+const SKILL_INSTALL = {
   skillId: "s-1",
   name: "quarterly-report",
   versionId: "v-1",
@@ -74,7 +74,13 @@ describe("install updates", () => {
     });
     const run = vi.fn(async (action: () => Promise<{ ok: boolean }>) => (await action()).ok);
     renderTeam(
-      <InstallUpdatesPanel teamId="t-1" install={INSTALL} mayMove pending={false} run={run} />,
+      <SkillInstallUpdatesPanel
+        teamId="t-1"
+        install={SKILL_INSTALL}
+        mayMove
+        pending={false}
+        run={run}
+      />,
     );
     await userEvent.click(screen.getByText("Updates"));
     expect(await screen.findByText("Charts.")).toBeTruthy();

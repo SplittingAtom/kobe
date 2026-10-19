@@ -4,7 +4,11 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
 import { invalidRequest } from "../teams/http.js";
-import { REQUESTS_PER_DAY, notifyTeamAdmins, requestForTeam } from "../skills/install-requests.js";
+import {
+  REQUESTS_PER_DAY,
+  notifyTeamAdmins,
+  requestForTeam,
+} from "../skills/skill-install-requests.js";
 
 const querySchema = z.object({
   q: z.string().max(200).optional(),

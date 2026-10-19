@@ -2,7 +2,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { dismissInstallRequests, listInstallRequests } from "../skills/install-requests.js";
+import {
+  dismissSkillInstallRequests,
+  listSkillInstallRequests,
+} from "../skills/skill-install-requests.js";
 import { listTeamMemberAdds } from "../skills/member-adds.js";
 import { blockCatalogSkill, listTeamBlocks, unblockCatalogSkill } from "../skills/team-blocks.js";
 
@@ -58,14 +61,14 @@ export function teamSkillBlockRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.get("/install-requests", manage, async (c) =>
-    c.json({ requests: await listInstallRequests(db, c.get("team").id) }),
+    c.json({ requests: await listSkillInstallRequests(db, c.get("team").id) }),
   );
 
   app.post("/install-requests/:skillId/dismiss", manage, async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));
     const done =
       id.success &&
-      (await dismissInstallRequests(db, { teamId: c.get("team").id, skillId: id.data }));
+      (await dismissSkillInstallRequests(db, { teamId: c.get("team").id, skillId: id.data }));
     return done
       ? c.json({ dismissed: true })
       : c.json({ code: "not_found", message: "No open request for that skill." }, 404);

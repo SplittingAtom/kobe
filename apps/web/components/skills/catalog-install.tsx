@@ -104,7 +104,7 @@ export function CatalogInstall({
             </Select>
           </Field>
           <Button type="submit" variant="primary" disabled={mutation.pending}>
-            {current ? "Save" : "Install"}
+            {current ? "Save" : "Install skill"}
           </Button>
         </FormRow>
       </form>

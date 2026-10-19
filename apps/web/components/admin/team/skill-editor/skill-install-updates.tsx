@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  getInstallDiff,
-  getInstallUpdates,
-  moveInstallPin,
-  rollbackInstall,
+  getSkillInstallDiff,
+  getSkillInstallUpdates,
+  moveSkillInstallPin,
+  rollbackSkillInstall,
   type CatalogInstall,
-  type InstallUpdate,
-  type InstallUpdates,
+  type SkillInstallUpdate,
+  type SkillInstallUpdates,
   type SkillInstallResult,
 } from "../../../../lib/admin/api/team/skill-installs";
 import type { VersionDiff } from "../../../../lib/admin/api/site/skill-review";
@@ -30,14 +30,14 @@ function Update({
 }: {
   readonly teamId: string;
   readonly install: CatalogInstall;
-  readonly update: InstallUpdate;
+  readonly update: SkillInstallUpdate;
   readonly mayMove: boolean;
   readonly pending: boolean;
   readonly onMove: (version: string) => void;
 }) {
   const [diff, setDiff] = useState<VersionDiff | string | null>(null);
   const loadDiff = async () => {
-    const r = await getInstallDiff(teamId, install.skillId, update.semver);
+    const r = await getSkillInstallDiff(teamId, install.skillId, update.semver);
     setDiff(r.ok ? r.data : r.error.message);
   };
   return (
@@ -76,7 +76,7 @@ function Update({
  * Update available (KOBE-337, SK25): what the install runs, each newer version with its
  * changelog, eval delta and file diff, Move pin and Roll back (single audited acts).
  */
-export function InstallUpdatesPanel({
+export function SkillInstallUpdatesPanel({
   teamId,
   install,
   mayMove,
@@ -92,9 +92,9 @@ export function InstallUpdatesPanel({
     notice: (r: SkillInstallResult) => string,
   ) => Promise<boolean>;
 }) {
-  const [state, setState] = useState<InstallUpdates | string | null>(null);
+  const [state, setState] = useState<SkillInstallUpdates | string | null>(null);
   const load = async () => {
-    const r = await getInstallUpdates(teamId, install.skillId);
+    const r = await getSkillInstallUpdates(teamId, install.skillId);
     setState(r.ok ? r.data : r.error.message);
   };
   const act = async (fn: () => Promise<ApiResult<SkillInstallResult>>) => {
@@ -127,7 +127,7 @@ export function InstallUpdatesPanel({
                   update={u}
                   mayMove={mayMove}
                   pending={pending}
-                  onMove={(v) => void act(() => moveInstallPin(teamId, install.skillId, v))}
+                  onMove={(v) => void act(() => moveSkillInstallPin(teamId, install.skillId, v))}
                 />
               ))}
             </ul>
@@ -137,7 +137,7 @@ export function InstallUpdatesPanel({
               size="sm"
               className="mt-2"
               disabled={pending}
-              onClick={() => void act(() => rollbackInstall(teamId, install.skillId))}
+              onClick={() => void act(() => rollbackSkillInstall(teamId, install.skillId))}
             >
               Roll back to {state.rollbackTo}
             </Button>

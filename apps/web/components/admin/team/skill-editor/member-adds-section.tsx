@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import {
-  dismissInstallRequests,
-  listInstallRequests,
+  dismissSkillInstallRequests,
+  listSkillInstallRequests,
   listMemberAdds,
   listTeamBlocks,
   retirementText,
   unblockSkill,
-  type InstallRequest,
+  type SkillInstallRequest,
   type MemberAdd,
   type TeamBlock,
 } from "../../../../lib/admin/api/team/skill-installs";
@@ -74,7 +74,7 @@ export function MemberAddsSection() {
   const teamId = useTeamAccess().team.id;
   const adds = useResource(() => listMemberAdds(teamId));
   const blocks = useResource(() => listTeamBlocks(teamId));
-  const requests = useResource(() => listInstallRequests(teamId));
+  const requests = useResource(() => listSkillInstallRequests(teamId));
   const mutation = useMutation();
 
   async function unblock(b: TeamBlock) {
@@ -85,9 +85,9 @@ export function MemberAddsSection() {
     if (done) blocks.reload();
   }
 
-  async function dismiss(r: InstallRequest) {
+  async function dismiss(r: SkillInstallRequest) {
     const done = await mutation.run(
-      () => dismissInstallRequests(teamId, r.skillId),
+      () => dismissSkillInstallRequests(teamId, r.skillId),
       () => `Dismissed the requests for ${r.name}.`,
     );
     if (done) requests.reload();
