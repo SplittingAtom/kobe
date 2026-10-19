@@ -1661,7 +1661,7 @@ export const AUDIT_EVENTS = {
     recipientId: id,
     emailed: z.boolean(),
     /** KOBE-431: `skipped` for a refresh-skip event (rate-limited apart from drift); absent = drift. */
-    kind: z.enum(["drift", "skipped"]).optional(),
+    kind: z.enum(["drift", "skipped", "templates_skipped"]).optional(),
   }),
   /** A site admin re-approved drifted tools (KOBE-102); they are offered again. */
   "mcp.connector.reapproved": event("site", {
@@ -1690,6 +1690,16 @@ export const AUDIT_EVENTS = {
     connectorId: id,
     name: z.string().max(64),
     reason: z.enum(["auth_required"]),
+  }),
+  /**
+   * The refresh began not checking a connector's MCP Apps templates while its tools were checked
+   * (KOBE-433 re-review NEW-2): `resources/list` failed, an outdated proxy, a failed write. Site
+   * admins are told; only approved bytes are ever served meanwhile.
+   */
+  "mcp.connector.templates_skipped": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.string().regex(/^[a-z_]{1,32}$/),
   }),
   /** A site admin set or replaced a connector's site-wide API key (KOBE-303); never the key or its hint. */
   "mcp.connector.site_key_set": event("site", {

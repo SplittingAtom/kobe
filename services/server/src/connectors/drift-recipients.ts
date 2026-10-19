@@ -93,6 +93,8 @@ export interface DriftNotice {
    * asks for credentials and no site key or admin key is usable.
    */
   readonly refreshSkipped?: "auth_required";
+  /** Site admins only (KOBE-433): why the app templates were not checked for changes. */
+  readonly templatesSkipped?: string;
 }
 
 /** Connectors with tools awaiting re-approval that this user is told about (the in-app notice). */
@@ -106,6 +108,7 @@ export async function driftNoticesFor(
       name: connectors.name,
       snapshot: connectors.toolsSnapshot,
       skipped: connectors.refreshSkipped,
+      templatesSkipped: connectors.templatesSkipped,
     })
     .from(connectors)
     .where(and(eq(connectors.status, "active"), isNull(connectors.deletedAt)))
@@ -125,12 +128,19 @@ export async function driftNoticesFor(
         t.reason === undefined ? [] : [{ uri: t.uri, reason: t.reason }],
       ),
     };
-    return r.skipped === "auth_required" && user.siteRole !== null
-      ? { ...notice, refreshSkipped: "auth_required" }
-      : notice;
+    if (user.siteRole === null) return notice;
+    return {
+      ...notice,
+      ...(r.skipped === "auth_required" ? { refreshSkipped: "auth_required" as const } : {}),
+      ...(r.templatesSkipped === null ? {} : { templatesSkipped: r.templatesSkipped }),
+    };
   });
   const drifted = notices.filter(
-    (n) => n.tools.length > 0 || n.templates.length > 0 || n.refreshSkipped !== undefined,
+    (n) =>
+      n.tools.length > 0 ||
+      n.templates.length > 0 ||
+      n.refreshSkipped !== undefined ||
+      n.templatesSkipped !== undefined,
   );
   if (user.siteRole !== null || drifted.length === 0) return drifted;
 

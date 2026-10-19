@@ -151,7 +151,8 @@ export interface ServedTemplate {
 }
 
 /**
- * The template Kobe may render: pinned (never drifted), of an active, not deleted connector.
+ * The template Kobe may render: pinned (never drifted) and approved, of an active, not deleted
+ * connector.
  * Visibility to a member and the template's tool are checked by the callers (MA-4, MA-8).
  */
 export async function servedTemplate(
@@ -173,6 +174,8 @@ export async function servedTemplate(
         eq(connectorUiResources.connectorId, connectorId),
         eq(connectorUiResources.uri, uri),
         eq(connectorUiResources.status, "pinned"),
+        // The CHECK already ties pinned to approved; this holds even if it ever loosens (NEW-3).
+        eq(connectorUiResources.approved, true),
         eq(connectors.status, "active"),
         isNull(connectors.deletedAt),
       ),

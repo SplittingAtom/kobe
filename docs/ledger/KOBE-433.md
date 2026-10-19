@@ -114,6 +114,19 @@ pinned_hash}`; the same proposal again is no new event;
   - MA-2 approval: refuse `proposed {invalid}` and placeholders; require the reviewed
     `pinned_hash` (a new row: its own); re-validate MIME, size and NUL; set `approved = true`.
 
+## Re-review fixes (NEW-1..3)
+
+- **Migration 0156** (generated): `connectors.pin_version` (1 = pinned before 433, the upgrade
+  default; 2 since) and `templates_skipped`. Upgrade test `connector-pin-version-upgrade.db.test.ts`.
+- **NEW-1:** `applyDrift(..., {adoptLegacyUi})` adopts a `ui` reference only for a version-1
+  snapshot; every pin and checked refresh sets version 2. Afterwards a tool that starts naming a
+  template (even an approved one) drifts.
+- **NEW-2:** the old-proxy fallback reports `uiSkipped: proxy_outdated`. A checked pass stores
+  `templates_skipped` (cleared by a pass that checks templates, a URL change); its start (or a
+  new reason) is warned and audited `mcp.connector.templates_skipped`, emailed to site admins
+  (kind `templates_skipped`), in their notices and on the registry page.
+- **NEW-3:** `servedTemplate` also requires `approved`.
+
 ## Open questions
 
 - None open. (Invalid new templates: reported, per coordinator decision 3.)

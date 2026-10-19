@@ -114,9 +114,11 @@ export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
         let res = await post({ ...base, ui_resources: true });
         // A proxy older than KOBE-433 refuses the field: probe the tools alone (review LOW-1);
         // without `uiResources` the refresh leaves the templates as they are.
+        let outdated = false;
         if (res.status === 400) {
           await res.body?.cancel();
           res = await post(base);
+          outdated = true;
         }
         if (res.status !== 200) {
           await res.body?.cancel();
@@ -132,7 +134,11 @@ export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
           ok: true,
           tools,
           ...(uiResources === undefined ? {} : { uiResources }),
-          ...(uiSkipped === undefined ? {} : { uiSkipped }),
+          ...(outdated
+            ? { uiSkipped: "proxy_outdated" }
+            : uiSkipped === undefined
+              ? {}
+              : { uiSkipped }),
         };
       } catch {
         return { ok: false, failure: "proxy_unavailable" };

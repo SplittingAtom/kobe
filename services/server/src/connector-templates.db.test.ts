@@ -329,6 +329,8 @@ describe("review fixes (KOBE-433 review)", () => {
     const plain = { name: "open", description: "Opens the app", inputSchema: { type: "object" } };
     const up: Upstream = { tools: [plain], resources: [] };
     const { id } = await register("apps-legacy", up);
+    // What G10 left: pin_version 1 (the column default on upgrade, 0156).
+    await h.admin.query(`UPDATE connectors SET pin_version = 1 WHERE id = $1`, [id]);
     const [before] = await toolsOf(id);
     expect(before).not.toHaveProperty("ui");
     // Exactly G10's pin: SHA-256 of the canonical {name, description, inputSchema}.
@@ -358,6 +360,56 @@ describe("review fixes (KOBE-433 review)", () => {
     });
     expect(await rows(id)).toMatchObject([{ uri: "ui://l/app", status: "drifted" }]);
     expect(await refresh(id)).toEqual({ status: "unchanged" });
+    const [version] = (
+      await h.admin.query(`SELECT pin_version FROM connectors WHERE id = $1`, [id])
+    ).rows;
+    expect(version).toEqual({ pin_version: 2 });
+  });
+
+  it("NEW-1: after KOBE-433 a tool that starts naming an approved template drifts", async () => {
+    const plain = { name: "other", description: "d", inputSchema: { type: "object" } };
+    const up: Upstream = {
+      tools: [appTool("open", "ui://a/app"), plain],
+      resources: [template("ui://a/app", "<p>app</p>")],
+    };
+    const { id } = await register("apps-new1", up);
+    expect(await rows(id)).toMatchObject([{ uri: "ui://a/app", status: "pinned" }]);
+    up.tools = [
+      appTool("open", "ui://a/app"),
+      { ...plain, _meta: { ui: { resourceUri: "ui://a/app" } } },
+    ];
+    expect(await refresh(id)).toMatchObject({ status: "drifted", changed: 1 });
+    const other = (await toolsOf(id)).find((t) => t.name === "other");
+    expect(other).toMatchObject({ status: "drifted" });
+    expect(other).not.toHaveProperty("ui");
+  });
+
+  it("NEW-2: an outdated proxy's template skip is stored, audited once and shown to site admins", async () => {
+    const up: Upstream = {
+      tools: [appTool("open", "ui://p/app")],
+      resources: [template("ui://p/app", "ok")],
+    };
+    const { id } = await register("apps-outdated", up);
+    up.skipped = "proxy_outdated";
+    expect(await refresh(id)).toMatchObject({ templatesSkipped: "proxy_outdated" });
+    expect(await refresh(id)).toMatchObject({ templatesSkipped: "proxy_outdated" });
+    expect(await events("mcp.connector.templates_skipped", id)).toEqual([
+      { connectorId: id, name: "apps-outdated", reason: "proxy_outdated" },
+    ]);
+    const view = await root.get(`${BASE}/${id}`);
+    expect(view.json.connector.templatesSkipped).toBe("proxy_outdated");
+    const notice = (await driftNoticesFor(db(), { id: rootId, siteRole: "admin" })).find(
+      (n) => n.connectorId === id,
+    );
+    expect(notice).toMatchObject({ templatesSkipped: "proxy_outdated" });
+    await notifyDrift({ db: db(), mailer: h.mailer, publicUrl: "https://kobe.test" });
+    const mail = h.mailer.to("root@apps.test").filter((m) => m.subject.includes("apps-outdated"));
+    expect(mail).toHaveLength(1);
+    expect(must(mail[0]).subject).toMatch(/app templates are not checked/);
+    // A checked pass clears it.
+    delete up.skipped;
+    expect(await refresh(id)).toEqual({ status: "unchanged" });
+    expect((await root.get(`${BASE}/${id}`)).json.connector.templatesSkipped).toBeNull();
   });
 
   it("HIGH-2: an invalid new template is reported once with its reason, never as removed", async () => {

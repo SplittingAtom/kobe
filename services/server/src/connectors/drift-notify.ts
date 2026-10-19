@@ -39,7 +39,10 @@ export interface DriftNotifyDeps {
 interface DriftEvent {
   readonly seq: number;
   /** `skipped`: the refresh began skipping it for want of credentials (KOBE-431). */
-  readonly kind: "drift" | "skipped";
+  /** `templates_skipped`: the refresh began not checking its app templates (KOBE-433). */
+  readonly kind: "drift" | "skipped" | "templates_skipped";
+  /** Why the templates were not checked (templates_skipped events). */
+  readonly reason?: string;
   readonly connectorId: string;
   readonly name: string;
   readonly tools: readonly string[];
@@ -157,6 +160,31 @@ export function skippedMessage(
   };
 }
 
+/** KOBE-433 re-review NEW-2: the refresh checks the tools but not the app templates. */
+export function templatesSkippedMessage(
+  publicUrl: string,
+  event: Pick<DriftEvent, "name" | "reason">,
+  to: string,
+): MailMessage {
+  const name = oneLine(event.name);
+  const why =
+    event.reason === "proxy_outdated"
+      ? "Kobe's MCP proxy is older than this server and cannot read app templates: upgrade it."
+      : `The server's app templates could not be read (${oneLine(event.reason ?? "unknown")}).`;
+  return {
+    to,
+    subject: `Connector ${name}: app templates are not checked for changes`,
+    text: [
+      `Kobe checks the tools of the ${name} connector but not its app templates (ui://).`,
+      "Only templates a site admin approved are shown; changes on the server are not noticed.",
+      "",
+      why,
+      "",
+      `Site admins can review it at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
+    ].join("\n"),
+  };
+}
+
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
 
@@ -183,6 +211,11 @@ const templateNames = (value: unknown): string[] =>
       ]
     : [];
 
+const KINDS: Readonly<Record<string, DriftEvent["kind"]>> = {
+  "mcp.connector.refresh_skipped": "skipped",
+  "mcp.connector.templates_skipped": "templates_skipped",
+};
+
 async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
   const rows = await db.execute<{
     seq: string;
@@ -190,7 +223,8 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
     target: Record<string, unknown>;
   }>(sql`
     SELECT seq, action, target FROM audit_log
-     WHERE action IN ('mcp.connector.drift', 'mcp.connector.refresh_skipped')
+     WHERE action IN ('mcp.connector.drift', 'mcp.connector.refresh_skipped',
+                      'mcp.connector.templates_skipped')
        AND at > now() - make_interval(hours => ${MAX_AGE_HOURS})
      ORDER BY seq`);
   const events: DriftEvent[] = [];
@@ -198,7 +232,8 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
     if (typeof target.connectorId !== "string" || typeof target.name !== "string") continue;
     events.push({
       seq: Number(seq),
-      kind: action === "mcp.connector.refresh_skipped" ? "skipped" : "drift",
+      kind: KINDS[action] ?? "drift",
+      ...(typeof target.reason === "string" ? { reason: target.reason } : {}),
       connectorId: target.connectorId,
       name: target.name,
       tools: [...strings(target.changed), ...strings(target.added)],
@@ -232,12 +267,23 @@ async function stillSkipped(db: KobeDb, event: DriftEvent): Promise<DriftEvent |
   return row?.skipped === "auth_required" ? { ...event, source: row.source } : undefined;
 }
 
-const stillCurrent = async (db: KobeDb, event: DriftEvent): Promise<DriftEvent | undefined> =>
-  event.kind === "skipped"
-    ? stillSkipped(db, event)
-    : (await stillDrifted(db, event.connectorId))
-      ? event
-      : undefined;
+/** Templates still not checked, for the same reason (a checked pass ends the notice). */
+async function stillTemplatesSkipped(
+  db: KobeDb,
+  event: DriftEvent,
+): Promise<DriftEvent | undefined> {
+  const [row] = await db
+    .select({ skipped: connectors.templatesSkipped })
+    .from(connectors)
+    .where(and(eq(connectors.id, event.connectorId), isNull(connectors.deletedAt)));
+  return row?.skipped !== null && row?.skipped === event.reason ? event : undefined;
+}
+
+const stillCurrent = async (db: KobeDb, event: DriftEvent): Promise<DriftEvent | undefined> => {
+  if (event.kind === "skipped") return stillSkipped(db, event);
+  if (event.kind === "templates_skipped") return stillTemplatesSkipped(db, event);
+  return (await stillDrifted(db, event.connectorId)) ? event : undefined;
+};
 
 /** Who hears about an event: a skip only concerns site admins, who can fix it. */
 const recipientsOf = async (db: KobeDb, event: DriftEvent) => {
@@ -308,7 +354,12 @@ export async function notifyDrift(
             await record(deps.db, event, recipient, false);
             continue;
           }
-          const message = event.kind === "skipped" ? skippedMessage : driftMessage;
+          const message =
+            event.kind === "skipped"
+              ? skippedMessage
+              : event.kind === "templates_skipped"
+                ? templatesSkippedMessage
+                : driftMessage;
           await deps.mailer.send(message(deps.publicUrl, event, recipient.email));
           sent += 1;
           await record(deps.db, event, recipient, true);

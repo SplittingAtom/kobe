@@ -250,11 +250,21 @@ describe("refresh skips (KOBE-431)", () => {
     expect(screen.getByText(/own key of the site admin who last pinned or approved/)).toBeTruthy();
   });
 
+  it("tells admins when the app templates were not checked (KOBE-433)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ templatesSkipped: "proxy_outdated" })] }],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText("App templates not checked for changes")).toBeTruthy();
+    expect(screen.getByText(/MCP proxy is older than this server/)).toBeTruthy();
+  });
+
   it("says nothing when the last refresh ran", async () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
     renderSite(<ConnectorsPage />);
     await screen.findByRole("rowheader", { name: "github" });
     expect(screen.queryByText(/Not checked for changes/)).toBeNull();
+    expect(screen.queryByText(/App templates not checked/)).toBeNull();
   });
 });
 

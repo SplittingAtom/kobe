@@ -103,6 +103,8 @@ export interface ConnectorView {
   readonly refreshSkipped: string | null;
   /** When the periodic refresh last probed it; null before the first pass. */
   readonly refreshedAt: Date | null;
+  /** Why the last refresh did not check its MCP Apps templates (KOBE-433); site admins only. */
+  readonly templatesSkipped: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -126,6 +128,7 @@ const columns = {
     ),
   refreshSkipped: connectors.refreshSkipped,
   refreshedAt: connectors.refreshedAt,
+  templatesSkipped: connectors.templatesSkipped,
   createdAt: connectors.createdAt,
   updatedAt: connectors.updatedAt,
 } as const;
@@ -224,6 +227,7 @@ export async function updateConnector(
       set.toolsSnapshot = [];
       set.toolsHash = null;
       set.refreshSkipped = null;
+      set.templatesSkipped = null;
       changed.push("url");
       // Its MCP Apps templates too (KOBE-433): nothing of the old server is ever rendered.
       await dropTemplates(tx, id);

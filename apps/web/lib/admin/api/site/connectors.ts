@@ -26,6 +26,8 @@ export interface Connector {
   /** Why the last periodic refresh was skipped (`auth_required`, `unreachable`, ...; KOBE-431). */
   readonly refreshSkipped: string | null;
   readonly refreshedAt: string | null;
+  /** Why the last refresh did not check the connector's app templates (KOBE-433). */
+  readonly templatesSkipped?: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

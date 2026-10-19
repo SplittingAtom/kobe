@@ -8,8 +8,31 @@ import { DateTime } from "../parts";
  * The periodic refresh could not check the connector for changed tools (KOBE-431). For
  * `auth_required`, says whose key Kobe would use, so an admin knows how to fix it.
  */
+/** Why the templates were not checked, in words (KOBE-433). */
+const TEMPLATE_SKIPS: Readonly<Record<string, string>> = {
+  proxy_outdated:
+    "Kobe's MCP proxy is older than this server and cannot read app templates. Upgrade the proxy.",
+  write_failed: "Kobe could not store the server's app templates.",
+};
+
+/**
+ * The refresh checked the tools but not the MCP Apps templates (KOBE-433): only approved
+ * templates are shown meanwhile, and changes upstream are not noticed.
+ */
+function TemplatesSkipped({ reason }: { readonly reason: string }) {
+  return (
+    <p className="m-0 mt-1 text-sm text-console-muted">
+      <Badge tone="attention">App templates not checked for changes</Badge>{" "}
+      {TEMPLATE_SKIPS[reason] ??
+        `The server's app templates could not be read (${reason.replaceAll("_", " ")}).`}
+    </p>
+  );
+}
+
 export function RefreshSkipped({ connector: c }: { readonly connector: Connector }) {
-  if (c.refreshSkipped === null) return null;
+  if (c.refreshSkipped === null) {
+    return c.templatesSkipped ? <TemplatesSkipped reason={c.templatesSkipped} /> : null;
+  }
   const auth = c.refreshSkipped === "auth_required";
   return (
     <p className="m-0 mt-1 text-sm text-console-muted">

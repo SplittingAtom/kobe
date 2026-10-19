@@ -69,7 +69,11 @@ describe("createProxyProbe", () => {
         ? Response.json({ code: "invalid_request" }, { status: 400 })
         : Response.json({ ok: true, tools: [] }),
     );
-    expect(await old.probe.probe("https://x")).toEqual({ ok: true, tools: [] });
+    expect(await old.probe.probe("https://x")).toEqual({
+      ok: true,
+      tools: [],
+      uiSkipped: "proxy_outdated",
+    });
     expect(old.seen.map((s) => JSON.parse(String(s.init.body)))).toEqual([
       { url: "https://x", ui_resources: true },
       { url: "https://x" },

@@ -121,11 +121,34 @@ async function recordSkip(
   return skipped(reason);
 }
 
-const markRefreshed = (tx: KobeTx, connectorId: string) =>
-  tx
-    .update(connectors)
-    .set({ refreshSkipped: null, refreshedAt: sql`now()` })
-    .where(eq(connectors.id, connectorId));
+/** A checked pass: no tool skip, the snapshot is post-433 now, and the template skip (if any). */
+const passState = (templatesSkipped: string | undefined) => ({
+  refreshSkipped: null,
+  refreshedAt: sql`now()`,
+  pinVersion: 2,
+  templatesSkipped: templatesSkipped ?? null,
+});
+
+const markRefreshed = (tx: KobeTx, connectorId: string, templatesSkipped: string | undefined) =>
+  tx.update(connectors).set(passState(templatesSkipped)).where(eq(connectors.id, connectorId));
+
+/**
+ * The start of a template skip (or a new reason) is audited and warned about, so site admins are
+ * told like an `auth_required` skip (re-review NEW-2); a repeat is not.
+ */
+async function noteTemplatesSkipped(
+  tx: KobeTx,
+  connector: { readonly id: string; readonly name: string; readonly before: string | null },
+  reason: string | undefined,
+): Promise<void> {
+  if (reason === undefined || reason === connector.before) return;
+  logger.warn({ connectorId: connector.id, reason }, "connector templates not checked for changes");
+  await recordAudit(tx, {
+    action: "mcp.connector.templates_skipped",
+    actor: SYSTEM_ACTOR,
+    target: { connectorId: connector.id, name: connector.name, reason },
+  });
+}
 
 export async function refreshConnector(
   db: KobeDb,
@@ -152,25 +175,36 @@ export async function refreshConnector(
 
   return db.transaction(async (tx): Promise<RefreshOutcome> => {
     const [locked] = await tx
-      .select({ url: connectors.url, name: connectors.name, snapshot: connectors.toolsSnapshot })
+      .select({
+        url: connectors.url,
+        name: connectors.name,
+        snapshot: connectors.toolsSnapshot,
+        pinVersion: connectors.pinVersion,
+        templatesSkipped: connectors.templatesSkipped,
+      })
       .from(connectors)
       .where(refreshable(connectorId))
       .for("update");
     if (!locked || locked.url !== row.url) return skipped("changed");
 
     const before = parseToolsSnapshot(locked.snapshot);
-    const drift = applyDrift(before, live.tools);
+    const drift = applyDrift(before, live.tools, { adoptLegacyUi: locked.pinVersion === 1 });
     const templates =
       liveUi === undefined ? undefined : await driftTemplates(tx, connectorId, liveUi);
     const ui = templates?.ok ? templates.drift : NO_TEMPLATE_DRIFT;
     const notes = templates?.ok === false ? { templatesSkipped: "write_failed" } : uiSkipped;
+    await noteTemplatesSkipped(
+      tx,
+      { id: connectorId, name: locked.name, before: locked.templatesSkipped },
+      notes.templatesSkipped,
+    );
     const toolEvents = drift.changed.length + drift.added.length + drift.removed.length;
     const templateEvents =
       ui.changed.length + ui.added.length + ui.removed.length + ui.invalid.length;
     const toolsSame = canonicalJson(drift.tools) === canonicalJson(before);
     // A drifted tool returning to its approval rewrites the rows without being an event.
     if (toolEvents + templateEvents === 0 && toolsSame) {
-      await markRefreshed(tx, connectorId);
+      await markRefreshed(tx, connectorId, notes.templatesSkipped);
       return { status: "unchanged", ...notes };
     }
     await tx
@@ -178,8 +212,7 @@ export async function refreshConnector(
       .set({
         toolsSnapshot: drift.tools,
         toolsHash: approvedHash(drift.tools),
-        refreshSkipped: null,
-        refreshedAt: sql`now()`,
+        ...passState(notes.templatesSkipped),
         updatedAt: sql`now()`,
       })
       .where(eq(connectors.id, connectorId));
@@ -270,12 +303,6 @@ export async function refreshAllConnectors(
     try {
       const outcome = await refreshConnector(db, prober, id, options);
       if (outcome.status === "drifted") drifted += 1;
-      if (outcome.status !== "skipped" && outcome.templatesSkipped !== undefined) {
-        logger.info(
-          { connectorId: id, reason: outcome.templatesSkipped },
-          "connector templates not refreshed",
-        );
-      }
       if (outcome.status === "skipped") {
         skippedCount += 1;
         logger.info({ connectorId: id, reason: outcome.reason }, "connector refresh skipped");

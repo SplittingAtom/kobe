@@ -64,6 +64,9 @@ export async function pinConnector(
         toolsHash: snapshot.hash,
         ...(options.pinnedBy === undefined ? {} : { pinnedBy: options.pinnedBy }),
         refreshSkipped: null,
+        // Pinned with template references (KOBE-433): never a legacy snapshot.
+        pinVersion: 2,
+        templatesSkipped: probed.uiSkipped ?? null,
         updatedAt: sql`now()`,
       })
       .where(

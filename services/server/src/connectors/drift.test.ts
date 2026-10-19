@@ -159,7 +159,7 @@ describe("tools pinned before KOBE-433 whose upstream names a template (review H
 
   it("adopts the template reference silently, keeping the approved fields", () => {
     const before = legacy();
-    const r = applyDrift(before, withUi());
+    const r = applyDrift(before, withUi(), { adoptLegacyUi: true });
     expect(r).toMatchObject({ changed: [], added: [], removed: [] });
     expect(r.tools[0]).toMatchObject({
       status: "pinned",
@@ -172,7 +172,17 @@ describe("tools pinned before KOBE-433 whose upstream names a template (review H
   });
 
   it("still drifts when anything else changed too", () => {
-    const r = applyDrift(legacy(), withUi("sneaky"));
+    const r = applyDrift(legacy(), withUi("sneaky"), { adoptLegacyUi: true });
     expect(r.changed).toEqual(["open"]);
+  });
+
+  it("drifts a tool that starts naming a template after KOBE-433 (re-review NEW-1)", () => {
+    const r = applyDrift(legacy(), withUi());
+    expect(r.changed).toEqual(["open"]);
+    expect(r.tools[0]).toMatchObject({
+      status: "drifted",
+      proposed: { ui: { resource_uri: "ui://srv/app" } },
+    });
+    expect(r.tools[0]).not.toHaveProperty("ui");
   });
 });
