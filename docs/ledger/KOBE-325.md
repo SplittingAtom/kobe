@@ -15,47 +15,38 @@
   `services/server/src/index.ts` beside the Orbit eval sweep (`agents/eval/`, a good pattern for
   a provider-backed sweep), **not** in `startup/jobs.ts`. On a fresh site they write nothing (no
   eval runs), so `startup-seeds.ts` needs nothing.
-- **Next, in order:**
-  1. **Wire slot plumbing.** `sandbox_connections` is untouched (the old release upserts on
-     its (team, user) key). Eval sandboxes register in `sandbox_eval_connections` (key team,
-     thread). Add `slot` to `SandboxTarget` (default `''`) and to every query on
-     `sandbox_commands` / `sandbox_run_leases`; eval routing reads `sandbox_eval_connections`.
-     Files: `sandbox-wire/{commands,delivery,registry,router,run-state,sweeper}.ts`,
-     `runs/{dispatch,sweeper,orchestrator,compaction,run-prompt}.ts`, `approvals/decide.ts`,
-     `mcp/{approvals,run-context}.ts`, `egress/blocked-relay.ts`, `skills/materialize.ts`,
-     `threads/{followups,title-source}.ts`, `offboarding/destroy.ts`, `routes/workspace-move.ts`,
-     `cli/cold-start.ts`, `sandbox-lifecycle/store.ts`. A command's slot comes from its thread;
-     the DB refuses any other (check + trigger, 0146). A connection is an eval one only when the
-     claim owning the pod is `e-<thread>` (looked up by UID; never a label, annotation or
-     `hello` field) and the eval row is live for that team and author. Leases and claim checks
-     key on the claim UID (`sandbox_id`), never (user, slot). A wake for an eval thread never
-     wakes or creates the member's sandbox. Tests: both directions of routing.
-  2. **Provider.** Per team: SandboxTemplate + SandboxWarmPool `kobe-eval-sandbox` (replicas 0;
-     a claim requires `warmPoolRef`, checked on the cluster, agent-sandbox v1.0.4), workspace as
-     an `emptyDir`, `KOBE_WORKSPACE_SYNC_INTERVAL_MS=0`. Claim `e-<thread>` with
-     `spec.lifecycle {shutdownTime, shutdownPolicy: Delete}` (the claim CRD has these, plus
-     `ttlSecondsAfterFinished`). `isolation.require()` before create, read-back check after.
-  3. **Sandbox agent:** commands `eval.prepare` (fetch the fixtures zip over the sandbox
-     listener with the run binding, unpack into `/workspace`) and `eval.snapshot` (the 324
-     snapshot: walk roots, fixture paths only hashed, lstat, no links). New kinds need
-     `SANDBOX_COMMAND_KINDS` in `@kobe/db` (its check constraint: a migration) and protocol frames.
-  4. **Runner** (`services/server/src/skills/evals/`): start routes (draft / saved version), the
-     scan and bundle like `skills/drafts/test-bundle.ts` but stored under the eval's own key
-     (`skill_eval_runs.bundle_key`, a blob ref: retention must delete it with the run), the plan,
-     a per-team queue (≤ `maxConcurrentSandboxes`, SKIP LOCKED), `withSkillEvals` resolver wrapper
-     (`onlySkill` / no skills), checks with the 324 functions (`matches` under a VM timeout),
-     one retry in a new thread and sandbox, `computeSkillEvalScorecard`, the judge seam (326; until
-     then a `judge` check fails `judge_failed`), cancel, NOTIFY + SSE events.
-  5. **Policy:** Kobe's `auto` mode already denies would-ask calls (`neverPromptReason`), but the
-     team floor can clamp it stricter, so treat eval-thread runs like scheduled runs in
-     `sandbox-wire/policy-check.ts` (deny with `eval_run_no_prompt`); never loosen the mode.
-  6. **Threads:** eval threads stay out of lists and search, and refuse member sends.
-  7. **Reaper:** every replica, advisory lock: delete eval claims (label) whose row is done, gone
-     or past its deadline; end executions whose deadline passed.
-  8. Retention and offboarding purges of `skill_eval_runs` (the hold trigger skips held rows
-     silently) and their objects.
-  9. Tests the 324 handoff asked for: protocol `EVAL_MODEL_ALIAS_PATTERN` equals `@kobe/db`
-     `MODEL_ALIAS_PATTERN`; `SKILL_EVAL_RUN_STATES` / modes equal the protocol lists.
+- **Done (step 2 so far):** wire plumbing (commands follow their thread; eval connections in
+  `sandbox_eval_connections`; leases, `hello.ack`, frame authority and the lost-run sweep per
+  sandbox; eval leases by claim UID; no wake for eval threads; no member workspace or memory in
+  an eval sandbox; tokens carry `eval_thread`; liveness and the model gateway accept an eval
+  sandbox only while its execution runs), the provider (eval template, empty pool, claims with
+  `shutdownTime`, own quota), the agent's `eval.prepare` / `eval.snapshot`, the pure checks and
+  executions (`skills/evals/{checks,execution}.ts`), the contract mirrors.
+- **Next, in order:** (1) sandbox-listener auth option `allowEval` (workspace sync refuses eval
+  tokens, skill bundles and `GET /v1/sandbox/skill-evals/fixtures?path=` accept them) and
+  `locateBundle` serving the eval's `bundle_key`; (2) `withSkillEvals` resolver (`onlySkill` or no
+  skills; no personal grants) and `createThread({skillEvalRunId})`; policy-check deny
+  `eval_run_no_prompt`; MCP grant refused for eval principals; (3) start routes + prepare (scan,
+  bundle and fixtures zip under `teams/<team>/skill-evals/<id>/`, plan rows); (4) runner: claim under
+  a per-team advisory xact lock (count `starting|running|collecting` ≤ min(site
+  `maxConcurrentSandboxes`, chart `maxConcurrentPerTeam`)), thread, sandbox, connect, prepare,
+  submit (auto), wait (deadline, cancel, turns), snapshot, checks, delete claim, retry/finalize,
+  scorecard; (5) events (NOTIFY `kobe_skill_eval`, SSE); (6) threads hidden + member sends
+  refused; (7) reaper (advisory lock; claims by label whose row is done/gone/late; executions past
+  deadline); offboarding (delete live eval claims, cancel runs) and retention (RETURNING keys).
+- **Coordinator decisions (2026-10-18):** leases and claim checks by claim UID; per-team cap
+  atomic across replicas (advisory lock); eval sandboxes have their own quota (never a member's);
+  no personal connector or MCP credentials in evals (team connectors under team policy only), so
+  **Registry re-runs (Phase C) run in the Registry team without the reviewer's personal keys**;
+  the snapshot never follows a symlinked root or any link; offboarding deletes live eval
+  sandboxes and cancels eval runs; cleanup on every path incl. a crash reaper.
+- **Rollout:** no replica records its build, so nothing refuses eval starts during a rollout;
+  docs/install.md says to start evals only after `rollout status` (an old pod could hand an
+  eval's stop or steer to the member's own sandbox).
+- **Startup jobs:** the runner and reaper need the sandbox provider, so they start in
+  `index.ts` beside the Orbit eval sweep; main's G5 `startup/jobs.ts` is the place once this
+  branch merges with it (renumbered at PR time): the reaper is a lock-guarded periodic job that
+  slots in there.
 - **Gotchas:** never change a key the previous release's SQL infers (`ON CONFLICT`): rolling
   upgrades and `helm rollback` run it on the new schema; `threads-plans.db.test.ts` counts
   break-glass policies (18); the CLI's `catalog.db.test.ts` lists blob-ref tables newer than its
@@ -122,7 +113,8 @@ net) and emits `skill.eval.progress` / `skill.eval.completed` (ids, statuses, nu
       results tied to eval threads; `threads.skill_eval` fixed. Probes and DB tests, and the old
       release's wire SQL in `skill-evals-upgrade.db.test.ts`.
 - [x] DB review (review-325a) B1, S1, S2, N1 fixed; N2 gone (no index rebuilds); N3 moot.
-- [ ] Wire slot plumbing (connect, routing, leases, sweeps) with tests.
-- [ ] Provider: eval template / pool / claim, reaper.
-- [ ] Sandbox agent: `eval.prepare`, `eval.snapshot`.
+- [x] Wire slot plumbing (connect, routing, leases, sweeps): `sandbox-wire-eval.db.test.ts`.
+- [x] Provider: eval template / pool / claim / quota (`provider.test.ts`); chart PriorityClass.
+- [x] Sandbox agent: `eval.prepare`, `eval.snapshot` (`skill-eval/*.test.ts`).
+- [ ] Reaper.
 - [ ] Runner, checks, routes, events; DB tests for ac-1..ac-4.

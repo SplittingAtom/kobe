@@ -589,6 +589,17 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Skill evals (KOBE-325, migrations `*_skill_evals` and `*_skill_evals_rls`).** Members can run
+  a skill's eval suite: each case runs in its own short-lived sandbox in the team namespace
+  (template and warm pool `kobe-eval-sandbox`, claims `e-<thread id>`), beside the member's own
+  sandbox. The migrations add tables and columns only; the previous release keeps connecting
+  sandboxes, sending commands and leasing runs during the upgrade, and `helm rollback` is safe.
+  **Start skill evals only after the rollout has finished** (`kubectl rollout status
+deployment/<release>-server`): a replica of the previous release doesn't know eval sandboxes
+  and could hand an eval run's stop or steer to the member's own sandbox (same member, same team;
+  the eval loses that command). Kobe does not detect a rollout in progress. Before a
+  `helm rollback`, cancel running evals; any eval sandbox left behind deletes itself at its
+  shutdown time (the case's wall clock plus 5 minutes).
 - **Agents freeze their skill versions (KOBE-318, migrations `0139_agent_skill_manifest` and
   `0140_agent_skill_manifest_backfill`).** A published team agent version now runs the exact team
   skill versions it named at publish, not the newest approved one: approving a newer version
