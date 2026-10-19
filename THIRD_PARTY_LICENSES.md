@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-854 packages, 572 of them shipped in an image.
+855 packages, 573 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -527,6 +527,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | detect-libc | 2.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/detect-libc@2.1.2/LICENSE) |
 | detect-node-es | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/detect-node-es@1.1.0/LICENSE) |
 | devlop | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/devlop@1.1.0/license) |
+| diff | 9.0.0 | BSD-3-Clause | linked, bundled | server | [license](https://unpkg.com/diff@9.0.0/LICENSE) |
 | dom-accessibility-api | 0.5.16 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/dom-accessibility-api@0.5.16/LICENSE.md) |
 | dompurify | 3.4.16 | (MPL-2.0 OR Apache-2.0) | linked, bundled | web | [license](https://unpkg.com/dompurify@3.4.16/LICENSE) |
 | drizzle-kit | 0.31.11 | MIT | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/drizzle-kit/v/0.31.11) |
