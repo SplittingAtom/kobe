@@ -171,19 +171,38 @@ CREATE TRIGGER "sandbox_commands_slot_thread" BEFORE INSERT OR UPDATE OF "slot",
 CREATE TRIGGER "sandbox_run_leases_slot_thread" BEFORE INSERT OR UPDATE OF "slot", "thread_id"
   ON "sandbox_run_leases" FOR EACH ROW EXECUTE FUNCTION "public"."sandbox_wire_slot_matches_thread"();--> statement-breakpoint
 
--- A thread never becomes, or stops being, an eval thread: the slot rules above rely on it. Fires
--- only on an UPDATE that sets skill_eval.
+-- A thread never becomes, or stops being, an eval thread, and an eval thread's run is set when it
+-- is created and only ever cleared (the ON DELETE SET NULL of its run): the slot and result rules
+-- rely on both. Fires only on an UPDATE that sets one of the two columns.
 CREATE FUNCTION "public"."threads_skill_eval_fixed"() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF NEW.skill_eval IS DISTINCT FROM OLD.skill_eval THEN
     RAISE EXCEPTION 'threads.skill_eval never changes' USING ERRCODE = '55000';
   END IF;
+  IF NEW.skill_eval_run_id IS NOT NULL AND NEW.skill_eval_run_id IS DISTINCT FROM OLD.skill_eval_run_id THEN
+    RAISE EXCEPTION 'an eval thread keeps its eval run' USING ERRCODE = '55000';
+  END IF;
   RETURN NEW;
 END;
 $$;--> statement-breakpoint
-CREATE TRIGGER "threads_skill_eval_fixed" BEFORE UPDATE OF "skill_eval" ON "threads"
+CREATE TRIGGER "threads_skill_eval_fixed" BEFORE UPDATE OF "skill_eval", "skill_eval_run_id" ON "threads"
   FOR EACH ROW EXECUTE FUNCTION "public"."threads_skill_eval_fixed"();--> statement-breakpoint
+
+-- An eval sandbox's lease names its one claim for good (the wire's authority keys on the claim UID):
+-- an eval lease's sandbox_id never changes. A member's lease may move to a re-created claim (the
+-- delivery's re-lease), as before.
+CREATE FUNCTION "public"."sandbox_run_leases_eval_fixed"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF OLD.slot <> '' AND NEW.sandbox_id IS DISTINCT FROM OLD.sandbox_id THEN
+    RAISE EXCEPTION 'an eval lease keeps its sandbox' USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "sandbox_run_leases_eval_fixed" BEFORE UPDATE OF "sandbox_id" ON "sandbox_run_leases"
+  FOR EACH ROW EXECUTE FUNCTION "public"."sandbox_run_leases_eval_fixed"();--> statement-breakpoint
 
 -- A result's thread is an eval thread of the same eval run (never a member's chat). A missing
 -- thread is left to the foreign key; clearing thread_id (ON DELETE SET NULL) passes.
