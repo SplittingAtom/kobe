@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import {
   AUTH_LABELS,
+  CREDENTIAL_LABELS,
   NAME_PATTERN,
   createConnector,
   listConnectors,
@@ -11,6 +12,7 @@ import {
   type Connector,
   type ConnectorAuthKind,
   type ConnectorInput,
+  type CredentialSource,
 } from "../../../lib/admin/api/site/connectors";
 import {
   Badge,
@@ -36,13 +38,21 @@ import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { SiteKeyPanel } from "./connector-site-key";
+import { RefreshSkipped } from "./connector-refresh-skipped";
 import { ToolReviewPanel } from "./connector-tool-review";
 
 /** The list's heading: focus lands here when a removal empties the list. */
 const HEADING = "registered-connectors";
 
 const NAME_HINT = "Use lowercase letters and digits joined by - or _ (up to 64 characters).";
-const EMPTY: ConnectorInput = { name: "", url: "", iconUrl: null, authKind: "none" };
+const EMPTY: ConnectorInput = {
+  name: "",
+  url: "",
+  iconUrl: null,
+  authKind: "none",
+  credentialSource: "member",
+};
 
 /**
  * The site connector registry (spec D6, D27; `/v1/site/connectors`, KOBE-100): the MCP
@@ -53,6 +63,12 @@ export function ConnectorsPage() {
   const mutation = useMutation();
   const [editing, setEditing] = useState<Connector | null>(null);
   const [reviewing, setReviewing] = useState<Connector | null>(null);
+  const [keyFor, setKeyFor] = useState<string | null>(null);
+  // Looked up in the latest list, so the panel shows the hint the last save returned.
+  const keyConnector =
+    keyFor !== null && state.status === "ready"
+      ? state.data.find((c) => c.id === keyFor && c.credentialSource === "site")
+      : undefined;
 
   return (
     <>
@@ -79,6 +95,7 @@ export function ConnectorsPage() {
               mutation={mutation}
               onEdit={setEditing}
               onReview={setReviewing}
+              onSiteKey={(c) => setKeyFor(c.id)}
               onChanged={reload}
             />
           )}
@@ -91,6 +108,15 @@ export function ConnectorsPage() {
           mutation={mutation}
           onChanged={reload}
           onClose={() => setReviewing(null)}
+        />
+      ) : null}
+      {keyConnector ? (
+        <SiteKeyPanel
+          key={keyConnector.id}
+          connector={keyConnector}
+          mutation={mutation}
+          onChanged={reload}
+          onClose={() => setKeyFor(null)}
         />
       ) : null}
     </>
@@ -109,12 +135,19 @@ function ConnectorForm({
   readonly onCancel: () => void;
 }) {
   const initial: ConnectorInput = editing
-    ? { name: editing.name, url: editing.url, iconUrl: editing.iconUrl, authKind: editing.authKind }
+    ? {
+        name: editing.name,
+        url: editing.url,
+        iconUrl: editing.iconUrl,
+        authKind: editing.authKind,
+        credentialSource: editing.credentialSource,
+      }
     : EMPTY;
   const [name, setName] = useState(initial.name);
   const [url, setUrl] = useState(initial.url);
   const [iconUrl, setIconUrl] = useState(initial.iconUrl ?? "");
   const [authKind, setAuthKind] = useState<ConnectorAuthKind>(initial.authKind);
+  const [source, setSource] = useState<CredentialSource>(initial.credentialSource);
   const [problem, setProblem] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -124,6 +157,8 @@ function ConnectorForm({
       url: url.trim(),
       iconUrl: iconUrl.trim() === "" ? null : iconUrl.trim(),
       authKind,
+      // A site-wide key is for API-key connectors only (KOBE-303).
+      credentialSource: authKind === "api_key" ? source : "member",
     };
     if (!NAME_PATTERN.test(next.name) || next.name.length > 64) {
       setProblem(NAME_HINT);
@@ -180,6 +215,17 @@ function ConnectorForm({
             ))}
           </Select>
         </Field>
+        {authKind === "api_key" ? (
+          <Field label="Whose key">
+            <Select value={source} onChange={(e) => setSource(e.target.value as CredentialSource)}>
+              {(Object.keys(CREDENTIAL_LABELS) as CredentialSource[]).map((k) => (
+                <option key={k} value={k}>
+                  {CREDENTIAL_LABELS[k]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
         <Button type="submit" variant="primary" disabled={mutation.pending}>
           {editing ? "Save changes" : "Register connector"}
         </Button>
@@ -196,6 +242,9 @@ function changes(current: Connector, next: ConnectorInput): Partial<ConnectorInp
     ...(next.url !== current.url ? { url: next.url } : {}),
     ...(next.iconUrl !== current.iconUrl ? { iconUrl: next.iconUrl } : {}),
     ...(next.authKind !== current.authKind ? { authKind: next.authKind } : {}),
+    ...(next.credentialSource !== current.credentialSource
+      ? { credentialSource: next.credentialSource }
+      : {}),
   };
 }
 
@@ -204,12 +253,14 @@ function ConnectorTable({
   mutation,
   onEdit,
   onReview,
+  onSiteKey,
   onChanged,
 }: {
   readonly connectors: readonly Connector[];
   readonly mutation: Mutation;
   readonly onEdit: (c: Connector) => void;
   readonly onReview: (c: Connector) => void;
+  readonly onSiteKey: (c: Connector) => void;
   readonly onChanged: () => void;
 }) {
   async function toggle(c: Connector) {
@@ -290,7 +341,21 @@ function ConnectorTable({
               <TableCell>
                 <code className="break-all">{c.url}</code>
               </TableCell>
-              <TableCell>{AUTH_LABELS[c.authKind]}</TableCell>
+              <TableCell>
+                {AUTH_LABELS[c.authKind]}
+                {c.credentialSource === "site" ? (
+                  <span className="ms-1 inline-flex flex-wrap items-center gap-1.5">
+                    <Badge tone={c.siteKeyHint === null ? "attention" : "neutral"}>
+                      {c.siteKeyHint === null
+                        ? "Site-wide key: not set"
+                        : `Site-wide key ${c.siteKeyHint}`}
+                    </Badge>
+                    <Button size="sm" onClick={() => onSiteKey(c)}>
+                      Site key<span className="sr-only"> of {c.name}</span>
+                    </Button>
+                  </span>
+                ) : null}
+              </TableCell>
               <TableCell>
                 {c.toolCount}
                 {c.driftedCount > 0 ? (
@@ -342,30 +407,5 @@ function ConnectorTable({
       </Table>
       {confirmDialog}
     </div>
-  );
-}
-
-/**
- * The periodic refresh could not check the connector for changed tools (KOBE-431). For
- * `auth_required`, says whose key Kobe would use, so an admin knows how to fix it.
- */
-function RefreshSkipped({ connector: c }: { readonly connector: Connector }) {
-  if (c.refreshSkipped === null) return null;
-  const auth = c.refreshSkipped === "auth_required";
-  return (
-    <p className="m-0 mt-1 text-sm text-console-muted">
-      <Badge tone="attention">
-        {auth ? "Not checked for changes: needs a key" : "Last check for changes failed"}
-      </Badge>{" "}
-      {auth
-        ? "Kobe checks it with its site-wide key, else the own key of the site admin who last pinned or approved its tools. Add your key for it at My connector keys, then pin or approve its tools."
-        : `The server could not be checked (${c.refreshSkipped.replaceAll("_", " ")}).`}
-      {c.refreshedAt ? (
-        <>
-          {" "}
-          Last tried <DateTime value={c.refreshedAt} />.
-        </>
-      ) : null}
-    </p>
   );
 }

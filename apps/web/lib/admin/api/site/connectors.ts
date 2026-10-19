@@ -5,6 +5,8 @@ const BASE = "/v1/site/connectors";
 
 export type ConnectorAuthKind = "none" | "api_key" | "oauth";
 export type ConnectorStatus = "active" | "disabled";
+/** KOBE-303: each member's own key, or one site-wide key for everyone (api_key connectors only). */
+export type CredentialSource = "member" | "site";
 
 export interface Connector {
   readonly id: string;
@@ -12,6 +14,9 @@ export interface Connector {
   readonly url: string;
   readonly iconUrl: string | null;
   readonly authKind: ConnectorAuthKind;
+  readonly credentialSource: CredentialSource;
+  /** The site key's masked hint (last four characters at most); null when none is set. */
+  readonly siteKeyHint: string | null;
   readonly status: ConnectorStatus;
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
@@ -28,6 +33,7 @@ export interface ConnectorInput {
   readonly url: string;
   readonly iconUrl: string | null;
   readonly authKind: ConnectorAuthKind;
+  readonly credentialSource: CredentialSource;
 }
 
 export interface Removal {
@@ -42,6 +48,11 @@ export const AUTH_LABELS: Readonly<Record<ConnectorAuthKind, string>> = {
   none: "No authentication",
   api_key: "API key",
   oauth: "OAuth",
+};
+
+export const CREDENTIAL_LABELS: Readonly<Record<CredentialSource, string>> = {
+  member: "Each member's own key",
+  site: "Site-wide key",
 };
 
 export async function listConnectors(): Promise<ApiResult<readonly Connector[]>> {
@@ -98,3 +109,15 @@ export const approveConnectorTools = (
     method: "POST",
     json: { tools },
   });
+
+/** Sets or replaces the site-wide key (KOBE-303); the key never comes back, only a hint. */
+export const setSiteKey = (id: string, apiKey: string) =>
+  one(
+    apiRequest(`${BASE}/${encodeURIComponent(id)}/site-key`, {
+      method: "PUT",
+      json: { api_key: apiKey },
+    }),
+  );
+
+export const removeSiteKey = (id: string): Promise<ApiResult<unknown>> =>
+  apiRequest(`${BASE}/${encodeURIComponent(id)}/site-key`, { method: "DELETE" });

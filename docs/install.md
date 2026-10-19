@@ -458,6 +458,33 @@ Limits per proxy replica: `mcpProxy.limits.callsPerSandbox` (8 concurrent), `req
 `requestsPerSecond` (60, then 10/s), `maxRequestBytes` (1 MiB), `maxResponseBytes` (4 MiB),
 `upstreamTimeoutSeconds` (55).
 
+**Credentials.** An `api_key` connector uses either **each member's own key** (the default:
+members add it at My connector keys) or one **site-wide key** (KOBE-303): in Site console →
+Connectors choose "Whose key: Site-wide key", then "Site key" to enter, replace or remove it.
+Every member of a team that enabled the connector then calls it with that key and needs no setup
+(their page says "Provided by your organization"); members cannot add their own, and switching a
+connector to the site key deletes the members' keys (switching back, changing its URL or its auth
+kind deletes the site key). Team admins still enable the connector and choose its exposure, and
+the server still decides every call (policy, exposure, approvals) and audits it with the member's
+id; but the MCP server itself sees one identity for everyone, so its own logs cannot tell members
+apart. Every key is sealed with the envelope key (`<release>-envelope-key`), shown only by its
+last four characters, and never sent to a sandbox: the proxy fetches it from the server per call,
+so a replaced or removed key takes effect on the next call. Setting and removing it are audited
+(`mcp.connector.site_key_set` / `_removed`), never the value; the start-up sealed-key check covers
+it like members' keys.
+
+**Probing and drift.** Kobe pins a connector's tools from its `tools/list`, and re-checks every
+pinned connector each `KOBE_CONNECTOR_REFRESH_SECONDS` (default 3600) for changed tools, which stay
+disabled until a site admin approves them. For a connector that asks for a credential, both probes
+use the connector's site-wide key if it has one, else the own key of a site admin (KOBE-431): for a
+pin the admin doing it, for the refresh the admin who last pinned or approved its tools, while they
+are active and still a site admin. A member's key is never used. Which credential was used is
+audited (`mcp.connector.probe_credential`, never the value). When no key is usable the refresh is
+skipped: the registry page shows "Not checked for changes: needs a key", and site admins get an
+in-app notice and an email (`mcp.connector.refresh_skipped`). To fix it, add your own key for the
+connector at My connector keys (in a team that enabled it) and pin or approve its tools, or give
+it a site-wide key.
+
 ## Install
 
 Create the Secrets the chart references, then install:

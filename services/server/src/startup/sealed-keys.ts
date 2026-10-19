@@ -1,5 +1,6 @@
 import {
   connectorGrants,
+  connectorSiteKeys,
   modelGatewayKeys,
   modelProviders,
   scanTeams,
@@ -90,6 +91,12 @@ export function sealedFamilies(keys: {
         secret: envelope,
         keyIds: keys.envelopeKeyIds,
         team: kidCount(sql`${connectorGrants.sealed}`, sql`${connectorGrants}`),
+      },
+      {
+        name: "connector site-wide keys",
+        secret: envelope,
+        keyIds: keys.envelopeKeyIds,
+        site: kidCount(sql`${connectorSiteKeys.sealed}`, sql`${connectorSiteKeys}`),
       },
       {
         name: "the web search API key",

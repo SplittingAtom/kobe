@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  CONNECTOR_CREDENTIAL_SOURCES,
   CONNECTOR_NAME_PATTERN,
   CONNECTOR_URL_MAX,
+  connectorSiteKeys,
   and,
   asc,
   connectors,
@@ -16,6 +18,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { dropConnectorGrants } from "./grants.js";
+import { dropSiteKey } from "./site-key.js";
 
 /**
  * The site connector registry (KOBE-100, spec D6, D27): MCP servers a site admin registers.
@@ -46,12 +49,18 @@ const iconSchema = z
     }
   }, "an https URL");
 
-export const createSchema = z.strictObject({
-  name: nameSchema,
-  url: urlSchema,
-  iconUrl: iconSchema.nullish(),
-  authKind: z.enum(AUTH_KINDS).default("none"),
-});
+/** A site-wide key (KOBE-303) is for `api_key` connectors only. */
+const SITE_NEEDS_API_KEY = "a site-wide key needs authKind api_key";
+
+export const createSchema = z
+  .strictObject({
+    name: nameSchema,
+    url: urlSchema,
+    iconUrl: iconSchema.nullish(),
+    authKind: z.enum(AUTH_KINDS).default("none"),
+    credentialSource: z.enum(CONNECTOR_CREDENTIAL_SOURCES).default("member"),
+  })
+  .refine((v) => v.credentialSource === "member" || v.authKind === "api_key", SITE_NEEDS_API_KEY);
 
 export const updateSchema = z
   .strictObject({
@@ -60,13 +69,18 @@ export const updateSchema = z
     iconUrl: iconSchema.nullable(),
     authKind: z.enum(AUTH_KINDS),
     status: z.enum(STATUSES),
+    credentialSource: z.enum(CONNECTOR_CREDENTIAL_SOURCES),
   })
   .partial()
-  .refine((v) => Object.keys(v).length > 0, "nothing to change");
+  .refine((v) => Object.keys(v).length > 0, "nothing to change")
+  .refine(
+    (v) => v.credentialSource !== "site" || v.authKind === undefined || v.authKind === "api_key",
+    SITE_NEEDS_API_KEY,
+  );
 
 export type CreateInput = z.infer<typeof createSchema>;
 export type UpdateInput = z.infer<typeof updateSchema>;
-export type ChangedField = "name" | "url" | "iconUrl" | "authKind" | "status";
+export type ChangedField = "name" | "url" | "iconUrl" | "authKind" | "status" | "credentialSource";
 
 export interface ConnectorView {
   readonly id: string;
@@ -74,6 +88,10 @@ export interface ConnectorView {
   readonly url: string;
   readonly iconUrl: string | null;
   readonly authKind: (typeof AUTH_KINDS)[number];
+  /** `site`: every member uses the site-wide key (KOBE-303); `member`: their own. */
+  readonly credentialSource: (typeof CONNECTOR_CREDENTIAL_SOURCES)[number];
+  /** The site key's masked hint (last four characters at most); null when none is set. */
+  readonly siteKeyHint: string | null;
   readonly status: (typeof STATUSES)[number];
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
@@ -92,6 +110,10 @@ const columns = {
   url: connectors.url,
   iconUrl: connectors.iconUrl,
   authKind: connectors.authKind,
+  credentialSource: connectors.credentialSource,
+  siteKeyHint: sql<
+    string | null
+  >`(SELECT ${connectorSiteKeys.hint} FROM ${connectorSiteKeys} WHERE ${connectorSiteKeys.connectorId} = ${connectors.id})`,
   status: connectors.status,
   toolCount: sql<number>`jsonb_array_length(${connectors.toolsSnapshot})`.mapWith(Number),
   driftedCount:
@@ -150,6 +172,7 @@ export async function createConnector(
         url: input.url,
         iconUrl: input.iconUrl ?? null,
         authKind: input.authKind,
+        credentialSource: input.credentialSource,
         createdBy: userId,
       })
       .returning(columns);
@@ -195,6 +218,7 @@ export async function updateConnector(
       changed.push("url");
       // Credentials were issued for the old server: drop them (users reconnect), same transaction.
       await dropConnectorGrants(tx, id, current.name);
+      await dropSiteKey(tx, { id, name: current.name }, "url_changed");
     }
     if (input.iconUrl !== undefined && input.iconUrl !== current.iconUrl) {
       set.iconUrl = input.iconUrl;
@@ -203,6 +227,14 @@ export async function updateConnector(
     if (input.authKind !== undefined && input.authKind !== current.authKind) {
       set.authKind = input.authKind;
       changed.push("authKind");
+    }
+    const source = nextSource(current, input);
+    if (source !== current.credentialSource) {
+      set.credentialSource = source;
+      changed.push("credentialSource");
+      // Never both (KOBE-303): a connector uses members' own keys or the site key.
+      if (source === "site") await dropConnectorGrants(tx, id, current.name);
+      else await dropSiteKey(tx, { id, name: current.name }, "mode_changed");
     }
     if (input.status !== undefined && input.status !== current.status) {
       set.status = input.status;
@@ -219,6 +251,16 @@ export async function updateConnector(
     });
     return { ok: true as const, connector: await view(tx, id) };
   });
+}
+
+/** The credential source after an edit: a connector that stops being `api_key` is per-member. */
+function nextSource(
+  current: { readonly authKind: string; readonly credentialSource: string },
+  input: UpdateInput,
+): (typeof CONNECTOR_CREDENTIAL_SOURCES)[number] {
+  const authKind = input.authKind ?? current.authKind;
+  if (authKind !== "api_key") return "member";
+  return input.credentialSource ?? (current.credentialSource === "site" ? "site" : "member");
 }
 
 async function view(tx: KobeTx, id: string): Promise<ConnectorView> {

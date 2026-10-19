@@ -12,6 +12,7 @@ import {
 } from "@kobe/db";
 import { recordAuditAfter } from "../audit/record.js";
 import { adminProbeKey } from "./grants.js";
+import { revealSiteKey } from "./site-key.js";
 
 /**
  * Which credential probes a connector's `tools/list` (KOBE-431, decision (a) of 2026-10-19; the
@@ -61,6 +62,8 @@ export async function chooseProbeCredential(
     .from(connectors)
     .where(eq(connectors.id, connectorId));
   if (!row || row.authKind !== "api_key" || !envelope) return NONE;
+  const siteKey = await revealSiteKey(db, envelope, connectorId);
+  if (siteKey !== undefined) return { source: "site_key", apiKey: siteKey };
   const adminId = admin === "pinned_by" ? row.pinnedBy : admin;
   if (adminId === null || !(await isActiveSiteAdmin(db, adminId))) return NONE;
   const apiKey = await adminProbeKey(db, envelope, adminId, connectorId);

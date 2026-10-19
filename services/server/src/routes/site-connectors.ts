@@ -19,6 +19,8 @@ import {
 } from "../connectors/reapproval.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
 import { adminPinCredential } from "../connectors/probe-credential.js";
+import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
+import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -63,7 +65,7 @@ const pinBody = (pin: PinOutcome) =>
     : { ok: false as const, failure: pin.failure, message: PIN_MESSAGES[pin.failure] };
 
 const invalidFields =
-  "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth.";
+  "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth, credentialSource is member or site (site needs api_key).";
 
 /**
  * The site connector registry (`/v1/site/connectors`, spec D6, D27; KOBE-100): install
@@ -140,6 +142,49 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       { connector, pin: pinBody(pin) },
       pin.ok || pin.failure === "already_pinned" ? 200 : 502,
     );
+  });
+
+  // The connector's site-wide key (KOBE-303): set or replace, then pin with it if unpinned.
+  app.put("/:id/site-key", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const body = await parseBody(c, putGrantSchema);
+    if (!body) {
+      return invalidRequest(c, "Send the API key as api_key (8 to 2048 visible characters).");
+    }
+    if (!deps.envelope) {
+      return c.json(
+        { code: "credentials_unavailable", message: "This site cannot store credentials yet." },
+        503,
+      );
+    }
+    const result = await setSiteKey(db, deps.envelope, id.data, body.api_key, c.get("user").id);
+    if (!result.ok) {
+      return result.failure === "not_found"
+        ? notFound(c)
+        : c.json(
+            {
+              code: "not_site_key",
+              message: "Choose 'Site-wide key' for this API-key connector first.",
+            },
+            409,
+          );
+    }
+    const pin = await pinAs(c, id.data);
+    const connector = await getConnector(db, id.data);
+    const shown =
+      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
+    return c.json({ connector, replaced: result.replaced, ...shown });
+  });
+
+  app.delete("/:id/site-key", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const removed = id.success ? await removeSiteKey(db, id.data) : undefined;
+    if (removed === undefined) return notFound(c);
+    return removed
+      ? c.body(null, 204)
+      : c.json({ code: "not_found", message: "No site-wide key is set." }, 404);
   });
 
   // What each tool is now: approved vs live definition, for the re-approval review (KOBE-102).
