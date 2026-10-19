@@ -173,6 +173,21 @@ export const FILE_SHARE_REFUSALS = [
   "scan_rejected",
 ] as const;
 
+/** Why the server refused a `skill.draft_save` (audit `sandbox.skill_draft_refused`, KOBE-442). */
+export const SKILL_DRAFT_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "invalid_skill",
+  "too_large",
+  "draft_limit",
+  "rate_limited",
+] as const;
+
 /** Why the server refused a `memory.put` / `memory.read` (audit `sandbox.memory_refused`, KOBE-156). */
 export const MEMORY_REFUSALS = [
   "capability_missing",
@@ -1108,6 +1123,20 @@ export const AUDIT_EVENTS = {
   }),
 
   /**
+   * The server refused a `skill.draft_save` (KOBE-442): no `skill_drafts` capability, a run not
+   * active here, a `save_skill_draft` call it did not allow (or other input), a file outside the
+   * folder or not as pushed, or a draft refusal (validation, limits, rate). Never records names,
+   * paths or content (system; at most one per 5 minutes per reason and user).
+   */
+  "sandbox.skill_draft_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(SKILL_DRAFT_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
    * The server refused a `project.file_propose` (KOBE-162): no `projects` capability, a run not
    * active here, a `propose_project_file` call it did not allow (or other input), a thread outside
    * a project, a user who is not a project member, a workspace entry that does not match the push,
@@ -1555,6 +1584,17 @@ export const AUDIT_EVENTS = {
       .optional(),
     /** Save to Workbench: the conversation the files came from. */
     fromThreadId: id.optional(),
+    /** `tool`: the agent's `save_skill_draft` (KOBE-442); absent: the member in the web app. */
+    via: z.enum(["tool"]).optional(),
+  }),
+  /**
+   * Save to Workbench again from the same conversation (KOBE-322) or `save_skill_draft`
+   * (KOBE-442, `via: tool`): the draft's files were replaced by the folder's, one new revision.
+   */
+  "skill.draft.updated": event("team", {
+    draftId: id,
+    fromThreadId: id.optional(),
+    via: z.enum(["tool"]).optional(),
   }),
   /** A draft's author shared it with the team's Builders and Team admins, or stopped sharing. */
   "skill.draft.shared": event("team", { draftId: id, shared: z.boolean() }),

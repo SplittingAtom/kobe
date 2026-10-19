@@ -4,6 +4,7 @@ import {
   CAPABILITY_FILES,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
+  CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_WORKSPACE_MOVES,
@@ -21,6 +22,7 @@ import {
   type SandboxCloseReason,
   type SandboxErrorCode,
   type SandboxToServerFrame,
+  type SkillDraftSaveFrame,
   type TraceSpansFrame,
   type WebSearchQueryFrame,
   type ServerToSandboxFrame,
@@ -50,6 +52,7 @@ import {
   isActiveMessageRun,
   type InterruptCause,
 } from "./run-state.js";
+import { onSkillDraftSave } from "./skill-draft-save.js";
 import { createRunTranslator } from "./translate.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
@@ -121,6 +124,7 @@ export class SandboxConnection implements RegisteredConnection {
   #webSearches = 0;
   #memoryOps = 0;
   #projectProposals = 0;
+  readonly #skillDraftSaves = { count: 0 };
   /** Aborts pending project-memory approvals when the connection ends. */
   readonly #memoryAbort = new AbortController();
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
@@ -441,6 +445,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "project.file_propose":
         this.#onProjectFilePropose(frame);
+        return;
+      case "skill.draft_save":
+        this.#onSkillDraftSave(frame);
         return;
       case "memory.put":
         this.#onMemoryPut(frame);
@@ -835,6 +842,25 @@ export class SandboxConnection implements RegisteredConnection {
         }
         fail(result.code, result.message);
       });
+  }
+
+  /** `skill.draft_save` (KOBE-442): checks and save in `skill-draft-save.ts`. */
+  #onSkillDraftSave(frame: SkillDraftSaveFrame): void {
+    onSkillDraftSave(
+      {
+        ctx: this.#ctx,
+        target: this.target,
+        sandboxId: this.sandboxId,
+        log: this.log,
+        hasCapability: this.hasCapability(CAPABILITY_SKILL_DRAFTS),
+        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "skill.draft_save"),
+        verdict: () =>
+          this.#allowedArtifacts.check(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        inFlight: this.#skillDraftSaves,
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
   }
 
   /**

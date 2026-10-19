@@ -67,6 +67,7 @@ import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
+import { createSkillDraftTool, type SkillDraftTool } from "./skills/drafts/tool.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
@@ -267,6 +268,8 @@ export interface ServerDeps {
   readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
   readonly projectMounts: ProjectMounts;
+  /** `save_skill_draft` (KOBE-442); `index.ts` binds the workspace store later. */
+  readonly skillDraftTool: SkillDraftTool;
   /** Exports answer ratings as Langfuse scores (KOBE-275); undefined when tracing has no scores. */
   readonly feedbackScores: FeedbackScores | undefined;
   /** Creates an email+password user (and optional site role) atomically, without sign-up. */
@@ -365,6 +368,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     : undefined;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
   const projectMounts = createProjectMounts(database.db, logger);
+  const skillDraftTool = createSkillDraftTool(database.db);
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,
@@ -377,6 +381,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.blobs ? { blobs: options.blobs } : {}),
     ...(options.uploads ? { uploads: options.uploads } : {}),
     projectMounts,
+    skillDrafts: skillDraftTool,
     webSearch:
       options.sandboxWire?.webSearch ??
       createWebSearchService({ db: database.db, envelope: options.envelope }),
@@ -501,6 +506,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     uploads: options.uploads,
     modelTokenDefaults,
     projectMounts,
+    skillDraftTool,
     feedbackScores,
     async createUserWithPassword({ email, name, password }, { siteRole, recordSetup } = {}) {
       const ctx = await auth.$context;

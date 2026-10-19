@@ -291,6 +291,8 @@ const workspaceSync =
 if (workspaceSync && deps) {
   // Project files are mounted into members' workspaces through the same store (KOBE-162).
   deps.projectMounts.use(workspaceSync);
+  // `save_skill_draft` reads the pushed skill folder from the same store (KOBE-442).
+  deps.skillDraftTool.use(workspaceSync);
   deps.runs.useAttachments(
     createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
   );

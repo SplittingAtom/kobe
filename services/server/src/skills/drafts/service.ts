@@ -74,6 +74,8 @@ export interface DraftStartInput {
   readonly parentRef?: Record<string, unknown>;
   /** A start from a conversation: a thread of this team. */
   readonly fromThreadId?: string;
+  /** Made by the agent's `save_skill_draft` (KOBE-442), recorded in the audit event. */
+  readonly via?: "tool";
 }
 
 /** Why the files can't start a draft (the draft's own limits and path rules), or null. */
@@ -142,6 +144,7 @@ export async function createDraft(
         // What was copied (review N3): the fork's parent version, or the conversation.
         ...(draft.parentRef ? auditParent(draft.parentRef) : {}),
         ...(draft.fromThreadId ? { fromThreadId: draft.fromThreadId } : {}),
+        ...(start.via ? { via: start.via } : {}),
       },
     });
     return { ok: true, draft };
@@ -291,13 +294,14 @@ export async function removeDraft(
 
 /**
  * Replaces every file of the author's draft with `files` (Save to Workbench, KOBE-322): files no
- * longer there are deleted, the rest written, one new revision. Author only; the draft's own
- * limits were checked on `files` already (`startFilesProblem`).
+ * longer there are deleted, the rest written, one new revision, `skill.draft.updated`. Author
+ * only; the draft's own limits are checked on `files` first (`startFilesProblem`).
  */
 export async function replaceDraftFiles(
   ctx: DraftContext,
   id: string,
   files: ReadonlyMap<string, Uint8Array>,
+  source: { readonly fromThreadId?: string; readonly via?: "tool" } = {},
 ): Promise<DraftOutcome<{ draft: DraftRecord }>> {
   const problem = startFilesProblem(files);
   if (problem) return fail(problem);
@@ -312,9 +316,16 @@ export async function replaceDraftFiles(
       await putFile(tx, ctx.teamId, id, path, bytes, ctx.viewer.userId);
     const name = files.get(SKILL_MD_PATH);
     const renamed = name ? nameOf(name) : undefined;
-    return {
-      ok: true,
-      draft: await bumpRevision(tx, draft, ctx.viewer.userId, renamed ? { name: renamed } : {}),
-    };
+    const next = await bumpRevision(tx, draft, ctx.viewer.userId, renamed ? { name: renamed } : {});
+    await recordAudit(tx, {
+      action: "skill.draft.updated",
+      teamId: ctx.teamId,
+      target: {
+        draftId: id,
+        ...(source.fromThreadId ? { fromThreadId: source.fromThreadId } : {}),
+        ...(source.via ? { via: source.via } : {}),
+      },
+    });
+    return { ok: true, draft: next };
   });
 }

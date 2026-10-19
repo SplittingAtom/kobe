@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalZip, SkillPackageError } from "@kobe/protocol";
-import { and, eq, skillDrafts, withTeam } from "@kobe/db";
+import { and, eq, skillDrafts, withTeam, type KobeTx } from "@kobe/db";
 import { findThread } from "../../threads/repository.js";
 import { viewerProjectIds } from "../../threads/references.js";
 import { liveFilesUnder } from "../../workspace-files/browse.js";
@@ -26,8 +26,74 @@ import type { DraftRecord } from "./records.js";
 
 export type WorkspaceSaveResult =
   | (DraftOutcome<{ draft: DraftRecord }> & { readonly created?: boolean })
-  | { readonly ok: false; readonly error: "thread_not_found" | "folder_empty" | "folder_changed" }
+  | {
+      readonly ok: false;
+      readonly error: "thread_not_found" | "folder_empty" | "folder_changed" | "outside_folder";
+    }
   | { readonly ok: false; readonly error: "invalid_bundle"; readonly bundle: BundleError };
+
+/** A file as the sandbox pushed it (`save_skill_draft`, KOBE-442): its live row must match. */
+export interface PinnedFile {
+  readonly path: string;
+  readonly rev: number;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+export interface WorkspaceSaveInput {
+  readonly threadId: string;
+  readonly folder: string;
+  /**
+   * `save_skill_draft`: exactly these pushed files, each unchanged since its push (else
+   * `folder_changed`); absent (Save to Workbench): every live file under the folder.
+   */
+  readonly pinned?: readonly PinnedFile[];
+  readonly via?: "tool";
+}
+
+type Owner = { readonly teamId: string; readonly userId: string };
+type ListedEntry = { path: string; entry: NonNullable<Awaited<ReturnType<typeof currentEntry>>> };
+type Listing = ListedEntry[] | "too_many" | "too_large" | "outside" | "changed";
+
+/** Every live file under `base`, counted and sized from the manifest before any bytes. */
+async function liveEntries(tx: KobeTx, owner: Owner, base: string): Promise<Listing> {
+  const listed = await liveFilesUnder(tx, owner, base, DRAFT_LIMITS.maxFiles + 1);
+  if (listed.length > DRAFT_LIMITS.maxFiles) return "too_many";
+  if (listed.reduce((n, f) => n + f.size, 0) > DRAFT_LIMITS.maxDraftBytes) return "too_large";
+  const out: ListedEntry[] = [];
+  for (const f of listed) {
+    const entry = await currentEntry(tx, owner, f.path);
+    if (entry && !entry.deleted && entry.blobKey) out.push({ path: f.path, entry });
+  }
+  return out;
+}
+
+/** The pushed files, each under `base` and with its live row exactly as pushed. */
+async function pinnedEntries(
+  tx: KobeTx,
+  owner: Owner,
+  base: string,
+  pinned: readonly PinnedFile[],
+): Promise<Listing> {
+  if (pinned.some((f) => !f.path.startsWith(`${base}/`))) return "outside";
+  if (pinned.length > DRAFT_LIMITS.maxFiles) return "too_many";
+  if (pinned.reduce((n, f) => n + f.size, 0) > DRAFT_LIMITS.maxDraftBytes) return "too_large";
+  const out: ListedEntry[] = [];
+  for (const f of pinned) {
+    const entry = await currentEntry(tx, owner, f.path);
+    if (
+      !entry ||
+      entry.deleted ||
+      !entry.blobKey ||
+      entry.rev !== f.rev ||
+      entry.sha256 !== f.sha256 ||
+      entry.size !== f.size
+    )
+      return "changed";
+    out.push({ path: f.path, entry });
+  }
+  return out;
+}
 
 /** The draft's zip is stored, not deflated: its 5 MiB of files plus headers (as Save version). */
 const DRAFT_BUNDLE_LIMITS = {
@@ -39,21 +105,15 @@ async function readFolder(
   ctx: DraftContext,
   sync: WorkspaceSync,
   folder: string,
+  pinned: readonly PinnedFile[] | undefined,
 ): Promise<Map<string, Uint8Array> | Exclude<WorkspaceSaveResult, { ok: true }>> {
   const owner = { teamId: ctx.teamId, userId: ctx.viewer.userId };
   const base = `skills/${folder}`;
-  const entries = await withTeam(ctx.db, ctx.teamId, async (tx) => {
-    const listed = await liveFilesUnder(tx, owner, base, DRAFT_LIMITS.maxFiles + 1);
-    if (listed.length > DRAFT_LIMITS.maxFiles) return "too_many" as const;
-    if (listed.reduce((n, f) => n + f.size, 0) > DRAFT_LIMITS.maxDraftBytes)
-      return "too_large" as const;
-    const out = [];
-    for (const f of listed) {
-      const entry = await currentEntry(tx, owner, f.path);
-      if (entry && !entry.deleted && entry.blobKey) out.push({ path: f.path, entry });
-    }
-    return out;
-  });
+  const entries = await withTeam(ctx.db, ctx.teamId, (tx) =>
+    pinned ? pinnedEntries(tx, owner, base, pinned) : liveEntries(tx, owner, base),
+  );
+  if (entries === "outside") return { ok: false, error: "outside_folder" };
+  if (entries === "changed") return { ok: false, error: "folder_changed" };
   if (entries === "too_many") return { ok: false, error: "too_many_files" };
   if (entries === "too_large")
     return {
@@ -113,7 +173,7 @@ async function existingDraft(ctx: DraftContext, threadId: string, name: string) 
 export async function saveWorkspaceSkill(
   ctx: DraftContext,
   sync: WorkspaceSync,
-  input: { readonly threadId: string; readonly folder: string },
+  input: WorkspaceSaveInput,
 ): Promise<WorkspaceSaveResult> {
   // A conversation of this team the caller can read (RLS and the viewer's access, as threads).
   const thread = await withTeam(ctx.db, ctx.teamId, async (tx) => {
@@ -125,7 +185,7 @@ export async function saveWorkspaceSkill(
     return findThread(tx, viewer, input.threadId);
   });
   if (!thread) return { ok: false, error: "thread_not_found" };
-  const read = await readFolder(ctx, sync, input.folder);
+  const read = await readFolder(ctx, sync, input.folder, input.pinned);
   if (!(read instanceof Map)) return read;
   let zip: Uint8Array;
   try {
@@ -142,12 +202,17 @@ export async function saveWorkspaceSkill(
   if (!valid.ok) return { ok: false, error: "invalid_bundle", bundle: valid.error };
   const files = packageFiles(valid.value);
   const existing = await existingDraft(ctx, input.threadId, valid.value.name);
-  if (existing) return { ...(await replaceDraftFiles(ctx, existing, files)), created: false };
+  const via = input.via ? { via: input.via } : {};
+  if (existing) {
+    const source = { fromThreadId: input.threadId, ...via };
+    return { ...(await replaceDraftFiles(ctx, existing, files, source)), created: false };
+  }
   const made = await createDraft(ctx, {
     name: valid.value.name,
     startedFrom: "thread",
     fromThreadId: input.threadId,
     files,
+    ...via,
   });
   return { ...made, created: true };
 }

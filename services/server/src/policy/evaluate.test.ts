@@ -389,6 +389,28 @@ const CASES: readonly Case[] = [
     effect: "require_approval",
     codes: ["team_ask_rule"],
   },
+  {
+    name: "save_skill_draft is not prompted in ask-on-write (a private draft, KOBE-442)",
+    tool: builtin("save_skill_draft"),
+    input: { folder: "weekly-report" },
+    effect: "allow",
+    codes: ["risk_write"],
+  },
+  {
+    name: "a team deny rule refuses save_skill_draft (KOBE-442)",
+    tool: builtin("save_skill_draft"),
+    input: { folder: "weekly-report" },
+    rules: [rule("team", "deny", "save_skill_draft")],
+    effect: "deny",
+    codes: ["team_deny_rule"],
+  },
+  {
+    name: "save_skill_draft takes only a skill folder name (KOBE-442)",
+    tool: builtin("save_skill_draft"),
+    input: { folder: "../etc" },
+    effect: "deny",
+    codes: ["invalid_input"],
+  },
   // 5. thread approval mode.
   {
     name: "ask-all prompts even for a read-only tool",

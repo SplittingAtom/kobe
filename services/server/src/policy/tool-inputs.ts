@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   artifactToolInputSchema,
   projectToolInputSchema,
+  skillDraftToolInputSchema,
   type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
@@ -59,6 +60,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   create_artifact: artifactToolInputSchema.create_artifact,
   update_artifact: artifactToolInputSchema.update_artifact,
   propose_project_file: projectToolInputSchema.propose_project_file,
+  save_skill_draft: skillDraftToolInputSchema.save_skill_draft,
 };
 
 /** Built-ins whose `path` is a filesystem path, and whether an omitted path means the cwd. */
