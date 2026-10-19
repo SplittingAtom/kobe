@@ -17,9 +17,7 @@ import {
   getCatalogSwitches,
   getEvalJudgeAlias,
   getPersonalSkillsDisabled,
-  setCatalogSwitches,
-  setEvalJudgeAlias,
-  setPersonalSkillsDisabled,
+  setTeamSkillSettings,
 } from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
@@ -214,29 +212,29 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       );
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
-    // The judge first: a model the team hasn't enabled refuses the whole request, changing nothing.
-    if (body.evalJudgeAlias !== undefined) {
-      const set = await setEvalJudgeAlias(db, teamId, userId, body.evalJudgeAlias);
-      if (!set.ok)
-        return c.json(
-          {
-            code: "model_not_enabled",
-            message: "The eval judge must be one of the team's enabled models.",
-          },
-          422,
-        );
-    }
-    if (body.personalSkillsDisabled !== undefined)
-      await setPersonalSkillsDisabled(db, teamId, userId, body.personalSkillsDisabled);
-    if (body.membersMayAddCatalog !== undefined || body.buildersMayInstallCatalog !== undefined)
-      await setCatalogSwitches(db, teamId, userId, {
+    // One transaction (review L6); a judge model the team hasn't enabled changes nothing.
+    const set = await setTeamSkillSettings(db, teamId, userId, {
+      ...(body.personalSkillsDisabled !== undefined
+        ? { personalSkillsDisabled: body.personalSkillsDisabled }
+        : {}),
+      catalog: {
         ...(body.membersMayAddCatalog !== undefined
           ? { membersMayAdd: body.membersMayAddCatalog }
           : {}),
         ...(body.buildersMayInstallCatalog !== undefined
           ? { buildersMayInstall: body.buildersMayInstallCatalog }
           : {}),
-      });
+      },
+      ...(body.evalJudgeAlias !== undefined ? { evalJudgeAlias: body.evalJudgeAlias } : {}),
+    });
+    if (!set.ok)
+      return c.json(
+        {
+          code: "model_not_enabled",
+          message: "The eval judge must be one of the team's enabled models.",
+        },
+        422,
+      );
     return c.json(await settingsJson(teamId));
   });
 

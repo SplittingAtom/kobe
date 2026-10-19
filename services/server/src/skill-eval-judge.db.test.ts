@@ -345,6 +345,54 @@ describe("skill eval judge (KOBE-326)", () => {
     expect(read.json.scorecard.details[0].with).toMatchObject({ requestedModel: "huge" });
   });
 
+  it("asks no structured format of a provider not known to take it (prompt and strict parser)", async () => {
+    const w = await bench.world();
+    await f.fx.admin.query(
+      `INSERT INTO model_providers (id, kind, name, base_url, created_by)
+       VALUES ('ollama', 'ollama', 'Ollama', 'http://ollama.invalid', $1) ON CONFLICT (id) DO NOTHING`,
+      [w.owner.id],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO model_catalog (alias, provider_id, model, created_by)
+       VALUES ('judge-o', 'ollama', 'judge-o-fake', $1) ON CONFLICT (alias) DO NOTHING`,
+      [w.owner.id],
+    );
+    await enable(w, "judge-o");
+    await siteJudge("judge-o");
+    const draft = await bench.draftWith(w.owner, "plain", suite(), {});
+    const evalRunId = await start(w.owner, draft);
+    await bench.drive(bench.runnerFor(reportProvider(), 4, { judge: judge() }), w.team, evalRunId);
+    expect(gateway.calls).toHaveLength(1);
+    const call = must(gateway.calls[0], "call");
+    expect(call.claims.model).toBe("ollama/judge-o-fake");
+    expect(call.body).toMatchObject({ temperature: 0 });
+    expect(call.body).not.toHaveProperty("response_format");
+    expect((await executions(w.team, evalRunId))[0]).toMatchObject({ status: "passed" });
+    await siteJudge(null);
+  });
+
+  it("refuses another team's model as the judge, and a refused request changes nothing (review L6)", async () => {
+    const w = await bench.world();
+    const other = await bench.world();
+    await catalogModel(w, "judge-3");
+    await enable(other, "judge-3");
+    const put = (body: object) =>
+      f.on(0, w.owner).request("PUT", "/v1/team/skill-review/settings", body);
+    const refused = await put({ evalJudgeAlias: "judge-3", personalSkillsDisabled: true });
+    expect([refused.status, refused.json.code]).toEqual([422, "model_not_enabled"]);
+    const after = await f.on(0, w.owner).get("/v1/team/skill-review/settings");
+    expect(after.json).toMatchObject({ personalSkillsDisabled: false, evalJudgeAlias: null });
+    const { rows } = await f.fx.admin.query(
+      `SELECT action FROM audit_log WHERE team_id = $1 AND action LIKE 'skill.%'`,
+      [w.team],
+    );
+    expect(rows).toEqual([]);
+    // Both at once, in one transaction.
+    const ok = await put({ evalJudgeAlias: "fast", personalSkillsDisabled: true });
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect(ok.json).toMatchObject({ personalSkillsDisabled: true, evalJudgeAlias: "fast" });
+  });
+
   it("fails a case on an unparseable verdict, and bounds the call by the judge's own timeout", async () => {
     const w = await bench.world();
     const evalJudge = judge();

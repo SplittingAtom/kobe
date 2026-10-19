@@ -49,23 +49,30 @@ export function setPersonalSkillsDisabled(
   userId: string,
   disabled: boolean,
 ): Promise<boolean> {
-  return withTeam(db, teamId, async (tx) => {
-    await lockSettings(tx, teamId);
-    if ((await readPersonalSkillsDisabled(tx, teamId)) === disabled) return disabled;
-    await tx
-      .insert(teamSkillSettings)
-      .values({ teamId, personalSkillsDisabled: disabled, updatedBy: userId })
-      .onConflictDoUpdate({
-        target: teamSkillSettings.teamId,
-        set: { personalSkillsDisabled: disabled, updatedBy: userId, updatedAt: new Date() },
-      });
-    await recordAudit(tx, {
-      action: "skill.personal_switch.changed",
-      teamId,
-      target: { disabled },
+  return withTeam(db, teamId, (tx) => writePersonalSkillsDisabled(tx, teamId, userId, disabled));
+}
+
+async function writePersonalSkillsDisabled(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  disabled: boolean,
+): Promise<boolean> {
+  await lockSettings(tx, teamId);
+  if ((await readPersonalSkillsDisabled(tx, teamId)) === disabled) return disabled;
+  await tx
+    .insert(teamSkillSettings)
+    .values({ teamId, personalSkillsDisabled: disabled, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: teamSkillSettings.teamId,
+      set: { personalSkillsDisabled: disabled, updatedBy: userId, updatedAt: new Date() },
     });
-    return disabled;
+  await recordAudit(tx, {
+    action: "skill.personal_switch.changed",
+    teamId,
+    target: { disabled },
   });
+  return disabled;
 }
 
 export function getCatalogSwitches(db: KobeDb, teamId: string): Promise<CatalogSwitches> {
@@ -83,32 +90,39 @@ export function setCatalogSwitches(
   userId: string,
   change: Partial<CatalogSwitches>,
 ): Promise<CatalogSwitches> {
-  return withTeam(db, teamId, async (tx) => {
-    // Two admins changing different switches at once: the second reads the first's commit, and
-    // only changed columns are written (review S2 of KOBE-316).
-    await lockSettings(tx, teamId);
-    const before = await readCatalogSwitches(tx, teamId);
-    const after = { ...before, ...change };
-    const changed = {
-      ...(after.membersMayAdd !== before.membersMayAdd
-        ? { membersMayAddCatalog: after.membersMayAdd }
-        : {}),
-      ...(after.buildersMayInstall !== before.buildersMayInstall
-        ? { buildersMayInstallCatalog: after.buildersMayInstall }
-        : {}),
-    };
-    if (Object.keys(changed).length === 0) return before;
-    const set = { ...changed, updatedBy: userId };
-    await tx
-      .insert(teamSkillSettings)
-      .values({ teamId, ...set })
-      .onConflictDoUpdate({
-        target: teamSkillSettings.teamId,
-        set: { ...set, updatedAt: new Date() },
-      });
-    await recordAudit(tx, { action: "skill.catalog_switches.changed", teamId, target: changed });
-    return after;
-  });
+  return withTeam(db, teamId, (tx) => writeCatalogSwitches(tx, teamId, userId, change));
+}
+
+async function writeCatalogSwitches(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  change: Partial<CatalogSwitches>,
+): Promise<CatalogSwitches> {
+  // Two admins changing different switches at once: the second reads the first's commit, and
+  // only changed columns are written (review S2 of KOBE-316).
+  await lockSettings(tx, teamId);
+  const before = await readCatalogSwitches(tx, teamId);
+  const after = { ...before, ...change };
+  const changed = {
+    ...(after.membersMayAdd !== before.membersMayAdd
+      ? { membersMayAddCatalog: after.membersMayAdd }
+      : {}),
+    ...(after.buildersMayInstall !== before.buildersMayInstall
+      ? { buildersMayInstallCatalog: after.buildersMayInstall }
+      : {}),
+  };
+  if (Object.keys(changed).length === 0) return before;
+  const set = { ...changed, updatedBy: userId };
+  await tx
+    .insert(teamSkillSettings)
+    .values({ teamId, ...set })
+    .onConflictDoUpdate({
+      target: teamSkillSettings.teamId,
+      set: { ...set, updatedAt: new Date() },
+    });
+  await recordAudit(tx, { action: "skill.catalog_switches.changed", teamId, target: changed });
+  return after;
 }
 
 /**
@@ -139,22 +153,59 @@ export function setEvalJudgeAlias(
   userId: string,
   alias: string | null,
 ): Promise<{ ok: true; alias: string | null } | { ok: false }> {
+  return withTeam(db, teamId, (tx) => writeEvalJudgeAlias(tx, teamId, userId, alias));
+}
+
+async function writeEvalJudgeAlias(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  alias: string | null,
+): Promise<{ ok: true; alias: string | null } | { ok: false }> {
+  await lockSettings(tx, teamId);
+  if (alias !== null && !(await isModelEnabled(tx, teamId, alias))) return { ok: false };
+  const [row] = await tx
+    .select({ alias: teamSkillSettings.evalJudgeAlias })
+    .from(teamSkillSettings)
+    .where(eq(teamSkillSettings.teamId, teamId));
+  if ((row?.alias ?? null) === alias) return { ok: true, alias };
+  await tx
+    .insert(teamSkillSettings)
+    .values({ teamId, evalJudgeAlias: alias, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: teamSkillSettings.teamId,
+      set: { evalJudgeAlias: alias, updatedBy: userId, updatedAt: new Date() },
+    });
+  await recordAudit(tx, { action: "skill.eval_judge.changed", teamId, target: { alias } });
+  return { ok: true, alias };
+}
+
+export interface TeamSkillSettingsChange {
+  readonly personalSkillsDisabled?: boolean;
+  readonly catalog?: Partial<CatalogSwitches>;
+  readonly evalJudgeAlias?: string | null;
+}
+
+/**
+ * One settings request in one transaction (KOBE-326 review L6): all of it or nothing. The judge
+ * goes first; a model the team hasn't enabled refuses the request before anything is written.
+ */
+export function setTeamSkillSettings(
+  db: KobeDb,
+  teamId: string,
+  userId: string,
+  change: TeamSkillSettingsChange,
+): Promise<{ ok: true } | { ok: false; code: "model_not_enabled" }> {
   return withTeam(db, teamId, async (tx) => {
     await lockSettings(tx, teamId);
-    if (alias !== null && !(await isModelEnabled(tx, teamId, alias))) return { ok: false };
-    const [row] = await tx
-      .select({ alias: teamSkillSettings.evalJudgeAlias })
-      .from(teamSkillSettings)
-      .where(eq(teamSkillSettings.teamId, teamId));
-    if ((row?.alias ?? null) === alias) return { ok: true, alias };
-    await tx
-      .insert(teamSkillSettings)
-      .values({ teamId, evalJudgeAlias: alias, updatedBy: userId })
-      .onConflictDoUpdate({
-        target: teamSkillSettings.teamId,
-        set: { evalJudgeAlias: alias, updatedBy: userId, updatedAt: new Date() },
-      });
-    await recordAudit(tx, { action: "skill.eval_judge.changed", teamId, target: { alias } });
-    return { ok: true, alias };
+    if (change.evalJudgeAlias !== undefined) {
+      const set = await writeEvalJudgeAlias(tx, teamId, userId, change.evalJudgeAlias);
+      if (!set.ok) return { ok: false, code: "model_not_enabled" } as const;
+    }
+    if (change.personalSkillsDisabled !== undefined)
+      await writePersonalSkillsDisabled(tx, teamId, userId, change.personalSkillsDisabled);
+    if (change.catalog && Object.keys(change.catalog).length > 0)
+      await writeCatalogSwitches(tx, teamId, userId, change.catalog);
+    return { ok: true } as const;
   });
 }
