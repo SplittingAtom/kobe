@@ -49,7 +49,7 @@ describe("Run evals (Workbench)", () => {
 
   it("shows why a start would be refused instead of the button", async () => {
     const message =
-      "Your team's monthly eval cap ($5.00) is used up: $5.10 spent on evals this month. A Team admin can raise or remove it.";
+      "Your team's monthly eval cap ($5.00) is used up. A Team admin can raise or remove it.";
     stubApi({
       "GET /v1/skills/drafts/d-1/evals/estimate?mode=full": [
         200,
@@ -59,6 +59,25 @@ describe("Run evals (Workbench)", () => {
     renderTeam(<EvalRun teamId="t-1" draftId="d-1" rev={1} flush={async () => null} />, MEMBER);
     expect(await screen.findByText(message)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Run evals" })).toBeNull();
+  });
+
+  it("asks for the estimate once after a burst of edits, and frees Run when saving fails", async () => {
+    const calls = stubApi({
+      "GET /v1/skills/drafts/d-1/evals/estimate?mode=full": [200, ESTIMATE()],
+    });
+    const flush = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const view = renderTeam(<EvalRun teamId="t-1" draftId="d-1" rev={1} flush={flush} />, MEMBER);
+    for (const rev of [2, 3, 4])
+      view.rerender(<EvalRun teamId="t-1" draftId="d-1" rev={rev} flush={flush} />);
+    await screen.findByLabelText("Estimate");
+    await new Promise((r) => setTimeout(r, 600));
+    expect(calls.filter((c) => c.url.includes("/estimate"))).toHaveLength(1);
+    const button = screen.getByRole("button", { name: "Run evals" });
+    await userEvent.click(button);
+    expect(await screen.findByText("Your latest edits aren't saved yet: try again.")).toBeDefined();
+    expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("words an estimate without history or prices", () => {

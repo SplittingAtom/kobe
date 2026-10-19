@@ -12,6 +12,9 @@ import {
 import { Button, Notice } from "../ui/console";
 import { ErrorNotice } from "../admin/error-notice";
 
+/** Quiet time after the last edit before the estimate is asked for again. */
+export const ESTIMATE_DEBOUNCE_MS = 500;
+
 /**
  * Run the draft's evals (KOBE-327, SK18): the estimate is shown before Run ("≈ $X, ≈ N min"),
  * and a budget or the team eval cap that would refuse the start says so instead of the button.
@@ -35,25 +38,38 @@ export function EvalRun({
   const [started, setStarted] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Debounced (review-327 L6): an autosave per keystroke must not reload the package each time.
   useEffect(() => {
     let live = true;
-    void estimateDraftEval(teamId, draftId, mode).then((res) => {
-      if (!live) return;
-      setView(res.ok ? res.data : null);
-      setError(res.ok ? null : res.error);
-    });
+    const timer = setTimeout(() => {
+      void estimateDraftEval(teamId, draftId, mode).then((res) => {
+        if (!live) return;
+        setView(res.ok ? res.data : null);
+        setError(res.ok ? null : res.error);
+      });
+    }, ESTIMATE_DEBOUNCE_MS);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [teamId, draftId, mode, rev]);
 
   async function run() {
     setBusy(true);
-    await flush();
-    const res = await startDraftEval(teamId, draftId, mode);
-    setBusy(false);
-    if (res.ok) setStarted(res.data.evalRunId);
-    else setError(res.error);
+    try {
+      await flush();
+      const res = await startDraftEval(teamId, draftId, mode);
+      if (res.ok) setStarted(res.data.evalRunId);
+      else setError(res.error);
+    } catch {
+      setError({
+        status: 0,
+        code: "not_saved",
+        message: "Your latest edits aren't saved yet: try again.",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
