@@ -126,16 +126,37 @@ export function bumpOf(previous: string | null, next: string): Bump {
 const changedCache = new Map<string, number>();
 const CACHE_MAX = 1000;
 
+/** Diffs by (approved package, submitted package): packages never change (review-335 L1). */
+const diffCache = new Map<string, PackageDiff>();
+const DIFF_CACHE_MAX = 50;
+
 /** The diff of `version` against the approved version (null: the bytes aren't stored). */
 export async function versionDiff(
   blobs: BlobStore,
   version: StoredPackage,
   approved: StoredPackage | undefined,
 ): Promise<PackageDiff | null> {
+  const key = `${approved?.packageHash ?? "-"}:${version.packageHash}`;
+  const cached = diffCache.get(key);
+  if (cached) return cached;
   const after = await readPackage(blobs, version);
   if (!after) return null;
   const before = approved ? await readPackage(blobs, approved) : null;
-  return diffPackages(before, after);
+  const diff = diffPackages(before, after);
+  if (diffCache.size >= DIFF_CACHE_MAX) diffCache.delete(diffCache.keys().next().value as string);
+  diffCache.set(key, diff);
+  return diff;
+}
+
+/** Both packages' bytes, for one file's diff or raw view (null: not stored). */
+export async function versionBytes(
+  blobs: BlobStore,
+  version: StoredPackage,
+  approved: StoredPackage | undefined,
+): Promise<{ before: Uint8Array | null; after: Uint8Array } | null> {
+  const after = await readPackage(blobs, version);
+  if (!after) return null;
+  return { before: approved ? await readPackage(blobs, approved) : null, after };
 }
 
 /** Bytes compared per file only (review H1): the queue never computes a line diff. */

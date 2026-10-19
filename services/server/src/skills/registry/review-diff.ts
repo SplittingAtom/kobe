@@ -134,8 +134,52 @@ const ORDER: Readonly<Record<FileStatus, number>> = {
 };
 
 /**
- * `after` against `before` (null: a new skill, every file added). Changed files come first, then
- * added, removed and unchanged ones, each by path.
+ * What a reviewer must read first (review-335 M2): the instructions and manifest, then scripts,
+ * then everything else; so decoy data files can't use up the request's budget before them.
+ */
+export function readingRank(path: string): number {
+  if (path === "SKILL.md") return 0;
+  if (path === "kobe.skill.yaml") return 1;
+  if (path.startsWith("scripts/")) return 2;
+  return 3;
+}
+
+/** One file's diff, given its bytes on both sides and the time it may take. */
+function fileDiff(
+  path: string,
+  status: FileStatus,
+  a: Uint8Array | undefined,
+  b: Uint8Array | undefined,
+  timeoutMs: number,
+): FileDiff {
+  const size = (b ?? a)?.length ?? 0;
+  const textA = textOf(a);
+  const textB = textOf(b);
+  const binary = textA === null || textB === null;
+  if (binary || status === "unchanged") return { path, status, size, binary, hunks: [] };
+  if (tooLarge(a) || tooLarge(b))
+    return { path, status, size, binary, notDiffed: "too_large", hunks: [] };
+  const patch = structuredPatch(path, path, textA, textB, "", "", {
+    context: CONTEXT_LINES,
+    timeout: Math.max(1, timeoutMs),
+    maxEditLength: MAX_EDIT_LENGTH,
+  });
+  if (!patch) return { path, status, size, binary, notDiffed: "too_different", hunks: [] };
+  const hunks = patch.hunks.map((h) => ({
+    oldStart: h.oldStart,
+    oldLines: h.oldLines,
+    newStart: h.newStart,
+    newLines: h.newLines,
+    lines: h.lines,
+  }));
+  return { path, status, size, binary, hunks };
+}
+
+/**
+ * `after` against `before` (null: a new skill, every file added). SKILL.md, kobe.skill.yaml and
+ * `scripts/` come first (review-335 M2), then the rest; within each, changed, added, removed and
+ * unchanged files, each by path. A file the request's budget didn't reach is `skipped`: the review
+ * screen loads it on its own (`diffOneFile`).
  */
 export function diffPackages(before: Uint8Array | null, after: Uint8Array): PackageDiff {
   const old = filesOf(before);
@@ -143,43 +187,71 @@ export function diffPackages(before: Uint8Array | null, after: Uint8Array): Pack
   const paths = [...new Set([...old.keys(), ...next.keys()])];
   const entries = paths
     .map((path) => ({ path, status: statusOf(old.get(path), next.get(path)) }))
-    .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.path < b.path ? -1 : 1));
+    .sort(
+      (a, b) =>
+        readingRank(a.path) - readingRank(b.path) ||
+        ORDER[a.status] - ORDER[b.status] ||
+        (a.path < b.path ? -1 : 1),
+    );
   let budget = MAX_PATCH_LINES;
   let truncated = false;
   const deadline = Date.now() + REQUEST_BUDGET_MS;
   const files = entries.map(({ path, status }): FileDiff => {
     const a = old.get(path);
     const b = next.get(path);
-    const size = (b ?? a)?.length ?? 0;
-    const textA = textOf(a);
-    const textB = textOf(b);
-    const binary = textA === null || textB === null;
-    if (binary || status === "unchanged") return { path, status, size, binary, hunks: [] };
-    if (tooLarge(a) || tooLarge(b))
-      return { path, status, size, binary, notDiffed: "too_large", hunks: [] };
-    if (budget <= 0 || Date.now() >= deadline) {
+    if (status !== "unchanged" && (budget <= 0 || Date.now() >= deadline)) {
+      const quick = fileDiff(path, status, a, b, 0);
+      if (quick.binary || quick.notDiffed === "too_large") return quick;
       truncated = true;
-      return { path, status, size, binary, notDiffed: "skipped", hunks: [] };
+      return { path, status, size: quick.size, binary: false, notDiffed: "skipped", hunks: [] };
     }
-    const patch = structuredPatch(path, path, textA, textB, "", "", {
-      context: CONTEXT_LINES,
-      timeout: Math.min(FILE_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
-      maxEditLength: MAX_EDIT_LENGTH,
-    });
-    if (!patch) return { path, status, size, binary, notDiffed: "too_different", hunks: [] };
-    const hunks = patch.hunks.map((h) => ({
-      oldStart: h.oldStart,
-      oldLines: h.oldLines,
-      newStart: h.newStart,
-      newLines: h.newLines,
-      lines: h.lines,
-    }));
-    budget -= hunks.reduce((n, h) => n + h.lines.length, 0);
-    return { path, status, size, binary, hunks };
+    const d = fileDiff(path, status, a, b, Math.min(FILE_TIMEOUT_MS, deadline - Date.now()));
+    budget -= d.hunks.reduce((n, h) => n + h.lines.length, 0);
+    return d;
   });
   return {
     files,
     changedFiles: entries.filter((e) => e.status !== "unchanged").length,
     truncated,
+  };
+}
+
+/**
+ * One file's diff on its own (the review screen's "Load diff" for a skipped file), with a whole
+ * request's budget; null when neither side has the path.
+ */
+export function diffOneFile(
+  before: Uint8Array | null,
+  after: Uint8Array,
+  path: string,
+): FileDiff | null {
+  const a = filesOf(before).get(path);
+  const b = filesOf(after).get(path);
+  if (!a && !b) return null;
+  return fileDiff(path, statusOf(a, b), a, b, REQUEST_BUDGET_MS);
+}
+
+/** Largest file text the raw view returns (a too-large or too-different file, review-335 M2). */
+export const MAX_RAW_BYTES = 1024 * 1024;
+
+export interface RawFile {
+  readonly path: string;
+  readonly size: number;
+  /** Null for a binary file. */
+  readonly text: string | null;
+  readonly truncated: boolean;
+}
+
+/** A file of the submitted package as text, for a reviewer to read whole; null when absent. */
+export function rawFile(after: Uint8Array, path: string): RawFile | null {
+  const bytes = filesOf(after).get(path);
+  if (!bytes) return null;
+  const head = bytes.subarray(0, MAX_RAW_BYTES);
+  if (head.includes(0)) return { path, size: bytes.length, text: null, truncated: false };
+  return {
+    path,
+    size: bytes.length,
+    text: new TextDecoder("utf-8").decode(head),
+    truncated: bytes.length > MAX_RAW_BYTES,
   };
 }
