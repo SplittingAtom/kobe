@@ -8,7 +8,8 @@
   (blocklist), KOBE-337 (install rules), KOBE-338 (notifications for skills)
 - **Migrations:** 0167 `notifications.skill_semver` and the retirement kinds (generated; the
   contract change is its own commit); upgrade test
-  `packages/db/src/skill-retirement-upgrade.db.test.ts`
+  `packages/db/src/skill-retirement-upgrade.db.test.ts`. Review: 0168 review action
+  `undeprecated` (generated), upgrade test `registry-undeprecated-upgrade.db.test.ts`
 
 ## What shipped
 
@@ -49,18 +50,38 @@
 
 ## Decisions
 
-- Running runs: a run already holding the skill's files keeps them until it ends (spec: "stopped
-  at the next fetch"); the next run of the thread starts without it (Pi relaunches on a changed
-  skill set), and no sandbox fetches it again.
+- **Running runs** (spec SK31: "Stopped at the next fetch"): a run already holding the skill's
+  files keeps the skill until it ends; the thread's next run starts without it (Pi relaunches on a
+  changed skill set), and no sandbox fetches it again.
 - Notices go out after the act commits; if writing them fails the act stands (logged) and the
-  install banners still say it. Email is best effort, off the request path.
-- No un-deprecate (not in SK31); a mistaken deprecation is fixed by a Site admin in the database.
-- Kobe-published skills can be withdrawn or revoked by Site admins (emergencies); they have no
-  maintainers to email.
+  install banners still say it. Email is best effort, off the request path. (Review L5: an outbox
+  job would scale better; not done.)
+- Kobe-published skills can be withdrawn or revoked by Site admins (emergencies).
+- **ac-1 "in e2e"** (review L4): the evidence is DB tests through the routes, the resolver and the
+  sandbox fetch; a browser or cluster e2e of the SK31 table is left for the Phase C gate.
+
+## Review fixes (review-340.md)
+
+- **M1** an act's answer is `{state, notified: true|false}`, never a count of teams or people.
+- **M2** the Default sync and the new-team hook never install a deprecated skill (`addInTeam`);
+  a Team admin's Reinstall may (their override). Withdrawn and revoked versions were never
+  installed (`newestApproved`). Named Kobe skills awaiting the sync skip deprecated ones too.
+- **M3** Revoke tells everyone with it: installers' Team admins, adders, members whose runs loaded
+  the version in the last 30 days, owners of team agents naming the skill; in-app and email, with
+  the maintainers. **Unrevoke** tells and emails exactly the people the revoke told (their
+  `skill.version.revoked` notices since that revoke, active accounts), not a new reckoning.
+- **L1** a skill's deprecation audits the status it left (`from`); **L2** the revoke records its
+  blocklist entry (`addedAt`) and Unrevoke removes only that entry while unchanged, else keeps
+  the block (`blockReplaced`); **L3** versions sharing the revoked runtime hash are told and show
+  Revoked.
+- **Undo a deprecation** (coordinator): `POST .../versions/:semver/undeprecate` and
+  `.../catalog/:skillId/undeprecate` (back to the status it left, replacement cleared);
+  maintainers and Site admins; audited `registry.undeprecated`, `skill.catalog.undeprecated`; no
+  notice, so a deprecate–undo loop can't flood installers.
 
 ## Open questions (for Chris or the coordinator)
 
-- Should Unrevoke email too? It notifies in-app only.
+- none
 
 ## Evidence (acceptance criteria → test or command output)
 
