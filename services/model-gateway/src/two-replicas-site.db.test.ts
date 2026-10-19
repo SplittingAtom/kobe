@@ -316,7 +316,8 @@ describe("two gate replicas, one site-wide hard budget (KOBE-121 ac-1)", () => {
       }
     }
     expect(attempts).toBeGreaterThan(1);
-    expect(blocked).toMatchObject({ ok: false, code: "budget_exhausted" });
+    // Full of the crashed replica's holds, not of spend: wait and retry (KOBE-443 review H1).
+    expect(blocked).toMatchObject({ ok: false, status: 429, code: "too_many_calls_in_flight" });
     // The holds expire by themselves (database clock), then the budget is free again.
     await noLiveHolds();
     const again = await healthy.gate.admit(call(teamIds[0] ?? "", randomUUID()));

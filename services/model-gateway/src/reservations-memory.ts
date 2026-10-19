@@ -68,9 +68,10 @@ export class MemoryReservations implements ReservationStore {
   }
 
   /**
-   * In-flight reservations against one budget line. On a shared line (site, team) each
-   * member's reservations count only up to their share of what is left, so one sandbox reserving
-   * large calls cannot deny everyone else; that member alone is refused once its own reach it.
+   * In-flight reservations against one budget line. Every live hold counts in full (KOBE-443):
+   * capping a member's holds at the share left now would undercount holds taken while the share
+   * was larger and admit a call past the limit. On a shared line (site, team) a member is refused
+   * once its own holds would pass its share of what is left.
    */
   private inFlight(
     line: BudgetLine,
@@ -83,7 +84,7 @@ export class MemoryReservations implements ReservationStore {
     const left = Math.max(0, line.limit - line.spent);
     const share = line.scope === "user" ? Number.POSITIVE_INFINITY : left * MEMBER_SHARE;
     let total = 0;
-    for (const r of byMember.values()) total += Math.min(r[line.unit], share);
+    for (const r of byMember.values()) total += r[line.unit];
     if (line.spent + total >= line.limit) return "full";
     // The share caps the member's first call too (own = 0), whenever others hold reservations
     // (a lone call is always admitted: the line is then not shared in practice).
