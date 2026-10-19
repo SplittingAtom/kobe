@@ -61,7 +61,7 @@ afterAll(async () => {
   if (oldMigrations) rmSync(oldMigrations, { recursive: true, force: true });
 });
 
-describe("retirement notifications (0167)", () => {
+describe("retirement notifications (0153)", () => {
   it("keeps the pause and takes retirement notices with their skill and version", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {

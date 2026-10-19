@@ -5,8 +5,8 @@
 - **Status:** in review (group branch `group-skills-c`, one PR for Phase C)
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-322 (Save to Workbench), KOBE-317 (Kobe package set), KOBE-150 (share_file)
-- **Migrations:** 0149 `skill_drafts.synced_rev` (generated), 0150 backfill (custom, NO FORCE/FORCE),
-  0151 partial unique index `skill_drafts_thread_sync_uq` (generated); upgrade test
+- **Migrations:** 0153 `skill_drafts.synced_rev` (generated), 0154 backfill (custom, NO FORCE/FORCE),
+  0153 partial unique index `skill_drafts_thread_sync_uq` (generated); upgrade test
   `packages/db/src/skill-drafts-synced-rev-upgrade.db.test.ts`
 
 ## What shipped

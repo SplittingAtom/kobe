@@ -174,7 +174,7 @@ export async function approve(
     });
   } catch (err) {
     if (err instanceof Refused) return { ok: false, problem: err.problem };
-    // The database's own separation-of-duties guard (0133, 0161) refused the submitter or the
+    // The database's own separation-of-duties guard (0133, 0158) refused the submitter or the
     // confirmer.
     if (isInsufficientPrivilege(err)) return { ok: false, problem: PROBLEMS.own_submission };
     throw err;

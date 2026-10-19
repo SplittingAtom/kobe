@@ -7,6 +7,11 @@
 - **Depends on:** KOBE-330 (`site_skill_settings.scanner.external`, off), KOBE-333
   (submissions), KOBE-334 (Caution acknowledgements, Approve), KOBE-93 (the Orbit eval Job pattern)
 - **Migrations:** none (the result lives in `registry_versions.scan.external`)
+- **Phase C after `db:rebase`** (main 05a92778): the branch's generated migrations are one, 0153;
+  its custom ones follow as 0154 (synced-rev backfill), 0155 (dedicated Registry team), 0156
+  (promotion requests RLS), 0157 (`from_conversation` backfill), 0158 (review guard for the
+  confirmer; fixed in place for versions without a submitter), 0159 (`team_skill_requests` RLS).
+  Ledgers, tests and docs use these numbers. `db:rebase` now caps the regenerated name's length.
 
 ## What shipped
 

@@ -6,7 +6,7 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-316 (`member_skill_enablements`, the 0133 block triggers, the switch),
   KOBE-315 (the resolver's member adds), KOBE-336/337 (catalog detail, install rules)
-- **Migrations (review):** 0163 `team_skill_requests` (generated), 0164 its RLS (custom), 0165
+- **Migrations (review):** 0153 `team_skill_requests` (generated), 0159 its RLS (custom), 0153
   `notifications.skill_id` + kind `skill.member_add.blocked` (generated); upgrade test
   `packages/db/src/skill-requests-upgrade.db.test.ts`; probe fixture added
 

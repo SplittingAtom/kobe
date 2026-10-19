@@ -5,7 +5,7 @@
 - **Status:** in review (group branch `group-skills-c`, one PR for Phase C)
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-330 (Registry team), KOBE-311 (`site_grants`, `SITE_GRANTS`)
-- **Migrations (review):** 0154 `team_members.added_via` (generated, CHECK `skill_reviewer_grant`)
+- **Migrations (review):** 0153 `team_members.added_via` (generated, CHECK `skill_reviewer_grant`)
 
 ## What shipped
 

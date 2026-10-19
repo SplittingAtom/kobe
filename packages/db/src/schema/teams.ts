@@ -20,7 +20,7 @@ export const teams = pgTable(
     settings: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     /**
      * The Site's Registry team (KOBE-330 review, coordinator decision): a dedicated team Kobe
-     * creates for the Registry, set at creation and never changed (trigger, 0153). Only such a
+     * creates for the Registry, set at creation and never changed (trigger, 0155). Only such a
      * team can be the Registry team, so the Skill reviewer grant never adds anyone to an
      * ordinary team. At most one.
      */

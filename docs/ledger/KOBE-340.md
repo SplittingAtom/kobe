@@ -6,9 +6,9 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-315 (`pickCatalogVersion` already applies SK31 to pins), KOBE-81
   (blocklist), KOBE-337 (install rules), KOBE-338 (notifications for skills)
-- **Migrations:** 0167 `notifications.skill_semver` and the retirement kinds (generated; the
+- **Migrations:** 0153 `notifications.skill_semver` and the retirement kinds (generated; the
   contract change is its own commit); upgrade test
-  `packages/db/src/skill-retirement-upgrade.db.test.ts`. Review: 0168 review action
+  `packages/db/src/skill-retirement-upgrade.db.test.ts`. Review: 0153 review action
   `undeprecated` (generated), upgrade test `registry-undeprecated-upgrade.db.test.ts`
 
 ## What shipped
