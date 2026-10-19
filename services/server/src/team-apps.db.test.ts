@@ -311,6 +311,81 @@ describe("app calls (ac-1, ac-4)", () => {
   });
 });
 
+describe("member app frame and tools/list (KOBE-437, MA-5)", () => {
+  const frameUrl = (appId: string, query: Record<string, string>) =>
+    `/v1/team/apps/${appId}/frame?${new URLSearchParams(query).toString()}`;
+
+  it("serves only the approved template as text/html with the sandboxing header CSP", async () => {
+    const id = await connector("apps5-frame");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const ok = { team, sha256: sha(TEMPLATE) };
+    const frame = await alice.get(frameUrl(appId, ok), { "sec-fetch-dest": "iframe" });
+    expect(frame.status).toBe(200);
+    expect(frame.text).toBe(TEMPLATE);
+    expect(frame.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(frame.headers.get("content-security-policy")).toBe(
+      "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
+        "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; " +
+        "connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; " +
+        "base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+    );
+    expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(frame.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(frame.headers.get("cache-control")).toMatch(/no-store/);
+    expect(frame.headers.get("x-content-type-options")).toBe("nosniff");
+
+    // Only into a frame of Kobe's own page, for the team the page names, for the bytes it names.
+    const status = async (who: TestBrowser, q: Record<string, string>, hdr = {}) =>
+      (await who.get(frameUrl(appId, q), hdr)).status;
+    expect(await status(alice, ok, { "sec-fetch-dest": "document" })).toBe(403);
+    expect(await status(alice, ok, { "sec-fetch-site": "cross-site" })).toBe(403);
+    expect(await status(alice, { sha256: ok.sha256 })).toBe(400);
+    expect(await status(alice, { team })).toBe(400);
+    expect(await status(alice, { ...ok, extra: "1" })).toBe(400);
+    expect(await status(alice, { ...ok, team: otherTeam })).toBe(409);
+    expect(await status(alice, { ...ok, sha256: sha("other") })).toBe(409);
+    expect(await status(alice, ok)).toBe(200);
+    expect(await status(alice, { ...ok }, { "sec-fetch-dest": "iframe" })).toBe(200);
+    // An unknown app answers JSON, never HTML.
+    const missing = await alice.get(frameUrl("f".repeat(64), ok));
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("content-type")).toMatch(/^application\/json/);
+
+    // A drifted template is never served to members.
+    upstream.set("apps5-frame.example", {
+      tools: TOOLS,
+      resources: [{ ...RESOURCES[0], text: "<p>changed upstream</p>" }],
+    });
+    await refreshConnector(db(), h.deps.connectorProbe, id);
+    expect(await status(alice, ok)).toBe(404);
+    expect(await status(alice, { ...ok, sha256: sha("<p>changed upstream</p>") })).toBe(404);
+  });
+
+  it("lists only the tools the app may call, in MCP's shape", async () => {
+    const id = await connector("apps5-tools");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const res = await alice.get(`/v1/team/apps/${appId}/tools`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const names = (res.json.tools as { name: string }[]).map((x) => x.name).sort();
+    expect(names).toEqual(["open_explorer", "preview_table", "search"]);
+    expect(res.json.tools).toContainEqual({
+      name: "preview_table",
+      description: "preview_table tool",
+      inputSchema: TOOLS[1]?.inputSchema,
+      annotations: { readOnlyHint: true },
+    });
+    // A custom exposure narrows it like a call.
+    const piName = (n: string) => `mcp__apps5_tools__${n}`;
+    await enable(id, "custom", [piName("open_explorer")]);
+    const narrowed = await alice.get(`/v1/team/apps/${appId}/tools`);
+    expect((narrowed.json.tools as { name: string }[]).map((x) => x.name)).toEqual([
+      "open_explorer",
+    ]);
+    expect((await alice.get(`/v1/team/apps/${"f".repeat(64)}/tools`)).status).toBe(404);
+  });
+});
+
 describe("hostile inputs (review HIGH-1, MEDIUM-1)", () => {
   it("refuses a catastrophic pattern within the deadline, audited, and the server keeps answering", async () => {
     const id = await connector("apps4-redos");

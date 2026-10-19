@@ -22,9 +22,7 @@ import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential
 import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
 import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
-import { isSameSiteFrameRequest } from "../artifacts/serve.js";
-import { createHash } from "node:crypto";
-import { APP_FRAME_HEADERS } from "../connectors/app-frame.js";
+import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
 import {
   approveConnectorTemplates,
   approveTemplatesSchema,
@@ -93,8 +91,6 @@ const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: strin
             ? SITE_AUTH_REQUIRED
             : PIN_MESSAGES[pin.failure],
       };
-
-const sha256Hex = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
 const TEMPLATE_APPROVAL_MESSAGES = {
   stale: "That template changed again since you reviewed it. Review it again.",
@@ -295,10 +291,8 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // network), only into a frame of Kobe's own page. Members never reach this route (site
   // permission above); MA-5's member route serves only approved templates.
   app.get("/:id/templates/frame", async (c) => {
-    // Only into a frame (review LOW-1): a browser says what it loads the document as, and a
-    // top-level copy would show upstream bytes under Kobe's URL.
-    const dest = c.req.header("sec-fetch-dest");
-    if (!isSameSiteFrameRequest(c.req.raw.headers, deps.publicUrl) || (dest && dest !== "iframe")) {
+    // Only into a frame of Kobe's own page (review LOW-1).
+    if (!mayLoadAppFrame(c.req.raw.headers, deps.publicUrl)) {
       return c.json(
         { code: "forbidden_origin", message: "Only Kobe's own frames load this." },
         403,
@@ -307,7 +301,6 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const id = idSchema.safeParse(c.req.param("id"));
     const uri = c.req.query("uri");
     const which = c.req.query("version");
-    const wanted = c.req.query("sha256");
     const html =
       id.success && uri !== undefined && (which === "live" || which === "approved")
         ? await connectorTemplateFrame(db, id.data, uri, which)
@@ -316,13 +309,14 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       return c.json({ code: "not_found", message: "That template version is not there." }, 404);
     }
     // The preview runs exactly the bytes the admin's source read showed (review LOW-2).
-    if (wanted !== undefined && sha256Hex(html) !== wanted) {
+    const document = appFrameDocument(html, c.req.query("sha256"));
+    if (document === "stale") {
       return c.json(
         { code: "stale", message: "The template changed. Show the source again." },
         409,
       );
     }
-    return new Response(html, { headers: APP_FRAME_HEADERS });
+    return document;
   });
 
   // Approve templates, each with the pinned hash of the live version that was reviewed.
