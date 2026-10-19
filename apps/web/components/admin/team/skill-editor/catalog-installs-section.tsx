@@ -24,6 +24,7 @@ import {
 } from "../../../ui/console";
 import { getCatalogSwitches } from "../../../../lib/admin/api/team/skill-review";
 import { useTeamAccess } from "../../console-context";
+import { InstallUpdatesPanel } from "./install-updates";
 import { SkillInstallChangeForm } from "./skill-install-change";
 import { MutationStatus } from "../../error-notice";
 import { DateTime, ResourceView } from "../../parts";
@@ -155,6 +156,17 @@ export function CatalogInstallsSection() {
                               }}
                             />
                           )}
+                          <InstallUpdatesPanel
+                            teamId={teamId}
+                            install={i}
+                            mayMove={mayChange(i)}
+                            pending={mutation.pending}
+                            run={async (action, notice) => {
+                              const done = await mutation.run(action, notice);
+                              if (done) reload();
+                              return done;
+                            }}
+                          />
                           {canManage && (
                             <Button
                               variant="danger"

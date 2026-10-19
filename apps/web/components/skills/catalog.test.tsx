@@ -119,4 +119,73 @@ describe("Catalog detail", () => {
     const post = calls.find((c) => c.method === "POST");
     expect(JSON.parse(String(post?.body))).toEqual({ domain: "example.com" });
   });
+
+  it("installs from the detail; a Builder isn't offered Required (KOBE-337)", async () => {
+    const detail = {
+      ...card("sales-report"),
+      skill_md: null,
+      files: [],
+      versions: [
+        {
+          id: "v2",
+          semver: "1.1.0",
+          state: "approved",
+          approved_at: null,
+          changelog: null,
+          verdict: "pass",
+        },
+        {
+          id: "v1",
+          semver: "1.0.0",
+          state: "deprecated",
+          approved_at: null,
+          changelog: null,
+          verdict: "pass",
+        },
+        {
+          id: "v0",
+          semver: "0.9.0",
+          state: "revoked",
+          approved_at: null,
+          changelog: null,
+          verdict: "pass",
+        },
+      ],
+      authoritative_scorecard: null,
+      license: null,
+      egress: [],
+      packages: {},
+      maintainers: [],
+      agents: [],
+      can_request_egress: true,
+    };
+    const calls = stubApi({
+      "GET /v1/skills/catalog/id-sales-report": [200, detail],
+      "PUT /v1/team/skills/installs/id-sales-report": [
+        200,
+        { semver: "1.1.0", deprecated: false, required_count: 0 },
+      ],
+    });
+    renderTeam(<CatalogDetailPage skillId="id-sales-report" />, {
+      role: "builder",
+      permissions: ["team.read", "team.skills.publish"],
+    });
+    const form = await screen.findByRole("form", { name: "Install in this team" });
+    expect(Array.from(form.querySelectorAll("option")).map((o) => o.textContent)).not.toContain(
+      "Required (always loaded)",
+    );
+    // Revoked versions are not offered.
+    expect(Array.from(form.querySelectorAll("option")).map((o) => o.textContent)).not.toContain(
+      "0.9.0",
+    );
+    await userEvent.selectOptions(screen.getByLabelText("Access"), "default_on");
+    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(await screen.findByText("sales-report is set to 1.1.0.")).toBeTruthy();
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({
+      version: "1.1.0",
+      pinMode: "within_major",
+      access: "default_on",
+    });
+  });
 });

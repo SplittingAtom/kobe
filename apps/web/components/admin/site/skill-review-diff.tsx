@@ -92,11 +92,19 @@ type Extra =
  * A changed file; one the request's budget skipped loads its own diff, and one too large or too
  * different to diff can be read whole (review-335 M2).
  */
-function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly versionId: string }) {
+function FilePatch({
+  file,
+  versionId,
+}: {
+  readonly file: FileDiff;
+  /** The Registry version, for Load diff and View (reviewers); absent: the diff alone. */
+  readonly versionId?: string | undefined;
+}) {
   const status = STATUS[file.status];
   const [extra, setExtra] = useState<Extra | null>(null);
   const [busy, setBusy] = useState(false);
   const load = async (kind: "diff" | "raw") => {
+    if (!versionId) return;
     setBusy(true);
     try {
       const res =
@@ -112,7 +120,7 @@ function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly vers
   };
   const shown = extra?.kind === "diff" ? extra.file : file;
   // Every changed file can be read whole: text, escaped bytes or a hex dump (review-336 M1).
-  const canRead = file.status !== "removed" && file.status !== "unchanged";
+  const canRead = !!versionId && file.status !== "removed" && file.status !== "unchanged";
   const code = /^(scripts|bin)\//.test(file.path) || CODE.test(file.path);
   return (
     <details open={file.status !== "unchanged"} className="mt-3">
@@ -134,7 +142,7 @@ function FilePatch({ file, versionId }: { readonly file: FileDiff; readonly vers
           <span className="ms-2 text-console-muted">{NOT_DIFFED[shown.notDiffed]}</span>
         )}
       </summary>
-      {file.notDiffed === "skipped" && extra === null && (
+      {versionId && file.notDiffed === "skipped" && extra === null && (
         <Button size="sm" className="mt-2" disabled={busy} onClick={() => void load("diff")}>
           Load diff of {file.path}
         </Button>
@@ -182,7 +190,7 @@ export function ReviewDiff({
   versionId,
 }: {
   readonly diff: VersionDiff;
-  readonly versionId: string;
+  readonly versionId?: string | undefined;
 }) {
   const changed = diff.files.filter((f) => f.status !== "unchanged");
   const same = diff.files.filter((f) => f.status === "unchanged");

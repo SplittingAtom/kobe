@@ -20,6 +20,7 @@ import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource, type Mutation } from "../admin/use-resource";
+import { CatalogInstall } from "./catalog-install";
 import { TeamStateBadges } from "./catalog-tab";
 import { visibleText } from "../../lib/admin/visible-text";
 
@@ -92,8 +93,11 @@ function EgressCheck({
  * the team's agents that use it.
  */
 export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
-  const teamId = useTeamAccess().team.id;
-  const { state } = useResource(() => getCatalogSkill(teamId, skillId));
+  const access = useTeamAccess();
+  const teamId = access.team.id;
+  const mayInstall = access.permissions.includes("team.skills.publish");
+  const mayRequire = access.permissions.includes("team.skills.installs.manage");
+  const { state, reload } = useResource(() => getCatalogSkill(teamId, skillId));
   const mutation = useMutation();
   return (
     <>
@@ -116,6 +120,15 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
               ))}
             </p>
             <MutationStatus error={mutation.error} notice={mutation.notice} />
+            {mayInstall && (
+              <CatalogInstall
+                detail={d}
+                teamId={teamId}
+                mayRequire={mayRequire}
+                mutation={mutation}
+                onDone={reload}
+              />
+            )}
             <Section title="Capabilities">
               <EgressCheck detail={d} teamId={teamId} mutation={mutation} />
             </Section>
