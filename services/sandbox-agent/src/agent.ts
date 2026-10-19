@@ -63,6 +63,8 @@ export interface AgentDeps {
   readonly backoff?: BackoffPolicy;
   readonly heartbeatTimeoutMs?: number;
   readonly policyReadyTimeoutMs?: number;
+  /** SIGTERM: how long a lost run's report waits for its frames to be acked (KOBE-444). */
+  readonly lostAckTimeoutMs?: number;
   /**
    * Root-owned extensions (or `builtin:<name>`) loaded before kobe-policy, which is always last
    * (KOBE-62 adds `builtin:mcp` here).
@@ -118,6 +120,14 @@ export const WORKSPACE_FLUSH_MS = 15_000;
 
 const MAX_REMEMBERED_COMMANDS = 4096;
 const MAX_QUEUED_EXITS = 64;
+/**
+ * SIGTERM (KOBE-444): how long a lost run's report waits for the server to store its frames. The
+ * pod's grace period (30 s) also covers the 10 s drain and the workspace flush after it.
+ */
+const LOST_ACK_TIMEOUT_MS = 3000;
+const LOST_ACK_POLL_MS = 20;
+/** What a run lost to SIGTERM is reported as: its Pi stopped by the agent's termination. */
+const TERMINATED: PiExit = { exitCode: null, signal: "SIGTERM", stderrTail: "" };
 const COMMAND_FRAMES = new Set([
   "run.start",
   "run.steer",
@@ -314,6 +324,50 @@ export class Agent {
     if (this.#stopping) return;
     this.#stopping = true;
     await this.#threads.shutdown(deadlineMs);
+    await this.#finishStop(code);
+  }
+
+  /**
+   * SIGTERM (the pod is going away, KOBE-444): drain runs up to `deadlineMs`; runs still active
+   * then are lost, not finished. Their Pi is stopped without an abort, and once the server has
+   * stored every frame of theirs already sent (bounded by `lostAckTimeoutMs`) each is reported
+   * with `pi.exited`, so the server interrupts it (D14) instead of ending it completed or failed.
+   */
+  async terminate(deadlineMs: number): Promise<void> {
+    if (this.#stopping) return;
+    this.#stopping = true;
+    const lost = await this.#threads.shutdown(deadlineMs, "terminate", (run) =>
+      this.#traces.piExited(run.runId),
+    );
+    if (lost.length > 0) {
+      await this.#untilStored(lost.map((r) => r.runId));
+      for (const run of lost) {
+        this.#deps.logger.warn(
+          { thread_id: run.threadId, run_id: run.runId },
+          "run lost: the sandbox is terminating",
+        );
+        this.#reportExit(run.threadId, run.runId, TERMINATED);
+      }
+    }
+    await this.#finishStop(0);
+  }
+
+  /** Waits until the server acked every frame of these runs (the outbox forgets them), bounded. */
+  async #untilStored(runIds: readonly string[]): Promise<void> {
+    const end = Date.now() + (this.#deps.lostAckTimeoutMs ?? LOST_ACK_TIMEOUT_MS);
+    while (runIds.some((id) => this.#outbox.has(id))) {
+      if (Date.now() >= end) {
+        this.#deps.logger.warn(
+          { run_ids: runIds.filter((id) => this.#outbox.has(id)) },
+          "lost runs reported with frames the server has not stored",
+        );
+        return;
+      }
+      await new Promise((r) => setTimeout(r, LOST_ACK_POLL_MS));
+    }
+  }
+
+  async #finishStop(code: number): Promise<void> {
     // Pi is gone, so the workspace is settled: push what changed since the last sync.
     await this.#deps.workspace?.flush(WORKSPACE_FLUSH_MS);
     this.#traces.flush();

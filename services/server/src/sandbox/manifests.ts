@@ -318,6 +318,16 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
 }
 
 /**
+ * How long the sandbox agent has between SIGTERM and SIGKILL (KOBE-444). Kubernetes' default 30 s
+ * is shorter than the agent's worst case: a 10 s drain, up to 5 s to stop each Pi (3 s stdin grace
+ * + 2 s TERM), up to 3 s for the server to ack a lost run's frames before `pi.exited`, then up to
+ * 15 s of workspace flush (about 33 s). The lost-run report comes before the flush, so a SIGKILL
+ * would only cut the flush (edits since the last periodic push). Raised rather than shortening
+ * those waits: an agent that finishes sooner exits sooner; only a stuck one is killed later.
+ */
+export const SANDBOX_TERMINATION_GRACE_SECONDS = 45;
+
+/**
  * The sandbox pod (spec D12, D13). Secrets never enter it: no Secret volumes or env, no API token;
  * its only credential is a projected token whose audience the Kubernetes API rejects.
  */
@@ -328,6 +338,7 @@ export function sandboxPodSpec(
 ): Record<string, unknown> {
   return {
     runtimeClassName: isolation.runtimeClassName,
+    terminationGracePeriodSeconds: SANDBOX_TERMINATION_GRACE_SECONDS,
     serviceAccountName: SANDBOX_SERVICE_ACCOUNT,
     automountServiceAccountToken: false,
     enableServiceLinks: false,

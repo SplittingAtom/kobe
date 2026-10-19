@@ -62,6 +62,13 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     sandboxPodSpec({ runtimeClassName: "gvisor", handler: "runsc" }, SETTINGS, ADDRESSES);
   });
 
+  it("gives the agent 45 s after SIGTERM: drain, Pi stop, lost-run report, workspace flush (KOBE-444)", async () => {
+    const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as {
+      terminationGracePeriodSeconds?: number;
+    };
+    expect(spec.terminationGracePeriodSeconds).toBe(45);
+  });
+
   it("mounts no Secrets and no API token; its only credential is the bootstrap token", async () => {
     const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as Pod;
     expect(spec.automountServiceAccountToken).toBe(false);
