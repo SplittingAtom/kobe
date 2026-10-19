@@ -535,8 +535,19 @@ export class ThreadManager {
     return this.#threads.get(frame.thread_id)?.answerDialog(frame.response) ?? false;
   }
 
-  /** Stop accepting runs; wait for active ones up to the deadline, then abort and close all. */
-  async shutdown(deadlineMs: number): Promise<void> {
+  /**
+   * Stop accepting runs; wait for active ones up to the deadline, then close all Pi processes.
+   * `drain` (the server's `shutdown`, hibernation): a run still active is aborted, so Pi settles
+   * it. `terminate` (SIGTERM, KOBE-444): a run still active whose prompt is in Pi is lost, not
+   * finished: Pi is stopped without an abort (so nothing settles it) and the run is returned, for
+   * the agent to report it with `pi.exited` (`onLost` hears of it before its Pi stops). A run
+   * still preparing is ended either way.
+   */
+  async shutdown(
+    deadlineMs: number,
+    mode: "drain" | "terminate" = "drain",
+    onLost?: (run: LostRun) => void,
+  ): Promise<readonly LostRun[]> {
     this.#draining = true;
     clearInterval(this.#reaper);
     this.#unsubscribeTokens?.();
@@ -551,12 +562,22 @@ export class ThreadManager {
       }),
     ]);
     clearTimeout(timer);
+    const lost: LostRun[] = [];
     await Promise.all(
       [...this.#threads.values()].map(async (thread) => {
-        if (thread.runId !== undefined) await this.#abort(thread);
+        const runId = thread.runId;
+        if (runId !== undefined && mode === "terminate" && !thread.runPreparing) {
+          const run = { threadId: thread.id, runId };
+          lost.push(run);
+          // Before Pi stops: stopping it ends the run here.
+          onLost?.(run);
+        } else if (runId !== undefined) {
+          await this.#abort(thread);
+        }
         await thread.withLock(() => thread.stopProcess());
       }),
     );
+    return lost;
   }
 
   killAll(): void {
@@ -814,6 +835,12 @@ export class ThreadManager {
 }
 
 /** A run.start in progress; `stopped` once a Stop for its run arrived before the run began. */
+/** A run that was active when its Pi was stopped on SIGTERM (KOBE-444). */
+export interface LostRun {
+  readonly threadId: string;
+  readonly runId: string;
+}
+
 interface PendingStart {
   readonly threadId: string;
   stopped: boolean;
