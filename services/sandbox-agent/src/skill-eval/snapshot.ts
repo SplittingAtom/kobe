@@ -93,7 +93,7 @@ async function listDir(
 }
 
 /** A rough size of an entry as JSON (the budget never under-counts by much). */
-const entryBytes = (e: EvalWorkspaceEntry) => e.path.length * 2 + (e.sha256 ? 80 : 0) + 64;
+const entryBytes = (e: EvalWorkspaceEntry) => Buffer.byteLength(JSON.stringify(e)) + 1;
 
 async function walkOne(
   workspace: string,
@@ -142,6 +142,8 @@ export async function snapshotWorkspace(
   const hashes = new Set(hashPaths);
   const walks: EvalWorkspaceWalk[] = [];
   const budget = { bytes: EVAL_SNAPSHOT_MAX_BYTES };
-  for (const root of roots) walks.push(await walkOne(workspace, root, hashes, budget));
+  // The descriptor check compares real paths: a trailing slash or `..` must not fail every walk.
+  const resolved = path.resolve(workspace);
+  for (const root of roots) walks.push(await walkOne(resolved, root, hashes, budget));
   return { walks };
 }
