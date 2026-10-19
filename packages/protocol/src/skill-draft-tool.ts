@@ -33,6 +33,8 @@ export const SAVE_SKILL_DRAFT_TOOL = "save_skill_draft";
 
 /** Files one save names: the skill package's own file cap (`SKILL_LIMITS.maxFiles`). */
 export const SKILL_DRAFT_TOOL_MAX_FILES = 200;
+/** All files of one save: a draft's size cap (`SKILL_DRAFT_MAX_BYTES`, db); the agent checks first. */
+export const SKILL_DRAFT_TOOL_MAX_BYTES = 5 * 1024 * 1024;
 /** A listed path's length; keeps the frame small (200 x 512 bytes plus hashes < 256 KiB). */
 export const SKILL_DRAFT_TOOL_PATH_MAX = 512;
 

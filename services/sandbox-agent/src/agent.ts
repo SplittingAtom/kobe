@@ -4,6 +4,7 @@ import {
   CAPABILITY_MEMORY,
   CAPABILITY_FILES,
   CAPABILITY_PROJECTS,
+  CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -26,6 +27,7 @@ import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
 import { ProjectFileBroker } from "./tools/project-broker.js";
+import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
@@ -141,6 +143,7 @@ export class Agent {
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
   readonly #proposals: ProjectFileBroker;
+  readonly #skillDrafts: SkillDraftBroker;
   readonly #searches: WebSearchBroker;
   readonly #memory: MemoryBroker;
   /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
@@ -173,6 +176,11 @@ export class Agent {
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
     });
+    this.#skillDrafts = new SkillDraftBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
     this.#threads = new ThreadManager({
       bin: config.piBin,
       runtimeDir: config.piRuntimeDir,
@@ -187,6 +195,7 @@ export class Agent {
       execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
       projectTools: this.#projectsEnabled(),
+      skillDraftTools: this.#skillDraftsEnabled(),
       memoryTools: this.#memoryEnabled(),
       traceparentOf: (runId) => this.#traces.modelParentOf(runId),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
@@ -220,6 +229,7 @@ export class Agent {
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
           this.#proposals.failRun(runId, "run ended");
+          this.#skillDrafts.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
           this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
@@ -262,6 +272,11 @@ export class Agent {
             } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
             return;
           }
+          if (request.op === "skill.draft_save") {
+            if (this.#skillDraftsEnabled()) this.#skillDrafts.save(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "skill drafts are not available"));
+            return;
+          }
           if (request.op === "file.share") {
             if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
@@ -274,6 +289,7 @@ export class Agent {
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
           this.#proposals.failThread(threadId, reason);
+          this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
           this.#memory.failThread(threadId, reason);
         },
@@ -292,6 +308,7 @@ export class Agent {
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
         this.#proposals.failAll("connection to Kobe server lost");
+        this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
         this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
@@ -348,6 +365,11 @@ export class Agent {
     return this.#filesEnabled();
   }
 
+  /** `save_skill_draft` (KOBE-442) pushes the folder first, so it needs what `share_file` needs. */
+  #skillDraftsEnabled(): boolean {
+    return this.#filesEnabled();
+  }
+
   /** `remember` / `recall` need the tools channel (fd 4); without it neither is registered nor announced. */
   #memoryEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined;
@@ -359,6 +381,7 @@ export class Agent {
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),
+      ...(this.#skillDraftsEnabled() ? [CAPABILITY_SKILL_DRAFTS] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
@@ -454,6 +477,9 @@ export class Agent {
         return;
       case "project.file_propose_result":
         this.#proposals.onResult(frame);
+        return;
+      case "skill.draft_save_result":
+        this.#skillDrafts.onResult(frame);
         return;
       case "web_search.result":
         this.#searches.onResult(frame);
