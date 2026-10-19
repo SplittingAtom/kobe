@@ -1,6 +1,6 @@
 # Kobe — MCP Apps Host (companion to Catalyst spec 0612ef17)
 
-Status: **in review, pending Chris's approval** (Hadron project `kobe`, spec
+Status: **approved 2026-10-19 by Chris** (Hadron project `kobe`, spec
 `7119888c-0058-419c-b6df-37ae09687433`, KOBE-432). Version 0.2, 2026-10-19: per Chris, the
 **conversation is where apps render**. The rail is a launcher that inserts an app card into the
 thread, and the artifact column is only the "expand" view.
@@ -642,24 +642,24 @@ coordinator's local notes; no host names here):
 Evidence: screenshots, audit rows and the thread's entries. This closes KOBE-432 ac-2 together
 with Catalyst M24.
 
-## 12. Questions for Chris
+## 12. Decisions (approved 2026-10-19 by Chris)
 
-- **Q1.** Do you approve amending D27 ("MCP resources/prompts UI later") to allow `ui://`
-  templates rendered as apps now, and only those (MA1)?
-- **Q2.** (Changed in 0.2.) Decided by Chris: apps render in the conversation; the rail inserts
-  an app card into the current thread; the artifact column is only "expand" (MA3, MA11). Still
-  open within it:
-  - **Q2a.** Should the model see an app card as fenced untrusted text in the next run (MA11,
-    proposed: yes)?
-  - **Q2b.** During an active run, should a launch be queued (proposed) or refused?
-  - **Q2c.** Should the cap be 3 live frames per thread, with a 360 px default height (proposed)?
-- **Q3.** Should model context go with the next message as a visible, removable chip (MA7,
-  proposed), or be added silently (the Catalyst spec allows either)?
-- **Q4.** Should "the member holds a grant" (§8.7) also count a KOBE-303 site key (MA8, proposed:
-  yes)?
-- **Q5.** Should the browser principal stay read-only even for tools a member has "approved and
-  remembered" (MA5, proposed: yes, in v1)?
-- **Q6.** Declared `_meta.ui.csp` domains are ignored in v1, so no app gets network access. Is
-  that acceptable until a later spec (proposed: yes)?
-- **Q7.** Should a viewer of a shared thread who can call the connector get the live app, acting
-  as themselves (MA10 and T12, proposed: yes), or always the text?
+- **Q1. Yes.** D27 is amended for `ui://` templates rendered as apps only (MA1). Every other
+  resource and prompt UI stays "later".
+- **Q2. Apps render in the conversation.** The rail inserts an app card into the current thread,
+  and the artifact column is only "expand" (MA3, MA11).
+  - **Q2a. Yes:** the model sees an app card as fenced untrusted text in the next run.
+  - **Q2b. Queue:** a launch during an active run is queued (D17) and inserted when the run ends.
+  - **Q2c.** At most 3 live frames per thread, with a 360 px default height.
+- **Q3.** Model context goes with the next message as a visible, removable chip (MA7).
+- **Q4.** A KOBE-303 site key counts as "the member holds a grant" (MA8).
+- **Q5.** The browser principal is read-only in v1, even for remembered rules (MA5).
+- **Q6.** No network for apps in v1: declared `_meta.ui.csp` domains are ignored (T3).
+- **Q7. Yes:** a viewer of a shared thread who can call the connector gets the live app, acting as
+  themselves (MA10, T12).
+
+MCP Apps is the next gate (MA-8, the Kobe Explorer Gate).
+
+**Filed 2026-10-19** (spec order): MA-1 KOBE-433 · MA-2 KOBE-434 · MA-3 KOBE-435 · MA-4 KOBE-436 ·
+MA-5 KOBE-437 · MA-9 KOBE-438 · MA-7 KOBE-439 · MA-6 KOBE-440 · **MA-8 KOBE-441 (gate)**. All have
+priority high, are linked "related" to KOBE-432, and are in the backlog.

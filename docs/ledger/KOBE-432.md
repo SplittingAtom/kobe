@@ -53,3 +53,23 @@ Group G10, step 2. A spec, not code.
   first.
 - **Questions:** Q2 became Q2a–c. Q7 (shared-thread viewers) is new.
 - Hadron spec 7119888c: description, architecture and goals patched; it stays in **review**.
+
+## Approved and filed (2026-10-19)
+
+- Chris approved v0.2 as proposed, answering Q1–Q7 (spec §12, now "Decisions"). Hadron spec
+  7119888c is **approved** (set by the coordinator), and its text has been updated.
+- Tickets filed by the agent (one-time authorisation), each with `Idempotency-Key`
+  `kobe-ma-<n>-20261019`, `spec_id` 7119888c, priority high, labels `kobe, mcp-apps`, and a
+  "related" link to KOBE-432:
+  - MA-1 KOBE-433
+  - MA-2 KOBE-434
+  - MA-3 KOBE-435
+  - MA-4 KOBE-436
+  - MA-5 KOBE-437
+  - MA-9 KOBE-438
+  - MA-7 KOBE-439
+  - MA-6 KOBE-440
+  - MA-8 KOBE-441: the gate, labelled `gates`, effort small, titled "Gate MA — …" like KOBE-329
+    and KOBE-342.
+
+  None was claimed.
