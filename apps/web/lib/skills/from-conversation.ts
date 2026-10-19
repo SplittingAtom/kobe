@@ -5,7 +5,8 @@
  * thread itself is never touched. The composer is prefilled with the request to skill-creator
  * (build the skill under `/workspace/skills/<name>/`) and the file attached, but nothing is sent:
  * the member reads it and sends it, so no model turn is spent unasked (coordinator, KOBE-322
- * review). Save to Workbench (the thread menu) then makes the result a draft.
+ * review). skill-creator then saves the result as a private draft (`save_skill_draft`, KOBE-442);
+ * Save to Workbench (the thread menu) stays the manual fallback.
  */
 import type { ApiResult } from "../api/client";
 import type { ChatApi } from "../chat/api";
@@ -18,8 +19,7 @@ export const skillPrompt = (title: string) =>
   [
     `Use the skill-creator skill to turn the conversation in the attached ${SOURCE_FILE} (“${title}”) into a reusable skill.`,
     "Take the steps, tools, corrections and formats from it, ask me only about the gaps,",
-    "and build the skill under /workspace/skills/<name>/. When it is ready, tell me the folder name:",
-    "I will save it to my Workbench from this conversation's menu.",
+    "and build the skill under /workspace/skills/<name>/. When it passes validation, save it to my Workbench as a draft.",
   ].join(" ");
 
 const failed = (message: string): ApiResult<never> => ({
