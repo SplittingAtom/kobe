@@ -467,12 +467,14 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
 
 ## 8. `ui/message` and `ui/update-model-context` (§8.6)
 
-- **`ui/message`** with role `user` and text content inserts the text **at the cursor of the
-  composer draft of the thread the card is in** (always the thread on screen, since frames run
-  only for visible cards).
-  It **never sends**. Text is capped at 4 KiB, other content types are ignored, and the composer
-  flashes and receives focus. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
-  for the member to send or edit.
+- **`ui/message`** with role `user` and text content inserts the text **at the caret of the
+  composer draft of the card's own thread** (always the thread on screen, since frames run only
+  for visible cards). It **never sends and never moves the focus** (amended 2026-10-19,
+  coordinator decision on the KOBE-439 review): the text carries a visible "From _app_" marker,
+  and Enter and Send do nothing until the member edits it or confirms it, so an Enter pressed in
+  the app cannot send it. Text is capped at 4 KiB, other content types are ignored, and text that
+  imitates app context is refused. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
+  for the member to edit or confirm, then send.
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app
   (capped at 8 KiB serialized; anything larger is refused with an error to the app). The composer
   shows a chip, "Context from _Lakehouse Explorer_: _one-line summary_", with a remove button and
@@ -484,6 +486,12 @@ data}`. It is stored in the user's thread entry, so it is visible in history and
   preceded by one fixed sentence saying it is data from an app, not instructions. After the send
   the chip clears, and a later selection makes a new chip. The context goes only to the thread it
   was sent with, and never to schedules or other threads.
+- **Untrusted everywhere else** (amended 2026-10-19, KOBE-439 review): app context reaches only
+  Pi's fenced prompt, the thread's history (as chips) and exports (escaped). Titles, thread cards,
+  follow-up suggestions and eval-case copies read only the member's own text. Only the server
+  writes the preamble and fences: member text that imitates them is refused. A queued message's
+  context is checked at submit (not again at dequeue), and a retry resends the stored input
+  unchanged; both accepted for v1. An edit of a queued message changes only the member's text.
 - Neither path runs a model turn by itself. That is the point of the Kobe Explorer Gate: the app
   in the conversation, then a member action, then a run.
 

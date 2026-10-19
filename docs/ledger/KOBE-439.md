@@ -2,6 +2,66 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+## HANDOFF for MA-6 and MA-8 (2026-10-19, written for a fresh agent)
+
+**Branch** `group-ma-apps` in worktree `../Kobe-ma`, built on G10 (`group-10-connectors`
+c2d7f110, PR #317, not yet on main). MA-1..5, MA-9 and MA-7 (KOBE-433..439) are built and
+reviewed (review fixes included); **nothing is pushed and Hadron is untouched.** Next: MA-6
+KOBE-440 (rail launcher and app cards), then MA-8 KOBE-441 (the Kobe Explorer Gate). Read the spec
+`docs/specs/mcp-apps-host.md` (amended for MA4, T3, T11, MA10 and §8) and the ledgers
+`KOBE-433.md` .. `KOBE-439.md`; reviews are in the session scratchpad (`review-ma*.md`).
+
+**Migrations (one release, none shipped):** 0152-0156 site-wide templates and pins (MA-1..3);
+0157 `thread_app_results` (generated, team table), 0158 RLS + legal-hold guards + run key
+`ON DELETE SET NULL (run_id)` (custom), 0159 `input jsonb` (generated), 0160 run-end discard of
+unclaimed results (custom trigger), 0161 the same with the hold lock first (custom). **Next free: 0162.** MA-6 needs `entry_id` rows (the column, its unique key and the origin CHECK exist).
+
+**Protocol commits (each meant for its own PR, ahead of the feature PR; the coordinator decides
+against the one-PR-per-group rule):** `92f6279c` (`tool.result.app`), `32a4ad26`
+(`app_context`), `daa1470f` (`APP_CONTEXT_PREAMBLE`), `74d5bf70` (`splitAppContext`,
+`imitatesAppContext`). MA-6 adds the `app_card` thread entry (protocol first).
+
+**Decisions in force (do not re-open):**
+
+- Frames: Kobe frame routes with header CSP `sandbox allow-scripts … webrtc 'block'`, the
+  WebRTC guard script first, `sandbox="allow-scripts"`, never `srcdoc`. Kobe's own bridge (not
+  ext-apps `AppBridge`; ext-apps is a web devDependency for the interop test only).
+- App calls: MA-4 endpoints only, browser principal, read-only, audited; one validation per
+  member; 3 live frames per thread (expanded tabs count); teardown on every removal.
+- Capture: a signed ticket on the allow; the proxy reports `{ticket, input, result}`; claimed
+  only when exactly one unclaimed row matches (run, Pi tool, input digest), else text; unclaimed
+  rows dropped at run end; ≤ 20 per run; the store locks the run row.
+- Context: chips sent only with the member's message; fenced, escaped, compact JSON; refused if
+  imitated; stripped from titles, cards, follow-ups and eval copies. `ui/message` never moves
+  the focus and is not sendable until edited or confirmed. Unsent chips are lost on reload (ok).
+
+**Open questions:**
+
+- Pi 1.0.x `custom_message` shape for MA-6's `kobe.app_card` mirror, and whether it enters the
+  model's context (spec MA11 "verify in the ticket").
+- LOW-D (review-ma7): a proxy report that times out but commits late can, for two identical
+  parallel calls, let one call claim the other's row. Same user, same input. Not fixed.
+- Whether the protocol commits ship as separate PRs.
+
+**What MA-8's gate must prove** (spec §11; add the fake MCP template and tools to
+`e2e/lib/fake-mcp.js` and the spec to the k3d browser list with `KOBE_REQUIRE_APP=1`):
+
+1. **Real Pi passes MCP arguments unchanged**: the claim digests Pi's `tool.call` input against
+   the proxy's canonical input. Call a UI tool whose schema has a **default** and a **coercible
+   argument** (`"5"` for an integer) and assert the card gets the `app` marker. A mismatch fails
+   safe (text) but would make every card text.
+2. **ac-1 frame isolation** on k3d and gate1: `e2e/browser/tests/app-frame.spec.ts` (fetch, XHR,
+   WebSocket, img, form, window.open, top navigation, cookie, storage, parent DOM, WebRTC, the
+   header-only frame), with `KOBE_ALL_BROWSERS=1` in the Playwright container to measure
+   Firefox's WebRTC.
+3. **The Catalyst Explorer flow** on gate1 (spec §11 b): pin `ui://catalyst/lakehouse-explorer`,
+   approve it, "Open the lakehouse explorer" → the card shows the tree; select a table → chip;
+   "Use in chat" inserts `` Use table `c.n.t` `` with the "From" marker, no focus move; confirm and
+   send → the fenced block is in the run's input; reload rebuilds; Expand and back; then MA-6's
+   rail launch.
+4. The negative checks of §11 (fetch out, open-link, write tool, forged result, drift → text, no
+   key → text and no rail app, no key in the network log, export text only).
+
 Group MCP Apps (`group-ma-apps`), after KOBE-438. Spec `docs/specs/mcp-apps-host.md` §8, MA7, T8.
 Nothing pushed; Hadron untouched.
 
@@ -57,6 +117,17 @@ structuredContent?}}` of at most 8 KiB. `daa1470f` protocol: `APP_CONTEXT_PREAMB
   `export-markdown.test.ts` (the block in the Markdown export), web history test.
 - **ac-4** sizes: protocol `app-context.test.ts` (8 KiB per part, 3 parts, one per app); server
   400 over 8 KiB; web store refuses over 8 KiB; `ui/message` 4 KiB.
+
+## Review fixes (review-ma7: MEDIUM-2, MEDIUM-3, LOW-A..C, E, F, H, I), `b5c3c81a..`
+
+- MEDIUM-2: `ui/message` never moves the focus; a "From _app_" marker blocks Enter and Send
+  until the member edits or confirms (web tests: Enter in the app frame sends nothing).
+- MEDIUM-3: `memberText` strips context from first message, last exchange, title fallback and
+  eval copies (DB test: the thread card shows only the member's text).
+- LOW-A/B: the store locks the run row (cap tested with 25 parallel reports); LOW-C: 0161.
+- LOW-E: imitation refused (server 422 `invalid_content`, web channel); queued edits keep the
+  block. LOW-F: compact JSON, 413 `message_too_large`. LOW-H: channel keyed by thread. LOW-I:
+  invisible and bidi characters escaped in the fence and dropped from chip summaries.
 
 ## Notes for review
 
