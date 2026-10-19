@@ -4,8 +4,8 @@ import { sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { readVerified } from "./blob-read.js";
-import { usageSnapshot } from "./usage-snapshot.js";
-import { cardUsage, viewerTeams, type CardUsage } from "./usage-views.js";
+import { usageSnapshot, viewerTeamsOf } from "./usage-snapshot.js";
+import { cardUsage, type CardUsage } from "./usage-views.js";
 import { hostStandings } from "../egress/host-standing.js";
 import { readPackage } from "./registry/review-diff.js";
 import { readCatalogSwitches } from "./settings.js";
@@ -88,7 +88,8 @@ async function usageFor(
   who: { readonly teamId: string; readonly userId: string },
 ): Promise<UsageOf> {
   const snapshot = await usageSnapshot(db);
-  const viewer = viewerTeams(snapshot, who.userId, who.teamId);
+  // The viewer's teams now (review M3), not when the window was computed.
+  const viewer = await viewerTeamsOf(db, who.userId, who.teamId);
   return Object.assign((skillId: string) => cardUsage(snapshot, skillId, viewer), {
     window: { from: snapshot.from, to: snapshot.to },
   });

@@ -1,14 +1,15 @@
-import { scanTeams, sql, type KobeDb } from "@kobe/db";
+import { sql, type KobeDb } from "@kobe/db";
+import { usageSnapshot, viewerTeamsOf } from "./usage-snapshot.js";
+import { optOutCount } from "./usage-views.js";
 import { isMasked } from "./default-sync-run.js";
 import { defaultTargets } from "./default-target.js";
 
 /**
  * The Site console's view of catalog tags (KOBE-314, SK5–SK8, SK26): each catalog skill with its
  * tags, newest approved version and, for Default skills, the major Default installs follow and
- * how many teams opted out. Opt-out counts obey the minimum-count rule: fewer than
- * {@link MIN_TEAMS} teams (but some) shows as "few"; never team names.
+ * how many teams opted out, under the usage minimum-count rule (`usage-views.ts`); never team
+ * names.
  */
-export const MIN_TEAMS = 3;
 
 export interface SiteCatalogSkill {
   readonly id: string;
@@ -24,22 +25,12 @@ export interface SiteCatalogSkill {
   readonly optOuts: number | "few" | null;
 }
 
-/** Opt-outs per skill across teams (each team read under its own RLS), then the count rule. */
-async function optOutCounts(db: KobeDb, skillIds: readonly string[]) {
-  const counts = new Map<string, number>(skillIds.map((id) => [id, 0]));
-  if (skillIds.length === 0) return counts;
-  const rows = await scanTeams(db, "optOutCounts", async (tx, team) => {
-    const r = await tx.execute<{ skill_id: string }>(sql`
-      SELECT skill_id FROM team_skill_optouts WHERE team_id = ${team.id}`);
-    return r.rows.map((x) => x.skill_id);
-  });
-  for (const id of rows.flat()) if (counts.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
-  return counts;
-}
-
-const shown = (n: number): number | "few" => (n > 0 && n < MIN_TEAMS ? "few" : n);
-
-export async function listSiteCatalog(db: KobeDb): Promise<SiteCatalogSkill[]> {
+/**
+ * The Site console's catalog. Default opt-out counts come from the last closed usage window under
+ * the minimum-count rule, the viewer's own teams left out (KOBE-339 review M4): never live, so
+ * watching the page can't catch one team's opt-out.
+ */
+export async function listSiteCatalog(db: KobeDb, viewerId: string): Promise<SiteCatalogSkill[]> {
   const { rows } = await db.execute<{
     id: string;
     name: string;
@@ -60,7 +51,8 @@ export async function listSiteCatalog(db: KobeDb): Promise<SiteCatalogSkill[]> {
         WHERE st.skill_id = s.id AND t.kind = 'topic' ORDER BY t.name) AS topic
     FROM registry_skills s ORDER BY s.name`);
   const majors = new Map((await defaultTargets(db)).map((t) => [t.skillId, t.major]));
-  const counts = await optOutCounts(db, [...majors.keys()]);
+  const snapshot = await usageSnapshot(db);
+  const viewer = await viewerTeamsOf(db, viewerId);
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -71,7 +63,7 @@ export async function listSiteCatalog(db: KobeDb): Promise<SiteCatalogSkill[]> {
     system: r.system ?? [],
     topic: r.topic ?? [],
     defaultMajor: majors.get(r.id) ?? null,
-    optOuts: majors.has(r.id) ? shown(counts.get(r.id) ?? 0) : null,
+    optOuts: majors.has(r.id) ? optOutCount(snapshot, r.id, viewer) : null,
   }));
 }
 

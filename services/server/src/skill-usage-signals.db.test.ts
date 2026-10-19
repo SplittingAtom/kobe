@@ -2,13 +2,22 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { forgetUsageSnapshot } from "./skills/usage-snapshot.js";
+import { closedWindow, ensureUsageSnapshot, forgetUsageSnapshot } from "./skills/usage-snapshot.js";
 
 /**
- * KOBE-339 (SK26): usage signals of catalog skills from the nightly snapshot, with the
- * minimum-count rule (3 teams other than the viewer's, 20 ratings), role-appropriate views, no
- * team names or ids anywhere, and fixed windows that can't be differenced.
+ * KOBE-339 (SK26): usage signals of catalog skills from the stored snapshot of the last closed
+ * 30-day window, with the minimum-count rule (3 teams other than the viewer's teams now, 20
+ * ratings, no dominant team; own team: 3 members other than the viewer), role-appropriate views,
+ * no team names or ids anywhere, and fixed windows that can't be differenced.
  */
+const WINDOW = closedWindow(new Date());
+/** A day into the closed window, a day before it, or now (the current, open period). */
+const at = (where: "in" | "before" | "current") =>
+  where === "current"
+    ? new Date().toISOString()
+    : new Date(
+        new Date(WINDOW.from).getTime() + (where === "in" ? 1 : -1) * 86_400_000,
+      ).toISOString();
 let h: Harness;
 const NAME = "usage-report";
 let skillId = "";
@@ -31,15 +40,20 @@ async function member(team: string, key: string, role = "member") {
   ]);
 }
 
-/** A run in `team` by `key` that read the skill at `semver`; `daysAgo` 0 is today (outside). */
+/** A run in `team` by `key` that read the skill at `semver`, in the closed window by default. */
 async function run(
   team: string,
   key: string,
   semver: string,
-  opts: { daysAgo?: number; ratedBy?: string; rating?: "up" | "down"; flag?: string } = {},
+  opts: {
+    when?: "in" | "before" | "current";
+    ratedBy?: string;
+    rating?: "up" | "down";
+    flag?: string;
+  } = {},
 ) {
   const thread = randomUUID();
-  const days = opts.daysAgo ?? 1;
+  const when = at(opts.when ?? "in");
   await h.admin.query(
     `INSERT INTO threads (team_id, id, owner_user_id, title${opts.flag ? `, ${opts.flag}` : ""})
      VALUES ($1, $2, $3, 't'${opts.flag ? ", true" : ""})`,
@@ -48,13 +62,13 @@ async function run(
   const r = await h.admin.query<{ id: string }>(
     `INSERT INTO runs (team_id, thread_id, trigger, status, started_at, ended_at, created_at,
        skill_refs, skills_used)
-     VALUES ($1, $2, 'user', 'completed', now(), now(), now() - make_interval(days => $3::int),
+     VALUES ($1, $2, 'user', 'completed', now(), now(), $3::timestamptz,
        $4::jsonb, $5::jsonb)
      RETURNING id`,
     [
       team,
       thread,
-      days,
+      when,
       JSON.stringify([{ name: NAME, source: "catalog", sha256: "a".repeat(64), semver }]),
       JSON.stringify([{ tool_call_id: "c1", name: NAME, source: "catalog" }]),
     ],
@@ -63,9 +77,8 @@ async function run(
     await h.admin.query(
       `INSERT INTO answer_feedback (team_id, thread_id, run_id, user_id, rating, created_at,
          updated_at)
-       VALUES ($1, $2, $3, $4, $5, now() - make_interval(days => $6::int),
-         now() - make_interval(days => $6::int))`,
-      [team, thread, r.rows[0]?.id, ids[opts.ratedBy], opts.rating ?? "up", days],
+       VALUES ($1, $2, $3, $4, $5, now(), now())`,
+      [team, thread, r.rows[0]?.id, ids[opts.ratedBy], opts.rating ?? "up"],
     );
 }
 
@@ -144,12 +157,13 @@ beforeAll(async () => {
   await run(t1, "u1", "1.0.0", { ratedBy: "u1" });
   await run(t1, "v1", "1.0.0");
   for (let i = 0; i < 7; i += 1) await run(t2, "u2", "1.0.0", { ratedBy: "u2" });
-  for (let i = 0; i < 7; i += 1) await run(t3, "m3_1", "1.0.0", { ratedBy: `m3_${(i % 5) + 1}` });
+  for (let i = 0; i < 7; i += 1)
+    await run(t3, `m3_${(i % 3) + 1}`, "1.0.0", { ratedBy: `m3_${(i % 5) + 1}` });
   for (let i = 0; i < 7; i += 1)
     await run(t4, "u4", "2.0.0", { ratedBy: "u4", rating: i === 0 ? "down" : "up" });
-  // Not counted: today's run, a run 31 days ago, the Registry team, a test chat, an eval thread.
-  await run(t5, "u5", "1.0.0", { daysAgo: 0, ratedBy: "u5" });
-  await run(t5, "u5", "1.0.0", { daysAgo: 31 });
+  // Not counted: a run of the open period, one before the window, the Registry team, a test chat.
+  await run(t5, "u5", "1.0.0", { when: "current", ratedBy: "u5" });
+  await run(t5, "u5", "1.0.0", { when: "before" });
   await run(registryTeam, "u5", "1.0.0", { ratedBy: "u5" });
   await run(t5, "u5", "1.0.0", { flag: "skill_test" });
 
@@ -169,6 +183,12 @@ beforeAll(async () => {
     }
   }
   forgetUsageSnapshot();
+  // Two replicas at once: one computes and stores the window, the other finds it taken.
+  const stored = await Promise.all([
+    ensureUsageSnapshot(h.deps.database),
+    ensureUsageSnapshot(h.deps.database),
+  ]);
+  expect(stored.filter(Boolean)).toHaveLength(1);
 });
 
 afterAll(async () => {
@@ -189,14 +209,14 @@ async function card(key: string) {
 
 describe("members see site-wide numbers under the minimum-count rule (ac-1, ac-3)", () => {
   it("shows teams, members and the thumbs share from three teams other than the viewer's", async () => {
-    // Four teams installed; members u1, v1, u2, m3_1, u4; 22 ratings, 21 from teams 2–4.
+    // Four teams installed; members u1, v1, u2, m3_1–3, u4; 22 ratings, 21 from teams 2–4.
     expect(await card("v1")).toMatchObject({
       teamsInstalled: 4,
-      usage: { members: 5, thumbsUp: 0.95 },
+      usage: { members: 7, thumbsUp: 0.95 },
     });
     const d = await get("v1", `/v1/skills/catalog/${skillId}`);
-    expect(d.json).toMatchObject({ teamsInstalled: 4, usage: { members: 5 } });
-    expect(d.json.usageWindow.to).toBe(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+    expect(d.json).toMatchObject({ teamsInstalled: 4, usage: { members: 7 } });
+    expect(d.json.usageWindow).toEqual(WINDOW);
   });
 
   it("leaves every team the viewer belongs to out of the count", async () => {
@@ -206,26 +226,38 @@ describe("members see site-wide numbers under the minimum-count rule (ac-1, ac-3
       usage: { members: "few", thumbsUp: "few" },
     });
   });
+
+  it("reads the viewer's teams now, not when the window was computed (review M3)", async () => {
+    await member(t3, "v1");
+    expect(await card("v1")).toMatchObject({ teamsInstalled: "few" });
+    await h.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      t3,
+      ids.v1,
+    ]);
+    expect(await card("v1")).toMatchObject({ teamsInstalled: 4 });
+  });
 });
 
 describe("Team admins see their own team (ac-3)", () => {
-  it("runs, members and thumbs per skill and version; thumbs on five raters", async () => {
+  it("runs and members on three members other than the viewer; thumbs on five raters", async () => {
+    // Team 1: two members used it: few, and the version table is withheld.
     const t1Usage = await get("admin1", "/v1/team/skills/usage");
     expect(t1Usage.status, JSON.stringify(t1Usage.json)).toBe(200);
     expect(t1Usage.json.skills).toEqual([
       expect.objectContaining({
         name: NAME,
-        runs: 2,
-        members: 2,
+        runs: "few",
+        members: "few",
         thumbs: { enough: false },
-        versions: [{ semver: "1.0.0", runs: 2, members: 2 }],
+        versions: null,
       }),
     ]);
     const t3Usage = await get("admin3", "/v1/team/skills/usage");
     expect(t3Usage.json.skills[0]).toMatchObject({
       runs: 7,
-      members: 1,
+      members: 3,
       thumbs: { enough: true, up: 7, down: 0 },
+      versions: [{ semver: "1.0.0", runs: 7, members: 3 }],
     });
     expect((await get("v1", "/v1/team/skills/usage")).status).toBe(403);
   });
@@ -237,8 +269,8 @@ describe("maintainers and Site admins see per version (ac-3, ac-4)", () => {
       const u = await get(key, `/v1/skills/catalog/${skillId}/usage`);
       expect(u.status, JSON.stringify(u.json)).toBe(200);
       expect(u.json).toMatchObject({
-        totals: { teamsInstalled: 4, members: 5, runs: 23, optOuts: "few" },
-        versions: ["2.0.0", "1.0.0"],
+        totals: { teamsInstalled: 4, members: 7, runs: 23, optOuts: "few" },
+        versions: ["2.0.0", "1.0.0", "other"],
         // 2.0.0 runs in team 4 only: shown, it would give team 4 away by subtraction.
         perVersion: { teamsRunning: null, runs: null, members: null, thumbsUp: null },
       });
@@ -256,11 +288,16 @@ describe("maintainers and Site admins see per version (ac-3, ac-4)", () => {
     expect((await get("admin1", "/v1/team/skills/usage?window=90")).status).toBe(400);
   });
 
-  it("answers the same all day: new use shows only in tomorrow's snapshot", async () => {
+  it("never changes a closed window, on any replica or after a restart (review M1, M2)", async () => {
     const before = await get("maintainer", `/v1/skills/catalog/${skillId}/usage`);
     await run(t2, "u2", "1.0.0");
+    // A restart (nothing cached) and another replica's check find the window stored.
+    forgetUsageSnapshot();
+    expect(await ensureUsageSnapshot(h.deps.database)).toBe(false);
     const after = await get("maintainer", `/v1/skills/catalog/${skillId}/usage`);
     expect(after.json).toEqual(before.json);
+    const rows = await h.admin.query(`SELECT window_start FROM skill_usage_snapshots`);
+    expect(rows.rows).toHaveLength(1);
   });
 });
 

@@ -5,8 +5,8 @@ import type { AuthVariables } from "../auth/session.js";
 import { siteRoleAllows } from "../authz/permissions.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { usageSnapshot } from "../skills/usage-snapshot.js";
-import { siteSkillUsage, teamSkillUsage, viewerTeams } from "../skills/usage-views.js";
+import { usageSnapshot, viewerTeamsOf } from "../skills/usage-snapshot.js";
+import { siteSkillUsage, teamSkillUsage } from "../skills/usage-views.js";
 
 const idSchema = z.uuid();
 
@@ -33,11 +33,15 @@ export function skillUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     if (!id.success) return c.json(missing, 404);
     if (hasQuery(c)) return c.json(FIXED, 400);
     const userId = c.get("user").id;
+    // Only a skill with a published version has usage (review L4: 404 alike for the rest).
     const found = await db.execute<{ maintainer: boolean }>(sql`
       SELECT EXISTS (SELECT 1 FROM registry_maintainers m JOIN users u ON u.id = m.user_id
                       WHERE m.skill_id = s.id AND m.user_id = ${userId}
                         AND u.deactivated_at IS NULL) AS maintainer
-        FROM registry_skills s WHERE s.id = ${id.data}`);
+        FROM registry_skills s
+       WHERE s.id = ${id.data}
+         AND EXISTS (SELECT 1 FROM registry_versions v WHERE v.skill_id = s.id
+                      AND v.state::text IN ('approved', 'deprecated', 'withdrawn', 'revoked'))`);
     const row = found.rows[0];
     if (!row) return c.json(missing, 404);
     if (!row.maintainer && !siteRoleAllows(c.get("siteRole"), "site.skills.catalog.manage"))
@@ -56,7 +60,7 @@ export function skillUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
         snapshot,
         id.data,
         versions.rows.map((v) => v.semver),
-        viewerTeams(snapshot, userId),
+        await viewerTeamsOf(db, userId),
       ),
     );
   });

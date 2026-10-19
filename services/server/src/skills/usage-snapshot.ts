@@ -1,6 +1,8 @@
 import {
-  scanTeams,
+  listMemberships,
   sql,
+  withTeam,
+  type KobeDatabase,
   type KobeDb,
   type KobeTx,
   type RunSkillRef,
@@ -9,24 +11,30 @@ import {
 import { pickCatalogVersion, type CatalogVersion } from "../resolver/catalog-pins.js";
 
 /**
- * The nightly usage aggregates of catalog skills (KOBE-339, SK26): for one fixed window, the last
- * {@link USAGE_WINDOW_DAYS} finished UTC days (ending at the start of the snapshot's UTC day), each
- * team's contribution per catalog skill: whether it installed the skill and which version that
- * install runs, whether it opted out of it (a Default), and per version the runs that used it, the
- * members whose runs did, and the thumbs on those runs' answers (KOBE-275).
+ * The usage aggregates of catalog skills (KOBE-339, SK26), per **closed window**: windows are
+ * fixed, non-overlapping {@link USAGE_WINDOW_DAYS}-day periods counted from the Unix epoch (UTC,
+ * review M2). Once a window closes, one replica, under an advisory lock, computes each team's
+ * contribution per catalog skill and stores it in `skill_usage_snapshots` (review M1); every
+ * replica serves the last closed window's row, so a window's numbers never change after it
+ * closes and never differ between replicas or restarts. No two answers cover overlapping windows,
+ * so nothing can be differenced day by day.
  *
- * It holds team ids and user ids only to apply the minimum-count rule (`usage-views.ts`); nothing
- * here is ever returned as is. Each team is read under its own RLS (`scanTeams`). The Registry
- * team (re-runs, SK21), test chats and eval threads don't count. Computed once per UTC day per
- * replica (the nightly job warms it); every read on that day sees the same numbers, so two reads
- * can't be differenced within a day, and the window never moves within a day (ac-4).
+ * A team's contribution: whether it installed the skill and which version its install ran when
+ * the window was computed, a Default opt-out, and per version the runs that read the skill, the
+ * members whose runs did (the thread's owner: runs record no starter, review L5) and the thumbs on
+ * those runs' answers. Team and user ids stay on the server (the minimum-count rule needs them,
+ * `usage-views.ts`); nothing here is returned as is. Each team is read in its own transaction
+ * under its RLS (review L3); the Registry team, test chats and eval threads don't count.
  */
 export const USAGE_WINDOW_DAYS = 30;
+const DAY_MS = 86_400_000;
+const WINDOW_MS = USAGE_WINDOW_DAYS * DAY_MS;
+const LOCK = "kobe.skills.usage-snapshot";
 
 /** One team's part in one catalog skill. Versions by semver ("" when a run recorded none). */
 export interface TeamUse {
   installed: boolean;
-  /** The version the team's install runs now (null: none can run, or not installed). */
+  /** The version the team's install ran (null: none could run, or not installed). */
   running: string | null;
   optedOut: boolean;
   readonly runs: Map<string, number>;
@@ -37,25 +45,25 @@ export interface TeamUse {
 }
 
 export interface UsageSnapshot {
-  /** The UTC day it was computed for (YYYY-MM-DD): the window ends at its start. */
-  readonly day: string;
   readonly from: string;
   readonly to: string;
   readonly computedAt: string;
   /** skill id → team id → its part. */
   readonly skills: ReadonlyMap<string, ReadonlyMap<string, TeamUse>>;
-  /** user id → the teams they belong to (to leave the viewer's own teams out of the rule). */
-  readonly memberships: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
-export function utcDay(now: Date): string {
-  return now.toISOString().slice(0, 10);
+export interface UsageWindow {
+  readonly from: string;
+  readonly to: string;
 }
 
-export function usageWindow(day: string): { from: string; to: string } {
-  const to = new Date(`${day}T00:00:00.000Z`);
-  const from = new Date(to.getTime() - USAGE_WINDOW_DAYS * 86_400_000);
-  return { from: from.toISOString(), to: to.toISOString() };
+/** The last window that closed at or before `now`. */
+export function closedWindow(now: Date): UsageWindow {
+  const end = Math.floor(now.getTime() / WINDOW_MS) * WINDOW_MS;
+  return {
+    from: new Date(end - WINDOW_MS).toISOString(),
+    to: new Date(end).toISOString(),
+  };
 }
 
 const emptyUse = (): TeamUse => ({
@@ -139,9 +147,9 @@ type UseRow = { user_id: string; used: RunSkillUse[]; refs: RunSkillRef[] };
 async function teamPart(
   tx: KobeTx,
   teamId: string,
-  window: { from: string; to: string },
+  window: UsageWindow,
   catalog: Catalog,
-): Promise<{ uses: Map<string, TeamUse>; members: string[] }> {
+): Promise<Map<string, TeamUse>> {
   const uses = new Map<string, TeamUse>();
   const of = (skillId: string) => {
     const u = uses.get(skillId) ?? emptyUse();
@@ -179,7 +187,8 @@ async function teamPart(
       bump(u.runs, semver);
       add(u.members, semver, r.user_id);
     }
-  // Ratings of the window on answers of runs that used a skill.
+  // Ratings of the window's runs that used a skill (the run's window, so a rating changed later
+  // can't move a closed window: it was computed once).
   const rated = await tx.execute<UseRow & { rating: string }>(sql`
     SELECT f.user_id, f.rating, r.skills_used AS used, r.skill_refs AS refs
       FROM answer_feedback f
@@ -187,7 +196,7 @@ async function teamPart(
       JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
      WHERE f.team_id = ${teamId} AND r.team_id = ${teamId} AND t.team_id = ${teamId}
        AND jsonb_array_length(r.skills_used) > 0
-       AND f.updated_at >= ${window.from}::timestamptz AND f.updated_at < ${window.to}::timestamptz
+       AND r.created_at >= ${window.from}::timestamptz AND r.created_at < ${window.to}::timestamptz
        AND NOT t.skill_test AND NOT t.skill_eval`);
   for (const r of rated.rows)
     for (const [skillId, semver] of catalogUses(r.used, r.refs, catalog.idByName)) {
@@ -195,90 +204,215 @@ async function teamPart(
       bump(r.rating === "up" ? u.up : u.down, semver);
       add(u.raters, semver, r.user_id);
     }
-  const members = await tx.execute<{ user_id: string }>(
-    sql`SELECT user_id FROM team_members WHERE team_id = ${teamId}`,
-  );
-  return { uses, members: members.rows.map((m) => m.user_id) };
+  return uses;
 }
 
-export async function computeUsageSnapshot(db: KobeDb, now: Date): Promise<UsageSnapshot> {
-  const day = utcDay(now);
-  const window = usageWindow(day);
+export async function computeUsageSnapshot(
+  db: KobeDb,
+  window: UsageWindow,
+  now: Date,
+): Promise<UsageSnapshot> {
   const catalog = await readCatalog(db);
-  const registry = await db.execute<{ id: string }>(sql`SELECT id FROM teams WHERE registry`);
-  const skip = new Set(registry.rows.map((r) => r.id));
-  const parts = await scanTeams(db, "skillUsageSnapshot", async (tx, team) =>
-    skip.has(team.id)
-      ? undefined
-      : { teamId: team.id, ...(await teamPart(tx, team.id, window, catalog)) },
+  const teams = await db.execute<{ id: string }>(
+    sql`SELECT id FROM teams WHERE NOT registry ORDER BY id`,
   );
   const skills = new Map<string, Map<string, TeamUse>>();
-  const memberships = new Map<string, Set<string>>();
-  for (const p of parts) {
-    for (const [skillId, use] of p.uses) {
-      const teams = skills.get(skillId) ?? new Map<string, TeamUse>();
-      teams.set(p.teamId, use);
-      skills.set(skillId, teams);
+  for (const team of teams.rows) {
+    const uses = await withTeam(db, team.id, (tx) => teamPart(tx, team.id, window, catalog));
+    for (const [skillId, use] of uses) {
+      const per = skills.get(skillId) ?? new Map<string, TeamUse>();
+      per.set(team.id, use);
+      skills.set(skillId, per);
     }
-    for (const userId of p.members) add(memberships, userId, p.teamId);
   }
-  return { day, ...window, computedAt: now.toISOString(), skills, memberships };
+  return { ...window, computedAt: now.toISOString(), skills };
+}
+
+// --- storage: the payload is plain JSON of the maps ------------------------------------------
+
+type StoredUse = {
+  i: boolean;
+  r: string | null;
+  o: boolean;
+  runs: Record<string, number>;
+  members: Record<string, string[]>;
+  up: Record<string, number>;
+  down: Record<string, number>;
+  raters: Record<string, string[]>;
+};
+type Payload = { skills: Record<string, Record<string, StoredUse>> };
+
+const toObj = <V, W>(m: ReadonlyMap<string, V>, f: (v: V) => W) =>
+  Object.fromEntries([...m].map(([k, v]) => [k, f(v)]));
+
+export function toPayload(s: UsageSnapshot): Payload {
+  return {
+    skills: toObj(s.skills, (teams) =>
+      toObj(teams, (u) => ({
+        i: u.installed,
+        r: u.running,
+        o: u.optedOut,
+        runs: toObj(u.runs, (n) => n),
+        members: toObj(u.members, (set) => [...set]),
+        up: toObj(u.up, (n) => n),
+        down: toObj(u.down, (n) => n),
+        raters: toObj(u.raters, (set) => [...set]),
+      })),
+    ),
+  };
+}
+
+const numMap = (o: Record<string, number> | undefined) => new Map(Object.entries(o ?? {}));
+const setMap = (o: Record<string, string[]> | undefined) =>
+  new Map(Object.entries(o ?? {}).map(([k, v]) => [k, new Set(v)]));
+
+export function fromPayload(
+  p: Payload,
+  window: UsageWindow & { computedAt: string },
+): UsageSnapshot {
+  const skills = new Map<string, Map<string, TeamUse>>();
+  for (const [skillId, teams] of Object.entries(p.skills ?? {}))
+    skills.set(
+      skillId,
+      new Map(
+        Object.entries(teams).map(([teamId, u]) => [
+          teamId,
+          {
+            installed: u.i,
+            running: u.r,
+            optedOut: u.o,
+            runs: numMap(u.runs),
+            members: setMap(u.members),
+            up: numMap(u.up),
+            down: numMap(u.down),
+            raters: setMap(u.raters),
+          },
+        ]),
+      ),
+    );
+  return { ...window, skills };
+}
+
+const iso = (v: unknown) => new Date(v as string | Date).toISOString();
+
+async function storedRow(db: KobeDb, from: string | null): Promise<UsageSnapshot | null> {
+  const r = await db.execute<{
+    window_start: string;
+    window_end: string;
+    computed_at: string;
+    payload: Payload;
+  }>(sql`
+    SELECT window_start, window_end, computed_at, payload FROM skill_usage_snapshots
+     ${from ? sql`WHERE window_start = ${from}::timestamptz` : sql``}
+     ORDER BY window_start DESC LIMIT 1`);
+  const row = r.rows[0];
+  if (!row) return null;
+  return fromPayload(row.payload, {
+    from: iso(row.window_start),
+    to: iso(row.window_end),
+    computedAt: iso(row.computed_at),
+  });
 }
 
 /**
- * The day's snapshot, computed once per UTC day per replica (single flight). The nightly job
- * calls it just after midnight UTC; a read before that computes it then.
+ * Computes and stores the last closed window's snapshot if nobody has: one replica at a time (a
+ * session advisory lock on a dedicated connection), written once (`ON CONFLICT DO NOTHING`), and
+ * windows older than the previous one purged. Returns whether this call stored it.
  */
-let current: { day: string; snapshot: Promise<UsageSnapshot> } | null = null;
-
-export function usageSnapshot(db: KobeDb, now: Date = new Date()): Promise<UsageSnapshot> {
-  const day = utcDay(now);
-  if (current?.day !== day) {
-    const snapshot = computeUsageSnapshot(db, now);
-    current = { day, snapshot };
-    // A failed computation is retried by the next read.
-    snapshot.catch(() => {
-      if (current?.snapshot === snapshot) current = null;
-    });
+export async function ensureUsageSnapshot(
+  deps: { readonly db: KobeDb; readonly pool: KobeDatabase["pool"] },
+  now: Date = new Date(),
+): Promise<boolean> {
+  const window = closedWindow(now);
+  const have = await deps.db.execute(sql`
+    SELECT 1 FROM skill_usage_snapshots WHERE window_start = ${window.from}::timestamptz`);
+  if (have.rows.length > 0) return false;
+  const client = await deps.pool.connect();
+  let destroy = false;
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked`,
+      [LOCK],
+    );
+    if (!rows[0]?.locked) return false;
+    try {
+      const again = await deps.db.execute(sql`
+        SELECT 1 FROM skill_usage_snapshots WHERE window_start = ${window.from}::timestamptz`);
+      if (again.rows.length > 0) return false;
+      const snapshot = await computeUsageSnapshot(deps.db, window, now);
+      await deps.db.execute(sql`
+        INSERT INTO skill_usage_snapshots (window_start, window_end, payload)
+        VALUES (${window.from}::timestamptz, ${window.to}::timestamptz,
+          ${JSON.stringify(toPayload(snapshot))}::jsonb)
+        ON CONFLICT (window_start) DO NOTHING`);
+      await deps.db.execute(sql`
+        DELETE FROM skill_usage_snapshots
+         WHERE window_start < ${window.from}::timestamptz - make_interval(days => ${USAGE_WINDOW_DAYS})`);
+      return true;
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [LOCK]).catch(() => {
+        destroy = true;
+      });
+    }
+  } finally {
+    client.release(destroy);
   }
-  return current.snapshot;
+}
+
+/**
+ * The snapshot to serve: the last closed window's stored row, or, while it isn't stored yet (the
+ * job runs at start and hourly), the newest stored one (also a closed window, so its numbers are
+ * final). With none stored at all, an empty snapshot (every number reads "few"). Stored rows never
+ * change, so a replica caches the one it serves and only looks for the newer one now and then.
+ */
+let cache: { key: string; snapshot: UsageSnapshot; checkedAt: number } | null = null;
+const RECHECK_MS = 60_000;
+
+export async function usageSnapshot(db: KobeDb, now: Date = new Date()): Promise<UsageSnapshot> {
+  const window = closedWindow(now);
+  if (cache?.key === window.from) return cache.snapshot;
+  if (cache && now.getTime() - cache.checkedAt < RECHECK_MS) return cache.snapshot;
+  const stored = (await storedRow(db, window.from)) ?? (await storedRow(db, null));
+  const snapshot = stored ?? { ...window, computedAt: now.toISOString(), skills: new Map() };
+  cache = { key: stored?.from ?? "", snapshot, checkedAt: now.getTime() };
+  return snapshot;
 }
 
 /** Tests: drop the cached snapshot. */
 export function forgetUsageSnapshot(): void {
-  current = null;
+  cache = null;
 }
 
-/** Minutes after midnight UTC the nightly job computes the new day's snapshot. */
-const NIGHTLY_OFFSET_MS = 5 * 60_000;
-
-/** Milliseconds from `now` to the next nightly run (00:05 UTC). */
-export function msToNextNightly(now: Date): number {
-  const next = new Date(`${utcDay(now)}T00:00:00.000Z`).getTime() + NIGHTLY_OFFSET_MS;
-  const at = next > now.getTime() ? next : next + 86_400_000;
-  return at - now.getTime();
+/** The teams the viewer belongs to now (review M3), plus the active one. */
+export async function viewerTeamsOf(
+  db: KobeDb,
+  userId: string,
+  activeTeamId?: string,
+): Promise<Set<string>> {
+  const teams = new Set((await listMemberships(db, userId)).map((m) => m.teamId));
+  if (activeTeamId) teams.add(activeTeamId);
+  return teams;
 }
+
+/** How often each replica checks whether the last closed window is stored. */
+export const USAGE_CHECK_MS = 60 * 60_000;
 
 /**
- * The nightly refresh (ac-1): computes the snapshot at start, then just after each midnight UTC.
- * Reads only; a failure is logged and the next read retries. Returns how to stop it.
+ * The refresh job (ac-1): at start and every hour, stores the last closed window's snapshot if no
+ * replica has yet. A failure is logged and retried at the next check. Returns how to stop it.
  */
 export function startUsageSnapshots(deps: {
   readonly db: KobeDb;
+  readonly pool: KobeDatabase["pool"];
   readonly log: { error(obj: object, msg: string): void };
 }): () => void {
-  let timer: NodeJS.Timeout | undefined;
-  let stopped = false;
   const run = () => {
-    usageSnapshot(deps.db).catch((err: unknown) =>
+    ensureUsageSnapshot(deps).catch((err: unknown) =>
       deps.log.error({ err }, "skill usage snapshot failed"),
     );
-    if (!stopped) timer = setTimeout(run, msToNextNightly(new Date()));
-    timer?.unref();
   };
   run();
-  return () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-  };
+  const timer = setInterval(run, USAGE_CHECK_MS);
+  timer.unref();
+  return () => clearInterval(timer);
 }
