@@ -5,7 +5,7 @@
 - **Status:** in review (group branch `group-skills-c`, one PR for Phase C)
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-330 (Registry team), KOBE-311 (`site_grants`, `SITE_GRANTS`)
-- **Migrations:** none (`site_grants` and its enum exist since KOBE-311)
+- **Migrations (review):** 0154 `team_members.added_via` (generated, CHECK `skill_reviewer_grant`)
 
 ## What shipped
 
@@ -32,18 +32,35 @@
   do, the holders with Take (confirmed), and Make Skill reviewer for active plain users (Site
   admins review anyway, so they are not offered).
 
+## Review fixes (review-c1.md)
+
+- **H1** grantees join only the dedicated Registry team (KOBE-330 review); the grant is refused
+  for oneself, Site admins and the Owner (`not_grantable`, they review through their role).
+  Team admins see "Added by Kobe: Skill reviewer" on such members. No separate notification: the
+  team is the Registry's own (its admin is the Site admin who created it).
+- **Coordinator decision (revoke):** Kobe's memberships are `added_via = skill_reviewer_grant`;
+  taking the grant removes exactly those, through `removeMemberInTx` (invites, schedules, egress,
+  shares, audit `identity.member.removed` with `via`). A prior member, a member whose role a team
+  admin changed, or one who accepted an invitation is the team's own (`added_via` cleared) and
+  stays.
+- **M3** granting a deactivated account is 409 `user_deactivated`; deactivated holders never join
+  and are flagged in the list. **M4** the grant (or revoke) and the membership change are one
+  transaction under the Registry team's RLS context, the team read under `FOR SHARE`.
+- **L5** tests: reviewers can't grant (themselves included), revoke or list grants; team admins
+  can't grant or revoke; a promoted-then-demoted grantee keeps only reviewer actions;
+  `grantsOf` is empty for a deactivated holder; the reviewer table is exhaustive by type.
+  **L6** DELETE answers `user_not_found` for an unknown user. **L7** the Registry team's creator
+  is its team admin; other Site admins review through `site.skills.review` and are not members
+  (re-runs are the review ticket's to place).
+
 ## Decisions
 
-- **Taking the grant leaves Registry team membership alone:** the person may be a member for
-  other reasons; the team's admins remove them if wanted. The queue closes at once either way.
 - **Who gives the grant:** "the Owner or a Site admin" (SK22), so a new admin-level
   `site.grants.manage`, not the Owner-only `site.roles.manage`.
-- Changing the Registry team later adds the reviewers to the new team; the old team's
-  memberships stay.
 
 ## Open questions (for Chris or the coordinator)
 
-- Should taking the grant also remove the person from the Registry team when Kobe added them?
+- none
 
 ## Evidence (acceptance criteria → test or command output)
 

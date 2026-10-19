@@ -90,7 +90,8 @@ synced_rev` (nobody, the author included, changed it since); otherwise one trans
 - **L4** the server appends `skill.draft_saved` (tool call, draft, name, created, new_because) to
   the run; `GET /v1/skills/drafts/saves?threadId=` returns a readable conversation's saves; the
   card is built only from those (a forged tool result shows no card).
-- **L5** (draft-cap TOCTOU, pre-existing) not changed.
+- **L5** (draft-cap TOCTOU, pre-existing) not changed. Second review: saves listed newest
+  first by run creation, then shown oldest first (a random run id is no order).
 - Tests added: concurrent saves, replay, shared and edited targets, name/folder, rename clash,
   another member's run, another thread, rate, cap, site deny, team ask, ask-all; web card from
   the server record only. `forbidden` (role) can't be reached: every team role may draft.

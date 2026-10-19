@@ -6,7 +6,9 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-311 (the `site_skill_settings` row and its columns), KOBE-325/326 (eval
   limits, judge alias readers)
-- **Migrations:** none (the table and its seeded row exist since 0133)
+- **Migrations (review):** 0152 `teams.registry` + one-registry-team index (generated), 0153
+  (custom) clears an ordinary team's designation and adds the guard triggers; upgrade test
+  `packages/db/src/registry-team-upgrade.db.test.ts`
 
 ## What shipped
 
@@ -34,11 +36,28 @@
 
 - **No new permission:** Registry settings sit with the catalog (`site.skills.catalog.manage`),
   which only admins hold; KOBE-331 adds `site.skills.review` for the queue.
-- **"Approve disabled" (ac-2):** there is no Approve yet (the review screen is a later Phase C
-  ticket). `registryReady()` is the guard Approve and re-runs must call, and the console shows
-  "not ready"; the review ticket wires the button and the 409.
+- **"Approve disabled" (ac-2):** there is no Approve yet; `requireRegistryTeam(tx)` is the guard
+  (see M2 below) and the console shows "not ready".
 - Rule documents are replaced whole on save (the web sends the full rules object when any rule
   changed), so the stored document is always complete.
+
+## Review fixes (review-c1.md)
+
+- **H1 (coordinator decision): the Registry team is always a dedicated team Kobe creates.**
+  `POST /v1/site/skills/registry/team {name, slug}` creates it flagged `teams.registry` (at most
+  one; the flag is fixed at creation by trigger), with the creating Site admin as team admin and
+  every active Skill reviewer as a member, and names it, in one transaction. `registryTeamId` is
+  no longer a setting; the database refuses naming any other team (trigger, 23514). 0153 clears
+  an existing designation of an ordinary team (a NOTICE in the migration log names it); its
+  members are untouched. Deleting the Registry team leaves "not ready"; a new one can be created.
+- **M1** a mirror URL with userinfo, query or fragment is refused (the token lives in a Secret).
+- **M2** `registryTeamFor(tx)` reads the team under `FOR SHARE` and `requireRegistryTeam(tx)`
+  answers `registry_not_ready`: **Approve, re-runs and every Registry action from KOBE-333 on must
+  call it inside their transaction and use the id it returns** (tested now: not ready → refused).
+- **L2** the audit lists settings whose values changed; re-sending the same values records
+  nothing. **L3** an unparseable stored document reads as defaults with a warning. **L1** doc
+  comment restored. **L4** SK30's allowlisted organizations and SK22's single-admin self-approve
+  flag are left to the import (D2) and review tickets.
 
 ## Open questions (for Chris or the coordinator)
 
