@@ -26,6 +26,7 @@ import {
   TableRowHeader,
 } from "../../ui/console";
 import { DateTime, ResourceView } from "../parts";
+import { CatalogMaintainers } from "./skill-catalog-maintainers";
 import { useResource, type Mutation } from "../use-resource";
 
 const majorOf = (semver: string | null) => (semver ? Number(semver.split(".")[0]) : null);
@@ -121,6 +122,7 @@ export function CatalogTagsSection({
 }) {
   const { state } = useResource(() => listSiteCatalog());
   const [editing, setEditing] = useState<string | null>(null);
+  const [maintaining, setMaintaining] = useState<string | null>(null);
 
   async function move(skill: SiteCatalogSkill, to: number) {
     const done = await mutation.run(
@@ -156,7 +158,16 @@ export function CatalogTagsSection({
                     <TableRow key={s.id}>
                       <TableRowHeader>
                         {s.name}
+                        {s.status === "unmaintained" && (
+                          <>
+                            {" "}
+                            <Badge tone="attention">Unmaintained</Badge>
+                          </>
+                        )}
                         <div className="text-sm font-normal text-console-muted">{s.summary}</div>
+                        {maintaining === s.id && (
+                          <CatalogMaintainers skill={s} mutation={mutation} />
+                        )}
                       </TableRowHeader>
                       <TableCell>{s.latest ?? "None approved"}</TableCell>
                       <TableCell>
@@ -187,6 +198,16 @@ export function CatalogTagsSection({
                         >
                           Edit tags
                         </Button>
+                        {s.publisher !== "kobe" && (
+                          <Button
+                            variant="ghost"
+                            aria-expanded={maintaining === s.id}
+                            aria-label={`Maintainers of ${s.name}`}
+                            onClick={() => setMaintaining(maintaining === s.id ? null : s.id)}
+                          >
+                            Maintainers
+                          </Button>
+                        )}
                         {major !== null ? (
                           <Button
                             disabled={mutation.pending}
