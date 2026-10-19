@@ -43,6 +43,11 @@ export const SANDBOX_WARM_POOL = "kobe-sandbox";
 export const NETWORK_POLICY = "kobe-sandbox-isolation";
 /** Egress policy for eval pods only (the namespace-wide policy leaves them out). */
 export const EVAL_NETWORK_POLICY = "kobe-orbit-eval-isolation";
+/**
+ * No traffic for external skill scan pods (KOBE-341; the namespace-wide policy leaves them out).
+ * Kept in every team namespace, so a pod with the scan label is never left without a policy.
+ */
+export const SKILL_SCAN_NETWORK_POLICY = "kobe-skill-scan";
 export const RESOURCE_QUOTA = "kobe-team-quota";
 /** Skill eval sandboxes (KOBE-325): their own template and (empty) warm pool per team. */
 export const EVAL_SANDBOX_TEMPLATE = "kobe-skill-eval";

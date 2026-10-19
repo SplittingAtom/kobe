@@ -10,6 +10,7 @@ import {
   BOOTSTRAP_TOKEN_SECONDS,
   KOBE_ENDPOINTS,
   EVAL_NETWORK_POLICY,
+  SKILL_SCAN_NETWORK_POLICY,
   LABEL_MANAGED_BY,
   LABEL_ORBIT_EVAL,
   LABEL_SKILL_SCAN,
@@ -226,7 +227,6 @@ export function evalNetworkPolicyManifest(namespace: string, s: SandboxSettings)
  * External skill scans (KOBE-341): no ingress and no egress at all. The scan reads its package
  * from a ConfigMap and writes its result to its log; it needs nothing on the network.
  */
-export const SKILL_SCAN_NETWORK_POLICY = "kobe-skill-scan";
 export function skillScanNetworkPolicyManifest(namespace: string): KubeObject {
   return {
     apiVersion: "networking.k8s.io/v1",

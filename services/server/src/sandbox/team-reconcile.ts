@@ -4,6 +4,7 @@ import {
   LABEL_TEAM_ID,
   LABEL_TEAM_NAMESPACE,
   NETWORK_POLICY,
+  SKILL_SCAN_NETWORK_POLICY,
   TEAM_NAMESPACE_PREFIX,
 } from "./constants.js";
 import { assertTeamRef, type KubeObject, type TeamRef } from "./manifests.js";
@@ -44,7 +45,9 @@ const POLICY = (name: string, namespace: string): ObjectRef => ({
 /** The specs of the managed NetworkPolicies, to tell whether a convergence changed them. */
 async function policySpecs(kube: KubeClient, namespace: string): Promise<string> {
   const objects: (KubeObject | undefined)[] = await Promise.all(
-    [NETWORK_POLICY, EVAL_NETWORK_POLICY].map((n) => kube.get(POLICY(n, namespace))),
+    [NETWORK_POLICY, EVAL_NETWORK_POLICY, SKILL_SCAN_NETWORK_POLICY].map((n) =>
+      kube.get(POLICY(n, namespace)),
+    ),
   );
   return JSON.stringify(objects.map((o) => o?.spec ?? null));
 }
