@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UI_RESOURCE_URI_PATTERN } from "./ui-resources.js";
 
 /**
  * One pinned tool of a connector's `tools/list` snapshot (D27), as stored in
@@ -25,6 +26,15 @@ export const pinnedToolAnnotationsSchema = z.object({
 });
 
 /**
+ * The MCP Apps template a tool opens (`_meta.ui.resourceUri`, KOBE-433). Part of the tool's pin
+ * when present, so pointing a tool at another template is drift.
+ */
+export const pinnedToolUiSchema = z.strictObject({
+  resource_uri: z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN),
+});
+export type PinnedToolUi = z.infer<typeof pinnedToolUiSchema>;
+
+/**
  * What a drifted tool's live definition says now (KOBE-102). The entry's own fields stay the
  * approved ones until a site admin re-approves; nothing reads `proposed` except the review UI.
  */
@@ -34,6 +44,7 @@ export const proposedToolSchema = z.object({
   input_schema: jsonObject,
   output_schema: jsonObject.optional(),
   annotations: pinnedToolAnnotationsSchema.default({}),
+  ui: pinnedToolUiSchema.optional(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type ProposedTool = z.infer<typeof proposedToolSchema>;
@@ -48,7 +59,9 @@ export const pinnedToolSchema = z.object({
   input_schema: jsonObject,
   output_schema: jsonObject.optional(),
   annotations: pinnedToolAnnotationsSchema.default({}),
-  /** SHA-256 (hex) of the pinned name, description and schema. */
+  /** The template it opens (MCP Apps), when the server declares one. */
+  ui: pinnedToolUiSchema.optional(),
+  /** SHA-256 (hex) of the pinned name, description and schema (and `ui`, when present). */
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   /** `drifted`: the live tool changed since it was pinned; disabled until re-approved (D27). */
   status: z.enum(["pinned", "drifted"]),
