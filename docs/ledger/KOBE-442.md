@@ -5,7 +5,9 @@
 - **Status:** in review (group branch `group-skills-c`, one PR for Phase C)
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-322 (Save to Workbench), KOBE-317 (Kobe package set), KOBE-150 (share_file)
-- **Migrations:** none (audit actions are a zod registry, no table changes)
+- **Migrations:** 0149 `skill_drafts.synced_rev` (generated), 0150 backfill (custom, NO FORCE/FORCE),
+  0151 partial unique index `skill_drafts_thread_sync_uq` (generated); upgrade test
+  `packages/db/src/skill-drafts-synced-rev-upgrade.db.test.ts`
 
 ## What shipped
 
@@ -66,12 +68,37 @@ size}`, 1..200, unique, path <= 512) and `skill.draft_save_result` (`draft_id`, 
 - `save_skill_draft` is registered for any agent with the capability (like `share_file`), not
   only the Kobe agent; an agent with an explicit tool list must name it.
 
+## Review fixes (review-442.md)
+
+- **H1** a conversation saves `name` into one draft: `synced_rev` (the revision its last save
+  wrote; null = no longer saved into) and a unique index on (team, author, from_thread_id, name)
+  where both are set. Name is in the key so one conversation can still make two skills. A create
+  that loses the race (23505 on that index) looks again and updates the winner; a Workbench
+  rename into a taken name is 409 `name_taken`. The backfill makes the newest draft per key the
+  target; older duplicates keep their files and are no longer saved into.
+- **M1** the allowance is consumed (`AllowedArtifactCalls.consume`, as web_search): a second
+  frame for the call is refused, audited `replayed`.
+- **M2** (coordinator) the tool updates the target only while it is private and `rev ==
+synced_rev` (nobody, the author included, changed it since); otherwise one transaction detaches
+  it (`synced_rev = NULL`) and makes a new private draft; the answer, the event and the card say
+  "Your earlier draft was shared or edited, so this is a new draft." REST Save to Workbench (the
+  member's own action) still writes into its target.
+- **L1** the tool refuses `invalid_skill` unless SKILL.md's name is the folder policy saw.
+- **L2** accepted: the tool shares the member's `skill-upload` rate (30 per 10 minutes) with
+  uploads, forks and Save to Workbench, charged before validation like those.
+- **L3** `skill.draft.created/updated` carry `runId` and `toolCallId` for tool saves.
+- **L4** the server appends `skill.draft_saved` (tool call, draft, name, created, new_because) to
+  the run; `GET /v1/skills/drafts/saves?threadId=` returns a readable conversation's saves; the
+  card is built only from those (a forged tool result shows no card).
+- **L5** (draft-cap TOCTOU, pre-existing) not changed.
+- Tests added: concurrent saves, replay, shared and edited targets, name/folder, rename clash,
+  another member's run, another thread, rate, cap, site deny, team ask, ask-all; web card from
+  the server record only. `forbidden` (role) can't be reached: every team role may draft.
+
 ## Open questions (for Chris or the coordinator)
 
 - Exempting the tool from the ask-on-write prompt is my reading of "allowed by default"; say if it
   should prompt like `share_file`.
-- KOBE-322 review N2 (same-conversation race needs a unique index) still open; the tool makes two
-  concurrent saves a little likelier (one in flight per thread on the agent side).
 - Gate1 needs a new sandbox image (kobe-tools, agent) and server for the browser spec.
 
 ## Evidence (acceptance criteria → test or command output)
