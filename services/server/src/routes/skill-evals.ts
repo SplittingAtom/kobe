@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { withTeam } from "@kobe/db";
+import { getMembership, withTeam } from "@kobe/db";
 import { startSkillEvalBodySchema } from "@kobe/protocol";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -127,14 +127,23 @@ export function skillEvalRoutes(
       return error(c, 403, "forbidden", "Only its starter or a team admin can cancel it.");
     if (outcome === "ended") return error(c, 409, "eval_ended", "The eval has already ended.");
     const run = await withTeam(db, who.teamId, (tx) => readEvalRun(tx, who, id.data));
-    return c.json(run);
+    // The contract's 202: the cancel is accepted; running executions stop within seconds.
+    return c.json(run, 202);
   });
 
   app.get("/skill-evals/:id/events", team, async (c) => {
     const id = uuid.safeParse(c.req.param("id"));
     if (!id.success) return error(c, 404, "not_found", "No such eval.");
-    const stream = await skillEvalEventStream({ db, hub: options.hub }, viewerOf(c), id.data);
-    if (!stream) return error(c, 404, "not_found", "No such eval.");
+    const who = viewerOf(c);
+    const stream = await skillEvalEventStream({ db, hub: options.hub }, who, id.data, {
+      reconnect: c.req.header("last-event-id") !== undefined,
+      stillAllowed: async () => (await getMembership(db, who.teamId, who.userId)) !== null,
+    });
+    if (stream === "not_found") return error(c, 404, "not_found", "No such eval.");
+    // A finished eval's reconnect: 204 tells EventSource to stop (review L5).
+    if (stream === "finished") return c.body(null, 204);
+    if (stream === "too_many_streams")
+      return c.json({ code: "too_many_streams", message: "Too many eval streams open." }, 429);
     return new Response(stream, { status: 200, headers: SSE_HEADERS });
   });
 

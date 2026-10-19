@@ -81,7 +81,15 @@ export class SkillEvalHub {
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "budget_stopped"]);
 
-const frame = (type: string, data: unknown) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+const frame = (type: string, id: string, data: unknown) =>
+  `id: ${id}\nevent: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+
+/** Open streams per viewer on this replica, and how long one stays open (review L5). */
+export const SKILL_EVAL_STREAMS_PER_USER = 5;
+export const SKILL_EVAL_STREAM_MAX_MS = 30 * 60_000;
+const openStreams = new Map<string, number>();
+
+export type StreamRefusal = "not_found" | "finished" | "too_many_streams";
 
 /**
  * The SSE stream of one eval run: `skill.eval.progress` for each execution done (those done
@@ -92,14 +100,35 @@ export async function skillEvalEventStream(
   deps: { readonly db: KobeDb; readonly hub: SkillEvalHub | undefined },
   who: EvalViewer,
   evalRunId: string,
-  options: { readonly pollMs?: number; readonly keepaliveMs?: number } = {},
-): Promise<ReadableStream<Uint8Array> | null> {
+  options: {
+    readonly pollMs?: number;
+    readonly keepaliveMs?: number;
+    readonly maxMs?: number;
+    /** A reconnect (`Last-Event-ID`): a finished eval answers no stream, so EventSource stops. */
+    readonly reconnect?: boolean;
+    /** Re-checked on every read: the viewer is still an active member of the team. */
+    readonly stillAllowed?: () => Promise<boolean>;
+  } = {},
+): Promise<ReadableStream<Uint8Array> | StreamRefusal> {
   const first = await withTeam(deps.db, who.teamId, (tx) => readEvalRun(tx, who, evalRunId));
-  if (!first) return null;
+  if (!first) return "not_found";
+  if (options.reconnect && TERMINAL.has(first.status)) return "finished";
+  const open = openStreams.get(who.userId) ?? 0;
+  if (open >= SKILL_EVAL_STREAMS_PER_USER) return "too_many_streams";
+  openStreams.set(who.userId, open + 1);
+  let counted = true;
+  const release = () => {
+    if (!counted) return;
+    counted = false;
+    const n = (openStreams.get(who.userId) ?? 1) - 1;
+    if (n <= 0) openStreams.delete(who.userId);
+    else openStreams.set(who.userId, n);
+  };
   const encoder = new TextEncoder();
   const sent = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
   let keepalive: NodeJS.Timeout | undefined;
+  let lifetime: NodeJS.Timeout | undefined;
   let unsubscribe: (() => void) | undefined;
   let reading = false;
   let again = false;
@@ -108,12 +137,15 @@ export async function skillEvalEventStream(
     finished = true;
     if (timer) clearInterval(timer);
     if (keepalive) clearInterval(keepalive);
+    if (lifetime) clearTimeout(lifetime);
     unsubscribe?.();
+    release();
   };
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const push = (text: string) => controller.enqueue(encoder.encode(text));
       const emit = async () => {
+        if (options.stillAllowed && !(await options.stillAllowed())) return true;
         const read = await withTeam(deps.db, who.teamId, async (tx) => ({
           run: await readEvalRun(tx, who, evalRunId),
           done: await doneExecutions(tx, who.teamId, evalRunId),
@@ -128,6 +160,7 @@ export async function skillEvalEventStream(
           push(
             frame(
               "skill.eval.progress",
+              `p${done}`,
               skillEvalProgressPayloadSchema.parse({
                 evalRunId,
                 done,
@@ -140,7 +173,7 @@ export async function skillEvalEventStream(
           );
         }
         if (!TERMINAL.has(read.run.status)) return false;
-        push(frame("skill.eval.completed", completedPayload(read.run)));
+        push(frame("skill.eval.completed", "done", completedPayload(read.run)));
         return true;
       };
       const tick = () => {
@@ -174,6 +207,12 @@ export async function skillEvalEventStream(
       timer.unref();
       keepalive = setInterval(() => push(": keepalive\n\n"), options.keepaliveMs ?? 15_000);
       keepalive.unref();
+      // A stream ends after a while; the client reconnects (and a finished eval answers 204).
+      lifetime = setTimeout(() => {
+        stop();
+        controller.close();
+      }, options.maxMs ?? SKILL_EVAL_STREAM_MAX_MS);
+      lifetime.unref();
       push("retry: 3000\n\n");
       tick();
     },

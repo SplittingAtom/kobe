@@ -189,6 +189,14 @@ async function drive(runner: SkillEvalRunner, team: string, evalRunId: string) {
 
 const url = () => must(f.listeners[0], "listener").url;
 
+/** Ends a test's open evals, so later tests' runners never pick them up. */
+const closeEvals = (team: string) =>
+  f.fx.admin.query(
+    `UPDATE skill_eval_runs SET status = 'cancelled', cancel_requested_at = now(), finished_at = now()
+      WHERE team_id = $1 AND status IN ('queued', 'running')`,
+    [team],
+  );
+
 describe("skill eval runner (KOBE-325)", () => {
   it("runs a full eval: one sandbox per case per mode, baseline without skills, scored and streamed", async () => {
     const w = await world();
@@ -269,6 +277,12 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(events.text.match(/event: skill\.eval\.progress/g)).toHaveLength(3);
     expect(events.text).toContain("event: skill.eval.completed");
     expect(events.text).not.toContain("Total: 42");
+    expect(events.text).toContain("id: done");
+    // A reconnect after the end gets no stream again (EventSource stops on 204).
+    const again = await f
+      .on(0, w.owner)
+      .get(`/v1/skill-evals/${evalRunId}/events`, { "last-event-id": "done" });
+    expect(again.status).toBe(204);
   });
 
   it("retries a failing case once in a new thread and sandbox, within a cap of one", async () => {
@@ -318,7 +332,7 @@ describe("skill eval runner (KOBE-325)", () => {
     });
     const evalRunId = started.json.evalRunId as string;
     const cancelled = await f.on(0, w.owner).post(`/v1/skill-evals/${evalRunId}/cancel`, {});
-    expect(cancelled.status).toBe(200);
+    expect(cancelled.status).toBe(202);
     expect(cancelled.json).toMatchObject({ status: "cancelled", scorecard: null });
     const runner = runnerFor(provider);
     expect(await runner.sweep()).toBe(0);
@@ -364,6 +378,7 @@ describe("skill eval runner (KOBE-325)", () => {
       [w.team, must(provider.created[0], "thread")],
     );
     expect(rows[0]?.status).toBe("cancelled");
+    await closeEvals(w.team);
   });
 
   it("the reaper takes over only executions whose heartbeat stopped (review M2)", async () => {
@@ -425,6 +440,7 @@ describe("skill eval runner (KOBE-325)", () => {
       { case_id: "b", state: "queued", attempt: 1 },
     ]);
     expect(provider.deleted).toEqual([dead]);
+    await closeEvals(w.team);
   });
 
   it("retention purges past held starters' runs instead of stalling behind them (review M3)", async () => {
@@ -470,11 +486,13 @@ describe("skill eval runner (KOBE-325)", () => {
       ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
       {},
     );
+    const open: string[] = [];
     for (let i = 0; i < 3; i += 1) {
       const ok = await f
         .on(0, w.owner)
         .post(`/v1/skills/drafts/${id}/evals`, { mode: "with_only" });
       expect(ok.status, JSON.stringify(ok.json)).toBe(202);
+      open.push(ok.json.evalRunId as string);
     }
     const before = objects.objects.size;
     const refused = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
@@ -483,6 +501,9 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(refused.status).toBe(409);
     expect(refused.json).toMatchObject({ code: "too_many_evals" });
     expect(objects.objects.size).toBe(before);
+    // Leave nothing queued for the other tests' runners.
+    for (const e of open)
+      expect((await f.on(0, w.owner).post(`/v1/skill-evals/${e}/cancel`, {})).status).toBe(202);
   });
 
   it("never asks, and ignores the starter's remembered approvals, under a stricter floor (review L2, L12)", async () => {

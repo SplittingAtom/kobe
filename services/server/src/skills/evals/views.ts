@@ -70,9 +70,9 @@ async function mayRead(tx: KobeTx, who: EvalViewer, r: RunRow): Promise<boolean>
   return false;
 }
 
-/** Whether `who` may cancel it: its starter, or a team admin. */
+/** Whether `who` may cancel it: its starter, or a team admin (review L6). */
 export const mayCancel = (who: EvalViewer, run: SkillEvalRun): boolean =>
-  run.startedBy === who.userId || teamRoleAllows(who.role, "team.skills.publish");
+  run.startedBy === who.userId || teamRoleAllows(who.role, "team.skills.review");
 
 export async function readEvalRun(
   tx: KobeTx,
