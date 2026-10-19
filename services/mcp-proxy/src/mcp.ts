@@ -369,6 +369,7 @@ async function decideAndForward(
               ctx.token,
               ctx.connectorId,
               decision.app_capture.ticket,
+              args,
               result.result,
             );
       log({

@@ -98,15 +98,22 @@ class FakePolicyServer implements PolicyServer {
   }
 
   /** MCP Apps result reports (KOBE-438), and what the server answers. */
-  readonly reports: { token: string; connectorId: string; ticket: string; result: unknown }[] = [];
+  readonly reports: {
+    token: string;
+    connectorId: string;
+    ticket: string;
+    input: unknown;
+    result: unknown;
+  }[] = [];
   reportAnswer = true;
   reportResult(
     token: string,
     connectorId: string,
     ticket: string,
+    input: Record<string, unknown>,
     result: Record<string, unknown>,
   ) {
-    this.reports.push({ token, connectorId, ticket, result });
+    this.reports.push({ token, connectorId, ticket, input, result });
     return Promise.resolve(this.reportAnswer);
   }
 
@@ -512,7 +519,13 @@ describe("tools/call", () => {
       const result = { content: [{ type: "text", text: 'get_issue:{"id":"1"}' }] };
       expect(res.json?.result).toEqual(result);
       expect(server.reports).toEqual([
-        { token: expect.any(String), connectorId: CONNECTOR, ticket: "ticket-1", result },
+        {
+          token: expect.any(String),
+          connectorId: CONNECTOR,
+          ticket: "ticket-1",
+          input: { id: "1" },
+          result,
+        },
       ]);
     });
 

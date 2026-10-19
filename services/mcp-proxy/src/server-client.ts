@@ -100,6 +100,7 @@ export interface PolicyServer {
     token: string,
     connectorId: string,
     ticket: string,
+    input: Record<string, unknown>,
     result: Record<string, unknown>,
   ): Promise<boolean>;
 }
@@ -202,6 +203,7 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
     token: string,
     connectorId: string,
     ticket: string,
+    input: Record<string, unknown>,
     result: Record<string, unknown>,
   ): Promise<boolean> {
     try {
@@ -214,7 +216,7 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
             "kobe-sandbox-token": token,
             "content-type": "application/json",
           }),
-          body: JSON.stringify({ ticket, result }),
+          body: JSON.stringify({ ticket, input, result }),
           signal: AbortSignal.timeout(options.timeoutMs),
           redirect: "error",
         },
