@@ -6,7 +6,7 @@ import {
   type MemberBudgetState,
   type ModelPrice,
 } from "@kobe/db";
-import { SERVER_CALL_LIMITS, type ServerCallPurpose } from "@kobe/protocol";
+import { SERVER_CALL_LIMITS, type ServerCallTokenPurpose } from "@kobe/protocol";
 import { randomUUID } from "node:crypto";
 import { TtlCache } from "./cache.js";
 import { MemoryReservations } from "./reservations-memory.js";
@@ -69,14 +69,20 @@ export function budgetMessage(line: BudgetLine): string {
   return `${budgetName(line)} is used up.`;
 }
 
+const SKIPPED: Record<ServerCallTokenPurpose, string> = {
+  title: "titles",
+  followups: "follow-ups",
+  eval_judge: "eval judge calls",
+};
+
 /** KOBE-234: a server call skipped at its purpose's soft limit (follow-ups at 80 %). */
-export function budgetSoftLimitMessage(line: BudgetLine, purpose: ServerCallPurpose): string {
+export function budgetSoftLimitMessage(line: BudgetLine, purpose: ServerCallTokenPurpose): string {
   const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
-  return `${budgetName(line)} is at ${pct} % or more: ${purpose === "title" ? "titles" : "follow-ups"} are skipped.`;
+  return `${budgetName(line)} is at ${pct} % or more: ${SKIPPED[purpose]} are skipped.`;
 }
 
 /** The purpose's soft limit in percent, when it is below the 100 % stop. */
-function softPercent(purpose: ServerCallPurpose | undefined): number | undefined {
+function softPercent(purpose: ServerCallTokenPurpose | undefined): number | undefined {
   if (purpose === undefined) return undefined;
   const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
   return pct < 100 ? pct : undefined;
@@ -110,7 +116,7 @@ function atPercent(line: BudgetLine, pct: number): BudgetLine {
 /** The first line at or past a server call's soft limit (none below 100 %: the stop applies). */
 function softLimitLine(
   lines: readonly BudgetLine[],
-  purpose: ServerCallPurpose | undefined,
+  purpose: ServerCallTokenPurpose | undefined,
 ): BudgetLine | undefined {
   const pct = softPercent(purpose);
   return pct === undefined ? undefined : lines.find((l) => thresholdReached(l, pct));

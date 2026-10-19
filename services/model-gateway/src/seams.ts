@@ -1,4 +1,4 @@
-import type { ServerCallPurpose } from "@kobe/protocol";
+import type { ServerCallTokenPurpose } from "@kobe/protocol";
 import type { Logger } from "pino";
 import type { RouteKind } from "./routes.js";
 import type { UsageReading } from "./usage/meter.js";
@@ -25,7 +25,7 @@ export interface CallContext {
    */
   readonly runId: string | undefined;
   /** Set on a server call (KOBE-234): what it is for; its usage row's `kind`. */
-  readonly purpose?: ServerCallPurpose;
+  readonly purpose?: ServerCallTokenPurpose;
   readonly route: RouteKind;
   readonly path: string;
   /** The model the request names (body `model`, or Gemini's path), when it does. */

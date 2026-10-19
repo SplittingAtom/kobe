@@ -485,7 +485,9 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(
         req,
-        serverCall ? serverCallBodyLimit(settings.maxBodyBytes) : settings.maxBodyBytes,
+        serverCall
+          ? serverCallBodyLimit(settings.maxBodyBytes, serverCall.purpose)
+          : settings.maxBodyBytes,
         (n) => options.bytes.tryTake(limitKey, n),
         (n) => {
           bytesHeld += n;
