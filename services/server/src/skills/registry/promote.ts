@@ -444,6 +444,19 @@ export async function confirmRequest(
   const state = await requestState(deps.db, teamId, id);
   if (state === null) return { ok: false, code: "not_found", message: "No such request." };
   if (state !== "pending") return CLOSED;
+  const result = await confirmPending(deps, teamId, id, admin);
+  // Decided by another admin since the check above (C4-M1): the plan then sees its submission
+  // (a duplicate, a refusal). A request that is no longer pending always answers request_closed.
+  if (result.ok || result.code === "request_closed") return result;
+  return (await requestState(deps.db, teamId, id)) === "pending" ? result : CLOSED;
+}
+
+async function confirmPending(
+  deps: PromoteDeps,
+  teamId: string,
+  id: string,
+  admin: string,
+): Promise<PromoteResult> {
   const preview = await requestPreview(deps, teamId, id);
   if (!preview) return CLOSED;
   const { request: req, prepared } = preview;

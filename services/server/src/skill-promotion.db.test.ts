@@ -492,6 +492,25 @@ describe("review fixes (KOBE-333 review)", () => {
       expect([c1.status, c2.status].sort()).toEqual([201, 409]);
     }
   });
+
+  it("answers 409 to any decision on a request already decided, one after the other (C4-M1)", async () => {
+    await as.admin.put("/v1/team/skill-review/settings", { buildersMayPromote: false });
+    const made = await upload(as.builder, "team", pkg("late-skill", "0.1.0"));
+    await evaluated("team", made.skill.id, 1, ids.builder);
+    const source = { scope: "team", skillId: made.skill.id, version: 1 };
+    const req = (await as.builder.post("/v1/skills/promotions", source)).json.requestId as string;
+    const first = await as.admin.post(`/v1/team/skill-promotions/${req}/confirm`, {});
+    expect(first.status, JSON.stringify(first.json)).toBe(201);
+    for (const action of ["confirm", "decline"]) {
+      const late = await as.admin.post(`/v1/team/skill-promotions/${req}/${action}`, {});
+      expect([action, late.status, late.json.code]).toEqual([action, 409, "request_closed"]);
+    }
+    const submitted = await h.admin.query(
+      `SELECT count(*)::int AS n FROM registry_versions WHERE source ->> 'skillId' = $1`,
+      [made.skill.id],
+    );
+    expect(submitted.rows[0]?.n).toBe(1);
+  });
 });
 
 /**
