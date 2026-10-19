@@ -294,7 +294,7 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
       view: "app",
       app_id: appIdOf(w.connector.id, URI),
       template_sha256: TEMPLATE_SHA,
-      app: { title: "open_explorer" },
+      app: { title: "Open explorer" },
     });
     const read = await w.owner.browser.get(
       `/v1/threads/${w.threadId}/app-results/${view?.result_ref}`,

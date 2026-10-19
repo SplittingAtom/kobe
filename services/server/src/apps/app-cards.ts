@@ -25,6 +25,7 @@ import { loadUserGrantFacts } from "../runs/run-mcp.js";
 import { piBranchPoint } from "../runs/run-prompt.js";
 import { abortPending } from "../runs/store.js";
 import { fallbackTitle } from "../threads/title.js";
+import { appTitle } from "./app-title.js";
 import { createThread } from "../threads/repository.js";
 import { callApp, type AppCallDeps, type BrowserPrincipal } from "./call.js";
 import { memberApp, type MemberApp } from "./catalog.js";
@@ -261,9 +262,8 @@ export async function launchAppCard(
 }
 
 /** The app's title as a thread title: the title rules' unsafe characters removed (LOW-5). */
-export function titleOf(app: MemberApp): string {
-  const raw = app.tool.title ?? app.tool.annotations.title ?? app.tool.name;
-  return fallbackTitle(raw) ?? fallbackTitle(app.tool.name) ?? "App";
+export function titleOf(app: Pick<MemberApp, "tool" | "title">): string {
+  return fallbackTitle(app.title) ?? appTitle(app.tool, undefined);
 }
 
 async function storeCard(

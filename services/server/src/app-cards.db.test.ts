@@ -165,7 +165,7 @@ describe("rail launch inserts an app card (KOBE-440)", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(201);
     const threadId = res.json.thread_id as string;
     const thread = await w.owner.browser.get(`/v1/threads/${threadId}`);
-    expect(thread.json.title).toBe("open_explorer");
+    expect(thread.json.title).toBe("Open explorer");
     const rows = await entries(w.team, threadId);
     expect(rows.map((r) => [r.entry_id, r.parent_id])).toEqual([[res.json.entry_id, null]]);
     expect(await leaf(threadId)).toBe(res.json.entry_id);

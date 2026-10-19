@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   parseToolsSnapshot,
+  sql,
   teamConnectors,
   withTeam,
   type ConnectorAuthKind,
@@ -21,6 +22,7 @@ import type { TeamConnector } from "../mcp/catalog.js";
 import { loadUserGrantFacts, type GrantFact } from "../runs/run-mcp.js";
 import { exposedToApps } from "./decide.js";
 import { appIdOf } from "./app-id.js";
+import { appTitle, HEAD_SCAN_CHARS, templateTitle } from "./app-title.js";
 
 /**
  * Which MCP Apps a member has (KOBE-436, spec MA8 and §6). An app is a connector's pinned and
@@ -45,6 +47,8 @@ export interface MemberApp {
   readonly sha256: string;
   /** The tool that opens it: one with no required arguments that apps may call, if any. */
   readonly tool: PinnedTool;
+  /** Plain text (KOBE-447): the tool's title, the template's `<title>`, or the readable name. */
+  readonly title: string;
 }
 
 /** What `GET /v1/team/apps` shows: never the template bytes or a credential. */
@@ -65,7 +69,7 @@ export const viewOf = (app: MemberApp): MemberAppView => ({
   connectorName: app.connector.name,
   iconUrl: app.connector.iconUrl,
   tool: app.tool.name,
-  title: app.tool.title ?? app.tool.annotations.title ?? app.tool.name,
+  title: app.title,
   uri: app.uri,
   sha256: app.sha256,
 });
@@ -158,6 +162,49 @@ function openingTool(c: MemberAppConnector, uri: string): PinnedTool | undefined
   return [...candidates].sort((a, b) => rank(a) - rank(b) || (a.name < b.name ? -1 : 1))[0];
 }
 
+/**
+ * Pinned templates' `<title>`s by sha256 (KOBE-447): the bytes behind a hash never change, so a
+ * title read once holds. Bounded; the oldest entry goes first.
+ */
+const TITLE_CACHE_MAX = 256;
+const titleCache = new Map<string, string | undefined>();
+
+function rememberTitle(sha256: string, title: string | undefined): void {
+  if (titleCache.size >= TITLE_CACHE_MAX) {
+    const oldest = titleCache.keys().next().value;
+    if (oldest !== undefined) titleCache.delete(oldest);
+  }
+  titleCache.set(sha256, title);
+}
+
+const titled = (t: PinnedTool): boolean =>
+  Boolean(t.title?.trim()) || Boolean(t.annotations.title?.trim());
+
+/** The `<title>`s of these templates, reading only the head of the ones not seen before. */
+async function templateTitles(
+  db: KobeDb,
+  wanted: readonly { connectorId: string; uri: string; sha256: string }[],
+): Promise<ReadonlyMap<string, string | undefined>> {
+  const missing = wanted.filter((w) => !titleCache.has(w.sha256));
+  if (missing.length > 0) {
+    const heads = await db
+      .select({
+        sha256: connectorUiResources.sha256,
+        head: sql<string>`left(${connectorUiResources.html}, ${HEAD_SCAN_CHARS})`,
+      })
+      .from(connectorUiResources)
+      .where(
+        and(
+          inArray(connectorUiResources.sha256, [...new Set(missing.map((m) => m.sha256))]),
+          eq(connectorUiResources.status, "pinned"),
+          eq(connectorUiResources.approved, true),
+        ),
+      );
+    for (const h of heads) rememberTitle(h.sha256, templateTitle(h.head));
+  }
+  return new Map(wanted.map((w) => [w.sha256, titleCache.get(w.sha256)] as const));
+}
+
 /** The apps of `callable` connectors: pinned, approved templates with an opening tool. */
 async function appsOf(db: KobeDb, callable: readonly MemberAppConnector[]): Promise<MemberApp[]> {
   if (callable.length === 0) return [];
@@ -180,20 +227,23 @@ async function appsOf(db: KobeDb, callable: readonly MemberAppConnector[]): Prom
     )
     .orderBy(connectorUiResources.connectorId, connectorUiResources.uri);
   const byId = new Map(callable.map((c) => [c.id, c]));
-  const apps: MemberApp[] = [];
-  for (const t of templates) {
+  const found = templates.flatMap((t) => {
     const connector = byId.get(t.connectorId);
     const tool = connector ? openingTool(connector, t.uri) : undefined;
-    if (!connector || !tool) continue;
-    apps.push({
-      appId: appIdOf(connector.id, t.uri),
-      connector,
-      uri: t.uri,
-      sha256: t.sha256,
-      tool,
-    });
-  }
-  return apps;
+    return connector && tool ? [{ ...t, connector, tool }] : [];
+  });
+  const titles = await templateTitles(
+    db,
+    found.filter((f) => !titled(f.tool)),
+  );
+  return found.map((f): MemberApp => ({
+    appId: appIdOf(f.connector.id, f.uri),
+    connector: f.connector,
+    uri: f.uri,
+    sha256: f.sha256,
+    tool: f.tool,
+    title: appTitle(f.tool, titles.get(f.sha256)),
+  }));
 }
 
 /** Every app live for the member in the team (MA8), with its connector (no template bytes). */
