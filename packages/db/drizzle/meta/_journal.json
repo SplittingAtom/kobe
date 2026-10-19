@@ -1065,6 +1065,13 @@
       "when": 1792405861864,
       "tag": "0151_connector_site_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1792420255509,
+      "tag": "0152_reserve_full_holds",
+      "breakpoints": true
     }
   ]
 }
