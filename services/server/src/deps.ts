@@ -68,6 +68,11 @@ import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
 import { createSkillDraftTool, type SkillDraftTool } from "./skills/drafts/tool.js";
+import {
+  markMaintainedAgain,
+  markUnmaintained,
+  notifyUnmaintained,
+} from "./skills/registry/maintainers.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
@@ -457,6 +462,21 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   lifecycle.on("deactivated", {
     name: "sandbox-wire",
     run: (userId) => sandboxWire.revalidateUser(userId),
+  });
+  // The last active maintainer of a catalog skill leaves: Unmaintained, Site admins emailed (KOBE-332).
+  lifecycle.on("deactivated", {
+    name: "catalog-maintainers",
+    run: async (userId) => {
+      const skills = await markUnmaintained(database.db, userId);
+      await notifyUnmaintained(
+        { db: database.db, mailer: options.mailer, publicUrl: new URL(options.publicUrl).origin },
+        skills,
+      );
+    },
+  });
+  lifecycle.on("reactivated", {
+    name: "catalog-maintainers",
+    run: (userId) => markMaintainedAgain(database.db, userId),
   });
   const offboarding = createOffboarding({
     db: database.db,

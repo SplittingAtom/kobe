@@ -9,6 +9,7 @@ import {
   updateRegistrySettings,
 } from "../skills/registry/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { similarCatalogNames } from "../skills/registry/names-db.js";
 
 /**
  * Registry settings (`/v1/site/skills/registry/settings`, KOBE-330, SK20, SK21): Site Owner and
@@ -30,6 +31,14 @@ export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   });
 
   app.get("/settings", async (c) => c.json(await readRegistrySettings(db)));
+
+  // Near catalog names, a typosquat hint for reviewers (KOBE-332, SK24): never a block.
+  app.get("/similar", requireSkillReview(deps, "queue.read"), async (c) => {
+    const name = c.req.query("name") ?? "";
+    if (!/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/.test(name))
+      return invalidRequest(c, "Send a skill name.");
+    return c.json({ similar: await similarCatalogNames(db, name) });
+  });
 
   // Whether the Registry is ready (SK21), for everyone who sees the queue (KOBE-331).
   app.get("/status", requireSkillReview(deps, "queue.read"), async (c) => {

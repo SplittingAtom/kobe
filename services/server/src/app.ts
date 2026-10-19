@@ -37,6 +37,7 @@ import { siteConnectorsRoutes } from "./routes/site-connectors.js";
 import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
 import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
+import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
@@ -209,6 +210,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/", skillEvalRoutes(deps, options.skillEvals));
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
   api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
+  api.route("/skills/catalog", catalogMaintainerRoutes(deps));
   api.route("/skills", skillRoutes(deps));
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

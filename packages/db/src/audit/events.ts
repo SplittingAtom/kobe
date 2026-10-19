@@ -1473,6 +1473,20 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 
   // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
+  // ── catalog maintainers (KOBE-332, SK24): ids only ──
+  /** A maintainer (or a Site admin) added a maintainer to a catalog skill. */
+  "skill.maintainer.added": event("site", { skillId: id, userId: id }),
+  /** A maintainer (or a Site admin) removed a maintainer; the last one is never removed. */
+  "skill.maintainer.removed": event("site", { skillId: id, userId: id }),
+  /** A Site admin reassigned a catalog skill's maintainers (SK24). */
+  "skill.maintainers.reassigned": event("site", {
+    skillId: id,
+    userIds: z.array(id).min(1).max(20),
+  }),
+  /** The skill's last active maintainer was deactivated: it shows Unmaintained (system). */
+  "skill.catalog.unmaintained": event("site", { skillId: id, name: catalogName }),
+  /** An Unmaintained skill has an active maintainer again (added, reassigned or reactivated). */
+  "skill.catalog.maintained": event("site", { skillId: id, name: catalogName }),
   /**
    * A Site admin changed the Registry settings (KOBE-330, SK20, SK21): which settings, and the
    * Registry team and judge alias when they changed (ids and aliases, never URLs or rules).
