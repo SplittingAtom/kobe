@@ -64,6 +64,10 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   skill_draft_file_history:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
     `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")}) OR (written_by = ${g("user_id")})))`,
+  // Builders' Promote to Site requests (KOBE-333): team grants, user grants by the requester.
+  skill_promotion_requests:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (requested_by = ${g("user_id")})))`,
   // Skill eval runs (KOBE-325): team grants, user grants by the starter.
   skill_eval_runs:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
