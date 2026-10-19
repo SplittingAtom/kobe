@@ -1,6 +1,6 @@
 {
-  "id": "27206d5e-02a7-47e0-a1c5-f49251ad6710",
-  "prevId": "17a1ecbf-770b-4ce4-9626-2fac4d124d59",
+  "id": "64c55510-0556-4114-9242-a8c6bc14dea4",
+  "prevId": "8b679291-db89-46dc-a9d2-d8bdc0b8482f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -18122,6 +18122,13 @@
           "notNull": true,
           "default": 1
         },
+        "takeovers": {
+          "name": "takeovers",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "thread_id": {
           "name": "thread_id",
           "type": "uuid",
@@ -18260,6 +18267,10 @@
         "skill_eval_results_attempt": {
           "name": "skill_eval_results_attempt",
           "value": "\"skill_eval_results\".\"attempt\" IN (1, 2)"
+        },
+        "skill_eval_results_takeovers": {
+          "name": "skill_eval_results_takeovers",
+          "value": "\"skill_eval_results\".\"takeovers\" BETWEEN 0 AND 100"
         },
         "skill_eval_results_done": {
           "name": "skill_eval_results_done",

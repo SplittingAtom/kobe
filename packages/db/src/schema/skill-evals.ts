@@ -182,6 +182,11 @@ export const skillEvalResults = pgTable(
     withSkill: boolean().notNull(),
     state: text().$type<SkillEvalResultState>().notNull().default("queued"),
     attempt: smallint().notNull().default(1),
+    /**
+     * How often the reaper took the execution over from a replica that stopped beating (review
+     * R1): requeued without using the attempt, up to a limit; then it is recorded as an error.
+     */
+    takeovers: smallint().notNull().default(0),
     threadId: uuid(),
     runId: uuid(),
     deadlineAt: ts(),
@@ -208,6 +213,7 @@ export const skillEvalResults = pgTable(
     check("skill_eval_results_case_id", sql`${t.caseId} ~ '${sql.raw(CASE_ID)}'`),
     check("skill_eval_results_state", sql`${t.state} IN (${list(SKILL_EVAL_RESULT_STATES)})`),
     check("skill_eval_results_attempt", sql`${t.attempt} IN (1, 2)`),
+    check("skill_eval_results_takeovers", sql`${t.takeovers} BETWEEN 0 AND 100`),
     check(
       "skill_eval_results_done",
       sql`(${t.execution} IS NOT NULL) = (${t.state} = 'done')

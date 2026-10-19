@@ -5,6 +5,7 @@ CREATE TABLE "skill_eval_results" (
 	"with_skill" boolean NOT NULL,
 	"state" text DEFAULT 'queued' NOT NULL,
 	"attempt" smallint DEFAULT 1 NOT NULL,
+	"takeovers" smallint DEFAULT 0 NOT NULL,
 	"thread_id" uuid,
 	"run_id" uuid,
 	"deadline_at" timestamp with time zone,
@@ -17,6 +18,7 @@ CREATE TABLE "skill_eval_results" (
 	CONSTRAINT "skill_eval_results_case_id" CHECK ("skill_eval_results"."case_id" ~ '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'),
 	CONSTRAINT "skill_eval_results_state" CHECK ("skill_eval_results"."state" IN ('queued', 'starting', 'running', 'collecting', 'done')),
 	CONSTRAINT "skill_eval_results_attempt" CHECK ("skill_eval_results"."attempt" IN (1, 2)),
+	CONSTRAINT "skill_eval_results_takeovers" CHECK ("skill_eval_results"."takeovers" BETWEEN 0 AND 100),
 	CONSTRAINT "skill_eval_results_done" CHECK (("skill_eval_results"."execution" IS NOT NULL) = ("skill_eval_results"."state" = 'done')
         AND ("skill_eval_results"."finished_at" IS NOT NULL) = ("skill_eval_results"."state" = 'done')),
 	CONSTRAINT "skill_eval_results_json" CHECK (("skill_eval_results"."execution" IS NULL OR jsonb_typeof("skill_eval_results"."execution") = 'object')
