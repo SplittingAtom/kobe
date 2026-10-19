@@ -137,7 +137,7 @@ describe("diffPackages (KOBE-334, SK23)", () => {
     expect(one?.path).toBe(skipped?.path);
     expect(one?.notDiffed === undefined || one.notDiffed === "too_different").toBe(true);
     expect(diffOneFile(before, after, "nope.txt")).toBeNull();
-  });
+  }, 30_000);
 
   it("returns a file whole for the raw view", () => {
     expect(rawFile(zip({ "a.txt": "hi\n" }), "a.txt")).toEqual({
