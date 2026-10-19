@@ -463,6 +463,9 @@ export class FakeKobe {
     return json(201, { thread_id: threadId, entry_id: entryId, result_ref: ref, queued: false });
   }
 
+  /** Like the server's re-check at insertion (review LOW-2): waiting cards are dropped. */
+  dropWaitingCards = false;
+
   /** The run ended: its waiting cards go in at the leaf, in launch order. */
   #insertQueuedCards(threadId: string): void {
     const waiting = this.#queuedCards.get(threadId) ?? [];
@@ -472,7 +475,7 @@ export class FakeKobe {
         threadId,
         (this.appResults.get(threadId) ?? []).filter((v) => v.result_ref !== card.ref),
       );
-      this.addAppCard(threadId, card.app, { ref: card.ref });
+      if (!this.dropWaitingCards) this.addAppCard(threadId, card.app, { ref: card.ref });
     }
   }
 

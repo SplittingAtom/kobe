@@ -20,6 +20,7 @@ export function QueuedAppCards() {
   const threadId = apps.threadId;
   const remove = async (view: AppResultView) => {
     setError(null);
+    apps.forget(view.resultRef);
     const res = await removeQueuedAppCard(threadId, view.resultRef, apps.teamId);
     if (!res.ok && res.error.status !== 404) setError(res.error.message);
     apps.reload();
@@ -92,5 +93,36 @@ function QueuedChip({
         <XIcon aria-hidden className="size-3" />
       </button>
     </li>
+  );
+}
+
+/**
+ * Waiting cards the server dropped when the run ended (KOBE-440 review LOW-2): the member could
+ * no longer open the app there, or it waited more than 10 minutes. Said once, dismissable.
+ */
+export function DroppedAppNotice() {
+  const apps = useThreadApps();
+  if (!apps || apps.dropped.length === 0) return null;
+  const names = [...new Set(apps.dropped)].join(", ");
+  return (
+    <div
+      role="status"
+      className="text-muted-foreground flex items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+      data-kobe-dropped-apps
+    >
+      <p className="flex-1">
+        Not added to the conversation: {names}. The app is no longer available to you here, or it
+        waited more than 10 minutes. Open it again from the rail.
+      </p>
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground rounded p-0.5"
+        aria-label="Dismiss"
+        title="Dismiss"
+        onClick={apps.dismissDropped}
+      >
+        <XIcon aria-hidden className="size-3.5" />
+      </button>
+    </div>
   );
 }

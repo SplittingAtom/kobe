@@ -152,6 +152,29 @@ describe("the rail's Apps section (KOBE-440)", () => {
     );
   });
 
+  it("says when the server dropped a waiting card at the run's end (review LOW-2)", async () => {
+    fake.teamApps = [APP];
+    fake.dropWaitingCards = true;
+    const t = answered();
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "first{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const runId = must(fake.activeRun(t)).run_id;
+    await streaming(fake, runId);
+    await user.click(
+      within(await appsSection()).getByRole("button", { name: /Open Lakehouse Explorer/ }),
+    );
+    expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
+    fake.agent.commitPrompt(runId);
+    fake.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "one" }] });
+    fake.agent.complete(runId);
+    expect(
+      await screen.findByText(/Not added to the conversation: Lakehouse Explorer/),
+    ).toBeTruthy();
+    expect(screen.queryByTitle(FRAME)).toBeNull();
+  });
+
   it("is absent without apps, and says 'Add your key' when only the member's key is missing (ac-1)", async () => {
     openApp(fake, answered());
     await screen.findByLabelText("Message");

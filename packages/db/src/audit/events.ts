@@ -690,6 +690,21 @@ export const AUDIT_EVENTS = {
       .optional(),
   }),
   /**
+   * A rail-launched app card that waited for a run was not inserted (KOBE-440, review LOW-2): the
+   * member could no longer open the app (`no_access`), it waited more than 10 minutes
+   * (`expired`), it would have made too many cards in a row, or it was not a valid card.
+   */
+  "mcp.app_card_dropped": event("team", {
+    connectorId: id,
+    userId: id,
+    threadId: id,
+    tool: z
+      .string()
+      .max(128)
+      .regex(/^[A-Za-z0-9_.-]{1,128}$/),
+    reason: z.enum(["no_access", "expired", "too_many_cards", "invalid"]),
+  }),
+  /**
    * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
    * allowed call is recorded before the proxy forwards it; denied calls are throttled per sandbox.
    * `reason` is the deciding policy reason code (`approval_granted` when a signed approval was

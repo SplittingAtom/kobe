@@ -368,6 +368,17 @@ opened_by: user_id}` and the text result. It is not a run: no run row, no `run_e
   only inserts the entry (`promoteInTx`, under the thread lock, never an upstream call while the
   lock is held). That is what lets a waiting chip expand; its data is from the click. A launch
   from a thread shared read-only or in Trash starts a new thread, like the new-thread view.
+  At insertion each waiting card is re-checked (connector active and enabled, the same pinned
+  and approved template, the member's grant or site key) and dropped, audited
+  `mcp.app_card_dropped` and announced in the chat, when that fails or it waited more than 10
+  minutes. Waiting cards go in whenever no run is active (also during Stop's abort hold, and
+  before a later launch's card).
+
+- **No app card may leave a thread unable to run** (coordinator rule, KOBE-440 review): its
+  content is capped after escaping and validated before it is written; its parent is never an
+  unsent prompt (`ku-`) Pi never had; at most 20 cards follow each other (a 21st launch is
+  refused, 409 `too_many_cards`; a waiting one is dropped), so one `run.start` carries the whole
+  chain. Launches have their own rate limit (a burst of 5, then one every 2 s per member).
 
   _Why queue:_ it is what Enter does during a run (D17), so the member's click is never lost. It
   also keeps the entry tree linear: inserting mid-run would add a sibling under a leaf Pi is still

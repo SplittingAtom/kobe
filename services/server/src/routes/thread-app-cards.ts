@@ -1,7 +1,13 @@
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { launchAppCardBodySchema, type LaunchAppCardResponse } from "@kobe/protocol";
-import { launchAppCard, removeQueuedAppCard, type LaunchOutcome } from "../apps/app-cards.js";
+import {
+  APP_LAUNCH_RATE,
+  launchAppCard,
+  removeQueuedAppCard,
+  type LaunchOutcome,
+} from "../apps/app-cards.js";
+import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { BrowserPrincipal } from "../apps/call.js";
 import { appCallDepsFor } from "../apps/call-deps.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -43,7 +49,11 @@ function answer(c: Context, outcome: LaunchOutcome) {
 
 export function threadAppCardRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
-  const cardDeps = { call: appCallDepsFor(deps), store: deps.appResults.store };
+  const cardDeps = {
+    call: appCallDepsFor(deps),
+    store: deps.appResults.store,
+    launches: createRateLimiter(APP_LAUNCH_RATE),
+  };
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
   const limit = bodyLimit({

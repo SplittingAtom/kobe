@@ -132,6 +132,11 @@ export async function promoteInTx(
   const transitions: AppliedTransition[] = [];
   let thread = await lockThreadRow(tx, teamId, threadId);
   if (!thread || thread.deletedAt !== null) return { transitions };
+  // App cards launched during the run that just ended go in first (KOBE-440, D17), also while
+  // Pi still aborts a stopped run: an entry in Postgres reaches Pi only at the next run start.
+  if (!(await threadRunRows(tx, teamId, threadId)).some((r) => isActiveRunStatus(r.status))) {
+    thread = { ...thread, ...(await insertQueuedAppCardsInTx(tx, teamId, thread)) };
+  }
   // Pi is still aborting a stopped run of this thread: the next start would be refused (KOBE-26).
   const hold = options.abortHoldMs ?? 0;
   if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
@@ -150,8 +155,6 @@ export async function promoteInTx(
   for (let step = 0; step < MAX_PROMOTION_STEPS; step += 1) {
     const rows = await threadRunRows(tx, teamId, threadId);
     if (rows.some((r) => isActiveRunStatus(r.status))) return { transitions };
-    // App cards launched during the run that just ended go in first (KOBE-440, D17).
-    if (step === 0) thread = { ...thread, ...(await insertQueuedAppCardsInTx(tx, teamId, thread)) };
     const next = rows.find((r) => r.status === "queued");
     if (!next) return { transitions };
     if (next.retryOfRunId === null && (paused || !queueMayAdvance(thread.status))) {

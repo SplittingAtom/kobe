@@ -32,6 +32,14 @@ export interface ThreadApps {
   readonly queued: readonly AppResultView[];
   /** Reads the list again (a launch or a removal). */
   reload(): void;
+  /**
+   * Waiting cards that went away without being inserted or removed by the member: the server
+   * dropped them at the run's end (KOBE-440 review LOW-2). Titles, for the notice.
+   */
+  readonly dropped: readonly string[];
+  /** The member removes a waiting card: its disappearance is no drop. */
+  forget(resultRef: string): void;
+  dismissDropped(): void;
   /** Cards holding a live frame, least recently in view first. */
   readonly live: readonly string[];
   /** A slot for `key`; `force` (the member asked) retires the least recent frame. */
@@ -140,6 +148,25 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
     () => (results === null ? [] : results.filter((r) => r.queued === true)),
     [results],
   );
+  // Waiting cards seen before, and the ones the member removed (KOBE-440 review LOW-2).
+  const waiting = useRef(new Map<string, string>());
+  const removed = useRef(new Set<string>());
+  const [dropped, setDropped] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (results === null) return;
+    const present = new Set(results.map((r) => r.resultRef));
+    const gone = [...waiting.current].filter(
+      ([ref]) => !present.has(ref) && !removed.current.has(ref),
+    );
+    if (gone.length > 0) setDropped((prev) => [...prev, ...gone.map(([, title]) => title)]);
+    waiting.current = new Map(queued.map((r) => [r.resultRef, r.app?.title ?? r.tool]));
+  }, [results, queued]);
+  useEffect(() => {
+    waiting.current = new Map();
+    setDropped([]);
+  }, [threadId]);
+  const forget = useCallback((ref: string) => removed.current.add(ref), []);
+  const dismissDropped = useCallback(() => setDropped([]), []);
   const take = useCallback((key: string, force: boolean) => {
     setLive((prev) => takeSlot(prev, key, force));
   }, []);
@@ -156,8 +183,25 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       take,
       release,
       reload: load,
+      dropped,
+      forget,
+      dismissDropped,
     }),
-    [threadId, teamId, byPrompt, byRun, byEntry, queued, live, take, release, load],
+    [
+      threadId,
+      teamId,
+      byPrompt,
+      byRun,
+      byEntry,
+      queued,
+      live,
+      take,
+      release,
+      load,
+      dropped,
+      forget,
+      dismissDropped,
+    ],
   );
   return <ThreadAppsContext.Provider value={value}>{children}</ThreadAppsContext.Provider>;
 }

@@ -100,3 +100,25 @@ protocol 931; db unit 598, probe 657, upgrade (0157-0162) 11; server unit 2,116;
 - The k3d gate's fake MCP needs an opening tool with no required arguments for the rail launch.
 - Gate step "From the rail" checks: the card, no run, then the next run's prompt has the fenced
   card (Pi session file or the model gateway's request log).
+
+## Review fixes (review-ma6: MEDIUM-1, MEDIUM-2, LOW-1..6), coordinator rule "no card may leave a thread unable to run"
+
+- MEDIUM-1: `appCardContent` escapes first, then cuts to 8 KiB (never inside an entity or
+  `\uXXXX`) with `[truncated]`; every entry is validated (`appCardEntrySchema`) before it is
+  written (422 `app_card_invalid`). Tests: protocol (8 KiB of `<`, `&`, U+200B, bidi); DB "fits
+  any result…" (inserted and queued, then runs).
+- MEDIUM-2: a card's parent is `piBranchPoint(leaf)`, never a `ku-` prompt. DB "never hangs a card
+  under an unsent prompt" (failed start, launch, the next run starts with the card).
+- LOW-1: ≤ 20 cards in a row: launch refused 409 `too_many_cards`; a waiting card that would pass
+  it is dropped. DB "caps cards in a row at 20…" (the 20 still run) and "drops a waiting card…".
+- LOW-2: insertion re-checks access (SQL in the thread transaction) and age (10 min); a drop
+  deletes the row, queues its blob, audits `mcp.app_card_dropped` (new action, docs/audit-log.md)
+  and the chat says so (`DroppedAppNotice`). Waiting cards go in whenever no run is active,
+  also during the abort hold and before a later launch. DB tests "drops a card whose app…",
+  "inserts a card left waiting…"; web "says when the server dropped a waiting card".
+- LOW-3: own limiter `APP_LAUNCH_RATE` (5, then 0.5/s per member), taken first. DB test.
+- LOW-4: a new thread is created in the card's transaction. DB test (error result, no thread).
+- LOW-5: titles via `fallbackTitle` (unsafe characters removed). Unit `apps/app-cards.test.ts`.
+- LOW-6: cross-team launch and DELETE (404), another member's DELETE (404), builder test thread
+  (`is_test`) refused. A launch from a project's new-thread view starts outside the project with
+  the default agent (spec MA11 "the team's default agent").
