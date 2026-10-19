@@ -234,12 +234,13 @@ describe("server sandbox configuration", () => {
   });
 
   it("caps skill eval sandboxes per team and ships their low, non-preempting priority (KOBE-325)", () => {
-    expect(sandboxConfig(ms).skillEval).toEqual({ maxConcurrentPerTeam: 4 });
+    expect(sandboxConfig(ms).skillEval).toEqual({ maxConcurrentPerTeam: 4, workspaceSize: "2Gi" });
     expect(
       sandboxConfig(render({ "sandbox.skillEval.maxConcurrentPerTeam": "2" })).skillEval,
-    ).toEqual({ maxConcurrentPerTeam: 2 });
+    ).toEqual({ maxConcurrentPerTeam: 2, workspaceSize: "2Gi" });
     expect(sandboxConfig(render({ sandbox: "null" })).skillEval).toEqual({
       maxConcurrentPerTeam: 4,
+      workspaceSize: "2Gi",
     });
     expect(renderError({ "sandbox.skillEval.maxConcurrentPerTeam": "40" })).toMatch(/maximum/);
     const pc = find(ms, "PriorityClass", EVAL_PRIORITY_CLASS);

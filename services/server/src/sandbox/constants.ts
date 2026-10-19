@@ -47,6 +47,8 @@ export const EVAL_SANDBOX_WARM_POOL = "kobe-skill-eval";
  * members' quota plus this one, so evals never use what members' sandboxes need.
  */
 export const EVAL_RESOURCE_QUOTA = "kobe-skill-eval-quota";
+/** The members' share: every pod but an eval's stays within `teamQuota`. */
+export const MEMBER_RESOURCE_QUOTA = "kobe-team-member-quota";
 /** Low priority that never preempts: under node pressure a member's sandbox wins (chart object). */
 export const EVAL_PRIORITY_CLASS = "kobe-skill-eval";
 export const LIMIT_RANGE = "kobe-sandbox-defaults";

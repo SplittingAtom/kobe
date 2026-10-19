@@ -7,6 +7,7 @@ import {
   ANNOTATION_USER_ID,
   EVAL_PRIORITY_CLASS,
   EVAL_RESOURCE_QUOTA,
+  MEMBER_RESOURCE_QUOTA,
   EVAL_SANDBOX_TEMPLATE,
   EVAL_SANDBOX_WARM_POOL,
   LABEL_EVAL_THREAD,
@@ -23,7 +24,7 @@ import {
   type KubeObject,
   type TeamRef,
 } from "./manifests.js";
-import { evalQuotaHard } from "./eval-quota.js";
+import { evalQuotaHard, memberQuotaHard } from "./eval-quota.js";
 
 // Skill eval sandboxes (KOBE-325, SK16): one ephemeral sandbox per eval execution, in the team
 // namespace beside the members' sandboxes. Same pod as a member's (same RuntimeClass, the same
@@ -44,6 +45,26 @@ export const evalThreadOfClaim = (name: string): string | undefined => {
   const id = /^e-(.+)$/.exec(name)?.[1];
   return id && isUuid(id) ? id : undefined;
 };
+
+/**
+ * The members' share (M1, KOBE-325): every pod but an eval's (`NotIn`, which matches a pod without
+ * a priorityClassName too) stays within `teamQuota`, whatever the evals do.
+ */
+export function memberResourceQuotaManifest(namespace: string, s: SandboxSettings): KubeObject {
+  return {
+    apiVersion: "v1",
+    kind: "ResourceQuota",
+    metadata: { name: MEMBER_RESOURCE_QUOTA, namespace, labels: managedLabels },
+    spec: {
+      hard: memberQuotaHard(s),
+      scopeSelector: {
+        matchExpressions: [
+          { scopeName: "PriorityClass", operator: "NotIn", values: [EVAL_PRIORITY_CLASS] },
+        ],
+      },
+    },
+  };
+}
 
 export function evalResourceQuotaManifest(namespace: string, s: SandboxSettings): KubeObject {
   return {
@@ -81,7 +102,10 @@ export function evalSandboxPodSpec(
     ...spec,
     priorityClassName: EVAL_PRIORITY_CLASS,
     containers,
-    volumes: [{ name: "workspace", emptyDir: { sizeLimit: s.workspace.size } }, ...spec.volumes],
+    volumes: [
+      { name: "workspace", emptyDir: { sizeLimit: s.skillEval.workspaceSize } },
+      ...spec.volumes,
+    ],
   };
 }
 

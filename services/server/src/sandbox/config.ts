@@ -135,8 +135,15 @@ export const sandboxSettingsSchema = z.strictObject({
    * `teamQuota`, so evals never take what members' sandboxes need; more evals wait their turn.
    */
   skillEval: z
-    .strictObject({ maxConcurrentPerTeam: z.number().int().min(1).max(16) })
-    .default({ maxConcurrentPerTeam: 4 }),
+    .strictObject({
+      maxConcurrentPerTeam: z.number().int().min(1).max(16),
+      /**
+       * An eval sandbox's `/workspace` (an emptyDir on the node's disk, counted in the pod's
+       * ephemeral storage: keep it below `ephemeralStorage.limit` minus /tmp and $HOME).
+       */
+      workspaceSize: quantity.default("2Gi"),
+    })
+    .default({ maxConcurrentPerTeam: 4, workspaceSize: "2Gi" }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 

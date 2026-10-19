@@ -22,6 +22,18 @@ export function evalQuotaHard(s: SandboxSettings): Record<string, string> {
   return Object.fromEntries(Object.entries(perPod(s)).map(([k, v]) => [k, scaleQuantity(v, n)]));
 }
 
+/** Quota keys a PriorityClass-scoped quota may hold (pod resources; no storage or PVC counts). */
+const POD_SCOPED =
+  /^(pods|cpu|memory|ephemeral-storage|(requests|limits)\.(cpu|memory|ephemeral-storage))$/;
+
+/**
+ * The members' own quota (scoped to pods without the eval PriorityClass, a pod with none
+ * included, checked on k3s 1.34): `teamQuota`'s pod keys, so members never use the eval share.
+ */
+export function memberQuotaHard(s: SandboxSettings): Record<string, string> {
+  return Object.fromEntries(Object.entries(s.teamQuota).filter(([k]) => POD_SCOPED.test(k)));
+}
+
 /**
  * The team quota's hard limits: the members' (`teamQuota`) plus the eval quota, for the keys the
  * team quota sets. Eval pods count in both, so they can use at most the eval share and members

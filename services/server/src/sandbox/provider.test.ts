@@ -127,6 +127,19 @@ describe("ensureSandbox: team namespace (D11)", () => {
         ],
       },
     });
+    // Members stay within teamQuota (pod keys only: a scoped quota holds no storage counts).
+    expect(objectAt(kube, "ResourceQuota", "kobe-team-member-quota", NS)?.spec).toEqual({
+      hard: Object.fromEntries(
+        Object.entries(SETTINGS.teamQuota).filter(
+          ([k]) => !["requests.storage", "persistentvolumeclaims"].includes(k),
+        ),
+      ),
+      scopeSelector: {
+        matchExpressions: [
+          { scopeName: "PriorityClass", operator: "NotIn", values: ["kobe-skill-eval"] },
+        ],
+      },
+    });
     const evalTemplate = objectAt(kube, "SandboxTemplate", "kobe-skill-eval", NS);
     expect(evalTemplate?.spec).toMatchObject({
       podTemplate: {
@@ -134,7 +147,7 @@ describe("ensureSandbox: team namespace (D11)", () => {
         spec: {
           runtimeClassName: "gvisor",
           priorityClassName: "kobe-skill-eval",
-          volumes: expect.arrayContaining([{ name: "workspace", emptyDir: { sizeLimit: "10Gi" } }]),
+          volumes: expect.arrayContaining([{ name: "workspace", emptyDir: { sizeLimit: "2Gi" } }]),
         },
       },
     });

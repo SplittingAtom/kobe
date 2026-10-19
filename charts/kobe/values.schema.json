@@ -292,6 +292,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 16
+            },
+            "workspaceSize": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$"
             }
           }
         },

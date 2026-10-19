@@ -48,6 +48,7 @@ import {
   evalClaimManifest,
   evalClaimName,
   evalResourceQuotaManifest,
+  memberResourceQuotaManifest,
   evalSandboxTemplateManifest,
   evalThreadOfClaim,
   evalWarmPoolManifest,
@@ -458,6 +459,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     await applyWithRbacRetry(evalNetworkPolicyManifest(namespace, settings));
     await kube.apply(resourceQuotaManifest(namespace, settings));
     await kube.apply(evalResourceQuotaManifest(namespace, settings));
+    await kube.apply(memberResourceQuotaManifest(namespace, settings));
     await kube.apply(limitRangeManifest(namespace, settings));
     await kube.apply(sandboxServiceAccountManifest(namespace));
     for (const name of settings.imagePullSecrets) {
