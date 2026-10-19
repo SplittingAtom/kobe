@@ -125,7 +125,11 @@ async function wave(f: Fixture, lines: unknown[], kind: UsageKind): Promise<stri
     await recordModelUsage(app.db, [usage(f, x.who, kind)]);
     await settle(f, [x.call]);
   }
-  return reserve(f, d, randomUUID(), lines);
+  const last = randomUUID();
+  const verdict = await reserve(f, d, last, lines);
+  // Site holds are site-wide: end every one this wave left, so later files start clean.
+  await settle(f, [...held.map((x) => x.call), last]);
+  return verdict;
 }
 
 beforeAll(() => {
