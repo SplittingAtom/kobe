@@ -114,6 +114,17 @@ export function scanSkillBundle(files: readonly ScanFile[]): ScanResult {
     .filter((f) => texts.has(f.path) && isScript(f, refs))
     .map((f) => f.path)
     .sort();
+  // A script with bytes that aren't UTF-8 (KOBE-336 review M1): it still runs, but its review
+  // diff can't show those bytes as text; a reviewer acknowledges it (Caution).
+  const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+  for (const f of files) {
+    if (!scripts.includes(f.path)) continue;
+    try {
+      strictUtf8.decode(f.bytes);
+    } catch {
+      c.cautions.push(fileFinding(f.path, "obfuscation", "invalid-utf8-script", "caution"));
+    }
+  }
   const scriptRules = new Set(
     files.filter((f) => texts.has(f.path) && getsScriptRules(f, refs)).map((f) => f.path),
   );
