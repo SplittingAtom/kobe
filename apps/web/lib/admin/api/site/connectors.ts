@@ -16,6 +16,9 @@ export interface Connector {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  /** Why the last periodic refresh was skipped (`auth_required`, `unreachable`, ...; KOBE-431). */
+  readonly refreshSkipped: string | null;
+  readonly refreshedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

@@ -78,6 +78,10 @@ export interface ConnectorView {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  /** Why the last periodic refresh was skipped (e.g. `auth_required`, KOBE-431); null when it ran. */
+  readonly refreshSkipped: string | null;
+  /** When the periodic refresh last probed it; null before the first pass. */
+  readonly refreshedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -94,6 +98,8 @@ const columns = {
     sql<number>`(SELECT count(*) FROM jsonb_array_elements(${connectors.toolsSnapshot}) AS t WHERE t->>'status' = 'drifted')`.mapWith(
       Number,
     ),
+  refreshSkipped: connectors.refreshSkipped,
+  refreshedAt: connectors.refreshedAt,
   createdAt: connectors.createdAt,
   updatedAt: connectors.updatedAt,
 } as const;
@@ -185,6 +191,7 @@ export async function updateConnector(
       // A different server: its tools were never reviewed, so the old pins must not carry over.
       set.toolsSnapshot = [];
       set.toolsHash = null;
+      set.refreshSkipped = null;
       changed.push("url");
       // Credentials were issued for the old server: drop them (users reconnect), same transaction.
       await dropConnectorGrants(tx, id, current.name);

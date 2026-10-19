@@ -12,7 +12,7 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
-import { driftRecipients, type DriftRecipient } from "./drift-recipients.js";
+import { driftRecipients, siteAdminIds, type DriftRecipient } from "./drift-recipients.js";
 import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /**
@@ -37,6 +37,8 @@ export interface DriftNotifyDeps {
 
 interface DriftEvent {
   readonly seq: number;
+  /** `skipped`: the refresh began skipping it for want of credentials (KOBE-431). */
+  readonly kind: "drift" | "skipped";
   readonly connectorId: string;
   readonly name: string;
   readonly tools: readonly string[];
@@ -64,19 +66,49 @@ export function driftMessage(
   };
 }
 
+/** KOBE-431: the refresh cannot check a connector for changes; site admins only. */
+export function skippedMessage(
+  publicUrl: string,
+  event: Pick<DriftEvent, "name">,
+  to: string,
+): MailMessage {
+  const name = oneLine(event.name);
+  return {
+    to,
+    subject: `Connector ${name}: tools are not checked for changes`,
+    text: [
+      `The ${name} connector asks for credentials, and Kobe has none to check its tools with:`,
+      "it has no site-wide key, and the site admin who last pinned or approved its tools has no",
+      "usable key for it (deactivated, no longer an admin, or the key was removed or expired).",
+      "Until that changes, new or changed tools on the server are not noticed.",
+      "",
+      "Add your own key for the connector (My connector keys, in a team that enabled it) and",
+      "pin or approve its tools, or give it a site-wide key.",
+      "",
+      `Site admins can review it at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
+    ].join("\n"),
+  };
+}
+
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
 
 async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
-  const rows = await db.execute<{ seq: string; target: Record<string, unknown> }>(sql`
-    SELECT seq, target FROM audit_log
-     WHERE action = 'mcp.connector.drift' AND at > now() - make_interval(hours => ${MAX_AGE_HOURS})
+  const rows = await db.execute<{
+    seq: string;
+    action: string;
+    target: Record<string, unknown>;
+  }>(sql`
+    SELECT seq, action, target FROM audit_log
+     WHERE action IN ('mcp.connector.drift', 'mcp.connector.refresh_skipped')
+       AND at > now() - make_interval(hours => ${MAX_AGE_HOURS})
      ORDER BY seq`);
   const events: DriftEvent[] = [];
-  for (const { seq, target } of rows.rows) {
+  for (const { seq, action, target } of rows.rows) {
     if (typeof target.connectorId !== "string" || typeof target.name !== "string") continue;
     events.push({
       seq: Number(seq),
+      kind: action === "mcp.connector.refresh_skipped" ? "skipped" : "drift",
       connectorId: target.connectorId,
       name: target.name,
       tools: [...strings(target.changed), ...strings(target.added)],
@@ -93,6 +125,28 @@ async function stillDrifted(db: KobeDb, connectorId: string): Promise<boolean> {
     .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)));
   return !!row && parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted");
 }
+
+/** Still skipped for want of credentials (a good pass or a new URL ends the notice). */
+async function stillSkipped(db: KobeDb, connectorId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ skipped: connectors.refreshSkipped })
+    .from(connectors)
+    .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)));
+  return row?.skipped === "auth_required";
+}
+
+const stillCurrent = (db: KobeDb, event: DriftEvent) =>
+  event.kind === "skipped"
+    ? stillSkipped(db, event.connectorId)
+    : stillDrifted(db, event.connectorId);
+
+/** Who hears about an event: a skip only concerns site admins, who can fix it. */
+const recipientsOf = async (db: KobeDb, event: DriftEvent) => {
+  const all = await driftRecipients(db, event.connectorId);
+  if (event.kind === "drift") return all;
+  const admins = new Set((await siteAdminIds(db)).map((r) => r.userId));
+  return all.filter((r) => admins.has(r.userId));
+};
 
 async function handled(db: KobeDb, seq: number): Promise<Set<string>> {
   const rows = await db.execute<{ recipient: string }>(sql`
@@ -139,16 +193,17 @@ export async function notifyDrift(
   let sent = 0;
   try {
     for (const event of await recentEvents(deps.db)) {
-      if (!(await stillDrifted(deps.db, event.connectorId))) continue;
+      if (!(await stillCurrent(deps.db, event))) continue;
       const done = await handled(deps.db, event.seq);
-      for (const recipient of await driftRecipients(deps.db, event.connectorId)) {
+      for (const recipient of await recipientsOf(deps.db, event)) {
         if (done.has(recipient.userId)) continue;
         try {
           if (await rateLimited(deps.db, event.connectorId, recipient.userId, windowMs)) {
             await record(deps.db, event, recipient, false);
             continue;
           }
-          await deps.mailer.send(driftMessage(deps.publicUrl, event, recipient.email));
+          const message = event.kind === "skipped" ? skippedMessage : driftMessage;
+          await deps.mailer.send(message(deps.publicUrl, event, recipient.email));
           sent += 1;
           await record(deps.db, event, recipient, true);
         } catch (err) {

@@ -17,8 +17,8 @@ import {
   approveSchema,
   reviewConnectorTools,
 } from "../connectors/reapproval.js";
-import { adminProbeKey } from "../connectors/grants.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
+import { adminPinCredential } from "../connectors/probe-credential.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -43,7 +43,7 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
   unreachable: "The server could not be reached.",
   timeout: "The server did not answer in time.",
   auth_required:
-    "The server asked for credentials, which a pinning probe does not have. Tools stay unpinned (none are offered).",
+    "The server asked for credentials. Kobe probes with the connector's site-wide key, else your own key for it (add one at My connector keys in a team that enabled it); never a member's. Tools stay unpinned (none are offered).",
   http_error: "The server answered with an error.",
   protocol_error: "The server did not answer as an MCP server.",
   too_large: "The server's tool list was too large.",
@@ -75,9 +75,14 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   const db = deps.database.db;
   app.use(requireSitePermission("site.connectors.manage"));
 
-  // The acting admin's own grant, if any; never another user's.
-  const adminKey = (c: Context, connectorId: string) =>
-    adminProbeKey(db, deps.envelope, c.get("user").id, connectorId);
+  // Pins as the acting admin: the site key, else their own grant, never a member's (KOBE-431).
+  const pinAs = (c: Context, connectorId: string) => {
+    const adminId = c.get("user").id;
+    return pinConnector(db, deps.connectorProbe, connectorId, {
+      credential: adminPinCredential(db, deps.envelope, adminId),
+      pinnedBy: adminId,
+    });
+  };
 
   const badUrl = (c: Context, check: { code: string; message: string }) =>
     c.json({ code: check.code, message: check.message }, 422);
@@ -98,12 +103,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const result = await createConnector(db, { ...input, url: checked.url }, c.get("user").id);
     if (!result.ok) return nameConflict(c, result.error);
     // Registering snapshots and pins every tool; a failed probe leaves it registered, unpinned.
-    const pin = await pinConnector(
-      db,
-      deps.connectorProbe,
-      result.connector.id,
-      await adminKey(c, result.connector.id),
-    );
+    const pin = await pinAs(c, result.connector.id);
     const connector = (await getConnector(db, result.connector.id)) ?? result.connector;
     return c.json({ connector, ...(pin ? { pin: pinBody(pin) } : {}) }, 201);
   });
@@ -123,10 +123,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!result.ok)
       return result.error === "not_found" ? notFound(c) : nameConflict(c, result.error);
     // A new URL cleared the old pins; pin the new server's tools (no-op when pins still exist).
-    const pin =
-      patch.url === undefined
-        ? undefined
-        : await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data));
+    const pin = patch.url === undefined ? undefined : await pinAs(c, id.data);
     const connector = (await getConnector(db, id.data)) ?? result.connector;
     const shown =
       pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
@@ -136,9 +133,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   // Probe and pin again, for a connector that has none (the registration probe failed).
   app.post("/:id/pin", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
-    const pin = id.success
-      ? await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data))
-      : undefined;
+    const pin = id.success ? await pinAs(c, id.data) : undefined;
     if (!id.success || !pin) return notFound(c);
     const connector = await getConnector(db, id.data);
     return c.json(
@@ -162,7 +157,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!input) {
       return invalidRequest(c, "Send tools: a list of { name, sha256 } of the reviewed tools.");
     }
-    const result = await approveConnectorTools(db, id.data, input);
+    const result = await approveConnectorTools(db, id.data, input, c.get("user").id);
     if (result.ok) return c.json({ approved: result.approved });
     if (result.error === "not_found") return notFound(c);
     return c.json(

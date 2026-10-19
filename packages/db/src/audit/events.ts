@@ -1585,7 +1585,9 @@ export const AUDIT_EVENTS = {
   "mcp.connector.updated": event("site", {
     connectorId: id,
     name: z.string().max(64),
-    changed: z.array(z.enum(["name", "url", "iconUrl", "authKind", "status"])).max(5),
+    changed: z
+      .array(z.enum(["name", "url", "iconUrl", "authKind", "status", "credentialSource"]))
+      .max(6),
   }),
   /** A site admin removed a connector; `soft` when teams still used it (kept disabled). */
   "mcp.connector.removed": event("site", {
@@ -1639,6 +1641,40 @@ export const AUDIT_EVENTS = {
     connectorId: id,
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
+  }),
+  /**
+   * Which credential probes a connector's `tools/list` (KOBE-431): the connector's site-wide key
+   * (KOBE-303), the own key of the site admin `adminId`, or none. Never a member's key, never the
+   * value. Recorded on every pin by an admin, and by the periodic refresh when its choice changes.
+   */
+  "mcp.connector.probe_credential": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    purpose: z.enum(["pin", "refresh"]),
+    credential: z.enum(["site_key", "admin_key", "none"]),
+    adminId: id.optional(),
+  }),
+  /**
+   * The periodic refresh started skipping a connector because it asked for credentials and no
+   * usable site key or admin key exists (KOBE-431); site admins are told. System actor; written
+   * when the skip begins, not on every pass.
+   */
+  "mcp.connector.refresh_skipped": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["auth_required"]),
+  }),
+  /** A site admin set or replaced a connector's site-wide API key (KOBE-303); never the key or its hint. */
+  "mcp.connector.site_key_set": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    replaced: z.boolean(),
+  }),
+  /** A connector's site-wide API key was removed (KOBE-303): by an admin, or by a change of URL or mode. */
+  "mcp.connector.site_key_removed": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["removed", "url_changed", "mode_changed"]),
   }),
 
   // ── memory: file memory (KOBE-155, D24); ids, versions and sizes, never paths or content ──

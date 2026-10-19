@@ -98,6 +98,8 @@ export async function approveConnectorTools(
   db: KobeDb,
   connectorId: string,
   input: ApproveInput,
+  /** The approving site admin: their own key probes the refresh from now on (KOBE-431). */
+  approvedBy: string,
 ): Promise<ApprovalOutcome> {
   return db.transaction(async (tx): Promise<ApprovalOutcome> => {
     const [row] = await tx
@@ -113,6 +115,7 @@ export async function approveConnectorTools(
       .set({
         toolsSnapshot: result.tools,
         toolsHash: approvedHash(result.tools),
+        pinnedBy: approvedBy,
         updatedAt: sql`now()`,
       })
       .where(eq(connectors.id, connectorId));

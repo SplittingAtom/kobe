@@ -15,6 +15,8 @@ const connector = (over: Record<string, unknown> = {}) => ({
   status: "active",
   toolCount: 0,
   driftedCount: 0,
+  refreshSkipped: null,
+  refreshedAt: null,
   createdAt: "2026-10-05T10:00:00.000Z",
   updatedAt: "2026-10-05T10:00:00.000Z",
   ...over,
@@ -220,5 +222,34 @@ describe("Tool drift re-approval (KOBE-102)", () => {
       "changed_tool",
       "fresh_tool",
     ]);
+  });
+});
+
+describe("refresh skips (KOBE-431)", () => {
+  it("tells admins a connector is not checked for changes and whose key it needs", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              refreshSkipped: "auth_required",
+              refreshedAt: "2026-10-19T01:28:16.000Z",
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText("Not checked for changes: needs a key")).toBeTruthy();
+    expect(screen.getByText(/own key of the site admin who last pinned or approved/)).toBeTruthy();
+  });
+
+  it("says nothing when the last refresh ran", async () => {
+    stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
+    renderSite(<ConnectorsPage />);
+    await screen.findByRole("rowheader", { name: "github" });
+    expect(screen.queryByText(/Not checked for changes/)).toBeNull();
   });
 });

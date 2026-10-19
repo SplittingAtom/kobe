@@ -301,6 +301,7 @@ function ConnectorTable({
                     </Button>
                   </span>
                 ) : null}
+                <RefreshSkipped connector={c} />
               </TableCell>
               <TableCell>
                 <Badge tone={c.status === "active" ? "running" : "neutral"}>
@@ -341,5 +342,30 @@ function ConnectorTable({
       </Table>
       {confirmDialog}
     </div>
+  );
+}
+
+/**
+ * The periodic refresh could not check the connector for changed tools (KOBE-431). For
+ * `auth_required`, says whose key Kobe would use, so an admin knows how to fix it.
+ */
+function RefreshSkipped({ connector: c }: { readonly connector: Connector }) {
+  if (c.refreshSkipped === null) return null;
+  const auth = c.refreshSkipped === "auth_required";
+  return (
+    <p className="m-0 mt-1 text-sm text-console-muted">
+      <Badge tone="attention">
+        {auth ? "Not checked for changes: needs a key" : "Last check for changes failed"}
+      </Badge>{" "}
+      {auth
+        ? "Kobe checks it with its site-wide key, else the own key of the site admin who last pinned or approved its tools. Add your key for it at My connector keys, then pin or approve its tools."
+        : `The server could not be checked (${c.refreshSkipped.replaceAll("_", " ")}).`}
+      {c.refreshedAt ? (
+        <>
+          {" "}
+          Last tried <DateTime value={c.refreshedAt} />.
+        </>
+      ) : null}
+    </p>
   );
 }
