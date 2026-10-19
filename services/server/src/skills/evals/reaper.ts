@@ -2,7 +2,13 @@ import { sql, teams, withTeam, type KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { ServerRunOrchestrator } from "../../runs/orchestrator.js";
 import type { SandboxProvider } from "../../sandbox/provider.js";
-import { requeueExecution } from "./store.js";
+import { errorAttempt } from "./execution.js";
+import {
+  cancelDepartedStartersEvals,
+  claimTakeover,
+  recordAttempt,
+  requeueExecution,
+} from "./store.js";
 
 // The skill eval reaper (KOBE-325): the cleanup path for a server that died mid-execution (or a
 // delete that failed). One replica at a time (an advisory lock, `SKILL_EVAL_REAPER_LOCK`). It
@@ -18,6 +24,8 @@ export const SKILL_EVAL_REAPER_LOCK = "kobe.skill-eval.reaper";
 export const SKILL_EVAL_REAPER_MS = 30_000;
 /** An execution without a heartbeat for this long has no live runner. */
 export const SKILL_EVAL_HEARTBEAT_TIMEOUT_MS = 60_000;
+/** Takeovers requeued without using the attempt; the next one records an error attempt. */
+export const SKILL_EVAL_MAX_TAKEOVERS = 2;
 
 export interface SkillEvalReaperDeps {
   readonly db: KobeDb;
@@ -30,6 +38,8 @@ export interface SkillEvalReaperDeps {
 export interface ReapResult {
   readonly executions: number;
   readonly claims: number;
+  /** Open eval runs of departed or deactivated starters, cancelled. */
+  readonly departed: number;
 }
 
 type OrphanRow = {
@@ -57,6 +67,17 @@ async function takeOverOrphans(
   );
   let taken = 0;
   for (const row of orphans.rows) {
+    const key = {
+      teamId: team.id,
+      evalRunId: row.eval_run_id,
+      caseId: row.case_id,
+      withSkill: row.with_skill,
+      threadId: row.thread_id,
+    };
+    // Claimed first (still silent now), then stopped: a runner that beat meanwhile keeps its
+    // sandbox and run (re-review R4).
+    const claim = await claimTakeover(deps.db, key, timeout);
+    if (!claim) continue;
     if (row.run_id) {
       const actor = {
         user_id: row.started_by,
@@ -67,14 +88,18 @@ async function takeOverOrphans(
       await deps.runs.cancel(actor, row.run_id).catch(() => undefined);
     }
     await deps.provider.deleteEvalSandbox(team, row.thread_id).catch(() => false);
-    const requeued = await requeueExecution(deps.db, {
-      teamId: team.id,
-      evalRunId: row.eval_run_id,
-      caseId: row.case_id,
-      withSkill: row.with_skill,
-      threadId: row.thread_id,
-    });
-    if (requeued) taken += 1;
+    // Requeued without using the attempt, up to SKILL_EVAL_MAX_TAKEOVERS times; an execution that
+    // keeps losing its replica then counts as an error (re-review R1: no endless loop).
+    const done =
+      claim.takeovers > SKILL_EVAL_MAX_TAKEOVERS
+        ? (await recordAttempt(
+            deps.db,
+            { ...key, attempt: claim.attempt, firstAttempt: claim.firstAttempt },
+            errorAttempt(row.thread_id, row.run_id, 0),
+            claim.model,
+          )) !== "stale"
+        : await requeueExecution(deps.db, key);
+    if (done) taken += 1;
   }
   return taken;
 }
@@ -83,8 +108,10 @@ async function takeOverOrphans(
 export async function reapSkillEvals(deps: SkillEvalReaperDeps): Promise<ReapResult> {
   const all = await deps.db.select({ id: teams.id, slug: teams.slug }).from(teams);
   let executions = 0;
+  let departed = 0;
   for (const team of all) {
     try {
+      departed += await cancelDepartedStartersEvals(deps.db, team.id);
       executions += await takeOverOrphans(deps, team);
     } catch (err) {
       deps.log.warn({ err, team_id: team.id }, "skill eval reaper: a team failed");
@@ -110,7 +137,7 @@ export async function reapSkillEvals(deps: SkillEvalReaperDeps): Promise<ReapRes
     if (running || !team) continue;
     if (await deps.provider.deleteEvalSandbox(team, claim.threadId).catch(() => false)) claims += 1;
   }
-  if (executions + claims > 0)
-    deps.log.info({ executions, claims }, "skill eval reaper cleaned up");
-  return { executions, claims };
+  if (executions + claims + departed > 0)
+    deps.log.info({ executions, claims, departed }, "skill eval reaper cleaned up");
+  return { executions, claims, departed };
 }

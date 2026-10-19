@@ -211,7 +211,6 @@ export class SkillEvalRunner {
           .catch(() => undefined);
       attempt = shutdown ? null : errorAttempt(claim.threadId, state.runId, Date.now() - started);
     } finally {
-      clearInterval(beat);
       // Cleanup on every path (KOBE-325): the claim's shutdownTime and the reaper are backstops.
       await this.#o.provider
         .deleteEvalSandbox(team, claim.threadId)
@@ -227,6 +226,10 @@ export class SkillEvalRunner {
       else await recordAttempt(this.#o.db, claim, attempt, claim.runModel.used);
     } catch (err) {
       this.#o.log.error({ err, eval_run_id: claim.evalRunId }, "skill evals: could not record");
+    } finally {
+      // Beating until the result is recorded: a slow sandbox delete never looks like a dead
+      // replica to the reaper (re-review R4).
+      clearInterval(beat);
     }
   }
 

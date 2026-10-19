@@ -237,6 +237,49 @@ export async function heartbeat(db: KobeDb, e: ExecutionKey): Promise<boolean> {
 }
 
 /**
+ * The reaper's claim on a silent execution (re-review R4): only if its heartbeat is still older
+ * than `silentSec` now, in one guarded update that counts the takeover and resets the heartbeat (a
+ * runner that beat meanwhile keeps it; a second reaper pass waits again). What it needs next.
+ */
+export async function claimTakeover(
+  db: KobeDb,
+  e: ExecutionKey,
+  silentSec: number,
+): Promise<{
+  takeovers: number;
+  attempt: 1 | 2;
+  firstAttempt: EvalAttempt | null;
+  model: string;
+} | null> {
+  return withTeam(db, e.teamId, async (tx) => {
+    const res = await tx.execute<{
+      takeovers: number;
+      attempt: number;
+      first_attempt: EvalAttempt | null;
+      model: string;
+    }>(sql`
+      UPDATE skill_eval_results x
+         SET takeovers = least(x.takeovers + 1, 100), updated_at = now()
+        FROM skill_eval_runs r
+       WHERE x.team_id = ${e.teamId} AND x.eval_run_id = ${e.evalRunId}
+         AND x.case_id = ${e.caseId} AND x.with_skill = ${e.withSkill}
+         AND x.thread_id = ${e.threadId} AND x.state IN ${ACTIVE}
+         AND x.updated_at < now() - make_interval(secs => ${silentSec})
+         AND r.team_id = x.team_id AND r.id = x.eval_run_id
+      RETURNING x.takeovers, x.attempt, x.first_attempt, r.run_model ->> 'used' AS model`);
+    const row = res.rows[0];
+    return row
+      ? {
+          takeovers: row.takeovers,
+          attempt: row.attempt === 2 ? 2 : 1,
+          firstAttempt: row.first_attempt,
+          model: row.model,
+        }
+      : null;
+  });
+}
+
+/**
  * Puts an execution back to queued without using up its attempt (a shutdown or a dead replica:
  * an infrastructure event, never the skill's result). Its thread stays as history.
  */
@@ -395,6 +438,28 @@ export async function cancelEvalRun(
      WHERE team_id = ${teamId} AND id = ${evalRunId} AND status IN ${OPEN}`);
   if (res.rowCount === 1) await notifyEval(tx, teamId, evalRunId);
   return res.rowCount === 1;
+}
+
+/**
+ * Cancels the open eval runs whose starter is no longer an active member of the team (re-review
+ * R3): offboarding may have missed them (no sandbox in that team, a failed step); the runner
+ * never starts them, so they would hold the team's open-eval slots for good.
+ */
+export async function cancelDepartedStartersEvals(db: KobeDb, teamId: string): Promise<number> {
+  return withTeam(db, teamId, async (tx) => {
+    const res = await tx.execute<{ id: string }>(sql`
+      UPDATE skill_eval_runs r
+         SET status = 'cancelled', cancel_requested_at = now(), finished_at = now(),
+             updated_at = now()
+       WHERE r.team_id = ${teamId} AND r.status IN ${OPEN}
+         AND NOT EXISTS (
+           SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
+            WHERE m.team_id = r.team_id AND m.user_id = r.started_by
+              AND u.deactivated_at IS NULL)
+      RETURNING r.id`);
+    for (const row of res.rows) await notifyEval(tx, teamId, row.id);
+    return res.rows.length;
+  });
 }
 
 /** Fails an open eval run that cannot go on (its package is unreadable, a model is gone). */

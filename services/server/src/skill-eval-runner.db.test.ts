@@ -343,7 +343,7 @@ describe("skill eval runner (KOBE-325)", () => {
       runs: f.fx.replica(0).deps.runs,
       log: silent,
     });
-    expect(reaped).toEqual({ executions: 0, claims: 0 });
+    expect(reaped).toEqual({ executions: 0, claims: 0, departed: 0 });
   });
 
   it("on shutdown puts a running execution back without using its attempt (review M2)", async () => {
@@ -478,6 +478,93 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(rows[0]?.n).toBe(210);
   });
 
+  it("counts takeovers: the third records an error attempt, so a poison pill ends (re-review R1)", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    const id = await draftWith(
+      w.owner,
+      "poison",
+      ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    const row = async () =>
+      (
+        await f.fx.admin.query<{
+          state: string;
+          attempt: number;
+          takeovers: number;
+          first_attempt: { status: string } | null;
+          execution: { status: string } | null;
+        }>(
+          `SELECT state, attempt, takeovers, first_attempt, execution FROM skill_eval_results
+            WHERE team_id = $1 AND eval_run_id = $2`,
+          [w.team, evalRunId],
+        )
+      ).rows[0];
+    // A replica takes it (the run is running) and dies, four times over.
+    await f.fx.admin.query(`UPDATE skill_eval_runs SET status = 'running' WHERE id = $1`, [
+      evalRunId,
+    ]);
+    for (let i = 0; i < 4; i += 1) {
+      const thread = randomUUID();
+      await f.fx.admin.query(
+        `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_eval_run_id)
+         VALUES ($1, $2, $3, 'e', true, $4)`,
+        [w.team, thread, w.owner.id, evalRunId],
+      );
+      await f.fx.admin.query(
+        `UPDATE skill_eval_results SET state = 'running', thread_id = $3,
+                deadline_at = now() + interval '5 minutes', updated_at = now() - interval '5 minutes'
+          WHERE team_id = $1 AND eval_run_id = $2`,
+        [w.team, evalRunId, thread],
+      );
+      await reapSkillEvals({ db: f.fx.db, provider, runs: f.fx.replica(0).deps.runs, log: silent });
+      const r = await row();
+      if (i < 2) expect(r).toMatchObject({ state: "queued", attempt: 1, takeovers: i + 1 });
+      if (i === 2)
+        expect(r).toMatchObject({
+          state: "queued",
+          attempt: 2,
+          first_attempt: { status: "error" },
+        });
+      if (i === 3) expect(r).toMatchObject({ state: "done", execution: { status: "error" } });
+    }
+    await closeEvals(w.team);
+  });
+
+  it("the reaper cancels the open evals of a deactivated starter (re-review R3)", async () => {
+    const w = await world();
+    const gone = await f.member(w.team);
+    const id = await draftWith(
+      gone,
+      "departed",
+      ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, gone).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    await f.fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [gone.id]);
+    const provider = new FakeEvalProvider(url);
+    const reaped = await reapSkillEvals({
+      db: f.fx.db,
+      provider,
+      runs: f.fx.replica(0).deps.runs,
+      log: silent,
+    });
+    expect(reaped.departed).toBeGreaterThanOrEqual(1);
+    const { rows } = await f.fx.admin.query<{ status: string }>(
+      `SELECT status FROM skill_eval_runs WHERE team_id = $1 AND id = $2`,
+      [w.team, evalRunId],
+    );
+    expect(rows[0]?.status).toBe("cancelled");
+  });
+
   it("bounds a member's open evals (review M4)", async () => {
     const w = await world();
     const id = await draftWith(
@@ -508,6 +595,10 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("never asks, and ignores the starter's remembered approvals, under a stricter floor (review L2, L12)", async () => {
     const w = await world();
+    const saved = await f.fx.admin.query<{ key: string; value: string }>(
+      `SELECT key, value FROM site_settings
+        WHERE key IN ('policy.approval_floor', 'policy.ask_on_write.prompt_sandbox_writes')`,
+    );
     await f.fx.admin.query(
       `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write'),
          ('policy.ask_on_write.prompt_sandbox_writes', 'true')
@@ -570,9 +661,15 @@ describe("skill eval runner (KOBE-325)", () => {
       );
       expect(denied.rows).toHaveLength(2);
     } finally {
+      // Put back what was there (the test database's other files may rely on it).
       await f.fx.admin.query(
         `DELETE FROM site_settings WHERE key IN ('policy.approval_floor', 'policy.ask_on_write.prompt_sandbox_writes')`,
       );
+      for (const r of saved.rows)
+        await f.fx.admin.query(`INSERT INTO site_settings (key, value) VALUES ($1, $2)`, [
+          r.key,
+          r.value,
+        ]);
     }
   });
 
