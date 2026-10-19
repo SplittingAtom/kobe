@@ -187,10 +187,12 @@ async function refusalsOf(
   if (!right.ok) out.push({ code: right.code, message: right.message });
   const catalogSkillId = right.ok ? (right.skill?.id ?? null) : null;
   if (catalogSkillId) {
-    const res = await db.execute<{ semver: string }>(sql`
-      SELECT semver FROM registry_versions WHERE skill_id = ${catalogSkillId}`);
-    const semvers = res.rows.map((r) => r.semver);
-    if (semvers.includes(plan.semver))
+    const res = await db.execute<{ semver: string; state: string }>(sql`
+      SELECT semver, state FROM registry_versions WHERE skill_id = ${catalogSkillId}`);
+    // A rejected version keeps its number (the Registry keeps it) but sets no floor: a name freed
+    // after a rejection starts again at any version (KOBE-334).
+    const semvers = res.rows.filter((r) => r.state !== "rejected").map((r) => r.semver);
+    if (res.rows.some((r) => r.semver === plan.semver))
       out.push({ code: "already_submitted", message: `${plan.semver} was already submitted.` });
     else if (semvers.some((v) => compareSemver(v, plan.semver) > 0))
       out.push({

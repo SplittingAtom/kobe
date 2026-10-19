@@ -31,6 +31,9 @@ import { isReservedName } from "./names.js";
 
 type Db = KobeDb | KobeTx;
 
+/** A submission still waiting on its review or its author: it holds a never-approved name. */
+const OPEN_STATES = ["submitted", "in_review", "changes_requested"] as const;
+
 export const MAINTAINERS_MAX = 20;
 
 export interface Maintainer {
@@ -253,8 +256,9 @@ export type SubmissionRight =
 /**
  * May `userId` submit a version named `name` (KOBE-332, SK24; the promotion ticket calls it)?
  * A new name: yes (`skill: null`), unless it is Kobe's. An existing catalog skill: only its active
- * maintainers; before its first approval (no maintainers yet) only whoever submitted it. Anyone
- * else is told who maintains it.
+ * maintainers; before its first approval (no maintainers yet) only whoever has a submission open
+ * under it, and anyone once every submission was rejected (KOBE-334). Anyone else is told who
+ * maintains it.
  */
 export async function submissionRight(
   tx: Db,
@@ -273,16 +277,22 @@ export async function submissionRight(
   const all = await listMaintainers(tx, skill.id);
   const list = activeMaintainers(all);
   if (list.some((m) => m.userId === userId)) return { ok: true, skill };
-  // Before its first approval it has no maintainer rows at all: only its submitter goes on. An
-  // Unmaintained skill (rows, none active) reopens only when a Site admin reassigns it (review
-  // C3-M1): a maintainer removed earlier never wins the right back.
+  // Before its first approval it has no maintainer rows at all: whoever has a submission open
+  // under the name goes on; once none is open (every one rejected), the name is free again for
+  // anyone (review C3-M2: a rejected first submission never squats a name). An Unmaintained skill
+  // (rows, none active) reopens only when a Site admin reassigns it (review C3-M1): a maintainer
+  // removed earlier never wins the right back.
   if (all.length === 0) {
-    const [mine] = await tx
-      .select({ id: registryVersions.id })
+    const open = await tx
+      .select({ submittedBy: registryVersions.submittedBy })
       .from(registryVersions)
-      .where(and(eq(registryVersions.skillId, skill.id), eq(registryVersions.submittedBy, userId)))
-      .limit(1);
-    if (mine) return { ok: true, skill };
+      .where(
+        and(
+          eq(registryVersions.skillId, skill.id),
+          inArray(registryVersions.state, [...OPEN_STATES]),
+        ),
+      );
+    if (open.length === 0 || open.some((o) => o.submittedBy === userId)) return { ok: true, skill };
     return {
       ok: false,
       code: "taken",
