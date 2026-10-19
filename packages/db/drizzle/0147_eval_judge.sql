@@ -1,0 +1,4 @@
+ALTER TABLE "sandbox_commands" DROP CONSTRAINT "sandbox_commands_kind";--> statement-breakpoint
+ALTER TABLE "team_skill_settings" ADD COLUMN "eval_judge_alias" text;--> statement-breakpoint
+ALTER TABLE "sandbox_commands" ADD CONSTRAINT "sandbox_commands_kind" CHECK ("sandbox_commands"."kind" IN ('run.start', 'run.steer', 'run.stop', 'pi.command', 'thread.compact', 'eval.prepare', 'eval.snapshot', 'eval.read'));--> statement-breakpoint
+ALTER TABLE "team_skill_settings" ADD CONSTRAINT "team_skill_settings_eval_judge_alias" CHECK ("team_skill_settings"."eval_judge_alias" IS NULL OR char_length("team_skill_settings"."eval_judge_alias") BETWEEN 1 AND 64);

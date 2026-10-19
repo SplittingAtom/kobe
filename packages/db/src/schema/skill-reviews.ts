@@ -138,18 +138,33 @@ export const teamSkillReviews = pgTable(
 );
 
 /** Team table: the team's skill switches (one row per team, created on first change). */
-export const teamSkillSettings = pgTable("team_skill_settings", {
-  teamId: uuid()
-    .primaryKey()
-    .references(() => teams.id, { onDelete: "cascade" }),
-  /** Members' personal skills are left out of this team's runs (spec D22). */
-  personalSkillsDisabled: boolean().notNull().default(false),
-  /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
-  membersMayAddCatalog: boolean().notNull().default(true),
-  /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
-  buildersMayInstallCatalog: boolean().notNull().default(true),
-  updatedBy: uuid()
-    .notNull()
-    .references(() => users.id),
-  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-});
+export const teamSkillSettings = pgTable(
+  "team_skill_settings",
+  {
+    teamId: uuid()
+      .primaryKey()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** Members' personal skills are left out of this team's runs (spec D22). */
+    personalSkillsDisabled: boolean().notNull().default(false),
+    /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
+    membersMayAddCatalog: boolean().notNull().default(true),
+    /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
+    buildersMayInstallCatalog: boolean().notNull().default(true),
+    /**
+     * The team's eval judge (KOBE-326, SK17): one of its enabled models, used when the Site's
+     * `judge_alias` is not enabled in the team; null (or a model disabled since): the team default.
+     * Checked against the team's models when set and again whenever it is used.
+     */
+    evalJudgeAlias: text(),
+    updatedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "team_skill_settings_eval_judge_alias",
+      sql`${t.evalJudgeAlias} IS NULL OR char_length(${t.evalJudgeAlias}) BETWEEN 1 AND 64`,
+    ),
+  ],
+);
