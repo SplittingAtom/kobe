@@ -43,6 +43,7 @@ const ROUTES = {
   "GET /v1/skills?scope=team": [200, { skills: [SKILL("t-1", "team", "house-style")] }],
   "GET /v1/skills?scope=personal": [200, { skills: [SKILL("p-1", "personal", "my-notes")] }],
   "GET /v1/me/skills/enablements": [200, { personal: [], team: [], catalog: [] }],
+  "GET /v1/skills/catalog": [200, { skills: [], tags: [] }],
   "GET /v1/skills/drafts": [
     200,
     {
@@ -83,7 +84,7 @@ describe("Skills page", () => {
     expect(await screen.findByText("house-style")).toBeDefined();
   });
 
-  it("shows my personal skills and choices on Mine, and the catalog placeholder", async () => {
+  it("shows my personal skills and choices on Mine, and the Catalog tab (KOBE-336)", async () => {
     const calls = stubApi(ROUTES);
     renderTeam(<SkillsPage initialTab="mine" />, MEMBER);
     expect(await screen.findByText("my-notes")).toBeDefined();
@@ -91,7 +92,7 @@ describe("Skills page", () => {
       expect.arrayContaining(["GET /v1/skills?scope=personal", "GET /v1/me/skills/enablements"]),
     );
     await userEvent.click(screen.getByRole("tab", { name: "Catalog" }));
-    expect(screen.getByText(/Site catalog comes with the Skills Registry/)).toBeDefined();
+    expect(await screen.findByText("No catalog skill matches.")).toBeDefined();
     expect(replaced.at(-1)).toContain("tab=catalog");
   });
 
