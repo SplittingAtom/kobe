@@ -192,10 +192,12 @@ function ToolCardBody({
 function ToolCardSlots({
   activity,
   toolName,
+  toolCallId,
   result,
 }: {
   readonly activity: ToolActivity;
   readonly toolName: string;
+  readonly toolCallId?: string;
   readonly result: unknown;
 }) {
   return (
@@ -229,7 +231,9 @@ function ToolCardSlots({
       {activity.files.map((file) => (
         <FileSlot key={file.file_id} file={file} />
       ))}
-      {toolName === SAVE_SKILL_DRAFT_TOOL && <SkillDraftCard result={result} />}
+      {toolName === SAVE_SKILL_DRAFT_TOOL && toolCallId !== undefined && (
+        <SkillDraftCard toolCallId={toolCallId} done={result !== undefined} />
+      )}
     </div>
   );
 }
@@ -285,6 +289,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
       <ToolCardSlots
         activity={activity}
         toolName={props.toolName}
+        toolCallId={props.toolCallId}
         result={props.result ?? activity.result?.preview}
       />
     </section>

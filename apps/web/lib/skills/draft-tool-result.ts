@@ -1,29 +1,28 @@
+import { apiRequest, type ApiResult } from "../api/client";
+
 /**
- * The draft a `save_skill_draft` call made or updated (KOBE-442), read from the tool's result:
- * the JSON the kobe-tools extension returns (`draft_id`, `name`, `created`, ...). Undefined for
- * anything else (an error text, a malformed answer), so the card never links a guessed id.
+ * The drafts `save_skill_draft` made or updated in a conversation (KOBE-442), as the server
+ * recorded them (`GET /v1/skills/drafts/saves`, review L4): the Open in Workbench card is built
+ * from these only, never from the tool result the sandbox relays.
  */
 export interface SavedSkillDraft {
+  readonly toolCallId: string;
   readonly draftId: string;
   readonly name: string;
   readonly created: boolean;
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function skillDraftFromToolResult(result: unknown): SavedSkillDraft | undefined {
-  let value = result;
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value) as unknown;
-    } catch {
-      return undefined;
-    }
-  }
-  if (value === null || typeof value !== "object") return undefined;
-  const { draft_id: id, name, created } = value as Record<string, unknown>;
-  if (typeof id !== "string" || !UUID.test(id) || typeof name !== "string") return undefined;
-  return { draftId: id, name, created: created !== false };
+  /** A new draft although the conversation had one: it was shared, or edited since. */
+  readonly newBecause?: "shared" | "edited";
 }
 
 export const SAVE_SKILL_DRAFT_TOOL = "save_skill_draft";
+
+export async function recordedSkillDraftSaves(
+  teamId: string,
+  threadId: string,
+): Promise<ApiResult<readonly SavedSkillDraft[]>> {
+  const res = await apiRequest<{ saves: SavedSkillDraft[] }>(
+    `/v1/skills/drafts/saves?threadId=${encodeURIComponent(threadId)}`,
+    { teamId },
+  );
+  return res.ok ? { ...res, data: res.data.saves } : res;
+}
