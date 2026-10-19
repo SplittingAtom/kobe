@@ -1,0 +1,1 @@
+ALTER TYPE "public"."registry_review_action" ADD VALUE 'undeprecated' BEFORE 'finding_acknowledged';

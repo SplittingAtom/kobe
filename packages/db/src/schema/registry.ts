@@ -83,6 +83,8 @@ export const registryReviewAction = pgEnum("registry_review_action", [
   "withdrawn",
   "revoked",
   "unrevoked",
+  /** A maintainer or Site admin undid a version's deprecation (KOBE-340). */
+  "undeprecated",
   // A reviewer acknowledged one Caution finding (KOBE-334 review M1, SK32).
   "finding_acknowledged",
   "retracted",

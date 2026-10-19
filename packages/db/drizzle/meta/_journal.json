@@ -1177,6 +1177,13 @@
       "when": 1792432840659,
       "tag": "0167_notifications_skill_retirement",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1792434824245,
+      "tag": "0168_registry_review_undeprecated",
+      "breakpoints": true
     }
   ]
 }
