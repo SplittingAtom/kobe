@@ -1044,6 +1044,13 @@
       "when": 1792388380693,
       "tag": "0148_eval_cap_reserve",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1792410540660,
+      "tag": "0149_skill_drafts_synced_rev",
+      "breakpoints": true
     }
   ]
 }

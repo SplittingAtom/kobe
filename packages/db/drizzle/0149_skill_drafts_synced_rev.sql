@@ -1,0 +1,1 @@
+ALTER TABLE "skill_drafts" ADD COLUMN "synced_rev" integer;

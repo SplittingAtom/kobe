@@ -84,6 +84,12 @@ export const skillDrafts = pgTable(
     parentRef: jsonb().$type<Record<string, unknown>>(),
     fromThreadId: uuid(),
     coEdited: boolean().notNull().default(false),
+    /**
+     * The revision the last save from its conversation wrote (Save to Workbench, KOBE-322;
+     * `save_skill_draft`, KOBE-442); null once the conversation no longer saves into it. The
+     * agent's tool updates the draft only while `rev` still equals it and the draft is private.
+     */
+    syncedRev: integer(),
     ownerDepartedAt: ts(),
     rev: integer().notNull().default(1),
     sizeBytes: integer().notNull().default(0),
