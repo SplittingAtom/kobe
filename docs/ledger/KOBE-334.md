@@ -7,7 +7,10 @@
 - **Depends on:** KOBE-330 (Registry team, `requireRegistryTeam`), KOBE-331 (`skillReviewAllows`),
   KOBE-332 (`recordFirstMaintainer`, `submissionRight`), KOBE-333 (submissions); KOBE-335 fills
   the authoritative scorecard Approve needs
-- **Migrations:** none. New dependency `diff` 9.0.0 (jsdiff, BSD-3-Clause; inventory regenerated)
+- **Migrations (review):** 0159 `retracted` state, `finding_acknowledged`/`retracted` actions
+  (generated); 0160 `registry_versions_review` CHECK covers the confirmer (generated); 0161 the
+  review guard treats the confirmer as the submitter (custom); upgrade test
+  `packages/db/src/registry-review-confirmer-upgrade.db.test.ts`. New dependency `diff` 9.0.0 (jsdiff, BSD-3-Clause; inventory regenerated)
 - **Also here (KOBE-333 re-review LOWs):** R1 0158 joins the draft row in the version's own team
   (edited in place: the migration is unreleased; upgrade test adds a look-alike row in a second
   team); R2 `submit` re-reads the team review `FOR SHARE` inside its transaction and refuses
@@ -64,8 +67,7 @@ changes_requested|rejected{blocked}`.
 ## Decisions
 
 - **Confirming Team admin** (review-c2 (b)): refused for Approve only (they may send back or
-  reject). On a single-admin Site they may approve; the DB flag `self_approved` can't record it
-  (its CHECK ties the flag to the submitter), so the audit row says `confirmerApproved: true`.
+  reject). On a single-admin Site they may approve, flagged `self_approved` (review M2).
 - **Name freeing by reopening, not deleting:** rejected versions stay in the Registry (its
   history), so the name's row stays and the next submitter's versions join it; approval re-checks
   the right, so two people can't both end up approved under one name.
@@ -75,12 +77,30 @@ changes_requested|rejected{blocked}`.
   column (no migration).
 - **Reject and block** blocks the runtime hash (its alias group covers the package hash).
 
+## Review fixes (review-334.md)
+
+- **H1** line diffs only up to 128 KiB / 5000 lines a file; jsdiff `timeout` 250 ms and
+  `maxEditLength` 5000; 1.5 s per request; such files show "too large / too different / not
+  diffed". The queue counts changed files by bytes (`changedFileCount`), never diffing.
+  `review-diff.test.ts` runs the review's two 20 000-line files (< 3 s).
+- **M1** (coordinator) `POST /:id/acknowledgements {finding}`: one Caution finding
+  (`rule@file:line`) per call, a `finding_acknowledged` event and `registry.finding_acknowledged`
+  audit; Approve 409 `findings_unacknowledged` until all are; the UI has one button per finding.
+- **M2** (coordinator) the DB flags the confirmer's single-admin approval `self_approved`
+  (0160/0161) and refuses it otherwise; the Workbench and queue show "Self-approved" (the catalog
+  card is KOBE-336's).
+- **M3** (coordinator) Reject/Reject and block also act on Changes requested; the author withdraws
+  (`POST /v1/me/skill-submissions/:id/retract`, state `retracted`, Workbench button). Either frees
+  a never-approved name. Tests in `skill-registry-review-rules.db.test.ts`.
+- **L1/C3-L3** Approve locks the catalog skill row; `submit` re-checks `submissionRight` on the
+  locked row and maps unique races to `taken`/`already_submitted`. **L2** the authoritative card
+  must name the package. **L3** a Block override needs a note (`scanOverride` audited). **L4**
+  hidden and bidi characters shown as `⟨U+202E⟩` markers in the diff. **L5** archived skill and
+  deactivated submitter refused.
+- Decided: no Registry-team hand-over on demotion.
+
 ## Open questions (for Chris or the coordinator)
 
-- Caution verdicts: SK32 wants each finding acknowledged by the reviewer; not enforced here (the
-  checklist is advisory). The scanner ticket or 335 could require an `acknowledged` field.
-- A demoted Registry-team creator keeps team admin (review-c2 L-d): not changed; say if demotion
-  should hand the team over.
 - The `registry.version.updated` stream event (spec §8) isn't emitted; the console reloads.
 
 ## Evidence (acceptance criteria → test or command output)
