@@ -90,7 +90,7 @@ describe("My area pages beside the thread (KOBE-424 ac-1)", () => {
     expect(await composer()).toBeTruthy();
   });
 
-  it("My connectors and My schedules open beside; My skills, Projects and My agents stay pages", async () => {
+  it("My connectors and My schedules open beside; Skills, Projects and My agents stay pages", async () => {
     await openThread();
     const user = userEvent.setup();
     await user.click(barLink("profile"));
@@ -99,8 +99,8 @@ describe("My area pages beside the thread (KOBE-424 ac-1)", () => {
     await user.click(barLink("my-schedules"));
     expect(await screen.findByRole("region", { name: "My schedules" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "My connectors" })).toBeNull();
-    await user.click(barLink("profile"));
-    expect(screen.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/me/skills");
+    // Skills is a bar command since the Skills page (KOBE-321), not a profile menu entry.
+    expect(barLink("skills").getAttribute("href")).toBe("/me/skills");
     expect(barLink("my-agents").getAttribute("href")).toBe("/me/agents");
   });
 
