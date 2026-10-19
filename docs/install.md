@@ -591,13 +591,21 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Skill evals (KOBE-325, migrations `*_skill_evals` and `*_skill_evals_rls`).** Members can run
   a skill's eval suite: each case runs in its own short-lived sandbox in the team namespace
-  (template and warm pool `kobe-eval-sandbox`, claims `e-<thread id>`), beside the member's own
-  sandbox. The migrations add tables and columns only; the previous release keeps connecting
-  sandboxes, sending commands and leasing runs during the upgrade, and `helm rollback` is safe.
-  **Start skill evals only after the rollout has finished** (`kubectl rollout status
-deployment/<release>-server`): a replica of the previous release doesn't know eval sandboxes
-  and could hand an eval run's stop or steer to the member's own sandbox (same member, same team;
-  the eval loses that command). Kobe does not detect a rollout in progress. Before a
+  (template and warm pool `kobe-skill-eval`, claims `e-<thread id>`, PriorityClass and quota
+  `kobe-skill-eval`), beside the member's own sandbox; members' pods keep `teamQuota`
+  (`kobe-team-member-quota`). What the migrations do: new tables and columns, a `slot` column and
+  checks on `sandbox_commands` / `sandbox_run_leases` (with a trigger that keeps every command and
+  lease on its thread's own sandbox), hold triggers, and a re-validated `sandbox_commands` kind
+  check (a full scan of that small table while the upgrade holds its lock). The previous release
+  keeps connecting sandboxes, sending commands and leasing runs, and `helm rollback` is safe for
+  members' own work. **This upgrade only (and a rollback from it): start skill evals after every
+  Kobe deployment has rolled** (`kubectl rollout status deploy -l
+app.kubernetes.io/instance=<release>`; server, model gateway, MCP proxy and egress proxy). Until
+  then a previous-release component can break evals, never anything else: its model gateway, MCP
+  proxy and egress proxy refuse an eval sandbox's tokens; its server can deliver an eval's stop or
+  steer to the member's own sandbox (same member, same team), interrupt an eval's run as lost,
+  fail `eval.prepare` / `eval.snapshot`, or, for a few milliseconds, stall its own command
+  delivery on an eval's `run.start`. Kobe does not detect a rollout in progress. Before a
   `helm rollback`, cancel running evals; any eval sandbox left behind deletes itself at its
   shutdown time (the case's wall clock plus 5 minutes).
 - **Agents freeze their skill versions (KOBE-318, migrations `0139_agent_skill_manifest` and
