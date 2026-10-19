@@ -1,0 +1,1 @@
+ALTER TABLE "connector_ui_resources" ADD CONSTRAINT "connector_ui_resources_approved" CHECK ("connector_ui_resources"."approved" OR "connector_ui_resources"."status" = 'drifted');

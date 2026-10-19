@@ -49,8 +49,8 @@ const insert = (c: pg.Client, overrides: Record<string, unknown> = {}) => {
   };
   return c.query(
     `INSERT INTO connector_ui_resources
-       (connector_id, uri, mime_type, html, sha256, pinned_hash, status, proposed)
-     VALUES ($1, $2, $3, $4, $5, $5, $6, $7)`,
+       (connector_id, uri, mime_type, html, sha256, pinned_hash, status, proposed, approved)
+     VALUES ($1, $2, $3, $4, $5, $5, $6, $7, true)`,
     [connectorId, row.uri, row.mime_type, row.html, HEX, row.status, row.proposed],
   );
 };

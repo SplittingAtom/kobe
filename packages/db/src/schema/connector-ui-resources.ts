@@ -89,6 +89,8 @@ export const connectorUiResources = pgTable(
       sql`jsonb_typeof(${t.meta}) = 'object' AND octet_length(${t.meta}::text) <= ${sql.raw(String(UI_RESOURCE_META_MAX_BYTES))}`,
     ),
     check("connector_ui_resources_status", sql`${t.status} IN ('pinned', 'drifted')`),
+    // Nothing a site admin never approved can be served.
+    check("connector_ui_resources_approved", sql`${t.approved} OR ${t.status} = 'drifted'`),
     check(
       "connector_ui_resources_proposed",
       sql`${t.proposed} IS NULL OR (${t.status} = 'drifted' AND jsonb_typeof(${t.proposed}) = 'object')`,
