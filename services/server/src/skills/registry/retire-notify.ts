@@ -42,6 +42,7 @@ const kindOf = (r: Retired) =>
     : (`skill.version.${
         {
           deprecate: "deprecated",
+          undeprecate: "deprecated",
           withdraw: "withdrawn",
           revoke: "revoked",
           unrevoke: "unrevoked",
@@ -113,6 +114,8 @@ async function revokeRecipients(tx: KobeTx, teamId: string, r: Retired): Promise
 }
 
 async function teamPart(tx: KobeTx, teamId: string, r: Retired) {
+  // An undone deprecation tells no one: a deprecate–undo loop must not flood installers' bells.
+  if (r.act === "undeprecate") return undefined;
   if (r.act === "unrevoke")
     return write(tx, teamId, r, new Set(await revokeRecipients(tx, teamId, r)));
   const install = await tx.execute<Pin>(sql`

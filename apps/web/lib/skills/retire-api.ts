@@ -4,7 +4,7 @@
  */
 import { apiRequest, type ApiResult } from "../api/client";
 
-export type RetireAct = "deprecate" | "withdraw" | "revoke" | "unrevoke";
+export type RetireAct = "deprecate" | "undeprecate" | "withdraw" | "revoke" | "unrevoke";
 
 export interface RetirableVersions {
   readonly status: string;
@@ -55,9 +55,14 @@ export function deprecateSkill(
 export function actsFor(state: string, mayRetire: boolean): RetireAct[] {
   const all: Record<string, RetireAct[]> = {
     approved: ["deprecate", "withdraw", "revoke"],
-    deprecated: ["withdraw", "revoke"],
+    deprecated: ["undeprecate", "withdraw", "revoke"],
     withdrawn: ["revoke"],
     revoked: ["unrevoke"],
   };
-  return (all[state] ?? []).filter((a) => mayRetire || a === "deprecate");
+  return (all[state] ?? []).filter((a) => mayRetire || a === "deprecate" || a === "undeprecate");
+}
+
+/** Undoes a skill's deprecation (maintainers and Site admins). */
+export function undeprecateSkill(skillId: string): Promise<ApiResult<Retired>> {
+  return apiRequest(`${base(skillId)}/undeprecate`, { method: "POST", json: {} });
 }

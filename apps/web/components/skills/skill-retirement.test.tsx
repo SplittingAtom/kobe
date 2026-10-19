@@ -49,7 +49,7 @@ describe("the retire panel", () => {
       within(row("1.1.0"))
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Withdraw", "Revoke"]);
+    ).toEqual(["Undo deprecation", "Withdraw", "Revoke"]);
     expect(
       within(row("1.2.0"))
         .getAllByRole("button")
@@ -75,7 +75,7 @@ describe("the retire panel", () => {
     );
   });
 
-  it("offers a maintainer Deprecate only, and deprecating the skill with a replacement", async () => {
+  it("offers a maintainer Deprecate and its undo only, and deprecating the skill with a replacement", async () => {
     const calls = stubApi({
       "GET /v1/site/skills/catalog/s1/versions": [200, VERSIONS(false)],
       "POST /v1/site/skills/catalog/s1/deprecate": [200, { state: "deprecated", notified: true }],
@@ -88,7 +88,7 @@ describe("the retire panel", () => {
       within(table)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["Deprecate"]);
+    ).toEqual(["Undo deprecation", "Deprecate"]);
     await userEvent.selectOptions(screen.getByLabelText("Replacement"), "s2");
     fireEvent.click(screen.getByRole("button", { name: "Deprecate sales" }));
     await answerConfirm(/Deprecate sales\?/, "Deprecate");
@@ -158,5 +158,22 @@ describe("retirement notifications", () => {
     ["skill.version.unrevoked", "2.0.0", "sales 2.0.0 is available again"],
   ] as const)("%s", (kind, semver, words) => {
     expect(notificationTitle({ ...base, kind, skillSemver: semver })).toBe(words);
+  });
+});
+
+describe("undoing a skill's deprecation", () => {
+  it("offers Undo on a deprecated skill", async () => {
+    const calls = stubApi({
+      "GET /v1/site/skills/catalog/s1/versions": [
+        200,
+        { ...VERSIONS(false), status: "deprecated" },
+      ],
+      "POST /v1/site/skills/catalog/s1/undeprecate": [200, { state: "active", notified: true }],
+    });
+    render(<RetirePanel skillId="s1" name="sales" candidates={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Undo the deprecation of sales" }));
+    expect(await screen.findByText("sales is active again.")).toBeTruthy();
+    expect(summary(calls)).toContain("POST /v1/site/skills/catalog/s1/undeprecate");
+    expect(screen.queryByRole("button", { name: "Deprecate sales" })).toBeNull();
   });
 });

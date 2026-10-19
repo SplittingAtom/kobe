@@ -1596,6 +1596,20 @@ export const AUDIT_EVENTS = {
     /** The revoke's entry was removed or replaced since: the block stays (review L2). */
     blockReplaced: z.literal(true).optional(),
   }),
+  /** A maintainer or Site admin undid a version's deprecation: it is approved again (KOBE-340). */
+  "registry.undeprecated": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    to: z.literal("approved"),
+  }),
+  /** A maintainer or Site admin undid a skill's deprecation; its replacement is cleared. */
+  "skill.catalog.undeprecated": event("site", {
+    skillId: id,
+    name: catalogName,
+    to: z.enum(["active", "unmaintained"]),
+  }),
   /** A maintainer or Site admin deprecated a whole catalog skill, naming its replacement or not. */
   "skill.catalog.deprecated": event("site", {
     skillId: id,

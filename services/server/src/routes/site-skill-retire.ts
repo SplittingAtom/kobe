@@ -4,6 +4,7 @@ import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import {
   deprecateSkill,
+  undeprecateSkill,
   publishedForActors,
   retireVersion,
   type RetireResult,
@@ -16,7 +17,7 @@ import { invalidRequest, parseBody } from "../teams/http.js";
 import { logger } from "../logger.js";
 
 const idSchema = z.uuid();
-const actSchema = z.enum(["deprecate", "withdraw", "revoke", "unrevoke"]);
+const actSchema = z.enum(["deprecate", "undeprecate", "withdraw", "revoke", "unrevoke"]);
 const noteSchema = z.strictObject({ note: z.string().trim().min(1).max(2000).optional() });
 const skillSchema = z.strictObject({ replacementId: z.uuid().optional() });
 
@@ -26,7 +27,7 @@ const ERRORS = {
   not_found: [404, "No published version (or catalog skill) with that id."],
   forbidden: [
     403,
-    "Maintainers and Site admins deprecate; only Site admins withdraw, revoke and unrevoke.",
+    "Maintainers and Site admins deprecate and undo it; only Site admins withdraw, revoke and unrevoke.",
   ],
   wrong_state: [409, "The version (or skill) isn't in a state this act applies to."],
   bad_replacement: [422, "The replacement must be another live catalog skill."],
@@ -110,6 +111,12 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
         replacementId: body.replacementId,
       }),
     );
+  });
+
+  app.post("/catalog/:skillId/undeprecate", async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    return answer(c, await undeprecateSkill(db, { skillId: id.data, actor: actor(c) }));
   });
 
   return app;

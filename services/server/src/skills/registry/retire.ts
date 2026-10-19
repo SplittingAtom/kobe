@@ -19,20 +19,30 @@ import { inRegistryTx } from "./registry-tx.js";
  * Never a move across majors (the resolver's ranges). Each act is a review event and a site audit
  * row in one transaction; notices follow (`retire-notify.ts`).
  */
-export type VersionAct = "deprecate" | "withdraw" | "revoke" | "unrevoke";
+export type VersionAct = "deprecate" | "undeprecate" | "withdraw" | "revoke" | "unrevoke";
 
 const FROM: Readonly<Record<VersionAct, readonly string[]>> = {
   deprecate: ["approved"],
+  undeprecate: ["deprecated"],
   withdraw: ["approved", "deprecated"],
   revoke: ["approved", "deprecated", "withdrawn"],
   unrevoke: ["revoked"],
 };
 const EVENT = {
   deprecate: "deprecated",
+  undeprecate: "undeprecated",
   withdraw: "withdrawn",
   revoke: "revoked",
   unrevoke: "unrevoked",
 } as const;
+/** The state each act leaves (Unrevoke: the one its revoke left, read from the event). */
+const TO: Readonly<Record<VersionAct, string>> = {
+  deprecate: "deprecated",
+  undeprecate: "approved",
+  withdraw: "withdrawn",
+  revoke: "revoked",
+  unrevoke: "approved",
+};
 
 export interface Actor {
   readonly userId: string;
@@ -71,10 +81,16 @@ async function isActiveMaintainer(tx: KobeTx, skillId: string, userId: string) {
   return r.rows.length > 0;
 }
 
-/** A maintainer or Site admin may deprecate; only Site admins withdraw, revoke and unrevoke. */
+/**
+ * A maintainer or Site admin may deprecate and undo it; only Site admins withdraw, revoke and
+ * unrevoke.
+ */
 async function mayAct(tx: KobeTx, act: VersionAct, skillId: string, who: Actor) {
   if (siteRoleAllows(who.siteRole, "site.skills.catalog.manage")) return true;
-  return act === "deprecate" && (await isActiveMaintainer(tx, skillId, who.userId));
+  return (
+    (act === "deprecate" || act === "undeprecate") &&
+    (await isActiveMaintainer(tx, skillId, who.userId))
+  );
 }
 
 async function versionsBefore(tx: KobeTx, skillId: string): Promise<CatalogVersion[]> {
@@ -136,7 +152,7 @@ export function retireVersion(
       .filter((x) => x.id !== v.id && x.runtimeHash === v.runtime_hash)
       .map((x) => x.id);
     let revokedAt: string | null = null;
-    let to: string = EVENT[act];
+    let to: string = TO[act];
     let checklist: Record<string, unknown> = { from: v.state };
     const target = { registryVersionId: v.id, skillId, name: v.name, semver: input.semver };
     if (act === "revoke") {
@@ -193,6 +209,11 @@ export function retireVersion(
           unblocked: checklist.unblocked === true,
           ...(checklist.blockReplaced === true ? { blockReplaced: true } : {}),
         },
+      });
+    else if (act === "undeprecate")
+      await recordAudit(tx, {
+        action: "registry.undeprecated",
+        target: { ...target, to: "approved" as const },
       });
     else
       await recordAudit(tx, {
@@ -310,5 +331,53 @@ export async function publishedForActors(
          AND state::text IN ('approved', 'deprecated', 'withdrawn', 'revoked')
        ORDER BY seq DESC`);
     return { status, mayRetire: admin, versions: v.rows };
+  });
+}
+
+/**
+ * Undoes a skill's deprecation (KOBE-340): back to the status it left (the deprecation's audit
+ * row, `from`; active when unknown), the replacement cleared. Maintainers and Site admins; no
+ * notice (an undo isn't news, and a notice would let a deprecate–undo loop flood installers).
+ */
+export function undeprecateSkill(
+  db: KobeDb,
+  input: { readonly skillId: string; readonly actor: Actor },
+): Promise<RetireResult> {
+  const { skillId, actor } = input;
+  return db.transaction(async (tx): Promise<RetireResult> => {
+    const found = await tx.execute<{ name: string; status: string }>(sql`
+      SELECT name, status::text AS status FROM registry_skills WHERE id = ${skillId} FOR UPDATE`);
+    const s = found.rows[0];
+    if (!s) return { ok: false, code: "not_found" };
+    if (!(await mayAct(tx, "undeprecate", skillId, actor))) return { ok: false, code: "forbidden" };
+    if (s.status !== "deprecated") return { ok: false, code: "wrong_state" };
+    const last = await tx.execute<{ from: string | null }>(sql`
+      SELECT target ->> 'from' AS from FROM audit_log
+       WHERE action = 'skill.catalog.deprecated' AND target ->> 'skillId' = ${skillId}
+       ORDER BY seq DESC LIMIT 1`);
+    const to = last.rows[0]?.from === "unmaintained" ? "unmaintained" : "active";
+    const before = await versionsBefore(tx, skillId);
+    await tx.execute(sql`
+      UPDATE registry_skills SET status = ${to}::registry_skill_status, replacement_id = NULL,
+        updated_at = now()
+       WHERE id = ${skillId}`);
+    await recordAudit(tx, {
+      action: "skill.catalog.undeprecated",
+      target: { skillId, name: s.name, to },
+    });
+    return {
+      ok: true,
+      retired: {
+        skillId,
+        name: s.name,
+        semver: null,
+        versionId: null,
+        act: "undeprecate",
+        state: to,
+        before,
+        siblingIds: [],
+        revokedAt: null,
+      },
+    };
   });
 }

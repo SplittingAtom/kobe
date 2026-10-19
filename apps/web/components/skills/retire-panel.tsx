@@ -5,6 +5,7 @@ import {
   actsFor,
   deprecateSkill,
   listRetirable,
+  undeprecateSkill,
   retireVersion,
   type RetireAct,
   type Retired,
@@ -31,17 +32,20 @@ import { useMutation, useResource } from "../admin/use-resource";
 
 const LABEL: Readonly<Record<RetireAct, string>> = {
   deprecate: "Deprecate",
+  undeprecate: "Undo deprecation",
   withdraw: "Withdraw",
   revoke: "Revoke",
   unrevoke: "Unrevoke",
 };
 const DONE: Readonly<Record<RetireAct, string>> = {
   deprecate: "deprecated",
+  undeprecate: "approved again",
   withdraw: "withdrawn",
   revoke: "revoked",
   unrevoke: "available again",
 };
 const EFFECT: Readonly<Record<RetireAct, string>> = {
+  undeprecate: "It installs again without a warning; its banners go. Nobody is notified.",
   deprecate: "New installs need a Team admin's override; existing installs keep it with a banner.",
   withdraw:
     "No new installs or pins. Tracking installs move to the next version in their range; pinned installs keep it until a Team admin chooses a version.",
@@ -158,6 +162,24 @@ export function RetirePanel({
                 ))}
               </TableBody>
             </Table>
+            {data.status === "deprecated" && (
+              <p>
+                <Button
+                  disabled={mutation.pending}
+                  aria-label={`Undo the deprecation of ${name}`}
+                  onClick={() =>
+                    void mutation
+                      .run(
+                        () => undeprecateSkill(skillId),
+                        (r) => `${name} is ${r.state} again.`,
+                      )
+                      .then((done) => done && reload())
+                  }
+                >
+                  Undo the skill's deprecation
+                </Button>
+              </p>
+            )}
             {data.status !== "deprecated" && data.status !== "archived" && (
               <FormRow>
                 <Field label="Replacement">

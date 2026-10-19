@@ -509,3 +509,46 @@ describe("the Default sync and retired skills (review M2)", () => {
     expect(rows.rows).toEqual([{ skill_id: otherId }]);
   });
 });
+
+describe("Undo a deprecation", () => {
+  it("maintainers and Site admins undo a version's or a skill's deprecation, audited, untold", async () => {
+    const t1Before = (await notices(teams.t1, ids.a1)).length;
+    expect((await act("reviewer", "1.1.0", "undeprecate")).status).toBe(403);
+    expect((await act("outsider", "1.1.0", "undeprecate")).status).toBe(403);
+    const u = await act("maintainer", "1.1.0", "undeprecate");
+    expect([u.status, u.json.state]).toEqual([200, "approved"]);
+    // Not a deprecated version: refused.
+    expect((await act("maintainer", "1.1.0", "undeprecate")).status).toBe(409);
+    expect((await act("admin", "1.2.0", "undeprecate")).status).toBe(409);
+    expect(await audits("registry.undeprecated")).toEqual([
+      expect.objectContaining({ semver: "1.1.0", to: "approved" }),
+    ]);
+    expect(await notices(teams.t1, ids.a1)).toHaveLength(t1Before);
+
+    // The whole skill (deprecated above, with a replacement) returns to active, cleared.
+    const path = `/v1/site/skills/catalog/${skillId}/undeprecate`;
+    expect((await (as.reviewer as TestBrowser).post(path, {})).status).toBe(403);
+    const s = await (as.maintainer as TestBrowser).post(path, {});
+    expect([s.status, s.json.state]).toEqual([200, "active"]);
+    const row = await h.admin.query(
+      `SELECT status::text AS status, replacement_id FROM registry_skills WHERE id = $1`,
+      [skillId],
+    );
+    expect(row.rows).toEqual([{ status: "active", replacement_id: null }]);
+    expect((await (as.maintainer as TestBrowser).post(path, {})).status).toBe(409);
+
+    // A skill deprecated while Unmaintained returns to Unmaintained.
+    await h.admin.query(`UPDATE registry_skills SET status = 'unmaintained' WHERE id = $1`, [
+      otherId,
+    ]);
+    const other = `/v1/site/skills/catalog/${otherId}`;
+    expect((await (as.admin as TestBrowser).post(`${other}/deprecate`, {})).status).toBe(200);
+    const back = await (as.admin as TestBrowser).post(`${other}/undeprecate`, {});
+    expect([back.status, back.json.state]).toEqual([200, "unmaintained"]);
+    expect((await audits("skill.catalog.undeprecated")).at(-1)).toMatchObject({
+      skillId: otherId,
+      to: "unmaintained",
+    });
+    await h.admin.query(`UPDATE registry_skills SET status = 'active' WHERE id = $1`, [otherId]);
+  });
+});
