@@ -337,6 +337,39 @@ describe("eval sandboxes on the wire (KOBE-325)", () => {
     await inTeam(t, `UPDATE threads SET title = 'renamed' WHERE id = '${ev}'`);
   });
 
+  it("keeps an eval thread on its eval run (only cleared) and an eval lease on its sandbox", async () => {
+    const t = await team();
+    const u = await user("Author");
+    const id = await evalRun(t, u);
+    const other = await evalRun(t, u);
+    const ev = await thread(t, u, true, id);
+    expect(
+      await pgCode(
+        inTeam(t, `UPDATE threads SET skill_eval_run_id = '${other}' WHERE id = '${ev}'`),
+      ),
+    ).toBe("55000");
+    await inTeam(t, `UPDATE threads SET skill_eval_run_id = NULL WHERE id = '${ev}'`);
+    expect(
+      await pgCode(inTeam(t, `UPDATE threads SET skill_eval_run_id = '${id}' WHERE id = '${ev}'`)),
+    ).toBe("55000");
+    const normal = await thread(t, u, false);
+    await lease(t, u, ev, `e-${ev}`);
+    await lease(t, u, normal, "");
+    expect(
+      await pgCode(
+        inTeam(
+          t,
+          `UPDATE sandbox_run_leases SET sandbox_id = '${randomUUID()}' WHERE thread_id = '${ev}'`,
+        ),
+      ),
+    ).toBe("55000");
+    // A member's lease may still move to a re-created claim.
+    await inTeam(
+      t,
+      `UPDATE sandbox_run_leases SET sandbox_id = '${randomUUID()}' WHERE thread_id = '${normal}'`,
+    );
+  });
+
   it("ties a result's thread to an eval thread of its own eval run", async () => {
     const t = await team();
     const u = await user("Author");
