@@ -319,6 +319,33 @@ describe("a personal promotion (ac-1)", () => {
       submitter: { userId: ids.member },
     });
   });
+
+  it("queues the external scan with the submission when the Site has it on (KOBE-341 review M1)", async () => {
+    await h.admin.query(
+      `UPDATE site_skill_settings SET scanner = '{"external": true}' WHERE id = 1`,
+    );
+    try {
+      const made = await upload(as.member, "personal", pkg("scanned-notes", "0.1.0"));
+      await evaluated("personal", made.skill.id, 1, ids.member);
+      const res = await as.member.post("/v1/skills/promotions", {
+        scope: "personal",
+        skillId: made.skill.id,
+        version: 1,
+      });
+      expect(res.status, JSON.stringify(res.json)).toBe(201);
+      // Queued in the submission; this test server has no scan runner, so it says so at once.
+      const [row] = (
+        await h.admin.query<{ scan: { external?: Record<string, unknown> }; verdict: string }>(
+          `SELECT scan, verdict::text AS verdict FROM registry_versions WHERE id = $1`,
+          [res.json.registryVersionId],
+        )
+      ).rows;
+      expect(row?.scan.external).toMatchObject({ status: "unavailable", reason: "no_runner" });
+      expect(row?.verdict).not.toBe("pass");
+    } finally {
+      await h.admin.query(`UPDATE site_skill_settings SET scanner = '{}' WHERE id = 1`);
+    }
+  });
 });
 
 describe("teams are walls (ac-4)", () => {
