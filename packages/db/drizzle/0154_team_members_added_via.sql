@@ -1,0 +1,2 @@
+ALTER TABLE "team_members" ADD COLUMN "added_via" text;--> statement-breakpoint
+ALTER TABLE "team_members" ADD CONSTRAINT "team_members_added_via" CHECK ("team_members"."added_via" IS NULL OR "team_members"."added_via" = 'skill_reviewer_grant');

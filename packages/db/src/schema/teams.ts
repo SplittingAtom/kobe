@@ -29,6 +29,8 @@ export const teams = pgTable(
   },
   (t) => [
     check("teams_slug_format", sql`${t.slug} ~ '^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$'`),
-    uniqueIndex("teams_registry_uq").on(t.registry).where(sql`${t.registry}`),
+    uniqueIndex("teams_registry_uq")
+      .on(t.registry)
+      .where(sql`${t.registry}`),
   ],
 );
