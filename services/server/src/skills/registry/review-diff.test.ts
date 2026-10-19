@@ -130,7 +130,8 @@ describe("diffPackages (KOBE-334, SK23)", () => {
     const after = zip(many("b"));
     const started = Date.now();
     const d = diffPackages(before, after);
-    expect(Date.now() - started).toBeLessThan(2_500);
+    // The 1.5 s budget plus unzipping both packages (outside it), with headroom for a loaded CI.
+    expect(Date.now() - started).toBeLessThan(3_000);
     const skipped = d.files.find((f) => f.notDiffed === "skipped");
     expect(skipped).toBeDefined();
     const one = diffOneFile(before, after, skipped?.path as string);

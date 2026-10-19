@@ -200,10 +200,14 @@ export function diffPackages(before: Uint8Array | null, after: Uint8Array): Pack
     const a = old.get(path);
     const b = next.get(path);
     if (status !== "unchanged" && (budget <= 0 || Date.now() >= deadline)) {
-      const quick = fileDiff(path, status, a, b, 0);
-      if (quick.binary || quick.notDiffed === "too_large") return quick;
+      // Past the budget: byte checks only, never a decode or a diff (review-335 L1).
+      const size = (b ?? a)?.length ?? 0;
+      const binary = !!a?.includes(0) || !!b?.includes(0);
+      if (binary) return { path, status, size, binary, hunks: [] };
+      if (tooLarge(a) || tooLarge(b))
+        return { path, status, size, binary, notDiffed: "too_large", hunks: [] };
       truncated = true;
-      return { path, status, size: quick.size, binary: false, notDiffed: "skipped", hunks: [] };
+      return { path, status, size, binary: false, notDiffed: "skipped", hunks: [] };
     }
     const d = fileDiff(path, status, a, b, Math.min(FILE_TIMEOUT_MS, deadline - Date.now()));
     budget -= d.hunks.reduce((n, h) => n + h.lines.length, 0);
