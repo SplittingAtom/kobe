@@ -16,20 +16,20 @@
   a provider-backed sweep), **not** in `startup/jobs.ts`. On a fresh site they write nothing (no
   eval runs), so `startup-seeds.ts` needs nothing.
 - **Next, in order:**
-  1. **Wire slot plumbing.** `sandbox_connections` is keyed by a unique index (team, user, slot);
-     `registry.ts` already upserts on it, but only for slot `''`. Add `slot` to `SandboxTarget`
-     (default `''`) and to every query on `sandbox_connections`, `sandbox_commands` and
-     `sandbox_run_leases`: `sandbox-wire/{commands,delivery,registry,router,run-state,sweeper}.ts`,
+  1. **Wire slot plumbing.** `sandbox_connections` is untouched (the old release upserts on
+     its (team, user) key). Eval sandboxes register in `sandbox_eval_connections` (key team,
+     thread). Add `slot` to `SandboxTarget` (default `''`) and to every query on
+     `sandbox_commands` / `sandbox_run_leases`; eval routing reads `sandbox_eval_connections`.
+     Files: `sandbox-wire/{commands,delivery,registry,router,run-state,sweeper}.ts`,
      `runs/{dispatch,sweeper,orchestrator,compaction,run-prompt}.ts`, `approvals/decide.ts`,
      `mcp/{approvals,run-context}.ts`, `egress/blocked-relay.ts`, `skills/materialize.ts`,
      `threads/{followups,title-source}.ts`, `offboarding/destroy.ts`, `routes/workspace-move.ts`,
-     `cli/cold-start.ts`, `sandbox-lifecycle/store.ts`. A command takes its slot from its thread
-     in `enqueueCommand` (`'e-' || thread.id` when `threads.skill_eval`). The connection's slot
-     comes from the claim found at connect (`providerLiveness` / the bootstrap exchange in
-     `sandbox/provider.ts`): claim `u-<user>` → `''`, `e-<thread>` → that slot after checking
-     the eval row is live for that team and author. A wake for an `e-` slot never wakes the
-     member's sandbox. Tests: two sandboxes of one member at once; a command for an eval thread
-     never reaches the member's sandbox and the reverse.
+     `cli/cold-start.ts`, `sandbox-lifecycle/store.ts`. A command's slot comes from its thread;
+     the DB refuses any other (check + trigger, 0146). A connection is an eval one only when the
+     claim owning the pod is `e-<thread>` (looked up by UID; never a label, annotation or
+     `hello` field) and the eval row is live for that team and author. Leases and claim checks
+     key on the claim UID (`sandbox_id`), never (user, slot). A wake for an eval thread never
+     wakes or creates the member's sandbox. Tests: both directions of routing.
   2. **Provider.** Per team: SandboxTemplate + SandboxWarmPool `kobe-eval-sandbox` (replicas 0;
      a claim requires `warmPoolRef`, checked on the cluster, agent-sandbox v1.0.4), workspace as
      an `emptyDir`, `KOBE_WORKSPACE_SYNC_INTERVAL_MS=0`. Claim `e-<thread>` with
@@ -56,9 +56,10 @@
      silently) and their objects.
   9. Tests the 324 handoff asked for: protocol `EVAL_MODEL_ALIAS_PATTERN` equals `@kobe/db`
      `MODEL_ALIAS_PATTERN`; `SKILL_EVAL_RUN_STATES` / modes equal the protocol lists.
-- **Gotchas:** drizzle orders a primary-key swap before the `ADD COLUMN` it needs (so the
-  connection key is a unique index); `threads-plans.db.test.ts` counts break-glass policies (now
-  18); the CLI's `catalog.db.test.ts` lists blob-ref tables newer than its old schema.
+- **Gotchas:** never change a key the previous release's SQL infers (`ON CONFLICT`): rolling
+  upgrades and `helm rollback` run it on the new schema; `threads-plans.db.test.ts` counts
+  break-glass policies (18); the CLI's `catalog.db.test.ts` lists blob-ref tables newer than its
+  old schema.
 
 ## Design
 
@@ -71,8 +72,10 @@ sandbox, so attempts never share history or files.
 
 **Sandbox identity: slots.** Today every wire table is keyed by (team, user): one sandbox per member
 (D11). An eval sandbox runs as the author but must not replace the author's own connection, so the
-wire gets a **slot**: `''` for the member's sandbox, `e-<thread id>` for an eval thread's sandbox.
-`sandbox_connections` (PK team, user, slot), `sandbox_commands` and `sandbox_run_leases` carry it.
+wire gets a **slot**: `''` for the member's sandbox, `e-<thread id>` for an eval thread's sandbox,
+on `sandbox_commands` and `sandbox_run_leases`. Eval connections live in their own table
+`sandbox_eval_connections` (key team, thread; FK to the thread): `sandbox_connections` keeps its
+(team, user) key, which the previous release's connect upsert needs (rolling upgrade, rollback).
 The connection's slot comes from the claim the server finds at connect (claim `u-<user>` → `''`,
 claim `e-<thread>` → that slot, after checking the eval row is live, of that team and author). A
 command's slot comes from its **thread** (inside `enqueueCommand`, which already checks the thread
@@ -112,10 +115,13 @@ net) and emits `skill.eval.progress` / `skill.eval.completed` (ids, statuses, nu
 
 ## Progress
 
-- [x] Migration (generated, 0145): eval tables, `threads.skill_eval*`, wire `slot` columns.
-- [x] Migration (custom, 0146): RLS, break-glass read, silent legal hold, keys and checks;
-      probes, `skill-evals.db.test.ts`, `skill-evals-upgrade.db.test.ts`; the member's connection
-      upserts on the new key (slot `''`).
+- [x] Migration (generated, 0145): eval tables (`fixtures_key` too), `threads.skill_eval*`,
+      `sandbox_eval_connections`, `slot` on commands and leases. No wire key or index changes.
+- [x] Migration (custom, 0146): RLS, break-glass read, silent legal hold; slot check
+      (`'' or 'e-'||thread_id`, NOT VALID) and slot-matches-thread trigger; eval connections and
+      results tied to eval threads; `threads.skill_eval` fixed. Probes and DB tests, and the old
+      release's wire SQL in `skill-evals-upgrade.db.test.ts`.
+- [x] DB review (review-325a) B1, S1, S2, N1 fixed; N2 gone (no index rebuilds); N3 moot.
 - [ ] Wire slot plumbing (connect, routing, leases, sweeps) with tests.
 - [ ] Provider: eval template / pool / claim, reaper.
 - [ ] Sandbox agent: `eval.prepare`, `eval.snapshot`.
