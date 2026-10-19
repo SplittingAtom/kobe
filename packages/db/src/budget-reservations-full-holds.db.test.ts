@@ -100,21 +100,32 @@ async function fixture(): Promise<Fixture> {
  * a member with no hold of its own (d) was admitted. Returns that last verdict.
  */
 async function wave(f: Fixture, lines: unknown[], kind: UsageKind): Promise<string | undefined> {
-  const [a, b, c, d, e, g, h, i] = f.members as [string, ...string[]];
+  const [a, b, c, d, e, g, h, i] = f.members as [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
   const held: { who: string; call: string }[] = [];
-  for (const who of [a, a, b, b, c, c, d, e, g, h, i] as string[]) {
+  for (const who of [a, a, b, b, c, c, d, e, g, h, i]) {
     const call = randomUUID();
     expect(await reserve(f, who, call, lines)).toBe("ok");
     held.push({ who, call });
   }
-  expect(await reserve(f, i!, randomUUID(), lines)).toMatch(/^(full|own_share):0$/);
-  const landing = [...held.filter((x) => ![a, b, c].includes(x.who)), held[4]!];
+  expect(await reserve(f, i, randomUUID(), lines)).toMatch(/^(full|own_share):0$/);
+  const cFirst = held[4];
+  if (cFirst === undefined) throw new Error("fixture");
+  const landing = [...held.filter((x) => ![a, b, c].includes(x.who)), cFirst];
   expect(landing.map((x) => x.who)).toEqual([d, e, g, h, i, c]);
   for (const x of landing) {
     await recordModelUsage(app.db, [usage(f, x.who, kind)]);
     await settle(f, [x.call]);
   }
-  return reserve(f, d!, randomUUID(), lines);
+  return reserve(f, d, randomUUID(), lines);
 }
 
 beforeAll(() => {
