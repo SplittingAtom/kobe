@@ -40,6 +40,40 @@ export async function readCatalogSwitches(tx: KobeTx, teamId: string): Promise<C
   return row ?? { membersMayAdd: true, buildersMayInstall: true };
 }
 
+/** "Builders may promote without confirmation" (KOBE-333, SK19): off unless a Team admin turns it on. */
+export async function readBuildersMayPromote(tx: KobeTx, teamId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ on: teamSkillSettings.buildersMayPromote })
+    .from(teamSkillSettings)
+    .where(eq(teamSkillSettings.teamId, teamId));
+  return row?.on ?? false;
+}
+
+export function getBuildersMayPromote(db: KobeDb, teamId: string): Promise<boolean> {
+  return withTeam(db, teamId, (tx) => readBuildersMayPromote(tx, teamId));
+}
+
+async function writeBuildersMayPromote(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  on: boolean,
+): Promise<void> {
+  if ((await readBuildersMayPromote(tx, teamId)) === on) return;
+  await tx
+    .insert(teamSkillSettings)
+    .values({ teamId, buildersMayPromote: on, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: teamSkillSettings.teamId,
+      set: { buildersMayPromote: on, updatedBy: userId, updatedAt: new Date() },
+    });
+  await recordAudit(tx, {
+    action: "skill.catalog_switches.changed",
+    teamId,
+    target: { buildersMayPromote: on },
+  });
+}
+
 export async function readPersonalSkillsDisabled(tx: KobeTx, teamId: string): Promise<boolean> {
   const [row] = await tx
     .select({ disabled: teamSkillSettings.personalSkillsDisabled })
@@ -239,6 +273,7 @@ export interface TeamSkillSettingsChange {
   readonly personalSkillsDisabled?: boolean;
   readonly catalog?: Partial<CatalogSwitches>;
   readonly evalJudgeAlias?: string | null;
+  readonly buildersMayPromote?: boolean;
 }
 
 /**
@@ -261,6 +296,8 @@ export function setTeamSkillSettings(
       await writePersonalSkillsDisabled(tx, teamId, userId, change.personalSkillsDisabled);
     if (change.catalog && Object.keys(change.catalog).length > 0)
       await writeCatalogSwitches(tx, teamId, userId, change.catalog);
+    if (change.buildersMayPromote !== undefined)
+      await writeBuildersMayPromote(tx, teamId, userId, change.buildersMayPromote);
     return { ok: true } as const;
   });
 }

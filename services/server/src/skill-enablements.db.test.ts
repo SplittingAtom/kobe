@@ -244,6 +244,7 @@ describe("the team's catalog switches and Builder installs", () => {
       personalSkillsDisabled: false,
       membersMayAddCatalog: true,
       buildersMayInstallCatalog: false,
+      buildersMayPromote: false,
       evalJudgeAlias: null,
       evalCap: null,
     });

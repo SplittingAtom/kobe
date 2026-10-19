@@ -24,6 +24,7 @@ export const AUDIT_CATEGORIES = [
   "platform",
   "policy",
   "project",
+  "registry",
   "retention",
   "run",
   "sandbox",

@@ -1452,6 +1452,8 @@ export const AUDIT_EVENTS = {
   "skill.catalog_switches.changed": event("team", {
     membersMayAddCatalog: z.boolean().optional(),
     buildersMayInstallCatalog: z.boolean().optional(),
+    /** "Builders may promote without confirmation" (KOBE-333, SK19). */
+    buildersMayPromote: z.boolean().optional(),
   }),
   /**
    * A Team admin chose the team's eval judge (KOBE-326, SK17): one of its enabled models, or null
@@ -1473,6 +1475,42 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 
   // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
+  // ── promotion to the Site Registry (KOBE-333, SK19): ids, names and counts, never content ──
+  /** A Builder asked to promote a team version; it waits for a Team admin (team log). */
+  "skill.promotion.requested": event("team", {
+    requestId: id,
+    skillId: id,
+    version,
+    semver: z.string().max(32),
+  }),
+  /** A Team admin confirmed a Builder's request; Kobe submitted it (team log). */
+  "skill.promotion.confirmed": event("team", { requestId: id, registryVersionId: id }),
+  /** A Team admin declined a Builder's request (team log). */
+  "skill.promotion.declined": event("team", { requestId: id }),
+  /**
+   * A team or personal version left the team for the Site Registry (team log): what left is
+   * counted (payload files, eval fixtures) and whether it started from a conversation.
+   */
+  "skill.promoted": event("team", {
+    skillId: id,
+    scope: z.enum(["team", "personal"]),
+    version,
+    semver: z.string().max(32),
+    registryVersionId: id,
+    files: count,
+    fixtures: count,
+    fromConversation: z.boolean(),
+    requestId: id.optional(),
+  }),
+  /** A version was submitted to the Site Registry for review (site log). */
+  "registry.submitted": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    newSkill: z.boolean(),
+  }),
+
   // ── catalog maintainers (KOBE-332, SK24): ids only ──
   /** A maintainer (or a Site admin) added a maintainer to a catalog skill. */
   "skill.maintainer.added": event("site", { skillId: id, userId: id }),
