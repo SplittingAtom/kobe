@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { recordModelUsage, type ModelUsageRecord } from "@kobe/db";
 import { TEAM_EVAL_CAP_USD_MESSAGE } from "@kobe/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ServerCallClient } from "./models/gateway-client.js";
+import { ServerCallError, type ServerCallClient } from "./models/gateway-client.js";
 import { createSkillEvalJudge } from "./skills/evals/judge.js";
 import { must } from "./testing/event-stream-fixture.js";
 import { SkillEvalBench, type SkillEvalWorld } from "./testing/skill-eval-bench.js";
@@ -160,13 +160,22 @@ describe("skill eval budgets (KOBE-327)", () => {
   it("ac-1, ac-2: eval spend is its own kinds, and the estimate is within ±50 % on the reference suite", async () => {
     const w = await pricedWorld();
     const draft = await bench.draftWith(w.owner, "reference", REFERENCE_SUITE, {});
-    // No history yet: no numbers, said so.
+    // No history yet: the suite's own sizes at the catalog's prices.
     const none = await estimate(w, draft, "full");
     expect(none.status, JSON.stringify(none.json)).toBe(200);
     expect(none.json).toMatchObject({
-      estimate: { executions: 8, costUsd: null, minutes: null, basis: "none" },
+      estimate: { executions: 8, basis: "suite_size" },
       blocked: null,
     });
+    expect(none.json.estimate.costUsd).toBeGreaterThan(0);
+    // A member's estimate never draws on anyone else's usage (review-327 R1): their own history
+    // only, else the suite's sizes. Taken before and after the owner's evals: unchanged.
+    const member = await f.member(w.team);
+    const memberDraft = await bench.draftWith(member, "reference-copy", REFERENCE_SUITE, {});
+    const memberEstimate = () =>
+      f.on(0, member).get(`/v1/skills/drafts/${memberDraft}/evals/estimate?mode=full`);
+    const memberBefore = await memberEstimate();
+    expect(memberBefore.json.estimate).toMatchObject({ basis: "suite_size" });
 
     // The history: the reference suite once, with the first recording.
     const first = await startEval(w, draft, "full");
@@ -183,9 +192,11 @@ describe("skill eval budgets (KOBE-327)", () => {
     );
     expect((await evalRow(w, historyRun)).status).toBe("completed");
 
-    // ac-2: the estimate before Run, then the actual cost of the same suite.
+    // ac-2: the estimate before Run, then the actual cost of the same suite. The owner is a
+    // Team admin (who sees team usage): team-wide means.
     const before = await estimate(w, draft, "full");
     expect(before.json.estimate).toMatchObject({ executions: 8, basis: "team_history" });
+    expect((await memberEstimate()).json.estimate).toEqual(memberBefore.json.estimate);
     const estimated = Number(before.json.estimate.costUsd);
     expect(estimated).toBeGreaterThan(0);
     expect(before.json.estimate.minutes).toBeGreaterThanOrEqual(1);
@@ -329,6 +340,71 @@ describe("skill eval budgets (KOBE-327)", () => {
     expect(rows).toEqual([]);
     const read = await f.on(0, w.owner).get(`/v1/skill-evals/${evalRunId}`);
     expect(read.json).toMatchObject({ status: "budget_stopped", scorecard: null });
+  });
+
+  it("R3: other gateway errors stay errors: retried, recorded, and the eval completes", async () => {
+    const w = await pricedWorld();
+    const draft = await bench.draftWith(
+      w.owner,
+      "flaky",
+      ["cases:", "  - id: a", "    prompt: Case a", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const provider = bench.provider();
+    provider.fail = () => "kobe.model_error:model_unavailable: gave up after 6 attempts";
+    const started = await startEval(w, draft, "with_only");
+    const evalRunId = started.json.evalRunId as string;
+    await bench.drive(bench.runnerFor(provider, 1), w.team, evalRunId);
+    expect((await evalRow(w, evalRunId)).status).toBe("completed");
+    expect(provider.created).toHaveLength(2);
+    const read = await f.on(0, w.owner).get(`/v1/skill-evals/${evalRunId}`);
+    expect(read.json.scorecard.details[0].with).toMatchObject({ status: "error", attempts: 2 });
+  });
+
+  it("R3: a judge refused for a budget stops the eval; one that is merely unavailable fails the case", async () => {
+    const judged = [
+      "cases:",
+      "  - id: a",
+      "    prompt: Case a",
+      '    expect: {contains: Total, judge: "Names the total."}',
+      "",
+    ].join("\n");
+    const judgeThrowing = (code: string) =>
+      createSkillEvalJudge({
+        db: f.fx.db,
+        client: {
+          complete: async () => {
+            throw new ServerCallError(code, code === "budget_exhausted" ? 402 : 503);
+          },
+        },
+        log: bench.silent,
+        costWaitMs: 100,
+      });
+    const stopped = await pricedWorld();
+    const d1 = await bench.draftWith(stopped.owner, "judge-refused", judged, {});
+    const e1 = (await startEval(stopped, d1, "with_only")).json.evalRunId as string;
+    await bench.drive(
+      bench.runnerFor(bench.provider(), 1, { judge: judgeThrowing("budget_exhausted") }),
+      stopped.team,
+      e1,
+    );
+    expect((await evalRow(stopped, e1)).status).toBe("budget_stopped");
+
+    const flaky = await pricedWorld();
+    const d2 = await bench.draftWith(flaky.owner, "judge-down", judged, {});
+    const e2 = (await startEval(flaky, d2, "with_only")).json.evalRunId as string;
+    await bench.drive(
+      bench.runnerFor(bench.provider(), 1, { judge: judgeThrowing("budget_unavailable") }),
+      flaky.team,
+      e2,
+    );
+    expect((await evalRow(flaky, e2)).status).toBe("completed");
+    const read = await f.on(0, flaky.owner).get(`/v1/skill-evals/${e2}`);
+    const checks = read.json.scorecard.details[0].with.checks as {
+      check: string;
+      reason?: string;
+    }[];
+    expect(checks.find((c) => c.check === "judge")?.reason).toBe("judge_failed");
   });
 
   it("ac-4: a used-up budget refuses new evals and ends a running one budget_stopped", async () => {

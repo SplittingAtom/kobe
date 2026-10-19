@@ -27,6 +27,7 @@ import {
 import { parseSkillEvalSuite, type SkillEvalIssue } from "@kobe/protocol/skill-evals";
 import type { ScanResult } from "@kobe/skill-scanner";
 import { unzipSync } from "fflate";
+import { teamRoleAllows } from "../../authz/permissions.js";
 import { isModelEnabled } from "../../models/team-store.js";
 import type { BlobStore } from "../../retention/blobs.js";
 import { resolveRunModel } from "../../runs/models.js";
@@ -326,10 +327,12 @@ export async function estimateSkillEval(
     const estimate = await estimateSkillEvalIn(tx, {
       teamId: who.teamId,
       userId: who.userId,
+      teamWide: teamRoleAllows(who.role, "team.budgets.manage"),
       runModel: run.used,
       suite: prepared.suite,
       plan,
       concurrency: prepared.limits.maxConcurrentSandboxes,
+      fixtureBytes: (f) => prepared.pkg.files.get(`evals/${f}`)?.length ?? 0,
     });
     return { run, estimate, blocked: await evalBudgetBlockIn(tx, who.teamId, who.userId) };
   });
@@ -366,10 +369,12 @@ export async function startSkillEval(
     const estimate = await estimateSkillEvalIn(tx, {
       teamId: who.teamId,
       userId: who.userId,
+      teamWide: teamRoleAllows(who.role, "team.budgets.manage"),
       runModel: run.used,
       suite,
       plan,
       concurrency: limits.maxConcurrentSandboxes,
+      fixtureBytes: (f) => pkg.files.get(`evals/${f}`)?.length ?? 0,
     });
     return { run, judge: rubric ? await judgeModelFor(tx, who.teamId, run) : null, estimate };
   });
