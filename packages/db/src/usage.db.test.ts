@@ -255,6 +255,38 @@ describe("recordModelUsage", () => {
     });
   });
 
+  it("takes the skill eval kinds (KOBE-326): eval_judge as a server call, eval as a sandbox call", async () => {
+    const runId = randomUUID();
+    const judge = randomUUID();
+    const sb = randomUUID();
+    await recordModelUsage(app.db, [
+      record({ id: judge, sandboxId: undefined, runId, kind: "eval_judge" }),
+      record({ sandboxId: sb, runId, kind: "eval" }),
+    ]);
+    const rows = await withTeam(app.db, teamA, (tx) =>
+      tx
+        .select({ kind: runUsage.kind, sandboxId: runUsage.sandboxId })
+        .from(runUsage)
+        .where(and(eq(runUsage.teamId, teamA), eq(runUsage.runId, runId))),
+    );
+    expect(rows.map((r) => [r.kind, r.sandboxId]).sort()).toEqual([
+      ["eval", sb],
+      ["eval_judge", null],
+    ]);
+    const shape = async (over: Partial<ModelUsageRecord>) =>
+      (
+        (await recordModelUsage(app.db, [record(over)]).catch((e: unknown) => e)) as {
+          cause?: { constraint?: string };
+        }
+      ).cause?.constraint;
+    expect(await shape({ kind: "eval_judge", runId })).toBe("run_usage_kind_shape");
+    expect(await shape({ kind: "eval_judge", sandboxId: undefined })).toBe("run_usage_kind_shape");
+    expect(await shape({ kind: "eval", sandboxId: undefined, runId })).toBe("run_usage_kind_shape");
+    expect(await shape({ kind: "judge" as "eval", sandboxId: undefined, runId })).toBe(
+      "run_usage_kind",
+    );
+  });
+
   it("adds the kind CHECKs NOT VALID: no scan of the ledger under the migration's lock (0099)", async () => {
     const res = await app.db.execute<{ conname: string; convalidated: boolean }>(sql`
       SELECT conname, convalidated FROM pg_constraint
