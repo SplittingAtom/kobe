@@ -17,6 +17,14 @@ export const ANNOTATION_TEAM_ID = LABEL_TEAM_ID;
 export const ANNOTATION_USER_ID = LABEL_USER_ID;
 /** On the pods (and Job, ConfigMap) of an Orbit eval (KOBE-93); the value is the eval id. */
 export const LABEL_ORBIT_EVAL = `${DOMAIN}/orbit-eval`;
+/**
+ * Skill eval sandboxes (KOBE-325): label `true` on their claims and pods (the reaper lists them by
+ * it); the eval thread on the claim and pod (label for listing, annotation for identity).
+ */
+export const LABEL_SKILL_EVAL = `${DOMAIN}/skill-eval`;
+export const LABEL_EVAL_THREAD = `${DOMAIN}/eval-thread-id`;
+export const ANNOTATION_EVAL_THREAD = LABEL_EVAL_THREAD;
+export const ANNOTATION_EVAL_RUN = `${DOMAIN}/eval-run-id`;
 export const LABEL_MANAGED_BY = "app.kubernetes.io/managed-by";
 export const MANAGED_BY = "kobe-server";
 
@@ -31,6 +39,18 @@ export const NETWORK_POLICY = "kobe-sandbox-isolation";
 /** Egress policy for eval pods only (the namespace-wide policy leaves them out). */
 export const EVAL_NETWORK_POLICY = "kobe-orbit-eval-isolation";
 export const RESOURCE_QUOTA = "kobe-team-quota";
+/** Skill eval sandboxes (KOBE-325): their own template and (empty) warm pool per team. */
+export const EVAL_SANDBOX_TEMPLATE = "kobe-skill-eval";
+export const EVAL_SANDBOX_WARM_POOL = "kobe-skill-eval";
+/**
+ * Their own quota (scoped to their PriorityClass) inside the team's: the team quota is the
+ * members' quota plus this one, so evals never use what members' sandboxes need.
+ */
+export const EVAL_RESOURCE_QUOTA = "kobe-skill-eval-quota";
+/** The members' share: every pod but an eval's stays within `teamQuota`. */
+export const MEMBER_RESOURCE_QUOTA = "kobe-team-member-quota";
+/** Low priority that never preempts: under node pressure a member's sandbox wins (chart object). */
+export const EVAL_PRIORITY_CLASS = "kobe-skill-eval";
 export const LIMIT_RANGE = "kobe-sandbox-defaults";
 export const SERVER_ROLE_BINDING = "kobe-server";
 export const SANDBOX_CONTAINER = "agent";

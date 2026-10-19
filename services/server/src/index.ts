@@ -30,6 +30,14 @@ import { schedulerAuthStandIn } from "./scheduler/process-deps.js";
 import { onScheduledRunEnded } from "./scheduler/run-hook.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
+import { skillEvalFixtureRoutes } from "./skills/evals/fixture-routes.js";
+import { SkillEvalHub } from "./skills/evals/events.js";
+import {
+  reapSkillEvals,
+  SKILL_EVAL_REAPER_LOCK,
+  SKILL_EVAL_REAPER_MS,
+} from "./skills/evals/reaper.js";
+import { SkillEvalRunner } from "./skills/evals/runner.js";
 import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-token.js";
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
@@ -52,6 +60,8 @@ import {
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const EVAL_SWEEP_MS = 60_000;
+/** Skill eval runner sweep (KOBE-325): claims queued executions within each team's cap. */
+const SKILL_EVAL_SWEEP_MS = 5_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
@@ -289,8 +299,9 @@ if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
 }
 /** Workspace sync's caller checks; revocations (deactivation, removal) clear its cache. */
-function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
+function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>, allowEval = false) {
   const authenticate = createSandboxAuthenticator({
+    allowEval,
     db: d.database.db,
     verify: sandboxWireVerifier(s.sessionKeys),
     // Short positive cache: a destroyed or replaced sandbox loses access within 5 s.
@@ -301,6 +312,9 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
 }
 // One caller check for every sandbox-listener HTTP endpoint (workspace sync, skill bundles).
 const sandboxAuth = sandbox && deps ? workspaceAuth(deps, sandbox) : undefined;
+// Skill bundles and eval fixtures also serve a skill eval's own sandbox (KOBE-325); workspace
+// sync never does.
+const evalCapableAuth = sandbox && deps ? workspaceAuth(deps, sandbox, true) : undefined;
 const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
 
 // Pre-publish Orbit evals (KOBE-93): Jobs in team namespaces, through the sandbox provider.
@@ -317,6 +331,58 @@ const evalRunner =
       })
     : undefined;
 
+// Skill evals (KOBE-325): every server replica runs eval executions in ephemeral sandboxes (the
+// per-team cap is atomic across replicas), streams progress, and one replica at a time reaps what
+// a dead replica left. Needs the sandbox provider and object storage.
+const skillEvalHub = isServer && deps ? new SkillEvalHub(config.databaseUrl, logger) : undefined;
+skillEvalHub?.start();
+const skillEvalRunner =
+  isServer && sandbox && deps?.blobs
+    ? new SkillEvalRunner({
+        db: deps.database.db,
+        blobs: deps.blobs,
+        router: deps.sandboxWire.router,
+        runs: deps.runs,
+        provider: sandbox.provider,
+        maxConcurrentPerTeam: sandbox.settings.skillEval.maxConcurrentPerTeam,
+        log: logger,
+        // KOBE-326: without server calls a `judge` check fails `judge_failed`.
+        ...(deps.skillEvalJudge ? { judge: deps.skillEvalJudge } : {}),
+      })
+    : undefined;
+const kickSkillEvals = () =>
+  void skillEvalRunner
+    ?.sweep()
+    .catch((err: unknown) => logger.warn({ err }, "skill eval sweep failed"));
+const skillEvalSweep = skillEvalRunner
+  ? setInterval(kickSkillEvals, SKILL_EVAL_SWEEP_MS)
+  : undefined;
+skillEvalSweep?.unref();
+const skillEvalReaperLock =
+  skillEvalRunner && deps && sandbox
+    ? createPgReconcileLock(
+        deps.database.pool,
+        (err) => logger.warn({ err }, "skill eval reaper lock connection problem"),
+        SKILL_EVAL_REAPER_LOCK,
+      )
+    : undefined;
+const skillEvalReaper =
+  skillEvalReaperLock && deps && sandbox
+    ? setInterval(() => {
+        skillEvalReaperLock
+          .runExclusive(() =>
+            reapSkillEvals({
+              db: deps.database.db,
+              provider: sandbox.provider,
+              runs: deps.runs,
+              log: logger,
+            }),
+          )
+          .catch((err: unknown) => logger.warn({ err }, "skill eval reaper failed"));
+      }, SKILL_EVAL_REAPER_MS)
+    : undefined;
+skillEvalReaper?.unref();
+
 // The scheduler serves health endpoints only: no user API (it has no auth), just its runner below.
 const server = serve(
   {
@@ -324,6 +390,10 @@ const server = serve(
       isolation,
       ...(evalRunner ? { evals: evalRunner } : {}),
       ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
+      skillEvals: {
+        ...(skillEvalHub ? { hub: skillEvalHub } : {}),
+        ...(skillEvalRunner ? { kick: kickSkillEvals } : {}),
+      },
     }).fetch,
     port: config.port,
   },
@@ -344,12 +414,18 @@ const sandboxServer =
               ? { workspace: workspaceSync.routes(sandboxAuth) }
               : {}),
             // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
-            ...(deps?.blobs && sandboxAuth
+            ...(deps?.blobs && evalCapableAuth
               ? {
                   skills: skillSandboxRoutes({
                     db: deps.database.db,
                     blobs: deps.blobs,
-                    authenticate: sandboxAuth,
+                    authenticate: evalCapableAuth,
+                    log: logger,
+                  }),
+                  evalFixtures: skillEvalFixtureRoutes({
+                    db: deps.database.db,
+                    blobs: deps.blobs,
+                    authenticate: evalCapableAuth,
                     log: logger,
                   }),
                 }
@@ -509,6 +585,12 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   stopTeamReconciler?.();
   if (evalSweep) clearInterval(evalSweep);
+  if (skillEvalSweep) clearInterval(skillEvalSweep);
+  if (skillEvalReaper) clearInterval(skillEvalReaper);
+  // Running eval executions go back to queued (another replica takes them), their runs stopped
+  // and sandboxes deleted, before the database pool closes (review M2).
+  const evalsStopped = skillEvalRunner?.shutdown(DRAIN_TIMEOUT_MS - 2_000) ?? Promise.resolve();
+  void skillEvalHub?.close();
   stopHibernation?.();
   stopCollector?.();
   sandboxServer?.close();
@@ -517,9 +599,10 @@ function shutdown(signal: string): void {
   void deps?.eventStream.hub.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
-    void Promise.all([deps?.close(), telemetry.shutdown()]).finally(() =>
-      process.exit(err ? 1 : 0),
-    );
+    void evalsStopped
+      .catch(() => undefined)
+      .then(() => Promise.all([deps?.close(), telemetry.shutdown()]))
+      .finally(() => process.exit(err ? 1 : 0));
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();
   setTimeout(() => {

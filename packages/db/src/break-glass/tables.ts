@@ -19,6 +19,14 @@ export const BREAK_GLASS_READABLE_TABLES = [
   "answer_feedback_history",
   "agent_eval_cases",
   "agent_eval_case_history",
+  // Workbench drafts and a hold's copies of them (KOBE-320): team grants, user grants by author or writer.
+  "skill_drafts",
+  "skill_draft_files",
+  "skill_draft_history",
+  "skill_draft_file_history",
+  // Skill eval runs and their executions (KOBE-325): team grants, user grants by the starter.
+  "skill_eval_runs",
+  "skill_eval_results",
 ] as const satisfies readonly TeamTable[];
 
 export type BreakGlassReadableTable = (typeof BREAK_GLASS_READABLE_TABLES)[number];

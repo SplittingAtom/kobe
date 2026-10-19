@@ -1,0 +1,16 @@
+{{- /*
+Skill eval sandboxes (KOBE-325): their pods carry this PriorityClass, which the per-team quota
+kobe-skill-eval-quota counts (the server creates it in each team namespace). Below the default
+priority and never preempting: under node pressure a member's own sandbox wins over an eval, and
+an eval never evicts anything. The name is the server's EVAL_PRIORITY_CLASS.
+*/ -}}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: kobe-skill-eval
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+value: -100
+preemptionPolicy: Never
+globalDefault: false
+description: "Kobe skill eval sandboxes: low priority, never preempt (KOBE-325)."

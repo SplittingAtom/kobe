@@ -6,6 +6,7 @@ import {
   RUN_TOKEN_HEADER,
   SERVER_CALL_AUDIENCE,
   SERVER_CALL_LIMITS,
+  SERVER_CALL_RESPONSE_FORMATS,
   SERVER_CALL_TOKEN_HEADER,
   type ServerCallClaims,
 } from "@kobe/protocol";
@@ -285,6 +286,97 @@ describe("server calls: accepted (KOBE-234)", () => {
     const r = await post("/v1/chat/completions", asServer(serverToken({ purpose: "followups" })));
     expect([r.status, r.code]).toEqual([402, "budget_soft_limit"]);
     expect(hits).toEqual([]);
+  });
+});
+
+describe("server calls: the eval judge (KOBE-326 ac-2)", () => {
+  const judgeToken = (over: Partial<ServerCallClaims> = {}) =>
+    serverToken({ purpose: "eval_judge", max_output_tokens: 512, ...over });
+  const judgeBody = (content: string, extra: object = {}) => ({
+    model: MODEL,
+    messages: [
+      { role: "system", content: "You grade one run of an AI agent against a rubric." },
+      { role: "user", content },
+    ],
+    max_tokens: 512,
+    temperature: 0,
+    ...extra,
+  });
+
+  it("forwards a judge call, larger than an epilogue's, and records it as eval_judge under the token's identity", async () => {
+    const data = "x".repeat(100_000);
+    const body = judgeBody(data, { response_format: SERVER_CALL_RESPONSE_FORMATS.eval_judge });
+    const r = await post("/v1/chat/completions", asServer(judgeToken()), body);
+    expect(r.status).toBe(200);
+    expect(JSON.parse(hits[0]?.body ?? "{}")).toEqual(body);
+    expect(hits[0]?.headers["x-bf-vk"]).toBe(vk);
+    expect(loadedSandboxes).toEqual([undefined]);
+    expect(runChecks).toEqual([{ teamId: team, runId: run, threadId: thread, userId: user }]);
+    await expect.poll(() => records.length).toBe(1);
+    // The ledger row: the token's member, run and purpose; no sandbox (gateway identity).
+    expect(records[0]).toMatchObject({
+      purpose: "eval_judge",
+      teamId: team,
+      userId: user,
+      sandboxId: undefined,
+      runId: run,
+      model: MODEL,
+      status: 200,
+    });
+  });
+
+  it("takes only the judge's own response format, and no epilogue call takes one", async () => {
+    const format = SERVER_CALL_RESPONSE_FORMATS.eval_judge;
+    const title = await post("/v1/chat/completions", asServer(), {
+      ...BODY,
+      response_format: format,
+    });
+    expect([title.status, title.code]).toEqual([400, "server_call_body_refused"]);
+    const other = await post(
+      "/v1/chat/completions",
+      asServer(judgeToken()),
+      judgeBody("data", {
+        response_format: {
+          ...format,
+          json_schema: { ...format.json_schema, schema: { type: "object" } },
+        },
+      }),
+    );
+    expect([other.status, other.code]).toEqual([400, "server_call_body_refused"]);
+    expect(hits).toEqual([]);
+  });
+
+  it("pins the judge's temperature to 0 (review L4)", async () => {
+    for (const temperature of [0.2, 1, undefined]) {
+      const r = await post(
+        "/v1/chat/completions",
+        asServer(judgeToken()),
+        judgeBody("data", { temperature }),
+      );
+      expect([r.status, r.code], String(temperature)).toEqual([400, "server_call_body_refused"]);
+    }
+    expect(hits).toEqual([]);
+    expect(
+      (await post("/v1/chat/completions", asServer(judgeToken()), judgeBody("d"))).status,
+    ).toBe(200);
+  });
+
+  it("keeps the epilogue's message cap for titles, and the judge's own above it", async () => {
+    const long = "x".repeat(SERVER_CALL_LIMITS.title.max_message_chars + 1);
+    const title = await post("/v1/chat/completions", asServer(), {
+      ...BODY,
+      messages: [{ role: "user", content: long }],
+    });
+    expect([title.status, title.code]).toEqual([400, "server_call_body_refused"]);
+    const judge = await post("/v1/chat/completions", asServer(judgeToken()), judgeBody(long));
+    expect(judge.status).toBe(200);
+    expect(() => judgeToken({ max_output_tokens: 513 })).not.toThrow();
+    const over = await post(
+      "/v1/chat/completions",
+      asServer(judgeToken({ max_output_tokens: 513 })),
+      judgeBody("data", { max_tokens: 513 }),
+    );
+    expect([over.status, over.code]).toEqual([400, "server_call_body_refused"]);
   });
 });
 

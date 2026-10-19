@@ -1,5 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { SKILL_BUNDLE_PATH, WORKSPACE_SYNC_PATH } from "@kobe/protocol";
+import { SKILL_BUNDLE_PATH, SKILL_EVAL_FIXTURES_PATH, WORKSPACE_SYNC_PATH } from "@kobe/protocol";
 import { Hono, type Context } from "hono";
 import { honoTracing } from "@kobe/telemetry";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
@@ -35,6 +35,8 @@ export interface SandboxRoutesDeps {
   readonly workspace?: ReturnType<WorkspaceSync["routes"]>;
   /** Skill bundle downloads (KOBE-82); absent when object storage is not configured. */
   readonly skills?: Hono;
+  /** A skill eval case's fixtures for its own sandbox (KOBE-325). */
+  readonly evalFixtures?: Hono;
 }
 
 function peerAddress(c: Context): string {
@@ -63,6 +65,7 @@ export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
   });
   if (deps.workspace) app.route(WORKSPACE_SYNC_PATH, deps.workspace);
   if (deps.skills) app.route(SKILL_BUNDLE_PATH, deps.skills);
+  if (deps.evalFixtures) app.route(SKILL_EVAL_FIXTURES_PATH, deps.evalFixtures);
   app.route("/v1/sandbox", sandboxRoutes(deps));
   return app;
 }

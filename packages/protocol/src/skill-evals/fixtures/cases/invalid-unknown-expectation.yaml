@@ -1,0 +1,6 @@
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    expect:
+      triggers: true
+      judge_model: smart

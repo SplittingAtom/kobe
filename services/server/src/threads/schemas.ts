@@ -57,6 +57,11 @@ export const createThreadBodySchema = z.strictObject({
    * and the right to edit that agent), private to its creator, kept out of lists and search.
    */
   test: z.boolean().optional(),
+  /**
+   * A Workbench test chat (KOBE-323): a conversation with the Kobe agent (`agent_id` absent or
+   * that agent) whose runs load only this draft, one the caller can see. No project, not `test`.
+   */
+  skill_draft_id: uuidSchema.optional(),
 });
 export type CreateThreadBody = z.infer<typeof createThreadBodySchema>;
 
@@ -179,6 +184,9 @@ export const threadSummarySchema = z.object({
   pending_approval: z.literal(true).optional(),
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
+  /** A Workbench test chat (KOBE-323): its runs load only the draft; null once it is deleted. */
+  skill_test: z.literal(true).optional(),
+  skill_draft_id: wireUuidSchema.nullable().optional(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   model: z.string().nullable(),
   /** The conversation's thinking level (KOBE-260); null = the model's default. */

@@ -69,6 +69,8 @@ describe("thread row menu (KOBE-292)", () => {
       "Move to project",
       "Archive",
       "Share",
+      "Make a skill from this",
+      "Save skill to Workbench",
       "Delete",
     ]);
   });

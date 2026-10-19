@@ -15,6 +15,7 @@ import { useChatSession } from "./kobe-runtime";
 import { useThreadTeamModels, type TeamModelsLoad } from "./use-team-models";
 import { useOrganizeMenu } from "./use-organize-menu";
 import { useShareMenu } from "./use-share-menu";
+import { useSkillMenu } from "./use-skill-menu";
 
 const NO_ANSWER = "There is no answer to regenerate yet.";
 export const OPENING = "Opening the conversation…";
@@ -87,7 +88,8 @@ export interface ThreadMenuInput {
  * What a thread's menu does (KOBE-292), for the thread under the current `threadListItem`: Copy
  * (the branch on screen as Markdown), Regenerate and Regenerate with (its last answer, as the
  * answer's own buttons do, after opening the thread), Pin, Move to project and Archive (CE19,
- * KOBE-220), Share (CE20, KOBE-221) and Delete (to Trash, no confirm: it can be undone). The rail
+ * KOBE-220), Share (CE20, KOBE-221), the skill actions (KOBE-322) and Delete (to Trash, no
+ * confirm: it can be undone). The rail
  * row's ⋯ menu shows them; the open thread publishes the same bindings to the `/` menu (KOBE-224).
  */
 export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
@@ -106,6 +108,7 @@ export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
     notify,
   });
   const share = useShareMenu({ threadId: threadId ?? "", title, custom, readOnly, state, notify });
+  const skills = useSkillMenu({ threadId, title, open, notify });
   if (threadId === undefined) return {};
 
   /** Runs `act` on the thread's controller once read, held until `act` is done. */
@@ -184,6 +187,7 @@ export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
       : {}),
     ...organize,
     ...share,
+    ...skills,
     "trash-thread": { onSelect: trash, destructive: true, blocker: readOnly ? NOT_YOURS : null },
   };
 }

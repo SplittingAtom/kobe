@@ -84,6 +84,52 @@ describe("reconcileTeams (KOBE-115)", () => {
     expect(summary).toMatchObject({ namespaces: 2, converged: 1, failed: 1 });
   });
 
+  it("keeps converging when a scoped quota is refused, and counts the namespace failed (PR #316)", async () => {
+    const { kube, provider } = await setup();
+    for (const name of ["kobe-skill-eval-quota", "kobe-team-member-quota"])
+      kube.failNext(
+        "apply",
+        "ResourceQuota",
+        422,
+        2,
+        "unsupported scope applied to resource",
+        name,
+      );
+    const summary = await provider.reconcileTeams();
+    expect(summary).toMatchObject({ namespaces: 2, converged: 0, failed: 2 });
+    // The rest of each namespace still converged after the refused quotas.
+    const after = kube.calls.filter((c) => c.verb === "apply" && c.kind === "SandboxWarmPool");
+    expect(after.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("starts a member's sandbox even when both scoped quotas are refused (PR #316)", async () => {
+    const kube = createFakeKube();
+    seedCluster(kube);
+    const gate = gateFor(kube);
+    const provider = createSandboxProvider({ kube, isolation: gate, settings: SETTINGS });
+    for (const name of ["kobe-skill-eval-quota", "kobe-team-member-quota"])
+      kube.failNext(
+        "apply",
+        "ResourceQuota",
+        422,
+        1,
+        "unsupported scope applied to resource",
+        name,
+      );
+    const verified = await gate.require();
+    await expect(provider.ensureTeam(TEAM, verified)).resolves.toBe(NS);
+    expect(
+      must(
+        kube.peek({
+          apiVersion: "v1",
+          kind: "ResourceQuota",
+          name: "kobe-team-quota",
+          namespace: NS,
+        }),
+      ),
+    ).toBeDefined();
+  });
+
   it("skips namespaces being deleted", async () => {
     const { kube, provider } = await setup();
     const ns = must(kube.peek({ apiVersion: "v1", kind: "Namespace", name: NS }));

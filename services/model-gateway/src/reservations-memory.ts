@@ -29,6 +29,8 @@ export class MemoryReservations implements ReservationStore {
       site: "site",
       team: `team:${r.teamId}`,
       user: `user:${r.teamId}:${r.userId}`,
+      // The team eval cap (KOBE-327): only calls that carry an eval line hold against it.
+      eval: `eval:${r.teamId}`,
     };
     // No await from the checks to the reservation: concurrent calls cannot pass the same check.
     for (const [index, l] of r.lines.entries()) {
@@ -36,6 +38,7 @@ export class MemoryReservations implements ReservationStore {
       if (verdict !== "ok") return { ok: false, verdict, line: index };
     }
     const all = [keys.site, keys.team, keys.user];
+    if (r.lines.some((l) => l.scope === "eval")) all.push(keys.eval);
     for (const k of all) this.add(k, member, r.cost, 1);
     this.held.set(r.callId, { keys: all, member, cost: r.cost });
     return { ok: true };

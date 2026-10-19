@@ -1,6 +1,6 @@
 apiVersion: kobe.dev/skill/v1
 name: skill-creator
-version: 1.0.0
+version: 1.1.0
 summary: "Write, validate and package a Kobe skill: SKILL.md, scripts and references, by Kobe's rules."
 license: Apache-2.0
-changelog: Published by Kobe from the built-in skill of the same name.
+changelog: Proposes an eval suite (evals/cases.yaml) with positive and at least one negative trigger case (KOBE-328).

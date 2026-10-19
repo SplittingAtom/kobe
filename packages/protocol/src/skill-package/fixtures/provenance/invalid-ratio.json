@@ -49,12 +49,40 @@
     "mode": "full",
     "cases": 5,
     "negativeTriggerCases": 1,
-    "passRateWith": 1.5,
-    "passRateWithout": 0.4,
-    "lift": 0.4,
+    "baselineCases": 4,
+    "passRateWith": 0.8,
+    "passRateWithout": 0.5,
+    "lift": 2,
     "triggerPrecision": 1,
     "triggerRecall": 0.75,
+    "triggerCounts": {
+      "observed": 5,
+      "tp": 3,
+      "fp": 0,
+      "fn": 1,
+      "tn": 1
+    },
+    "executions": {
+      "with": {
+        "executions": 5,
+        "passed": 4,
+        "failed": 1,
+        "errored": 0,
+        "timedOut": 0
+      },
+      "without": {
+        "executions": 4,
+        "passed": 2,
+        "failed": 2,
+        "errored": 0,
+        "timedOut": 0
+      }
+    },
     "costUsd": 1.25,
+    "judge": {
+      "source": "site"
+    },
+    "runModelFellBack": false,
     "at": "2026-10-17T09:00:00.000Z"
   },
   "createdAt": "2026-10-17T10:00:01.000Z"

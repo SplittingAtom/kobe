@@ -58,6 +58,7 @@ import {
   ThumbsUpIcon,
   Trash2Icon,
   UsersIcon,
+  WandSparklesIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -165,6 +166,17 @@ const LIST = [
     scope: "bar",
     href: "/me/agents",
     slash: "agents",
+    readOnlySafe: true,
+  },
+  // The Skills page (KOBE-321, SK9): Catalog, Team, Mine and the Workbench.
+  {
+    id: "skills",
+    group: "areas",
+    name: "Skills",
+    icon: WandSparklesIcon,
+    scope: "bar",
+    href: "/me/skills",
+    slash: "skills",
     readOnlySafe: true,
   },
   // On the rail's top line since KOBE-419 (team admins only); the palette still lists it.
@@ -333,6 +345,24 @@ const LIST = [
     scope: "thread-menu",
     slash: "share",
     arg: "with",
+  },
+  // Skills from a conversation (KOBE-322, SK10): a Workbench thread with skill-creator and this
+  // conversation attached read-only; then Save to Workbench brings /workspace/skills/<name>/ in.
+  {
+    id: "skill-from-thread",
+    name: "Make a skill from this",
+    icon: WandSparklesIcon,
+    scope: "thread-menu",
+    slash: "skill",
+    readOnlySafe: true,
+  },
+  {
+    id: "save-skill-to-workbench",
+    name: "Save skill to Workbench",
+    icon: FolderInputIcon,
+    scope: "thread-menu",
+    slash: "saveskill",
+    arg: "skill",
   },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },

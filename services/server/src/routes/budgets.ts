@@ -17,6 +17,8 @@ import {
   setTeamBudget,
   teamBudgetsView,
 } from "../budgets/store.js";
+import { TEAM_EVAL_CAP_USD_MESSAGE, teamEvalCapSchema } from "@kobe/protocol";
+import { setEvalCap } from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 
@@ -115,6 +117,23 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
       );
     }
     void deps.budgets.evaluate(teamId).catch(() => undefined);
+    return c.json(await teamBudgetsView(db, teamId));
+  });
+
+  // The team eval cap (KOBE-327, SK18): a spend limit, so the budget permission (coordinator
+  // decision: never the skills review permission). `{evalCap: {usd} | {tokens} | null}`.
+  app.put("/eval-cap", requireTeamPermission("team.budgets.manage"), async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as { evalCap?: unknown } | undefined;
+    const cap = teamEvalCapSchema.safeParse(body?.evalCap);
+    if (!body || !("evalCap" in body) || !cap.success)
+      return invalidRequest(
+        c,
+        typeof body?.evalCap === "object" && body.evalCap !== null && "usd" in body.evalCap
+          ? TEAM_EVAL_CAP_USD_MESSAGE
+          : "Send evalCap: {usd} (dollars, whole cents) or {tokens} per month, or null for none.",
+      );
+    const teamId = c.get("team").id;
+    await setEvalCap(db, teamId, c.get("user").id, cap.data);
     return c.json(await teamBudgetsView(db, teamId));
   });
 

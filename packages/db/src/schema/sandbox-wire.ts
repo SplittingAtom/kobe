@@ -21,6 +21,16 @@ import { threads } from "./threads.js";
 // is the record (these tables), LISTEN/NOTIFY only a hint that carries ids. Team tables: every key
 // and foreign key includes team_id (KOBE-29 convention).
 
+/**
+ * Which sandbox a command or lease is for (KOBE-325): `''` the member's own sandbox (D11, the
+ * connection in `sandbox_connections`), `e-<thread id>` the ephemeral sandbox of one skill-eval
+ * thread (its connection in `sandbox_eval_connections`). SQL-only (`*_skill_evals_rls.sql`): the
+ * check `slot = '' OR slot = 'e-' || thread_id` and a row trigger that requires `e-<thread>` exactly
+ * when the thread is an eval thread, so no row routes a normal thread's command into an eval
+ * sandbox or an eval thread's into the member's.
+ */
+const slot = () => text().notNull().default("");
+
 const teamRef = () =>
   uuid()
     .notNull()
@@ -69,6 +79,11 @@ export const SANDBOX_COMMAND_KINDS = [
   "run.stop",
   "pi.command",
   "thread.compact",
+  // A skill eval's own sandbox only (KOBE-325): fixtures in, workspace snapshot out; the matched
+  // outputs' bytes for the judge (KOBE-326).
+  "eval.prepare",
+  "eval.snapshot",
+  "eval.read",
 ] as const;
 export type SandboxCommandKind = (typeof SANDBOX_COMMAND_KINDS)[number];
 
@@ -84,6 +99,7 @@ export const sandboxCommands = pgTable(
     teamId: teamRef(),
     id: uuid().notNull().defaultRandom(),
     userId: uuid().notNull(),
+    slot: slot(),
     threadId: uuid().notNull(),
     runId: uuid(),
     kind: text().$type<SandboxCommandKind>().notNull(),
@@ -134,6 +150,7 @@ export const sandboxRunLeases = pgTable(
     teamId: teamRef(),
     runId: uuid().notNull(),
     userId: uuid().notNull(),
+    slot: slot(),
     threadId: uuid().notNull(),
     sandboxId: uuid().notNull(),
     leasedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

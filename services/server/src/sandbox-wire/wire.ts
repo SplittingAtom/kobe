@@ -502,6 +502,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
               sandboxId: claims.sub,
               teamId: claims.team_id,
               userId: claims.user_id,
+              ...(claims.eval_thread === undefined ? {} : { evalThreadId: claims.eval_thread }),
               exp: claims.exp,
             },
             registry,

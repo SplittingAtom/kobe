@@ -29,7 +29,7 @@ import {
 import {
   SERVER_CALL_AUDIENCE,
   SERVER_CALL_TOKEN_HEADER,
-  type ServerCallPurpose,
+  type ServerCallTokenPurpose,
 } from "@kobe/protocol";
 import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
@@ -127,16 +127,20 @@ beforeAll(async () => {
   }));
   bifrost = createServer((req, res) => {
     upstreamCalls++;
-    req.resume();
-    req.on("end", () =>
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      const judge = Buffer.concat(chunks).toString().includes("Grade.");
       res.writeHead(200, { "content-type": "application/json" }).end(
         JSON.stringify({
           choices: [{ message: { role: "assistant", content: "ok" } }],
-          // 8 000 of the 10 000-token daily budget: 80 %.
-          usage: { prompt_tokens: 4_000, completion_tokens: 4_000 },
+          // 8 000 of the 10 000-token daily budget: 80 % (the eval judge's call: 1 %).
+          usage: judge
+            ? { prompt_tokens: 50, completion_tokens: 50 }
+            : { prompt_tokens: 4_000, completion_tokens: 4_000 },
         }),
-      ),
-    );
+      );
+    });
   });
   await new Promise<void>((r) => bifrost.listen(0, "127.0.0.1", r));
   const db = app.db;
@@ -197,7 +201,7 @@ afterAll(async () => {
   await app.close();
 });
 
-async function serverCall(purpose: ServerCallPurpose) {
+async function serverCall(purpose: ServerCallTokenPurpose) {
   const cap = purpose === "title" ? 48 : 200;
   const iat = Math.floor(Date.now() / 1000);
   const token = signServerCallToken(SC_KEY, {
@@ -219,8 +223,11 @@ async function serverCall(purpose: ServerCallPurpose) {
     headers: { [SERVER_CALL_TOKEN_HEADER]: token, "content-type": "application/json" },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: "user", content: "Suggest follow-ups." }],
+      messages: [
+        { role: "user", content: purpose === "eval_judge" ? "Grade." : "Suggest follow-ups." },
+      ],
       max_tokens: cap,
+      ...(purpose === "eval_judge" ? { temperature: 0 } : {}),
     }),
   });
   const body = (await res.json()) as { error?: { code?: string } };
@@ -236,6 +243,8 @@ async function spentToday(): Promise<number> {
 
 describe("server calls through kobe_reserve_budget (KOBE-234)", () => {
   it("skips follow-ups at 80 % from the database's own spend read; titles still pass", async () => {
+    // The eval judge (KOBE-326 ac-2) goes the same way and lands as its own kind.
+    expect(await serverCall("eval_judge")).toEqual({ status: 200, code: undefined });
     expect(await serverCall("followups")).toEqual({ status: 200, code: undefined });
     const end = Date.now() + 10_000;
     while ((await spentToday()) < 8_000) {
@@ -245,14 +254,15 @@ describe("server calls through kobe_reserve_budget (KOBE-234)", () => {
     // The gate's cache still says 0 % spent: the reservation refuses.
     expect(await serverCall("followups")).toEqual({ status: 402, code: "budget_soft_limit" });
     expect(await serverCall("title")).toEqual({ status: 200, code: undefined });
-    expect(upstreamCalls).toBe(2);
+    expect(upstreamCalls).toBe(3);
     await sink.flush();
     const kinds = await withTeam(app.db, team, (tx) =>
-      tx.execute<{ kind: string; sandbox_id: string | null; run_id: string }>(
-        sql`SELECT kind, sandbox_id, run_id FROM run_usage WHERE team_id = ${team}::uuid ORDER BY at`,
+      tx.execute<{ kind: string; sandbox_id: string | null; run_id: string; user_id: string }>(
+        sql`SELECT kind, sandbox_id, run_id, user_id FROM run_usage WHERE team_id = ${team}::uuid ORDER BY at`,
       ),
     );
-    expect(kinds.rows).toEqual([
+    expect(kinds.rows.map(({ user_id, ...r }) => (user_id === user ? r : { user_id }))).toEqual([
+      { kind: "eval_judge", sandbox_id: null, run_id: runId },
       { kind: "followups", sandbox_id: null, run_id: runId },
       { kind: "title", sandbox_id: null, run_id: runId },
     ]);

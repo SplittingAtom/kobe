@@ -390,8 +390,13 @@ contains "team NetworkPolicy governs ingress and egress" '^\["Ingress","Egress"\
 contains "team NetworkPolicy allows no ingress at all" '^(\[\])?$' "$(np_spec '{.spec.ingress}')"
 contains "team namespace has only Kobe's two NetworkPolicies (controller policy unmanaged)" '^kobe-orbit-eval-isolation kobe-sandbox-isolation $' \
   "$($KUBECTL -n "$TEAM_NS" get networkpolicy -o name | sed 's|.*/||' | sort | tr '\n' ' ')"
-contains "team ResourceQuota is in place" '^20$' \
+# The team quota is the members' share plus the eval share (KOBE-325); members are held to theirs.
+contains "team ResourceQuota is in place (members' 20 CPU plus the eval share)" '^20[0-9]{3}m$' \
   "$($KUBECTL -n "$TEAM_NS" get resourcequota kobe-team-quota -o jsonpath='{.spec.hard.requests\.cpu}')"
+contains "member ResourceQuota holds members to the team's 20 CPU" '^20$' \
+  "$($KUBECTL -n "$TEAM_NS" get resourcequota kobe-team-member-quota -o jsonpath='{.spec.hard.requests\.cpu}')"
+contains "eval ResourceQuota is in place" '^[0-9]+m?$' \
+  "$($KUBECTL -n "$TEAM_NS" get resourcequota kobe-skill-eval-quota -o jsonpath='{.spec.hard.requests\.cpu}')"
 contains "team warm pool exists" '^1$' \
   "$($KUBECTL -n "$TEAM_NS" get sandboxwarmpool kobe-sandbox -o jsonpath='{.spec.replicas}')"
 contains "sandbox pod is set to the gVisor RuntimeClass" '^gvisor$' \

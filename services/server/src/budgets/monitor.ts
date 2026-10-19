@@ -10,6 +10,7 @@ import {
   teams,
   withTeam,
   type BudgetLine,
+  type BudgetScope,
   type BudgetThreshold,
   type KobeDb,
   type KobeTx,
@@ -165,8 +166,10 @@ export class BudgetMonitor {
 
   private async evaluateOnce(teamId: string): Promise<Evaluation> {
     const { db, logger } = this.options;
-    const { lines } = await withTeam(db, teamId, (tx) =>
-      loadTeamBudgetLines(tx, teamId, this.now()),
+    const loaded = await withTeam(db, teamId, (tx) => loadTeamBudgetLines(tx, teamId, this.now()));
+    // Budgets only: the team eval cap (KOBE-327) is enforced per call and never stops runs here.
+    const lines = loaded.lines.filter(
+      (l): l is BudgetLine & { readonly scope: BudgetScope } => l.scope !== "eval",
     );
     // Stops first (KOBE-42 review): nothing about alerts or email may delay ending runs. Widest
     // first; a narrower stop of the same runs is then a no-op.
@@ -220,7 +223,7 @@ export class BudgetMonitor {
    */
   private async alert(
     teamId: string,
-    line: BudgetLine,
+    line: BudgetLine & { readonly scope: BudgetScope },
     threshold: BudgetThreshold,
   ): Promise<boolean> {
     const { db } = this.options;

@@ -17,10 +17,16 @@ import type {
 } from "@kobe/protocol";
 import type { KobeTx } from "@kobe/db";
 
-/** The (team, user) sandbox a command targets (D11: one sandbox per user and team). */
+/**
+ * The sandbox a connection is, or a command targets: the (team, user) member sandbox (D11), or,
+ * with `evalThreadId`, the ephemeral sandbox of that skill-eval thread (KOBE-325; wire slot
+ * `e-<thread>`, connection in `sandbox_eval_connections`). A command's sandbox always follows its
+ * thread (`enqueueCommand`), whatever the caller passes.
+ */
 export interface SandboxTarget {
   readonly teamId: string;
   readonly userId: string;
+  readonly evalThreadId?: string;
 }
 
 /**
@@ -35,7 +41,13 @@ export type SessionTokenVerifier = (token: string) => SessionTokenClaims;
  * the team namespace with that UID. Checked at connect and periodically while connected.
  */
 export interface SandboxLiveness {
-  isLive(claims: { sandboxId: string; teamId: string; userId: string }): Promise<boolean>;
+  isLive(claims: {
+    sandboxId: string;
+    teamId: string;
+    userId: string;
+    /** An eval sandbox (KOBE-325): live while it is claim `e-<thread>` and its execution runs. */
+    evalThreadId?: string;
+  }): Promise<boolean>;
 }
 
 /**
@@ -163,6 +175,39 @@ export interface SandboxRouter {
     request: PiCommandRequest,
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * KOBE-325, to a skill eval's own sandbox only (an eval thread): copy the case's fixtures in
+   * (`eval.prepare`), or take the after-snapshot (`eval.snapshot`; `data` untrusted: validate it).
+   */
+  evalPrepare(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly files: readonly { path: string; sha256: string; size: number }[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  evalSnapshot(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly roots: readonly string[];
+      readonly hashPaths: readonly string[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  /**
+   * KOBE-326, to a skill eval's own sandbox only: the matched outputs' bytes for the judge
+   * (`eval.read`; paths and walked sizes only go out; `data` untrusted: validate it).
+   */
+  evalRead(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly files: readonly { path: string; size: number }[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
   /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */
   compactThread(
     target: SandboxTarget,
@@ -170,7 +215,7 @@ export interface SandboxRouter {
     options?: SendOptions,
   ): Promise<CommandOutcome>;
   /** True while some replica holds a live (heartbeating) connection of this sandbox. */
-  isConnected(target: SandboxTarget): Promise<boolean>;
+  isConnected(target: SandboxTarget, threadId?: string): Promise<boolean>;
 }
 
 /** How a run ended, as the wire observed it. */

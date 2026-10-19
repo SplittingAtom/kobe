@@ -123,7 +123,7 @@ export async function titleDecisionInTx(
 ): Promise<TitleDecision> {
   const { teamId, runId, threadId } = ids;
   const res = await tx.execute<{ eligible: boolean; attempts: number | string }>(sql`
-    SELECT (t.title IS NULL AND NOT t.title_locked AND NOT t.is_test AND t.deleted_at IS NULL
+    SELECT (t.title IS NULL AND NOT t.title_locked AND NOT t.is_test AND NOT t.skill_eval AND t.deleted_at IS NULL
             AND r.kind = 'message' AND r.status = 'completed') AS eligible,
            (SELECT count(*) FROM runs c
              WHERE c.team_id = ${teamId} AND c.thread_id = ${threadId}

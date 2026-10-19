@@ -112,6 +112,7 @@ export function createThreadListAdapter(
 
     async initialize() {
       const test = session.testAgentId;
+      const skillDraftId = session.testSkillDraftId;
       const model = session.takeNextModel();
       const thinking = session.takeNextThinking();
       const agent = session.takeNextAgent();
@@ -125,11 +126,12 @@ export function createThreadListAdapter(
           agent?.model != null ? null : model,
           test !== undefined
             ? { agentId: test, test: true }
-            : agent === null
+            : agent === null || skillDraftId !== undefined
               ? undefined
               : { agentId: agent.id, test: false },
-          projectId,
+          skillDraftId === undefined ? projectId : null,
           thinking,
+          skillDraftId,
         ),
       );
       session.setProvisionalTitle(created.threadId, provisional);

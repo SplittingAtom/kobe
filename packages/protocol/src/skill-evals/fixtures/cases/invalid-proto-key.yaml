@@ -1,0 +1,5 @@
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    __proto__: { polluted: true }
+    expect: { triggers: true }

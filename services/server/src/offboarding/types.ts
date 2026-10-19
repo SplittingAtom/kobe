@@ -8,7 +8,10 @@ export const RETAIN_DAYS = 30;
 
 export type OffboardTrigger = "member_removed" | "deactivated" | "team_removed" | "reconciled";
 
-export type OffboardProvider = Pick<SandboxProvider, "destroySandbox" | "deleteVolume">;
+export type OffboardProvider = Pick<
+  SandboxProvider,
+  "destroySandbox" | "deleteVolume" | "deleteEvalSandbox"
+>;
 
 export interface OffboardingContext {
   readonly db: KobeDb;

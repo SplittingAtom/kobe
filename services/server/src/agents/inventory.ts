@@ -145,7 +145,7 @@ export function toInventoryItem(
 const usedSiteAgentIds = (teamId: string) => sql`
   SELECT t.site_agent_id FROM threads t
    WHERE t.team_id = ${teamId} AND t.site_agent_id IS NOT NULL AND t.deleted_at IS NULL
-     AND NOT t.is_test
+     AND NOT t.is_test AND NOT t.skill_eval
   UNION
   SELECT s.agent_id FROM schedules s WHERE s.team_id = ${teamId}`;
 
@@ -178,9 +178,9 @@ export async function listInventory(
         SELECT page.id AS agent_id, count(r.id) AS run_count, max(r.created_at) AS last_run_at
           FROM page
           JOIN LATERAL (
-            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id AND NOT t.is_test
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id AND NOT t.is_test AND NOT t.skill_eval
             UNION ALL
-            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.site_agent_id = page.id AND NOT t.is_test
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.site_agent_id = page.id AND NOT t.is_test AND NOT t.skill_eval
           ) th ON true
           JOIN runs r ON r.team_id = ${teamId} AND r.thread_id = th.id
          GROUP BY page.id),

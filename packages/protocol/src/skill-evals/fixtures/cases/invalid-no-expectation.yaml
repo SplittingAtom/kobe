@@ -1,0 +1,6 @@
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    expect:
+      max_turns: 5
+      no_denied_tools: true

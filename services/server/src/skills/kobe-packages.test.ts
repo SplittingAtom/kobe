@@ -58,6 +58,10 @@ const PUBLISHED: Record<string, Record<string, { runtime: string; package: strin
       runtime: "edc6a1a909b6b85801a48a4f9fbd305e8c4c1044915d3353ba93f1450aafd7ec",
       package: "05b240a4aa419c924a3be770f1952ec83a6731e5c072e19f251cf2059dae5aa6",
     },
+    "1.1.0": {
+      runtime: "ecc8c31c7980eb49ccc1f74645feb358eeb67068eede450c672a05a25841bcd6",
+      package: "1ff17aa2a178cf2c6ff3731e09951ca0d16e782a6c361e9ead949c7a380c6860",
+    },
   },
 };
 
@@ -121,3 +125,21 @@ describe("the Kobe package set (KOBE-317)", () => {
     }
   });
 });
+
+describe("skill-creator proposes eval cases (KOBE-328 ac-2)", () => {
+  it("asks for positive trigger cases and at least one negative one, with an example of each", async () => {
+    const creator = (await loadKobePackages()).find((p) => p.name === "skill-creator");
+    const md = new TextDecoder().decode(
+      unzipSync(must(creator).bundle.zip)["SKILL.md"] ?? new Uint8Array(),
+    );
+    expect(md).toContain("evals/cases.yaml");
+    expect(md).toMatch(/always at\s+least one near miss into a negative case/);
+    expect(md).toContain("expect: { triggers: false }");
+    expect(md).toContain("expect: { triggers: true");
+  });
+});
+
+function must<T>(x: T | undefined): T {
+  if (x === undefined) throw new Error("missing");
+  return x;
+}

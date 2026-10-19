@@ -1,3 +1,4 @@
+import { NO_EVAL_PURGE, purgeSkillEvals, type EvalPurgeCounts } from "./skill-evals.js";
 import {
   SYSTEM_ACTOR,
   asc,
@@ -12,6 +13,7 @@ import {
 import type pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
+import { sweepOrphanDraftBundles } from "../skills/drafts/test-holds.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
@@ -19,6 +21,12 @@ import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
 import { purgeReleasedFeedbackHistory, type FeedbackHistoryCounts } from "./feedback-history.js";
 import { NO_EVAL_CASE_PURGE, purgeEvalCases, type EvalCasePurgeCounts } from "./eval-cases.js";
+import {
+  NO_DRAFT_PURGE,
+  purgeReleasedDraftHistory,
+  purgeSkillDrafts,
+  type DraftPurgeCounts,
+} from "./skill-drafts.js";
 import {
   purgeReleasedWorkspaceHoldHistory,
   type WorkspaceHoldHistoryCounts,
@@ -47,7 +55,9 @@ import {
  *  6. sweep orphaned upload staging objects and fork-copied entry bodies (KOBE-189);
  *  7. purge answer feedback kept for a legal hold once it is released (KOBE-275);
  *  8. purge shared eval cases past the team's window, and their copies kept for a released hold
- *     (KOBE-276).
+ *     (KOBE-276);
+ *  9. purge Workbench drafts unchanged for longer than the team's window, and the copies kept
+ *     for a released hold (KOBE-320).
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
@@ -84,6 +94,14 @@ export interface TeamPassResult {
   readonly evalCases: EvalCasePurgeCounts;
   /** Moved workspace files' old paths kept for a released hold, deleted (KOBE-304). */
   readonly workspaceHoldHistory: WorkspaceHoldHistoryCounts;
+  /** Workbench drafts past the window, deleted (KOBE-320). */
+  readonly skillDrafts: DraftPurgeCounts;
+  /** Copies of drafts and draft files kept for a released hold, deleted (KOBE-320). */
+  readonly skillDraftHistory: { readonly rows: number };
+  /** Test bundles of drafts that are gone, deleted (KOBE-323). */
+  readonly skillDraftBundles: { readonly drafts: number };
+  /** Finished skill eval runs past the window, and their objects (KOBE-325). */
+  readonly skillEvals: EvalPurgeCounts;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -289,6 +307,32 @@ async function teamPass(
     : await step("workspace_hold_history", { rows: 0 }, () =>
         purgeReleasedWorkspaceHoldHistory(db, teamId, { stop }),
       );
+  const skillDrafts = stop()
+    ? NO_DRAFT_PURGE
+    : await step("skill_drafts", NO_DRAFT_PURGE, async () => {
+        const days = await windowDays(db, teamId);
+        const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
+        return purgeSkillDrafts(db, teamId, cutoff, { stop });
+      });
+  const skillDraftHistory = stop()
+    ? { rows: 0 }
+    : await step("skill_draft_history", { rows: 0 }, () =>
+        purgeReleasedDraftHistory(db, teamId, { stop }),
+      );
+  // After the draft purge, so a purged draft's test bundles (KOBE-323) go in the same pass.
+  const skillDraftBundles =
+    deps.blobs && !stop()
+      ? await step("skill_draft_bundles", { drafts: 0 }, () =>
+          sweepOrphanDraftBundles(db, deps.blobs as BlobStore, teamId, { stop }),
+        )
+      : { drafts: 0 };
+  const skillEvals = stop()
+    ? NO_EVAL_PURGE
+    : await step("skill_evals", NO_EVAL_PURGE, async () => {
+        const days = await windowDays(db, teamId);
+        const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
+        return purgeSkillEvals(db, deps.blobs, teamId, cutoff, { stop });
+      });
   return {
     teamId,
     trash,
@@ -301,6 +345,10 @@ async function teamPass(
     feedbackHistory,
     evalCases,
     workspaceHoldHistory,
+    skillDrafts,
+    skillDraftHistory,
+    skillDraftBundles,
+    skillEvals,
     failed,
   };
 }

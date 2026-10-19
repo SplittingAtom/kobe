@@ -405,6 +405,34 @@ describe("gateway principal", () => {
     });
   });
 
+  it("a skill eval's sandbox is live only while connected, running and not cancelled (KOBE-325)", async () => {
+    const evalSandbox = randomUUID();
+    const threadId = randomUUID();
+    const evalRunId = randomUUID();
+    const h = "f".repeat(64);
+    const q = (text: string) => withTeam(app.db, teamA, (tx) => tx.execute(sql.raw(text)));
+    await q(`INSERT INTO skill_eval_runs (team_id, id, started_by, subject_kind, subject_id, subject_rev,
+        skill_name, package_hash, runtime_hash, bundle_key, bundle_size, mode, status, suite, limits,
+        progress_total) VALUES ('${teamA}', '${evalRunId}', '${userId}', 'draft', '${randomUUID()}', 1,
+        'r', '${h}', '${h}', 'k', 1, 'with_only', 'running', '{"cases":[]}', '{}', 1)`);
+    await q(`INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_eval_run_id)
+        VALUES ('${teamA}', '${threadId}', '${userId}', 'e', true, '${evalRunId}')`);
+    await q(`INSERT INTO skill_eval_results (team_id, eval_run_id, case_id, with_skill, state, thread_id, deadline_at)
+        VALUES ('${teamA}', '${evalRunId}', 'a', true, 'running', '${threadId}', now() + interval '5 minutes')`);
+    await q(`INSERT INTO sandbox_eval_connections (team_id, thread_id, user_id, sandbox_id, connection_id, replica_id)
+        VALUES ('${teamA}', '${threadId}', '${userId}', '${evalSandbox}', '${randomUUID()}', 'r')`);
+    const live = async () =>
+      (await loadGatewayPrincipal(app.db, teamA, userId, evalSandbox)).sandbox;
+    expect(await live()).toBe("live");
+    await q(`UPDATE skill_eval_runs SET cancel_requested_at = now() WHERE id = '${evalRunId}'`);
+    expect(await live()).toBe("revoked");
+    await q(`UPDATE skill_eval_runs SET cancel_requested_at = NULL WHERE id = '${evalRunId}'`);
+    await q(
+      `UPDATE sandbox_eval_connections SET closed_at = now() WHERE thread_id = '${threadId}'`,
+    );
+    expect(await live()).toBe("revoked");
+  });
+
   it("a server call's principal names the catalog's reasoning models (KOBE-219)", async () => {
     const plain = await loadGatewayPrincipal(app.db, teamA, userId, undefined);
     expect(plain).toMatchObject({ sandbox: "unrecorded", reasoningModels: [] });

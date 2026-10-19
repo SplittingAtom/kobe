@@ -1,0 +1,4 @@
+cases:
+  - id: unrelated-question
+    prompt: "What is the capital of France?"
+    expect: { triggers: false }

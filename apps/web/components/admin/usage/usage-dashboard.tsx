@@ -122,6 +122,8 @@ const KIND_LABELS: Readonly<Record<KindUsage["kind"], string>> = {
   run: "Runs",
   title: "Titles",
   followups: "Follow-ups",
+  eval: "Skill evals",
+  eval_judge: "Eval judge",
 };
 
 function agentName(a: UsageReport["byAgent"][number]): string {

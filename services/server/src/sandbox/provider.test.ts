@@ -1,4 +1,5 @@
 import { AUDIT_EVENTS } from "@kobe/db";
+import { POD_SCOPED_QUOTA_KEYS } from "./eval-quota.js";
 import { describe, expect, it, vi } from "vitest";
 import { IsolationRuntimeMissingError, type IsolationGate } from "../isolation/gate.js";
 import { createFakeKube, simulateAgentSandbox, type FakeKube } from "../testing/fake-kube.js";
@@ -97,8 +98,64 @@ describe("ensureSandbox: team namespace (D11)", () => {
   it("puts a quota, container defaults, the sandbox ServiceAccount, template and warm pool there", async () => {
     const { kube, provider } = setup();
     await provider.ensureSandbox(TEAM, USER);
+    // The members' quota plus the skill-eval share: 4 eval pods (KOBE-325).
+    const gi = (n: number) => String(n * 2 ** 30);
     expect(objectAt(kube, "ResourceQuota", "kobe-team-quota", NS)?.spec).toEqual({
-      hard: SETTINGS.teamQuota,
+      hard: {
+        ...SETTINGS.teamQuota,
+        "requests.cpu": "22",
+        "requests.memory": gi(44),
+        "limits.cpu": "48",
+        "limits.memory": gi(96),
+        "requests.ephemeral-storage": gi(44),
+        "limits.ephemeral-storage": gi(176),
+        ...(SETTINGS.teamQuota.pods ? { pods: String(Number(SETTINGS.teamQuota.pods) + 4) } : {}),
+      },
+    });
+    expect(objectAt(kube, "ResourceQuota", "kobe-skill-eval-quota", NS)?.spec).toEqual({
+      hard: {
+        pods: "4",
+        "requests.cpu": "2",
+        "requests.memory": gi(4),
+        "limits.cpu": "8",
+        "limits.memory": gi(16),
+      },
+      scopeSelector: {
+        matchExpressions: [
+          { scopeName: "PriorityClass", operator: "In", values: ["kobe-skill-eval"] },
+        ],
+      },
+    });
+    // Members stay within teamQuota (pod count, CPU and memory only: the PriorityClass scope
+    // allows nothing else, ephemeral storage included).
+    expect(objectAt(kube, "ResourceQuota", "kobe-team-member-quota", NS)?.spec).toEqual({
+      hard: Object.fromEntries(
+        Object.entries(SETTINGS.teamQuota).filter(([k]) => POD_SCOPED_QUOTA_KEYS.has(k)),
+      ),
+      scopeSelector: {
+        matchExpressions: [
+          { scopeName: "PriorityClass", operator: "NotIn", values: ["kobe-skill-eval"] },
+        ],
+      },
+    });
+    const evalTemplate = objectAt(kube, "SandboxTemplate", "kobe-skill-eval", NS);
+    expect(evalTemplate?.spec).toMatchObject({
+      podTemplate: {
+        metadata: { labels: { "kobe.splittingatom.io/skill-eval": "true" } },
+        spec: {
+          runtimeClassName: "gvisor",
+          priorityClassName: "kobe-skill-eval",
+          volumes: expect.arrayContaining([{ name: "workspace", emptyDir: { sizeLimit: "2Gi" } }]),
+        },
+      },
+    });
+    expect(JSON.stringify(evalTemplate?.spec)).not.toContain('volumeClaimTemplates":[');
+    expect(JSON.stringify(evalTemplate?.spec)).toContain(
+      '{"name":"KOBE_WORKSPACE_SYNC_INTERVAL_MS","value":"0"}',
+    );
+    expect(objectAt(kube, "SandboxWarmPool", "kobe-skill-eval", NS)?.spec).toMatchObject({
+      replicas: 0,
+      sandboxTemplateRef: { name: "kobe-skill-eval" },
     });
     expect(objectAt(kube, "LimitRange", "kobe-sandbox-defaults", NS)).toBeDefined();
     expect(objectAt(kube, "ServiceAccount", "kobe-sandbox", NS)).toMatchObject({
@@ -185,7 +242,9 @@ describe("ensureSandbox: team namespace (D11)", () => {
     await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow();
     await provider.ensureSandbox(TEAM, USER);
     await provider.ensureSandbox(TEAM, OTHER_USER);
-    const quotaApplies = kube.calls.filter((c) => c.verb === "apply" && c.kind === "ResourceQuota");
+    const quotaApplies = kube.calls.filter(
+      (c) => c.verb === "apply" && c.kind === "ResourceQuota" && c.name === "kobe-team-quota",
+    );
     expect(quotaApplies).toHaveLength(2);
   });
 
@@ -798,5 +857,68 @@ describe("isLive (sandbox wire liveness, KOBE-24)", () => {
       metadata: { ...claim.metadata, deletionTimestamp: new Date().toISOString() },
     });
     expect(await provider.isLive(TEAM, USER, handle.sandboxId)).toBe(false);
+  });
+});
+
+describe("skill eval sandboxes (KOBE-325)", () => {
+  const THREAD = "22222222-2222-4222-8222-222222222222";
+  const RUN = "33333333-3333-4333-8333-333333333333";
+  const TOKEN = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ5In0.c2lnbmF0dXJl";
+  const spec = {
+    userId: USER,
+    threadId: THREAD,
+    evalRunId: RUN,
+    shutdownAt: new Date(Date.UTC(2030, 0, 1)),
+  };
+
+  it("claims e-<thread> from the eval pool, beside the member's own claim, with a cluster-side shutdown", async () => {
+    const { kube, provider } = setup();
+    const own = await provider.ensureSandbox(TEAM, USER);
+    const handle = await provider.createEvalSandbox(TEAM, spec);
+    expect(handle.claimName).toBe(`e-${THREAD}`);
+    expect(handle.sandboxId).not.toBe(own.sandboxId);
+    const claim = must(objectAt(kube, "SandboxClaim", `e-${THREAD}`, NS));
+    expect(claim.metadata.labels).toMatchObject({
+      "kobe.splittingatom.io/skill-eval": "true",
+      "kobe.splittingatom.io/eval-thread-id": THREAD,
+    });
+    expect(claim.spec).toMatchObject({
+      warmPoolRef: { name: "kobe-skill-eval" },
+      lifecycle: { shutdownTime: "2030-01-01T00:00:00.000Z", shutdownPolicy: "Delete" },
+    });
+    expect(objectAt(kube, "SandboxClaim", `u-${USER}`, NS)).toBeDefined();
+    expect(await provider.listEvalSandboxes()).toMatchObject([
+      { teamId: TEAM.id, threadId: THREAD, userId: USER, evalRunId: RUN },
+    ]);
+  });
+
+  it("is live only as its own claim, never as the member's, and identifies its pod as the eval thread's", async () => {
+    const { kube, provider } = setup();
+    const own = await provider.ensureSandbox(TEAM, USER);
+    const handle = await provider.createEvalSandbox(TEAM, spec);
+    expect(await provider.isLive(TEAM, USER, handle.sandboxId, THREAD)).toBe(true);
+    expect(await provider.isLive(TEAM, USER, handle.sandboxId)).toBe(false);
+    expect(await provider.isLive(TEAM, USER, own.sandboxId, THREAD)).toBe(false);
+    const pod = must(objectAt(kube, "Pod", must(handle.podName), NS));
+    kube.tokens.set(TOKEN, {
+      authenticated: true,
+      audiences: [BOOTSTRAP_TOKEN_AUDIENCE],
+      username: `system:serviceaccount:${NS}:kobe-sandbox`,
+      extra: {
+        "authentication.kubernetes.io/pod-name": [pod.metadata.name],
+        "authentication.kubernetes.io/pod-uid": [pod.metadata.uid as string],
+      },
+    });
+    await expect(provider.identifyBootstrapToken(TOKEN)).resolves.toMatchObject({
+      state: "assigned",
+      principal: {
+        sandboxId: handle.sandboxId,
+        teamId: TEAM.id,
+        userId: USER,
+        evalThreadId: THREAD,
+      },
+    });
+    expect(await provider.deleteEvalSandbox(TEAM, THREAD)).toBe(true);
+    expect(await provider.isLive(TEAM, USER, handle.sandboxId, THREAD)).toBe(false);
   });
 });

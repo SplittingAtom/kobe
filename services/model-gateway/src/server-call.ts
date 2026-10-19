@@ -1,12 +1,15 @@
 import type { IncomingHttpHeaders } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 import {
   RUN_TOKEN_HEADER,
-  SERVER_CALL_MAX_BODY_BYTES,
+  SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
+  SERVER_CALL_RESPONSE_FORMATS,
   SERVER_CALL_TOKEN_HEADER,
   serverCallOutputCap,
   serverCallRequestSchema,
   type ServerCallClaims,
+  type ServerCallTokenPurpose,
 } from "@kobe/protocol";
 import { verifyServerCallToken } from "@kobe/protocol/node";
 import type { ServerCallRunClaim } from "@kobe/db";
@@ -128,17 +131,25 @@ export function authenticateServerCall(
   return { ok: true, claims };
 }
 
-/** The most a server call's body may hold (the contract's cap, never above the gateway's own). */
-export function serverCallBodyLimit(maxBodyBytes: number): number {
-  return Math.min(maxBodyBytes, SERVER_CALL_MAX_BODY_BYTES);
+/**
+ * The most a server call's body may hold: its purpose's cap (the eval judge's is larger, KOBE-326),
+ * never above the gateway's own.
+ */
+export function serverCallBodyLimit(maxBodyBytes: number, purpose: ServerCallTokenPurpose): number {
+  return Math.min(maxBodyBytes, SERVER_CALL_LIMITS[purpose].max_body_bytes);
 }
+
+/** The structured-output format the purpose may ask for, if any (only the judge's verdict). */
+const formatOf = (purpose: ServerCallTokenPurpose): unknown =>
+  (SERVER_CALL_RESPONSE_FORMATS as Partial<Record<ServerCallTokenPurpose, unknown>>)[purpose];
 
 /**
  * The body against the contract and the token: shape (no tools, no streaming), the token's model,
  * an output limit within the token's and within the purpose's cap for this model: the reasoning
  * headroom and a `reasoning_effort` only when the site catalog marks the model as reasoning
- * (KOBE-219), whatever the token says. Returns the output limit (the budget reservation's
- * allowance).
+ * (KOBE-219), whatever the token says; each message within the purpose's length; a
+ * `response_format` only as exactly the purpose's own (the eval judge's verdict schema, KOBE-326).
+ * Returns the output limit (the budget reservation's allowance).
  */
 export function checkServerCallBody(
   body: Buffer,
@@ -158,6 +169,22 @@ export function checkServerCallBody(
     return bad("A server call is a plain chat completion: no tools, no streaming, text only.");
   }
   if (parsed.data.model !== claims.model) return bad("The model is not the token's.");
+  const maxChars = SERVER_CALL_LIMITS[claims.purpose].max_message_chars;
+  if (parsed.data.messages.some((m) => m.content.length > maxChars)) {
+    return bad("A message is longer than the purpose allows.");
+  }
+  // The judge samples at its fixed temperature (0) or not at all (KOBE-326 review L4): the
+  // author's run and the Registry re-run must agree.
+  if (
+    claims.purpose === "eval_judge" &&
+    parsed.data.temperature !== SERVER_CALL_LIMITS.eval_judge.temperature
+  ) {
+    return bad("The eval judge runs at temperature 0.");
+  }
+  const format = parsed.data.response_format;
+  if (format !== undefined && !isDeepStrictEqual(format, formatOf(claims.purpose))) {
+    return bad("This purpose may not ask for that response format.");
+  }
   const limit = parsed.data.max_tokens ?? parsed.data.max_completion_tokens ?? Infinity;
   if (limit > claims.max_output_tokens) return bad("The output limit is above the token's.");
   if (limit > serverCallOutputCap(claims.purpose, reasoning)) {

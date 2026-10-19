@@ -40,9 +40,12 @@ export type UsageSource = (typeof USAGE_SOURCES)[number];
  * before migration 0099), `title` / `followups` for the server's own post-run calls through the
  * gateway (`@kobe/protocol` server-call.ts). Server calls have no sandbox; they carry the run whose
  * completion triggered them (so thread and agent resolve as for run calls). Budgets count every
- * kind; per-run views and the context gauge read `run` rows only.
+ * kind; per-run views and the context gauge read `run` rows only. Skill evals (KOBE-326, SK17):
+ * `eval_judge` for the server's judge call after an eval execution's run (a server call, like
+ * titles), and `eval` for an eval sandbox's own calls (a sandbox call, like `run`; written once
+ * KOBE-327 bills eval runs apart, until then they are `run`). Migration 0147 widens the CHECKs.
  */
-export const USAGE_KINDS = ["run", "title", "followups"] as const;
+export const USAGE_KINDS = ["run", "title", "followups", "eval", "eval_judge"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
 /** Longest gateway model id kept (`<gateway provider>/<model>`). */

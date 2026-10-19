@@ -3,7 +3,8 @@ import { READY, defineTeamSection } from "../types";
 export default defineTeamSection({
   id: "skills",
   label: "Skills",
-  description: "Create and edit skills in the browser; each save is a new version.",
+  description:
+    "Team skills: access modes, the agents they reach, catalog installs. Skills are written in the Workbench.",
   group: "Agents and skills",
   order: 20,
   permission: "team.skills.publish",

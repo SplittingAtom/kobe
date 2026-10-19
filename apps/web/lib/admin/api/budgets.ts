@@ -61,6 +61,19 @@ export interface TeamBudgets {
   };
   readonly effectiveRequestsPerMinute: number;
   readonly members: readonly MemberBudget[];
+  /** This month's spend by usage kind (KOBE-327): runs, titles, follow-ups, evals, eval judge. */
+  readonly spentByKind?: readonly {
+    readonly kind: string;
+    readonly usd: number;
+    readonly tokens: number;
+  }[];
+  /** The team eval cap (KOBE-327, set in the skill settings) and this month's eval spend. */
+  readonly evalCap?: {
+    readonly usd: number | null;
+    readonly tokens: number | null;
+    readonly monthUsd: number;
+    readonly monthTokens: number;
+  };
 }
 
 export type BudgetState = "ok" | "warning" | "exhausted";
@@ -147,4 +160,16 @@ export function parseTokens(text: string): number | null | undefined {
   if (!/^\d{1,16}$/.test(t)) return undefined;
   const n = Number(t);
   return n <= 1_000_000_000_000_000 ? n : undefined;
+}
+
+/** The team eval cap (KOBE-327, SK18): monthly dollars or tokens, or null for none. */
+export type TeamEvalCap = { readonly usd: number } | { readonly tokens: number } | null;
+
+/** Sets or removes the team eval cap (`team.budgets.manage`, KOBE-327). */
+export function setTeamEvalCap(teamId: string, cap: TeamEvalCap): Promise<ApiResult<unknown>> {
+  return apiRequest("/v1/team/budgets/eval-cap", {
+    method: "PUT",
+    json: { evalCap: cap },
+    teamId,
+  });
 }

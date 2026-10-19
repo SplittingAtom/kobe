@@ -12,8 +12,8 @@ import styles from "./shell.module.css";
 /**
  * The profile menu at the bar's right end (CE3): the member's other areas and sign-out. A
  * disclosure, like the team switcher; one of the two is open at a time. On the chat page My
- * approvals and My connectors open beside the thread (CE4, KOBE-424); the builders (My skills),
- * Projects and My shared cases stay full pages. Slot: a member settings page joins this menu when
+ * approvals and My connectors open beside the thread (CE4, KOBE-424); Projects and My shared cases stay
+ * full pages (Skills is a bar command, KOBE-321). Slot: a member settings page joins this menu when
  * one exists.
  */
 export function ProfileMenu() {
@@ -45,9 +45,6 @@ export function ProfileMenu() {
     <details className={styles.menu} {...barMenuProps}>
       <IconAction command="profile" as="summary" className={styles.iconLink} />
       <ul className={styles.menuList}>
-        <li>
-          <MenuLink href="/me/skills">My skills</MenuLink>
-        </li>
         <li>
           <MenuLink href="/me/projects">Projects</MenuLink>
         </li>

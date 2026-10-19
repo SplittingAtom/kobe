@@ -13,6 +13,8 @@ export interface SandboxCaller {
   readonly sandboxId: string;
   readonly teamId: string;
   readonly userId: string;
+  /** A skill eval's sandbox (KOBE-325); only with `allowEval`. */
+  readonly evalThreadId?: string;
 }
 
 export type AuthResult =
@@ -37,6 +39,12 @@ export function createSandboxAuthenticator(options: {
   readonly liveness: SandboxLiveness;
   readonly cacheMs?: number;
   readonly now?: () => number;
+  /**
+   * Whether a skill eval's sandbox (a token with `eval_thread`, KOBE-325) may call: false for
+   * workspace sync (an eval sandbox never touches the member's durable workspace), true for skill
+   * bundles and eval fixtures.
+   */
+  readonly allowEval?: boolean;
 }): SandboxAuthenticator {
   const { db, verify, liveness, cacheMs = AUTH_CACHE_MS, now = () => Date.now() } = options;
   const allowed = new Map<string, number>();
@@ -69,7 +77,14 @@ export function createSandboxAuthenticator(options: {
     } catch {
       return { ok: false, reason: "invalid" };
     }
-    const caller = { sandboxId: claims.sub, teamId: claims.team_id, userId: claims.user_id };
+    if (claims.eval_thread !== undefined && options.allowEval !== true)
+      return { ok: false, reason: "not_live" };
+    const caller: SandboxCaller = {
+      sandboxId: claims.sub,
+      teamId: claims.team_id,
+      userId: claims.user_id,
+      ...(claims.eval_thread === undefined ? {} : { evalThreadId: claims.eval_thread }),
+    };
     if (!(await liveness.isLive(caller))) return { ok: false, reason: "not_live" };
     if (!(await principalAllowed(caller))) return { ok: false, reason: "not_allowed" };
     return { ok: true, caller };

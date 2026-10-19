@@ -1,0 +1,5 @@
+model: Smart Model
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    expect: { triggers: true }

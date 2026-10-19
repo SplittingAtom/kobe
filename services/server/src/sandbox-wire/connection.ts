@@ -58,6 +58,8 @@ export interface ConnectionClaims {
   readonly sandboxId: string;
   readonly teamId: string;
   readonly userId: string;
+  /** A skill eval's ephemeral sandbox (KOBE-325): its eval thread, from the signed token. */
+  readonly evalThreadId?: string;
   /** Session token `exp` (seconds since the epoch). */
   readonly exp: number;
 }
@@ -147,7 +149,11 @@ export class SandboxConnection implements RegisteredConnection {
     this.#ctx = ctx;
     this.#socket = socket;
     this.#registry = registry;
-    this.target = { teamId: claims.teamId, userId: claims.userId };
+    this.target = {
+      teamId: claims.teamId,
+      userId: claims.userId,
+      ...(claims.evalThreadId === undefined ? {} : { evalThreadId: claims.evalThreadId }),
+    };
     this.sandboxId = claims.sandboxId;
     this.#tokenExpiresAt = claims.exp * 1000;
     this.#tokens = ctx.tuning.frameBurst;
@@ -1351,10 +1357,10 @@ export class SandboxConnection implements RegisteredConnection {
       this.close("replaced", "a newer connection of this sandbox registered first");
       return;
     }
-    const { teamId, userId } = this.target;
+    const { teamId } = this.target;
     const offered = new Map(hello.runs.map((r) => [r.run_id, r]));
     const { listed, lost, orphans } = await withTeam(ctx.db, teamId, async (tx) => {
-      const active = await activeLeasedRuns(tx, teamId, userId);
+      const active = await activeLeasedRuns(tx, this.target, this.sandboxId);
       // A compaction is never kept (KOBE-213): its `thread.compact` was issued on the old
       // connection, so no answer can arrive on this one; it ends (failed) and the agent, not
       // seeing it listed, aborts it. Its thread is released, its queue moves on.

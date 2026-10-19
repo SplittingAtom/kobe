@@ -30,6 +30,8 @@ export async function listThreadActivity(
         eq(threads.ownerUserId, viewer.userId),
         sql`${threads.deletedAt} IS NULL`,
         eq(threads.isTest, false),
+        // A skill eval's thread (KOBE-325) is no chat of the member's: no rail dot either.
+        eq(threads.skillEval, false),
         eq(threads.status, "running"),
       ),
     )

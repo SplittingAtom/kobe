@@ -51,9 +51,11 @@ describe("blob-ref columns on an older schema", () => {
     const present = await existingColumns(conn(), asked);
     const names = present.map((c) => `${c.table}.${c.column}`);
     // Added after that level: the hold history (KOBE-304), personal_skill_versions (the 0128
-    // rename), the skill package keys (KOBE-310) and catalog bytes (KOBE-317).
+    // rename), the skill package keys (KOBE-310), catalog bytes (KOBE-317) and eval bundles
+    // (KOBE-325).
     const later = (c: { table: string; column: string }) =>
       c.table === "workspace_file_hold_history" ||
+      c.table === "skill_eval_runs" ||
       c.table === "personal_skill_versions" ||
       c.table === "registry_versions" ||
       c.column === "package_storage_key";

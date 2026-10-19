@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   check,
   foreignKey,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -138,18 +140,46 @@ export const teamSkillReviews = pgTable(
 );
 
 /** Team table: the team's skill switches (one row per team, created on first change). */
-export const teamSkillSettings = pgTable("team_skill_settings", {
-  teamId: uuid()
-    .primaryKey()
-    .references(() => teams.id, { onDelete: "cascade" }),
-  /** Members' personal skills are left out of this team's runs (spec D22). */
-  personalSkillsDisabled: boolean().notNull().default(false),
-  /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
-  membersMayAddCatalog: boolean().notNull().default(true),
-  /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
-  buildersMayInstallCatalog: boolean().notNull().default(true),
-  updatedBy: uuid()
-    .notNull()
-    .references(() => users.id),
-  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-});
+export const teamSkillSettings = pgTable(
+  "team_skill_settings",
+  {
+    teamId: uuid()
+      .primaryKey()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /** Members' personal skills are left out of this team's runs (spec D22). */
+    personalSkillsDisabled: boolean().notNull().default(false),
+    /** "Members may add catalog skills for themselves" (SK25, default on): member adds load. */
+    membersMayAddCatalog: boolean().notNull().default(true),
+    /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
+    buildersMayInstallCatalog: boolean().notNull().default(true),
+    /**
+     * The team's eval judge (KOBE-326, SK17): one of its enabled models, used when the Site's
+     * `judge_alias` is not enabled in the team; null (or a model disabled since): the team default.
+     * Checked against the team's models when set and again whenever it is used.
+     */
+    evalJudgeAlias: text(),
+    /**
+     * The optional monthly team eval cap (KOBE-327, SK18; protocol `teamEvalCapSchema`): dollars
+     * or tokens, at most one; none by default. Counted from `model_spend_daily.eval_*` and
+     * enforced in `kobe_reserve_budget` (an `eval` line on every eval and eval judge call).
+     */
+    evalCapUsd: numeric({ precision: 14, scale: 2, mode: "number" }),
+    evalCapTokens: bigint({ mode: "number" }),
+    updatedBy: uuid()
+      .notNull()
+      .references(() => users.id),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "team_skill_settings_eval_judge_alias",
+      sql`${t.evalJudgeAlias} IS NULL OR char_length(${t.evalJudgeAlias}) BETWEEN 1 AND 64`,
+    ),
+    check(
+      "team_skill_settings_eval_cap",
+      sql`(${t.evalCapUsd} IS NULL OR ${t.evalCapTokens} IS NULL)
+        AND (${t.evalCapUsd} IS NULL OR (${t.evalCapUsd} > 0 AND ${t.evalCapUsd} <= 1000000))
+        AND (${t.evalCapTokens} IS NULL OR ${t.evalCapTokens} BETWEEN 1 AND 1000000000000)`,
+    ),
+  ],
+);

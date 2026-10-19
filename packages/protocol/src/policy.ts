@@ -134,6 +134,8 @@ export const POLICY_REASON_CODES = [
   "mode_ask_on_write",
   "mode_auto_not_allowlisted", // auto: anything not allow-listed is denied, not prompted
   "scheduled_run_no_prompt", // D32: deny-don't-wait
+  "eval_run_no_prompt", // KOBE-325: a skill eval's run never asks; a would-ask call is denied
+  "eval_run_isolated", // KOBE-325: a skill eval never reads or writes the member's memory or projects
   "user_allow_rule",
   "approval_granted", // a valid signed approval exists for this exact call
   "budget_exhausted", // D30: pending approvals expire at 100 %

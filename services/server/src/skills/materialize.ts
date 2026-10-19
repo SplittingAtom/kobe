@@ -135,10 +135,13 @@ async function isSuspended(tx: KobeTx, teamId: string, hash: string): Promise<bo
   return rows.length > 0;
 }
 
-export interface LocatedBundle {
-  readonly storageKey: string;
-  readonly size: number;
-}
+export type LocatedBundle =
+  | { readonly storageKey: string; readonly size: number }
+  /**
+   * A Workbench test chat's draft bundle (KOBE-323): no version row holds it; the caller opens
+   * `draftBundleKey(prefix, team, draftId, hash)` of one of these drafts, size as `run.start` said.
+   */
+  | { readonly draftIds: readonly string[]; readonly size: number };
 
 /** The sandbox the request came from, as the verified token names it. */
 export interface BundleCaller {
@@ -161,10 +164,17 @@ export async function locateBundle(
 ): Promise<LocatedBundle | null> {
   if (await isBlocked(tx, hash)) return null;
   if (await isSuspended(tx, who.teamId, hash)) return null;
-  const bound = await tx.execute(sql`
-    SELECT 1
+  const bound = await tx.execute<{
+    skill_draft_id: string | null;
+    skill_eval_run_id: string | null;
+    size: number | null;
+  }>(sql`
+    SELECT t.skill_draft_id, t.skill_eval_run_id,
+           (SELECT (b ->> 'size')::int FROM jsonb_array_elements(c.frame -> 'config' -> 'skill_bundles') b
+             WHERE b ->> 'sha256' = ${hash}::text LIMIT 1) AS size
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
+      JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
       JOIN sandbox_commands c
         ON c.team_id = l.team_id AND c.run_id = l.run_id AND c.kind = 'run.start'
      WHERE l.team_id = ${who.teamId} AND l.user_id = ${who.userId}
@@ -173,8 +183,26 @@ export async function locateBundle(
        AND c.user_id = ${who.userId} AND c.status IN ('pending', 'delivered')
        AND c.frame -> 'config' -> 'skill_bundles'
            @> jsonb_build_array(jsonb_build_object('sha256', ${hash}::text))
-     LIMIT 1`);
+     ORDER BY t.skill_draft_id IS NULL
+     LIMIT 8`);
   if (bound.rows.length === 0) return null;
+  // A skill eval's run (KOBE-325): the eval's own stored runtime zip, scanned at its start.
+  const evalRuns = [
+    ...new Set(bound.rows.flatMap((r) => (r.skill_eval_run_id ? [r.skill_eval_run_id] : []))),
+  ];
+  if (evalRuns.length > 0) {
+    const size = bound.rows.find((r) => r.skill_eval_run_id !== null)?.size;
+    const evalBundle = await tx.execute<{ key: string }>(sql`
+      SELECT bundle_key AS key FROM skill_eval_runs
+       WHERE team_id = ${who.teamId} AND runtime_hash = ${hash}
+         AND id IN (${sql.join(
+           evalRuns.map((id) => sql`${id}::uuid`),
+           sql`, `,
+         )})
+       LIMIT 1`);
+    const key = evalBundle.rows[0]?.key;
+    return key && size != null ? { storageKey: key, size: Number(size) } : null;
+  }
   // The bytes: this team's version with that hash, else one of the caller's own personal versions
   // (versions are immutable, so a replaced skill's old bytes are still there).
   const [team] = await tx
@@ -198,5 +226,11 @@ export async function locateBundle(
     WHERE runtime_hash = ${hash} AND runtime_storage_key IS NOT NULL
     ORDER BY seq DESC LIMIT 1`);
   const row = catalog.rows[0];
-  return row ? { storageKey: row.key, size: Number(row.size) } : null;
+  if (row) return { storageKey: row.key, size: Number(row.size) };
+  // A test chat's draft (KOBE-323): only the drafts of the runs that bound this hash, in this team.
+  const drafts = bound.rows.filter((r) => r.skill_draft_id !== null && r.size !== null);
+  const size = drafts[0]?.size;
+  return size == null
+    ? null
+    : { draftIds: [...new Set(drafts.map((r) => r.skill_draft_id as string))], size: Number(size) };
 }

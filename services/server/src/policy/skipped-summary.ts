@@ -29,6 +29,8 @@ const RISK_LABEL: Readonly<Record<RiskClass, string>> = {
 
 const REASON_LABEL: Readonly<Partial<Record<PolicyReasonCode, string>>> = {
   scheduled_run_no_prompt: "scheduled runs cannot ask for approval and it is not allow-listed",
+  eval_run_no_prompt: "skill eval runs cannot ask for approval",
+  eval_run_isolated: "skill eval runs never use your memory or projects",
   mode_auto_not_allowlisted: "auto mode only runs allow-listed tools",
   site_deny_rule: "blocked by policy",
   team_deny_rule: "blocked by policy",

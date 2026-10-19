@@ -271,6 +271,7 @@ function searchQuery(
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
         AND NOT t.is_test
+        AND NOT t.skill_eval
         AND (t.owner_user_id = ${p.viewerUserId}
              OR (NOT ${p.ownOnly}::boolean AND (t.shared_to_team
                   OR (t.shared_to_project

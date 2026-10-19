@@ -1,5 +1,6 @@
 import type { VerifiedIsolation } from "../isolation/gate.js";
 import type { SandboxSettings } from "./config.js";
+import { teamQuotaHard } from "./eval-quota.js";
 import {
   ANNOTATION_TEAM_ID,
   ANNOTATION_USER_ID,
@@ -219,7 +220,8 @@ export function resourceQuotaManifest(namespace: string, s: SandboxSettings): Ku
     apiVersion: "v1",
     kind: "ResourceQuota",
     metadata: { name: RESOURCE_QUOTA, namespace, labels: managedLabels },
-    spec: { hard: { ...s.teamQuota } },
+    // The members' quota plus the skill-eval share (KOBE-325, `kobe-skill-eval-quota`).
+    spec: { hard: teamQuotaHard(s) },
   };
 }
 

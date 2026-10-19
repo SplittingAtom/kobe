@@ -1,0 +1,7 @@
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    files:
+      - fixtures/sales.csv
+      - fixtures/missing.csv
+    expect: { triggers: true }

@@ -1,6 +1,8 @@
 import { SYSTEM_ACTOR, eq, sql, teams, withTeam } from "@kobe/db";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAudit } from "../audit/record.js";
+import { logger } from "../logger.js";
+import { offboardSkillEvals } from "./skill-evals.js";
 import {
   RETAIN_DAYS,
   type Departed,
@@ -43,6 +45,12 @@ export async function offboardSandbox(
   const team = await findTeam(ctx, target.teamId);
   if (!team) return "no_sandbox";
   const { userId, teamId } = target;
+  // KOBE-325: the member's eval runs stop and their eval sandboxes go, sandbox or not. A failure
+  // never keeps the member's own sandbox: the runner starts nothing for a departed starter, and
+  // the reaper deletes eval sandboxes whose execution stopped (review L9).
+  await offboardSkillEvals(ctx, team, userId).catch((err: unknown) =>
+    logger.error({ err, team_id: teamId, user_id: userId }, "offboarding skill evals failed"),
+  );
   const provider = ctx.provider();
   const destroyed = provider
     ? await provider.destroySandbox(team, userId, { retainVolume: true })

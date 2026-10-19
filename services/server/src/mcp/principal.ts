@@ -36,6 +36,7 @@ export async function authenticateSandbox(
     sandboxId: claims.sub,
     teamId: claims.team_id,
     userId: claims.user_id,
+    ...(claims.eval_thread === undefined ? {} : { evalThreadId: claims.eval_thread }),
   };
   if (!(await deps.liveness.isLive(principal))) return { ok: false, code: "not_live" };
   const [user] = await deps.db

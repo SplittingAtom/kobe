@@ -1,3 +1,4 @@
+import { MODEL_ALIAS_PATTERN } from "@kobe/db";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -14,9 +15,10 @@ import {
 } from "../skills/review.js";
 import {
   getCatalogSwitches,
+  getEvalCap,
+  getEvalJudgeAlias,
   getPersonalSkillsDisabled,
-  setCatalogSwitches,
-  setPersonalSkillsDisabled,
+  setTeamSkillSettings,
 } from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
@@ -44,6 +46,8 @@ const settingsSchema = z
     personalSkillsDisabled: z.boolean().optional(),
     membersMayAddCatalog: z.boolean().optional(),
     buildersMayInstallCatalog: z.boolean().optional(),
+    /** The team's eval judge (KOBE-326): one of its enabled models, or null for the default. */
+    evalJudgeAlias: z.string().regex(new RegExp(MODEL_ALIAS_PATTERN)).max(64).nullable().optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined));
 const idSchema = z.uuid();
@@ -191,6 +195,9 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       personalSkillsDisabled: await getPersonalSkillsDisabled(db, teamId),
       membersMayAddCatalog: catalog.membersMayAdd,
       buildersMayInstallCatalog: catalog.buildersMayInstall,
+      // Null: the team default judges (also when the chosen model was disabled since).
+      evalJudgeAlias: await getEvalJudgeAlias(db, teamId),
+      evalCap: await getEvalCap(db, teamId),
     };
   };
 
@@ -203,21 +210,33 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     if (!body)
       return invalidRequest(
         c,
-        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog: true or false.",
+        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog (true or false) and evalJudgeAlias (a model alias or null). The eval cap is set at PUT /v1/team/budgets/eval-cap.",
       );
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
-    if (body.personalSkillsDisabled !== undefined)
-      await setPersonalSkillsDisabled(db, teamId, userId, body.personalSkillsDisabled);
-    if (body.membersMayAddCatalog !== undefined || body.buildersMayInstallCatalog !== undefined)
-      await setCatalogSwitches(db, teamId, userId, {
+    // One transaction (review L6); a judge model the team hasn't enabled changes nothing.
+    const set = await setTeamSkillSettings(db, teamId, userId, {
+      ...(body.personalSkillsDisabled !== undefined
+        ? { personalSkillsDisabled: body.personalSkillsDisabled }
+        : {}),
+      catalog: {
         ...(body.membersMayAddCatalog !== undefined
           ? { membersMayAdd: body.membersMayAddCatalog }
           : {}),
         ...(body.buildersMayInstallCatalog !== undefined
           ? { buildersMayInstall: body.buildersMayInstallCatalog }
           : {}),
-      });
+      },
+      ...(body.evalJudgeAlias !== undefined ? { evalJudgeAlias: body.evalJudgeAlias } : {}),
+    });
+    if (!set.ok)
+      return c.json(
+        {
+          code: "model_not_enabled",
+          message: "The eval judge must be one of the team's enabled models.",
+        },
+        422,
+      );
     return c.json(await settingsJson(teamId));
   });
 

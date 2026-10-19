@@ -17,6 +17,7 @@ import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension
 import { sweepPiPrivateDirs } from "./threads/exec-wiring.js";
 import { SessionClient } from "./session/exchange.js";
 import { createSkillFetcher } from "./skills/client.js";
+import { createSkillEvalHooks } from "./skill-eval/hooks.js";
 import { SkillStore } from "./skills/store.js";
 import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 import { SyncClient } from "./workspace/client.js";
@@ -131,9 +132,17 @@ async function main(): Promise<void> {
           log: logger,
         });
   await skills?.init();
+  // KOBE-325: a skill eval's fixtures and after-snapshot (the server sends these only to an eval
+  // sandbox, whose /workspace is an emptyDir with sync off).
+  const skillEval = createSkillEvalHooks({
+    workspaceDir: config.workspaceDir,
+    serverUrl: config.serverUrl,
+    readToken,
+  });
   const agent = new Agent({
     config,
     ...(skills === undefined ? {} : { skills }),
+    skillEval,
     logger,
     readToken,
     ...(workspace === undefined ? {} : { workspace }),

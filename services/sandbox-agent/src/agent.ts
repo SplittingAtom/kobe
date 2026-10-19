@@ -9,6 +9,7 @@ import {
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_TRACE_SPANS,
+  CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
@@ -31,7 +32,8 @@ import { toolsError } from "./tools/channel.js";
 import type { PushedFile } from "./workspace/sync.js";
 import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
-import { fail, type CommandOutcome } from "./threads/outcome.js";
+import { fail, ok, type CommandOutcome } from "./threads/outcome.js";
+import type { SkillEvalHooks } from "./skill-eval/hooks.js";
 import { compactFailure, type CompactReply } from "./threads/compact.js";
 import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js";
 import { encodeOutbound } from "./wire/encode.js";
@@ -90,6 +92,8 @@ export interface AgentDeps {
   readonly exec?: { readonly extension: string; readonly wiring: ExecWiring } | undefined;
   /** Skills store (KOBE-82); absent: runs that list skills fail instead of starting without them. */
   readonly skills?: SkillStore;
+  /** Skill eval fixtures and snapshots (KOBE-325); present: the agent announces `skill_eval`. */
+  readonly skillEval?: SkillEvalHooks;
 }
 
 /** What the agent needs of workspace sync (`workspace/sync.ts`). */
@@ -120,6 +124,9 @@ const COMMAND_FRAMES = new Set([
   "run.stop",
   "pi.command",
   "session.restore",
+  "eval.prepare",
+  "eval.snapshot",
+  "eval.read",
 ]);
 const DRAIN_ON_FATAL_MS = 5000;
 
@@ -365,6 +372,8 @@ export class Agent {
       CAPABILITY_TRACE_SPANS,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
+      // Skill eval fixtures in, workspace snapshot out (KOBE-325; sent only to eval sandboxes).
+      ...(this.#deps.skillEval === undefined ? [] : [CAPABILITY_SKILL_EVAL]),
     ];
     return {
       v: 1,
@@ -518,8 +527,37 @@ export class Agent {
         return this.#threads.piCommand(frame);
       case "session.restore":
         return this.#threads.restore(frame);
+      case "eval.prepare":
+      case "eval.snapshot":
+      case "eval.read":
+        return this.#skillEval(frame);
       default:
         return Promise.resolve(fail("internal", "not a command"));
+    }
+  }
+
+  /**
+   * KOBE-325: a skill eval's fixtures in (`eval.prepare`) or its workspace snapshot out; KOBE-326:
+   * the matched outputs' bytes for the server's judge (`eval.read`).
+   */
+  async #skillEval(
+    frame: Extract<ServerToSandboxFrame, { type: "eval.prepare" | "eval.snapshot" | "eval.read" }>,
+  ): Promise<CommandOutcome> {
+    const hooks = this.#deps.skillEval;
+    if (!hooks) return fail("unknown_type", "this agent takes no skill eval commands");
+    try {
+      if (frame.type === "eval.prepare") {
+        await hooks.prepare(frame);
+        return ok();
+      }
+      if (frame.type === "eval.read") return ok(await hooks.read(frame));
+      return ok(await hooks.snapshot(frame));
+    } catch (error) {
+      this.#deps.logger.warn(
+        { err: (error as Error).message, type: frame.type },
+        "eval command failed",
+      );
+      return fail("internal", `${frame.type} failed: ${(error as Error).message}`);
     }
   }
 

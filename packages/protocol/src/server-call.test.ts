@@ -7,7 +7,10 @@ import {
   SERVER_CALL_EPILOGUE_MAX_MS,
   SERVER_CALL_LIMITS,
   SERVER_CALL_REASONING_EFFORT,
+  SERVER_CALL_RESPONSE_FORMATS,
   SERVER_CALL_TOKEN_HEADER,
+  SERVER_CALL_TOKEN_PURPOSES,
+  SKILL_EVAL_JUDGE_RESPONSE_SCHEMA,
   SERVER_CALL_TOKEN_SKEW_SECONDS,
   decideStreamOpen,
   epilogueOpen,
@@ -186,6 +189,30 @@ describe("server-call token", () => {
     expect(SERVER_CALL_LIMITS.followups.skip_at_percent).toBe(80);
     expect(SERVER_CALL_LIMITS.title.skip_at_percent).toBe(100);
   });
+
+  it("carries the eval judge's purpose, never announced in an epilogue (KOBE-326)", () => {
+    const parse = (over: Partial<ServerCallClaims>) =>
+      serverCallClaimsSchema.safeParse({ ...CLAIMS, ...over }).success;
+    expect(SERVER_CALL_TOKEN_PURPOSES).toEqual(["title", "followups", "eval_judge"]);
+    expect(parse({ purpose: "eval_judge", max_output_tokens: 512 })).toBe(true);
+    expect(
+      parse({
+        purpose: "eval_judge",
+        max_output_tokens: SERVER_CALL_LIMITS.eval_judge.reasoning_max_output_tokens + 1,
+      }),
+    ).toBe(false);
+    expect(Object.keys(EPILOGUE_EVENT_TYPES)).toEqual(["title", "followups"]);
+    expect(() =>
+      parseEventPayload("run.completed", { leaf_entry_id: null, epilogue: ["eval_judge"] }),
+    ).toThrow();
+    // The judge runs at temperature 0 under its own, longer timeout; epilogue calls keep theirs.
+    expect(SERVER_CALL_LIMITS.eval_judge).toMatchObject({
+      temperature: 0,
+      timeout_ms: 60_000,
+      skip_at_percent: 100,
+    });
+    expect(SERVER_CALL_EPILOGUE_MAX_MS).toBe(30_000);
+  });
 });
 
 describe("server-call request body", () => {
@@ -211,6 +238,25 @@ describe("server-call request body", () => {
     expect(ok({ stream: true })).toBe(false);
     expect(ok({ n: 2 })).toBe(false);
     expect(ok({ web_search_options: {} })).toBe(false);
+  });
+
+  it("takes a long message and the judge's structured format by shape (the gateway checks the purpose)", () => {
+    const long = "x".repeat(SERVER_CALL_LIMITS.eval_judge.max_message_chars);
+    expect(ok({ messages: [{ role: "user", content: long }] })).toBe(true);
+    expect(ok({ messages: [{ role: "user", content: `${long}x` }] })).toBe(false);
+    expect(ok({ response_format: SERVER_CALL_RESPONSE_FORMATS.eval_judge })).toBe(true);
+    expect(SERVER_CALL_RESPONSE_FORMATS.eval_judge.json_schema.schema).toBe(
+      SKILL_EVAL_JUDGE_RESPONSE_SCHEMA,
+    );
+    expect(ok({ response_format: { type: "json_object" } })).toBe(false);
+    expect(
+      ok({
+        response_format: {
+          ...SERVER_CALL_RESPONSE_FORMATS.eval_judge,
+          json_schema: { name: "v", strict: false, schema: {} },
+        },
+      }),
+    ).toBe(false);
   });
 
   it("needs exactly one output limit", () => {

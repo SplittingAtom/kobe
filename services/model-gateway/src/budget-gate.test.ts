@@ -488,3 +488,102 @@ describe("BudgetGate (KOBE-42)", () => {
     expect(() => parseVerdict(undefined)).toThrow();
   });
 });
+
+describe("BudgetGate: the team eval cap (KOBE-327)", () => {
+  const cap = (spent: number) =>
+    line({
+      scope: "eval",
+      unit: "usd",
+      limit: 5,
+      spent,
+      limitExact: "5",
+      spentExact: String(spent),
+    });
+  const state = (spent: number): MemberBudgetState => ({
+    lines: [line({ limit: 1_000, spent: 0 })],
+    evalLines: [cap(spent)],
+    requestsPerMinute: 1_000,
+  });
+
+  it("stops an eval sandbox's and the judge's calls at the cap; other calls never see it", async () => {
+    const { g } = gate(() => state(5));
+    const user = randomUUID();
+    const evalCall = { ...call(user), eval: true };
+    const judge = {
+      ...call(user),
+      sandboxId: undefined,
+      runId: randomUUID(),
+      purpose: "eval_judge" as const,
+    };
+    for (const c of [evalCall, judge])
+      expect(await g.admit(c)).toEqual({
+        ok: false,
+        status: 402,
+        code: "budget_exhausted",
+        message: "Your team's monthly eval cap is used up.",
+      });
+    const plain = await g.admit(call(user));
+    expect(plain.ok).toBe(true);
+    if (plain.ok) plain.release?.(false);
+  });
+
+  it("holds eval calls' reservations against the cap (in memory as in Postgres)", async () => {
+    // 200 tokens held per call in flight against a cap of 200 tokens.
+    const { g } = gate(() => ({
+      lines: [],
+      evalLines: [
+        line({
+          scope: "eval",
+          unit: "tokens",
+          limit: 200,
+          spent: 0,
+          limitExact: "200",
+          spentExact: "0",
+        }),
+      ],
+      requestsPerMinute: 1_000,
+    }));
+    const first = await g.admit({ ...call(randomUUID()), eval: true });
+    expect(first.ok).toBe(true);
+    const second = await g.admit({ ...call(randomUUID()), eval: true });
+    // Refused while the first holds its share of what is left (the reservation path's rule).
+    expect(second).toMatchObject({ ok: false, status: 429, code: "too_many_calls_in_flight" });
+    // An ordinary call is not judged by the cap and holds nothing against it.
+    const plain = await g.admit(call(randomUUID()));
+    expect(plain.ok).toBe(true);
+    if (first.ok) first.release?.(false);
+    const third = await g.admit({ ...call(randomUUID()), eval: true });
+    expect(third.ok).toBe(true);
+  });
+});
+
+describe("BudgetGate: an eval cap on a team without budgets (KOBE-327 review L5)", () => {
+  it("still reserves an eval call against the cap alone", async () => {
+    const seen: { scopes: string[] }[] = [];
+    const store: ReservationStore = {
+      reserve: async (r) => {
+        seen.push({ scopes: r.lines.map((l) => l.scope) });
+        return { ok: true };
+      },
+      extend: async () => undefined,
+      end: async () => undefined,
+    };
+    const g = new BudgetGate(
+      {
+        load: async () => ({
+          lines: [],
+          evalLines: [line({ scope: "eval", unit: "tokens", limit: 10_000, spent: 0 })],
+          requestsPerMinute: 1_000,
+        }),
+        prices: async () => new Map(),
+      },
+      { ttlMs: 1_000, reservations: store },
+    );
+    const evalCall = await g.admit({ ...call(randomUUID()), eval: true });
+    expect(evalCall.ok).toBe(true);
+    const plain = await g.admit(call(randomUUID()));
+    expect(plain.ok).toBe(true);
+    // Only the eval call reserved (the plain one has no line at all).
+    expect(seen).toEqual([{ scopes: ["eval"] }]);
+  });
+});

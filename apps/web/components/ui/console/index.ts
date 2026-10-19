@@ -20,6 +20,7 @@ export {
   type Confirm,
   type ConfirmOptions,
 } from "./confirm-dialog";
+export { Dialog, DialogClose } from "./dialog";
 export { EmbeddedPage } from "./embedded-context";
 export { EmptyState } from "./empty-state";
 export { Field, FieldError, FormRow, RequiredMark, useFieldControl } from "./field";
@@ -31,6 +32,7 @@ export { PageHeader } from "./page-header";
 export { RowMenu, type RowMenuItem } from "./row-menu";
 export { Card, Section } from "./section";
 export { SideNav, SideNavGroup, SideNavLink } from "./side-nav";
+export { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
 export {
   Table,
   TableBody,

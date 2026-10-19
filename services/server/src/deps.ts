@@ -40,6 +40,8 @@ import { createWebSearchService } from "./web-search/service.js";
 import {
   DbRunOrchestrator,
   PINNED_AGENTS,
+  withDraftTests,
+  withSkillEvals,
   type RunOrchestratorOptions,
   type ServerRunOrchestrator,
 } from "./runs/index.js";
@@ -67,6 +69,7 @@ import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
+import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
 import type { UploadSettings } from "./uploads/settings.js";
 import type { ScoreSink } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
@@ -220,6 +223,11 @@ export interface ServerDeps {
   readonly runs: ServerRunOrchestrator;
   /** The run orchestrator's agent resolver (KOBE-44: the thread API asks it for the agent's model pin). */
   readonly runAgents: RunAgentResolver;
+  /**
+   * The skill eval judge (KOBE-326): server calls through the model gateway; undefined when server
+   * calls are not configured (a `judge` check then fails `judge_failed`).
+   */
+  readonly skillEvalJudge: SkillEvalJudge | undefined;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models:
     | {
@@ -326,21 +334,35 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   };
   const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
-  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
+  // Workbench test chats (KOBE-323) run their draft alone, whatever resolver runs the rest.
+  const runAgents = withSkillEvals(
+    withDraftTests(options.runs?.agents ?? PINNED_AGENTS, options.blobs),
+  );
   // Titles (KOBE-219) and follow-ups (KOBE-222) after a completed run, off its path.
-  const serverCalls = options.serverCalls
+  const serverCallClient = options.serverCalls
+    ? createServerCallClient({
+        url: options.serverCalls.gatewayUrl,
+        key: options.serverCalls.key,
+        ...(options.serverCalls.fetch ? { fetch: options.serverCalls.fetch } : {}),
+      })
+    : undefined;
+  const serverCalls = serverCallClient
     ? createServerCalls({
         db: database.db,
-        client: createServerCallClient({
-          url: options.serverCalls.gatewayUrl,
-          key: options.serverCalls.key,
-          ...(options.serverCalls.fetch ? { fetch: options.serverCalls.fetch } : {}),
-        }),
+        client: serverCallClient,
         agents: runAgents,
         background,
         log: logger.child({ component: "server-calls" }),
       })
     : NO_SERVER_CALLS;
+  // The skill eval judge (KOBE-326): a server call too, purpose eval_judge.
+  const skillEvalJudge = serverCallClient
+    ? createSkillEvalJudge({
+        db: database.db,
+        client: serverCallClient,
+        log: logger.child({ component: "skill-eval-judge" }),
+      })
+    : undefined;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
   const projectMounts = createProjectMounts(database.db, logger);
   const sandboxWire = createSandboxWire({
@@ -467,6 +489,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     sandboxWire,
     runs,
     runAgents,
+    skillEvalJudge,
     mcp,
     connectorUrlPolicy,
     connectorProbe: options.connectorProbe ?? NO_PROBE,

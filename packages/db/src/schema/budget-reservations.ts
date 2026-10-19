@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   index,
   numeric,
@@ -39,6 +40,11 @@ export const budgetReservations = pgTable(
     /** The member whose sandbox made the call (no FK: a reservation is short-lived). */
     userId: uuid().notNull(),
     ...amounts(),
+    /**
+     * A skill eval's call (KOBE-327): it was reserved against the team eval cap too, and counts
+     * there for the others (`kobe_reserve_budget` sets it when the call carries an `eval` line).
+     */
+    eval: boolean().notNull().default(false),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp({ withTimezone: true }).notNull(),
   },

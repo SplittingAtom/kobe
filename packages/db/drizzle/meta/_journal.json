@@ -1002,6 +1002,48 @@
       "when": 1792351318117,
       "tag": "0142_runs_agent_version_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1792388375205,
+      "tag": "0143_skill_drafts_thread_skill_test_skill_evals_eval_judge_eval_cap",
+      "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1792388376313,
+      "tag": "0144_skill_drafts_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1792388377419,
+      "tag": "0145_thread_skill_test_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1792388378528,
+      "tag": "0146_skill_evals_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1792388379595,
+      "tag": "0147_run_usage_eval_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1792388380693,
+      "tag": "0148_eval_cap_reserve",
+      "breakpoints": true
     }
   ]
 }

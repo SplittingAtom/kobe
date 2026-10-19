@@ -15,6 +15,7 @@ import {
 import { listTeamMembers, type TeamMember } from "../../../lib/admin/api/team/members";
 import { formatTokens, formatUsd } from "../../../lib/admin/usage-format";
 import { AmountFields, parseAmounts, useAmountTexts } from "../budgets/amount-fields";
+import { EvalCapForm } from "./eval-cap-form";
 import {
   Button,
   EmptyState,
@@ -169,7 +170,7 @@ export function TeamBudgetsPage() {
       <ResourceView state={state} label="budgets">
         {({ budgets, members }) => (
           <Body
-            key={JSON.stringify([budgets.team, budgets.members])}
+            key={JSON.stringify([budgets.team, budgets.members, budgets.evalCap])}
             teamId={teamId}
             budgets={budgets}
             members={members}
@@ -204,6 +205,8 @@ function Body({
   const [invalid, setInvalid] = useState<string | null>(null);
   const siteRpm = budgets.site.userRequestsPerMinute;
   const [confirm, confirmDialog] = useConfirm();
+  // A spend cap: the budget permission, as every budget on this page (never the review one).
+  const canSetCap = useTeamAccess().permissions.includes("team.budgets.manage");
 
   async function removeBudget(m: TeamBudgets["members"][number], trigger: HTMLElement | null) {
     const yes = await confirm(
@@ -308,6 +311,17 @@ function Body({
           </FormRow>
         </form>
       </Section>
+
+      <SpendByKind budgets={budgets} />
+      {budgets.evalCap && canSetCap && (
+        // Keyed by the cap: after a save or a removal the form shows what the server holds.
+        <EvalCapForm
+          key={JSON.stringify([budgets.evalCap.usd, budgets.evalCap.tokens])}
+          teamId={teamId}
+          cap={budgets.evalCap}
+          run={run}
+        />
+      )}
 
       <Section
         id="default-budget"
@@ -414,5 +428,58 @@ function Body({
       </Section>
       {confirmDialog}
     </>
+  );
+}
+
+/** `run_usage.kind` (KOBE-234, KOBE-327): who spent. */
+const KIND_LABELS: Readonly<Record<string, string>> = {
+  run: "Runs",
+  title: "Titles",
+  followups: "Follow-ups",
+  eval: "Skill evals",
+  eval_judge: "Eval judge",
+};
+
+/**
+ * This month's spend by kind, and the team eval cap (KOBE-327): every kind counts against the
+ * budgets above; the cap counts skill evals and their judge only.
+ */
+function SpendByKind({ budgets }: { readonly budgets: TeamBudgets }) {
+  const kinds = budgets.spentByKind ?? [];
+  const cap = budgets.evalCap;
+  if (kinds.length === 0 && !cap) return null;
+  return (
+    <Section id="spend-by-kind" title="This month by kind">
+      {kinds.length > 0 && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Kind</TableHead>
+              <TableHead>Dollars</TableHead>
+              <TableHead>Tokens</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {kinds.map((k) => (
+              <TableRow key={k.kind}>
+                <TableRowHeader>{KIND_LABELS[k.kind] ?? k.kind}</TableRowHeader>
+                <TableCell>{formatUsd(k.usd)}</TableCell>
+                <TableCell>{formatTokens(k.tokens)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+      {cap && (
+        <p className="mt-3 text-sm">
+          Team eval cap:{" "}
+          {cap.usd !== null
+            ? spentOf(cap.monthUsd, cap.usd)
+            : cap.tokens !== null
+              ? tokensOf(cap.monthTokens, cap.tokens)
+              : `none (${formatUsd(cap.monthUsd)} on evals this month)`}
+        </p>
+      )}
+    </Section>
   );
 }

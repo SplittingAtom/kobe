@@ -8,6 +8,15 @@ import type { ErrorInfo } from "@kobe/protocol";
 export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   account_inactive: "The run could not start: the account is deactivated or no longer in the team.",
   agent_unavailable: "The run could not start: the thread's agent version is not available.",
+  // KOBE-323: a Workbench test chat runs only its draft, never the member's usual skills instead.
+  skill_draft_unavailable:
+    "This test chat's draft isn't available: it was deleted, or it is no longer shared with you.",
+  skill_draft_personal_off:
+    "This team has turned personal skills off, so only its Builders and Team admins can test drafts here.",
+  skill_draft_declined:
+    "This team declined a personal skill with exactly these files, so the draft can't be tested here.",
+  skill_draft_changed:
+    "The draft changed after you sent the message, so the run didn't start. Send it again to test the current draft.",
   agent_suspended:
     "This agent is suspended, so it can't start new runs. Ask your team admin to reactivate it, or start a conversation with another agent.",
   // KOBE-174: a scheduled run the budget refused at fire time (no retry; the next occurrence tries).

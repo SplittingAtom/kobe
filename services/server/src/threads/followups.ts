@@ -93,7 +93,7 @@ export type FollowupsCheck = (tx: KobeTx, ids: RunIds) => Promise<boolean>;
 export const followupsEligibleInTx: FollowupsCheck = async (tx, { teamId, runId, threadId }) => {
   if (!(await readFollowupsEnabled(tx, teamId))) return false;
   const res = await tx.execute<{ eligible: boolean; user_id: string | null }>(sql`
-    SELECT (NOT t.is_test AND t.deleted_at IS NULL AND r.kind = 'message'
+    SELECT (NOT t.is_test AND NOT t.skill_eval AND t.deleted_at IS NULL AND r.kind = 'message'
             AND r.status = 'completed' AND r.trigger = 'user') AS eligible,
            l.user_id
       FROM threads t

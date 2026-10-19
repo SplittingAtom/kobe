@@ -131,7 +131,8 @@ describe("the seed (ac-1)", () => {
       expect(r, r.name).toMatchObject({
         sp: "kobe",
         vp: "kobe",
-        semver: "1.0.0",
+        // skill-creator 1.1.0 proposes eval suites (KOBE-328); the others are still 1.0.0.
+        semver: r.name === "skill-creator" ? "1.1.0" : "1.0.0",
         state: "approved",
         submitted_by: null,
         reviewed_by: null,

@@ -112,6 +112,10 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    // A skill eval (KOBE-325) never runs on a member's own keys (nor a Registry reviewer's).
+    if (auth.principal.evalThreadId !== undefined) {
+      return c.json({ code: "not_connected", message: "No personal keys in skill evals." }, 404);
+    }
     const revealed = await deps.mcp.revealCredential(auth.principal, id.data);
     if (revealed.ok) {
       const credential = revealed.credential;

@@ -19,6 +19,14 @@ export const agents = defineDomain({
     "team_skill_optouts",
     "team_skill_blocks",
     "member_skill_enablements",
+    // Workbench drafts (KOBE-320).
+    "skill_drafts",
+    "skill_draft_files",
+    "skill_draft_history",
+    "skill_draft_file_history",
+    // Skill eval runs and their executions (KOBE-325).
+    "skill_eval_runs",
+    "skill_eval_results",
   ],
   siteWide: [
     "skill_blocklist",

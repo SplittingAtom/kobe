@@ -251,6 +251,8 @@ export function createModelGateway(options: GatewayOptions): Server {
           readonly sandboxId: string | undefined;
         };
         readonly serverCall: ServerCallClaims | undefined;
+        /** A skill eval's own sandbox (its token names an `eval_thread`, KOBE-327). */
+        readonly evalSandbox?: boolean;
       }
     | {
         readonly ok: false;
@@ -297,6 +299,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       ok: true,
       identity: { teamId: claims.team_id, userId: claims.user_id, sandboxId: claims.sub },
       serverCall: undefined,
+      ...(claims.eval_thread === undefined ? {} : { evalSandbox: true }),
     };
   }
 
@@ -379,7 +382,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       sendError(res, kind, 404, "not_found", "Not a model inference endpoint.");
       return;
     }
-    const { identity, serverCall } = caller;
+    const { identity, serverCall, evalSandbox } = caller;
     // Limits are per sandbox; server calls have their own, per team (review L4).
     const limitKey = identity.sandboxId ?? `server-call:${identity.teamId}`;
     const limits = serverCall && options.serverCalls ? options.serverCalls : options;
@@ -485,7 +488,9 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(
         req,
-        serverCall ? serverCallBodyLimit(settings.maxBodyBytes) : settings.maxBodyBytes,
+        serverCall
+          ? serverCallBodyLimit(settings.maxBodyBytes, serverCall.purpose)
+          : settings.maxBodyBytes,
         (n) => options.bytes.tryTake(limitKey, n),
         (n) => {
           bytesHeld += n;
@@ -597,6 +602,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         callId: randomUUID(),
         runId,
         ...(serverCall ? { purpose: serverCall.purpose } : {}),
+        ...(evalSandbox ? { eval: true } : {}),
         route: route.kind,
         path: route.path,
         model,
@@ -686,7 +692,7 @@ export function createModelGateway(options: GatewayOptions): Server {
             runId: call.runId,
           }),
           "kobe.call_id": call.callId,
-          "kobe.usage_kind": call.purpose ?? "run",
+          "kobe.usage_kind": call.purpose ?? (call.eval ? "eval" : "run"),
           "kobe.route": call.route,
           ...(thinkingLevel === undefined ? {} : { "kobe.thinking_level": thinkingLevel }),
           ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),

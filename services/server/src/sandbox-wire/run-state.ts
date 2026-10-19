@@ -16,7 +16,8 @@ import { failureInfo } from "../runs/failure-codes.js";
 import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
 import { followupsDecisionInTx } from "../threads/followups.js";
 import { saveFallbackTitleInTx, titleDecisionInTx } from "../threads/title.js";
-import type { RunEnd } from "./types.js";
+import { slotOf } from "./slots.js";
+import type { RunEnd, SandboxTarget } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
 export type InterruptCause = "sandbox_gone" | "not_resumed" | "pi_exited";
@@ -286,12 +287,22 @@ export interface LeasedRun {
   readonly startedAt: Date | null;
 }
 
-/** Runs leased to the (team, user) sandbox that are still active. */
+/**
+ * Runs leased to this sandbox that are still active: the member's (slot `''`) for a member
+ * connection; for an eval sandbox (KOBE-325) only its own thread's slot and only leases naming
+ * its claim UID, so an eval sandbox never sees, or may send frames for, the member's runs.
+ */
 export async function activeLeasedRuns(
   tx: KobeTx,
-  teamId: string,
-  userId: string,
+  target: SandboxTarget,
+  sandboxId: string,
 ): Promise<LeasedRun[]> {
+  const { teamId, userId } = target;
+  const mine =
+    target.evalThreadId === undefined
+      ? sql`l.slot = ''`
+      : sql`l.slot = ${slotOf(target)} AND l.thread_id = ${target.evalThreadId}
+            AND l.sandbox_id = ${sandboxId}`;
   const res = await tx.execute<{
     run_id: string;
     thread_id: string;
@@ -303,7 +314,7 @@ export async function activeLeasedRuns(
     SELECT l.run_id, l.thread_id, r.status, r.sandbox_seq, r.kind, r.started_at
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
-     WHERE l.team_id = ${teamId} AND l.user_id = ${userId}
+     WHERE l.team_id = ${teamId} AND l.user_id = ${userId} AND ${mine}
        AND r.status IN ('running', 'waiting_approval')`);
   return res.rows.map((r) => ({
     runId: r.run_id,

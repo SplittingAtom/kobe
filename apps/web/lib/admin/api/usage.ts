@@ -38,9 +38,12 @@ export interface AgentUsage extends UsageTotals {
   readonly scope: "team" | "personal" | "gallery" | null;
 }
 
-/** Who made the calls (KOBE-234 `run_usage.kind`): a run, or the server's title / follow-ups. */
+/**
+ * Who made the calls (KOBE-234 `run_usage.kind`): a run, the server's title / follow-ups, or a
+ * skill eval's sandbox and its judge (KOBE-326).
+ */
 export interface KindUsage extends UsageTotals {
-  readonly kind: "run" | "title" | "followups";
+  readonly kind: "run" | "title" | "followups" | "eval" | "eval_judge";
 }
 
 export interface TeamUsageSummary extends UsageTotals {

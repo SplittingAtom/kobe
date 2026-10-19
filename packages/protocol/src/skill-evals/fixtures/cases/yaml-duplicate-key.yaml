@@ -1,0 +1,5 @@
+cases:
+  - id: q3
+    prompt: "Build the workbook"
+    prompt: "Build it twice"
+    expect: { triggers: true }

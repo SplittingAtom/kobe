@@ -128,7 +128,12 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
     }
     const target = { teamId: claims.team_id, userId: claims.user_id };
     annotate({ ...target, sandboxId: claims.sub });
-    const principal = { sandboxId: claims.sub, ...target };
+    // An eval sandbox (KOBE-325) is live only as its own claim `e-<thread>` while its execution runs.
+    const principal = {
+      sandboxId: claims.sub,
+      ...target,
+      ...(claims.eval_thread === undefined ? {} : { evalThreadId: claims.eval_thread }),
+    };
     if (!(await options.liveness.isLive(principal))) {
       options.onTokenRejected(principal, "not_live");
       return no(401, "not live");

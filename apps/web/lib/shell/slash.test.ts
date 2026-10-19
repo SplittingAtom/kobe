@@ -76,7 +76,12 @@ describe("slashEntries: every registered / word, known whether bound or not", ()
     const entries = slashEntries(bindings, { readOnly: false });
     const words = COMMANDS.flatMap((c) => (c.slash === undefined ? [] : [c.slash]));
     expect(entries.map((e) => e.slash).sort()).toEqual([...words].sort());
-    expect(entries.map((e) => e.slash).slice(-3)).toEqual(["memory", "schedules", "agents"]);
+    expect(entries.map((e) => e.slash).slice(-4)).toEqual([
+      "memory",
+      "schedules",
+      "agents",
+      "skills",
+    ]);
     expect(entries.map((e) => e.command.id)).not.toContain("trash-thread");
   });
 

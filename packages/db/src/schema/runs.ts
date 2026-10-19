@@ -86,7 +86,8 @@ export const RUN_INPUT_MAX_CHARS = 200_000;
  * Where a skill a run loaded comes from (KOBE-297): a team skill, a personal one, the image, or a
  * Site Skills Catalog install or member add (KOBE-315).
  */
-export const RUN_SKILL_SOURCES = ["team", "personal", "builtin", "catalog"] as const;
+/** `draft`: a Workbench test chat's draft (KOBE-323), the only skill such a run loads. */
+export const RUN_SKILL_SOURCES = ["team", "personal", "builtin", "catalog", "draft"] as const;
 export type RunSkillSource = (typeof RUN_SKILL_SOURCES)[number];
 
 /**

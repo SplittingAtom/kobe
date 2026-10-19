@@ -313,7 +313,7 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
            array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
       FROM run_usage u
       LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
-     WHERE u.team_id = ${teamId}::uuid AND ${filter} AND u.kind = 'run'
+     WHERE u.team_id = ${teamId}::uuid AND ${filter} AND u.kind IN ('run', 'eval')
      GROUP BY u.run_id, r.user_entry_id, r.thinking_level ORDER BY min(u.at)`);
   return res.rows.map((r) => ({
     run_id: String(r.run_id),
@@ -326,7 +326,8 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
 
 /**
  * Per-run usage of one run, or of every run of a thread (runs without calls are omitted): the
- * run's own calls (`kind = 'run'`); the server's title and follow-up calls after it are in the
+ * run's own calls (`kind` run, or eval for a skill eval's run, KOBE-327); the server's title,
+ * follow-up and eval judge calls after it are in the
  * dashboards and budgets, not under the answer (KOBE-219).
  */
 export async function runsUsage(db: KobeDb, teamId: string, of: UsageOf): Promise<RunUsage[]> {
@@ -367,7 +368,7 @@ async function latestCallIn(
   const res = await tx.execute<Row>(sql`
     SELECT u.run_id, u.at, u.model, u.input_tokens, u.cache_read_tokens, u.cache_write_tokens
       FROM run_usage u
-     WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid AND u.kind = 'run'
+     WHERE u.team_id = ${teamId}::uuid AND u.thread_id = ${threadId}::uuid AND u.kind IN ('run', 'eval')
        AND u.input_tokens + u.cache_read_tokens + u.cache_write_tokens > 0
        AND NOT EXISTS (SELECT 1 FROM runs r
                         WHERE r.team_id = u.team_id AND r.id = u.run_id AND r.kind = 'compaction')

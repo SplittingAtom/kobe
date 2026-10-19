@@ -49,6 +49,30 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   // A shared eval case is a member's copy, not thread content (KOBE-276): user grants by sharer.
   agent_eval_cases: sharerBound(),
   agent_eval_case_history: sharerBound(),
+  // Workbench drafts and a hold's copies (KOBE-320): user grants by author or writer.
+  skill_drafts:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")})))`,
+  skill_draft_files:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (updated_by = ${g("user_id")}) OR (EXISTS ( SELECT 1 FROM skill_drafts d ` +
+    `WHERE ((d.team_id = skill_draft_files.team_id) AND (d.id = skill_draft_files.draft_id) ` +
+    `AND (d.owner_user_id = ${g("user_id")}))))))`,
+  skill_draft_history:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")}) OR (updated_by = ${g("user_id")})))`,
+  skill_draft_file_history:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")}) OR (written_by = ${g("user_id")})))`,
+  // Skill eval runs (KOBE-325): team grants, user grants by the starter.
+  skill_eval_runs:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (started_by = ${g("user_id")})))`,
+  skill_eval_results:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM skill_eval_runs r ` +
+    `WHERE ((r.team_id = skill_eval_results.team_id) AND (r.id = skill_eval_results.eval_run_id) ` +
+    `AND (r.started_by = ${g("user_id")}))))))`,
   // Memory is not thread content (KOBE-154): team grants only, user grants by owner.
   memory_docs:
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +

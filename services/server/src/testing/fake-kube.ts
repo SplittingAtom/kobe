@@ -51,7 +51,15 @@ export interface FakeKube extends KubeClient {
   peek(ref: ObjectRef): KubeObject | undefined;
   all(kind?: string): KubeObject[];
   /** The next matching call throws KubeApiError(status). */
-  failNext(verb: Verb, kind: string, status: number, times?: number, message?: string): void;
+  failNext(
+    verb: Verb,
+    kind: string,
+    status: number,
+    times?: number,
+    message?: string,
+    /** Only for the object of this name (any, when omitted). */
+    name?: string,
+  ): void;
   /** Called after every apply/create (e.g. to simulate a controller). */
   afterWrite?: (object: KubeObject, fake: FakeKube) => void;
   /** Answers a dry-run create (default: the admission policy denies out-of-prefix namespaces). */
@@ -70,14 +78,21 @@ export function createFakeKube(): FakeKube {
     status: number;
     times: number;
     message?: string;
+    name?: string;
   }[] = [];
   /** Seconds since the epoch for creationTimestamps: strictly increasing in creation order. */
   let fakeClock = 1_790_000_000;
   /** resourceVersion: bumped on every write, like the API server's. */
   let revision = 1;
 
-  const maybeFail = (verb: Verb, kind: string) => {
-    const f = failures.find((x) => x.verb === verb && x.kind === kind && x.times > 0);
+  const maybeFail = (verb: Verb, kind: string, name?: string) => {
+    const f = failures.find(
+      (x) =>
+        x.verb === verb &&
+        x.kind === kind &&
+        x.times > 0 &&
+        (x.name === undefined || x.name === name),
+    );
     if (f) {
       f.times--;
       throw new KubeApiError(f.status, f.message ?? `injected ${f.status} on ${verb} ${kind}`);
@@ -118,12 +133,19 @@ export function createFakeKube(): FakeKube {
       return obj && clone(obj);
     },
     all: (kind) => [...store.values()].filter((o) => !kind || o.kind === kind).map(clone),
-    failNext(verb, kind, status, times = 1, message) {
-      failures.push({ verb, kind, status, times, ...(message === undefined ? {} : { message }) });
+    failNext(verb, kind, status, times = 1, message, name) {
+      failures.push({
+        verb,
+        kind,
+        status,
+        times,
+        ...(message === undefined ? {} : { message }),
+        ...(name === undefined ? {} : { name }),
+      });
     },
     async apply(object) {
       fake.calls.push({ verb: "apply", kind: object.kind, ...object.metadata });
-      maybeFail("apply", object.kind);
+      maybeFail("apply", object.kind, object.metadata.name);
       const existing = store.get(key({ ...object, ...object.metadata }));
       // Apply keeps status and other managers' fields; the applied fields win.
       const merged = existing

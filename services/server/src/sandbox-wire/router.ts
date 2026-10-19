@@ -1,4 +1,4 @@
-import { withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
 import { formatTraceparent, runTraceId } from "@kobe/protocol";
 import {
   idAttributes,
@@ -20,6 +20,7 @@ import {
 } from "./commands.js";
 import type { WireTuning } from "./constants.js";
 import type { ConnectionRegistry } from "./registry.js";
+import { targetForThread } from "./slots.js";
 import {
   SandboxWakeError,
   type CommandOutcome,
@@ -144,6 +145,40 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  evalPrepare(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalPrepare"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.prepare", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      files: request.files.map((f) => ({ path: f.path, sha256: f.sha256, size: f.size })),
+    });
+  }
+
+  evalSnapshot(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalSnapshot"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.snapshot", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      roots: [...request.roots],
+      hash_paths: [...request.hashPaths],
+    });
+  }
+
+  evalRead(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalRead"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.read", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      files: request.files.map((f) => ({ path: f.path, size: f.size })),
+    });
+  }
+
   compactThread(
     target: SandboxTarget,
     request: Parameters<SandboxRouter["compactThread"]>[1],
@@ -158,10 +193,23 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
-  async isConnected(target: SandboxTarget): Promise<boolean> {
-    const live = await withTeam(this.#db, target.teamId, (tx) =>
-      liveConnection(tx, target, this.#tuning.staleConnectionMs),
-    );
+  /**
+   * Whether the sandbox is connected. With `threadId`, the sandbox that serves that thread
+   * (KOBE-325: an eval thread's own sandbox, else the member's).
+   */
+  async isConnected(target: SandboxTarget, threadId?: string): Promise<boolean> {
+    const live = await withTeam(this.#db, target.teamId, async (tx) => {
+      if (threadId === undefined) return liveConnection(tx, target, this.#tuning.staleConnectionMs);
+      const res = await tx.execute<{ skill_eval: boolean }>(sql`
+        SELECT skill_eval FROM threads WHERE team_id = ${target.teamId} AND id = ${threadId}`);
+      const forThread = targetForThread(
+        target.teamId,
+        target.userId,
+        threadId,
+        res.rows[0]?.skill_eval === true,
+      );
+      return liveConnection(tx, forThread, this.#tuning.staleConnectionMs);
+    });
     return live !== undefined;
   }
 
@@ -255,7 +303,10 @@ export class CommandRouter implements SandboxRouter {
         error: { code: "thread_not_found", message: "no such thread for this sandbox" },
       };
     }
-    if (!queued.live) {
+    if (!queued.live && queued.evalThread) {
+      // An eval thread's sandbox (KOBE-325) is started by the eval runner, never woken here: the
+      // command waits for it to connect (or times out). The member's sandbox is never woken for it.
+    } else if (!queued.live) {
       const starts = kind === "run.start" || kind === "thread.compact";
       void this.#wakeFor(target, queued.id, timeoutMs, starts ? runId : undefined);
     } else if (queued.live.replicaId === this.#replicaId) {

@@ -33,6 +33,7 @@ describe("thread list adapter", () => {
     expect(page.threads[0]?.custom).toEqual({
       projectId: null,
       scheduled: false,
+      workbench: false,
       shared: false,
       visibility: "private",
       pinned: false,

@@ -290,7 +290,7 @@ const PROVENANCE_REFUSALS: Record<string, string> = {
   "invalid-finding-path.json": "scan.findings.0.file",
   "invalid-instant.json": "createdAt",
   "invalid-origin-http.json": "origin.url",
-  "invalid-ratio.json": "scorecard.passRateWith",
+  "invalid-ratio.json": "scorecard.lift",
   "invalid-scorecard-transcript.json": "scorecard",
 };
 const issueAt = (i: { path: PropertyKey[] }) =>

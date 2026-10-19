@@ -6,7 +6,7 @@ import {
   type MemberBudgetState,
   type ModelPrice,
 } from "@kobe/db";
-import { SERVER_CALL_LIMITS, type ServerCallPurpose } from "@kobe/protocol";
+import { SERVER_CALL_LIMITS, type ServerCallTokenPurpose } from "@kobe/protocol";
 import { randomUUID } from "node:crypto";
 import { TtlCache } from "./cache.js";
 import { MemoryReservations } from "./reservations-memory.js";
@@ -42,6 +42,10 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  * - **Server calls** (KOBE-234): the same lines and reservations, plus the purpose's soft limit
  *   (`SERVER_CALL_LIMITS[purpose].skip_at_percent`): follow-ups are refused with a final 402
  *   `budget_soft_limit` once any line is at 80 %, so a server bug cannot spend past CE21's rule.
+ * - **The team eval cap** (KOBE-327, SK18): a skill eval's calls (its eval sandbox's and the eval
+ *   judge's) also carry the team's monthly eval cap as a line of scope `eval`, judged in the same
+ *   reservation on the team's eval spend and the other eval calls' reservations: 402
+ *   `budget_exhausted` "Your team's monthly eval cap is used up." Other calls never see it.
  * - More requests than the member's per-minute rate (the site's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the site-wide backstop.
@@ -58,25 +62,42 @@ const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
   site: "The site's",
   team: "Your team's",
   user: "Your",
+  eval: "Your team's",
 };
 
 function budgetName(line: BudgetLine): string {
+  if (line.scope === "eval") return "Your team's monthly eval cap";
   const kind = line.unit === "tokens" ? "token" : "model";
   return `${SCOPE_NAMES[line.scope]} ${line.period === "month" ? "monthly" : "daily"} ${kind} budget`;
+}
+
+/**
+ * The lines a call is judged by: the member's budgets, and for a skill eval's call (its eval
+ * sandbox's, or the eval judge's) the team eval cap too (KOBE-327, SK18).
+ */
+function linesFor(call: CallContext, state: MemberBudgetState): readonly BudgetLine[] {
+  const evalCall = call.eval === true || call.purpose === "eval_judge";
+  return evalCall && state.evalLines?.length ? [...state.lines, ...state.evalLines] : state.lines;
 }
 
 export function budgetMessage(line: BudgetLine): string {
   return `${budgetName(line)} is used up.`;
 }
 
+const SKIPPED: Record<ServerCallTokenPurpose, string> = {
+  title: "titles",
+  followups: "follow-ups",
+  eval_judge: "eval judge calls",
+};
+
 /** KOBE-234: a server call skipped at its purpose's soft limit (follow-ups at 80 %). */
-export function budgetSoftLimitMessage(line: BudgetLine, purpose: ServerCallPurpose): string {
+export function budgetSoftLimitMessage(line: BudgetLine, purpose: ServerCallTokenPurpose): string {
   const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
-  return `${budgetName(line)} is at ${pct} % or more: ${purpose === "title" ? "titles" : "follow-ups"} are skipped.`;
+  return `${budgetName(line)} is at ${pct} % or more: ${SKIPPED[purpose]} are skipped.`;
 }
 
 /** The purpose's soft limit in percent, when it is below the 100 % stop. */
-function softPercent(purpose: ServerCallPurpose | undefined): number | undefined {
+function softPercent(purpose: ServerCallTokenPurpose | undefined): number | undefined {
   if (purpose === undefined) return undefined;
   const pct = SERVER_CALL_LIMITS[purpose].skip_at_percent;
   return pct < 100 ? pct : undefined;
@@ -110,7 +131,7 @@ function atPercent(line: BudgetLine, pct: number): BudgetLine {
 /** The first line at or past a server call's soft limit (none below 100 %: the stop applies). */
 function softLimitLine(
   lines: readonly BudgetLine[],
-  purpose: ServerCallPurpose | undefined,
+  purpose: ServerCallTokenPurpose | undefined,
 ): BudgetLine | undefined {
   const pct = softPercent(purpose);
   return pct === undefined ? undefined : lines.find((l) => thresholdReached(l, pct));
@@ -175,7 +196,7 @@ export class BudgetGate implements CallGate {
     const key = `${call.teamId}:${call.userId}`;
     const state = await this.states.get(key, () => this.store.load(call.teamId, call.userId));
     const prices =
-      state.lines.length === 0
+      state.lines.length === 0 && !state.evalLines?.length
         ? new Map<string, ModelPrice>()
         : await this.priceCache.get("prices", () => this.store.prices());
     return this.decide(call, key, state, prices);
@@ -184,9 +205,10 @@ export class BudgetGate implements CallGate {
   private async decide(
     call: CallContext,
     key: string,
-    state: MemberBudgetState,
+    member: MemberBudgetState,
     prices: ReadonlyMap<string, ModelPrice>,
   ): Promise<GateDecision> {
+    const state = { ...member, lines: linesFor(call, member) };
     const used = exhaustedLine(state.lines);
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };

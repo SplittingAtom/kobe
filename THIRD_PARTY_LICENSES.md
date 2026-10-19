@@ -876,7 +876,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | wrappy | 1.0.2 | ISC | linked, bundled | server | [license](https://unpkg.com/wrappy@1.0.2/LICENSE) |
 | ws | 8.22.0 | MIT | linked, bundled | sandbox, server | [license](https://unpkg.com/ws@8.22.0/LICENSE) |
 | xtend | 4.0.2 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/xtend@4.0.2/LICENSE) |
-| yaml | 2.9.1 | ISC | linked, bundled | server, web | [license](https://unpkg.com/yaml@2.9.1/LICENSE) |
+| yaml | 2.9.1 | ISC | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server, web | [license](https://unpkg.com/yaml@2.9.1/LICENSE) |
 | yocto-queue | 0.1.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/yocto-queue@0.1.0/license) |
 | zod | 4.6.5 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server, web | [license](https://unpkg.com/zod@4.6.5/LICENSE) |
 | zustand | 5.0.15 | MIT | linked, bundled | web | [license](https://unpkg.com/zustand@5.0.15/LICENSE) |

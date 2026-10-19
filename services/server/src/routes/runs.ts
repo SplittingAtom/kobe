@@ -9,10 +9,12 @@ import {
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
 import { RunError } from "../runs/errors.js";
 import { queueOrderBodySchema } from "../runs/queue-order.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { prepareTestChat } from "../skills/drafts/test-chat.js";
 
 type RunContext = Context<{ Variables: TeamVariables }>;
 
@@ -78,6 +80,7 @@ function scoped(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
  */
 export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = scoped(deps);
+  app.use("/:id/*", refuseEvalThreadWrites(deps, "thread"));
 
   app.post("/:id/messages", async (c) => {
     const id = idParam(c);
@@ -89,6 +92,14 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
       return invalidRequest(c, "Idempotency-Key must be 1–128 visible ASCII characters.");
     }
     const options = key?.success ? { clientKey: key.data } : {};
+    // A Workbench test chat (KOBE-323): its draft is scanned and stored before the message counts.
+    const actor = actorOf(c);
+    const refused = await prepareTestChat(
+      { db: deps.database.db, blobs: deps.blobs },
+      { teamId: actor.team_id, userId: actor.user_id, role: c.get("team").role },
+      id,
+    );
+    if (refused) return c.json({ code: refused.code, message: refused.message }, refused.status);
     return answer(c, async () =>
       c.json(
         await deps.runs.submitMessage(
@@ -145,6 +156,8 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
  */
 export function runRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = scoped(deps);
+  app.use("/:id", refuseEvalThreadWrites(deps, "run"));
+  app.use("/:id/*", refuseEvalThreadWrites(deps, "run"));
 
   app.get("/:id", async (c) => {
     const id = idParam(c);
