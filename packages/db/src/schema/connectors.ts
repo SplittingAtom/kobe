@@ -25,6 +25,13 @@ import { teams } from "./teams.js";
 export const connectorAuthKind = pgEnum("connector_auth_kind", ["oauth", "api_key", "none"]);
 export type ConnectorAuthKind = (typeof connectorAuthKind.enumValues)[number];
 
+/**
+ * Whose credential an `api_key` connector uses (KOBE-303): `member`, each member's own key (D27);
+ * `site`, one site-wide key a site admin sets (`connector_site_keys`), never both.
+ */
+export const CONNECTOR_CREDENTIAL_SOURCES = ["member", "site"] as const;
+export type ConnectorCredentialSource = (typeof CONNECTOR_CREDENTIAL_SOURCES)[number];
+
 /** `disabled`: kept registered, but offered to no team (calls are refused). */
 export const connectorStatus = pgEnum("connector_status", ["active", "disabled"]);
 export type ConnectorStatus = (typeof connectorStatus.enumValues)[number];
@@ -52,6 +59,8 @@ export const connectors = pgTable(
     /** Streamable HTTP endpoint (D27: remote only, no stdio). */
     url: text().notNull(),
     authKind: connectorAuthKind().notNull().default("none"),
+    /** KOBE-303: `site` only for `api_key` connectors; then members never use their own keys. */
+    credentialSource: text().$type<ConnectorCredentialSource>().notNull().default("member"),
     status: connectorStatus().notNull().default("active"),
     /** Optional https icon URL (KOBE-100); the admin UI renders it as an image. */
     iconUrl: text(),
@@ -98,6 +107,11 @@ export const connectors = pgTable(
     check(
       "connectors_tools_hash",
       sql`${t.toolsHash} IS NULL OR ${t.toolsHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("connectors_credential_source", sql`${t.credentialSource} IN ('member', 'site')`),
+    check(
+      "connectors_site_key_api_key",
+      sql`${t.credentialSource} = 'member' OR ${t.authKind} = 'api_key'`,
     ),
     check(
       "connectors_refresh_skipped",

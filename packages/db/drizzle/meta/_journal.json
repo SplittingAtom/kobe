@@ -1058,6 +1058,13 @@
       "when": 1792404145376,
       "tag": "0150_connector_pinned_by_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1792404559374,
+      "tag": "0151_connector_site_keys",
+      "breakpoints": true
     }
   ]
 }
