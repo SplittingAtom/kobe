@@ -485,6 +485,76 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(objects.objects.size).toBe(before);
   });
 
+  it("never asks, and ignores the starter's remembered approvals, under a stricter floor (review L2, L12)", async () => {
+    const w = await world();
+    await f.fx.admin.query(
+      `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write'),
+         ('policy.ask_on_write.prompt_sandbox_writes', 'true')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    );
+    try {
+      const results: { decision: string; reasons: { code: string }[] }[] = [];
+      const provider = new FakeEvalProvider(url);
+      provider.beforeReply = async (ws, start) => {
+        ws.sb.send({
+          v: 1,
+          type: "policy.check",
+          request_id: `r-${start.run_id}`,
+          run_id: start.run_id,
+          thread_id: start.thread_id,
+          tool_call_id: "c1",
+          tool: "write",
+          input: { path: "/workspace/outputs/x.txt", content: "y" },
+        });
+        results.push(
+          await ws.sb.until(() =>
+            ws.sb.frames("policy.result").find((r) => r.request_id === `r-${start.run_id}`),
+          ),
+        );
+        expect(ws.sb.frames("policy.pending")).toEqual([]);
+      };
+      const cases = [
+        "cases:",
+        "  - id: a",
+        "    prompt: Touch",
+        "    expect: {contains: Total}",
+        "",
+      ];
+      const run = async (who: Person, name: string) => {
+        const id = await draftWith(who, name, cases.join("\n"), {});
+        const started = await f.on(0, who).post(`/v1/skills/drafts/${id}/evals`, {
+          mode: "with_only",
+        });
+        await drive(runnerFor(provider), w.team, started.json.evalRunId as string);
+      };
+      // The owner remembered "allow write forever": it allows the call in their own chats.
+      await f.fx.admin.query(
+        `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by, remember_scope)
+         VALUES ($1, 'user', $2, 'allow', 'write', $2, 'forever')`,
+        [w.team, w.owner.id],
+      );
+      await run(await f.member(w.team), "floor");
+      await run(w.owner, "remembered");
+      expect(results.map((r) => [r.decision, r.reasons[0]?.code])).toEqual([
+        ["deny", "eval_run_no_prompt"],
+        ["deny", "eval_run_no_prompt"],
+      ]);
+      const approvals = await f.fx.admin.query(`SELECT 1 FROM approvals WHERE team_id = $1`, [
+        w.team,
+      ]);
+      expect(approvals.rows).toEqual([]);
+      const denied = await f.fx.admin.query(
+        `SELECT 1 FROM run_events WHERE team_id = $1 AND type = 'policy.denied'`,
+        [w.team],
+      );
+      expect(denied.rows).toHaveLength(2);
+    } finally {
+      await f.fx.admin.query(
+        `DELETE FROM site_settings WHERE key IN ('policy.approval_floor', 'policy.ask_on_write.prompt_sandbox_writes')`,
+      );
+    }
+  });
+
   it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
     const w = await world();
     const provider = new FakeEvalProvider(url);

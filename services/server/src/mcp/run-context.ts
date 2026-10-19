@@ -23,6 +23,8 @@ export interface ActiveRunContext {
   readonly runId: string;
   readonly threadId: string;
   readonly trigger: "user" | "schedule";
+  /** A skill eval's run (KOBE-325): never prompts, never uses the starter's own allow rules. */
+  readonly skillEval?: boolean;
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly mode: ApprovalMode;
@@ -48,8 +50,10 @@ export async function loadActiveRuns(
       agent_id: string | null;
       agent_version: number | null;
       project_id: string | null;
+      skill_eval: boolean;
     }>(sql`
-      SELECT r.id AS run_id, t.id AS thread_id, r.trigger, t.agent_id, t.agent_version, t.project_id
+      SELECT r.id AS run_id, t.id AS thread_id, r.trigger, t.agent_id, t.agent_version, t.project_id,
+             t.skill_eval
         FROM runs r
         JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
         JOIN sandbox_run_leases l ON l.team_id = r.team_id AND l.run_id = r.id
@@ -79,6 +83,7 @@ export async function loadActiveRuns(
         runId: row.run_id,
         threadId: row.thread_id,
         trigger: row.trigger,
+        ...(row.skill_eval ? { skillEval: true } : {}),
         agentId: row.agent_id,
         agentVersion: row.agent_version,
         mode: clampApprovalMode(

@@ -396,6 +396,12 @@ export async function decideMcpCall(
     if (combined.effect === "deny") {
       return await skip(combined.reason.code, combined.reason.message);
     }
+    if (combined.effect === "require_approval" && named.skillEval) {
+      return await skip(
+        "eval_run_no_prompt",
+        "Skill eval runs never ask for approval; this call was denied.",
+      );
+    }
     if (combined.effect === "require_approval" && named.trigger === "schedule") {
       return await skip(
         "scheduled_run_no_prompt",
@@ -429,6 +435,14 @@ export async function decideMcpCall(
     // A remembered approval allowed it (KOBE-289): its own audit row and last use, at this
     // enforcement point too; a rule revoked since the decision denies the call.
     const rule = combined.effect === "allow" ? appliedUserRule(namedDecision) : undefined;
+    // A skill eval (KOBE-325) never runs on its starter's remembered approvals: without the rule
+    // the call would ask, and an eval never asks.
+    if (rule !== undefined && named.skillEval) {
+      return await skip(
+        "eval_run_no_prompt",
+        "Skill eval runs don't use your remembered approvals; this call was denied.",
+      );
+    }
     if (rule?.rule_id !== undefined) {
       const recorded = await recordRuleApplied(deps.db, {
         teamId: principal.teamId,

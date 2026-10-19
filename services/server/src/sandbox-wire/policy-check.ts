@@ -387,6 +387,17 @@ export async function decidePolicyCheck(
       // A remembered approval allowed it (KOBE-289): recorded first (last used, audit, tool card).
       // A rule revoked meanwhile, or a failed record, denies the call instead.
       const rule = appliedUserRule(decision);
+      // A skill eval (KOBE-325) is measured on team and site rules only, the same for every
+      // starter: a remembered approval doesn't apply, and without it the call would ask.
+      if (rule !== undefined && evalRun) {
+        const reasons = [
+          EVAL_NO_PROMPT,
+          ...decision.reasons.filter((r) => r.code !== "user_allow_rule"),
+        ];
+        await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
+        await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
+        return denyFrame(frame, reasons, EVAL_NO_PROMPT.message);
+      }
       if (rule?.rule_id !== undefined) {
         const recorded = await recordRuleApplied(deps.db, {
           teamId: target.teamId,
