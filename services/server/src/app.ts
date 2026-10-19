@@ -72,6 +72,7 @@ import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamSkillInstallRoutes } from "./routes/team-skill-installs.js";
 import { teamSkillBlockRoutes } from "./routes/team-skill-blocks.js";
+import { skillUsageRoutes, teamSkillUsageRoutes } from "./routes/skill-usage.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
@@ -182,6 +183,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/skills", teamSkillInstallRoutes(deps));
   api.route("/team/skills", teamSkillBlockRoutes(deps));
+  api.route("/team/skills", teamSkillUsageRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
@@ -215,6 +217,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
   api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
   api.route("/skills/catalog", catalogMaintainerRoutes(deps));
+  api.route("/skills/catalog", skillUsageRoutes(deps));
   api.route("/skills/catalog", skillCatalogRoutes(deps));
   api.route("/skills/promotions", skillPromotionRoutes(deps));
   api.route("/team/skill-promotions", teamSkillPromotionRoutes(deps));

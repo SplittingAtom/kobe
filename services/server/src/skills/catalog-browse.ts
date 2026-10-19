@@ -1,10 +1,11 @@
 import { unzipSync } from "fflate";
 import { catalogSkillEvalScorecardSchema } from "@kobe/protocol";
-import { scanTeams, sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { readVerified } from "./blob-read.js";
-import { MIN_TEAMS } from "./catalog-admin.js";
+import { usageSnapshot } from "./usage-snapshot.js";
+import { cardUsage, viewerTeams, type CardUsage } from "./usage-views.js";
 import { hostStandings } from "../egress/host-standing.js";
 import { readPackage } from "./registry/review-diff.js";
 import { readCatalogSwitches } from "./settings.js";
@@ -63,8 +64,10 @@ export interface CatalogCard {
     readonly approvedAt: string | null;
   };
   readonly score: CardScore | null;
-  /** Teams that installed it: a count, or "few" under the minimum-count rule. */
+  /** Teams that installed it: a count, or "few" under the minimum-count rule (KOBE-339). */
   readonly teamsInstalled: number | "few";
+  /** Members using it and the thumbs-up share in the window, under the same rule. */
+  readonly usage: { readonly members: number | "few"; readonly thumbsUp: number | "few" };
   readonly state: TeamState;
 }
 
@@ -75,30 +78,21 @@ export function cardScore(card: Record<string, unknown> | null): CardScore | nul
   return { passRate: num(card.passRateWith), lift: num(card.lift), cases: num(card.cases) };
 }
 
-/** Installs per catalog skill across teams (each read under its own RLS), cached briefly. */
-let installCounts: { at: number; counts: Map<string, number> } | null = null;
-const INSTALL_COUNTS_TTL_MS = 5 * 60_000;
+/** The viewer's usage numbers from the nightly snapshot (KOBE-339): one per card. */
+type UsageOf = ((skillId: string) => CardUsage) & {
+  readonly window: { readonly from: string; readonly to: string };
+};
 
-async function teamsInstalled(db: KobeDb): Promise<Map<string, number>> {
-  if (installCounts && Date.now() - installCounts.at < INSTALL_COUNTS_TTL_MS)
-    return installCounts.counts;
-  const rows = await scanTeams(db, "catalogInstallCounts", async (tx, team) => {
-    const r = await tx.execute<{ skill_id: string }>(sql`
-      SELECT skill_id FROM team_skill_installs WHERE team_id = ${team.id}`);
-    return r.rows.map((x) => x.skill_id);
+async function usageFor(
+  db: KobeDb,
+  who: { readonly teamId: string; readonly userId: string },
+): Promise<UsageOf> {
+  const snapshot = await usageSnapshot(db);
+  const viewer = viewerTeams(snapshot, who.userId, who.teamId);
+  return Object.assign((skillId: string) => cardUsage(snapshot, skillId, viewer), {
+    window: { from: snapshot.from, to: snapshot.to },
   });
-  const counts = new Map<string, number>();
-  for (const id of rows.flat()) counts.set(id, (counts.get(id) ?? 0) + 1);
-  installCounts = { at: Date.now(), counts };
-  return counts;
 }
-
-/** Tests: forget the cached install counts. */
-export function forgetInstallCounts(): void {
-  installCounts = null;
-}
-
-const shown = (n: number): number | "few" => (n > 0 && n < MIN_TEAMS ? "few" : n);
 
 type CardRow = Record<string, unknown> & {
   id: string;
@@ -192,7 +186,8 @@ async function cardRows(
   return res.rows;
 }
 
-function toCard(r: CardRow, counts: Map<string, number>): CatalogCard {
+function toCard(r: CardRow, usageOf: UsageOf): CatalogCard {
+  const usage = usageOf(r.id);
   return {
     id: r.id,
     name: r.name,
@@ -207,7 +202,8 @@ function toCard(r: CardRow, counts: Map<string, number>): CatalogCard {
       approvedAt: r.approved_at ? new Date(r.approved_at).toISOString() : null,
     },
     score: cardScore(r.authoritative_scorecard),
-    teamsInstalled: shown(counts.get(r.id) ?? 0),
+    teamsInstalled: usage.teamsInstalled,
+    usage: { members: usage.members, thumbsUp: usage.thumbsUp },
     state: {
       installed: r.pin_mode
         ? { semver: r.install_semver, pinMode: r.pin_mode, access: r.access ?? "available" }
@@ -228,6 +224,8 @@ export interface CatalogPage {
   readonly tags: readonly string[];
   /** The team switch "Members may add catalog skills for themselves" (KOBE-338, SK25). */
   readonly membersMayAdd: boolean;
+  /** The fixed window the usage numbers cover (the last 30 finished UTC days, KOBE-339). */
+  readonly usageWindow: { readonly from: string; readonly to: string };
 }
 
 export async function browseCatalog(
@@ -235,16 +233,22 @@ export async function browseCatalog(
   who: { readonly teamId: string; readonly userId: string },
   query: CatalogQuery,
 ): Promise<CatalogPage> {
-  const counts = await teamsInstalled(db);
-  const ranks = new Map([...counts].map(([id, n]) => [id, rank(shown(n))]));
+  const usageOf = await usageFor(db, who);
+  const ids = await db.execute<{ id: string }>(sql`SELECT id FROM registry_skills`);
+  const ranks = new Map(ids.rows.map((r) => [r.id, rank(usageOf(r.id).teamsInstalled)]));
   const { rows, membersMayAdd } = await withTeam(db, who.teamId, async (tx) => ({
     rows: await cardRows(tx, who, query, undefined, ranks),
     membersMayAdd: (await readCatalogSwitches(tx, who.teamId)).membersMayAdd,
   }));
-  const sorted = rows.map((r) => toCard(r, counts));
+  const sorted = rows.map((r) => toCard(r, usageOf));
   const tags = await db.execute<{ name: string }>(sql`
     SELECT name FROM registry_tags WHERE kind = 'topic' AND status = 'active' ORDER BY name`);
-  return { skills: sorted, tags: tags.rows.map((t) => t.name), membersMayAdd };
+  return {
+    skills: sorted,
+    tags: tags.rows.map((t) => t.name),
+    membersMayAdd,
+    usageWindow: usageOf.window,
+  };
 }
 
 export interface CatalogVersion {
@@ -282,6 +286,8 @@ export interface CatalogDetail extends CatalogCard {
   readonly membersMayAdd: boolean;
   /** The caller may block the skill in this team (Team admins). */
   readonly canBlock: boolean;
+  /** The fixed window the usage numbers cover (KOBE-339). */
+  readonly usageWindow: { readonly from: string; readonly to: string };
 }
 
 const PUBLISHED = ["approved", "deprecated", "withdrawn", "revoked"];
@@ -421,7 +427,8 @@ export async function catalogDetail(
   });
   if (!found) return null;
   const { row, manifest } = found;
-  const card = toCard(row, await teamsInstalled(db));
+  const usageOf = await usageFor(db, who);
+  const card = toCard(row, usageOf);
   const maintainers = await db.execute<{ name: string }>(sql`
     SELECT u.name FROM registry_maintainers m JOIN users u ON u.id = m.user_id
      WHERE m.skill_id = ${skillId} AND u.deactivated_at IS NULL ORDER BY u.name`);
@@ -446,5 +453,6 @@ export async function catalogDetail(
     canRequestEgress: teamRoleAllows(who.role, "team.chat"),
     membersMayAdd: found.membersMayAdd,
     canBlock: teamRoleAllows(who.role, "team.skills.installs.manage"),
+    usageWindow: usageOf.window,
   };
 }

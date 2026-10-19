@@ -3,7 +3,7 @@ import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { scorecardForProvenance, skillEvalScorecardSchema } from "@kobe/protocol";
 import { validateZipBundle } from "./skills/bundle.js";
-import { forgetInstallCounts } from "./skills/catalog-browse.js";
+import { forgetUsageSnapshot } from "./skills/usage-snapshot.js";
 import { ensureObject } from "./skills/kobe-seed.js";
 import { sha256Hex } from "./skills/storage.js";
 import type { TestBrowser } from "./testing/browser.js";
@@ -255,7 +255,7 @@ beforeAll(async () => {
     team,
     agent,
   ]);
-  forgetInstallCounts();
+  forgetUsageSnapshot();
 });
 
 afterAll(async () => {
@@ -295,7 +295,9 @@ describe("browse and search (ac-1)", () => {
     const all = await as.member.get("/v1/skills/catalog?sort=teams");
     const card = (n: string) =>
       (all.json.skills as Record<string, unknown>[]).find((s) => s.name === n);
-    expect(names(all.json)[0]).toBe("sales-report");
+    // Fewer than three teams: every count reads "few", so sorting by teams falls back to names
+    // (KOBE-339: none can't be told from few).
+    expect(names(all.json)).toEqual(["budget-planner", "sales-report", "slide-maker"]);
     expect(card("sales-report")).toMatchObject({
       latest: { semver: "1.1.0", verdict: "pass" },
       score: { passRate: expect.any(Number), cases: expect.any(Number) },
@@ -309,7 +311,7 @@ describe("browse and search (ac-1)", () => {
     });
     expect(card("budget-planner")).toMatchObject({
       state: { installed: null, addedByMe: true },
-      teamsInstalled: 0,
+      teamsInstalled: "few",
     });
     expect(card("slide-maker")).toMatchObject({ state: { blocked: true } });
     // Never a reviewer's fields.
