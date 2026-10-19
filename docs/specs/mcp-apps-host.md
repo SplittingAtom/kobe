@@ -346,7 +346,13 @@ opened_by: user_id}` and the text result. It is not a run: no run row, no `run_e
   markers (`appendBranchMarker`). The server writes the Postgres entry at once and the agent
   catches the session file up at the next run start, so a launch never wakes a sandbox (D14).
   _Verify in the ticket:_ the exact Pi 1.0.x `custom_message` shape, and that it enters the
-  model's context (the branch marker's `custom` type does not).
+  model's context (the branch marker's `custom` type does not). _Verified (KOBE-440):_ Pi 1.0.0
+  `{type: "custom_message", id, parentId, timestamp, customType, content, display, details}`;
+  `convertToLlm` gives the model a user message of `content`, `details` never
+  (`app-cards.real-pi.test.ts` against the pinned Pi). Card ids are `ka-` and 24 hex characters,
+  server-only like `ks-`/`ku-`; the next `run.start` carries the cards Pi lacks
+  (`app_cards`, capability `app_cards`; an older agent starts below them), and a new thread's
+  session is started from its first card.
 - **No current thread** (the new-thread view): Kobe **starts a new thread** in the active team
   with the team's default agent, titled after the app ("Lakehouse Explorer"). The app card is its
   first entry. The member's first message then continues that thread.
@@ -356,6 +362,12 @@ opened_by: user_id}` and the text result. It is not a run: no run row, no `run_e
   run, and the opening tool is called at insertion time, so the data is current. The chip can be
   removed like a queued message, and while it waits the member may **Expand** it into the
   artifact column (a transient view, not an entry).
+
+  _Amended 2026-10-19 (KOBE-440, for review):_ the opening tool is called **at the click**,
+  through the MA-4 path, and the waiting row keeps the result and the card's text; the run's end
+  only inserts the entry (`promoteInTx`, under the thread lock, never an upstream call while the
+  lock is held). That is what lets a waiting chip expand; its data is from the click. A launch
+  from a thread shared read-only or in Trash starts a new thread, like the new-thread view.
 
   _Why queue:_ it is what Enter does during a run (D17), so the member's click is never lost. It
   also keeps the entry tree linear: inserting mid-run would add a sibling under a leaf Pi is still

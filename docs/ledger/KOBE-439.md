@@ -14,7 +14,7 @@ KOBE-440 (rail launcher and app cards), then MA-8 KOBE-441 (the Kobe Explorer Ga
 **Migrations (one release, none shipped):** 0152-0156 site-wide templates and pins (MA-1..3);
 0157 `thread_app_results` (generated, team table), 0158 RLS + legal-hold guards + run key
 `ON DELETE SET NULL (run_id)` (custom), 0159 `input jsonb` (generated), 0160 run-end discard of
-unclaimed results (custom trigger), 0161 the same with the hold lock first (custom). **Next free: 0162.** MA-6 needs `entry_id` rows (the column, its unique key and the origin CHECK exist).
+unclaimed results (custom trigger), 0161 the same with the hold lock first (custom); MA-6 added 0162 (generated, queued app cards). **Next free: 0163.**
 
 **Protocol commits (each meant for its own PR, ahead of the feature PR; the coordinator decides
 against the one-PR-per-group rule):** `92f6279c` (`tool.result.app`), `32a4ad26`
@@ -37,8 +37,7 @@ against the one-PR-per-group rule):** `92f6279c` (`tool.result.app`), `32a4ad26`
 
 **Open questions:**
 
-- Pi 1.0.x `custom_message` shape for MA-6's `kobe.app_card` mirror, and whether it enters the
-  model's context (spec MA11 "verify in the ticket").
+- ~~Pi 1.0.x `custom_message` shape~~: verified in MA-6 (KOBE-440.md, real Pi test).
 - LOW-D (review-ma7): a proxy report that times out but commits late can, for two identical
   parallel calls, let one call claim the other's row. Same user, same input. Not fixed.
 - Whether the protocol commits ship as separate PRs.
@@ -136,3 +135,13 @@ structuredContent?}}` of at most 8 KiB. `daa1470f` protocol: `APP_CONTEXT_PREAMB
   clears"; it does not say chips survive a reload.
 - Steering a running run (`POST /v1/runs/:id/steer`) does not carry chips; Enter during a run
   queues a message, which does.
+
+## Re-review LOWs (review-ma7 re-review: LOW-J, K, L, M), `71291a5f`, `938f0547`
+
+- LOW-J: an insert's gate lifts only on Confirm, an emptied composer, or a change of the
+  inserted text itself at least 800 ms after the insert (`settlesInsert`); typing around it
+  does not. LOW-L: the gate lives in `ComposerDictationProvider` (`useInsertGate`), so the
+  steer chord, the `steer` command and Steer now are unavailable while an insert waits.
+- LOW-K: `runActive` locks `FOR NO KEY UPDATE` (DB test: a store does not wait on a held
+  `FOR KEY SHARE`). LOW-M: steer refuses imitated app context (422 `invalid_content`).
+- LOW-D stays accepted (spec MA10: same run, tool, canonical input and member).
