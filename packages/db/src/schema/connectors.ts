@@ -66,6 +66,15 @@ export const connectors = pgTable(
     toolsSnapshot: jsonb().$type<PinnedTool[]>().notNull().default([]),
     /** SHA-256 over the whole snapshot (KOBE-59 drift detection), when pinned. */
     toolsHash: text(),
+    /**
+     * The site admin who last pinned or re-approved the tools (KOBE-431): the periodic refresh of a
+     * connector that needs a credential probes with this admin's own key, never a member's.
+     */
+    pinnedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    /** Why the last periodic refresh was skipped (a probe failure code); null after a good one. */
+    refreshSkipped: text(),
+    /** When the periodic refresh last probed the connector (skipped or not). */
+    refreshedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -89,6 +98,10 @@ export const connectors = pgTable(
     check(
       "connectors_tools_hash",
       sql`${t.toolsHash} IS NULL OR ${t.toolsHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "connectors_refresh_skipped",
+      sql`${t.refreshSkipped} IS NULL OR ${t.refreshSkipped} ~ '^[a-z_]{1,32}$'`,
     ),
   ],
 );
