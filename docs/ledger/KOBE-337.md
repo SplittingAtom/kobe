@@ -77,7 +77,8 @@
   (`automatic`: within major its own major only, latest any, pinned none) and the eval delta from
   the authoritative cards; and the Roll back target.
 - **Diff** `GET .../installs/:skillId/diff?to=<semver>`: the file diff (the bounded review diff)
-  from the running version to a published one.
+  from the running version to an approved or deprecated one (never withdrawn, revoked or
+  blocklisted).
 - **Move pin** `POST .../move {version}` and **Roll back** `POST .../rollback`: the install's
   version changes, pin mode and access kept, through `installCatalogSkill` (every install rule:
   Builders, withdrawn/revoked, blocks), audited `skill.catalog.pin_moved` /
