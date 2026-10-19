@@ -262,7 +262,13 @@ describe("audit", () => {
     );
     const actions = new Set(rows.map((r) => r.action));
     expect(actions).toEqual(
-      new Set(["mcp.connector.registered", "mcp.connector.updated", "mcp.connector.removed"]),
+      new Set([
+        "mcp.connector.registered",
+        "mcp.connector.updated",
+        "mcp.connector.removed",
+        // Every pinning probe records which credential it used (KOBE-431).
+        "mcp.connector.probe_credential",
+      ]),
     );
     for (const r of rows) {
       expect(r.team_id).toBeNull();

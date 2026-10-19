@@ -36,7 +36,8 @@ const notAvailable = (c: Context) =>
  *
  * GET    /                 → 200 `{grants: [{connector_id, hint, created_at, updated_at}]}`
  * PUT    /{connector_id}   `{api_key}` → 200 `{grant}` (201 when new); 404 not enabled;
- *                          422 `not_api_key`; 503 when the site has no envelope key
+ *                          422 `not_api_key`; 409 `provided_by_site` (the connector uses
+ *                          its site-wide key, KOBE-303); 503 when the site has no envelope key
  * DELETE /{connector_id}   → 204; 404 when there is no key
  */
 export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
@@ -70,9 +71,20 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     const subject = { teamId: c.get("team").id, userId: c.get("user").id, connectorId: id.data };
     const result = await putGrant(db, deps.envelope, subject, body.api_key);
     if (!result.ok) {
-      return result.failure === "not_available"
-        ? notAvailable(c)
-        : c.json({ code: "not_api_key", message: "That connector does not use an API key." }, 422);
+      if (result.failure === "not_available") return notAvailable(c);
+      if (result.failure === "provided_by_site") {
+        return c.json(
+          {
+            code: "provided_by_site",
+            message: "Your organization provides the key for this connector; you need none.",
+          },
+          409,
+        );
+      }
+      return c.json(
+        { code: "not_api_key", message: "That connector does not use an API key." },
+        422,
+      );
     }
     // A user's key never probes or pins: pins are site-wide trust (site admins only).
     return c.json({ grant: summaryBody(result.grant) }, result.replaced ? 200 : 201);

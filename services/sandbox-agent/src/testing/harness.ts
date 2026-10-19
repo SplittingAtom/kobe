@@ -47,6 +47,8 @@ export interface HarnessOptions {
   readonly piBin?: string;
   readonly heartbeatTimeoutMs?: number;
   readonly policyReadyTimeoutMs?: number;
+  /** How long SIGTERM waits for a lost run's frames to be acked (KOBE-444); default the agent's. */
+  readonly lostAckTimeoutMs?: number;
   readonly extensions?: readonly string[];
   /** Model gateway wiring (KOBE-41); absent = no model access, as before. */
   readonly models?: ModelWiring;
@@ -136,6 +138,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.policyReadyTimeoutMs === undefined
       ? {}
       : { policyReadyTimeoutMs: options.policyReadyTimeoutMs }),
+    ...(options.lostAckTimeoutMs === undefined
+      ? {}
+      : { lostAckTimeoutMs: options.lostAckTimeoutMs }),
   });
   agent.start();
   await server.waitFor((f) => f.type === "hello");

@@ -13,6 +13,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   id: "c-1",
   name: "jira",
   auth_kind: "api_key",
+  credential_source: "member",
   status: "active",
   icon_url: null,
   enabled: true,
@@ -141,5 +142,21 @@ describe("My connector keys (KOBE-105)", () => {
     });
     renderTeam(<MyConnectorsPage />, MEMBER);
     expect(await screen.findByText(/No connector in this team needs your own key/)).toBeTruthy();
+  });
+});
+
+describe("site-wide keys (KOBE-303)", () => {
+  it("shows a connector whose key the organization provides, with nothing to enter", async () => {
+    stubApi({
+      [`GET ${TEAM_CONNECTORS}`]: [
+        200,
+        { connectors: [connector({ id: "c-9", name: "catalyst", credential_source: "site" })] },
+      ],
+      [`GET ${GRANTS}`]: [200, { grants: [] }],
+    });
+    renderTeam(<MyConnectorsPage />, MEMBER);
+    await screen.findByRole("article", { name: "catalyst" });
+    expect(card("catalyst").getByText(/Provided by your organization/)).toBeTruthy();
+    expect(card("catalyst").queryByLabelText("API key")).toBeNull();
   });
 });

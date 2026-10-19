@@ -160,8 +160,11 @@ async function main(): Promise<void> {
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());
+  // The pod is going away (deleted, evicted, drained): runs still active after the drain are
+  // reported lost, so the server interrupts them (KOBE-444). The server's `shutdown` frame
+  // (hibernation) drains and aborts instead.
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    process.once(signal, () => void agent.stop(SHUTDOWN_DEADLINE_MS, 0));
+    process.once(signal, () => void agent.terminate(SHUTDOWN_DEADLINE_MS));
   }
   agent.start();
   workspace?.start();

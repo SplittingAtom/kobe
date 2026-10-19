@@ -3305,6 +3305,60 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
     "$($KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 | grep -c '^CALL create_thing ' || true)"
   contains "the approval was consumed and audited (approval.consumed)" '^[1-9][0-9]*$' \
     "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'approval.consumed'")"
+  # KOBE-303: a connector with a site-wide API key. The Owner registers it through the registry API
+  # (the fake serves no tools/list, so its tools are pinned here like the fixture above), enables it
+  # and sets the key once; two members (the e2e user and the workspace-sync user, each with their own
+  # sandbox claim and run) call a tool without adding keys. The fake server sees the site key on
+  # every call; the key is in no sandbox env or template, no API answer and no audit row.
+  SITE_KEY="e2e-site-key-$(date +%s)-Kobe303"
+  site_reg=$(as_owner "POST /v1/site/connectors {\"name\":\"e2e-site\",\"url\":\"http://$fake_mcp_ip/mcp\",\"authKind\":\"api_key\",\"credentialSource\":\"site\"}")
+  SITE_CONNECTOR=$(printf '%s' "$site_reg" | sed -n 's/.*"connector":{"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
+  contains "KOBE-303: the Owner registers a site-key connector" '^[0-9a-f-]{36}$' "${SITE_CONNECTOR:-$site_reg}"
+  site_snapshot="[$(pinned get_thing '{"readOnlyHint":true}' | sed 's/mcp__e2e_fake__/mcp__e2e_site__/')]"
+  SITE_THREAD=7a2c3d4e-5f60-4718-9a2b-3c4d5e6f7081
+  SITE_RUN=8b3d4e5f-6071-4829-ab3c-4d5e6f708192
+  SITE_THREAD2=9c4e5f60-7182-493a-bc4d-5e6f708192a3
+  SITE_RUN2=ad5f6071-8293-4a4b-8d5e-6f708192a3b4
+  sync_sandbox=$(sync_uid)
+  psql_kobe "UPDATE connectors SET tools_snapshot = '$site_snapshot'::jsonb WHERE id = '$SITE_CONNECTOR';
+    INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_by) VALUES ('$E2E_TEAM_ID', '$SITE_CONNECTOR', 'all', '$E2E_USER_ID') ON CONFLICT DO NOTHING;
+    INSERT INTO threads (team_id, id, owner_user_id, status) VALUES ('$E2E_TEAM_ID', '$SITE_THREAD', '$E2E_USER_ID', 'running'), ('$E2E_TEAM_ID', '$SITE_THREAD2', '$SYNC_USER_ID', 'running') ON CONFLICT DO NOTHING;
+    INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at) VALUES ('$E2E_TEAM_ID', '$SITE_RUN', '$SITE_THREAD', 'user', 'running', now()), ('$E2E_TEAM_ID', '$SITE_RUN2', '$SITE_THREAD2', 'user', 'running', now()) ON CONFLICT DO NOTHING;
+    INSERT INTO sandbox_run_leases (team_id, run_id, user_id, thread_id, sandbox_id) VALUES ('$E2E_TEAM_ID', '$SITE_RUN', '$E2E_USER_ID', '$SITE_THREAD', '$sandbox_id'), ('$E2E_TEAM_ID', '$SITE_RUN2', '$SYNC_USER_ID', '$SITE_THREAD2', '$sync_sandbox') ON CONFLICT DO NOTHING;" >/dev/null
+  site_set=$(as_owner "PUT /v1/site/connectors/$SITE_CONNECTOR/site-key {\"api_key\":\"$SITE_KEY\"}" "GET /v1/site/connectors/$SITE_CONNECTOR")
+  contains "KOBE-303: the site key is set and shown only by its last four characters" "\"siteKeyHint\":\"••••${SITE_KEY: -4}\"" "$site_set"
+  contains "KOBE-303: no registry answer carries the key" '^0$' "$(printf '%s\n' "$site_set" | grep -c -- "$SITE_KEY" || true)"
+  site_rpc() { # token thread json-body → the answer body, then "status=<http status>"
+    in_sandbox "curl -s -m 30 -w '\nstatus=%{http_code}\n' -H 'authorization: Bearer $1' -H 'content-type: application/json' \
+      -H 'accept: application/json, text/event-stream' -H 'kobe-thread-id: $2' --data-raw '$3' \
+      http://$mcp_proxy_ip:80/v1/mcp/$SITE_CONNECTOR"
+  }
+  member2_token=$(mint kobe.mcp-proxy "$sync_sandbox" "$SYNC_USER_ID")
+  contains "KOBE-303: the first member calls a tool with no key of their own" 'fake:get_thing' \
+    "$(site_rpc "$mcp_token" "$SITE_THREAD" '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"get_thing","arguments":{"id":"site-1"}}}')"
+  contains "KOBE-303: a second member calls it too, with no setup" 'fake:get_thing' \
+    "$(site_rpc "$member2_token" "$SITE_THREAD2" '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"get_thing","arguments":{"id":"site-2"}}}')"
+  site_log=$($KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 || true)
+  contains "KOBE-303: the fake server received both members' calls" '^2$' \
+    "$(printf '%s\n' "$site_log" | grep -cE '^CALL get_thing \{"id":"site-[12]"\}$' || true)"
+  contains "KOBE-303: the fake server saw the site key on both calls" '^[2-9]$' \
+    "$(printf '%s\n' "$site_log" | grep -cxF "AUTH Bearer $SITE_KEY" || true)"
+  contains "KOBE-303: every call is audited with the member who made it" '^2$' \
+    "$(psql_kobe "SELECT count(DISTINCT target->>'userId') FROM audit_log WHERE team_id = '$E2E_TEAM_ID'
+      AND action = 'mcp.tool_call' AND target->>'connectorId' = '$SITE_CONNECTOR' AND target->>'decision' = 'allowed'")"
+  site_env=$($KUBECTL -n "$TEAM_NS" exec "$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=$sandbox_id" -o name | head -1)" \
+    -c agent -- env 2>/dev/null || true)
+  contains "control: the e2e sandbox's env was read" '^[1-9][0-9]*$' "$(printf '%s\n' "$site_env" | grep -c '^KOBE_' || true)"
+  contains "KOBE-303: the e2e sandbox's env holds no site key" '^0$' "$(printf '%s\n' "$site_env" | grep -c -- "$SITE_KEY" || true)"
+  contains "KOBE-303: no SandboxTemplate in the team namespace holds it" '^0$' \
+    "$($KUBECTL -n "$TEAM_NS" get sandboxtemplates.extensions.agents.x-k8s.io -o yaml 2>/dev/null | grep -c -- "$SITE_KEY" || true)"
+  contains "KOBE-303: no audit row holds it" '^0$' \
+    "$(psql_kobe "SELECT count(*) FROM audit_log WHERE target::text LIKE '%$SITE_KEY%'")"
+  contains "KOBE-303: it is stored sealed (never in clear)" '^0$' \
+    "$(psql_kobe "SELECT count(*) FROM connector_site_keys WHERE sealed LIKE '%$SITE_KEY%'")"
+  contains "KOBE-303: no server log line holds it" '^0$' \
+    "$(for pod in $($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=server -o name); do
+        $KUBECTL -n "$NS" logs "$pod" -c server 2>/dev/null || true; done | grep -c -- "$SITE_KEY" || true)"
   # Sandboxes cannot skip the proxy and ask the server's internal port themselves.
   internal=$(in_sandbox "curl -s -o /dev/null -m 5 http://$server_ip:8081/healthz && echo control=REACHED || echo control=BLOCKED; \
     curl -s -o /dev/null -m 5 http://$server_ip:8082/healthz && echo internal=REACHED || echo internal=BLOCKED")

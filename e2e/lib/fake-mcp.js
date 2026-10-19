@@ -9,7 +9,11 @@ http
     req.on("data", (c) => (body += c));
     req.on("end", () => {
       const m = JSON.parse(body);
-      if (req.headers.authorization) console.log("AUTH-HEADER-PRESENT");
+      if (req.headers.authorization) {
+        console.log("AUTH-HEADER-PRESENT");
+        // KOBE-303 e2e: which test-only credential arrived (the site key, never a session token).
+        console.log("AUTH " + req.headers.authorization);
+      }
       if (!("id" in m)) {
         res.writeHead(202).end();
         return;

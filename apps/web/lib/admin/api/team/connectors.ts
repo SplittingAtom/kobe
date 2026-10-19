@@ -25,6 +25,8 @@ export interface TeamConnector {
   readonly id: string;
   readonly name: string;
   readonly authKind: "oauth" | "api_key" | "none";
+  /** `site`: the organization provides the key (KOBE-303); members add none. */
+  readonly credentialSource: "member" | "site";
   /** The site admin's switch; a disabled connector cannot be enabled by a team. */
   readonly status: "active" | "disabled";
   readonly iconUrl: string | null;

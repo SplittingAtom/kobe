@@ -27,7 +27,8 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  * - **In-flight reservations** (KOBE-42 review): an admitted call reserves what it may cost (its
  *   input estimate plus the output it allows, `usage/charge.ts`; dollars at the catalog price) at
  *   its site, team and member levels until it ends, and a call is refused when spend plus the
- *   others' reservations reach a budget. Concurrent calls (many sandboxes of one team) therefore
+ *   others' reservations (each counted in full, KOBE-443) reach a budget: 429 with a retry hint
+ *   while the spend itself is below the limit (the holds end), 402 once it is not. Concurrent calls (many sandboxes of one team) therefore
  *   cannot together overshoot a budget on one shim replica by more than the last admitted
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
  *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
@@ -272,16 +273,26 @@ export class BudgetGate implements CallGate {
     }
     if (!verdict.ok) {
       this.giveBack(key);
-      if (verdict.verdict === "own_share") {
+      const l = state.lines[verdict.line] ?? state.lines[0];
+      // KOBE-443 review H1: a line full only of calls in flight (its spend is still below the
+      // limit) frees up as they end: overlapping calls wait and retry (KOBE-259), never a final
+      // "used up". The cached spend may be stale, so it is read again before saying 402.
+      const held =
+        verdict.verdict === "full" &&
+        pct === undefined &&
+        !(await this.spendReached(call, key, verdict.line));
+      if (verdict.verdict === "own_share" || held) {
         return {
           ok: false,
           status: 429,
           code: "too_many_calls_in_flight",
-          message: "Too many large model calls are in flight for this user; retry shortly.",
+          message:
+            verdict.verdict === "own_share"
+              ? "Too many large model calls are in flight for this user; retry shortly."
+              : "The budget is held by model calls in flight; retry shortly.",
           retryAfterSeconds: 2,
         };
       }
-      const l = state.lines[verdict.line] ?? state.lines[0];
       if (pct !== undefined && call.purpose && l) {
         return {
           ok: false,
@@ -298,6 +309,23 @@ export class BudgetGate implements CallGate {
       };
     }
     return { ok: true, release: this.releaser(call, callId) };
+  }
+
+  /**
+   * Whether the spend itself reached line `index` (KOBE-443), on a fresh read of the member's
+   * state (the cached one is dropped). A failed read answers false: the caller then says "retry",
+   * which admits nothing.
+   */
+  private async spendReached(call: CallContext, key: string, index: number): Promise<boolean> {
+    try {
+      this.states.deleteWhere((k) => k === key);
+      const fresh = await this.states.get(key, () => this.store.load(call.teamId, call.userId));
+      const line = linesFor(call, fresh)[index];
+      return line !== undefined && line.spent >= line.limit;
+    } catch (err) {
+      this.onError(err);
+      return false;
+    }
   }
 
   /** The call's input alone, at no output (KOBE-259 `budget_below_call`). */
@@ -321,7 +349,8 @@ export class BudgetGate implements CallGate {
    * The release of one reservation. `written`: the call's ledger row is on its way, so the
    * reservation is renewed for a full reservation TTL and stays until {@link settle} ends it
    * once the row landed (cut short, a row landing late would count nowhere; counted twice
-   * meanwhile is harmless, KOBE-286); otherwise it ends now. A failure is only logged: the
+   * meanwhile, KOBE-286, it can only make an overlapping call wait: a 429, KOBE-443); otherwise
+   * it ends now. A failure is only logged: the
    * reservation then expires by itself.
    */
   private releaser(call: CallContext, callId: string): (written: boolean) => void {

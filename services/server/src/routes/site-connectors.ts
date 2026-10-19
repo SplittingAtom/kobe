@@ -17,8 +17,10 @@ import {
   approveSchema,
   reviewConnectorTools,
 } from "../connectors/reapproval.js";
-import { adminProbeKey } from "../connectors/grants.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
+import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential.js";
+import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
+import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -43,7 +45,7 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
   unreachable: "The server could not be reached.",
   timeout: "The server did not answer in time.",
   auth_required:
-    "The server asked for credentials, which a pinning probe does not have. Tools stay unpinned (none are offered).",
+    "The server asked for credentials. Kobe probes with the connector's site-wide key, else your own key for it (add one at My connector keys in a team that enabled it); never a member's. Tools stay unpinned (none are offered).",
   http_error: "The server answered with an error.",
   protocol_error: "The server did not answer as an MCP server.",
   too_large: "The server's tool list was too large.",
@@ -57,13 +59,24 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
 };
 
 /** The `pin` part of a response: what happened to the tool surface (never the server's own text). */
-const pinBody = (pin: PinOutcome) =>
+/** A site-key connector is fixed by its key, not by anyone's own key (review L2). */
+const SITE_AUTH_REQUIRED =
+  "The server asked for credentials: set (or re-enter) this connector's site-wide key. Tools stay unpinned (none are offered).";
+
+const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: string }) =>
   pin.ok
     ? { ok: true as const, tools: pin.tools }
-    : { ok: false as const, failure: pin.failure, message: PIN_MESSAGES[pin.failure] };
+    : {
+        ok: false as const,
+        failure: pin.failure,
+        message:
+          pin.failure === "auth_required" && connector?.credentialSource === "site"
+            ? SITE_AUTH_REQUIRED
+            : PIN_MESSAGES[pin.failure],
+      };
 
 const invalidFields =
-  "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth.";
+  "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth, credentialSource is member or site (site needs api_key).";
 
 /**
  * The site connector registry (`/v1/site/connectors`, spec D6, D27; KOBE-100): install
@@ -75,9 +88,14 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   const db = deps.database.db;
   app.use(requireSitePermission("site.connectors.manage"));
 
-  // The acting admin's own grant, if any; never another user's.
-  const adminKey = (c: Context, connectorId: string) =>
-    adminProbeKey(db, deps.envelope, c.get("user").id, connectorId);
+  // Pins as the acting admin: the site key, else their own grant, never a member's (KOBE-431).
+  const pinAs = async (c: Context, connectorId: string) => {
+    const adminId = c.get("user").id;
+    return pinConnector(db, deps.connectorProbe, connectorId, {
+      credential: adminPinCredential(db, deps.envelope, adminId),
+      pinnedBy: await nextPinnedBy(db, deps.envelope, connectorId, adminId),
+    });
+  };
 
   const badUrl = (c: Context, check: { code: string; message: string }) =>
     c.json({ code: check.code, message: check.message }, 422);
@@ -98,14 +116,9 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const result = await createConnector(db, { ...input, url: checked.url }, c.get("user").id);
     if (!result.ok) return nameConflict(c, result.error);
     // Registering snapshots and pins every tool; a failed probe leaves it registered, unpinned.
-    const pin = await pinConnector(
-      db,
-      deps.connectorProbe,
-      result.connector.id,
-      await adminKey(c, result.connector.id),
-    );
+    const pin = await pinAs(c, result.connector.id);
     const connector = (await getConnector(db, result.connector.id)) ?? result.connector;
-    return c.json({ connector, ...(pin ? { pin: pinBody(pin) } : {}) }, 201);
+    return c.json({ connector, ...(pin ? { pin: pinBody(pin, connector) } : {}) }, 201);
   });
 
   app.patch("/:id", async (c) => {
@@ -120,31 +133,77 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       patch = { ...input, url: checked.url };
     }
     const result = await updateConnector(db, id.data, patch);
-    if (!result.ok)
-      return result.error === "not_found" ? notFound(c) : nameConflict(c, result.error);
+    if (!result.ok) {
+      if (result.error === "not_found") return notFound(c);
+      if (result.error === "site_needs_api_key") {
+        return invalidRequest(
+          c,
+          "A site-wide key is for API-key connectors only: set authKind to api_key as well.",
+        );
+      }
+      return nameConflict(c, result.error);
+    }
     // A new URL cleared the old pins; pin the new server's tools (no-op when pins still exist).
-    const pin =
-      patch.url === undefined
-        ? undefined
-        : await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data));
+    const pin = patch.url === undefined ? undefined : await pinAs(c, id.data);
     const connector = (await getConnector(db, id.data)) ?? result.connector;
     const shown =
-      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
+      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin, connector) } : {};
     return c.json({ connector, ...shown });
   });
 
   // Probe and pin again, for a connector that has none (the registration probe failed).
   app.post("/:id/pin", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
-    const pin = id.success
-      ? await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data))
-      : undefined;
+    const pin = id.success ? await pinAs(c, id.data) : undefined;
     if (!id.success || !pin) return notFound(c);
     const connector = await getConnector(db, id.data);
     return c.json(
-      { connector, pin: pinBody(pin) },
+      { connector, pin: pinBody(pin, connector) },
       pin.ok || pin.failure === "already_pinned" ? 200 : 502,
     );
+  });
+
+  // The connector's site-wide key (KOBE-303): set or replace, then pin with it if unpinned.
+  app.put("/:id/site-key", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const body = await parseBody(c, putGrantSchema);
+    if (!body) {
+      return invalidRequest(c, "Send the API key as api_key (8 to 2048 visible characters).");
+    }
+    if (!deps.envelope) {
+      return c.json(
+        { code: "credentials_unavailable", message: "This site cannot store credentials yet." },
+        503,
+      );
+    }
+    const result = await setSiteKey(db, deps.envelope, id.data, body.api_key, c.get("user").id);
+    if (!result.ok) {
+      return result.failure === "not_found"
+        ? notFound(c)
+        : c.json(
+            {
+              code: "not_site_key",
+              message: "Choose 'Site-wide key' for this API-key connector first.",
+            },
+            409,
+          );
+    }
+    const pin = await pinAs(c, id.data);
+    const connector = await getConnector(db, id.data);
+    const shown =
+      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin, connector) } : {};
+    return c.json({ connector, replaced: result.replaced, ...shown });
+  });
+
+  app.delete("/:id/site-key", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const removed = id.success ? await removeSiteKey(db, id.data) : undefined;
+    if (removed === undefined) return notFound(c);
+    return removed
+      ? c.body(null, 204)
+      : c.json({ code: "not_found", message: "No site-wide key is set." }, 404);
   });
 
   // What each tool is now: approved vs live definition, for the re-approval review (KOBE-102).
@@ -162,7 +221,8 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!input) {
       return invalidRequest(c, "Send tools: a list of { name, sha256 } of the reviewed tools.");
     }
-    const result = await approveConnectorTools(db, id.data, input);
+    const pinnedBy = await nextPinnedBy(db, deps.envelope, id.data, c.get("user").id);
+    const result = await approveConnectorTools(db, id.data, input, pinnedBy);
     if (result.ok) return c.json({ approved: result.approved });
     if (result.error === "not_found") return notFound(c);
     return c.json(

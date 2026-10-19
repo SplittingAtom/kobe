@@ -268,10 +268,11 @@ function siteJobs(o: ServerJobsOptions): ServerJob[] {
           lock: lockFor(o, CONNECTOR_REFRESH_LOCK, "connector refresh"),
           intervalMs: o.connectorRefreshSeconds * 1000,
           logger: o.logger,
+          envelope: deps.envelope,
           afterPass,
         }),
       async () => {
-        await refreshAllConnectors(db, deps.connectorProbe, o.logger);
+        await refreshAllConnectors(db, deps.connectorProbe, o.logger, { envelope: deps.envelope });
         await afterPass();
       },
     ),
