@@ -94,4 +94,8 @@
   reservations hold); web `eval-run.test.tsx` (refusal shown instead of Run).
 - **ac-4** `skill-eval-budget.db.test.ts` ac-4 test (team budget used up mid-eval →
   `budget_stopped` `budget_exhausted`; new start refused).
-- Commands: see the final report of this ticket (typecheck, lint, unit and DB suites).
+- Commands (2026-10-18): `pnpm typecheck`, `pnpm lint`, prettier green; unit tests protocol 915,
+  db 580, server 2041, model-gateway 180, web 1913, sandbox-agent 848 (one unrelated
+  `pi/identities.test.ts` timing flake under load, green alone); DB: `@kobe/db` 66 files / 1459,
+  model-gateway 6 files / 20, server eval, budget, usage, runs, approvals, titles, follow-ups,
+  settings and review files (18 files) green.
