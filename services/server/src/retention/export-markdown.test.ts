@@ -32,6 +32,23 @@ describe("export Markdown", () => {
     expect(result).toContain("a.csv");
   });
 
+  it("renders an app card's text only: never its details (KOBE-440, MA10)", () => {
+    const card = entryMarkdown({
+      type: "custom_message",
+      id: "ka-000000000000000000000001",
+      parentId: "e1",
+      timestamp: "2026-10-01T10:00:00.000Z",
+      customType: "kobe.app_card",
+      content: "The app-card block below…\n<app-card>3 tables</app-card>",
+      display: true,
+      details: { tool: "open_explorer", result_ref: "secret-ref" },
+    });
+    expect(card).toContain("**App opened by the member:** `open_explorer`");
+    expect(card).toContain("3 tables");
+    expect(card).not.toContain("secret-ref");
+    expect(entryMarkdown({ type: "custom_message", customType: "kobe.branch" })).toBeNull();
+  });
+
   it("skips entries that are not conversation turns or are malformed", () => {
     expect(entryMarkdown({ type: "model_change", id: "x" })).toBeNull();
     expect(entryMarkdown({ type: "message" })).toBeNull();
