@@ -110,10 +110,49 @@ async function scorecardOf(
   return scorecardForProvenance(card.data, new Date(row.finished_at).toISOString());
 }
 
+/** A team version's review row, as `teamReviewRefusal` reads it. */
+export interface TeamReviewRow {
+  readonly status: string | null;
+  readonly suspended: boolean;
+}
+
+/**
+ * D22 (review C4-M2): only a version the team's own review approved, and not suspended by a
+ * rescan, may leave the team; null when it may.
+ */
+export function teamReviewRefusal(row: TeamReviewRow | undefined): Refusal | null {
+  if (row?.status === "approved" && !row.suspended) return null;
+  return {
+    code: "team_review",
+    message:
+      row?.status === "rejected"
+        ? "The team's review rejected this version: only an approved version can be promoted."
+        : row?.suspended
+          ? "A rescan suspended this version: the team's review must decide it again first."
+          : "The team's review hasn't approved this version yet: a Team admin approves it first.",
+  };
+}
+
+/**
+ * The team's review of a version, its row held `FOR SHARE` until the transaction ends (re-review
+ * LOW-R2): submit re-checks it there, so a rejection or suspension landing after the preview
+ * check waits for the submission or wins over it.
+ */
+export async function lockedTeamReview(
+  tx: KobeTx,
+  source: PromoteSource,
+): Promise<TeamReviewRow | undefined> {
+  const res = await tx.execute<{ status: string; suspended: boolean }>(sql`
+    SELECT status, suspended_at IS NOT NULL AS suspended FROM team_skill_reviews
+     WHERE team_id = ${source.teamId} AND scope = 'team' AND skill_id = ${source.skillId}
+       AND version = ${source.version}
+     FOR SHARE`);
+  return res.rows[0];
+}
+
 /**
  * The version's own flags (KOBE-333 review): whether it came from a conversation (stored at save,
- * through forks too, C4-M3) and, for a team version, its team review (D22, C4-M2): only a version
- * the team's own review approved, and not suspended by a rescan, may leave the team.
+ * through forks too, C4-M3) and, for a team version, its team review (D22, C4-M2).
  */
 async function versionFacts(db: KobeDb, source: PromoteSource) {
   return withTeam(db, source.teamId, async (tx: KobeTx) => {
@@ -132,21 +171,7 @@ async function versionFacts(db: KobeDb, source: PromoteSource) {
        WHERE v.team_id = ${source.teamId} AND v.skill_id = ${source.skillId}
          AND v.version = ${source.version}`);
     const row = res.rows[0];
-    const approved = row?.status === "approved" && !row.suspended;
-    return {
-      fromConversation: row?.flag === true,
-      review: approved
-        ? null
-        : {
-            code: "team_review",
-            message:
-              row?.status === "rejected"
-                ? "The team's review rejected this version: only an approved version can be promoted."
-                : row?.suspended
-                  ? "A rescan suspended this version: the team's review must decide it again first."
-                  : "The team's review hasn't approved this version yet: a Team admin approves it first.",
-          },
-    };
+    return { fromConversation: row?.flag === true, review: teamReviewRefusal(row) };
   });
 }
 

@@ -16,7 +16,9 @@ import type { BlobStore } from "../../retention/blobs.js";
 import { ensureObject, scanDocument } from "../kobe-seed.js";
 import type { SkillStore } from "../skill-store.js";
 import {
+  lockedTeamReview,
   preparePromotion,
+  teamReviewRefusal,
   type PromoteSource,
   type PromotionPlan,
   type Refusal,
@@ -115,6 +117,13 @@ export class RequestClosedError extends Error {
   }
 }
 
+/** A rule the plan passed no longer holds inside the submission's transaction. */
+export class SubmitRefusedError extends Error {
+  constructor(readonly refusal: Refusal) {
+    super(refusal.message);
+  }
+}
+
 /** The request's row lock; throws {@link RequestClosedError} unless it is still pending. */
 async function lockOpenRequest(tx: KobeTx, teamId: string, id: string): Promise<void> {
   const res = await tx.execute<{ state: string }>(sql`
@@ -161,6 +170,11 @@ async function submit(
     // The first decision on a request wins (review C4-M1): lock it and check it is still open,
     // before anything is written.
     if (confirmed) await lockOpenRequest(tx, source.teamId, confirmed.requestId);
+    // The team's review again, its row held until commit (re-review LOW-R2).
+    if (source.scope === "team") {
+      const refusal = teamReviewRefusal(await lockedTeamReview(tx, source));
+      if (refusal) throw new SubmitRefusedError(refusal);
+    }
     const skill = await catalogSkill(tx, plan);
     const seq = await tx.execute<{ next: number }>(sql`
       SELECT COALESCE(max(seq), 0) + 1 AS next FROM registry_versions WHERE skill_id = ${skill.id}`);
@@ -256,13 +270,18 @@ export async function promote(
     source.scope === "personal" ||
     admin ||
     (await withTeam(deps.db, source.teamId, (tx) => buildersMayPromote(tx, source.teamId)));
-  if (direct)
+  if (!direct) return request(deps.db, plan, source, who.userId);
+  try {
     return {
       ok: true,
       kind: "submitted",
       registryVersionId: await submit(deps, plan, source, who.userId),
     };
-  return request(deps.db, plan, source, who.userId);
+  } catch (err) {
+    if (err instanceof SubmitRefusedError)
+      return { ok: false, code: "refused", refusals: [err.refusal] };
+    throw err;
+  }
 }
 
 async function request(
@@ -380,6 +399,8 @@ export async function confirmRequest(
     return { ok: true, kind: "submitted", registryVersionId: versionId };
   } catch (err) {
     if (err instanceof RequestClosedError) return CLOSED;
+    if (err instanceof SubmitRefusedError)
+      return { ok: false, code: "refused", refusals: [err.refusal] };
     throw err;
   }
 }

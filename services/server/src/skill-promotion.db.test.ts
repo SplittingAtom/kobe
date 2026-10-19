@@ -392,6 +392,34 @@ describe("review fixes (KOBE-333 review)", () => {
     }
   });
 
+  it("re-checks the team's review inside the submission (re-review LOW-R2)", async () => {
+    const made = await upload(as.admin, "team", pkg("late-reject", "0.1.0"));
+    await evaluated("team", made.skill.id, 1, ids.admin);
+    // The team's review rejects the version after the preview's check, just before the
+    // submission's transaction (its catalog bytes are being written).
+    const get = objects.get.bind(objects);
+    objects.get = async (key, options) => {
+      if (key.includes("skills/catalog/")) {
+        objects.get = get;
+        await reviewed(made.skill.id, 1, "rejected");
+      }
+      return get(key, options);
+    };
+    try {
+      const res = await as.admin.post("/v1/skills/promotions", {
+        scope: "team",
+        skillId: made.skill.id,
+        version: 1,
+      });
+      expect([res.status, res.json.code]).toEqual([422, "submission_refused"]);
+      expect((res.json.refusals as { code: string }[]).map((r) => r.code)).toEqual(["team_review"]);
+    } finally {
+      objects.get = get;
+    }
+    const r = await h.admin.query(`SELECT 1 FROM registry_skills WHERE name = 'late-reject'`);
+    expect(r.rows).toEqual([]);
+  });
+
   it("lets the first decision on a request win; the second gets 409 (C4-M1)", async () => {
     // An earlier test let Builders promote directly: their promotions wait again.
     await as.admin.put("/v1/team/skill-review/settings", { buildersMayPromote: false });
