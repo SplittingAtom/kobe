@@ -51,9 +51,10 @@ rules:
     resources: ["sandboxtemplates", "sandboxwarmpools"]
     verbs: ["create", "patch"]
   # delete: a sandbox found outside the verified isolation runtime is deleted (KOBE-9).
+  # list: the skill eval reaper finds orphaned eval claims by label (KOBE-325).
   - apiGroups: ["extensions.agents.x-k8s.io"]
     resources: ["sandboxclaims"]
-    verbs: ["get", "create", "delete"]
+    verbs: ["get", "list", "create", "delete"]
   # patch: hibernate/wake via operatingMode (KOBE-25).
   - apiGroups: ["agents.x-k8s.io"]
     resources: ["sandboxes"]
