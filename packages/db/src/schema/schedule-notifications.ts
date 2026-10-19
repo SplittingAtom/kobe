@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
+import { registrySkills } from "./registry.js";
 import { runs } from "./runs.js";
 import { SCHEDULE_PAUSED_BY } from "./schedules.js";
 import { teams } from "./teams.js";
@@ -33,6 +34,8 @@ export const NOTIFICATION_KINDS = [
   "schedule.run.interrupted",
   "schedule.run.skipped_actions",
   "schedule.paused",
+  /** A Team admin blocked a catalog skill the member had added for themselves (KOBE-338). */
+  "skill.member_add.blocked",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -60,6 +63,8 @@ export const notifications = pgTable(
     threadId: uuid(),
     runId: uuid(),
     skippedCount: integer(),
+    /** `skill.member_add.blocked`: the catalog skill (a site row; catalog rows are never deleted). */
+    skillId: uuid().references(() => registrySkills.id),
     pausedBy: text().$type<(typeof SCHEDULE_PAUSED_BY)[number]>(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     readAt: timestamp({ withTimezone: true }),
@@ -77,11 +82,13 @@ export const notifications = pgTable(
       foreignColumns: [runs.teamId, runs.id],
     }).onDelete("cascade"),
     check("notifications_kind", sql`${t.kind} IN (${list(NOTIFICATION_KINDS)})`),
-    // A run notification names its thread and run; a pause names neither and says who paused.
+    // A run notification names its thread and run; a pause names neither and says who paused; a
+    // skill notification names its catalog skill and no schedule, thread or run (KOBE-338).
     check(
       "notifications_shape",
-      sql`(${t.kind} = 'schedule.paused' AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NOT NULL)
-        OR (${t.kind} <> 'schedule.paused' AND ${t.threadId} IS NOT NULL AND ${t.runId} IS NOT NULL AND ${t.pausedBy} IS NULL)`,
+      sql`(${t.kind} = 'schedule.paused' AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NOT NULL AND ${t.skillId} IS NULL)
+        OR (${t.kind} = 'skill.member_add.blocked' AND ${t.scheduleId} IS NULL AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NOT NULL)
+        OR (${t.kind} NOT IN ('schedule.paused', 'skill.member_add.blocked') AND ${t.threadId} IS NOT NULL AND ${t.runId} IS NOT NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NULL)`,
     ),
     check("notifications_paused_by", sql`${t.pausedBy} IN (${list(SCHEDULE_PAUSED_BY)})`),
     check("notifications_skipped_count", sql`${t.skippedCount} >= 0`),

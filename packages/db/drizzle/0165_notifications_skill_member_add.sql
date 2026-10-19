@@ -1,0 +1,8 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_kind";--> statement-breakpoint
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_shape";--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "skill_id" uuid;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_skill_id_registry_skills_id_fk" FOREIGN KEY ("skill_id") REFERENCES "public"."registry_skills"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_kind" CHECK ("notifications"."kind" IN ('schedule.run.succeeded', 'schedule.run.failed', 'schedule.run.interrupted', 'schedule.run.skipped_actions', 'schedule.paused', 'skill.member_add.blocked'));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_shape" CHECK (("notifications"."kind" = 'schedule.paused' AND "notifications"."thread_id" IS NULL AND "notifications"."run_id" IS NULL AND "notifications"."paused_by" IS NOT NULL AND "notifications"."skill_id" IS NULL)
+        OR ("notifications"."kind" = 'skill.member_add.blocked' AND "notifications"."schedule_id" IS NULL AND "notifications"."thread_id" IS NULL AND "notifications"."run_id" IS NULL AND "notifications"."paused_by" IS NULL AND "notifications"."skill_id" IS NOT NULL)
+        OR ("notifications"."kind" NOT IN ('schedule.paused', 'skill.member_add.blocked') AND "notifications"."thread_id" IS NOT NULL AND "notifications"."run_id" IS NOT NULL AND "notifications"."paused_by" IS NULL AND "notifications"."skill_id" IS NULL));
