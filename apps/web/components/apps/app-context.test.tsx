@@ -6,7 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp } from "../chat/testing";
+import { INSERT_SETTLE_MS, settlesInsert } from "../chat/composer";
+import { chatRequests, composer, openApp, streaming } from "../chat/testing";
 
 /**
  * KOBE-439 (MA-7) ac-1, ac-2, ac-3: an app's `ui/message` goes into the composer of its own
@@ -95,6 +96,17 @@ async function appWindow() {
   return { send, replies };
 }
 
+const marker = () => document.querySelector("[data-kobe-app-insert-from]");
+
+function insert(app: Awaited<ReturnType<typeof appWindow>>, text: string) {
+  return app.send({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "ui/message",
+    params: { role: "user", content: [{ type: "text", text }] },
+  });
+}
+
 const posts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 
 describe("ui/message and model context (KOBE-439)", () => {
@@ -133,32 +145,74 @@ describe("ui/message and model context (KOBE-439)", () => {
     expect(posts()).toEqual([]);
   });
 
-  it("does not send inserted text on Enter until the member edits or confirms it (MEDIUM-2)", async () => {
+  it("does not send inserted text until the member confirms it; one keystroke is not an edit (MEDIUM-2, LOW-J)", async () => {
     openApp(fake, thread());
     const app = await appWindow();
     const user = userEvent.setup();
     const box = (await composer()) as HTMLTextAreaElement;
     await user.click(box);
     await user.type(box, "Look at ");
-    await app.send({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "ui/message",
-      params: { role: "user", content: [{ type: "text", text: "table t" }] },
-    });
+    await insert(app, "table t");
     await waitFor(() => expect(box.value).toBe("Look at table t"));
-    expect(document.querySelector("[data-kobe-app-insert-from]")?.textContent).toContain(
-      "From Lakehouse Explorer",
-    );
+    expect(marker()?.textContent).toContain("From Lakehouse Explorer");
+    await user.keyboard("{Enter}");
+    // The member's next keystroke (typing around the inserted text) does not lift the gate.
+    await user.type(box, "!");
     await user.keyboard("{Enter}");
     await new Promise((r) => setTimeout(r, 50));
     expect(posts()).toEqual([]);
-    // The member edits: the marker goes, and their Enter sends.
-    await user.type(box, "!");
-    await waitFor(() => expect(document.querySelector("[data-kobe-app-insert-from]")).toBeNull());
+    expect(marker()).not.toBeNull();
+    // Confirm lifts it, and the member's Enter sends.
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(marker()).toBeNull());
     await user.keyboard("{Enter}");
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(must(posts()[0]).body).toMatchObject({ content: "Look at table t!" });
+  });
+
+  it("a change of the inserted text lifts the gate only after the settle time (LOW-J)", async () => {
+    openApp(fake, thread());
+    const app = await appWindow();
+    const user = userEvent.setup();
+    const box = (await composer()) as HTMLTextAreaElement;
+    await insert(app, "Use table `c.n.t`");
+    await waitFor(() => expect(box.value).toBe("Use table `c.n.t`"));
+    await user.click(box);
+    await user.keyboard("{End}{Backspace}");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(marker()).not.toBeNull(); // a reflex keystroke right after the insert
+    await act(() => new Promise((r) => setTimeout(r, INSERT_SETTLE_MS)));
+    await user.keyboard("u`");
+    await waitFor(() => expect(marker()).toBeNull());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(must(posts()[0]).body).toMatchObject({
+      content: expect.not.stringContaining("`c.n.t`") as unknown,
+    });
+  });
+
+  it("steering obeys the gate: the chord and Steer now do nothing while an insert waits (LOW-L)", async () => {
+    const t = thread();
+    openApp(fake, t);
+    const app = await appWindow();
+    const user = userEvent.setup();
+    const box = (await composer()) as HTMLTextAreaElement;
+    await user.type(box, "first{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const runId = must(fake.activeRun(t)).run_id;
+    await streaming(fake, runId);
+    await insert(app, "Use table `c.n.t`");
+    await waitFor(() => expect(box.value).toBe("Use table `c.n.t`"));
+    await user.click(box);
+    await user.keyboard("{Meta>}{Shift>}{Enter}{/Shift}{/Meta}");
+    await user.keyboard("{Control>}{Shift>}{Enter}{/Shift}{/Control}");
+    const steerNow = await screen.findByRole("button", { name: "Steer now" });
+    expect(steerNow.getAttribute("aria-disabled")).toBe("true");
+    await user.click(steerNow);
+    await new Promise((r) => setTimeout(r, 50));
+    const steers = chatRequests(fake, "POST").filter((r) => r.path === `/v1/runs/${runId}/steer`);
+    expect(steers).toEqual([]);
+    expect(box.value).toBe("Use table `c.n.t`");
   });
 
   it("shows a removable chip and sends exactly the chips shown (ac-2)", async () => {
@@ -227,5 +281,18 @@ describe("ui/message and model context (KOBE-439)", () => {
     expect(await screen.findByText("What is in it?")).toBeTruthy();
     expect(screen.getByText("Context from Catalyst (untrusted data)")).toBeTruthy();
     expect(screen.queryByText(new RegExp(APP_CONTEXT_PREAMBLE.slice(0, 20)))).toBeNull();
+  });
+});
+
+describe("settlesInsert (LOW-J)", () => {
+  const pending = { from: "App", insert: "table t", text: "Look at table t", at: 1_000 };
+  it("never settles on the unchanged text, settles on an empty composer at once", () => {
+    expect(settlesInsert(pending, "Look at table t", 99_999)).toBe(false);
+    expect(settlesInsert(pending, "  ", 1_001)).toBe(true);
+  });
+  it("needs the inserted text itself changed, after the settle time", () => {
+    expect(settlesInsert(pending, "Look at table ", 1_001)).toBe(false);
+    expect(settlesInsert(pending, "Look at table ", 1_000 + INSERT_SETTLE_MS)).toBe(true);
+    expect(settlesInsert(pending, "Look at table t!", 1_000 + INSERT_SETTLE_MS)).toBe(false);
   });
 });

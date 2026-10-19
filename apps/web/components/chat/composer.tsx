@@ -20,7 +20,12 @@ import { ComposerAttachments } from "./attachment-chips";
 import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
-import { useComposerDictation, useSteer } from "./composer-steer";
+import {
+  useComposerDictation,
+  useInsertGate,
+  useSteer,
+  type PendingInsert,
+} from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
@@ -178,8 +183,10 @@ export function Composer({
       }
       return;
     }
-    // Text an app inserted is not sent until the member edits or confirms it (MEDIUM-2).
-    if (e.key === "Enter" && !e.shiftKey && appInsert.pending !== null) {
+    // Text an app inserted is not sent, queued or steered until the member changes or confirms it
+    // (MEDIUM-2, LOW-L): only a plain Shift+Enter (a new line) gets through.
+    const newLine = e.shiftKey && !e.ctrlKey && !e.metaKey;
+    if (e.key === "Enter" && !newLine && appInsert.pending !== null) {
       e.preventDefault();
       return;
     }
@@ -385,21 +392,29 @@ export function Composer({
 /** How long the composer flashes after an app put text in it. */
 const INSERT_FLASH_MS = 600;
 
-/** Text an app put in the composer that the member has not edited or confirmed yet. */
-interface PendingInsert {
-  readonly from: string;
-  /** The composer's whole text right after the insert. */
-  readonly text: string;
-  /** The composer has shown that text (its state catches up a render later). */
-  readonly seen: boolean;
+/**
+ * Edits within this long after an insert never lift its gate (KOBE-439 re-review LOW-J): a
+ * keystroke the member was already making when the text arrived is not a review of it.
+ */
+export const INSERT_SETTLE_MS = 800;
+
+/**
+ * Whether `text` settles the pending insert: the member cleared the composer, or, once the settle
+ * time has passed, changed the inserted text itself. Typing around it does not (LOW-J).
+ */
+export function settlesInsert(pending: PendingInsert, text: string, now: number): boolean {
+  if (text === pending.text) return false;
+  if (text.trim() === "") return true;
+  return now - pending.at >= INSERT_SETTLE_MS && !text.includes(pending.insert);
 }
 
 /**
  * An app's `ui/message` (KOBE-439, spec §8; review MEDIUM-2, coordinator decision): the text goes
  * in at the caret of this thread's composer and **never moves the focus**: an Enter the member
- * presses in the app (or anywhere else) cannot send it. Until the member edits the text or
- * confirms it, it carries a visible "From <app>" marker, and Enter and Send do nothing. It is
- * never sent by itself. Only a writable composer of a thread listens.
+ * presses in the app (or anywhere else) cannot send it. Until the member changes the inserted text
+ * or confirms it, it carries a visible "From <app>" marker, and Enter, Send, Queue and every way
+ * of steering do nothing (LOW-J, LOW-L). It is never sent by itself. Only a writable composer of a
+ * thread listens.
  */
 function useAppInserts(
   input: RefObject<HTMLTextAreaElement | null>,
@@ -413,10 +428,11 @@ function useAppInserts(
 } {
   const aui = useAui();
   const session = useChatSession();
+  const gate = useInsertGate();
   const [flash, setFlash] = useState(false);
-  const [pending, setPending] = useState<PendingInsert | null>(null);
   const latest = useRef(text);
   latest.current = text;
+  const setPending = gate.set;
   useEffect(() => {
     if (!writable || threadId === undefined) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -425,7 +441,7 @@ function useAppInserts(
       const caret = el !== null && document.activeElement === el ? el.selectionEnd : undefined;
       const next = insertAt(latest.current, caret ?? latest.current.length, insert);
       aui.composer.setText(next.text);
-      setPending({ from, text: next.text, seen: false });
+      setPending({ from, insert, text: next.text, at: Date.now() });
       setFlash(true);
       clearTimeout(timer);
       timer = setTimeout(() => setFlash(false), INSERT_FLASH_MS);
@@ -434,14 +450,17 @@ function useAppInserts(
     return () => {
       stop();
       clearTimeout(timer);
+      setPending(null); // another thread's composer never inherits this one's gate
     };
-  }, [session, aui, input, threadId, writable]);
-  // Any change of the text after the insert (the member typing, a send clearing it) settles it.
-  if (pending !== null && !pending.seen && text === pending.text) {
-    setPending({ ...pending, seen: true });
-  } else if (pending !== null && pending.seen && text !== pending.text) {
-    setPending(null);
-  }
+  }, [session, aui, input, threadId, writable, setPending]);
+  const pending = gate.pending;
+  // The composer's state shows the inserted text a render later: judge only changes after that.
+  const seen = useRef<PendingInsert | null>(null);
+  useEffect(() => {
+    if (pending === null) return;
+    if (text === pending.text) seen.current = pending;
+    else if (seen.current === pending && settlesInsert(pending, text, Date.now())) setPending(null);
+  }, [pending, text, setPending]);
   const confirm = () => {
     setPending(null);
     input.current?.focus();
