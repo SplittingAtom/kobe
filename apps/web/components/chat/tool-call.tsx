@@ -16,6 +16,8 @@ import { useKobeExtras } from "./kobe-runtime";
 import { FullOutputStatus, Output, PRE, useFullOutput, type FullOutput } from "./tool-output";
 import { useSkillOfToolCall } from "./skill-badge";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
+import { SkillDraftCard } from "./skill-draft-card";
+import { SAVE_SKILL_DRAFT_TOOL } from "../../lib/skills/draft-tool-result";
 import styles from "./chat.module.css";
 
 const NO_ACTIVITY: ToolActivity = { egressBlocked: [], artifacts: [], files: [] };
@@ -227,6 +229,7 @@ function ToolCardSlots({
       {activity.files.map((file) => (
         <FileSlot key={file.file_id} file={file} />
       ))}
+      {toolName === SAVE_SKILL_DRAFT_TOOL && <SkillDraftCard result={result} />}
     </div>
   );
 }
