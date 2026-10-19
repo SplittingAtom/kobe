@@ -20,6 +20,8 @@ import {
   type SkillEvalCase,
   type SkillEvalLimits,
 } from "@kobe/protocol";
+import { judgeOutputs } from "./judge-outputs.js";
+import type { SkillEvalJudge } from "./judge.js";
 import type { Logger } from "pino";
 import { resolveAgentPin, type AgentPin } from "../../agents/versions.js";
 import { KOBE_GALLERY_KEY } from "../../gallery/definitions.js";
@@ -83,8 +85,8 @@ export interface SkillEvalRunnerOptions {
   /** The chart's `sandbox.skillEval.maxConcurrentPerTeam` (the eval quota's size). */
   readonly maxConcurrentPerTeam: number;
   readonly log: Pick<Logger, "info" | "warn" | "error">;
-  /** The judge (KOBE-326); absent: a `judge` check fails `judge_failed`. */
-  readonly judge?: EvalJudge;
+  /** The judge (KOBE-326, `judge.ts`); absent: a `judge` check fails `judge_failed`. */
+  readonly judge?: SkillEvalJudge;
   readonly tuning?: Partial<SkillEvalRunnerTuning>;
   /** How long a stale wire connection still counts as live (the wire's `staleConnectionMs`). */
   readonly staleConnectionMs?: number;
@@ -223,7 +225,7 @@ export class SkillEvalRunner {
     }
     try {
       if (attempt === null) await requeueExecution(this.#o.db, claim);
-      else await recordAttempt(this.#o.db, claim, attempt, claim.runModel.used);
+      else await recordAttempt(this.#o.db, claim, attempt, claim.runModel);
     } catch (err) {
       this.#o.log.error({ err, eval_run_id: claim.evalRunId }, "skill evals: could not record");
     } finally {
@@ -309,8 +311,9 @@ export class SkillEvalRunner {
       deniedToolCalls: observed.numbers.deniedToolCalls,
       snapshot,
     };
+    const judge = this.#judgeFor(target, claim, runId);
     const checked = await evalChecks(c, claim.withSkill, obs, fixtures, {
-      ...(this.#o.judge ? { judge: this.#o.judge } : {}),
+      ...(judge ? { judge } : {}),
     });
     return {
       status: checked.status,
@@ -323,6 +326,38 @@ export class SkillEvalRunner {
       deniedToolCalls: obs.deniedToolCalls,
       threadId: claim.threadId,
       runId,
+    };
+  }
+
+  /**
+   * This attempt's judge (KOBE-326): the matched outputs' bytes come from the sandbox
+   * (`eval.read`: paths and walked sizes only go out), then one server-side call on the judge
+   * model chosen at start. The runner keeps beating meanwhile (state `collecting`); the read and
+   * the call each have their own timeout. Nothing of the judge's messages reaches the sandbox.
+   */
+  #judgeFor(target: SandboxTarget, claim: ClaimedExecution, runId: string): EvalJudge | undefined {
+    const service = this.#o.judge;
+    const model = claim.judgeModel;
+    if (!service || !model) return undefined;
+    return async (input) => {
+      const outputs = await judgeOutputs(this.#o.router, target, claim.threadId, input.outputs);
+      if (!outputs)
+        return {
+          kind: "failed",
+          costUsd: 0,
+          detail: "The outputs could not be read for the judge.",
+        };
+      return service.judge({
+        teamId: claim.teamId,
+        userId: claim.userId,
+        threadId: claim.threadId,
+        runId,
+        judgeAlias: model.alias,
+        rubric: input.rubric,
+        prompt: input.prompt,
+        answer: input.answer,
+        outputs,
+      });
     };
   }
 

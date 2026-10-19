@@ -10,6 +10,7 @@ import {
   SERVER_CALL_AUDIENCE,
   SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
+  SERVER_CALL_RESPONSE_FORMATS,
   SERVER_CALL_TOKEN_HEADER,
   runRootSpanId,
   runTraceId,
@@ -85,6 +86,33 @@ const input = (over: Partial<ServerCallInput> = {}): ServerCallInput => ({
   messages: [{ role: "user", content: "What drives revenue?" }],
   signal: AbortSignal.timeout(5_000),
   ...over,
+});
+
+describe("server-call gateway client: the eval judge (KOBE-326)", () => {
+  it("asks at temperature 0, the judge's cap, and its structured format only when told", async () => {
+    reply = ok('{"passed": true, "reason": "ok"}');
+    const client = createServerCallClient({ url: base, key: KEY });
+    await client.complete(input({ purpose: "eval_judge", structured: true }));
+    await client.complete(input({ purpose: "eval_judge" }));
+    await client.complete(input({ structured: true }));
+    const bodies = seen.map((s) => serverCallRequestSchema.parse(JSON.parse(s.body)));
+    expect(bodies[0]).toMatchObject({
+      temperature: 0,
+      max_tokens: SERVER_CALL_LIMITS.eval_judge.max_output_tokens,
+      response_format: SERVER_CALL_RESPONSE_FORMATS.eval_judge,
+    });
+    expect(bodies[1]).toMatchObject({ temperature: 0 });
+    expect(bodies[1]).not.toHaveProperty("response_format");
+    // A title never asks for a format, and keeps its own temperature.
+    expect(bodies[2]).toMatchObject({ temperature: SERVER_CALL_LIMITS.title.temperature });
+    expect(bodies[2]).not.toHaveProperty("response_format");
+    const claims = verifyServerCallToken(
+      KEY,
+      seen[0]?.headers[SERVER_CALL_TOKEN_HEADER],
+      Math.floor(Date.now() / 1000),
+    );
+    expect(claims.ok && claims.claims.purpose).toBe("eval_judge");
+  });
 });
 
 describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {

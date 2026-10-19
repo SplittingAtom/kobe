@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import {
   MAX_SERVER_CALL_TOKEN_TTL_SECONDS,
   SERVER_CALL_AUDIENCE,
+  SERVER_CALL_LIMITS,
   SERVER_CALL_PATH,
   SERVER_CALL_REASONING_EFFORT,
+  SERVER_CALL_RESPONSE_FORMATS,
   SERVER_CALL_TOKEN_HEADER,
   serverCallOutputCap,
   serverCallRequestSchema,
-  type ServerCallPurpose,
   type ServerCallRequest,
+  type ServerCallTokenPurpose,
 } from "@kobe/protocol";
 import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
 import {
@@ -93,7 +95,8 @@ const UNUSABLE = new Set([
 ]);
 
 export interface ServerCallInput {
-  readonly purpose: ServerCallPurpose;
+  /** Titles, follow-ups (KOBE-234), or the skill eval judge (KOBE-326). */
+  readonly purpose: ServerCallTokenPurpose;
   readonly teamId: string;
   /** The member whose run triggered the call (budget line and virtual key). */
   readonly userId: string;
@@ -108,7 +111,12 @@ export interface ServerCallInput {
    */
   readonly reasoning: boolean;
   readonly messages: ServerCallRequest["messages"];
-  /** Bounds the whole call (the purpose's `timeout_ms`, from the epilogue). */
+  /**
+   * Ask for the purpose's structured-output format (`SERVER_CALL_RESPONSE_FORMATS`; the eval
+   * judge's verdict), where the caller knows the provider supports it.
+   */
+  readonly structured?: boolean;
+  /** Bounds the whole call (the purpose's `timeout_ms`). */
   readonly signal: AbortSignal;
 }
 
@@ -145,13 +153,18 @@ function mintToken(key: Uint8Array, input: ServerCallInput, now: Date): string {
 }
 
 function bodyOf(input: ServerCallInput): ServerCallRequest {
+  const format =
+    input.structured && input.purpose === "eval_judge"
+      ? { response_format: SERVER_CALL_RESPONSE_FORMATS.eval_judge }
+      : {};
   return serverCallRequestSchema.parse({
     model: input.model,
     messages: input.messages,
     max_tokens: serverCallOutputCap(input.purpose, input.reasoning),
-    temperature: 0.2,
+    temperature: SERVER_CALL_LIMITS[input.purpose].temperature,
     stream: false,
     ...(input.reasoning ? { reasoning_effort: SERVER_CALL_REASONING_EFFORT } : {}),
+    ...format,
   });
 }
 

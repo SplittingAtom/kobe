@@ -480,6 +480,8 @@ const skillEvalRunner =
         provider: sandbox.provider,
         maxConcurrentPerTeam: sandbox.settings.skillEval.maxConcurrentPerTeam,
         log: logger,
+        // KOBE-326: without server calls a `judge` check fails `judge_failed`.
+        ...(deps.skillEvalJudge ? { judge: deps.skillEvalJudge } : {}),
       })
     : undefined;
 const kickSkillEvals = () =>

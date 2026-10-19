@@ -168,6 +168,17 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  evalRead(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalRead"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.read", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      files: request.files.map((f) => ({ path: f.path, size: f.size })),
+    });
+  }
+
   compactThread(
     target: SandboxTarget,
     request: Parameters<SandboxRouter["compactThread"]>[1],

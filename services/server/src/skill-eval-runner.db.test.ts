@@ -1,17 +1,10 @@
 import { randomUUID } from "node:crypto";
-import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { EvalWorkspaceSnapshot } from "@kobe/protocol";
-import { seedGalleryAgents } from "./gallery/seed.js";
-import { SkillEvalRunner } from "./skills/evals/runner.js";
 import { reapSkillEvals } from "./skills/evals/reaper.js";
 import { purgeSkillEvals } from "./retention/skill-evals.js";
 import { skillEvalEventStream } from "./skills/evals/events.js";
 import { evalStreamAccess } from "./skills/evals/views.js";
-import { RawBody } from "./testing/browser.js";
-import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
-import { MemoryObjects } from "./testing/memory-objects.js";
-import { RunFixture, FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
+import { SkillEvalBench, type FakeEvalProvider } from "./testing/skill-eval-bench.js";
 import { must, type Person } from "./testing/event-stream-fixture.js";
 
 /**
@@ -21,188 +14,26 @@ import { must, type Person } from "./testing/event-stream-fixture.js";
  * retried once (ac-2); results are stored, scored and streamed (ac-3); eval sandboxes hold only
  * session tokens, are always deleted, and eval threads stay out of the member's lists (ac-4).
  */
-const objects = new MemoryObjects();
-const blobs = { objects, prefix: "kobe/" };
-const f = new RunFixture();
-const silent = pino({ level: process.env.EVAL_TEST_LOG ?? "silent" });
-type World = Awaited<ReturnType<RunFixture["world"]>>;
-
-/** A scripted eval sandbox per claim: answers fixtures, snapshots and runs as the test says. */
-class FakeEvalProvider {
-  readonly created: string[] = [];
-  readonly deleted: string[] = [];
-  readonly sandboxes = new Map<string, FakeWorkspace>();
-  live = 0;
-  maxLive = 0;
-  answer: (start: RunStart, attempt: number) => string = () => "Total: 42";
-  beforeReply: (ws: FakeWorkspace, start: RunStart) => Promise<void> = async () => {};
-  snapshot: EvalWorkspaceSnapshot = { walks: [] };
-  readonly attempts = new Map<string, number>();
-
-  constructor(private readonly url: () => string) {}
-
-  createEvalSandbox = async (
-    team: { id: string },
-    spec: { userId: string; threadId: string; evalRunId: string; shutdownAt: Date },
-  ) => {
-    this.created.push(spec.threadId);
-    this.live += 1;
-    this.maxLive = Math.max(this.maxLive, this.live);
-    const sandboxId = randomUUID();
-    const token = f.auth.issue({
-      sandboxId,
-      teamId: team.id,
-      userId: spec.userId,
-      evalThreadId: spec.threadId,
-    });
-    const sb = await FakeSandbox.connect(this.url(), token);
-    if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
-    sb.hello(sandboxId, [], "1.0.0", ["skill_bundles", "skill_eval"]);
-    await sb.ready();
-    const ws = new FakeWorkspace(sb);
-    const base = sb.respond;
-    sb.respond = (frame) => {
-      if (frame.type === "eval.prepare")
-        return { v: 1, type: "command.result", command_id: frame.command_id, ok: true };
-      if (frame.type === "eval.snapshot")
-        return {
-          v: 1,
-          type: "command.result",
-          command_id: frame.command_id,
-          ok: true,
-          data: this.snapshot,
-        };
-      return base?.(frame);
-    };
-    sb.onFrame = (frame) => {
-      if (frame.type !== "run.start") return;
-      const key = frame.message;
-      const n = (this.attempts.get(key) ?? 0) + 1;
-      this.attempts.set(key, n);
-      setTimeout(() => {
-        void this.beforeReply(ws, frame).then(() => ws.reply(frame, this.answer(frame, n)));
-      }, 20);
-    };
-    this.sandboxes.set(spec.threadId, ws);
-    return {
-      sandboxId,
-      namespace: "kobe-team-x",
-      claimName: `e-${spec.threadId}`,
-      sandboxName: "s",
-      state: "running" as const,
-    };
-  };
-
-  deleteEvalSandbox = async (_team: unknown, threadId: string) => {
-    this.deleted.push(threadId);
-    const ws = this.sandboxes.get(threadId);
-    if (ws) {
-      this.sandboxes.delete(threadId);
-      this.live -= 1;
-      ws.kill();
-    }
-    return true;
-  };
-
-  listEvalSandboxes = async () => [];
-}
+const bench = new SkillEvalBench();
+const { f, objects, blobs, silent } = bench;
+const world = () => bench.world();
+const draftWith = (...a: Parameters<SkillEvalBench["draftWith"]>) => bench.draftWith(...a);
+const runnerFor = (provider: FakeEvalProvider, cap = 4) => bench.runnerFor(provider, cap);
+const drive = (...a: Parameters<SkillEvalBench["drive"]>) => bench.drive(...a);
+const closeEvals = (team: string) => bench.closeEvals(team);
+const newProvider = () => bench.provider();
 
 beforeAll(async () => {
-  await f.setup({ blobs });
-  await seedGalleryAgents(f.fx.db);
+  await bench.setup();
 });
 afterAll(async () => {
-  await f.teardown();
+  await bench.teardown();
 });
-
-const text = (t: string) => new RawBody(t, "text/plain; charset=utf-8");
-const skillMd = (name: string) =>
-  `---\nname: ${name}\ndescription: Formats ${name} reports. Use when asked for a ${name} report.\n---\n# ${name}\nAdd a totals row.\n`;
-
-async function world(): Promise<World> {
-  const w = await f.world();
-  const admin = f.fx.admin;
-  await admin.query(
-    `INSERT INTO model_providers (id, kind, name, api_key_enc, created_by)
-     VALUES ('openai', 'openai', 'openai', 'v2.test.sealed-provider-key', $1) ON CONFLICT (id) DO NOTHING`,
-    [w.owner.id],
-  );
-  await admin.query(
-    `INSERT INTO model_catalog (alias, provider_id, model, created_by)
-     VALUES ('fast', 'openai', 'fast-fake', $1) ON CONFLICT (alias) DO NOTHING`,
-    [w.owner.id],
-  );
-  await admin.query(
-    `INSERT INTO team_models (team_id, alias, is_default, enabled_by) VALUES ($1, 'fast', true, $2)`,
-    [w.team, w.owner.id],
-  );
-  return w;
-}
-
-async function put(p: Person, id: string, path: string, rev: number, body: RawBody) {
-  const res = await f
-    .on(0, p)
-    .request("PUT", `/v1/skills/drafts/${id}/files/${path}`, body, { "if-match": `"${rev}"` });
-  expect(res.status, JSON.stringify(res.json)).toBe(200);
-  return res.json.rev as number;
-}
-
-/** A draft with a SKILL.md, a suite and its fixtures. */
-async function draftWith(p: Person, name: string, cases: string, fixtures: Record<string, string>) {
-  const created = await f.on(0, p).post("/v1/skills/drafts", { name });
-  expect(created.status, JSON.stringify(created.json)).toBe(201);
-  const id = created.json.draft.id as string;
-  let rev = await put(p, id, "SKILL.md", created.json.draft.rev as number, text(skillMd(name)));
-  rev = await put(p, id, "evals/cases.yaml", rev, text(cases));
-  for (const [path, body] of Object.entries(fixtures))
-    rev = await put(p, id, `evals/fixtures/${path}`, rev, text(body));
-  return id;
-}
-
-function runnerFor(provider: FakeEvalProvider, maxConcurrentPerTeam = 4) {
-  return new SkillEvalRunner({
-    db: f.fx.db,
-    blobs,
-    router: f.fx.replica(0).deps.sandboxWire.router,
-    runs: f.fx.replica(0).deps.runs,
-    provider,
-    maxConcurrentPerTeam,
-    log: silent,
-    tuning: { pollMs: 50, podWaitMs: 5_000, connectWaitMs: 5_000 },
-  });
-}
-
-async function drive(runner: SkillEvalRunner, team: string, evalRunId: string) {
-  await expect
-    .poll(
-      async () => {
-        await runner.sweep();
-        const { rows } = await f.fx.admin.query<{ status: string }>(
-          `SELECT status FROM skill_eval_runs WHERE team_id = $1 AND id = $2`,
-          [team, evalRunId],
-        );
-        return rows[0]?.status;
-      },
-      { timeout: 60_000, interval: 200 },
-    )
-    .toMatch(/completed|failed|cancelled/);
-  await runner.idle();
-}
-
-const url = () => must(f.listeners[0], "listener").url;
-
-/** Ends a test's open evals, so later tests' runners never pick them up. */
-const closeEvals = (team: string) =>
-  f.fx.admin.query(
-    `UPDATE skill_eval_runs SET status = 'cancelled', cancel_requested_at = now(), finished_at = now()
-      WHERE team_id = $1 AND status IN ('queued', 'running')`,
-    [team],
-  );
 
 describe("skill eval runner (KOBE-325)", () => {
   it("runs a full eval: one sandbox per case per mode, baseline without skills, scored and streamed", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     provider.snapshot = {
       walks: [
         {
@@ -293,7 +124,7 @@ describe("skill eval runner (KOBE-325)", () => {
       `INSERT INTO site_skill_settings (id, eval_limits) VALUES (1, '{"maxConcurrentSandboxes": 1}')
        ON CONFLICT (id) DO UPDATE SET eval_limits = EXCLUDED.eval_limits`,
     );
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     provider.answer = (_start, attempt) => (attempt === 1 ? "no idea" : "Total: 7");
     const id = await draftWith(
       w.owner,
@@ -322,7 +153,7 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("cancels: nothing more starts, the sandbox goes, and the reaper finds nothing left", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     const id = await draftWith(
       w.owner,
       "cancel",
@@ -350,7 +181,7 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("on shutdown puts a running execution back without using its attempt (review M2)", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     provider.beforeReply = () => new Promise(() => {}); // the run never answers
     const id = await draftWith(
       w.owner,
@@ -385,7 +216,7 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("the reaper takes over only executions whose heartbeat stopped (review M2)", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     const id = await draftWith(
       w.owner,
       "reap",
@@ -482,7 +313,7 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("counts takeovers: the third records an error attempt, so a poison pill ends (re-review R1)", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     const id = await draftWith(
       w.owner,
       "poison",
@@ -552,7 +383,7 @@ describe("skill eval runner (KOBE-325)", () => {
     });
     const evalRunId = started.json.evalRunId as string;
     await f.fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [gone.id]);
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     const reaped = await reapSkillEvals({
       db: f.fx.db,
       provider,
@@ -653,7 +484,7 @@ describe("skill eval runner (KOBE-325)", () => {
     );
     try {
       const results: { decision: string; reasons: { code: string }[] }[] = [];
-      const provider = new FakeEvalProvider(url);
+      const provider = newProvider();
       provider.beforeReply = async (ws, start) => {
         ws.sb.send({
           v: 1,
@@ -722,7 +553,7 @@ describe("skill eval runner (KOBE-325)", () => {
 
   it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
     const w = await world();
-    const provider = new FakeEvalProvider(url);
+    const provider = newProvider();
     provider.beforeReply = async (ws, start) => {
       ws.sb.send({
         v: 1,

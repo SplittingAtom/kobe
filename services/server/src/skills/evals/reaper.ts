@@ -96,7 +96,7 @@ async function takeOverOrphans(
             deps.db,
             { ...key, attempt: claim.attempt, firstAttempt: claim.firstAttempt },
             errorAttempt(row.thread_id, row.run_id, 0),
-            claim.model,
+            claim.runModel,
           )) !== "stale"
         : await requeueExecution(deps.db, key);
     if (done) taken += 1;

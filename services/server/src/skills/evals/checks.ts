@@ -16,8 +16,8 @@ import {
 
 // The checks of one eval execution (KOBE-325, contract KOBE-324 `docs/skill-evals.md`): pure, on
 // the server, from what the run recorded (skill uses, cost, turns, denials) and the sandbox's
-// after-snapshot. The judge is a seam (KOBE-326); until it is wired a `judge` check fails
-// `judge_failed`.
+// after-snapshot. The judge (KOBE-326, `judge.ts`) is passed in per attempt; without one a
+// `judge` check fails `judge_failed`.
 
 /** What one finished attempt left behind, as the runner collected it. */
 export interface EvalObservation {
@@ -40,7 +40,12 @@ export interface EvalObservation {
 export type EvalJudgeResult =
   | { readonly kind: "passed"; readonly costUsd: number; readonly reason?: string }
   | { readonly kind: "rejected"; readonly costUsd: number; readonly reason?: string }
-  | { readonly kind: "failed" | "unparseable"; readonly costUsd: number };
+  | {
+      readonly kind: "failed" | "unparseable";
+      readonly costUsd: number;
+      /** Why, for the case (a judge model no longer enabled, the call's error code). */
+      readonly detail?: string;
+    };
 
 /** The judge seam (KOBE-326): grade the answer and the matched outputs against the rubric. */
 export type EvalJudge = (input: {
@@ -200,7 +205,7 @@ export async function evalChecks(
         ? pass("judge")
         : verdict.kind === "rejected"
           ? fail("judge", "judge_rejected", verdict.reason)
-          : fail("judge", JUDGE_REASON[verdict.kind]),
+          : fail("judge", JUDGE_REASON[verdict.kind], verdict.detail),
     );
   }
   const checks = wanted.flatMap((k) => results.get(k) ?? []);

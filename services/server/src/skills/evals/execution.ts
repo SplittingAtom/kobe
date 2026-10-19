@@ -2,6 +2,7 @@ import {
   skillEvalExecutionSchema,
   type SkillEvalCheckResult,
   type SkillEvalExecution,
+  type SkillEvalRunModel,
   type SkillEvalScoredStatus,
 } from "@kobe/protocol";
 
@@ -29,11 +30,15 @@ export const retries = (attempt: EvalAttempt, attemptNo: number): boolean =>
 
 const roundUsd = (x: number) => Math.round(x * 1e6) / 1e6;
 
-/** The execution of `attempts` (one or two, final last), validated against the contract. */
+/**
+ * The execution of `attempts` (one or two, final last), validated against the contract. It
+ * reports the model it ran on and, when the team hasn't enabled the suite's model, that alias
+ * (KOBE-326, SK17: never a silent fallback).
+ */
 export function executionFromAttempts(
   caseId: string,
   withSkill: boolean,
-  model: string,
+  runModel: SkillEvalRunModel,
   attempts: readonly [EvalAttempt] | readonly [EvalAttempt, EvalAttempt],
 ): SkillEvalExecution {
   const final = attempts[attempts.length - 1] as EvalAttempt;
@@ -48,7 +53,8 @@ export function executionFromAttempts(
     skillUses,
     triggered: withSkill && final.status !== "error" ? skillUses > 0 : null,
     checks: final.checks,
-    model,
+    model: runModel.used,
+    ...(runModel.fellBack && runModel.requested ? { requestedModel: runModel.requested } : {}),
     costUsd,
     totalCostUsd: attempts.length === 1 ? costUsd : roundUsd(total((a) => a.costUsd)),
     judgeCostUsd: roundUsd(total((a) => a.judgeCostUsd)),

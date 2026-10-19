@@ -1,5 +1,6 @@
 import { eq, sql, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { isModelEnabled } from "../models/team-store.js";
 
 /**
  * The team's skill switches (KOBE-80, D22; SK25): members' personal skills can be left out of the
@@ -107,5 +108,53 @@ export function setCatalogSwitches(
       });
     await recordAudit(tx, { action: "skill.catalog_switches.changed", teamId, target: changed });
     return after;
+  });
+}
+
+/**
+ * The team's eval judge (KOBE-326, SK17): the alias a Team admin chose, if the team still enables
+ * it; null otherwise (the team default judges then). Used when the Site's judge is not enabled in
+ * the team.
+ */
+export async function readEvalJudgeAlias(tx: KobeTx, teamId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ alias: teamSkillSettings.evalJudgeAlias })
+    .from(teamSkillSettings)
+    .where(eq(teamSkillSettings.teamId, teamId));
+  const alias = row?.alias ?? null;
+  return alias !== null && (await isModelEnabled(tx, teamId, alias)) ? alias : null;
+}
+
+export function getEvalJudgeAlias(db: KobeDb, teamId: string): Promise<string | null> {
+  return withTeam(db, teamId, (tx) => readEvalJudgeAlias(tx, teamId));
+}
+
+/**
+ * Sets the team's eval judge (a Team admin's act) to one of the team's enabled models, or clears
+ * it (null: the team default). Refuses a model the team has not enabled; audits a real change.
+ */
+export function setEvalJudgeAlias(
+  db: KobeDb,
+  teamId: string,
+  userId: string,
+  alias: string | null,
+): Promise<{ ok: true; alias: string | null } | { ok: false }> {
+  return withTeam(db, teamId, async (tx) => {
+    await lockSettings(tx, teamId);
+    if (alias !== null && !(await isModelEnabled(tx, teamId, alias))) return { ok: false };
+    const [row] = await tx
+      .select({ alias: teamSkillSettings.evalJudgeAlias })
+      .from(teamSkillSettings)
+      .where(eq(teamSkillSettings.teamId, teamId));
+    if ((row?.alias ?? null) === alias) return { ok: true, alias };
+    await tx
+      .insert(teamSkillSettings)
+      .values({ teamId, evalJudgeAlias: alias, updatedBy: userId })
+      .onConflictDoUpdate({
+        target: teamSkillSettings.teamId,
+        set: { evalJudgeAlias: alias, updatedBy: userId, updatedAt: new Date() },
+      });
+    await recordAudit(tx, { action: "skill.eval_judge.changed", teamId, target: { alias } });
+    return { ok: true, alias };
   });
 }

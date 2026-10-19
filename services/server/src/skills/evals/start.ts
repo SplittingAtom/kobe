@@ -34,6 +34,7 @@ import { isBlocked } from "../blocklist.js";
 import { validateZipBundle } from "../bundle.js";
 import { readAllFiles, visibleDraft } from "../drafts/records.js";
 import { testGate } from "../drafts/test-gates.js";
+import { readEvalJudgeAlias } from "../settings.js";
 import { scanCanonicalZip } from "../review.js";
 import { ScanBusyError } from "../scan-pool.js";
 import { siteEvalLimits } from "./runner.js";
@@ -195,8 +196,13 @@ async function runModelFor(
   return { requested: requested ?? null, used, fellBack: requested !== undefined };
 }
 
-/** The judge (SK17): the Site's alias when the team enabled it, else the team's default. */
-async function judgeModelFor(
+/**
+ * The judge (SK17, KOBE-326): the Site's `judge_alias` when the team enabled it; else the team's
+ * own choice (a Team admin setting, while still enabled); else the team default; else the run's
+ * model. Every candidate is an enabled model of the team: eval content never goes elsewhere (the
+ * judge checks again when it calls).
+ */
+export async function judgeModelFor(
   tx: KobeTx,
   teamId: string,
   runModel: SkillEvalRunModel,
@@ -204,6 +210,8 @@ async function judgeModelFor(
   const [site] = await tx.select({ alias: siteSkillSettings.judgeAlias }).from(siteSkillSettings);
   if (site?.alias && (await isModelEnabled(tx, teamId, site.alias)))
     return { alias: site.alias, source: "site" };
+  const chosen = await readEvalJudgeAlias(tx, teamId);
+  if (chosen !== null) return { alias: chosen, source: "team" };
   const fallback = await resolveRunModel(tx, teamId, undefined);
   return { alias: (fallback.ok && fallback.model?.alias) || runModel.used, source: "team" };
 }

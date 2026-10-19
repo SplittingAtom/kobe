@@ -1395,6 +1395,11 @@ export const AUDIT_EVENTS = {
     membersMayAddCatalog: z.boolean().optional(),
     buildersMayInstallCatalog: z.boolean().optional(),
   }),
+  /**
+   * A Team admin chose the team's eval judge (KOBE-326, SK17): one of its enabled models, or null
+   * for the team default. Used when the Site's judge is not enabled in the team.
+   */
+  "skill.eval_judge.changed": event("team", { alias: modelAlias.nullable() }),
   /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */

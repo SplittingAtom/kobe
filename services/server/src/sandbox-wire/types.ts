@@ -196,6 +196,18 @@ export interface SandboxRouter {
     },
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * KOBE-326, to a skill eval's own sandbox only: the matched outputs' bytes for the judge
+   * (`eval.read`; paths and walked sizes only go out; `data` untrusted: validate it).
+   */
+  evalRead(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly files: readonly { path: string; size: number }[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
   /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */
   compactThread(
     target: SandboxTarget,

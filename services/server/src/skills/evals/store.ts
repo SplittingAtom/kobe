@@ -95,6 +95,8 @@ export interface ClaimedExecution {
   readonly runtimeHash: string;
   readonly skillName: string;
   readonly runModel: SkillEvalRunModel;
+  /** The judge chosen at start (KOBE-326); null when no case has a rubric. */
+  readonly judgeModel: SkillEvalJudgeModel | null;
 }
 
 /** Whether the team has any queued execution (a cheap look before taking the team's lock). */
@@ -143,10 +145,11 @@ export async function claimNextExecution(
       runtime_hash: string;
       skill_name: string;
       run_model: SkillEvalRunModel;
+      judge_model: SkillEvalJudgeModel | null;
       wall_minutes: number | null;
     }>(sql`
       SELECT x.eval_run_id, x.case_id, x.with_skill, x.attempt, x.first_attempt, r.started_by,
-             r.suite, r.fixtures_key, r.runtime_hash, r.skill_name, r.run_model,
+             r.suite, r.fixtures_key, r.runtime_hash, r.skill_name, r.run_model, r.judge_model,
              (r.limits ->> 'caseWallClockMinutes')::int AS wall_minutes
         FROM skill_eval_results x
         JOIN skill_eval_runs r ON r.team_id = x.team_id AND r.id = x.eval_run_id
@@ -212,6 +215,7 @@ export async function claimNextExecution(
       runtimeHash: row.runtime_hash,
       skillName: row.skill_name,
       runModel: row.run_model,
+      judgeModel: row.judge_model,
     };
   });
 }
@@ -249,14 +253,14 @@ export async function claimTakeover(
   takeovers: number;
   attempt: 1 | 2;
   firstAttempt: EvalAttempt | null;
-  model: string;
+  runModel: SkillEvalRunModel;
 } | null> {
   return withTeam(db, e.teamId, async (tx) => {
     const res = await tx.execute<{
       takeovers: number;
       attempt: number;
       first_attempt: EvalAttempt | null;
-      model: string;
+      run_model: SkillEvalRunModel;
     }>(sql`
       UPDATE skill_eval_results x
          SET takeovers = least(x.takeovers + 1, 100), updated_at = now()
@@ -266,14 +270,14 @@ export async function claimTakeover(
          AND x.thread_id = ${e.threadId} AND x.state IN ${ACTIVE}
          AND x.updated_at < now() - make_interval(secs => ${silentSec})
          AND r.team_id = x.team_id AND r.id = x.eval_run_id
-      RETURNING x.takeovers, x.attempt, x.first_attempt, r.run_model ->> 'used' AS model`);
+      RETURNING x.takeovers, x.attempt, x.first_attempt, r.run_model`);
     const row = res.rows[0];
     return row
       ? {
           takeovers: row.takeovers,
           attempt: row.attempt === 2 ? 2 : 1,
           firstAttempt: row.first_attempt,
-          model: row.model,
+          runModel: row.run_model,
         }
       : null;
   });
@@ -338,7 +342,7 @@ export async function recordAttempt(
     "teamId" | "evalRunId" | "caseId" | "withSkill" | "threadId" | "attempt" | "firstAttempt"
   >,
   attempt: EvalAttempt,
-  model: string,
+  runModel: SkillEvalRunModel,
 ): Promise<RecordOutcome> {
   return withTeam(db, e.teamId, async (tx) => {
     const run = await tx.execute<{ status: string; cancel_requested_at: Date | null }>(sql`
@@ -367,7 +371,7 @@ export async function recordAttempt(
       e.attempt === 2 && e.firstAttempt
         ? ([e.firstAttempt, attempt] as const)
         : ([attempt] as const);
-    const execution = executionFromAttempts(e.caseId, e.withSkill, model, attempts);
+    const execution = executionFromAttempts(e.caseId, e.withSkill, runModel, attempts);
     const done = await tx.execute(sql`
       UPDATE skill_eval_results
          SET state = 'done', execution = ${JSON.stringify(execution)}::jsonb, finished_at = now(),

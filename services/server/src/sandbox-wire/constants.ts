@@ -168,6 +168,8 @@ export const WIRE_DEFAULTS: WireTuning = {
     // KOBE-325: a case's fixtures (≤ 20 files) in; the after-snapshot (≤ 10 walks) out.
     "eval.prepare": 120_000,
     "eval.snapshot": 120_000,
+    // KOBE-326: the matched outputs for the judge (≤ 100 files, ≤ 1 MiB).
+    "eval.read": 60_000,
   } satisfies Record<SandboxCommandKind, number>,
 };
 

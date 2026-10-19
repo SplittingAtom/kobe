@@ -16,7 +16,20 @@ const attempt = (over: Partial<EvalAttempt> = {}): EvalAttempt => ({
   ...over,
 });
 
+const SMART = { requested: null, used: "smart", fellBack: false };
+
 describe("executionFromAttempts (KOBE-325)", () => {
+  it("reports the suite's model on the case when the team hasn't enabled it (KOBE-326)", () => {
+    const fellBack = { requested: "huge", used: "smart", fellBack: true };
+    expect(executionFromAttempts("a", true, fellBack, [attempt({})])).toMatchObject({
+      model: "smart",
+      requestedModel: "huge",
+    });
+    expect(executionFromAttempts("a", true, SMART, [attempt({})])).not.toHaveProperty(
+      "requestedModel",
+    );
+  });
+
   it("reports the final attempt and totals both", () => {
     const first = attempt({
       status: "failed",
@@ -26,7 +39,7 @@ describe("executionFromAttempts (KOBE-325)", () => {
       durationMs: 3000,
     });
     const second = attempt({ judgeCostUsd: 0.02 });
-    const e = executionFromAttempts("a", true, "smart", [first, second]);
+    const e = executionFromAttempts("a", true, SMART, [first, second]);
     expect(e).toMatchObject({
       status: "passed",
       attempts: 2,
@@ -41,10 +54,10 @@ describe("executionFromAttempts (KOBE-325)", () => {
   });
 
   it("derives triggered: null without the skill and after an error", () => {
-    expect(executionFromAttempts("a", false, "smart", [attempt({ skillUses: 0 })]).triggered).toBe(
+    expect(executionFromAttempts("a", false, SMART, [attempt({ skillUses: 0 })]).triggered).toBe(
       null,
     );
-    expect(executionFromAttempts("a", true, "smart", [errorAttempt(null, null, 5)]).triggered).toBe(
+    expect(executionFromAttempts("a", true, SMART, [errorAttempt(null, null, 5)]).triggered).toBe(
       null,
     );
   });

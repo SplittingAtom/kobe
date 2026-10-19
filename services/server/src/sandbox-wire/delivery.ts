@@ -405,7 +405,7 @@ export class CommandDelivery {
     }
     // Skill eval commands (KOBE-325) only to a skill eval's own sandbox whose agent knows them.
     if (
-      (row.kind === "eval.prepare" || row.kind === "eval.snapshot") &&
+      (row.kind === "eval.prepare" || row.kind === "eval.snapshot" || row.kind === "eval.read") &&
       (this.#host.target.evalThreadId !== row.threadId ||
         !this.#host.hasCapability(CAPABILITY_SKILL_EVAL))
     ) {
