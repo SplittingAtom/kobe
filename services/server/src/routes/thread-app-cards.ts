@@ -8,6 +8,7 @@ import {
   type LaunchOutcome,
 } from "../apps/app-cards.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
+import { RUN_DEFAULTS } from "../runs/orchestrator.js";
 import type { BrowserPrincipal } from "../apps/call.js";
 import { appCallDepsFor } from "../apps/call-deps.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -53,6 +54,7 @@ export function threadAppCardRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     call: appCallDepsFor(deps),
     store: deps.appResults.store,
     launches: createRateLimiter(APP_LAUNCH_RATE),
+    abortHoldMs: () => deps.runs.abortHoldMs ?? RUN_DEFAULTS.stopGraceMs,
   };
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));

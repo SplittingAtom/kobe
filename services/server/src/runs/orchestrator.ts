@@ -159,6 +159,8 @@ interface StagedAttachments {
 
 /** The orchestrator plus what the server wires around it (wire hooks, sweeps, isolation). */
 export interface ServerRunOrchestrator extends RunOrchestrator {
+  /** The Stop grace a promotion waits for Pi's abort (KOBE-26); app-card launches wait it too. */
+  readonly abortHoldMs?: number;
   /** `submitMessage` with a client idempotency key (unique per thread). */
   submitMessage(
     actor: ActorContext,
@@ -263,6 +265,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       track: (task) => this.#track(task),
     });
     if (options.sweep !== false) this.#scheduleSweep();
+  }
+
+  get abortHoldMs(): number {
+    return this.#tuning.stopGraceMs;
   }
 
   /** Promotion waits for Pi's abort of a stopped run, at most the Stop grace (KOBE-26). */

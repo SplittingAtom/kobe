@@ -27,7 +27,10 @@ export type ToolCheck =
   | { readonly ok: false; readonly reason: AppCallReason };
 
 /** The team's exposure rule (D27), without model visibility (apps, not agents, are asking). */
-export function exposedToApps(connector: TeamConnector, tool: PinnedTool): boolean {
+export function exposedToApps(
+  connector: Pick<TeamConnector, "exposure" | "enabledTools">,
+  tool: PinnedTool,
+): boolean {
   if (connector.exposure === "all") return true;
   if (connector.exposure === "read_only") return tool.annotations.readOnlyHint === true;
   return connector.enabledTools.includes(tool.pi_name);

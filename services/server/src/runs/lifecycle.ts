@@ -132,14 +132,15 @@ export async function promoteInTx(
   const transitions: AppliedTransition[] = [];
   let thread = await lockThreadRow(tx, teamId, threadId);
   if (!thread || thread.deletedAt !== null) return { transitions };
-  // App cards launched during the run that just ended go in first (KOBE-440, D17), also while
-  // Pi still aborts a stopped run: an entry in Postgres reaches Pi only at the next run start.
+  // Pi is still aborting a stopped run of this thread: the next start would be refused (KOBE-26).
+  // Waiting app cards wait too (re-review LOW-R2): Pi's last entries of the stopped run may still
+  // be mirrored and move the leaf, which would leave a card on a side branch the model never sees.
+  const hold = options.abortHoldMs ?? 0;
+  if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
+  // App cards launched during the run that just ended go in first (KOBE-440, D17).
   if (!(await threadRunRows(tx, teamId, threadId)).some((r) => isActiveRunStatus(r.status))) {
     thread = { ...thread, ...(await insertQueuedAppCardsInTx(tx, teamId, thread)) };
   }
-  // Pi is still aborting a stopped run of this thread: the next start would be refused (KOBE-26).
-  const hold = options.abortHoldMs ?? 0;
-  if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
   // Stop paused the queue (KOBE-26): it waits for Resume or a new message.
   const paused = await isQueuePaused(tx, teamId, threadId);
   const fail = async (

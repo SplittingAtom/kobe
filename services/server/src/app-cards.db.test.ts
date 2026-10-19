@@ -11,6 +11,8 @@ import {
 import type { AppCallRequest } from "./apps/app-caller.js";
 import { appIdOf } from "./apps/app-id.js";
 import { enableConnector, registerConnector } from "./testing/mcp-fixtures.js";
+import { logger } from "./logger.js";
+import { sweepRuns } from "./runs/sweeper.js";
 import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
 
 /**
@@ -33,6 +35,7 @@ let answer: Record<string, unknown> = {
 const f = new RunFixture();
 beforeAll(() =>
   f.setup({
+    stopGraceMs: 3_000,
     appCaller: {
       call: async (request) => {
         calls.push(request);
@@ -435,9 +438,11 @@ describe("no app card leaves a thread unable to run (KOBE-440 review)", () => {
     expect((await launch(w, threadId, appId)).json.queued).toBe(true);
     expect((await launch(w, threadId, appId)).json.queued).toBe(true);
     await f.until(w.team, lost, "failed", 20_000);
-    await expect.poll(() => dropped(w.team)).toEqual(["too_many_cards"]);
     ws.sb.respond = own;
+    // The lost start asked Pi to abort: the cards wait out Stop's grace (LOW-R2).
+    await new Promise((r) => setTimeout(r, 3_200));
     const start = await stillRuns(w, ws, threadId);
+    await expect.poll(() => dropped(w.team)).toEqual(["too_many_cards"]);
     expect(start.app_cards).toHaveLength(20);
   }, 40_000);
 });
@@ -556,5 +561,80 @@ describe("launch limits and access (KOBE-440 review LOW-3, LOW-6)", () => {
         structuredContent: STRUCTURED,
       };
     }
+  });
+});
+
+describe("KOBE-440 re-review (LOW-R1, LOW-R2)", () => {
+  it("drops a waiting card whose opening tool left the exposure or drifted (LOW-R1)", async () => {
+    const w = await f.world();
+    const { connector, appId } = await app(w);
+    const ws = await f.connect(w, 0, CAPS);
+    const threadId = await f.thread(w.owner);
+    const busy = await f.message(w.owner, threadId, "busy");
+    const start = await ws.started(busy);
+    expect((await launch(w, threadId, appId)).json.queued).toBe(true);
+    await f.fx.admin.query(
+      `UPDATE team_connectors SET exposure = 'custom', enabled_tools = '{}'
+        WHERE team_id = $1 AND connector_id = $2`,
+      [w.team, connector.id],
+    );
+    ws.reply(start, "done");
+    await f.until(w.team, busy, "completed");
+    await expect.poll(() => dropped(w.team)).toEqual(["no_access"]);
+
+    // A drifted opening tool drops it too.
+    await f.fx.admin.query(
+      `UPDATE team_connectors SET exposure = 'all' WHERE team_id = $1 AND connector_id = $2`,
+      [w.team, connector.id],
+    );
+    const again = await f.message(w.owner, threadId, "busy again");
+    const second = await ws.started(again);
+    expect((await launch(w, threadId, appId)).json.queued).toBe(true);
+    await f.fx.admin.query(
+      `UPDATE connectors SET tools_snapshot = jsonb_set(tools_snapshot, '{0,status}', '"drifted"')
+        WHERE id = $1`,
+      [connector.id],
+    );
+    ws.reply(second, "done");
+    await f.until(w.team, again, "completed");
+    await expect.poll(() => dropped(w.team)).toEqual(["no_access", "no_access"]);
+    expect((await entries(w.team, threadId)).some((r) => r.type === "custom_message")).toBe(false);
+  });
+
+  it("keeps a card launched during Stop's grace waiting; the sweep then puts it on the run's branch (LOW-R2)", async () => {
+    const w = await f.world();
+    const { appId } = await app(w);
+    const ws = await f.connect(w, 0, CAPS);
+    const threadId = await answered(w, ws);
+    // A stopped run whose abort Pi has not confirmed yet.
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `SELECT id FROM runs WHERE thread_id = $1 LIMIT 1`,
+      [threadId],
+    );
+    await f.fx.admin.query(
+      `UPDATE runs SET stop_mode = 'abort', stop_requested_at = now() WHERE id = $1`,
+      [rows[0]?.id],
+    );
+    const held = await launch(w, threadId, appId);
+    expect([held.status, held.json.queued]).toEqual([201, true]);
+    expect((await entries(w.team, threadId)).some((r) => r.type === "custom_message")).toBe(false);
+    // Past the hold, the sweep finds the thread and its promotion inserts the card at the leaf.
+    await new Promise((r) => setTimeout(r, 3_200));
+    const sweep = await sweepRuns(
+      f.fx.replica(0).deps.database.db,
+      {
+        startDeadlineMs: 3_600_000,
+        compactionDeadlineMs: 3_600_000,
+        stallMs: 0,
+        stopResendMs: 3_600_000,
+      },
+      logger,
+    );
+    expect(sweep.stalledThreads.map((t) => t.threadId)).toContain(threadId);
+    const leafBefore = await leaf(threadId);
+    const runId = await f.message(w.owner, threadId, "and now?");
+    const start = await ws.started(runId);
+    expect(start.app_cards).toHaveLength(1);
+    expect(start.app_cards?.[0]?.parentId).toBe(leafBefore);
   });
 });

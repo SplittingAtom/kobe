@@ -122,3 +122,13 @@ protocol 931; db unit 598, probe 657, upgrade (0157-0162) 11; server unit 2,116;
 - LOW-6: cross-team launch and DELETE (404), another member's DELETE (404), builder test thread
   (`is_test`) refused. A launch from a project's new-thread view starts outside the project with
   the default agent (spec MA11 "the team's default agent").
+
+## Re-review LOWs (R1, R2)
+
+- R1: the insert-time re-check also needs the opening tool pinned (not drifted), naming the
+  template, and in the team's exposure (`exposedToApps`). DB test "drops a waiting card whose
+  opening tool left the exposure or drifted".
+- R2: while Pi still aborts a stopped run (Stop's grace), waiting cards wait and a launch queues;
+  the sweep's stalled-thread pass also finds threads with waiting cards and no run, so the
+  promotion inserts them once the hold is over, on the branch the next run continues. DB test
+  "keeps a card launched during Stop's grace waiting…".

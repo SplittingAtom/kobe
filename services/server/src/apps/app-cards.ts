@@ -11,6 +11,7 @@ import {
 } from "@kobe/protocol";
 import {
   SYSTEM_ACTOR,
+  parseToolsSnapshot,
   sql,
   threadAppResults,
   threadEntries,
@@ -22,10 +23,12 @@ import { urlSha256 } from "../connectors/site-key.js";
 import type { RateLimiter } from "../sandbox/rate-limit.js";
 import { loadUserGrantFacts } from "../runs/run-mcp.js";
 import { piBranchPoint } from "../runs/run-prompt.js";
+import { abortPending } from "../runs/store.js";
 import { fallbackTitle } from "../threads/title.js";
 import { createThread } from "../threads/repository.js";
 import { callApp, type AppCallDeps, type BrowserPrincipal } from "./call.js";
 import { memberApp, type MemberApp } from "./catalog.js";
+import { exposedToApps } from "./decide.js";
 import { persistAppResult, type AppResultStoreDeps } from "./results-store.js";
 
 /**
@@ -54,6 +57,8 @@ export interface AppCardDeps {
   readonly store: AppResultStoreDeps;
   /** Launches per member (review LOW-3): a launch writes, so a tighter bucket than app calls. */
   readonly launches: RateLimiter;
+  /** Stop's grace (re-review LOW-R2): a launch while Pi still aborts a stopped run waits. */
+  readonly abortHoldMs?: () => number;
 }
 
 /** A burst of 5 launches, then one every 2 s, per member and server pod. */
@@ -252,7 +257,7 @@ export async function launchAppCard(
   const called = await callApp(deps.call, p, appId, { tool: app.tool.name, arguments: {} });
   if (!called.ok) return called;
   if (called.result["isError"] === true) return OPEN_FAILED;
-  return storeCard(deps.store, p, threadId, app, called.result);
+  return storeCard(deps.store, p, threadId, app, called.result, deps.abortHoldMs?.() ?? 0);
 }
 
 /** The app's title as a thread title: the title rules' unsafe characters removed (LOW-5). */
@@ -267,6 +272,7 @@ async function storeCard(
   existing: string | null,
   app: MemberApp,
   result: Record<string, unknown>,
+  abortHoldMs: number,
 ): Promise<LaunchOutcome> {
   const id = randomUUID();
   // A new thread is created in the same transaction as its card (review LOW-4): a refusal or a
@@ -305,7 +311,11 @@ async function storeCard(
         }
         let thread = await lockWritable(tx, p.teamId, threadId, p.userId);
         if (!thread) return { stored: false, value: THREAD_NOT_FOUND };
-        const queued = await hasActiveRun(tx, p.teamId, threadId);
+        // A run is active, or Pi still aborts a stopped one (LOW-R2): the card waits for the run's
+        // end or the hold's (the sweep then inserts it).
+        const queued =
+          (await hasActiveRun(tx, p.teamId, threadId)) ||
+          (abortHoldMs > 0 && (await abortPending(tx, p.teamId, threadId, abortHoldMs)));
         if (queued && (await queuedCount(tx, p.teamId, threadId)) >= MAX_QUEUED_APP_CARDS) {
           return { stored: false, value: TOO_MANY_QUEUED };
         }
@@ -375,20 +385,30 @@ async function stillLaunchable(tx: KobeTx, teamId: string, row: QueuedRow): Prom
     auth_kind: string;
     credential_source: string;
     url: string;
-    enabled: boolean;
+    tools_snapshot: unknown;
+    exposure: string | null;
+    enabled_tools: string[] | null;
     template: boolean;
   }>(sql`
-    SELECT c.auth_kind, c.credential_source, c.url,
-           EXISTS (SELECT 1 FROM team_connectors tc
-                    WHERE tc.team_id = ${teamId} AND tc.connector_id = c.id) AS enabled,
+    SELECT c.auth_kind, c.credential_source, c.url, c.tools_snapshot, tc.exposure, tc.enabled_tools,
            EXISTS (SELECT 1 FROM connector_ui_resources u
                     WHERE u.connector_id = c.id AND u.uri = ${row.template_uri}
                       AND u.status = 'pinned' AND u.approved AND u.sha256 = ${row.template_sha256})
              AS template
       FROM connectors c
+      LEFT JOIN team_connectors tc ON tc.team_id = ${teamId} AND tc.connector_id = c.id
      WHERE c.id = ${row.connector_id} AND c.status = 'active' AND c.deleted_at IS NULL`);
   const c = res.rows[0];
-  if (!c || !c.enabled || !c.template) return false;
+  if (!c || c.exposure === null || !c.template) return false;
+  // The opening tool (re-review LOW-R1): still pinned, not drifted, naming the template, and in the
+  // team's exposure (MA8).
+  const tool = parseToolsSnapshot(c.tools_snapshot).find((t) => t.name === row.tool);
+  if (!tool || tool.status !== "pinned" || tool.ui?.resource_uri !== row.template_uri) return false;
+  const exposure = {
+    exposure: c.exposure as Parameters<typeof exposedToApps>[0]["exposure"],
+    enabledTools: c.enabled_tools ?? [],
+  };
+  if (!exposedToApps(exposure, tool)) return false;
   if (c.auth_kind === "none") return true;
   if (c.credential_source === "site") {
     const key = await tx.execute(sql`
