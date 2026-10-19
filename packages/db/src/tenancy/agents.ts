@@ -54,6 +54,8 @@ export const agents = defineDomain({
     "skill_rescan_runs",
     // Default sync jobs (KOBE-314).
     "skill_default_syncs",
+    // Catalog usage aggregates per closed window (KOBE-339).
+    "skill_usage_snapshots",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -90,6 +92,8 @@ export const agents = defineDomain({
     skill_rescan_runs: ["SELECT", "INSERT", "UPDATE"],
     // One row per Default sync job, updated as it runs; kept as the record.
     skill_default_syncs: ["SELECT", "INSERT", "UPDATE"],
+    // One row per closed usage window, written once; the job purges windows older than two.
+    skill_usage_snapshots: ["SELECT", "INSERT", "DELETE"],
   },
   teamReferencing: {
     site_skill_settings:
