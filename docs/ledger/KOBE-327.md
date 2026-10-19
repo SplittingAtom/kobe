@@ -64,16 +64,27 @@
   `budget_stopped` at once: the attempt is not recorded, retried or scored. The message names the
   line that spend plus live reservations reached (else a general one). Test: cap with a held
   eval reservation, the gateway's refusal → `budget_stopped`, no execution recorded.
-- **L1 (aggregates only):** the estimate uses team-wide per-model means only with at least 3
-  members behind them (`ESTIMATE_MIN_MEMBERS`), else the caller's own history alone; it never
-  shows one member's usage. The cap message no longer shows the team's eval spend (amounts stay
-  in the admins' budget view).
+- **L1 / re-review R1 (whose history, coordinator decision 2026-10-19):** only Team admins
+  (`team.budgets.manage`, who see team usage anyway) get team-wide means (`team_history`).
+  Everyone else gets an estimate from their own runs and evals only (`own_history`), falling back
+  to the suite's own token sizes at the catalog's prices (`suite_size`: ESTIMATE_TURNS turns of
+  base context + prompt + fixtures, ESTIMATE_OUTPUT tokens out, a judge call per judged
+  execution). No member threshold any more, so no member's usage can be read from an estimate.
+  The cap message shows no team spend.
 - **L2:** docs/install.md: the rollout gap (old gateways bill eval calls `run`, don't hold them
   against the cap, refuse `eval_judge`). **L3:** `spent_by_kind` from the UTC month start.
   **L4:** a dollar cap is at least $0.01 in whole cents (`TEAM_EVAL_CAP_USD_MESSAGE`, 400).
   **L5:** DB tests for two connections racing at the cap, the UTC month and day periods, the
   member share, settle with `keep_ms`; gateway test for a cap on a team without budgets.
   **L6:** the estimate is fetched 500 ms after the last edit; Run is freed when saving fails.
+
+- **Re-review R2 (accepted):** a skill running in the eval sandbox could forge a
+  `model_budget_exhausted` failure; that only ends its own eval `budget_stopped` (no scorecard,
+  nothing billed or bypassed), so it is left as is.
+- **Re-review R3:** tests that other gateway errors (`model_unavailable`) stay errors (retried,
+  recorded, the eval completes), that a judge refused `budget_exhausted` stops the eval while
+  `budget_unavailable` only fails the case, and that a Team admin's estimate is `team_history`
+  while a member's is their own (`suite_size` without history), unchanged by others' evals.
 
 ## How ac-2's ±50 % is verified
 

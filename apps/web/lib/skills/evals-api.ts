@@ -14,7 +14,8 @@ export interface EvalEstimate {
   readonly executions: number;
   readonly costUsd: number | null;
   readonly minutes: number | null;
-  readonly basis: "team_history" | "none";
+  /** Team admins: the team's history; others: their own; else the suite's sizes (KOBE-327). */
+  readonly basis: "team_history" | "own_history" | "suite_size" | "none";
 }
 
 export interface EvalEstimateView {
@@ -53,13 +54,13 @@ export function startDraftEval(
 /** "≈ $0.42, ≈ 6 min · 8 runs", or what is not known yet. */
 export function estimateText(e: EvalEstimate): string {
   const runs = `${e.executions} ${e.executions === 1 ? "run" : "runs"}`;
-  if (e.basis === "none")
-    return `${runs} · no estimate yet (the team has no history on this model)`;
+  if (e.basis === "none") return `${runs} · no estimate yet (no history or prices for this model)`;
   const cost =
     e.costUsd === null
       ? "cost unknown (unpriced model)"
       : `≈ $${e.costUsd < 0.01 ? e.costUsd.toFixed(4) : e.costUsd.toFixed(2)}`;
-  return `${cost}, ≈ ${e.minutes ?? "?"} min · ${runs}`;
+  const rough = e.basis === "suite_size" ? " (rough: from the suite's size, no history yet)" : "";
+  return `${cost}, ≈ ${e.minutes ?? "?"} min · ${runs}${rough}`;
 }
 
 export function getEvalRun(teamId: string, id: string): Promise<ApiResult<SkillEvalRun>> {

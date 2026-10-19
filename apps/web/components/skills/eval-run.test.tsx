@@ -80,9 +80,18 @@ describe("Run evals (Workbench)", () => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("marks an estimate from the suite's size as rough", () => {
+    expect(estimateText({ executions: 2, costUsd: 0.05, minutes: 2, basis: "suite_size" })).toBe(
+      "≈ $0.05, ≈ 2 min · 2 runs (rough: from the suite's size, no history yet)",
+    );
+    expect(estimateText({ executions: 2, costUsd: 0.05, minutes: 2, basis: "own_history" })).toBe(
+      "≈ $0.05, ≈ 2 min · 2 runs",
+    );
+  });
+
   it("words an estimate without history or prices", () => {
     expect(estimateText({ executions: 1, costUsd: null, minutes: null, basis: "none" })).toBe(
-      "1 run · no estimate yet (the team has no history on this model)",
+      "1 run · no estimate yet (no history or prices for this model)",
     );
     expect(estimateText({ executions: 2, costUsd: null, minutes: 3, basis: "team_history" })).toBe(
       "cost unknown (unpriced model), ≈ 3 min · 2 runs",

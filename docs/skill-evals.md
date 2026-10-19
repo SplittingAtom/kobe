@@ -244,11 +244,13 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
   (`spent_by_kind`, `eval_cap`).
 - **Estimate before Run.** `GET /v1/skills/drafts/{id}/evals/estimate?mode=` (and
   `/v1/skills/{scope}/{id}/versions/{seq}/evals/estimate`) → `{estimate, runModel, blocked}`;
-  the start returns the same estimate. Executions × the team's mean total cost and duration per
-  eval execution on the run model (last 30 days, newest 200; retries included), plus the mean
-  judge cost per judged execution; minutes = ⌈executions / concurrent sandboxes⌉ × the mean
-  duration. Without eval history on the model, the team's ordinary runs on it stand in; with no
-  history at all, `basis: none` and null numbers. Unpriced models: cost null.
+  the start returns the same estimate. Executions × the mean total cost and duration per eval
+  execution on the run model (last 30 days, newest 200; retries included), plus the mean judge
+  cost per judged execution; minutes = ⌈executions / concurrent sandboxes⌉ × the mean duration.
+  Whose history: a Team admin's estimate uses the team's (`team_history`); everyone else's only
+  their own (`own_history`), never another member's. Without eval history on the model, ordinary
+  runs on it stand in; without any, the suite's own token sizes at the catalog's prices
+  (`suite_size`). Unpriced models: cost null.
 - **Team eval cap** (Team admin: `PUT /v1/team/skill-review/settings {evalCap: {usd} | {tokens}
 | null}`, audited `skill.eval_cap.changed`): monthly, counted from the eval kinds only
   (`model_spend_daily.eval_*`). Enforced on every eval and eval judge call by the gateway in
