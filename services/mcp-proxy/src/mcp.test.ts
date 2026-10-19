@@ -97,6 +97,19 @@ class FakePolicyServer implements PolicyServer {
     return Promise.resolve<GrantAnswer>({ ok: false, failure: "not_connected" });
   }
 
+  /** MCP Apps result reports (KOBE-438), and what the server answers. */
+  readonly reports: { token: string; connectorId: string; ticket: string; result: unknown }[] = [];
+  reportAnswer = true;
+  reportResult(
+    token: string,
+    connectorId: string,
+    ticket: string,
+    result: Record<string, unknown>,
+  ) {
+    this.reports.push({ token, connectorId, ticket, result });
+    return Promise.resolve(this.reportAnswer);
+  }
+
   decide(t: string, query: CallQuery) {
     this.asked.push({ token: t, query });
     if (this.next) return Promise.resolve(this.next(query));
@@ -475,6 +488,50 @@ describe("an allow from a server older than KOBE-435 (review M3)", () => {
 });
 
 describe("tools/call", () => {
+  describe("MCP Apps result capture (KOBE-438)", () => {
+    const allowWithTicket = (query: CallQuery): ServerAnswer<CallDecision> => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: {
+          id: query.connectorId,
+          name: "jira",
+          url: server.upstreamUrl,
+          auth_kind: "none",
+        },
+        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}`, model_visible: true },
+        input_sha256: sha(query.arguments),
+        reason: "risk_read",
+        app_capture: { ticket: "ticket-1" },
+      },
+    });
+
+    it("reports the upstream's full result with the ticket, then answers Pi unchanged", async () => {
+      server.next = allowWithTicket;
+      const res = await rpc("tools/call", { name: "get_issue", arguments: { id: "1" } });
+      const result = { content: [{ type: "text", text: 'get_issue:{"id":"1"}' }] };
+      expect(res.json?.result).toEqual(result);
+      expect(server.reports).toEqual([
+        { token: expect.any(String), connectorId: CONNECTOR, ticket: "ticket-1", result },
+      ]);
+    });
+
+    it("reports nothing without a ticket", async () => {
+      await rpc("tools/call", { name: "get_issue", arguments: { id: "1" } });
+      expect(server.reports).toEqual([]);
+    });
+
+    it("still answers Pi when the report is refused", async () => {
+      server.next = allowWithTicket;
+      server.reportAnswer = false;
+      const res = await rpc("tools/call", { name: "get_issue", arguments: { id: "2" } });
+      expect(res.json?.result).toEqual({
+        content: [{ type: "text", text: 'get_issue:{"id":"2"}' }],
+      });
+      expect(server.reports).toHaveLength(1);
+    });
+  });
+
   it("asks the server first, then forwards exactly the decided (canonical) input", async () => {
     const res = await rpc("tools/call", {
       name: "get_issue",

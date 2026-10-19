@@ -360,7 +360,23 @@ async function decideAndForward(
     });
     if (result.ok) {
       annotate({}, contentAttributes({ "kobe.tool.output": JSON.stringify(result.result) }));
-      log({ outcome: "ok", approvalId: decision.approval_id, reason: decision.reason });
+      // MCP Apps (KOBE-438, spec T11): the full result comes from here, never the sandbox, and is
+      // stored before Pi sees it, so the run's tool.result can claim it.
+      const reported =
+        decision.app_capture === undefined
+          ? undefined
+          : await deps.server.reportResult(
+              ctx.token,
+              ctx.connectorId,
+              decision.app_capture.ticket,
+              result.result,
+            );
+      log({
+        outcome: "ok",
+        approvalId: decision.approval_id,
+        reason: decision.reason,
+        ...(reported === undefined ? {} : { appResultStored: reported }),
+      });
       return [rpcResult(id, result.result)];
     }
     log({ outcome: "upstream_failed", reason: result.failure });
