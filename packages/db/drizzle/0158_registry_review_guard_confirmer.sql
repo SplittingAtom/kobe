@@ -29,7 +29,10 @@ BEGIN
     NEW.self_approved := OLD.self_approved;
     RETURN NEW;
   END IF;
-  by_submitter := NEW.reviewed_by IS NOT NULL AND NEW.reviewed_by = NEW.submitted_by;
+  -- IS NOT DISTINCT FROM: a Kobe-published version has no submitter (NULL), and a NULL here
+  -- would skip the "not the submitter's" branch below.
+  by_submitter := NEW.reviewed_by IS NOT NULL
+    AND NEW.reviewed_by IS NOT DISTINCT FROM NEW.submitted_by;
   by_confirmer := NEW.reviewed_by IS NOT NULL
     AND NEW.reviewed_by::text IS NOT DISTINCT FROM (NEW.provenance #>> '{confirmedBy,userId}');
   IF NOT (by_submitter OR by_confirmer) THEN
