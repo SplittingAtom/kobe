@@ -76,9 +76,9 @@ async function evalRun(teamId: string, userId: string): Promise<string> {
   const res = await withTeam(app.db, teamId, (tx) =>
     tx.execute<{ id: string }>(sql`
       INSERT INTO skill_eval_runs (team_id, started_by, subject_kind, subject_id, subject_rev,
-        skill_name, package_hash, runtime_hash, bundle_key, mode, suite, limits, progress_total)
+        skill_name, package_hash, runtime_hash, bundle_key, bundle_size, mode, suite, limits, progress_total)
       VALUES (${teamId}, ${userId}, 'draft', ${randomUUID()}, 1, 'report', ${H}, ${H},
-        'k', 'full', '{"cases":[]}', '{}', 2)
+        'k', 10, 'full', '{"cases":[]}', '{}', 2)
       RETURNING id`),
   );
   return res.rows[0]?.id ?? "";

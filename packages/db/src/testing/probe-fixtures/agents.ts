@@ -346,6 +346,7 @@ async function probeEvalRun(tx: Parameters<ProbeFixture>[0], teamId: string): Pr
       packageHash: "a".repeat(64),
       runtimeHash: "b".repeat(64),
       bundleKey: "skills/evals/probe.zip",
+      bundleSize: 10,
       mode: "full",
       suite: { cases: [] },
       limits: {},
