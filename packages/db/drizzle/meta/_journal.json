@@ -1072,6 +1072,55 @@
       "when": 1792420255509,
       "tag": "0152_reserve_full_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1792437670147,
+      "tag": "0153_skill_drafts_synced_rev_and_13_more",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1792437671162,
+      "tag": "0154_skill_drafts_synced_rev_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1792437672196,
+      "tag": "0155_registry_team_dedicated",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1792437673708,
+      "tag": "0156_skill_promotion_requests_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1792437674737,
+      "tag": "0157_skill_versions_from_conversation_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1792437675809,
+      "tag": "0158_registry_review_guard_confirmer",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1792437676872,
+      "tag": "0159_team_skill_requests_rls",
+      "breakpoints": true
     }
   ]
 }
