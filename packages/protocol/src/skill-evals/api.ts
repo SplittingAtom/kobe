@@ -36,6 +36,12 @@ export const skillEvalSubjectSchema = z.discriminatedUnion("kind", [
     skillId: uuidSchema,
     seq: z.number().int().min(1),
   }),
+  /** A Registry version re-run in the Registry team for its authoritative scorecard (SK23). */
+  z.strictObject({
+    kind: z.literal("registry"),
+    versionId: uuidSchema,
+    seq: z.number().int().min(1),
+  }),
 ]);
 export type SkillEvalSubject = z.infer<typeof skillEvalSubjectSchema>;
 
