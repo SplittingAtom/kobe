@@ -157,7 +157,7 @@ describe("Catalog maintainers (KOBE-332)", () => {
         "GET /v1/site/users": [200, { users: [user("u-ann", "Ann"), user("u-bob", "Bob")] }],
         "POST /v1/skills/catalog/s-1/maintainers": [200, { maintainers: [] }],
         "DELETE /v1/skills/catalog/s-1/maintainers/u-ann": [200, { maintainers: [] }],
-      }),
+      }) as never,
     );
     renderSite(<SkillTagsPage />);
     expect(await screen.findByText("Unmaintained")).toBeTruthy();
