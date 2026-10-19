@@ -4,6 +4,7 @@
  * list (`seed`) is ready before its view mounts, so the first message goes to the same controller.
  */
 import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
+import { AppCardSignal } from "../apps/app-cards";
 import type { ThinkingLevel } from "@kobe/protocol";
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
@@ -86,6 +87,8 @@ export class ChatSession {
   readonly appContexts = new AppContextStore();
   /** MCP Apps `ui/message` text for the composer on screen (KOBE-439); never sent by itself. */
   readonly composerInserts = new ComposerInsertChannel();
+  /** A rail launch changed a thread's app cards (KOBE-440): the thread reads them again. */
+  readonly appCards = new AppCardSignal();
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
   readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */

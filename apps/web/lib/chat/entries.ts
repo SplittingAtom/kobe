@@ -14,6 +14,9 @@ import type { ThreadEntry } from "./types";
 /** `customType` of the server-written skipped-actions summary of a scheduled run (KOBE-178). */
 export const SKIPPED_SUMMARY_TYPE = "kobe.skipped_actions";
 
+/** `customType` of an app card a member launched from the rail (KOBE-440). */
+export const APP_CARD_TYPE = "kobe.app_card";
+
 export type AssistantPiece =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "reasoning"; readonly text: string }
@@ -47,6 +50,12 @@ export type ParsedEntry =
    * a leaf, or a message of its own (the server refuses it as a parent, 422 invalid_parent_entry).
    */
   | { readonly kind: "skipped"; readonly text: string; readonly count: number }
+  /**
+   * An app card (KOBE-440, spec MA11): a member launched an app from the rail. Its own message in
+   * the conversation (no model turn); the app and its stored result come from the thread's app
+   * results by entry id.
+   */
+  | { readonly kind: "appCard"; readonly tool: string }
   /** A message whose body is in object storage (D15); its role is unknown here. */
   | { readonly kind: "offloaded" }
   /** Pi switched the session's model (KOBE-209 marker). */
@@ -186,9 +195,21 @@ export function recordedModel(entry: ThreadEntry, parsed: ParsedEntry): string |
   return model === undefined || model === "" ? undefined : model.slice(0, MAX_MODEL_NAME);
 }
 
+/** The server's app card ids: `ka-` and 24 hex characters. */
+const APP_CARD_ID = /^ka-[0-9a-f]{24}$/;
+
+function appCard(entry: ThreadEntry): ParsedEntry | undefined {
+  if (entry.type !== "custom_message" || !APP_CARD_ID.test(entry.entryId)) return undefined;
+  if (!entry.payloadOffloaded && entry.payload.customType !== APP_CARD_TYPE) return undefined;
+  const tool = str(record(entry.payload.details)?.tool) ?? "";
+  return { kind: "appCard", tool: tool.slice(0, 128) };
+}
+
 export function parseEntry(entry: ThreadEntry): ParsedEntry {
   const skipped = skippedSummary(entry);
   if (skipped) return skipped;
+  const card = appCard(entry);
+  if (card) return card;
   const system = systemEntry(entry);
   if (system) return system;
   // Only a message's body is an answer part; any other kind stays a hidden entry.

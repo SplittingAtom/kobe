@@ -26,6 +26,12 @@ export interface ThreadApps {
   /** By prompt entry and tool call (`approvalKey`); the live run's by `runToolKey`. */
   readonly byPrompt: ReadonlyMap<string, AppResultView>;
   readonly byRun: ReadonlyMap<string, AppResultView>;
+  /** Rail-launched app cards in the thread, by entry id (KOBE-440). */
+  readonly byEntry: ReadonlyMap<string, AppResultView>;
+  /** Cards launched during the run, waiting for it to end (KOBE-440), in launch order. */
+  readonly queued: readonly AppResultView[];
+  /** Reads the list again (a launch or a removal). */
+  reload(): void;
   /** Cards holding a live frame, least recently in view first. */
   readonly live: readonly string[];
   /** A slot for `key`; `force` (the member asked) retires the least recent frame. */
@@ -81,6 +87,16 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
   useEffect(() => {
     if (ended !== null || markers !== "") load();
   }, [ended, markers, load]);
+  // A rail launch or a removed chip (KOBE-440): the cards and the thread's entries changed.
+  const session = useChatSession();
+  const controller = extras?.controller ?? null;
+  useEffect(() => {
+    if (threadId === null) return undefined;
+    return session.appCards.listen(threadId, () => {
+      load();
+      void controller?.refresh();
+    });
+  }, [session, threadId, load, controller]);
   // Another thread: no frame of the last one stays live.
   useEffect(() => setLive([]), [threadId]);
 
@@ -109,13 +125,39 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
           ),
     [results],
   );
+  const byEntry = useMemo(
+    () =>
+      results === null
+        ? NONE
+        : new Map(
+            results.flatMap((r) =>
+              r.entryId === null || r.queued === true ? [] : [[r.entryId, r] as const],
+            ),
+          ),
+    [results],
+  );
+  const queued = useMemo(
+    () => (results === null ? [] : results.filter((r) => r.queued === true)),
+    [results],
+  );
   const take = useCallback((key: string, force: boolean) => {
     setLive((prev) => takeSlot(prev, key, force));
   }, []);
   const release = useCallback((key: string) => setLive((prev) => releaseSlot(prev, key)), []);
   const value = useMemo<ThreadApps>(
-    () => ({ threadId, teamId, byPrompt, byRun, live, take, release }),
-    [threadId, teamId, byPrompt, byRun, live, take, release],
+    () => ({
+      threadId,
+      teamId,
+      byPrompt,
+      byRun,
+      byEntry,
+      queued,
+      live,
+      take,
+      release,
+      reload: load,
+    }),
+    [threadId, teamId, byPrompt, byRun, byEntry, queued, live, take, release, load],
   );
   return <ThreadAppsContext.Provider value={value}>{children}</ThreadAppsContext.Provider>;
 }

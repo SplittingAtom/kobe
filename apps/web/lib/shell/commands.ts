@@ -1,4 +1,5 @@
 import {
+  AppWindowIcon,
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowLeftIcon,
@@ -276,6 +277,8 @@ const LIST = [
   // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
+  // Only when the member has apps (KOBE-440): expands the rail at its Apps section.
+  { id: "show-apps", name: "Show apps", icon: AppWindowIcon, scope: "rail" },
   // Under 768 px the rail is a drawer the bar opens (CE8, KOBE-201).
   { id: "open-rail", name: "Show the workspace", icon: PanelLeftOpenIcon, scope: "rail" },
   { id: "refresh-files", name: "Refresh files", icon: RefreshCwIcon, scope: "rail" },

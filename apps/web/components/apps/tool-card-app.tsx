@@ -94,7 +94,7 @@ export function ToolCardApp({
   return <LiveApp apps={apps} view={view} />;
 }
 
-function AppPlaceholder({
+export function AppPlaceholder({
   height,
   label,
   onShow,
@@ -120,7 +120,13 @@ function AppPlaceholder({
   );
 }
 
-function LiveApp({ apps, view }: { readonly apps: ThreadApps; readonly view: AppResultView }) {
+export function LiveApp({
+  apps,
+  view,
+}: {
+  readonly apps: ThreadApps;
+  readonly view: AppResultView;
+}) {
   const panel = useArtifactPanel();
   const box = useRef<HTMLDivElement>(null);
   const handle = useRef<AppFrameHandle>(null);

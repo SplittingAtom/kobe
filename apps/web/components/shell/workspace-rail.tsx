@@ -1,7 +1,7 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { useArtifactPanel } from "../chat/artifact-state";
@@ -27,6 +27,7 @@ import { useShellBand } from "./shell-band";
 import { useModalLayer } from "./use-modal-layer";
 import { RailTeam, RailTeamIcon } from "./rail-team";
 import { RailThreads } from "./rail-threads";
+import { RailApps, hasRailApps, useRailApps } from "./rail-apps";
 import styles from "./rail.module.css";
 import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
@@ -61,10 +62,13 @@ function CollapsedIcons({
   rail,
   teams,
   teamName,
+  onShowApps,
 }: {
   readonly rail: RailApi;
   readonly teams: MyTeamsState;
   readonly teamName: string;
+  /** Present when the member has apps (KOBE-440): expands the rail at its Apps section. */
+  readonly onShowApps?: (() => void) | undefined;
 }) {
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
@@ -91,6 +95,15 @@ function CollapsedIcons({
         className={RAIL_ACTION}
         onClick={() => rail.reveal("files", { toggle: true })}
       />
+      {onShowApps && (
+        <IconAction
+          command="show-apps"
+          side="right"
+          variant={RAIL_ACTION_VARIANT}
+          className={RAIL_ACTION}
+          onClick={onShowApps}
+        />
+      )}
     </div>
   );
 }
@@ -300,6 +313,22 @@ export function WorkspaceRail({
   // One read of the member's teams for the top line and the collapsed strip.
   const teams = useMyTeams(false);
   const both = rail.panels === "both";
+  // The Apps section (KOBE-440) sits between Threads and Files, only when the member has apps.
+  const apps = useRailApps();
+  const showsApps = hasRailApps(apps);
+  const [appsFocus, setAppsFocus] = useState(0);
+  const showApps = () => {
+    rail.toggle(false);
+    setAppsFocus((n) => n + 1);
+  };
+  const rows = both ? sectionRows(rail.threadsShare) : "minmax(0, 1fr)";
+  const gridRows = !showsApps
+    ? rows
+    : both
+      ? rows.replace(" auto ", " auto auto ")
+      : shows(rail.panels, "threads")
+        ? "minmax(0, 1fr) auto"
+        : "auto minmax(0, 1fr)";
 
   return (
     <>
@@ -313,14 +342,21 @@ export function WorkspaceRail({
         {...drop.handlers}
       >
         {drop.active && <RailDropOverlay />}
-        {!single && <CollapsedIcons rail={rail} teams={teams} teamName={teamName} />}
+        {!single && (
+          <CollapsedIcons
+            rail={rail}
+            teams={teams}
+            teamName={teamName}
+            onShowApps={showsApps ? showApps : undefined}
+          />
+        )}
         <div className={styles.expanded} hidden={collapsed}>
           <RailHeader rail={rail} teams={teams} teamName={teamName} />
           <div
             id="kobe-rail-sections"
             ref={sections}
             className={styles.sections}
-            style={{ gridTemplateRows: both ? sectionRows(rail.threadsShare) : "minmax(0, 1fr)" }}
+            style={{ gridTemplateRows: gridRows }}
           >
             <section
               id={SECTION_IDS.threads}
@@ -331,6 +367,9 @@ export function WorkspaceRail({
             >
               <RailThreads listError={listError} />
             </section>
+            {showsApps && shows(rail.panels, "threads") && (
+              <RailApps rail={rail} apps={apps} focusSeq={appsFocus} />
+            )}
             {both && (
               <RailDivider
                 share={rail.threadsShare}
@@ -338,6 +377,9 @@ export function WorkspaceRail({
                 container={sections}
                 controls={SECTION_IDS.threads}
               />
+            )}
+            {showsApps && !shows(rail.panels, "threads") && (
+              <RailApps rail={rail} apps={apps} focusSeq={appsFocus} />
             )}
             <RailFiles
               rail={rail}

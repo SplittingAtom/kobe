@@ -21,6 +21,8 @@ export interface AppResultView {
   readonly appId: string;
   readonly templateSha256: string;
   readonly view: "app" | "text";
+  /** A rail-launched card waiting for the thread's run to end (KOBE-440); absent = false. */
+  readonly queued?: boolean;
   readonly reason?: AppTextReason;
   readonly app?: { readonly title: string };
 }

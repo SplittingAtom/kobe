@@ -21,6 +21,7 @@ import {
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
+import { AppCardPart } from "../apps/app-card";
 import { useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
@@ -152,6 +153,7 @@ const ASSISTANT_PARTS = {
       "kobe-problem": Problem,
       "kobe-offloaded": Offloaded,
       "kobe-skipped": SkippedActions,
+      "kobe-app-card": AppCardPart,
     },
   },
 } as const;
@@ -232,6 +234,28 @@ function useCanRegenerate(): boolean {
 
 export function AssistantMessage() {
   const meta = useMeta();
+  if (meta?.kind === "assistant" && meta.appCard === true) return <AppCardMessage />;
+  return <AnswerMessage meta={meta} />;
+}
+
+/** A rail-launched app card (KOBE-440): the app in the conversation, no answer actions. */
+function AppCardMessage() {
+  return (
+    <MessagePrimitive.Root
+      data-role="assistant"
+      className="animate-in fade-in slide-in-from-bottom-1 relative duration-150"
+    >
+      <h3 className="sr-only">An app you opened</h3>
+      <MessageMarkers place="before" className="mb-2" />
+      <div className="flex flex-col gap-2 px-2">
+        <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+      </div>
+      <MessageMarkers place="after" className="mt-2" />
+    </MessagePrimitive.Root>
+  );
+}
+
+function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined }) {
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
   const canRegenerate = useCanRegenerate();
