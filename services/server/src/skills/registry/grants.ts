@@ -5,7 +5,6 @@ import {
   eq,
   isNull,
   siteGrants,
-  siteRoles,
   sql,
   teamMembers,
   users,
@@ -18,7 +17,10 @@ import { removeMemberInTx } from "../../teams/members.js";
 
 /**
  * Site grants beside the role ladder (KOBE-331, SK22): the **Skill reviewer** grant, given and
- * taken by the Owner or a Site admin, audited. Kobe adds every grantee to the dedicated Registry
+ * taken by the Owner or a Site admin, audited. Site admins and the Owner may hold it too
+ * (coordinator decision, review-336): it adds no decision power they lack, only membership of the
+ * Registry team, which re-runs need. Another admin gives it; a self-grant is refused except on a
+ * single-admin Site, where it is allowed and flagged (`selfGranted`), as with self-approval. Kobe adds every grantee to the dedicated Registry
  * team (never another team: review H1) as a member it marks `added_via` the grant, and taking the
  * grant removes exactly those memberships (a member by invitation, or one a team admin changed,
  * stays). The grant and the membership change are one transaction (review M4).
@@ -134,11 +136,23 @@ async function inRegistryTx<T>(
   }
 }
 
-export type GrantRefusal = "user_not_found" | "user_deactivated" | "not_grantable";
+export type GrantRefusal = "user_not_found" | "user_deactivated" | "self_grant";
+
+/** Whether `userId` is the Site's only active admin (or Owner), under the admin-set lock. */
+async function onlyAdmin(tx: KobeTx, userId: string): Promise<boolean> {
+  await tx.execute(sql`SELECT public.break_glass_lock_admin_set()`);
+  const res = await tx.execute<{ admin: boolean; others: boolean }>(sql`
+    SELECT public.break_glass_is_site_admin(${userId}) AS admin,
+      EXISTS (SELECT 1 FROM site_roles r JOIN users u ON u.id = r.user_id
+               WHERE r.user_id <> ${userId} AND u.deactivated_at IS NULL) AS others`);
+  const row = res.rows[0];
+  return row?.admin === true && row.others === false;
+}
 
 /**
- * Gives the grant (review H1a, M3): never to oneself, never to a Site admin or the Owner (they
- * review through their role), never to a deactivated account.
+ * Gives the grant (review H1a, M3; review-336): to any active account, Site admins and the Owner
+ * included; never to a deactivated one. Granting oneself is refused (`self_grant`) unless the
+ * giver is the Site's only admin, decided under the admin-set lock and audited `selfGranted`.
  */
 export async function giveGrant(
   db: KobeDb,
@@ -149,22 +163,27 @@ export async function giveGrant(
   | { readonly ok: true; readonly changed: boolean }
   | { readonly ok: false; readonly code: GrantRefusal }
 > {
-  const [user] = await db
-    .select({ deactivatedAt: users.deactivatedAt, role: siteRoles.role })
-    .from(users)
-    .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
-    .where(eq(users.id, userId));
-  if (!user) return { ok: false, code: "user_not_found" };
-  if (user.deactivatedAt !== null) return { ok: false, code: "user_deactivated" };
-  if (userId === by || user.role !== null) return { ok: false, code: "not_grantable" };
   return inRegistryTx(db, async (tx, team) => {
+    // Read inside the grant's transaction (review-c2 L-b), the account row held while it lasts.
+    const res = await tx.execute<{ deactivated_at: Date | null }>(sql`
+      SELECT deactivated_at FROM users WHERE id = ${userId} FOR SHARE`);
+    const user = res.rows[0];
+    if (!user) return { ok: false as const, code: "user_not_found" as const };
+    if (user.deactivated_at !== null)
+      return { ok: false as const, code: "user_deactivated" as const };
+    const self = userId === by;
+    if (self && !(await onlyAdmin(tx, by)))
+      return { ok: false as const, code: "self_grant" as const };
     const rows = await tx
       .insert(siteGrants)
       .values({ userId, grant, grantedBy: by })
       .onConflictDoNothing()
       .returning({ userId: siteGrants.userId });
     if (rows.length > 0)
-      await recordAudit(tx, { action: "identity.site_grant.granted", target: { userId, grant } });
+      await recordAudit(tx, {
+        action: "identity.site_grant.granted",
+        target: { userId, grant, ...(self ? { selfGranted: true as const } : {}) },
+      });
     if (team && grant === "skill_reviewer") await joinRegistryTeamInTx(tx, team, [userId]);
     return { ok: true as const, changed: rows.length > 0 };
   });

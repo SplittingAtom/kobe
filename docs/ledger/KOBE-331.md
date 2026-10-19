@@ -55,6 +55,12 @@
 
 ## Decisions
 
+- **Site admins may hold the grant** (coordinator, review-336): given by another admin; a
+  self-grant is refused (`self_grant`, 403) except on a single-admin Site, decided under the
+  admin-set lock and audited `selfGranted`. The grantee joins the Registry team as a member
+  (`added_via` the grant); the creator keeps team admin; taking the grant removes only a
+  grant-made membership. Replaces the earlier "never to Site admins or the Owner".
+
 - **Who gives the grant:** "the Owner or a Site admin" (SK22), so a new admin-level
   `site.grants.manage`, not the Owner-only `site.roles.manage`.
 

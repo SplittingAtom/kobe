@@ -354,7 +354,12 @@ export const AUDIT_EVENTS = {
     via: z.enum(["skill_reviewer_grant"]),
   }),
   /** The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22). */
-  "identity.site_grant.granted": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
+  /** `selfGranted`: the Site's only admin gave it to themselves (flagged, KOBE-336 review). */
+  "identity.site_grant.granted": event("site", {
+    userId: id,
+    grant: z.enum(["skill_reviewer"]),
+    selfGranted: z.literal(true).optional(),
+  }),
   "identity.site_grant.revoked": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
 
   // ── site: site-wide settings ──

@@ -39,6 +39,17 @@ beforeAll(async () => {
   }
   const made = await admin.post("/v1/site/skills/registry/team", { name: "Reg", slug: "reg" });
   expect(made.status, JSON.stringify(made.json)).toBe(201);
+  // The single admin may grant themselves Skill reviewer, flagged (review-336 decision).
+  const self = await admin.put(`/v1/site/roles/grants/${ids.admin}/skill_reviewer`, {});
+  expect(self.status, JSON.stringify(self.json)).toBe(200);
+  const granted = await h.admin.query<{ target: Record<string, unknown> }>(
+    `SELECT target FROM audit_log WHERE action = 'identity.site_grant.granted'`,
+  );
+  expect(granted.rows).toEqual([
+    { target: { userId: ids.admin, grant: "skill_reviewer", selfGranted: true } },
+  ]);
+  const list = await admin.get("/v1/site/roles/grants");
+  expect(list.json.grants).toMatchObject([{ userId: ids.admin, grantedBy: ids.admin }]);
 });
 
 afterAll(async () => {

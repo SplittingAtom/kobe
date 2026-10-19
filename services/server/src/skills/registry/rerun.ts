@@ -58,7 +58,7 @@ const fromProblem = (p: Problem, status: 403 | 404 | 409): RerunResult => ({
 export const NOT_REGISTRY_MEMBER = {
   code: "not_registry_member",
   message:
-    "Re-runs run in the Registry team as one of its members, and you aren't one. Skill reviewers join it with their grant; anyone else is added by its Team admin.",
+    "Re-runs run in the Registry team as one of its members, and you aren't one: ask another Site admin for the Skill reviewer grant, which adds you.",
 } as const;
 
 /** The duties check for re-runs, in its own read transaction (it takes the admin-set lock). */

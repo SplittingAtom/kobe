@@ -7,7 +7,8 @@ export type SiteGrantKind = (typeof siteGrant.enumValues)[number];
 
 /**
  * Site-wide (†): a user's site grants (SK22), the smallest step toward custom roles (D8). Given and
- * taken by the Owner or a Site admin (audited by the server); checked beside the role ladder.
+ * taken by the Owner or a Site admin (audited by the server); checked beside the role ladder. Site
+ * admins may hold one too, given by another admin; a self-grant only on a single-admin Site.
  */
 export const siteGrants = pgTable(
   "site_grants",

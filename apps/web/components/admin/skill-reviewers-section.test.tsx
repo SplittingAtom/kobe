@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("Skill reviewers (KOBE-331)", () => {
-  it("says what reviewers may do, offers active plain users only, and gives the grant", async () => {
+  it("says what reviewers may do, offers active users and other admins, and gives the grant", async () => {
     const calls = stubApi({
       "GET /v1/site/roles/grants": [
         [200, { grants: [grant("u-cy", "Cy")] }],
@@ -58,7 +58,7 @@ describe("Skill reviewers (KOBE-331)", () => {
       within(form)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Choose a user…", "Bob (u-bob@x.io)"]);
+    ).toEqual(["Choose a user…", "Ann (u-ann@x.io)", "Bob (u-bob@x.io)"]);
     await userEvent.selectOptions(within(form).getByLabelText("Reviewer"), "u-bob");
     await userEvent.click(within(form).getByRole("button", { name: "Make Skill reviewer" }));
     await screen.findByText("Bob is now a Skill reviewer.");
@@ -86,5 +86,39 @@ describe("Skill reviewers (KOBE-331)", () => {
     await answerConfirm("Take Skill reviewer from Cy?", "Take Skill reviewer");
     await screen.findByText("Cy is no longer a Skill reviewer.");
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+  });
+
+  it("offers oneself only on a single-admin Site and marks a self-grant (review-336)", async () => {
+    stubApi({
+      "GET /v1/site/roles/grants": [
+        200,
+        { grants: [{ ...grant("u-me", "Ada"), grantedBy: "u-me" }] },
+      ],
+      "GET /v1/site/users": [200, { users: [user("u-me", "Ada", "admin"), user("u-bob", "Bob")] }],
+    });
+    renderSite(<SkillReviewersSection />, "admin");
+    expect(await screen.findByText("self-granted")).toBeTruthy();
+    // Already holding it: only Bob is offered.
+    const form = screen.getByRole("form", { name: "Give Skill reviewer" });
+    expect(
+      within(form)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Choose a user…", "Bob (u-bob@x.io)"]);
+    cleanup();
+    stubApi({
+      "GET /v1/site/roles/grants": [200, { grants: [] }],
+      "GET /v1/site/users": [
+        200,
+        { users: [user("u-me", "Ada", "admin"), user("u-ann", "Ann", "admin")] },
+      ],
+    });
+    renderSite(<SkillReviewersSection />, "admin");
+    const other = await screen.findByRole("form", { name: "Give Skill reviewer" });
+    expect(
+      within(other)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Choose a user…", "Ann (u-ann@x.io)"]);
   });
 });

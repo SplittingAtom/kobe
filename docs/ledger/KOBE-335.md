@@ -75,9 +75,8 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- L5: "give yourself the Skill reviewer grant" can't work: KOBE-331 refuses the grant to
-  oneself and to Site admins. The message now says reviewers join with the grant and others are
-  added by the Registry team's admin. Decide whether Site admins may hold the grant.
+- (Answered, review-336) Site admins may hold the Skill reviewer grant from another admin; the
+  `not_registry_member` message says to ask for it.
 - "Shown in the catalog" (ac-2): the catalog browse is KOBE-336; the card is stored and the
   review screen shows it.
 - A completed re-run whose version was decided meanwhile is not stored (logged only).

@@ -198,7 +198,18 @@ describe("Re-run evals in the Registry team (KOBE-335)", () => {
     expect([own.status, own.json.code]).toEqual([403, "own_submission"]);
     const outside = await f.on(0, outsider).post(`/v1/site/skills/registry/${id}/rerun-evals`, {});
     expect([outside.status, outside.json.code]).toEqual([409, "not_registry_member"]);
-    expect(outside.json.message).toMatch(/Skill reviewers join it with their grant/);
+    expect(outside.json.message).toMatch(/ask another Site admin for the Skill reviewer grant/);
+    // Another Site admin grants it: the outsider joins the Registry team and may re-run.
+    expect(
+      (
+        await f
+          .on(0, reviewer)
+          .request("PUT", `/v1/site/roles/grants/${outsider.id}/skill_reviewer`, {})
+      ).status,
+    ).toBe(200);
+    const granted = await f.on(0, outsider).post(`/v1/site/skills/registry/${id}/rerun-evals`, {});
+    expect(granted.status, JSON.stringify(granted.json)).toBe(202);
+    await bench.closeEvals(registryTeam);
     await admin().query(
       `INSERT INTO model_catalog (alias, provider_id, model, created_by)
        VALUES ('judge-x', 'openai', 'judge-x', $1) ON CONFLICT (alias) DO NOTHING`,

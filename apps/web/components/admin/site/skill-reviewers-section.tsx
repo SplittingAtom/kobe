@@ -10,6 +10,7 @@ import {
 } from "../../../lib/admin/api/site/roles";
 import { listUsers, type SiteUser } from "../../../lib/admin/api/site/users";
 import {
+  Badge,
   Button,
   Field,
   FormRow,
@@ -25,6 +26,7 @@ import {
   eventTrigger,
   useConfirm,
 } from "../../ui/console";
+import { useSiteAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
@@ -42,13 +44,15 @@ async function load(): Promise<ApiResult<Loaded>> {
 }
 
 export const REVIEWER_HINT =
-  "Skill reviewers see the Registry queue and may claim, comment, approve, request changes and reject. They can't block, withdraw, revoke, tag Default or change Registry settings. Kobe adds them to the Registry team.";
+  "Skill reviewers see the Registry queue and may claim, comment, approve, request changes and reject. They can't block, withdraw, revoke, tag Default or change Registry settings. Kobe adds them to the Registry team, where re-runs run; a Site admin needs the grant for that too. Another admin gives it to you; on a single-admin Site you may give it to yourself (flagged).";
 
 /**
  * Skill reviewers (KOBE-331, SK22): a grant beside the role ladder, given and taken by the Owner
- * or a Site admin. Site admins review anyway, so they are not offered.
+ * or a Site admin. Site admins and the Owner may hold it too (review-336 decision), given by
+ * another admin; oneself only on a single-admin Site, shown "self-granted".
  */
 export function SkillReviewersSection() {
+  const me = useSiteAccess().user.id;
   const { state, reload } = useResource(load);
   const mutation = useMutation();
   const [confirm, confirmDialog] = useConfirm();
@@ -91,8 +95,10 @@ export function SkillReviewersSection() {
       <ResourceView state={state} label="Skill reviewers">
         {({ grants, users }) => {
           const holders = new Set(grants.map((g) => g.userId));
+          const admins = users.filter((u) => u.deactivatedAt === null && u.siteRole !== "user");
+          const soleAdmin = admins.length === 1 && admins[0]?.id === me;
           const candidates = users.filter(
-            (u) => u.deactivatedAt === null && u.siteRole === "user" && !holders.has(u.id),
+            (u) => u.deactivatedAt === null && !holders.has(u.id) && (u.id !== me || soleAdmin),
           );
           return (
             <>
@@ -110,7 +116,14 @@ export function SkillReviewersSection() {
                   <TableBody>
                     {grants.map((g) => (
                       <TableRow key={g.userId}>
-                        <TableRowHeader>{g.name}</TableRowHeader>
+                        <TableRowHeader>
+                          {g.name}
+                          {g.grantedBy === g.userId && (
+                            <Badge tone="attention" className="ms-2">
+                              self-granted
+                            </Badge>
+                          )}
+                        </TableRowHeader>
                         <TableCell>{g.email}</TableCell>
                         <TableCell>
                           <Button

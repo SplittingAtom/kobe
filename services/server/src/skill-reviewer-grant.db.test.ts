@@ -20,6 +20,7 @@ const finance = randomUUID();
 const ids = {
   admin: "",
   other: "",
+  owner: "",
   early: "",
   late: "",
   prior: "",
@@ -37,6 +38,7 @@ beforeAll(async () => {
   h = await openHarness();
   ids.admin = await h.createUser("admin@reviewers.test", "admin");
   ids.other = await h.createUser("other@reviewers.test", "admin");
+  ids.owner = await h.createUser("owner@reviewers.test", "owner");
   for (const who of [
     "early",
     "late",
@@ -90,30 +92,32 @@ const audit = async (action: string) =>
   ).rows;
 
 describe("Skill reviewer grant (KOBE-331)", () => {
-  it("is given by Site admins only, never to themselves, an admin or a deactivated account (ac-1)", async () => {
+  it("is given by Site admins, to admins too, never to oneself here or a deactivated account (ac-1)", async () => {
     expect((await grant(as.member, ids.early)).status).toBe(403);
     expect((await grant(as.fin, ids.early)).status).toBe(403);
     expect((await grant(as.admin, randomUUID())).status).toBe(404);
     expect((await as.admin.put(`/v1/site/roles/grants/${ids.early}/site_admin`, {})).status).toBe(
       400,
     );
-    for (const who of [ids.admin, ids.other]) {
-      const r = await grant(as.admin, who);
-      expect([r.status, r.json.code]).toEqual([400, "not_grantable"]);
-    }
+    // Coordinator decision (review-336): another admin gives it to an admin or the Owner; a
+    // self-grant is refused while another admin exists.
+    const self = await grant(as.admin, ids.admin);
+    expect([self.status, self.json.code]).toEqual([403, "self_grant"]);
+    expect((await grant(as.admin, ids.other)).status).toBe(200);
+    expect((await grant(as.admin, ids.owner)).status).toBe(200);
     await h.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.gone]);
     const gone = await grant(as.admin, ids.gone);
     expect([gone.status, gone.json.code]).toEqual([409, "user_deactivated"]);
     const given = await grant(as.admin, ids.early);
     expect([given.status, given.json.changed]).toEqual([200, true]);
     expect((await grant(as.admin, ids.early)).json.changed).toBe(false);
-    expect(await audit("identity.site_grant.granted")).toEqual([
-      {
+    expect(await audit("identity.site_grant.granted")).toEqual(
+      [ids.other, ids.owner, ids.early].map((userId) => ({
         team_id: null,
         actor_id: ids.admin,
-        target: { userId: ids.early, grant: "skill_reviewer" },
-      },
-    ]);
+        target: { userId, grant: "skill_reviewer" },
+      })),
+    );
   });
 
   it("adds grantees only to the dedicated Registry team, marked as the grant's (ac-1, review H1)", async () => {
@@ -158,6 +162,24 @@ describe("Skill reviewer grant (KOBE-331)", () => {
     expect(
       (list.json.grants as { userId: string; deactivated: boolean }[]).every((g) => !g.deactivated),
     ).toBe(true);
+  });
+
+  it("adds a granted admin as a member; taking it removes only that, never the creator's role (review-336)", async () => {
+    expect(await memberOf(registry, ids.other)).toEqual({
+      user_id: ids.other,
+      role: "member",
+      added_via: "skill_reviewer_grant",
+    });
+    // The creator (Registry team admin) receives the grant from another admin and keeps the role.
+    expect((await grant(as.other, ids.admin)).status).toBe(200);
+    expect(await memberOf(registry, ids.admin)).toMatchObject({
+      role: "team_admin",
+      added_via: null,
+    });
+    expect((await take(as.other, ids.admin)).status).toBe(204);
+    expect(await memberOf(registry, ids.admin)).toMatchObject({ role: "team_admin" });
+    expect((await take(as.admin, ids.other)).status).toBe(204);
+    expect(await memberOf(registry, ids.other)).toBeUndefined();
   });
 
   it("opens the queue to reviewers only, never settings, grants or the site ladder (ac-2, ac-3)", async () => {
@@ -237,8 +259,14 @@ describe("Skill reviewer grant (KOBE-331)", () => {
         a.target.userId,
         a.target.via,
       ]),
-    ).toEqual([[registry, ids.late, "skill_reviewer_grant"]]);
+    ).toEqual([
+      // The earlier test's granted admin (review-336), then this one's.
+      [registry, ids.other, "skill_reviewer_grant"],
+      [registry, ids.late, "skill_reviewer_grant"],
+    ]);
     expect((await audit("identity.site_grant.revoked")).map((a) => a.target.userId)).toEqual([
+      ids.admin,
+      ids.other,
       ids.late,
       ids.prior,
       ids.early,

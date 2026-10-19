@@ -101,11 +101,11 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
       );
     return c.json(
       {
-        code: "not_grantable",
+        code: "self_grant",
         message:
-          "Site admins and the Owner review through their role, and nobody grants themselves.",
+          "Another Site admin gives you the grant; on a single-admin Site you may give it to yourself (flagged).",
       },
-      400,
+      403,
     );
   });
 
