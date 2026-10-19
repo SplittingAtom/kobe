@@ -119,6 +119,20 @@ function validate(entry: z.infer<typeof proxyEntrySchema>): LiveEntry {
 }
 
 /**
+ * Validates stored bytes again before approval (MA-2): the same checks as a probe, so an approval
+ * can never pin something a probe would refuse. Returns the template with recomputed hashes.
+ */
+export function revalidate(t: {
+  readonly uri: string;
+  readonly mimeType: string;
+  readonly html: string;
+  readonly meta: UiResourceMeta;
+}): LiveEntry {
+  if (!UI_RESOURCE_URI_PATTERN.test(t.uri)) return invalid(t.uri, "ui_resource_invalid");
+  return validate({ uri: t.uri, mimeType: t.mimeType, text: t.html, meta: { ui: t.meta } });
+}
+
+/**
  * The live templates from the probe's `ui_resources`, keeping only those a live tool names (the
  * proxy already reads no others). Entries that do not parse are dropped.
  */

@@ -1668,6 +1668,11 @@ export const AUDIT_EVENTS = {
     connectorId: id,
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
+    /** MCP Apps templates approved (KOBE-434): URI and Kobe's SHA-256 of the approved bytes. */
+    templates: z
+      .array(z.strictObject({ uri: uiUri, sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+      .max(64)
+      .optional(),
   }),
   /**
    * Which credential probes a connector's `tools/list` (KOBE-431): the connector's site-wide key
