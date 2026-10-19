@@ -24,6 +24,7 @@ import {
   leaseRun,
   mcpToken,
   piName,
+  pinnedTool,
   registerConnector,
 } from "./testing/mcp-fixtures.js";
 
@@ -225,7 +226,12 @@ describe("tools/call: the server decides every call", () => {
     const res = await callTool(w, { tool: "get_issue", tool_call_id: "toolu_1" });
     expect(res.json).toMatchObject({
       decision: "allow",
-      tool: { name: "get_issue", pi_name: piName(w.connector.name, "get_issue") },
+      tool: {
+        name: "get_issue",
+        pi_name: piName(w.connector.name, "get_issue"),
+        // KOBE-435 review M3: tells the proxy this server checked MCP Apps visibility.
+        model_visible: true,
+      },
       connector: { id: w.connector.id, url: "https://mcp.example.com/mcp", auth_kind: "none" },
       input_sha256: digest({ q: "x" }),
     });
@@ -283,6 +289,26 @@ describe("tools/call: the server decides every call", () => {
     expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({
       decision: "deny",
       code: "tool_drifted",
+    });
+  });
+
+  it("never lists or calls an app-only tool for Pi, even when exposed (KOBE-435 ac-1)", async () => {
+    const w = await world();
+    const appOnly = pinnedTool(w.connector.name, {
+      name: "preview_table",
+      readOnly: true,
+      ui: { visibility: ["app"] },
+    });
+    await fx.admin.query(`UPDATE connectors SET tools_snapshot = $2::jsonb WHERE id = $1`, [
+      w.connector.id,
+      JSON.stringify([...w.connector.tools, appOnly]),
+    ]);
+    const names = ((await listTools(w)).json.tools as { name: string }[]).map((t) => t.name);
+    expect(names).toContain("get_issue");
+    expect(names).not.toContain("preview_table");
+    expect((await callTool(w, { tool: "preview_table" })).json).toMatchObject({
+      decision: "deny",
+      code: "unknown_tool",
     });
   });
 

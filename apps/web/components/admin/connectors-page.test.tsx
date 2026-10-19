@@ -216,6 +216,44 @@ describe("Tool drift re-approval (KOBE-102)", () => {
     });
   });
 
+  it("shows a visibility and template change of a tool (KOBE-434 review M4)", async () => {
+    stubApi({
+      ...routes([]),
+      [`GET ${BASE}/c-1/tools`]: [
+        200,
+        {
+          tools: [
+            {
+              name: "open_explorer",
+              status: "drifted",
+              change: "changed",
+              approved: {
+                description: "same",
+                inputSchema: { type: "object" },
+                annotations: { readOnlyHint: true },
+                ui: { visibility: ["app"] },
+              },
+              live: {
+                ...live("c".repeat(64), "same"),
+                annotations: { readOnlyHint: true },
+                ui: { resourceUri: "ui://c/explorer" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Review/ }));
+    const article = await screen.findByRole("article", { name: "open_explorer" });
+    const approved = within(article).getByRole("region", { name: "Approved" });
+    const now = within(article).getByRole("region", { name: "Now" });
+    expect(within(approved).getByText("apps only")).toBeTruthy();
+    expect(within(now).getByText("the model and apps (default)")).toBeTruthy();
+    expect(within(now).getByText("ui://c/explorer")).toBeTruthy();
+    expect(within(approved).getByText("readOnlyHint: true")).toBeTruthy();
+  });
+
   it("approves all pending tools at once", async () => {
     const calls = stubApi(routes(["changed_tool", "fresh_tool"]));
     renderSite(<ConnectorsPage />);
@@ -226,6 +264,90 @@ describe("Tool drift re-approval (KOBE-102)", () => {
       "changed_tool",
       "fresh_tool",
     ]);
+  });
+});
+
+describe("app template review (KOBE-434)", () => {
+  const version = (sha: string, pinnedHash: string, bytes: number) => ({
+    sha256: sha,
+    pinnedHash,
+    bytes,
+    mimeType: "text/html;profile=mcp-app",
+    meta: { prefersBorder: false },
+  });
+  const templates = [
+    {
+      uri: "ui://c/explorer",
+      status: "drifted",
+      change: "changed",
+      approved: version("1".repeat(64), "a".repeat(64), 10),
+      live: version("2".repeat(64), "b".repeat(64), 30),
+    },
+    {
+      uri: "ui://c/broken",
+      status: "drifted",
+      change: "invalid",
+      invalid: "ui_resource_hash_mismatch",
+    },
+  ];
+  const routes = {
+    [`GET ${BASE}`]: [
+      200,
+      { connectors: [connector({ toolCount: 1, driftedCount: 0, templatesDriftedCount: 2 })] },
+    ] as const,
+    [`GET ${BASE}/c-1/tools`]: [200, { tools: [] }] as const,
+    [`GET ${BASE}/c-1/templates`]: [200, { templates }] as const,
+    [`GET ${BASE}/c-1/templates/source?uri=${encodeURIComponent("ui://c/explorer")}`]: [
+      200,
+      {
+        source: {
+          uri: "ui://c/explorer",
+          approved: { ...version("1".repeat(64), "a".repeat(64), 10), html: "<p>old</p>" },
+          // The source read is newer than the list: its hash is the one approved (review M1).
+          live: {
+            ...version("3".repeat(64), "c".repeat(64), 40),
+            html: "<p>old</p>\n<script>alert(1)</script>",
+          },
+        },
+      },
+    ] as const,
+    [`POST ${BASE}/c-1/templates/approve`]: [200, { approved: ["ui://c/explorer"] }] as const,
+  };
+
+  it("shows hashes, an escaped source diff and a sandboxed preview, and approves by hash", async () => {
+    const calls = stubApi(routes);
+    renderSite(<ConnectorsPage />);
+    await screen.findByText(/2 app templates awaiting approval/);
+    await userEvent.click(screen.getByRole("button", { name: /Review/ }));
+    const card = await screen.findByRole("article", { name: "ui://c/explorer" });
+    expect(within(card).getByText("2".repeat(64))).toBeTruthy();
+    // No approving blind: Approve waits for the source.
+    expect(
+      (within(card).getByRole("button", { name: /Approve/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await userEvent.click(within(card).getByRole("button", { name: /Show source/ }));
+    const diff = await within(card).findByLabelText("Source changes of ui://c/explorer");
+    // Shown as text: the script is a line of the diff, not an element.
+    expect(diff.textContent).toContain("+ <script>alert(1)</script>");
+    expect(diff.querySelector("script")).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: /^Preview/ }));
+    const frame = within(card).getByTitle("Preview of ui://c/explorer");
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.getAttribute("srcdoc")).toBeNull();
+    expect(frame.getAttribute("src")).toBe(
+      `${BASE}/c-1/templates/frame?uri=${encodeURIComponent("ui://c/explorer")}&version=live&sha256=${"3".repeat(64)}`,
+    );
+    expect(within(card).getByText("3".repeat(64))).toBeTruthy();
+
+    const broken = screen.getByRole("article", { name: "ui://c/broken" });
+    expect(within(broken).getByText("Cannot be approved")).toBeTruthy();
+    expect(within(broken).queryByRole("button", { name: /Approve/ })).toBeNull();
+
+    await userEvent.click(within(card).getByRole("button", { name: /Approve/ }));
+    const post = calls.find((c) => c.method === "POST");
+    expect(JSON.parse(String(post?.body))).toEqual({
+      templates: [{ uri: "ui://c/explorer", pinnedHash: "c".repeat(64) }],
+    });
   });
 });
 
@@ -250,11 +372,21 @@ describe("refresh skips (KOBE-431)", () => {
     expect(screen.getByText(/own key of the site admin who last pinned or approved/)).toBeTruthy();
   });
 
+  it("tells admins when the app templates were not checked (KOBE-433)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ templatesSkipped: "proxy_outdated" })] }],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText("App templates not checked for changes")).toBeTruthy();
+    expect(screen.getByText(/MCP proxy is older than this server/)).toBeTruthy();
+  });
+
   it("says nothing when the last refresh ran", async () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
     renderSite(<ConnectorsPage />);
     await screen.findByRole("rowheader", { name: "github" });
     expect(screen.queryByText(/Not checked for changes/)).toBeNull();
+    expect(screen.queryByText(/App templates not checked/)).toBeNull();
   });
 });
 

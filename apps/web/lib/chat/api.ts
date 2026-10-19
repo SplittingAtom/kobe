@@ -3,6 +3,10 @@
  * sends `X-Kobe-Team`, reads included, so a tab left on another team gets `team_mismatch` instead of
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
+import type { appContextBody } from "../apps/app-context";
+
+/** One `app_context` part as sent (KOBE-439). */
+export type AppContextWire = ReturnType<typeof appContextBody>[number];
 import type { ThinkingLevel } from "@kobe/protocol";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
@@ -186,6 +190,8 @@ export interface ChatApi {
       readonly fileIds?: readonly string[] | undefined;
       /** Workspace paths picked with `@` (KOBE-223): only their markers are rewritten. */
       readonly mentions?: readonly string[] | undefined;
+      /** MCP Apps context chips, wire casing (KOBE-439). */
+      readonly appContext?: readonly AppContextWire[] | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -371,6 +377,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.mentions === undefined || body.mentions.length === 0
             ? {}
             : { mentions: body.mentions }),
+          ...(body.appContext === undefined || body.appContext.length === 0
+            ? {}
+            : { app_context: body.appContext }),
         },
         teamId,
         idempotencyKey,

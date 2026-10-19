@@ -62,5 +62,20 @@ export default defineConfig({
       dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"], ...browserUse, storageState: STORAGE_STATE },
     },
+    // KOBE_ALL_BROWSERS=1: the MCP App frame spec also in Firefox and WebKit, to record what each
+    // does with WebRTC (KOBE-437 review MEDIUM-2).
+    ...(process.env["KOBE_ALL_BROWSERS"] === "1"
+      ? (["firefox", "webkit"] as const).map((name) => ({
+          name,
+          testMatch: /app-frame\.spec\.ts/,
+          dependencies: ["setup"],
+          use: {
+            ...devices[name === "firefox" ? "Desktop Firefox" : "Desktop Safari"],
+            ...browserUse,
+            launchOptions: {},
+            storageState: STORAGE_STATE,
+          },
+        }))
+      : []),
   ],
 });

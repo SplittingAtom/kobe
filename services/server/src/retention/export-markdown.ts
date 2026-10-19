@@ -1,3 +1,4 @@
+import { APP_CARD_CUSTOM_TYPE } from "@kobe/protocol";
 /**
  * Markdown transcript of a thread for the user's export (spec D18). Entries are Pi 1.0 session
  * entries (D15) as stored, i.e. agent output: every field is checked, and anything unexpected is
@@ -81,6 +82,13 @@ function assistantMarkdown(message: Json): string {
 /** The Markdown block of one entry, or null when it is not a conversation turn. */
 export function entryMarkdown(payload: unknown): string | null {
   const entry = record(payload);
+  // An app card (KOBE-440): the text the model read, never the stored result or the template.
+  if (entry?.type === "custom_message" && entry.customType === APP_CARD_CUSTOM_TYPE) {
+    const tool = inline(str(record(entry.details)?.tool) ?? "app").replace(/`/g, "");
+    const when = str(entry.timestamp);
+    const text = clip(contentText(entry.content), MAX_TOOL_TEXT);
+    return `**App opened by the member:** \`${tool}\`${when ? ` · ${inline(when)}` : ""}\n\n${fence(text)}`;
+  }
   if (entry?.type !== "message") return null;
   const message = record(entry.message);
   if (!message) return null;

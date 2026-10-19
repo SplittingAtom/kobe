@@ -61,6 +61,7 @@ const UPSTREAM_MESSAGES: Readonly<Record<UpstreamFailure, string>> = {
   http_error: "The connector's server answered with an error.",
   protocol_error: "The connector's server did not answer as an MCP server.",
   too_large: "The connector's answer was too large.",
+  not_offered: "This tool is not offered to agents (the connector offers it only to apps).",
 };
 
 function toMcpTool(tool: ExposedTool): Record<string, unknown> {
@@ -352,11 +353,31 @@ async function decideAndForward(
       headers: credentials.headers,
       tool: decision.tool.name,
       arguments: args,
+      // An allow from a server older than KOBE-435 did not check MCP Apps visibility: the proxy
+      // checks the upstream's own tools/list in the same session (review M3).
+      ...(decision.tool.model_visible === true ? {} : { checkModelVisible: true }),
       signal: AbortSignal.timeout(deps.limits.upstreamTimeoutMs),
     });
     if (result.ok) {
       annotate({}, contentAttributes({ "kobe.tool.output": JSON.stringify(result.result) }));
-      log({ outcome: "ok", approvalId: decision.approval_id, reason: decision.reason });
+      // MCP Apps (KOBE-438, spec T11): the full result comes from here, never the sandbox, and is
+      // stored before Pi sees it, so the run's tool.result can claim it.
+      const reported =
+        decision.app_capture === undefined
+          ? undefined
+          : await deps.server.reportResult(
+              ctx.token,
+              ctx.connectorId,
+              decision.app_capture.ticket,
+              args,
+              result.result,
+            );
+      log({
+        outcome: "ok",
+        approvalId: decision.approval_id,
+        reason: decision.reason,
+        ...(reported === undefined ? {} : { appResultStored: reported }),
+      });
       return [rpcResult(id, result.result)];
     }
     log({ outcome: "upstream_failed", reason: result.failure });

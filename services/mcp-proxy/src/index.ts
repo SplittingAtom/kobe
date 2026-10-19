@@ -45,6 +45,8 @@ const app = createApp(
     timeoutMs: config.limits.upstreamTimeoutMs,
     maxRequestBytes: 4 * 1024,
   },
+  // MCP Apps' own calls (KOBE-436), decided and audited by the server first.
+  { internalKey: config.internalKey, upstream, timeoutMs: config.limits.upstreamTimeoutMs },
 );
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   logger.info(

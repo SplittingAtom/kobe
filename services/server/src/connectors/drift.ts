@@ -1,5 +1,5 @@
 import type { PinnedTool, ProposedTool } from "@kobe/db";
-import { snapshotHash } from "./pin.js";
+import { snapshotHash, toolHash } from "./pin.js";
 
 /**
  * Drift (KOBE-102, spec D27): compares a connector's stored snapshot with a fresh one built from
@@ -29,6 +29,7 @@ const proposalOf = (live: PinnedTool): ProposedTool => ({
   input_schema: live.input_schema,
   ...(live.output_schema === undefined ? {} : { output_schema: live.output_schema }),
   annotations: live.annotations,
+  ...(live.ui === undefined ? {} : { ui: live.ui }),
   sha256: live.sha256,
 });
 
@@ -38,9 +39,35 @@ function approvedOf(tool: PinnedTool): PinnedTool {
   return { ...rest, status: "pinned" };
 }
 
+/**
+ * Only for a legacy snapshot ({@link DriftOptions.adoptLegacyUi}): a tool pinned before KOBE-433 has no `ui` and a hash without it. When the live tool names a
+ * template and is otherwise exactly the approved definition, the pin is adopted silently: the
+ * tool keeps its approved fields and gains `ui` and the new hash. The template itself still
+ * arrives as a new, unapproved template (review HIGH-1).
+ */
+function adoptsTemplate(stored: PinnedTool, live: PinnedTool): boolean {
+  if (stored.ui !== undefined || live.ui === undefined) return false;
+  const without = toolHash({
+    name: live.name,
+    description: live.description,
+    inputSchema: live.input_schema,
+  });
+  return without === stored.sha256;
+}
+
+export interface DriftOptions {
+  /**
+   * The snapshot was pinned before KOBE-433 (`connectors.pin_version` 1): its tools may adopt a
+   * template reference silently, this once. Afterwards a tool that starts naming a template
+   * drifts like any other change (re-review NEW-1).
+   */
+  readonly adoptLegacyUi?: boolean;
+}
+
 export function applyDrift(
   current: readonly PinnedTool[],
   live: readonly PinnedTool[],
+  options: DriftOptions = {},
 ): DriftResult {
   const liveByName = new Map(live.map((t) => [t.name, t]));
   const known = new Set(current.map((t) => t.name));
@@ -62,6 +89,8 @@ export function applyDrift(
     }
     if (now.sha256 === tool.sha256) {
       tools.push(approvedOf(tool));
+    } else if (options.adoptLegacyUi === true && adoptsTemplate(tool, now)) {
+      tools.push({ ...approvedOf(tool), ui: now.ui, sha256: now.sha256 });
     } else if (tool.proposed?.sha256 === now.sha256) {
       tools.push(tool);
     } else {
@@ -117,7 +146,10 @@ export function approveTools(
     if (!wanted.has(tool.name)) return tool;
     approved.push(tool.name);
     const { proposed, ...rest } = tool;
-    return { ...rest, ...(proposed ?? {}), status: "pinned" };
+    if (!proposed) return { ...rest, status: "pinned" };
+    // The live definition replaces the approved one whole: an optional field it lacks goes too.
+    const { title: _title, output_schema: _output, ui: _ui, ...required } = rest;
+    return { ...required, ...proposed, status: "pinned" };
   });
   return { ok: true, tools, approved };
 }

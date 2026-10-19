@@ -1,5 +1,7 @@
 "use client";
 
+import { AppContextChips } from "../apps/app-context-chips";
+import { appContextBody, insertAt } from "../../lib/apps/app-context";
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { MicIcon } from "lucide-react";
 import {
@@ -10,6 +12,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
@@ -17,7 +20,12 @@ import { ComposerAttachments } from "./attachment-chips";
 import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
-import { useComposerDictation, useSteer } from "./composer-steer";
+import {
+  useComposerDictation,
+  useInsertGate,
+  useSteer,
+  type PendingInsert,
+} from "./composer-steer";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
@@ -126,6 +134,7 @@ export function Composer({
   const readOnly = extras.state.summary?.readOnly === true;
   // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
   const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
+  const appInsert = useAppInserts(input, text, remoteId, !readOnly && !inTrash);
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const onDragOver = (e: DragEvent) => {
     if (rowDrop.over(e) || !hasFiles(e)) return;
@@ -149,9 +158,11 @@ export function Composer({
     dictation.stop();
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
-    if (await controller.send(text.trim(), undefined, attach, mentions)) {
+    const contexts = appContextBody(session.appContexts.forDraft(draft));
+    if (await controller.send(text.trim(), undefined, attach, mentions, contexts)) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
+      session.appContexts.clear(draft);
       aui.composer.setText("");
     }
   };
@@ -170,6 +181,13 @@ export function Composer({
         e.preventDefault();
         editLast.onSelect();
       }
+      return;
+    }
+    // Text an app inserted is not sent, queued or steered until the member changes or confirms it
+    // (MEDIUM-2, LOW-L): only a plain Shift+Enter (a new line) gets through.
+    const newLine = e.shiftKey && !e.ctrlKey && !e.metaKey;
+    if (e.key === "Enter" && !newLine && appInsert.pending !== null) {
+      e.preventDefault();
       return;
     }
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
@@ -235,6 +253,7 @@ export function Composer({
           data-running={running || undefined}
           data-dragging={dragging || undefined}
           data-mention-drop={rowDrop.rowDrop ?? undefined}
+          data-app-insert={appInsert.flash || undefined}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDrop}
@@ -247,6 +266,21 @@ export function Composer({
           <SlashMenu input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
+          <AppContextChips draft={draft} />
+          {appInsert.pending && (
+            <p
+              role="note"
+              data-kobe-app-insert-from={appInsert.pending.from}
+              className="text-muted-foreground m-0 flex items-center gap-2 px-2 text-xs"
+            >
+              <span>
+                From {appInsert.pending.from}: edit the text or confirm it before you send.
+              </span>
+              <button type="button" className="underline" onClick={appInsert.confirm}>
+                Confirm
+              </button>
+            </p>
+          )}
           <label htmlFor="kobe-composer" className="sr-only">
             Message
           </label>
@@ -307,7 +341,7 @@ export function Composer({
                 size="sm"
                 className="h-8 shrink-0 rounded-full px-3"
                 onClick={() => void queue()}
-                disabled={empty || blocker !== undefined}
+                disabled={empty || blocker !== undefined || appInsert.pending !== null}
               >
                 Queue
               </Button>
@@ -318,7 +352,7 @@ export function Composer({
                   type="button"
                   variant="default"
                   className="size-7 shrink-0 rounded-full"
-                  disabled={blocker !== undefined}
+                  disabled={blocker !== undefined || appInsert.pending !== null}
                 />
               </ComposerPrimitive.Send>
             )}
@@ -353,4 +387,83 @@ export function Composer({
       </ComposerPrimitive.Root>
     </ComposerPrimitive.TriggerPopoverRoot>
   );
+}
+
+/** How long the composer flashes after an app put text in it. */
+const INSERT_FLASH_MS = 600;
+
+/**
+ * Edits within this long after an insert never lift its gate (KOBE-439 re-review LOW-J): a
+ * keystroke the member was already making when the text arrived is not a review of it.
+ */
+export const INSERT_SETTLE_MS = 800;
+
+/**
+ * Whether `text` settles the pending insert: the member cleared the composer, or, once the settle
+ * time has passed, changed the inserted text itself. Typing around it does not (LOW-J).
+ */
+export function settlesInsert(pending: PendingInsert, text: string, now: number): boolean {
+  if (text === pending.text) return false;
+  if (text.trim() === "") return true;
+  return now - pending.at >= INSERT_SETTLE_MS && !text.includes(pending.insert);
+}
+
+/**
+ * An app's `ui/message` (KOBE-439, spec §8; review MEDIUM-2, coordinator decision): the text goes
+ * in at the caret of this thread's composer and **never moves the focus**: an Enter the member
+ * presses in the app (or anywhere else) cannot send it. Until the member changes the inserted text
+ * or confirms it, it carries a visible "From <app>" marker, and Enter, Send, Queue and every way
+ * of steering do nothing (LOW-J, LOW-L). It is never sent by itself. Only a writable composer of a
+ * thread listens.
+ */
+function useAppInserts(
+  input: RefObject<HTMLTextAreaElement | null>,
+  text: string,
+  threadId: string | undefined,
+  writable: boolean,
+): {
+  readonly flash: boolean;
+  readonly pending: PendingInsert | null;
+  confirm(): void;
+} {
+  const aui = useAui();
+  const session = useChatSession();
+  const gate = useInsertGate();
+  const [flash, setFlash] = useState(false);
+  const latest = useRef(text);
+  latest.current = text;
+  const setPending = gate.set;
+  useEffect(() => {
+    if (!writable || threadId === undefined) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = session.composerInserts.listen(threadId, (insert, from) => {
+      const el = input.current;
+      const caret = el !== null && document.activeElement === el ? el.selectionEnd : undefined;
+      const next = insertAt(latest.current, caret ?? latest.current.length, insert);
+      aui.composer.setText(next.text);
+      setPending({ from, insert, text: next.text, at: Date.now() });
+      setFlash(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => setFlash(false), INSERT_FLASH_MS);
+      return true;
+    });
+    return () => {
+      stop();
+      clearTimeout(timer);
+      setPending(null); // another thread's composer never inherits this one's gate
+    };
+  }, [session, aui, input, threadId, writable, setPending]);
+  const pending = gate.pending;
+  // The composer's state shows the inserted text a render later: judge only changes after that.
+  const seen = useRef<PendingInsert | null>(null);
+  useEffect(() => {
+    if (pending === null) return;
+    if (text === pending.text) seen.current = pending;
+    else if (seen.current === pending && settlesInsert(pending, text, Date.now())) setPending(null);
+  }, [pending, text, setPending]);
+  const confirm = () => {
+    setPending(null);
+    input.current?.focus();
+  };
+  return { flash, pending, confirm };
 }

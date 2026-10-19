@@ -33,6 +33,7 @@ import { AnswerFeedbackProvider } from "./answer-feedback";
 import { ThreadUsageProvider } from "./message-footer";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
+import { ThreadAppsProvider } from "../apps/thread-apps";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { FileGoneNotice } from "../files/file-tab";
 import { IconActionProvider } from "../shell/icon-action";
@@ -235,48 +236,50 @@ function ChatWorkspace({
                 <AnswerFeedbackProvider>
                   <TeamModelsProvider>
                     <ThreadMarkersProvider>
-                      <ArtifactPanelProvider
-                        teamId={session.teamId}
-                        threadId={threadId}
-                        preferences={layout.preferences}
-                        onSavePreferences={layout.save}
-                      >
-                        <FileGoneNotice />
-                        {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
-                        <ThreadActivityWatch pollMs={activityPollMs} />
-                        <AppCommands />
-                        {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
-                        <ShortcutKeys />
-                        <CommandPalette onOpenThread={setThreadId} />
-                        <ShortcutSheet />
-                        <ShellSlot name="search">
-                          <ThreadSearch onOpenThread={setThreadId} />
-                        </ShellSlot>
-                        <ShellSlot name="nav">
-                          <RailDrawerButton teamName={teamName} />
-                        </ShellSlot>
-                        <WorkspaceGrid
-                          areaOpen={area !== undefined}
-                          rail={
-                            <WorkspaceRail
-                              teamName={teamName || "Workspace"}
-                              listError={listError}
-                              filesApi={filesApi}
-                            />
-                          }
-                          artifact={
-                            <>
-                              <AreaPanel area={area} fetchFn={fetchFn} />
-                              <ArtifactPanel filesApi={filesApi} />
-                            </>
-                          }
-                          conversation={
-                            <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                              <ThreadView onOpenThread={setThreadId} inShell />
-                            </main>
-                          }
-                        />
-                      </ArtifactPanelProvider>
+                      <ThreadAppsProvider>
+                        <ArtifactPanelProvider
+                          teamId={session.teamId}
+                          threadId={threadId}
+                          preferences={layout.preferences}
+                          onSavePreferences={layout.save}
+                        >
+                          <FileGoneNotice />
+                          {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
+                          <ThreadActivityWatch pollMs={activityPollMs} />
+                          <AppCommands />
+                          {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
+                          <ShortcutKeys />
+                          <CommandPalette onOpenThread={setThreadId} />
+                          <ShortcutSheet />
+                          <ShellSlot name="search">
+                            <ThreadSearch onOpenThread={setThreadId} />
+                          </ShellSlot>
+                          <ShellSlot name="nav">
+                            <RailDrawerButton teamName={teamName} />
+                          </ShellSlot>
+                          <WorkspaceGrid
+                            areaOpen={area !== undefined}
+                            rail={
+                              <WorkspaceRail
+                                teamName={teamName || "Workspace"}
+                                listError={listError}
+                                filesApi={filesApi}
+                              />
+                            }
+                            artifact={
+                              <>
+                                <AreaPanel area={area} fetchFn={fetchFn} />
+                                <ArtifactPanel filesApi={filesApi} />
+                              </>
+                            }
+                            conversation={
+                              <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                                <ThreadView onOpenThread={setThreadId} inShell />
+                              </main>
+                            }
+                          />
+                        </ArtifactPanelProvider>
+                      </ThreadAppsProvider>
                     </ThreadMarkersProvider>
                   </TeamModelsProvider>
                 </AnswerFeedbackProvider>

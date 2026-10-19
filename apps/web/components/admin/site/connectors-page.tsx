@@ -362,9 +362,17 @@ function ConnectorTable({
               </TableCell>
               <TableCell>
                 {c.toolCount}
-                {c.driftedCount > 0 ? (
+                {c.driftedCount > 0 || (c.templatesDriftedCount ?? 0) > 0 ? (
                   <span className="ms-1 inline-flex flex-wrap items-center gap-1.5">
-                    <Badge tone="attention">{c.driftedCount} awaiting approval</Badge>
+                    {c.driftedCount > 0 ? (
+                      <Badge tone="attention">{c.driftedCount} awaiting approval</Badge>
+                    ) : null}
+                    {(c.templatesDriftedCount ?? 0) > 0 ? (
+                      <Badge tone="attention">
+                        {c.templatesDriftedCount} app template
+                        {c.templatesDriftedCount === 1 ? "" : "s"} awaiting approval
+                      </Badge>
+                    ) : null}
                     <Button size="sm" onClick={() => onReview(c)}>
                       Review<span className="sr-only"> tools of {c.name}</span>
                     </Button>

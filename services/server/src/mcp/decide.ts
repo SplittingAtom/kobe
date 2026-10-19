@@ -1,3 +1,8 @@
+import { appInputDigest } from "../apps/input-canonical.js";
+import { modelVisible } from "../connectors/visibility.js";
+import { appIdOf } from "../apps/app-id.js";
+import { signCaptureTicket } from "../apps/capture-ticket.js";
+import { servedTemplateHash } from "../connectors/template-store.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   canonicalJson,
@@ -81,11 +86,26 @@ export type McpCallDecision =
   | {
       readonly decision: "allow";
       readonly connector: McpUpstreamTarget;
-      readonly tool: { readonly name: string; readonly pi_name: string };
+      /**
+       * `model_visible: true` (KOBE-435 review M3): this server checked the tool's MCP Apps
+       * visibility. A proxy that gets an allow without it (an older server mid-rollout) checks
+       * the upstream's own `tools/list` before calling.
+       */
+      readonly tool: {
+        readonly name: string;
+        readonly pi_name: string;
+        readonly model_visible: true;
+      };
       /** SHA-256 (hex) of `canonicalJson(input)`: the proxy forwards exactly these bytes. */
       readonly input_sha256: string;
       readonly reason: PolicyReasonCode;
       readonly approval_id?: string;
+      /**
+       * MCP Apps (KOBE-438): the tool opens a pinned, approved `ui://` template, so the proxy
+       * reports the upstream's full result with this signed ticket (`capture-ticket.ts`). Absent
+       * for every other tool, and from a server without a capture key.
+       */
+      readonly app_capture?: { readonly ticket: string };
     }
   | {
       readonly decision: "deny";
@@ -103,6 +123,8 @@ export interface McpDecideDeps {
   readonly now?: () => Date;
   /** Whether a denied call of this sandbox may be audited now (per-sandbox throttle). */
   readonly mayAuditDenied?: (sandboxId: string) => boolean;
+  /** Signs MCP Apps capture tickets (KOBE-438); unset: results are never captured. */
+  readonly captureKey?: Buffer;
 }
 
 /** Same grammar as the `mcp.tool_call` audit field: other ids are decided on but not recorded. */
@@ -336,6 +358,13 @@ export async function decideMcpCall(
         `${pinned.pi_name} changed since it was approved and is disabled until an admin re-approves it.`,
       );
     }
+    // An app-only tool (KOBE-435) is not offered to agents: for Pi it does not exist.
+    if (!modelVisible(pinned)) {
+      return await denied(
+        "unknown_tool",
+        `${pinned.pi_name} is offered only to apps, not to agents.`,
+      );
+    }
     if (!exposedTools(connector).some((t) => t.pi_name === pinned.pi_name)) {
       return await denied(
         "connector_exposure",
@@ -463,6 +492,16 @@ export async function decideMcpCall(
       }
     }
 
+    const capture = await captureFor(deps, principal, {
+      threadId: request.threadId,
+      runId: named.runId,
+      connectorId: connector.id,
+      tool: pinned,
+      // The capture's digest is of the canonical input (KOBE-441): the claim digests Pi's raw
+      // arguments the same way, so Pi's conversions and schema defaults do not drop the app.
+      inputSha256: appInputDigest(pinned.input_schema as Record<string, unknown>, input.data),
+      now: now(),
+    });
     // The record of the call comes first: no audit row, no upstream call.
     await audit(deps, principal, facts, {
       decision: "allowed",
@@ -478,10 +517,11 @@ export async function decideMcpCall(
         url: connector.url,
         auth_kind: connector.authKind,
       },
-      tool: { name: pinned.name, pi_name: pinned.pi_name },
+      tool: { name: pinned.name, pi_name: pinned.pi_name, model_visible: true },
       input_sha256: inputDigest(input.data),
       reason,
       ...(approvalId === undefined ? {} : { approval_id: approvalId }),
+      ...(capture === undefined ? {} : { app_capture: { ticket: capture } }),
     };
   } catch (err) {
     logger.error(
@@ -493,4 +533,41 @@ export async function decideMcpCall(
       "Policy could not be evaluated, so the call was denied. Try again.",
     );
   }
+}
+
+/** A capture ticket when the tool opens a pinned, approved template (KOBE-438). */
+async function captureFor(
+  deps: McpDecideDeps,
+  principal: McpPrincipal,
+  call: {
+    readonly threadId: string;
+    readonly runId: string;
+    readonly connectorId: string;
+    readonly tool: PinnedTool;
+    readonly inputSha256: string;
+    readonly now: Date;
+  },
+): Promise<string | undefined> {
+  const uri = call.tool.ui?.resource_uri;
+  if (deps.captureKey === undefined || uri === undefined) return undefined;
+  const templateSha256 = await servedTemplateHash(deps.db, call.connectorId, uri);
+  if (templateSha256 === undefined) return undefined;
+  return signCaptureTicket(
+    deps.captureKey,
+    {
+      teamId: principal.teamId,
+      userId: principal.userId,
+      sandboxId: principal.sandboxId,
+      threadId: call.threadId,
+      runId: call.runId,
+      connectorId: call.connectorId,
+      tool: call.tool.name,
+      piName: call.tool.pi_name,
+      inputSha256: call.inputSha256,
+      templateUri: uri,
+      templateSha256,
+      appId: appIdOf(call.connectorId, uri),
+    },
+    call.now,
+  );
 }

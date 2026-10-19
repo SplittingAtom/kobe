@@ -1,3 +1,4 @@
+import { splitAppContext } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
 
 export { cutText } from "./entry-output.js";
@@ -30,6 +31,15 @@ export interface FirstMessage {
   readonly text: string;
 }
 
+/**
+ * A user message's own text: MCP Apps context (KOBE-439) is untrusted and is stripped from every
+ * summary (titles, thread cards, follow-ups; review MEDIUM-3). Only Pi's fenced prompt, history
+ * and exports carry it.
+ */
+export function memberText(text: string): string {
+  return splitAppContext(text).rest.trim();
+}
+
 /** The thread's first user message (by append order), or undefined before there is one. */
 export async function firstUserMessage(
   tx: KobeTx,
@@ -43,7 +53,7 @@ export async function firstUserMessage(
        AND payload -> 'message' ->> 'role' = 'user'
      ORDER BY seq LIMIT 1`);
   const row = res.rows[0];
-  return row ? { seq: Number(row.seq), text: messageText(row.content).trim() } : undefined;
+  return row ? { seq: Number(row.seq), text: memberText(messageText(row.content)) } : undefined;
 }
 
 /** The text of the first assistant message after `seq` that has any (the answer's start). */
@@ -117,7 +127,7 @@ export async function lastExchange(
        AND payload -> 'message' ->> 'role' = 'user'
      ORDER BY seq DESC LIMIT 1`);
   const row = res.rows[0];
-  const prompt = row ? messageText(row.content).trim() : "";
+  const prompt = row ? memberText(messageText(row.content)) : "";
   if (!row || prompt === "") return undefined;
   const answers = await tx.execute<MessageRow>(sql`
     SELECT seq, payload -> 'message' -> 'content' AS content

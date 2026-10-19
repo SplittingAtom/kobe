@@ -106,6 +106,7 @@ export class CommandRouter implements SandboxRouter {
       ...(run.config === undefined ? {} : { config: run.config }),
       ...(run.project === undefined ? {} : { project: run.project }),
       ...(run.mcp === undefined ? {} : { mcp: run.mcp }),
+      ...(run.appCards === undefined ? {} : { app_cards: [...run.appCards] }),
     });
   }
 

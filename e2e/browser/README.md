@@ -80,6 +80,35 @@ skip the first card) and any it left at the end. `KOBE_USER` must be a team admi
 remember limits allowing "this conversation"; a few short model turns:
 `npx playwright test remember-approvals`.
 
+## MCP App frame isolation (KOBE-437)
+
+`app-frame.spec.ts` loads one of the member's live MCP Apps through Kobe's member frame route in
+a `sandbox="allow-scripts"` iframe, keeps the deployment's real response (status and the header
+CSP) and replaces only its body with a hostile probe (`tests/support/app-frame-probe.ts`). From
+inside the frame, `fetch` (remote and Kobe), `XMLHttpRequest`, `WebSocket`, a remote image, a
+form post, `window.open`, top navigation, `document.cookie`, storage and the parent's DOM must
+all fail, and each network attempt must be a CSP violation (not just an unreachable host). It
+needs an app the member can open (`KOBE_APP_ID`, or the first of `GET /v1/team/apps`) and skips
+without one, unless `KOBE_REQUIRE_APP=1` (set it at gates), when it fails. It keeps the route's
+own WebRTC guard script before the probe, runs the probe a second time in an iframe without the
+`sandbox` attribute (the header alone must isolate it), checks the CSP by parsing it, and records
+what the browser does with `RTCPeerConnection` (a `webrtc` annotation). `KOBE_ALL_BROWSERS=1`
+adds Firefox and WebKit projects for this spec (`npx playwright install firefox webkit` once).
+No tokens; it changes nothing: `npx playwright test app-frame`.
+
+## The Kobe Explorer Gate (KOBE-441)
+
+`gate-apps/explorer.spec.ts` drives an MCP App in the conversation (the model's call renders it in
+the tool card; one app call per click; the context chip; "Use in chat" inserts and never sends;
+the send carries the fenced block; reload rebuilds with no app call; Expand and back), then from
+the rail (a card with no run that the next run sees; a launch during a run waits as a chip), the
+test app's probes (fetch out, `ui/open-link`, the write tool: k3d only) and that no credential is
+in any answer the browser received. One spec for both runs: `KOBE_APPS_CONNECTOR` (default
+`e2e-apps`), `KOBE_APPS_OPEN` (the prompt), `KOBE_APPS_PATH` (tree items to click, comma
+separated), `KOBE_APPS_ITEM_ROLE` (`button` or `treeitem`), `KOBE_APPS_USE_LABEL`,
+`KOBE_APPS_USE_TEXT`, `KOBE_APPS_PROBES=1`, `KOBE_APPS_SECRET`. k3d: `e2e/gate-apps.sh` sets them;
+the gate install: `docs/gates/gate-apps-runbook.md`. A few model turns.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),

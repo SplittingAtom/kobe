@@ -25,6 +25,7 @@ import { useDraftAgentName } from "./agent-picker";
 import { useSteer } from "./composer-steer";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { SteeringQueue } from "./steering-queue";
+import { QueuedAppCards } from "../apps/queued-app-cards";
 
 /** Phase changes reach screen readers at most this often (polite, latest wins). */
 export const PHASE_ANNOUNCE_MS = 2_000;
@@ -262,6 +263,7 @@ export function SteeringPanel({ extras }: { readonly extras: KobeThreadExtras })
           <div className="bg-muted/30 mb-2 flex flex-col gap-1.5 rounded-xl border px-3 py-2">
             <StatusRow state={state} mode={mode} phase={phase} />
             {!reader && <SteeringQueue state={state} controller={controller} />}
+            {!reader && <QueuedAppCards />}
             {!reader && <ControlsRow extras={extras} controller={controller} mode={mode} />}
           </div>
         )}

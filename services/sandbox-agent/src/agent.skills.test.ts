@@ -169,10 +169,14 @@ describe("skills at run start", () => {
 
   it("advertises skill support in hello only when it has a skills store (older agents send none)", async () => {
     h = await startHarness({ skills: store() });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles", "trace_spans"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
+      "skill_bundles",
+      "app_cards",
+      "trace_spans",
+    ]);
     await h.close();
     h = await startHarness();
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["trace_spans"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["app_cards", "trace_spans"]);
   });
 
   it("ignores config fields it does not know instead of failing the run", async () => {
@@ -190,7 +194,11 @@ describe("former built-in skills", () => {
   it("never advertises builtin_skills, even with the old image variable set", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-builtin-gone-"));
     h = await startHarness({ skills: store(), env: { KOBE_BUILTIN_SKILLS_DIR: dir } });
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles", "trace_spans"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
+      "skill_bundles",
+      "app_cards",
+      "trace_spans",
+    ]);
     await h.close();
     await rm(dir, { recursive: true, force: true });
   });

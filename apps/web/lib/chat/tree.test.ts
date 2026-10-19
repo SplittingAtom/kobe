@@ -444,3 +444,55 @@ describe("rich history (KOBE-208)", () => {
     expect(meta("a1")).toMatchObject({ promptEntryId: "u1" });
   });
 });
+
+describe("app cards (KOBE-440)", () => {
+  const CARD = "ka-000000000000000000000001";
+  const card = (parentId: string | null): ThreadEntry => ({
+    ...entry(CARD, parentId, null, "custom_message"),
+    payload: {
+      type: "custom_message",
+      id: CARD,
+      parentId,
+      customType: "kobe.app_card",
+      content: "The app-card block below…",
+      display: true,
+      details: { tool: "open_explorer", result_ref: "r" },
+    },
+  });
+
+  it("projects a card as its own message between turns; the next prompt hangs below it", () => {
+    const entries = [
+      user("u1", null, "hello"),
+      assistant("a1", "u1", text("hi")),
+      card("a1"),
+      user("u2", CARD, "what is in it?"),
+      assistant("a2", "u2", text("tables")),
+    ];
+    const p = projectThread(entries, "a2");
+    expect(shape(p)).toEqual([
+      ["u1", null, "user"],
+      ["a1", "u1", "assistant"],
+      [CARD, "a1", "assistant"],
+      ["u2", CARD, "user"],
+      ["a2", "u2", "assistant"],
+    ]);
+    expect(content(p, CARD)).toEqual([
+      { type: "data-kobe-app-card", data: { entryId: CARD, tool: "open_explorer" } },
+    ]);
+    expect(messageMeta(must(p.items.find((i) => i.message.id === CARD)).message)).toMatchObject({
+      kind: "assistant",
+      appCard: true,
+    });
+  });
+
+  it("shows a card that is the leaf, also as a new thread's first entry", () => {
+    const p = projectThread([card(null)], CARD);
+    expect(shape(p)).toEqual([[CARD, null, "assistant"]]);
+    expect(p.headId).toBe(CARD);
+  });
+
+  it("ignores a custom_message with a card id but another type (not the server's card)", () => {
+    const forged = { ...card(null), payload: { ...card(null).payload, customType: "x" } };
+    expect(projectThread([forged], CARD).items).toEqual([]);
+  });
+});

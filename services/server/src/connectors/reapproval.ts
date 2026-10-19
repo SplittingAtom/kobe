@@ -34,6 +34,10 @@ export interface ToolDefinition {
   readonly title?: string | undefined;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
+  /** Risk hints (readOnlyHint, destructiveHint, ...): exposure and policy depend on them. */
+  readonly annotations: PinnedTool["annotations"];
+  /** MCP Apps (KOBE-433/435): the template it opens and its visibility, when declared. */
+  readonly ui?: { readonly resourceUri?: string; readonly visibility?: readonly string[] };
 }
 
 export interface ToolReview {
@@ -51,10 +55,21 @@ const definition = (t: {
   title?: string | undefined;
   description: string;
   input_schema: Record<string, unknown>;
+  annotations: PinnedTool["annotations"];
+  ui?: PinnedTool["ui"];
 }): ToolDefinition => ({
   ...(t.title === undefined ? {} : { title: t.title }),
   description: t.description,
   inputSchema: t.input_schema,
+  annotations: t.annotations,
+  ...(t.ui === undefined
+    ? {}
+    : {
+        ui: {
+          ...(t.ui.resource_uri === undefined ? {} : { resourceUri: t.ui.resource_uri }),
+          ...(t.ui.visibility === undefined ? {} : { visibility: t.ui.visibility }),
+        },
+      }),
 });
 
 export function reviewOf(tool: PinnedTool): ToolReview {

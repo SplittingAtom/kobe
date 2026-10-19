@@ -79,6 +79,32 @@ describe("POST /internal/v1/probe", () => {
     expect((await post({})).status).toBe(400);
   });
 
+  it("adds the ui:// templates the tools name when asked (KOBE-433)", async () => {
+    const tools = [{ name: "open", inputSchema: {}, _meta: { ui: { resourceUri: "ui://c/app" } } }];
+    fake.options = {
+      tools,
+      resources: [{ uri: "ui://c/app", mimeType: "text/html;profile=mcp-app", text: "<p/>" }],
+    };
+    expect(await (await post({ url: fake.url, ui_resources: true })).json()).toEqual({
+      ok: true,
+      tools,
+      ui_resources: [
+        { uri: "ui://c/app", mimeType: "text/html;profile=mcp-app", text: "<p/>", meta: {} },
+      ],
+    });
+    fake.received.length = 0;
+    expect(await (await post({ url: fake.url })).json()).toEqual({ ok: true, tools });
+    expect(fake.received.map((r) => r.method)).not.toContain("resources/read");
+    expect((await post({ url: fake.url, ui_resources: ["ui://c/app"] })).status).toBe(400);
+    // A failing resources/list skips only the template part (review MEDIUM-3).
+    fake.options = { ...fake.options, listErrorCode: -32603 };
+    expect(await (await post({ url: fake.url, ui_resources: true })).json()).toEqual({
+      ok: true,
+      tools,
+      ui_resources_skipped: "rpc_error",
+    });
+  });
+
   it("is mounted only when probe deps are given", async () => {
     const without = createApp();
     expect((await without.request("/internal/v1/probe", { method: "POST" })).status).toBe(404);

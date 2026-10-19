@@ -1,5 +1,6 @@
 "use client";
 
+import { splitAppContext } from "../../lib/apps/app-context";
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -20,6 +21,7 @@ import {
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
+import { AppCardPart } from "../apps/app-card";
 import { useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
@@ -44,7 +46,24 @@ import styles from "./chat.module.css";
 
 /** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
-  return <span>{text}</span>;
+  // MCP Apps context sent with the message (KOBE-439): shown as chips, the JSON one click away.
+  const { contexts, rest } = splitAppContext(text);
+  if (contexts.length === 0) return <span>{text}</span>;
+  return (
+    <>
+      <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
+        {contexts.map((c, i) => (
+          <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
+            <details>
+              <summary className="cursor-pointer">Context from {c.source} (untrusted data)</summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
+            </details>
+          </li>
+        ))}
+      </ul>
+      <span>{rest}</span>
+    </>
+  );
 }
 
 function Problem({ data }: DataMessagePartProps) {
@@ -134,6 +153,7 @@ const ASSISTANT_PARTS = {
       "kobe-problem": Problem,
       "kobe-offloaded": Offloaded,
       "kobe-skipped": SkippedActions,
+      "kobe-app-card": AppCardPart,
     },
   },
 } as const;
@@ -214,6 +234,28 @@ function useCanRegenerate(): boolean {
 
 export function AssistantMessage() {
   const meta = useMeta();
+  if (meta?.kind === "assistant" && meta.appCard === true) return <AppCardMessage />;
+  return <AnswerMessage meta={meta} />;
+}
+
+/** A rail-launched app card (KOBE-440): the app in the conversation, no answer actions. */
+function AppCardMessage() {
+  return (
+    <MessagePrimitive.Root
+      data-role="assistant"
+      className="animate-in fade-in slide-in-from-bottom-1 relative duration-150"
+    >
+      <h3 className="sr-only">An app you opened</h3>
+      <MessageMarkers place="before" className="mb-2" />
+      <div className="flex flex-col gap-2 px-2">
+        <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+      </div>
+      <MessageMarkers place="after" className="mt-2" />
+    </MessagePrimitive.Root>
+  );
+}
+
+function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined }) {
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
   const canRegenerate = useCanRegenerate();

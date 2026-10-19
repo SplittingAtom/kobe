@@ -40,7 +40,7 @@ see and remove before sending.
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **D27** MCP                           | It extends D27. D27 lists "MCP resources/prompts UI" as _later_. This spec brings forward **only `ui://` templates rendered as apps**, and keeps everything else D27 says. Resources stay unavailable to Pi, and data is never read through `resources/read` (Catalyst M13 agrees). Templates are pinned and drift exactly like tools. **Chris must approve this amendment (Q1).** |
 | **D29** Policy                        | Unchanged. App calls go through the same decision, at a new enforcement point `app_bridge`, in a mode stricter than `auto`: allowed only if read-only and not denied. Nothing is ever prompted.                                                                                                                                                                                    |
-| **D25** Artifacts                     | The same isolation pattern: an opaque-origin `srcdoc` iframe with a strict CSP injected into it. It is stricter here: `allow-scripts` only, without `allow-forms`.                                                                                                                                                                                                                 |
+| **D25** Artifacts                     | The same isolation pattern: an opaque-origin iframe loaded from a Kobe frame route whose header CSP carries `sandbox` (amended 2026-10-19). It is stricter here: `allow-scripts` only, without `allow-forms`, and no network.                                                                                                                                                      |
 | **D9** One active team                | An app belongs to the active team. Switching team destroys every open app frame.                                                                                                                                                                                                                                                                                                   |
 | **D10** Break-glass                   | Break-glass grants are never used to call connectors, so they never open apps.                                                                                                                                                                                                                                                                                                     |
 | **D32** Schedules, skill evals        | Not involved. Apps run only in a member's browser session.                                                                                                                                                                                                                                                                                                                         |
@@ -73,17 +73,25 @@ session and team data; the integrity of what the model sees and does; other conn
   approved, served by the Kobe server from Postgres. The browser never fetches the template from
   the upstream, and neither does the sandbox. A template that changed upstream is `drifted` and
   is not rendered until it is re-approved (§5).
-- **T2. Iframe isolation.** The frame is `<iframe sandbox="allow-scripts" srcdoc=…>`. Without
+- **T2. Iframe isolation.** The frame is `<iframe sandbox="allow-scripts" src=…>` loading Kobe's
+  app frame route (MA4, amended 2026-10-19: never `srcdoc`, which inherits Kobe's page CSP and
+  blocks the template's inline scripts). Without
   `allow-same-origin` its origin is opaque: no Kobe cookies, storage or DOM. Without
   `allow-top-navigation*`, `allow-popups`, `allow-forms`, `allow-modals` or
   `allow-downloads`, it cannot navigate, open windows, submit forms or download. No `allow`
   permission policy is granted (no camera, microphone, geolocation or clipboard-write).
   `referrerpolicy="no-referrer"`.
-- **T3. CSP.** A `<meta http-equiv="Content-Security-Policy">` is injected as the first element of
-  `<head>`, and Kobe's own page CSP is inherited by the `srcdoc` document. The policy is the
-  ext-apps restrictive default: `default-src 'none'; script-src 'unsafe-inline'; style-src
-'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src 'none';
-frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`.
+- **T3. CSP.** The frame route sends the policy as a **response header** (amended 2026-10-19; no
+  injected meta CSP): `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';
+style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src
+'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri
+'none'; form-action 'none'; frame-ancestors 'self'; webrtc 'block'`. The `sandbox` directive gives
+  the document an opaque origin even when it is opened top-level, like D25's artifact frames.
+  `connect-src` does not govern WebRTC, so the CSP3 `webrtc 'block'` directive is added for the
+  browsers that enforce it, and the frame route puts a small script before the template's bytes
+  that removes `RTCPeerConnection`, `webkitRTCPeerConnection`, `mozRTCPeerConnection` and
+  `RTCDataChannel` (amended 2026-10-19, KOBE-437 review MEDIUM-2; defence in depth, see the
+  residual risks below).
   A `_meta.ui.csp` the server declares (domains to connect to, load resources from or frame) is
   **ignored in v1**: no app gets network access. Catalyst omits it (M11). Kobe's web CSP keeps
   `frame-src 'self'` / `about:` only, so no other frame is possible.
@@ -123,7 +131,14 @@ frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-ac
   captured by mcp-proxy from the upstream response and reported to the server under the internal
   key (MA10). The sandbox, Pi and the model cannot forge or alter it: a compromised sandbox can
   only affect Pi's own text entry, which renders as text. A rail-launched card's result comes from
-  the server's own call (§6).
+  the server's own call (§6). The app's `tool-input` is the input the upstream ran, stored with
+  the result, never Pi's entry. (Amended 2026-10-19, KOBE-438 review: the proxy cannot see Pi's
+  tool-call id, so a result is stored under a server-signed capture ticket and claimed by the
+  run's `tool.result` as described in MA10.) What a compromised sandbox can still do: attach a
+  genuine upstream result of its own run to a tool call id of its choosing, and, because it names
+  the thread on each call (as for every MCP call since KOBE-62), store it under another active run
+  of the same member in the same sandbox. Either way the data is the member's own, from the
+  upstream.
 - **T12. Each viewer acts as themselves.** A stored result is shown to whoever can already read
   the thread (it is team data, like the text result). The app's further calls always run under the
   **viewer's** browser principal, never the author's. A viewer who cannot call the connector, or a
@@ -143,6 +158,16 @@ frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-ac
 - An app can put misleading text in the composer. The member reads it before sending.
 - The upstream sees each call under the member's credential (or the shared site key, KOBE-303).
   The upstream's own authorization applies, as it does for model-initiated calls.
+- **WebRTC in browsers without `webrtc 'block'`** (amended 2026-10-19, coordinator decision on
+  the KOBE-437 review). Chromium does not enforce the directive, and `connect-src` does not cover
+  ICE. An approved but malicious template (or a template bug that third-party data triggers)
+  could get past the removal script, for example from another realm, and leak tool results or
+  tool input over STUN or TURN (a server name, a username, UDP). The mitigations are the site
+  admin's review of the hash-pinned template (T1, §5), the removal script, and `webrtc 'block'`
+  where browsers enforce it. The KOBE-437 browser test records what each browser does: in
+  Chromium and WebKit the constructor is gone and a fresh `about:blank` realm is blocked
+  (`frame-src`/`child-src 'none'`), so "another realm" is theoretical there today; Firefox is
+  measured at the gate.
 
 ## 4. Decisions
 
@@ -157,11 +182,12 @@ UI (D27 "later"; data would bypass tools, against Catalyst M13).
 **MA2. Rendering stack.** The web app hosts frames with the ext-apps **`AppBridge`**
 (`@modelcontextprotocol/ext-apps` v2.x, MIT) **if** a spike (ticket MA-5) confirms three things:
 it can be driven without a live MCP client in the browser (Kobe proxies `tools/call` through its
-own API); every method handler can be overridden or denied; and its peer dependencies
+own API); every method handler can be overridden or denied; it works in a frame loaded from
+Kobe's frame route (MA4 as amended), not `srcdoc`; and its peer dependencies
 (`@modelcontextprotocol/core`/`client`, Apache-2.0) do not ship transport code that the CSP or
 bundle budget rejects. Otherwise Kobe writes a thin host bridge of its own (about 300 lines, zod,
-against the ext-apps specification text). Kobe's own code does the iframe creation, the CSP
-injection (shared with D25's injector) and the source checks either way. No assistant-ui MCP Apps
+against the ext-apps specification text). Kobe's own code does the iframe creation, the frame
+route with its header CSP (as D25's frame routes) and the source checks either way. No assistant-ui MCP Apps
 renderer was found in the published `@assistant-ui/*` packages as of 2026-10-19
 (`@assistant-ui/react` 0.15.29). If one ships, it is weighed in the same spike. _Rejected:_ the
 ext-apps "sandbox proxy" double-iframe on a second origin, because it needs a second hostname and
@@ -192,11 +218,18 @@ _Rejected:_
 
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
-with the KOBE-431 probe credential), and stored in Postgres. The browser gets them from
-`GET /v1/team/apps/{appId}/template`, which returns **JSON** (`{html, sha256, connectorId,
-uri}`), never `text/html` on Kobe's origin. That response is `Cache-Control: no-store`,
-`X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`. A template
-document therefore never runs as a top-level page on Kobe's origin.
+with the KOBE-431 probe credential), and stored in Postgres. **Amended 2026-10-19 (coordinator,
+KOBE-434 Q1):** a frame gets the template from a Kobe **frame route**, the way D25 serves
+artifacts: `text/html` only with the header CSP of T3 (`sandbox allow-scripts`, so an opaque
+origin even top-level; `default-src 'none'`; inline script and style only; no network),
+`X-Frame-Options: SAMEORIGIN`, `no-store`, `nosniff`, and only into a frame of Kobe's own page.
+No `srcdoc` and no meta CSP. A template therefore never runs as Kobe's origin. Two routes, never
+one with a flag: the site-admin review preview (KOBE-434,
+`GET /v1/site/connectors/{id}/templates/frame?uri=&version=live|approved`, which may show
+unapproved bytes) and MA-5's member route, which serves only pinned, approved templates. Every
+other template read (the review's source, `GET /v1/team/apps/{appId}/template`) is JSON with
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'`.
 
 **MA5. Browser principal and the decide pipeline.** It is defined in §6. The decision reuses the
 policy engine with `enforcement_point: "app_bridge"` and `mode: "app"`. The evaluation order is
@@ -239,10 +272,16 @@ most 300 KB by its own CI (M19).
   plus a `blob_ref` for larger output, D15), and Pi's MCP client keeps only the text. For a call
   to a pinned tool whose `_meta.ui` names a pinned, non-drifted template, **mcp-proxy** reports the
   upstream's full result to the server (`POST /internal/v1/mcp/connectors/{id}/results`,
-  internal key, keyed by the sandbox token and the `tool_call_id` the proxy already receives for
-  approval checks). This happens before the proxy returns the result to Pi. The report carries
-  `structuredContent` and `content`. The result is untrusted upstream data and is never taken
-  from the sandbox (T11).
+  internal key and the sandbox's own token). This happens before the proxy returns the result to
+  Pi. The result is untrusted upstream data and is never taken from the sandbox (T11).
+  _As built (amended 2026-10-19, KOBE-438):_ Pi's MCP client sends no tool-call id, so the
+  server's allow carries a **capture ticket** (an HMAC over team, user, sandbox, thread, run,
+  connector, tool, the input's canonical digest and the template). The report sends the ticket,
+  the input (its digest must match) and the result; it is stored **unclaimed**. When the run's
+  `tool.result` arrives (always after its own report), it claims the row with the same run, tool
+  and input digest **only if exactly one** is pending: two identical calls in parallel stay text,
+  because the reports' order need not be Pi's. A run's unclaimed rows (and blobs) are dropped when
+  the run ends, in any end state, and at most 20 may wait per run.
 - **Storage.** A team table `thread_app_results (team_id, thread_id, tool_call_id | entry_id,
 connector_id, tool, template_uri, template_sha256, result jsonb | blob_ref, bytes,
 created_at)` with `team_id NOT NULL`, ENABLE and FORCE RLS, and a policy through `withTeam()`.
@@ -307,7 +346,13 @@ opened_by: user_id}` and the text result. It is not a run: no run row, no `run_e
   markers (`appendBranchMarker`). The server writes the Postgres entry at once and the agent
   catches the session file up at the next run start, so a launch never wakes a sandbox (D14).
   _Verify in the ticket:_ the exact Pi 1.0.x `custom_message` shape, and that it enters the
-  model's context (the branch marker's `custom` type does not).
+  model's context (the branch marker's `custom` type does not). _Verified (KOBE-440):_ Pi 1.0.0
+  `{type: "custom_message", id, parentId, timestamp, customType, content, display, details}`;
+  `convertToLlm` gives the model a user message of `content`, `details` never
+  (`app-cards.real-pi.test.ts` against the pinned Pi). Card ids are `ka-` and 24 hex characters,
+  server-only like `ks-`/`ku-`; the next `run.start` carries the cards Pi lacks
+  (`app_cards`, capability `app_cards`; an older agent starts below them), and a new thread's
+  session is started from its first card.
 - **No current thread** (the new-thread view): Kobe **starts a new thread** in the active team
   with the team's default agent, titled after the app ("Lakehouse Explorer"). The app card is its
   first entry. The member's first message then continues that thread.
@@ -317,6 +362,23 @@ opened_by: user_id}` and the text result. It is not a run: no run row, no `run_e
   run, and the opening tool is called at insertion time, so the data is current. The chip can be
   removed like a queued message, and while it waits the member may **Expand** it into the
   artifact column (a transient view, not an entry).
+
+  _Amended 2026-10-19 (KOBE-440, for review):_ the opening tool is called **at the click**,
+  through the MA-4 path, and the waiting row keeps the result and the card's text; the run's end
+  only inserts the entry (`promoteInTx`, under the thread lock, never an upstream call while the
+  lock is held). That is what lets a waiting chip expand; its data is from the click. A launch
+  from a thread shared read-only or in Trash starts a new thread, like the new-thread view.
+  At insertion each waiting card is re-checked (connector active and enabled, the same pinned
+  and approved template, the member's grant or site key) and dropped, audited
+  `mcp.app_card_dropped` and announced in the chat, when that fails or it waited more than 10
+  minutes. Waiting cards go in whenever no run is active (also during Stop's abort hold, and
+  before a later launch's card).
+
+- **No app card may leave a thread unable to run** (coordinator rule, KOBE-440 review): its
+  content is capped after escaping and validated before it is written; its parent is never an
+  unsent prompt (`ku-`) Pi never had; at most 20 cards follow each other (a 21st launch is
+  refused, 409 `too_many_cards`; a waiting one is dropped), so one `run.start` carries the whole
+  chain. Launches have their own rate limit (a burst of 5, then one every 2 s per member).
 
   _Why queue:_ it is what Enter does during a run (D17), so the member's click is never lost. It
   also keeps the entry tree linear: inserting mid-run would add a sibling under a leaf Pi is still
@@ -354,8 +416,9 @@ sha256, pinned_hash, status pinned|drifted, proposed jsonb, pinned_by, pinned_at
   same email and the same in-app notice.
 - **Review.** The site admin's tool review (KOBE-102) shows changed templates with the old and new
   hash, size, declared `_meta.ui`, a source diff (escaped text, never rendered), and an optional
-  **preview** in the same sandboxed frame with the bridge stubbed: calls fail and nothing reaches
-  the upstream. Approval names the reviewed hash, and a stale hash is refused, like tools.
+  **preview** in the same kind of sandboxed frame (the admin frame route, MA4) with the bridge
+  stubbed: calls fail and nothing reaches the upstream. The source response carries the hashes
+  and meta of the same read, and approval sends that hash. Approval names the reviewed hash, and a stale hash is refused, like tools.
 - **Credentials.** Probes use `chooseProbeCredential` (KOBE-431: the site key, else the key of the
   admin who pinned it). The template therefore drift-checks on the same schedule as the tools, and
   an `auth_required` skip is surfaced the same way.
@@ -427,12 +490,14 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
 
 ## 8. `ui/message` and `ui/update-model-context` (§8.6)
 
-- **`ui/message`** with role `user` and text content inserts the text **at the cursor of the
-  composer draft of the thread the card is in** (always the thread on screen, since frames run
-  only for visible cards).
-  It **never sends**. Text is capped at 4 KiB, other content types are ignored, and the composer
-  flashes and receives focus. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
-  for the member to send or edit.
+- **`ui/message`** with role `user` and text content inserts the text **at the caret of the
+  composer draft of the card's own thread** (always the thread on screen, since frames run only
+  for visible cards). It **never sends and never moves the focus** (amended 2026-10-19,
+  coordinator decision on the KOBE-439 review): the text carries a visible "From _app_" marker,
+  and Enter and Send do nothing until the member edits it or confirms it, so an Enter pressed in
+  the app cannot send it. Text is capped at 4 KiB, other content types are ignored, and text that
+  imitates app context is refused. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
+  for the member to edit or confirm, then send.
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app
   (capped at 8 KiB serialized; anything larger is refused with an error to the app). The composer
   shows a chip, "Context from _Lakehouse Explorer_: _one-line summary_", with a remove button and
@@ -444,6 +509,12 @@ data}`. It is stored in the user's thread entry, so it is visible in history and
   preceded by one fixed sentence saying it is data from an app, not instructions. After the send
   the chip clears, and a later selection makes a new chip. The context goes only to the thread it
   was sent with, and never to schedules or other threads.
+- **Untrusted everywhere else** (amended 2026-10-19, KOBE-439 review): app context reaches only
+  Pi's fenced prompt, the thread's history (as chips) and exports (escaped). Titles, thread cards,
+  follow-up suggestions and eval-case copies read only the member's own text. Only the server
+  writes the preamble and fences: member text that imitates them is refused. A queued message's
+  context is checked at submit (not again at dequeue), and a retry resends the stored input
+  unchanged; both accepted for v1. An edit of a queued message changes only the member's text.
 - Neither path runs a model turn by itself. That is the point of the Kobe Explorer Gate: the app
   in the conversation, then a member action, then a run.
 
@@ -522,8 +593,8 @@ hidden from Pi's catalog and from the proxy's `tools/list`, and refused at `/cal
 - ac-5: the template endpoint never answers `text/html`.
 
 **MA-5. Host bridge and app frame (web).** A spike decides between AppBridge and Kobe's own
-bridge (MA2) and records the result in the ticket ledger. Then: `AppFrame` (srcdoc,
-`sandbox="allow-scripts"`, the injected CSP shared with D25, a host header, no `allow`
+bridge (MA2) and records the result in the ticket ledger. Then: `AppFrame` (Kobe's member
+frame route with the T3 header CSP, as amended in MA4; `sandbox="allow-scripts"`, a host header, no `allow`
 permissions, inline and expanded placement), the bridge (source and origin check, zod per method,
 the §7 table, per-frame limits) and the licence inventory.
 

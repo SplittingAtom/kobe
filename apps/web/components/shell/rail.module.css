@@ -492,3 +492,65 @@ button.teamIcon {
 .rail a[data-slot]:hover {
   color: var(--accent-foreground);
 }
+
+/* The Apps section (KOBE-440): between Threads and Files, as tall as its rows up to a cap. */
+.appsSection {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 10rem;
+  outline: none;
+}
+
+.appsSection:focus-visible .sectionTitle {
+  color: var(--admin-fg);
+  text-decoration: underline;
+}
+
+.appsList {
+  min-height: 0;
+  margin: 0;
+  padding: 0 0.25rem 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.appRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.appRow:hover:not(:disabled) {
+  background: var(--admin-hover, rgb(127 127 127 / 0.12));
+}
+
+.appRow:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.appHint {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  color: var(--admin-muted);
+  font-size: 0.8rem;
+}
+
+.appsError {
+  margin: 0 0.5rem 0.25rem 1rem;
+  color: var(--admin-danger);
+  font-size: 0.8rem;
+}

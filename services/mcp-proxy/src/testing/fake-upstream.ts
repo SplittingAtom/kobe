@@ -26,6 +26,32 @@ export interface FakeUpstreamOptions {
   pageSize?: number;
   /** Redirect every POST elsewhere. */
   redirectTo?: string;
+  /**
+   * The resources `resources/list` returns and `resources/read` serves (KOBE-433); unset: both
+   * answer "method not found", like a server without resources.
+   */
+  resources?: FakeResource[];
+  /** Answer `resources/read` with a JSON-RPC error. */
+  readError?: boolean;
+  /** Answer `resources/list` with this JSON-RPC error code. */
+  listErrorCode?: number;
+  /** Always hand out another `resources/list` page. */
+  endlessResources?: boolean;
+  /** The `uri` the read's content item claims (default: the one asked for). */
+  readUri?: string;
+}
+
+export interface FakeResource {
+  readonly uri: string;
+  readonly mimeType?: string;
+  /** On the `resources/list` entry. */
+  readonly _meta?: Record<string, unknown>;
+  readonly text?: string;
+  readonly blob?: string;
+  /** On the `resources/read` content item. */
+  readonly contentMeta?: Record<string, unknown>;
+  /** Left out of `resources/list` (still readable). */
+  readonly unlisted?: boolean;
 }
 
 export interface Received {
@@ -131,6 +157,45 @@ export class FakeUpstream {
           ...(end < all.length ? { nextCursor: String(end) } : {}),
         },
       };
+    } else if (method === "resources/list" && o.resources && o.listErrorCode !== undefined) {
+      reply = { jsonrpc: "2.0", id, error: { code: o.listErrorCode, message: "no list" } };
+    } else if (method === "resources/list" && o.resources) {
+      reply = {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resources: o.resources
+            .filter((r) => !r.unlisted)
+            .map((r) => ({
+              uri: r.uri,
+              name: r.uri,
+              ...(r.mimeType === undefined ? {} : { mimeType: r.mimeType }),
+              ...(r._meta === undefined ? {} : { _meta: r._meta }),
+            })),
+          ...(o.endlessResources ? { nextCursor: "more" } : {}),
+        },
+      };
+    } else if (method === "resources/read" && o.resources) {
+      const uri = (message.params as { uri?: string }).uri;
+      const found = o.resources.find((r) => r.uri === uri);
+      reply =
+        o.readError || !found
+          ? { jsonrpc: "2.0", id, error: { code: -32002, message: "not found" } }
+          : {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                contents: [
+                  {
+                    uri: o.readUri ?? found.uri,
+                    ...(found.mimeType === undefined ? {} : { mimeType: found.mimeType }),
+                    ...(found.text === undefined ? {} : { text: found.text }),
+                    ...(found.blob === undefined ? {} : { blob: found.blob }),
+                    ...(found.contentMeta === undefined ? {} : { _meta: found.contentMeta }),
+                  },
+                ],
+              },
+            };
     } else {
       reply = { jsonrpc: "2.0", id, error: { code: -32601, message: "nope" } };
     }

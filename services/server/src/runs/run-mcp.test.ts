@@ -89,3 +89,16 @@ describe("buildRunMcp", () => {
     expect(buildRunMcp([jira], ["jira"], { allow: ["read"] }).servers).toEqual([]);
   });
 });
+
+describe("app-only tools (KOBE-435 ac-1)", () => {
+  it("never offers Pi a tool whose visibility lacks model", () => {
+    const tools = [
+      pinnedTool("docs", { name: "both", readOnly: true }),
+      pinnedTool("docs", { name: "model_only", readOnly: true, ui: { visibility: ["model"] } }),
+      pinnedTool("docs", { name: "app_only", readOnly: true, ui: { visibility: ["app"] } }),
+      pinnedTool("docs", { name: "nobody", readOnly: true, ui: { visibility: [] } }),
+    ];
+    const ctx = buildRunMcp([connector(ID_A, "docs", "none", tools)], ["docs"], undefined);
+    expect(ctx.servers[0]?.tools.map((t) => t.name)).toEqual(["both", "model_only"]);
+  });
+});

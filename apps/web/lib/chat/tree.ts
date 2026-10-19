@@ -66,6 +66,8 @@ export type KobeMessageMeta =
       readonly promptEntryId?: string | undefined;
       /** When the answer's last entry was stored (the footer's timestamp). */
       readonly at?: string | undefined;
+      /** A rail-launched app card (KOBE-440): no answer actions, no feedback. */
+      readonly appCard?: boolean | undefined;
       readonly before?: readonly EntryMarker[] | undefined;
       readonly after?: readonly EntryMarker[] | undefined;
     };
@@ -204,6 +206,12 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
       ctx = create(entry.entryId, group ?? parentNode, "user", entry, carry);
       openGroup = null;
       childParent = ctx;
+    } else if (p.kind === "appCard") {
+      // A rail launch (KOBE-440): its own message, never part of an answer; what follows hangs
+      // below it.
+      ctx = create(entry.entryId, group ?? parentNode, "assistant", entry, carry);
+      openGroup = null;
+      childParent = ctx;
     } else if (isAssistantSide(p)) {
       if (group !== null) {
         attach(group, entry, true);
@@ -231,7 +239,7 @@ function buildNodes(entries: readonly ThreadEntry[], parsed: ReadonlyMap<string,
     const childrenCarry = childCarry(next, kids.length);
     // A message, or a fork that starts carrying, starts a new row of markers below it.
     const model = recordedModel(entry, p) ?? models.model;
-    const message = p.kind === "user" || isAssistantSide(p);
+    const message = p.kind === "user" || p.kind === "appCard" || isAssistantSide(p);
     const startsRow = message || (kids.length > 1 && next === null);
     const childModels: BranchModels = { model, from: startsRow ? model : models.from };
     for (let i = kids.length - 1; i >= 0; i--) {
@@ -296,6 +304,9 @@ function entryParts(
 ): MessagePart[] {
   if (p.kind === "offloaded") {
     return [{ type: "data-kobe-offloaded", data: { entryId: entry.entryId } }];
+  }
+  if (p.kind === "appCard") {
+    return [{ type: "data-kobe-app-card", data: { entryId: entry.entryId, tool: p.tool } }];
   }
   if (p.kind !== "assistant") return [];
   const parts: MessagePart[] = [];
@@ -484,6 +495,7 @@ export function projectThread(
         ...(trimmed.length > 0 ? { fullOutputs: Object.fromEntries(trimmed) } : {}),
         promptEntryId: promptOf(node),
         at: (node.entries.at(-1) as ThreadEntry).createdAt,
+        ...(parsed.get(first.entryId)?.kind === "appCard" ? { appCard: true } : {}),
         ...markers,
       };
       indexOf.set(id, built.length);

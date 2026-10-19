@@ -3,6 +3,8 @@ import { isIP } from "node:net";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { AddressPolicy } from "./address-policy.js";
 import type { UpstreamPolicy } from "./config.js";
+import { readUiResources } from "./ui-resources.js";
+import { upstreamModelVisible } from "./visibility.js";
 
 /**
  * The proxy's MCP client towards remote servers (D27: Streamable HTTP only, no stdio). One short
@@ -29,7 +31,9 @@ export type UpstreamFailure =
   | "auth_required"
   | "http_error"
   | "protocol_error"
-  | "too_large";
+  | "too_large"
+  /** The upstream offers this tool only to apps, or no longer lists it (KOBE-435 review M3). */
+  | "not_offered";
 
 export type UpstreamResult =
   | { readonly ok: true; readonly result: Record<string, unknown> }
@@ -54,15 +58,28 @@ export interface UpstreamBase {
 export interface UpstreamCall extends UpstreamBase {
   readonly tool: string;
   readonly arguments: Record<string, unknown>;
+  /**
+   * List the upstream's tools first, in the same session, and refuse (`not_offered`) unless it
+   * lists this tool as visible to the model. Set when the server's allow did not say it checked
+   * MCP Apps visibility (an older server pod, KOBE-435 review M3).
+   */
+  readonly checkModelVisible?: boolean;
 }
 
 export interface UpstreamClient {
   callTool(call: UpstreamCall): Promise<UpstreamResult>;
-  /** The live `tools/list` (all pages) as `{ tools: unknown[] }`, for the server's pinning probe. */
-  listTools(call: UpstreamBase): Promise<UpstreamResult>;
+  /**
+   * The live `tools/list` (all pages) as `{ tools: unknown[] }`, for the server's pinning probe;
+   * with `uiResources`, also `ui_resources`: the `ui://` templates the tools name (KOBE-433).
+   */
+  listTools(call: UpstreamBase, options?: ListToolsOptions): Promise<UpstreamResult>;
   /** Session DELETEs still in flight (bounded by `maxPendingDeletes`). */
   readonly pendingDeletes: number;
   close(): Promise<void>;
+}
+
+export interface ListToolsOptions {
+  readonly uiResources?: boolean;
 }
 
 export interface UpstreamOptions {
@@ -375,33 +392,87 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     return { ok: true, result: response.result };
   }
 
-  const callTool = (call: UpstreamCall): Promise<UpstreamResult> =>
-    inSession(call, (url, session) =>
-      request(url, call, session, 2, "tools/call", { name: call.tool, arguments: call.arguments }),
-    );
+  type Next = (method: string, params: Record<string, unknown>) => Promise<UpstreamResult>;
 
-  async function listTools(call: UpstreamBase): Promise<UpstreamResult> {
-    return inSession(call, async (url, session) => {
-      const tools: unknown[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
-        const answer = await request(
-          url,
-          call,
-          session,
-          2 + page,
-          "tools/list",
-          cursor === undefined ? {} : { cursor },
+  /** Every `tools/list` page, or the failure. */
+  async function allTools(next: Next): Promise<UpstreamResult> {
+    const tools: unknown[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
+      const answer = await next("tools/list", cursor === undefined ? {} : { cursor });
+      if (!answer.ok) return answer;
+      const pageTools = answer.result.tools;
+      if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
+      tools.push(...pageTools);
+      const nextCursor = answer.result.nextCursor;
+      if (typeof nextCursor !== "string" || nextCursor === "")
+        return { ok: true, result: { tools } };
+      cursor = nextCursor;
+    }
+    return { ok: false, failure: "too_large" };
+  }
+
+  const callTool = (call: UpstreamCall): Promise<UpstreamResult> =>
+    inSession(call, async (url, session) => {
+      let id = 2;
+      const next: Next = (method, params) => request(url, call, session, id++, method, params);
+      if (call.checkModelVisible === true) {
+        const listed = await allTools(next);
+        if (!listed.ok) return listed;
+        const tools = listed.result.tools as unknown[];
+        const tool = tools.find(
+          (t) =>
+            typeof t === "object" && t !== null && (t as { name?: unknown }).name === call.tool,
         );
-        if (!answer.ok) return answer;
-        const pageTools = answer.result.tools;
-        if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
-        tools.push(...pageTools);
-        const next = answer.result.nextCursor;
-        if (typeof next !== "string" || next === "") return { ok: true, result: { tools } };
-        cursor = next;
+        if (tool === undefined || !upstreamModelVisible(tool)) {
+          return { ok: false, failure: "not_offered" };
+        }
       }
-      return { ok: false, failure: "too_large" };
+      return next("tools/call", { name: call.tool, arguments: call.arguments });
+    });
+
+  /**
+   * The template part of a probe (KOBE-433): `ui_resources`, or `ui_resources_skipped` with a
+   * reason. Never fails the tool probe; a read answered too large is that template's error.
+   */
+  async function uiPart(
+    tools: readonly unknown[],
+    next: (method: string, params: Record<string, unknown>) => Promise<UpstreamResult>,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const tolerant = async (method: string, params: Record<string, unknown>) => {
+      try {
+        return await next(method, params);
+      } catch (err) {
+        if (err instanceof UpstreamError && err.failure === "too_large" && !signal.aborted) {
+          return { ok: false as const, failure: "too_large" as const };
+        }
+        throw err;
+      }
+    };
+    try {
+      const ui = await readUiResources(tools, tolerant);
+      return ui.ok ? { ui_resources: ui.resources } : { ui_resources_skipped: ui.skipped };
+    } catch (err) {
+      const cause = (err as { cause?: unknown }).cause;
+      const known =
+        err instanceof UpstreamError ? err : cause instanceof UpstreamError ? cause : undefined;
+      const failure = known?.failure ?? (signal.aborted ? "timeout" : "unreachable");
+      return { ui_resources_skipped: failure };
+    }
+  }
+
+  async function listTools(
+    call: UpstreamBase,
+    listOptions: ListToolsOptions = {},
+  ): Promise<UpstreamResult> {
+    return inSession(call, async (url, session) => {
+      let id = 2;
+      const next: Next = (method, params) => request(url, call, session, id++, method, params);
+      const listed = await allTools(next);
+      if (!listed.ok || !listOptions.uiResources) return listed;
+      const tools = listed.result.tools as unknown[];
+      return { ok: true, result: { tools, ...(await uiPart(tools, next, call.signal)) } };
     });
   }
 
