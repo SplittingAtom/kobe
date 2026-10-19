@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { TeamAgentsPage } from "./team/agents-page";
 import { TeamInvitesPage } from "./team/invites-page";
-import { MembersPage } from "./team/members-page";
+import { ADDED_BY_GRANT, MembersPage } from "./team/members-page";
 import {
   forbidNativeConfirm,
   ME,
@@ -64,6 +64,24 @@ afterEach(() => {
 });
 
 describe("Members and roles", () => {
+  it("marks a member Kobe added for the Skill reviewer grant (KOBE-331 review)", async () => {
+    stubApi({
+      "GET /v1/team/members": [
+        200,
+        {
+          members: [
+            MEMBERS.members[0],
+            { ...MEMBERS.members[1], addedVia: "skill_reviewer_grant" },
+          ],
+        },
+      ],
+    });
+    renderTeam(<MembersPage />);
+    const row = (await screen.findByText(ADDED_BY_GRANT)).closest("tr");
+    expect(row?.textContent).toContain("b@x.io");
+    expect(screen.getAllByText(ADDED_BY_GRANT)).toHaveLength(1);
+  });
+
   it("names the active team on every call (reads included)", async () => {
     const calls = stubApi({
       "GET /v1/team/members": [200, MEMBERS],

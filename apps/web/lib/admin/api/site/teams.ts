@@ -16,6 +16,8 @@ export interface RosterMember {
   readonly email: string;
   readonly role: "team_admin" | "builder" | "member";
   readonly joinedAt: string;
+  /** Kobe added them to the Registry team for the Skill reviewer grant (KOBE-331); older servers omit it. */
+  readonly addedVia?: "skill_reviewer_grant" | null;
 }
 
 /** Mirrors the server's team slug rule (it names the `kobe-team-<slug>` namespace). */

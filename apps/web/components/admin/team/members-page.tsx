@@ -31,6 +31,9 @@ import { useMutation, useResource } from "../use-resource";
 export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "builder", "member"];
 
 /** Team members and roles (spec D8; `/v1/team/members`). People join by accepting an invitation. */
+/** A membership Kobe made for the Skill reviewer grant (KOBE-331 review H1b). */
+export const ADDED_BY_GRANT = "Added by Kobe: Skill reviewer";
+
 export function MembersPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
@@ -139,6 +142,9 @@ export function MembersPage() {
                   </TableCell>
                   <TableCell>
                     <DateTime value={m.joinedAt} />
+                    {m.addedVia === "skill_reviewer_grant" && (
+                      <span className="block text-xs">{ADDED_BY_GRANT}</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Button

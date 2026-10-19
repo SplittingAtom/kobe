@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type { ApiResult } from "../../../lib/api/client";
 import {
+  createRegistryTeam,
   getRegistrySettings,
   putRegistrySettings,
   type RegistrySettings,
   type RegistrySettingsUpdate,
 } from "../../../lib/admin/api/site/skill-registry";
-import { listSiteTeams, type SiteTeam } from "../../../lib/admin/api/site/teams";
 import {
   Button,
   Checkbox,
@@ -16,7 +15,6 @@ import {
   Field,
   Notice,
   PageHeader,
-  Select,
   Textarea,
   TextInput,
 } from "../../ui/console";
@@ -30,44 +28,30 @@ import { useMutation, useResource } from "../use-resource";
  * rules, eval limits, the import allowlist, the external scanner and the git mirror. Site admins
  * only; every save is audited.
  */
-interface Loaded {
-  readonly settings: RegistrySettings;
-  readonly teams: readonly SiteTeam[];
-}
-
-async function load(): Promise<ApiResult<Loaded>> {
-  const [settings, teams] = await Promise.all([getRegistrySettings(), listSiteTeams()]);
-  if (!settings.ok) return settings;
-  if (!teams.ok) return teams;
-  return { ...settings, data: { settings: settings.data, teams: teams.data } };
-}
-
 export const NOT_READY =
-  "The Registry is not ready: name a Registry team. Until then nobody can approve a submission.";
+  "The Registry is not ready: create the Registry team. Until then nobody can approve a submission.";
 
 export function SkillRegistryPage() {
-  const { state, reload } = useResource(load);
+  const { state, reload } = useResource(getRegistrySettings);
   return (
     <>
       <PageHeader title="Skill Registry" />
       <ResourceView state={state} label="Registry settings">
-        {({ settings, teams }) => (
+        {(settings) => (
           <>
             {settings.ready && settings.registryTeam ? (
               <Notice tone="info">
                 <p>Ready. Site-side runs use the team {settings.registryTeam.name}.</p>
               </Notice>
             ) : (
-              <Notice tone="warn">
-                <p>{NOT_READY}</p>
-              </Notice>
+              <>
+                <Notice tone="warn">
+                  <p>{NOT_READY}</p>
+                </Notice>
+                <CreateRegistryTeam onCreated={reload} />
+              </>
             )}
-            <RegistryForm
-              key={settings.updatedAt}
-              settings={settings}
-              teams={teams}
-              onSaved={reload}
-            />
+            <RegistryForm key={settings.updatedAt} settings={settings} onSaved={reload} />
           </>
         )}
       </ResourceView>
@@ -95,7 +79,6 @@ function draftOf(s: RegistrySettings): Draft {
   const rules = s.submissionRules as unknown as Record<string, number | boolean>;
   const limits = s.evalLimits as unknown as Record<string, number>;
   return {
-    registryTeamId: s.registryTeam?.id ?? "",
     judgeAlias: s.judgeAlias ?? "",
     ...Object.fromEntries(RULE_FIELDS.map(([k]) => [k, String(rules[k])])),
     ...Object.fromEntries(LIMIT_FIELDS.map(([k]) => [k, String(limits[k])])),
@@ -126,7 +109,6 @@ export function updateOf(saved: RegistrySettings, d: Draft): RegistrySettingsUpd
   const num = (k: string) => Number(d[k]);
   const bool = (k: string) => d[k] === "true";
   const next = {
-    registryTeamId: d.registryTeamId === "" ? null : d.registryTeamId,
     judgeAlias: d.judgeAlias?.trim() === "" ? null : (d.judgeAlias?.trim() ?? null),
     submissionRules: {
       ...Object.fromEntries(RULE_FIELDS.map(([k]) => [k, num(k)])),
@@ -147,7 +129,6 @@ export function updateOf(saved: RegistrySettings, d: Draft): RegistrySettingsUpd
     },
   };
   const before = {
-    registryTeamId: saved.registryTeam?.id ?? null,
     judgeAlias: saved.judgeAlias,
     submissionRules: saved.submissionRules,
     evalLimits: saved.evalLimits,
@@ -163,11 +144,9 @@ export function updateOf(saved: RegistrySettings, d: Draft): RegistrySettingsUpd
 
 function RegistryForm({
   settings,
-  teams,
   onSaved,
 }: {
   readonly settings: RegistrySettings;
-  readonly teams: readonly SiteTeam[];
   readonly onSaved: () => void;
 }) {
   const mutation = useMutation();
@@ -190,20 +169,7 @@ function RegistryForm({
 
   return (
     <form onSubmit={onSubmit} aria-label="Registry settings">
-      <ChoiceGroup legend="Registry team and judge" stacked className="my-4">
-        <Field
-          label="Registry team"
-          hint="An existing team whose budget, policy and egress govern reviewer re-runs and catalog scorecards. Its members review."
-        >
-          <Select value={draft.registryTeamId} onChange={set("registryTeamId")}>
-            <option value="">Not set (the Registry is not ready)</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+      <ChoiceGroup legend="Site judge" stacked className="my-4">
         <Field
           label="Site judge (model alias)"
           hint="Used for eval judging where a team has enabled it."
@@ -266,6 +232,53 @@ function RegistryForm({
       </ChoiceGroup>
       <Button type="submit" variant="primary" disabled={mutation.pending || !dirty}>
         Save
+      </Button>
+      <MutationStatus error={mutation.error} notice={mutation.notice} />
+    </form>
+  );
+}
+
+export const REGISTRY_TEAM_HINT =
+  "Kobe creates a dedicated team for the Registry: its budget, policy and egress govern reviewer re-runs and catalog scorecards. You become its team admin and every Skill reviewer joins it. An existing team can't be used.";
+
+/** Creates the dedicated Registry team (KOBE-330 review H1): never an existing team. */
+function CreateRegistryTeam({ onCreated }: { readonly onCreated: () => void }) {
+  const mutation = useMutation();
+  const [name, setName] = useState("Skill Registry");
+  const [slug, setSlug] = useState("skill-registry");
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const done = await mutation.run(
+      () => createRegistryTeam({ name: name.trim(), slug }),
+      () => "The Registry team is ready.",
+    );
+    if (done) onCreated();
+  }
+
+  return (
+    <form onSubmit={onSubmit} aria-label="Create the Registry team">
+      <ChoiceGroup legend="Registry team" stacked className="my-4">
+        <p className="text-sm">{REGISTRY_TEAM_HINT}</p>
+        <Field label="Team name">
+          <TextInput
+            required
+            value={name}
+            maxLength={100}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </Field>
+        <Field label="Team slug">
+          <TextInput
+            required
+            value={slug}
+            pattern="[a-z0-9]([a-z0-9\-]{0,30}[a-z0-9])?"
+            onChange={(e) => setSlug(e.target.value)}
+          />
+        </Field>
+      </ChoiceGroup>
+      <Button type="submit" variant="primary" disabled={mutation.pending}>
+        Create the Registry team
       </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
