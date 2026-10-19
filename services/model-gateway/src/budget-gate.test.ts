@@ -556,3 +556,34 @@ describe("BudgetGate: the team eval cap (KOBE-327)", () => {
     expect(third.ok).toBe(true);
   });
 });
+
+describe("BudgetGate: an eval cap on a team without budgets (KOBE-327 review L5)", () => {
+  it("still reserves an eval call against the cap alone", async () => {
+    const seen: { scopes: string[] }[] = [];
+    const store: ReservationStore = {
+      reserve: async (r) => {
+        seen.push({ scopes: r.lines.map((l) => l.scope) });
+        return { ok: true };
+      },
+      extend: async () => undefined,
+      end: async () => undefined,
+    };
+    const g = new BudgetGate(
+      {
+        load: async () => ({
+          lines: [],
+          evalLines: [line({ scope: "eval", unit: "tokens", limit: 10_000, spent: 0 })],
+          requestsPerMinute: 1_000,
+        }),
+        prices: async () => new Map(),
+      },
+      { ttlMs: 1_000, reservations: store },
+    );
+    const evalCall = await g.admit({ ...call(randomUUID()), eval: true });
+    expect(evalCall.ok).toBe(true);
+    const plain = await g.admit(call(randomUUID()));
+    expect(plain.ok).toBe(true);
+    // Only the eval call reserved (the plain one has no line at all).
+    expect(seen).toEqual([{ scopes: ["eval"] }]);
+  });
+});
