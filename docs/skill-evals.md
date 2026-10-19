@@ -236,6 +236,30 @@ Rubrics are author content that reaches the Site judge in the Registry re-run, s
 reviewers check them** (Phase C): the review screen shows every rubric, and the SK23 checklist adds
 "rubrics grade behaviour; none says always pass".
 
+## Budgets, the estimate and the team eval cap (KOBE-327, SK18)
+
+- **Spend kinds.** An eval sandbox's model calls are `run_usage` kind `eval` (the gateway reads
+  the session token's `eval_thread`), the judge's `eval_judge`. Both count against every budget
+  like a run's, and show apart in team usage (`by_kind`) and the team budget view
+  (`spent_by_kind`, `eval_cap`).
+- **Estimate before Run.** `GET /v1/skills/drafts/{id}/evals/estimate?mode=` (and
+  `/v1/skills/{scope}/{id}/versions/{seq}/evals/estimate`) → `{estimate, runModel, blocked}`;
+  the start returns the same estimate. Executions × the team's mean total cost and duration per
+  eval execution on the run model (last 30 days, newest 200; retries included), plus the mean
+  judge cost per judged execution; minutes = ⌈executions / concurrent sandboxes⌉ × the mean
+  duration. Without eval history on the model, the team's ordinary runs on it stand in; with no
+  history at all, `basis: none` and null numbers. Unpriced models: cost null.
+- **Team eval cap** (Team admin: `PUT /v1/team/skill-review/settings {evalCap: {usd} | {tokens}
+| null}`, audited `skill.eval_cap.changed`): monthly, counted from the eval kinds only
+  (`model_spend_daily.eval_*`). Enforced on every eval and eval judge call by the gateway in
+  `kobe_reserve_budget` (an `eval` line beside the member's budgets: atomic across replicas, no
+  separate check-then-act); ordinary calls never see it.
+- **Stops (D30).** A start is refused (409 `eval_cap_reached` or `budget_exhausted`, the message
+  saying which and what to do) while the cap or a budget that applies to the starter is used up;
+  the estimate says so in `blocked`. A running eval whose next execution would start, or whose
+  attempt failed, while one is used up ends `budget_stopped` (no retry, no scorecard, nothing
+  more starts); its calls are refused by the gateway meanwhile.
+
 ## Limits and settings
 
 | Limit                              | Value                                                                        |
@@ -244,7 +268,7 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
 | Wall clock per case                | 10 min (Site may lower: `caseWallClockMinutes`)                              |
 | Concurrent eval sandboxes per team | 4 by default, 1–16 (`maxConcurrentSandboxes`), inside the team ResourceQuota |
 | Team eval cap (Team admin)         | none by default; monthly `{usd}` or `{tokens}` (`teamEvalCapSchema`)         |
-| `run_usage` kinds                  | `eval`, `eval_judge` (migration 0148; `eval` written from KOBE-327)          |
+| `run_usage` kinds                  | `eval`, `eval_judge` (migration 0148)                                        |
 
 ## API
 
