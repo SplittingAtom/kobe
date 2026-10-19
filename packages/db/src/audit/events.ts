@@ -45,6 +45,29 @@ export type AuditScope =
   | "any";
 
 const id = z.uuid();
+/**
+ * Why an app call was allowed or denied (KOBE-436, spec §6, MA5). `app_no_prompt`: an ask rule
+ * matched, and the browser principal is never prompted; `app_read_only`: not a read tool.
+ */
+export const APP_CALL_REASONS = [
+  "allowed",
+  "app_not_available",
+  "tool_not_in_app",
+  "tool_drifted",
+  "tool_not_read_only",
+  "tool_not_app_visible",
+  "connector_exposure",
+  "invalid_arguments",
+  "site_deny_rule",
+  "team_deny_rule",
+  "app_no_prompt",
+  "app_read_only",
+  "not_connected",
+  "credential_unavailable",
+  "rate_limited",
+  "upstream_failed",
+] as const;
+export type AppCallReason = (typeof APP_CALL_REASONS)[number];
 /** An MCP Apps template URI (KOBE-433): `ui://...`, never another scheme. */
 const uiUri = z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN);
 /** A short human label (team or agent name): no control characters, bounded. */
@@ -640,6 +663,24 @@ export const AUDIT_EVENTS = {
    * `reason` is the deciding policy reason code (`approval_granted` when a signed approval was
    * verified and consumed); `approvalFailure` says why an approval did not authorise the call.
    */
+  /**
+   * An MCP App's own `tools/call` under the viewing member's browser principal (KOBE-436, spec §6):
+   * read-only, app-visible tools of the app's connector only. Every decision is recorded, the
+   * denials with their reason. Never arguments, results or credentials.
+   */
+  "mcp.app_call": event("team", {
+    connectorId: id,
+    userId: id,
+    /** The upstream tool name (MCP grammar). */
+    tool: z.string().max(128).regex(/^[A-Za-z0-9_.-]{1,128}$/),
+    decision: z.enum(["allowed", "denied"]),
+    reason: z.enum(APP_CALL_REASONS),
+    /** The pinned template of the app the call came from. */
+    templateSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  }),
   "mcp.tool_call": event("team", {
     sandboxId: id,
     userId: id,

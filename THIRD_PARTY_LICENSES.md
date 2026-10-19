@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-854 packages, 572 of them shipped in an image.
+855 packages, 573 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -69,6 +69,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @braintree/sanitize-url | 7.1.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@braintree/sanitize-url@7.1.2/LICENSE) |
 | @cacheable/memory | 2.2.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/memory@2.2.0/LICENSE) |
 | @cacheable/utils | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/utils@2.5.0/LICENSE) |
+| @cfworker/json-schema | 4.1.1 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/@cfworker/json-schema/v/4.1.1) |
 | @chevrotain/types | 11.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/@chevrotain/types@11.1.2/LICENSE.txt) |
 | @drizzle-team/brocli | 0.10.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@drizzle-team/brocli/v/0.10.2) |
 | @esbuild-kit/core-utils | 3.3.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@esbuild-kit/core-utils@3.3.2/LICENSE) |

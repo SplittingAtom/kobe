@@ -76,7 +76,7 @@ export interface ProxyProbeOptions {
 export const PROBE_MAX_ANSWER_BYTES = 16 * 1024 * 1024;
 
 /** The body as text, refusing more than `max` bytes while it streams. */
-async function readCapped(res: Response, max: number): Promise<string | undefined> {
+export async function readCapped(res: Response, max: number): Promise<string | undefined> {
   if (!res.body) return "";
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];

@@ -39,6 +39,7 @@ export async function openHarness(
     | "egressHeaderSecrets"
     | "connectors"
     | "connectorProbe"
+    | "appCaller"
     | "envelope"
     | "modelTokenDefaults"
     | "auditForwardingDestinations"

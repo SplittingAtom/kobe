@@ -1,3 +1,4 @@
+import { NO_APP_CALLER, type AppCaller } from "./apps/app-caller.js";
 import type { ForwardDestination } from "./audit/forward/types.js";
 import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -108,6 +109,8 @@ export interface ServerDepsOptions {
   readonly connectors?: Partial<ConnectorUrlPolicy>;
   /** Probes a registered connector's tools through the MCP proxy (KOBE-101); unset = cannot pin. */
   readonly connectorProbe?: ConnectorProbe;
+  /** MCP Apps' own calls through the MCP proxy (KOBE-436); unset = every app call fails. */
+  readonly appCaller?: AppCaller;
   /** MCP proxy re-check seams (KOBE-58). */
   readonly mcp?: { readonly now?: () => Date };
   /**
@@ -245,6 +248,8 @@ export interface ServerDeps {
   readonly connectorUrlPolicy: ConnectorUrlPolicy;
   /** Fetches a connector's live `tools/list` through the MCP proxy, to pin it (KOBE-101). */
   readonly connectorProbe: ConnectorProbe;
+  /** Sends MCP Apps' decided calls to the MCP proxy (KOBE-436). */
+  readonly appCaller: AppCaller;
   /**
    * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
@@ -493,6 +498,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     mcp,
     connectorUrlPolicy,
     connectorProbe: options.connectorProbe ?? NO_PROBE,
+    appCaller: options.appCaller ?? NO_APP_CALLER,
     approvals,
     envelope: options.envelope,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,

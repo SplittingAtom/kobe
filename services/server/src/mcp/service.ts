@@ -34,6 +34,11 @@ export interface McpService {
    * another user's. Only the internal API (internal key) calls this; the key goes to the proxy.
    */
   revealCredential(principal: McpPrincipal, connectorId: string): Promise<RevealOutcome>;
+  /**
+   * The same for a member's browser principal (KOBE-436: an MCP App's own call). The server
+   * reveals it only after deciding the call; it goes to the proxy, never to the browser.
+   */
+  revealForMember(teamId: string, userId: string, connectorId: string): Promise<RevealOutcome>;
 }
 
 export interface McpServiceOptions {
@@ -88,6 +93,16 @@ export function createMcpService(options: McpServiceOptions): McpService {
     mayAuditDenied: (sandboxId: string) => deniedAudits.take(sandboxId) === 0,
     ...(options.now ? { now: options.now } : {}),
   };
+  const reveal = (teamId: string, userId: string, connectorId: string): Promise<RevealOutcome> =>
+    options.envelope
+      ? revealCredential(
+          options.db,
+          options.envelope,
+          { teamId, userId, connectorId },
+          undefined,
+          refresh,
+        )
+      : Promise.resolve({ ok: false, failure: "unavailable" });
   return {
     async listTools(principal, connectorId) {
       const connector = await loadTeamConnector(options.db, principal.teamId, connectorId);
@@ -102,18 +117,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
     },
     decide: (principal, request) => decideMcpCall(deps, principal, request),
     revealCredential: (principal, connectorId) =>
-      options.envelope
-        ? revealCredential(
-            options.db,
-            options.envelope,
-            {
-              teamId: principal.teamId,
-              userId: principal.userId,
-              connectorId,
-            },
-            undefined,
-            refresh,
-          )
-        : Promise.resolve({ ok: false, failure: "unavailable" }),
+      reveal(principal.teamId, principal.userId, connectorId),
+    revealForMember: reveal,
   };
 }
