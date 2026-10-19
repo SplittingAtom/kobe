@@ -52,7 +52,13 @@ function answer(c: Ctx, r: PromoteResult) {
       },
       422,
     );
-  const status = { not_found: 404, forbidden: 403, legacy: 409, already_requested: 409 } as const;
+  const status = {
+    not_found: 404,
+    forbidden: 403,
+    legacy: 409,
+    already_requested: 409,
+    request_closed: 409,
+  } as const;
   return c.json({ code: r.code, message: r.message }, status[r.code]);
 }
 
@@ -144,14 +150,19 @@ export function teamSkillPromotionRoutes(deps: ServerDeps): Hono<{ Variables: Te
     const body = await parseBody(c, declineSchema);
     if (!id.success || !body)
       return invalidRequest(c, "Send an optional note (up to 1000 characters).");
-    const ok = await declineRequest(
+    const r = await declineRequest(
       deps.database.db,
       c.get("team").id,
       id.data,
       c.get("user").id,
       body.note ?? null,
     );
-    if (!ok) return c.json({ code: "not_found", message: "No such open request." }, 404);
+    if (r === "not_found") return c.json({ code: "not_found", message: "No such request." }, 404);
+    if (r === "closed")
+      return c.json(
+        { code: "request_closed", message: "Another Team admin already decided this request." },
+        409,
+      );
     return c.json({ state: "declined" });
   });
 

@@ -51,7 +51,7 @@ export type PromoteResult =
   | { readonly ok: false; readonly code: "refused"; readonly refusals: readonly Refusal[] }
   | {
       readonly ok: false;
-      readonly code: "not_found" | "forbidden" | "legacy" | "already_requested";
+      readonly code: "not_found" | "forbidden" | "legacy" | "already_requested" | "request_closed";
       readonly message: string;
     };
 
@@ -108,6 +108,20 @@ function provenanceOf(
   });
 }
 
+/** A request decided already (declined, confirmed): a later decision answers 409. */
+export class RequestClosedError extends Error {
+  constructor() {
+    super("the promotion request was already decided");
+  }
+}
+
+/** The request's row lock; throws {@link RequestClosedError} unless it is still pending. */
+async function lockOpenRequest(tx: KobeTx, teamId: string, id: string): Promise<void> {
+  const res = await tx.execute<{ state: string }>(sql`
+    SELECT state FROM skill_promotion_requests WHERE team_id = ${teamId} AND id = ${id} FOR UPDATE`);
+  if (res.rows[0]?.state !== "pending") throw new RequestClosedError();
+}
+
 /** The catalog skill for the plan's name: the existing one, or a new one (maintainer-published). */
 async function catalogSkill(
   tx: KobeTx,
@@ -144,6 +158,9 @@ async function submit(
     confirmed ? { userId: confirmed.by, at: now } : undefined,
   );
   return withTeam(deps.db, source.teamId, async (tx) => {
+    // The first decision on a request wins (review C4-M1): lock it and check it is still open,
+    // before anything is written.
+    if (confirmed) await lockOpenRequest(tx, source.teamId, confirmed.requestId);
     const skill = await catalogSkill(tx, plan);
     const seq = await tx.execute<{ next: number }>(sql`
       SELECT COALESCE(max(seq), 0) + 1 AS next FROM registry_versions WHERE skill_id = ${skill.id}`);
@@ -184,6 +201,7 @@ async function submit(
           and(
             eq(skillPromotionRequests.teamId, source.teamId),
             eq(skillPromotionRequests.id, confirmed.requestId),
+            eq(skillPromotionRequests.state, "pending"),
           ),
         );
       await recordAudit(tx, {
@@ -342,8 +360,11 @@ export async function confirmRequest(
   id: string,
   admin: string,
 ): Promise<PromoteResult> {
+  const state = await requestState(deps.db, teamId, id);
+  if (state === null) return { ok: false, code: "not_found", message: "No such request." };
+  if (state !== "pending") return CLOSED;
   const preview = await requestPreview(deps, teamId, id);
-  if (!preview) return { ok: false, code: "not_found", message: "No such open request." };
+  if (!preview) return CLOSED;
   const { request: req, prepared } = preview;
   if (!prepared.ok) return prepared;
   if (prepared.plan.bundle.packageHash !== (await packageHashOf(deps.db, teamId, id)))
@@ -351,11 +372,33 @@ export async function confirmRequest(
   if (prepared.plan.refusals.length > 0)
     return { ok: false, code: "refused", refusals: prepared.plan.refusals };
   const source = { scope: "team" as const, teamId, skillId: req.skillId, version: req.version };
-  const versionId = await submit(deps, prepared.plan, source, req.requestedBy, {
-    requestId: id,
-    by: admin,
-  });
-  return { ok: true, kind: "submitted", registryVersionId: versionId };
+  try {
+    const versionId = await submit(deps, prepared.plan, source, req.requestedBy, {
+      requestId: id,
+      by: admin,
+    });
+    return { ok: true, kind: "submitted", registryVersionId: versionId };
+  } catch (err) {
+    if (err instanceof RequestClosedError) return CLOSED;
+    throw err;
+  }
+}
+
+const CLOSED = {
+  ok: false,
+  code: "request_closed",
+  message: "Another Team admin already decided this request.",
+} as const;
+
+/** A request's state, or null when the team has no such request. */
+async function requestState(db: KobeDb, teamId: string, id: string): Promise<string | null> {
+  const [row] = await withTeam(db, teamId, (tx) =>
+    tx
+      .select({ state: skillPromotionRequests.state })
+      .from(skillPromotionRequests)
+      .where(and(eq(skillPromotionRequests.teamId, teamId), eq(skillPromotionRequests.id, id))),
+  );
+  return row?.state ?? null;
 }
 
 async function packageHashOf(db: KobeDb, teamId: string, id: string): Promise<string | null> {
@@ -374,8 +417,13 @@ export async function declineRequest(
   id: string,
   admin: string,
   note: string | null,
-): Promise<boolean> {
+): Promise<"declined" | "not_found" | "closed"> {
   return withTeam(db, teamId, async (tx) => {
+    const lock = await tx.execute<{ state: string }>(sql`
+      SELECT state FROM skill_promotion_requests WHERE team_id = ${teamId} AND id = ${id} FOR UPDATE`);
+    const state = lock.rows[0]?.state;
+    if (state === undefined) return "not_found";
+    if (state !== "pending") return "closed";
     const rows = await tx
       .update(skillPromotionRequests)
       .set({ state: "declined", decidedBy: admin, decidedAt: new Date(), note })
@@ -387,12 +435,12 @@ export async function declineRequest(
         ),
       )
       .returning({ id: skillPromotionRequests.id });
-    if (rows.length === 0) return false;
+    if (rows.length === 0) return "closed";
     await recordAudit(tx, {
       action: "skill.promotion.declined",
       teamId,
       target: { requestId: id },
     });
-    return true;
+    return "declined";
   });
 }

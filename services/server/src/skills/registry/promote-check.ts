@@ -50,7 +50,7 @@ export interface PromotionPlan {
   readonly runtimeHash: string;
   readonly scan: ScanResult;
   readonly scorecard: CatalogSkillEvalScorecard | null;
-  /** The payload: what agents load. */
+  /** The payload (what agents load) and kobe.skill.yaml, which leaves too (review C4-L3). */
   readonly files: readonly PackageFile[];
   /** `evals/`: cases and fixtures, which leave the team too. */
   readonly fixtures: readonly PackageFile[];
@@ -80,7 +80,7 @@ function filesOf(bundle: ValidBundle) {
   const files: PackageFile[] = [];
   const fixtures: PackageFile[] = [];
   for (const [path, bytes] of entries) {
-    if (path.endsWith("/") || path === "kobe.skill.yaml") continue;
+    if (path.endsWith("/")) continue;
     (path.startsWith("evals/") ? fixtures : files).push({ path, size: bytes.length });
   }
   const byPath = (a: PackageFile, b: PackageFile) => (a.path < b.path ? -1 : 1);
@@ -111,30 +111,42 @@ async function scorecardOf(
 }
 
 /**
- * Whether the version was saved from a Workbench draft that started from a conversation (SK19),
- * read from the team's own audit rows (never rewritten, so a deleted draft still answers).
+ * The version's own flags (KOBE-333 review): whether it came from a conversation (stored at save,
+ * through forks too, C4-M3) and, for a team version, its team review (D22, C4-M2): only a version
+ * the team's own review approved, and not suspended by a rescan, may leave the team.
  */
-async function fromConversation(db: KobeDb, source: PromoteSource, semver: string) {
+async function versionFacts(db: KobeDb, source: PromoteSource) {
   return withTeam(db, source.teamId, async (tx: KobeTx) => {
-    const res =
-      source.scope === "team"
-        ? await tx.execute<{ thread: boolean }>(sql`
-            SELECT EXISTS (
-              SELECT 1 FROM audit_log u JOIN audit_log d
-                ON d.team_id = u.team_id AND d.action = 'skill.draft.created'
-               AND d.target ->> 'draftId' = u.target ->> 'draftId'
-             WHERE u.team_id = ${source.teamId} AND u.action = 'skill.uploaded'
-               AND u.target ->> 'skillId' = ${source.skillId}
-               AND u.target ->> 'version' = ${String(source.version)}
-               AND d.target ->> 'startedFrom' = 'thread') AS thread`)
-        : await tx.execute<{ thread: boolean }>(sql`
-            SELECT EXISTS (
-              SELECT 1 FROM audit_log p
-               WHERE p.team_id = ${source.teamId} AND p.action = 'skill.draft.personalized'
-                 AND p.target ->> 'skillId' = ${source.skillId}
-                 AND p.target ->> 'semver' = ${semver}
-                 AND (p.target ->> 'fromConversation')::boolean) AS thread`);
-    return res.rows[0]?.thread === true;
+    if (source.scope === "personal") {
+      const res = await tx.execute<{ flag: boolean }>(sql`
+        SELECT from_conversation AS flag FROM personal_skill_versions
+         WHERE skill_id = ${source.skillId} AND version = ${source.version}`);
+      return { fromConversation: res.rows[0]?.flag === true, review: null };
+    }
+    const res = await tx.execute<{ flag: boolean; status: string | null; suspended: boolean }>(sql`
+      SELECT v.from_conversation AS flag, r.status, r.suspended_at IS NOT NULL AS suspended
+        FROM team_skill_versions v
+        LEFT JOIN team_skill_reviews r
+          ON r.team_id = v.team_id AND r.skill_id = v.skill_id AND r.version = v.version
+         AND r.scope = 'team'
+       WHERE v.team_id = ${source.teamId} AND v.skill_id = ${source.skillId}
+         AND v.version = ${source.version}`);
+    const row = res.rows[0];
+    const approved = row?.status === "approved" && !row.suspended;
+    return {
+      fromConversation: row?.flag === true,
+      review: approved
+        ? null
+        : {
+            code: "team_review",
+            message:
+              row?.status === "rejected"
+                ? "The team's review rejected this version: only an approved version can be promoted."
+                : row?.suspended
+                  ? "A rescan suspended this version: the team's review must decide it again first."
+                  : "The team's review hasn't approved this version yet: a Team admin approves it first.",
+          },
+    };
   });
 }
 
@@ -214,6 +226,7 @@ export async function preparePromotion(
   if (!checked.ok) return NOT_FOUND;
   const bundle = checked.value;
   const settings = await readRegistrySettings(db);
+  const facts = await versionFacts(db, source);
   const base = {
     name: bundle.name,
     semver: version.semver,
@@ -228,7 +241,7 @@ export async function preparePromotion(
       settings.submissionRules.requireFreshScorecard,
     ),
     ...filesOf(bundle),
-    fromConversation: await fromConversation(db, source, version.semver),
+    fromConversation: facts.fromConversation,
   };
   const { refusals, catalogSkillId } = await refusalsOf(
     db,
@@ -236,5 +249,12 @@ export async function preparePromotion(
     base,
     submitterId,
   );
-  return { ok: true, plan: { ...base, refusals, catalogSkillId } };
+  return {
+    ok: true,
+    plan: {
+      ...base,
+      refusals: facts.review ? [facts.review, ...refusals] : refusals,
+      catalogSkillId,
+    },
+  };
 }

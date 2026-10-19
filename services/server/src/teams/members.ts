@@ -170,27 +170,25 @@ export async function removeMemberInTx(
   userId: string,
   via?: "skill_reviewer_grant",
 ): Promise<MembershipResult> {
-  {
-    const lock = await lockForChange(tx, teamId, userId);
-    if (lock.current === null) return fail("not_a_member");
-    if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
-    await tx
-      .delete(teamMembers)
-      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
-    await revokeInvitesSentBy(tx, teamId, userId);
-    // Their schedules here stop with the membership; other teams' keep running (KOBE-180).
-    await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
-    // Egress proxies close the user's open tunnels in this team (KOBE-38).
-    await notifyEgressUserChanged(tx, userId);
-    // Their shared threads go private: nobody else could revoke them (KOBE-221).
-    await endSharesOf(tx, teamId, userId);
-    await recordAudit(tx, {
-      action: "identity.member.removed",
-      teamId,
-      target: { userId, role: lock.current, ...(via ? { via } : {}) },
-    });
-    return OK;
-  }
+  const lock = await lockForChange(tx, teamId, userId);
+  if (lock.current === null) return fail("not_a_member");
+  if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
+  await tx
+    .delete(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  await revokeInvitesSentBy(tx, teamId, userId);
+  // Their schedules here stop with the membership; other teams' keep running (KOBE-180).
+  await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
+  // Egress proxies close the user's open tunnels in this team (KOBE-38).
+  await notifyEgressUserChanged(tx, userId);
+  // Their shared threads go private: nobody else could revoke them (KOBE-221).
+  await endSharesOf(tx, teamId, userId);
+  await recordAudit(tx, {
+    action: "identity.member.removed",
+    teamId,
+    target: { userId, role: lock.current, ...(via ? { via } : {}) },
+  });
+  return OK;
 }
 
 /**

@@ -77,8 +77,23 @@ async function packageHash(scope: "team" | "personal", skillId: string, version:
   return r.rows[0]?.package_hash as string;
 }
 
+/** The team's own review decides the version (D22): approved unless told otherwise. */
+async function reviewed(skillId: string, version: number, status = "approved") {
+  await h.admin.query(
+    `UPDATE team_skill_reviews SET status = $4, reviewed_by = $3, reviewed_at = now()
+      WHERE team_id = $1 AND skill_id = $2 AND version = 1 * $5`,
+    [team, skillId, ids.admin, status, version],
+  );
+}
+
 /** A completed full eval of the version in the team, with the golden card's numbers. */
-async function evaluated(scope: "team" | "personal", skillId: string, version: number, by: string) {
+async function evaluated(
+  scope: "team" | "personal",
+  skillId: string,
+  version: number,
+  by: string,
+  inTeam = team,
+) {
   const hash = await packageHash(scope, skillId, version);
   await h.admin.query(
     `INSERT INTO skill_eval_runs (team_id, started_by, subject_kind, subject_id, subject_rev,
@@ -86,8 +101,9 @@ async function evaluated(scope: "team" | "personal", skillId: string, version: n
        progress_total, progress_done, scorecard, finished_at)
      VALUES ($1, $2, $3, $4, $5, 'x', $6, repeat('b', 64), 'k', 1, 'full', 'completed', '{}', '{}',
        5, 5, $7, now())`,
-    [team, by, scope, skillId, version, hash, JSON.stringify({ ...GOLDEN, packageHash: hash })],
+    [inTeam, by, scope, skillId, version, hash, JSON.stringify({ ...GOLDEN, packageHash: hash })],
   );
+  if (scope === "team") await reviewed(skillId, version);
 }
 
 beforeAll(async () => {
@@ -154,7 +170,7 @@ describe("a Team admin's promotion (ac-1)", () => {
       refusals: [],
       newSkill: true,
       fromConversation: false,
-      files: [{ path: "SKILL.md" }],
+      files: [{ path: "SKILL.md" }, { path: "kobe.skill.yaml" }],
     });
     expect((preview.json.fixtures as { path: string }[]).map((f) => f.path)).toEqual([
       "evals/cases.yaml",
@@ -206,7 +222,7 @@ describe("a Team admin's promotion (ac-1)", () => {
       {
         team_id: team,
         actor_id: ids.admin,
-        target: { registryVersionId: versionId, files: 1, fixtures: 3, fromConversation: false },
+        target: { registryVersionId: versionId, files: 2, fixtures: 3, fromConversation: false },
       },
     ]);
     expect(await audit("registry.submitted")).toMatchObject([
@@ -339,5 +355,225 @@ describe("teams are walls (ac-4)", () => {
       [made.skill.id],
     );
     expect(r.rows).toEqual([]);
+  });
+});
+
+describe("review fixes (KOBE-333 review)", () => {
+  it("promotes only a version the team's review approved (C4-M2)", async () => {
+    const made = await upload(as.admin, "team", pkg("needs-review", "0.1.0"));
+    await evaluated("team", made.skill.id, 1, ids.admin);
+    const preview = (status: string) =>
+      reviewed(made.skill.id, 1, status).then(() =>
+        as.admin.get(`/v1/skills/promotions/preview?scope=team&skillId=${made.skill.id}&version=1`),
+      );
+    for (const status of ["rejected", "pending"]) {
+      if (status === "pending")
+        await h.admin.query(
+          `UPDATE team_skill_reviews SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL
+            WHERE skill_id = $1`,
+          [made.skill.id],
+        );
+      const r =
+        status === "pending"
+          ? await as.admin.get(
+              `/v1/skills/promotions/preview?scope=team&skillId=${made.skill.id}&version=1`,
+            )
+          : await preview(status);
+      expect(
+        (r.json.refusals as { code: string }[]).map((x) => x.code),
+        status,
+      ).toContain("team_review");
+      const sent = await as.admin.post("/v1/skills/promotions", {
+        scope: "team",
+        skillId: made.skill.id,
+        version: 1,
+      });
+      expect([sent.status, sent.json.code]).toEqual([422, "submission_refused"]);
+    }
+  });
+
+  it("lets the first decision on a request win; the second gets 409 (C4-M1)", async () => {
+    // An earlier test let Builders promote directly: their promotions wait again.
+    await as.admin.put("/v1/team/skill-review/settings", { buildersMayPromote: false });
+    const made = await upload(as.builder, "team", pkg("race-skill", "0.1.0"));
+    await evaluated("team", made.skill.id, 1, ids.builder);
+    const source = { scope: "team", skillId: made.skill.id, version: 1 };
+    const firstRes = await as.builder.post("/v1/skills/promotions", source);
+    expect(firstRes.status, JSON.stringify(firstRes.json)).toBe(202);
+    const first = firstRes.json.requestId as string;
+    // Decline, then confirm: refused, nothing submitted.
+    expect((await as.admin.post(`/v1/team/skill-promotions/${first}/decline`, {})).status).toBe(
+      200,
+    );
+    const late = await as.admin.post(`/v1/team/skill-promotions/${first}/confirm`, {});
+    expect([late.status, late.json.code]).toEqual([409, "request_closed"]);
+    expect((await as.admin.post(`/v1/team/skill-promotions/${first}/decline`, {})).json.code).toBe(
+      "request_closed",
+    );
+    // At once: one confirm and one decline; exactly one wins.
+    const second = (await as.builder.post("/v1/skills/promotions", source)).json
+      .requestId as string;
+    const [a, b] = await Promise.all([
+      as.admin.post(`/v1/team/skill-promotions/${second}/confirm`, {}),
+      as.admin.post(`/v1/team/skill-promotions/${second}/decline`, {}),
+    ]);
+    expect([a.status, b.status].sort()).toEqual(a.status === 201 ? [201, 409] : [200, 409]);
+    const state = await h.admin.query(`SELECT state FROM skill_promotion_requests WHERE id = $1`, [
+      second,
+    ]);
+    const submitted = await h.admin.query(
+      `SELECT count(*)::int AS n FROM registry_versions WHERE source ->> 'skillId' = $1`,
+      [made.skill.id],
+    );
+    expect(submitted.rows[0]?.n).toBe(state.rows[0]?.state === "confirmed" ? 1 : 0);
+    // A double confirm on a fresh request: the second is 409, never a 500.
+    if (state.rows[0]?.state !== "confirmed") {
+      const third = (await as.builder.post("/v1/skills/promotions", source)).json
+        .requestId as string;
+      const [c1, c2] = await Promise.all([
+        as.admin.post(`/v1/team/skill-promotions/${third}/confirm`, {}),
+        as.admin.post(`/v1/team/skill-promotions/${third}/confirm`, {}),
+      ]);
+      expect([c1.status, c2.status].sort()).toEqual([201, 409]);
+    }
+  });
+});
+
+/**
+ * A Workbench draft that started from a conversation (as Save to Workbench or save_skill_draft
+ * make it), written directly: its files are a full package.
+ */
+async function conversationDraft(ownerId: string, name: string): Promise<string> {
+  const draft = randomUUID();
+  await h.admin.query("BEGIN");
+  try {
+    await h.admin.query(`SELECT set_config('kobe.team_id', $1, true)`, [team]);
+    await h.admin.query(
+      `INSERT INTO skill_drafts (team_id, id, owner_user_id, name, started_from, from_thread_id,
+         updated_by, synced_rev)
+       VALUES ($1, $2, $3, $4, 'thread', $5, $3, 1)`,
+      [team, draft, ownerId, name, randomUUID()],
+    );
+    const files: Record<string, string> = {
+      "SKILL.md": skillMd(name),
+      "kobe.skill.yaml": manifest(name, "0.1.0"),
+      "evals/cases.yaml": CASES,
+      "evals/fixtures/sales.csv": "region,total\nnorth,1\n",
+      "evals/fixtures/regions/map.json": "{}",
+    };
+    for (const [path, text] of Object.entries(files))
+      await h.admin.query(
+        `INSERT INTO skill_draft_files (team_id, draft_id, path, text_content, size, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [team, draft, path, text, Buffer.byteLength(text), ownerId],
+      );
+    await h.admin.query("COMMIT");
+  } catch (err) {
+    await h.admin.query("ROLLBACK");
+    throw err;
+  }
+  // The draft's audit row, as createDraft writes it (promotion's backfill and checks read it).
+  await h.admin.query(
+    `INSERT INTO audit_log (actor_kind, actor_id, action, team_id, target)
+     VALUES ('user', $1, 'skill.draft.created', $2, $3)`,
+    [ownerId, team, JSON.stringify({ draftId: draft, name, startedFrom: "thread" })],
+  );
+  return draft;
+}
+
+async function saveDraft(
+  who: TestBrowser,
+  draftId: string,
+  destination: "team" | "personal",
+  semver: string,
+) {
+  const rev = (await who.get(`/v1/skills/drafts/${draftId}`)).json.draft.rev as number;
+  const res = await who.request(
+    "POST",
+    `/v1/skills/drafts/${draftId}/versions`,
+    { destination, semver, changelog: "Saved.", confirmPersonal: true },
+    { "if-match": `"${rev}"` },
+  );
+  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  return res.json as { skill: { id: string }; version: { version: number } };
+}
+
+describe("from a conversation (KOBE-333 review C4-M3)", () => {
+  it("is true for a version saved from a conversation draft, in the plan, provenance and audit", async () => {
+    const draft = await conversationDraft(ids.admin, "chat-report");
+    const saved = await saveDraft(as.admin, draft, "team", "0.1.0");
+    await evaluated("team", saved.skill.id, 1, ids.admin);
+    const source = { scope: "team", skillId: saved.skill.id, version: 1 };
+    const preview = await as.admin.get(
+      `/v1/skills/promotions/preview?scope=team&skillId=${saved.skill.id}&version=1`,
+    );
+    expect(preview.json).toMatchObject({ fromConversation: true, refusals: [] });
+    const res = await as.admin.post("/v1/skills/promotions", source);
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const row = await h.admin.query(`SELECT provenance FROM registry_versions WHERE id = $1`, [
+      res.json.registryVersionId,
+    ]);
+    expect(row.rows[0]?.provenance).toMatchObject({ fromConversation: true });
+    expect((await audit("skill.promoted")).at(-1)).toMatchObject({
+      target: { fromConversation: true },
+    });
+
+    // A fork of it, saved as the next version: still from a conversation.
+    const fork = await as.admin.post("/v1/skills/drafts/fork", {
+      source: { kind: "team", skillId: saved.skill.id, version: 1 },
+    });
+    expect(fork.status, JSON.stringify(fork.json)).toBe(201);
+    const next = await saveDraft(as.admin, fork.json.draft.id as string, "team", "0.2.0");
+    expect(next.version.version).toBe(2);
+    const flags = await h.admin.query(
+      `SELECT version, from_conversation FROM team_skill_versions WHERE skill_id = $1 ORDER BY version`,
+      [saved.skill.id],
+    );
+    expect(flags.rows).toEqual([
+      { version: 1, from_conversation: true },
+      { version: 2, from_conversation: true },
+    ]);
+    // A direct upload of the same files is not.
+    const direct = await upload(as.admin, "team", pkg("plain-upload", "0.1.0"));
+    const flag = await h.admin.query(
+      `SELECT from_conversation FROM team_skill_versions WHERE skill_id = $1`,
+      [direct.skill.id],
+    );
+    expect(flag.rows).toEqual([{ from_conversation: false }]);
+  });
+
+  it("is true for a personal skill promoted from another team", async () => {
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [other, ids.builder],
+    );
+    const draft = await conversationDraft(ids.builder, "my-chat-skill");
+    const saved = await saveDraft(as.builder, draft, "personal", "0.1.0");
+    // Promoted while the other team is active (its eval ran there).
+    expect((await as.builder.put("/v1/me/teams/active", { teamId: other })).status).toBe(200);
+    as.builder.team = other;
+    try {
+      await evaluated("personal", saved.skill.id, 1, ids.builder, other);
+      const preview = await as.builder.get(
+        `/v1/skills/promotions/preview?scope=personal&skillId=${saved.skill.id}&version=1`,
+      );
+      expect(preview.json).toMatchObject({ fromConversation: true, refusals: [] });
+      const res = await as.builder.post("/v1/skills/promotions", {
+        scope: "personal",
+        skillId: saved.skill.id,
+        version: 1,
+      });
+      expect(res.status, JSON.stringify(res.json)).toBe(201);
+      const row = await h.admin.query(`SELECT provenance FROM registry_versions WHERE id = $1`, [
+        res.json.registryVersionId,
+      ]);
+      expect(row.rows[0]?.provenance).toMatchObject({
+        fromConversation: true,
+        source: { scope: "personal", teamId: other },
+      });
+    } finally {
+      await as.builder.put("/v1/me/teams/active", { teamId: team });
+      as.builder.team = team;
+    }
   });
 });

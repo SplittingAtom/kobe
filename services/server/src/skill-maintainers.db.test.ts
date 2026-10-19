@@ -147,3 +147,44 @@ describe("Unmaintained (ac-3)", () => {
     expect((await audit("skill.catalog.maintained")).length).toBe(1);
   });
 });
+
+describe("Unmaintained stays closed to former maintainers (KOBE-332 review C3-M1)", () => {
+  it("refuses a removed maintainer until a Site admin reassigns the skill", async () => {
+    const lapsed = await skillRow("lapsed-skill");
+    await h.admin.query(
+      `INSERT INTO registry_maintainers (skill_id, user_id) VALUES ($1, $2), ($1, $3)`,
+      [lapsed, ids.alice, ids.bob],
+    );
+    // Alice submitted its first version, then Bob removed her; then Bob is deactivated.
+    await h.admin.query(
+      `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
+         provenance, source, scan, verdict, state, submitted_by)
+       VALUES ($1, '0.1.0', 1, repeat('c', 64), repeat('c', 64), '{}', '{}', '{}', '{}', 'pass',
+         'submitted', $2)`,
+      [lapsed, ids.alice],
+    );
+    expect((await as.bob.delete(`${M(lapsed)}/${ids.alice}`)).status).toBe(200);
+    expect((await as.admin.post(`/v1/site/users/${ids.bob}/deactivate`, {})).status).toBe(200);
+    const status = await h.admin.query(`SELECT status FROM registry_skills WHERE id = $1`, [
+      lapsed,
+    ]);
+    expect(status.rows[0]?.status).toBe("unmaintained");
+    expect(await submissionRight(db(), "lapsed-skill", ids.alice)).toEqual({
+      ok: false,
+      code: "unmaintained",
+      message: "lapsed-skill is Unmaintained: ask a Site admin to reassign its maintainers.",
+    });
+    expect(await submissionRight(db(), "lapsed-skill", ids.carol)).toMatchObject({
+      ok: false,
+      code: "unmaintained",
+    });
+    // A Site admin reassigning it reopens submissions to the new maintainer only.
+    expect((await as.admin.put(M(lapsed), { userIds: [ids.alice] })).status).toBe(200);
+    expect(await submissionRight(db(), "lapsed-skill", ids.alice)).toMatchObject({ ok: true });
+    expect(await submissionRight(db(), "lapsed-skill", ids.carol)).toMatchObject({
+      ok: false,
+      code: "not_maintainer",
+    });
+    await as.admin.post(`/v1/site/users/${ids.bob}/reactivate`, {});
+  });
+});

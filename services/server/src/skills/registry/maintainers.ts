@@ -246,7 +246,7 @@ export type SubmissionRight =
   | { readonly ok: true; readonly skill: { readonly id: string; readonly name: string } | null }
   | {
       readonly ok: false;
-      readonly code: "reserved" | "taken" | "not_maintainer" | "archived";
+      readonly code: "reserved" | "taken" | "not_maintainer" | "unmaintained" | "archived";
       readonly message: string;
     };
 
@@ -270,9 +270,13 @@ export async function submissionRight(
   if (!skill) return { ok: true, skill: null };
   if (skill.status === "archived")
     return { ok: false, code: "archived", message: `${name} is archived; choose another name.` };
-  const list = activeMaintainers(await listMaintainers(tx, skill.id));
+  const all = await listMaintainers(tx, skill.id);
+  const list = activeMaintainers(all);
   if (list.some((m) => m.userId === userId)) return { ok: true, skill };
-  if (list.length === 0) {
+  // Before its first approval it has no maintainer rows at all: only its submitter goes on. An
+  // Unmaintained skill (rows, none active) reopens only when a Site admin reassigns it (review
+  // C3-M1): a maintainer removed earlier never wins the right back.
+  if (all.length === 0) {
     const [mine] = await tx
       .select({ id: registryVersions.id })
       .from(registryVersions)
@@ -285,6 +289,12 @@ export async function submissionRight(
       message: `${name} is taken in the Catalog; fork it under a new name.`,
     };
   }
+  if (list.length === 0)
+    return {
+      ok: false,
+      code: "unmaintained",
+      message: `${name} is Unmaintained: ask a Site admin to reassign its maintainers.`,
+    };
   const names = list.map((m) => m.name).join(", ");
   return {
     ok: false,
