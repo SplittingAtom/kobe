@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EVAL_OUTPUT_READ_MAX_BYTES, EVAL_READ_MAX_TOTAL_BYTES } from "@kobe/protocol";
@@ -50,6 +50,13 @@ describe("readOutputs (KOBE-326)", () => {
       { path: "outputs/link.txt", status: "refused", reason: "link" },
       { path: "a/b/passwd", status: "refused", reason: "link" },
     ]);
+  });
+
+  it("refuses a hard link: the output and its other name share an inode (review L1)", async () => {
+    await writeFile(path.join(ws, "agent-temp"), "secret!");
+    await link(path.join(ws, "agent-temp"), path.join(ws, "outputs/copy.txt"));
+    const out = await readOutputs(ws, frame([{ path: "outputs/copy.txt", size: 7 }]));
+    expect(out.files).toEqual([{ path: "outputs/copy.txt", status: "refused", reason: "link" }]);
   });
 
   it("refuses non-regular files (a FIFO never blocks, a directory) and a changed size", async () => {

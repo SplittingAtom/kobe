@@ -9,11 +9,13 @@ import {
   type EvalReadResult,
 } from "@kobe/protocol";
 import { parentsAreDirs } from "../workspace/fs.js";
+import { volumeDevice } from "../workspace/volume.js";
 
 // The matched outputs' bytes for the server's judge (KOBE-326, contract KOBE-324 `outputs.ts`):
 // each file opened with O_NOFOLLOW and O_NONBLOCK (a FIFO never blocks the agent), no link on the
 // way (every parent an lstat directory; on Linux the open descriptor must name exactly the path),
-// refused unless fstat shows a regular file of the walked size (a process left running may have
+// refused unless fstat shows a regular file of the walked size with one link on the workspace
+// volume (a process left running may have
 // swapped or grown it), at most EVAL_OUTPUT_READ_MAX_BYTES each and EVAL_READ_MAX_TOTAL_BYTES in
 // all. The request carries paths and sizes only; nothing the judge is told reaches the sandbox.
 
@@ -81,6 +83,11 @@ async function readOne(
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) return { path: file.path, status: "refused", reason: "not_regular" };
+    // A hard link a tool made to a file only the agent may read (KOBE-326 review L1), or a file
+    // on another filesystem: never read for the judge.
+    if (stat.nlink !== 1) return { path: file.path, status: "refused", reason: "link" };
+    if (stat.dev !== (await volumeDevice(workspace)))
+      return { path: file.path, status: "refused", reason: "off_volume" };
     if (stat.size !== file.size)
       return { path: file.path, status: "refused", reason: "size_changed" };
     const bytes = await readUpTo(handle, Math.min(cap, stat.size));
