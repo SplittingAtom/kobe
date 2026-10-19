@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { FakeUpstream } from "./testing/fake-upstream.js";
-import { MAX_UI_RESOURCES, UI_RESOURCE_MAX_BYTES } from "./ui-resources.js";
+import {
+  MAX_UI_RESOURCES,
+  UI_RESOURCE_MAX_BYTES,
+  UI_RESOURCE_META_MAX_BYTES,
+} from "./ui-resources.js";
 import { createUpstreamClient, type UpstreamClient } from "./upstream.js";
 
 /** The pin probe's `ui://` templates (KOBE-433, mcp-apps-host §5): read only what tools name. */
@@ -149,12 +153,121 @@ describe("listTools with ui resources", () => {
     expect(res.ok && res.result.ui_resources).toEqual([{ uri: "ui://c/app", error: "invalid" }]);
   });
 
-  it("refuses more templates than it reads in one probe", async () => {
-    const uris = Array.from({ length: MAX_UI_RESOURCES + 1 }, (_, i) => `ui://c/${i}`);
+  it("reads at most MAX_UI_RESOURCES and reports the rest as invalid, never failing the tools", async () => {
+    const uris = Array.from({ length: MAX_UI_RESOURCES + 2 }, (_, i) => `ui://c/${i}`);
     fake.options = {
       tools: uris.map((u, i) => tool(`t${i}`, u)),
       resources: uris.map((uri) => ({ uri, mimeType: MIME, text: "x" })),
     };
-    expect(await probe()).toEqual({ ok: false, failure: "too_large" });
+    const res = await probe();
+    if (!res.ok) throw new Error("probe failed");
+    const ui = res.result.ui_resources as { uri: string; error?: string }[];
+    expect(ui.filter((r) => r.error === undefined)).toHaveLength(MAX_UI_RESOURCES);
+    expect(ui.slice(MAX_UI_RESOURCES)).toEqual([
+      { uri: `ui://c/${MAX_UI_RESOURCES}`, error: "invalid" },
+      { uri: `ui://c/${MAX_UI_RESOURCES + 1}`, error: "invalid" },
+    ]);
+    expect(methods().filter((m) => m === "resources/read")).toHaveLength(MAX_UI_RESOURCES);
+  });
+
+  it("skips the template part, keeping the tools, when resources/list fails or never ends", async () => {
+    fake.options = {
+      tools: [tool("open", "ui://c/app")],
+      resources: [{ uri: "ui://c/app", mimeType: MIME, text: "x" }],
+      listErrorCode: -32603,
+    };
+    expect(await probe()).toEqual({
+      ok: true,
+      result: { tools: expect.any(Array), ui_resources_skipped: "rpc_error" },
+    });
+    fake.options = {
+      tools: [tool("open", "ui://c/app")],
+      resources: [{ uri: "ui://c/app", mimeType: MIME, text: "x" }],
+      endlessResources: true,
+    };
+    expect(await probe()).toEqual({
+      ok: true,
+      result: { tools: expect.any(Array), ui_resources_skipped: "too_large" },
+    });
+  });
+
+  it("reports a read too large for the response cap as that template's error", async () => {
+    fake.options = {
+      tools: [tool("a", "ui://c/huge"), tool("b", "ui://c/ok")],
+      resources: [
+        { uri: "ui://c/huge", mimeType: MIME, text: "x".repeat(3 * 1024 * 1024) },
+        { uri: "ui://c/ok", mimeType: MIME, text: "ok" },
+      ],
+    };
+    const res = await probe();
+    expect(res.ok && res.result.ui_resources).toEqual([
+      { uri: "ui://c/huge", error: "too_large" },
+      { uri: "ui://c/ok", mimeType: MIME, text: "ok", meta: {} },
+    ]);
+  });
+
+  it("passes on only the ui and contentHash _meta keys, and refuses an oversized _meta", async () => {
+    fake.options = {
+      tools: [tool("a", "ui://c/a"), tool("b", "ui://c/b")],
+      resources: [
+        {
+          uri: "ui://c/a",
+          mimeType: MIME,
+          text: "a",
+          _meta: { ui: { prefersBorder: true }, junk: "x".repeat(10_000) },
+          contentMeta: { "io.splittingatom/contentHash": "h", other: 1 },
+        },
+        {
+          uri: "ui://c/b",
+          mimeType: MIME,
+          text: "b",
+          contentMeta: { ui: { csp: "x".repeat(UI_RESOURCE_META_MAX_BYTES) } },
+        },
+        // Listed but named by no tool: its _meta is never kept.
+        { uri: "ui://c/unnamed", mimeType: MIME, text: "u", _meta: { ui: "x".repeat(100_000) } },
+      ],
+    };
+    const res = await probe();
+    expect(res.ok && res.result.ui_resources).toEqual([
+      {
+        uri: "ui://c/a",
+        mimeType: MIME,
+        text: "a",
+        meta: { ui: { prefersBorder: true }, "io.splittingatom/contentHash": "h" },
+      },
+      { uri: "ui://c/b", error: "invalid" },
+    ]);
+  });
+
+  it("refuses a read whose content names another URI, and never reads a non-ui:// URI", async () => {
+    fake.options = {
+      tools: [
+        tool("a", "ui://c/a"),
+        tool("b", "https://x.example/app"),
+        tool("c", "ui://c/a\u0001"),
+      ],
+      resources: [{ uri: "ui://c/a", mimeType: MIME, text: "a" }],
+      readUri: "ui://c/other",
+    };
+    const res = await probe();
+    expect(res.ok && res.result.ui_resources).toEqual([{ uri: "ui://c/a", error: "invalid" }]);
+    const reads = fake.received.filter((r) => r.method === "resources/read");
+    expect(reads.map((r) => r.message.params)).toEqual([{ uri: "ui://c/a" }]);
+  });
+
+  it("keeps a leading BOM of a blob and refuses a blob that is not strict base64", async () => {
+    const bom = "\ufeff<p>x</p>";
+    fake.options = {
+      tools: [tool("a", "ui://c/bom"), tool("b", "ui://c/junk")],
+      resources: [
+        { uri: "ui://c/bom", mimeType: MIME, blob: Buffer.from(bom, "utf8").toString("base64") },
+        { uri: "ui://c/junk", mimeType: MIME, blob: "PHA+!!!" },
+      ],
+    };
+    const res = await probe();
+    expect(res.ok && res.result.ui_resources).toEqual([
+      { uri: "ui://c/bom", mimeType: MIME, text: bom, meta: {} },
+      { uri: "ui://c/junk", error: "invalid" },
+    ]);
   });
 });

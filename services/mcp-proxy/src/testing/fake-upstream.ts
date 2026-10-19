@@ -33,6 +33,12 @@ export interface FakeUpstreamOptions {
   resources?: FakeResource[];
   /** Answer `resources/read` with a JSON-RPC error. */
   readError?: boolean;
+  /** Answer `resources/list` with this JSON-RPC error code. */
+  listErrorCode?: number;
+  /** Always hand out another `resources/list` page. */
+  endlessResources?: boolean;
+  /** The `uri` the read's content item claims (default: the one asked for). */
+  readUri?: string;
 }
 
 export interface FakeResource {
@@ -151,6 +157,8 @@ export class FakeUpstream {
           ...(end < all.length ? { nextCursor: String(end) } : {}),
         },
       };
+    } else if (method === "resources/list" && o.resources && o.listErrorCode !== undefined) {
+      reply = { jsonrpc: "2.0", id, error: { code: o.listErrorCode, message: "no list" } };
     } else if (method === "resources/list" && o.resources) {
       reply = {
         jsonrpc: "2.0",
@@ -164,6 +172,7 @@ export class FakeUpstream {
               ...(r.mimeType === undefined ? {} : { mimeType: r.mimeType }),
               ...(r._meta === undefined ? {} : { _meta: r._meta }),
             })),
+          ...(o.endlessResources ? { nextCursor: "more" } : {}),
         },
       };
     } else if (method === "resources/read" && o.resources) {
@@ -178,7 +187,7 @@ export class FakeUpstream {
               result: {
                 contents: [
                   {
-                    uri: found.uri,
+                    uri: o.readUri ?? found.uri,
                     ...(found.mimeType === undefined ? {} : { mimeType: found.mimeType }),
                     ...(found.text === undefined ? {} : { text: found.text }),
                     ...(found.blob === undefined ? {} : { blob: found.blob }),

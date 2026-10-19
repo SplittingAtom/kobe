@@ -69,11 +69,12 @@ export function probeRoutes(deps: ProbeDeps): Hono {
         { uiResources: body.data.ui_resources === true },
       );
       if (result.ok) {
-        const { tools, ui_resources: uiResources } = result.result;
+        const { tools, ui_resources: uiResources, ui_resources_skipped: uiSkipped } = result.result;
         return c.json({
           ok: true,
           tools,
           ...(uiResources === undefined ? {} : { ui_resources: uiResources }),
+          ...(uiSkipped === undefined ? {} : { ui_resources_skipped: uiSkipped }),
         });
       }
       return c.json({ ok: false, failure: result.failure });

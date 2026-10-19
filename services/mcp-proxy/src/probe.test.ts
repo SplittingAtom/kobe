@@ -96,6 +96,13 @@ describe("POST /internal/v1/probe", () => {
     expect(await (await post({ url: fake.url })).json()).toEqual({ ok: true, tools });
     expect(fake.received.map((r) => r.method)).not.toContain("resources/read");
     expect((await post({ url: fake.url, ui_resources: ["ui://c/app"] })).status).toBe(400);
+    // A failing resources/list skips only the template part (review MEDIUM-3).
+    fake.options = { ...fake.options, listErrorCode: -32603 };
+    expect(await (await post({ url: fake.url, ui_resources: true })).json()).toEqual({
+      ok: true,
+      tools,
+      ui_resources_skipped: "rpc_error",
+    });
   });
 
   it("is mounted only when probe deps are given", async () => {

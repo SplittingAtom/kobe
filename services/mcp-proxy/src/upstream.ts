@@ -388,6 +388,37 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       request(url, call, session, 2, "tools/call", { name: call.tool, arguments: call.arguments }),
     );
 
+  /**
+   * The template part of a probe (KOBE-433): `ui_resources`, or `ui_resources_skipped` with a
+   * reason. Never fails the tool probe; a read answered too large is that template's error.
+   */
+  async function uiPart(
+    tools: readonly unknown[],
+    next: (method: string, params: Record<string, unknown>) => Promise<UpstreamResult>,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    const tolerant = async (method: string, params: Record<string, unknown>) => {
+      try {
+        return await next(method, params);
+      } catch (err) {
+        if (err instanceof UpstreamError && err.failure === "too_large" && !signal.aborted) {
+          return { ok: false as const, failure: "too_large" as const };
+        }
+        throw err;
+      }
+    };
+    try {
+      const ui = await readUiResources(tools, tolerant);
+      return ui.ok ? { ui_resources: ui.resources } : { ui_resources_skipped: ui.skipped };
+    } catch (err) {
+      const cause = (err as { cause?: unknown }).cause;
+      const known =
+        err instanceof UpstreamError ? err : cause instanceof UpstreamError ? cause : undefined;
+      const failure = known?.failure ?? (signal.aborted ? "timeout" : "unreachable");
+      return { ui_resources_skipped: failure };
+    }
+  }
+
   async function listTools(
     call: UpstreamBase,
     listOptions: ListToolsOptions = {},
@@ -407,9 +438,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
         const nextCursor = answer.result.nextCursor;
         if (typeof nextCursor !== "string" || nextCursor === "") {
           if (!listOptions.uiResources) return { ok: true, result: { tools } };
-          const ui = await readUiResources(tools, next);
-          if (!ui.ok) return ui;
-          return { ok: true, result: { tools, ui_resources: ui.resources } };
+          return { ok: true, result: { tools, ...(await uiPart(tools, next, call.signal)) } };
         }
         cursor = nextCursor;
       }
