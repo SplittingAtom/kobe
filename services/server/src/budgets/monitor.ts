@@ -166,9 +166,7 @@ export class BudgetMonitor {
 
   private async evaluateOnce(teamId: string): Promise<Evaluation> {
     const { db, logger } = this.options;
-    const loaded = await withTeam(db, teamId, (tx) =>
-      loadTeamBudgetLines(tx, teamId, this.now()),
-    );
+    const loaded = await withTeam(db, teamId, (tx) => loadTeamBudgetLines(tx, teamId, this.now()));
     // Budgets only: the team eval cap (KOBE-327) is enforced per call and never stops runs here.
     const lines = loaded.lines.filter(
       (l): l is BudgetLine & { readonly scope: BudgetScope } => l.scope !== "eval",
