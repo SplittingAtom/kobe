@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { closedWindow, fromPayload, toPayload, type UsageSnapshot } from "./usage-snapshot.js";
+import {
+  closedWindow,
+  configureUsageKey,
+  fromPayload,
+  toPayload,
+  userKey,
+  windowKey,
+  type UsageSnapshot,
+} from "./usage-snapshot.js";
 
 /** KOBE-339 review M2: fixed, non-overlapping 30-day windows from the epoch. */
 describe("the usage window", () => {
@@ -19,12 +27,33 @@ describe("the usage window", () => {
     expect(c.from).toBe(a.to);
   });
 
+  it("keys members by an HMAC of the window under the server's secret, never stored (341 L1)", () => {
+    configureUsageKey("a".repeat(32));
+    const a = windowKey("2026-09-04T00:00:00.000Z");
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(windowKey("2026-10-04T00:00:00.000Z")).not.toBe(a);
+    expect(
+      JSON.stringify(
+        toPayload({ from: "x", to: "y", computedAt: "z", salt: a, skills: new Map() }),
+      ),
+    ).not.toContain(a);
+    configureUsageKey("b".repeat(32));
+    expect(windowKey("2026-09-04T00:00:00.000Z")).not.toBe(a);
+    expect(userKey(a, "u")).not.toBe(userKey(windowKey("2026-09-04T00:00:00.000Z"), "u"));
+  });
+
+  it("ignores a payload stored before member keys (341 L2)", () => {
+    configureUsageKey("a".repeat(32));
+    expect(fromPayload({ skills: {} }, { from: "a", to: "b", computedAt: "c" })).toBeNull();
+  });
+
   it("stores and reads back each team's part", () => {
+    configureUsageKey("a".repeat(32));
     const s: UsageSnapshot = {
       from: "a",
       to: "b",
       computedAt: "c",
-      salt: "x",
+      salt: "",
       skills: new Map([
         [
           "s",
@@ -46,6 +75,9 @@ describe("the usage window", () => {
         ],
       ]),
     };
-    expect(fromPayload(toPayload(s), { from: "a", to: "b", computedAt: "c" })).toEqual(s);
+    expect(fromPayload(toPayload(s), { from: "a", to: "b", computedAt: "c" })).toEqual({
+      ...s,
+      salt: windowKey("a"),
+    });
   });
 });

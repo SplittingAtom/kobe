@@ -1,5 +1,6 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import {
+  deriveKey,
   listMemberships,
   sql,
   withTeam,
@@ -50,8 +51,10 @@ export interface UsageSnapshot {
   readonly to: string;
   readonly computedAt: string;
   /**
-   * The window's random salt (340 review N2): members and raters are stored as
-   * {@link userKey}(salt, user id), never as user ids; the rule only needs distinct counts and
+   * The window's key (340 review N2, 341 review L1): `HMAC(server key, window start)`, derived at
+   * compute and read time from the server's own secret and never stored. Members and raters are
+   * stored as {@link userKey}(key, user id), never as user ids, and can't be linked back without
+   * that secret; the rule only needs distinct counts and
    * "is it the viewer".
    */
   readonly salt: string;
@@ -150,6 +153,21 @@ async function readCatalog(db: KobeDb): Promise<Catalog> {
 
 type UseRow = { user_id: string; used: RunSkillUse[]; refs: RunSkillRef[] };
 
+/**
+ * The server's key for member keys (341 review L1): derived from the auth secret with its own
+ * HKDF purpose, so it never equals another key. Set once per process (`createServerDeps`).
+ */
+let serverKey: Buffer | null = null;
+export function configureUsageKey(secret: string): void {
+  serverKey = deriveKey(secret, "skill-usage.member-key");
+}
+
+/** One window's key: never stored; the same on every replica that holds the secret. */
+export function windowKey(from: string): string {
+  if (!serverKey) throw new Error("skills: the usage member key is not configured");
+  return createHmac("sha256", serverKey).update(`skill-usage:${from}`).digest("hex");
+}
+
 /** A member's key in one window's snapshot: not their id, and different in every window. */
 export function userKey(salt: string, userId: string): string {
   return createHash("sha256").update(`${salt}:${userId}`).digest("hex").slice(0, 32);
@@ -229,7 +247,7 @@ export async function computeUsageSnapshot(
   const teams = await db.execute<{ id: string }>(
     sql`SELECT id FROM teams WHERE NOT registry ORDER BY id`,
   );
-  const salt = randomBytes(16).toString("hex");
+  const salt = windowKey(window.from);
   const skills = new Map<string, Map<string, TeamUse>>();
   for (const team of teams.rows) {
     const uses = await withTeam(db, team.id, (tx) => teamPart(tx, team.id, window, catalog, salt));
@@ -254,14 +272,16 @@ type StoredUse = {
   down: Record<string, number>;
   raters: Record<string, string[]>;
 };
-type Payload = { salt?: string; skills: Record<string, Record<string, StoredUse>> };
+/** `keys` names how member keys were made; a payload without it (raw ids, 341 review L2) is ignored. */
+type Payload = { keys?: string; skills: Record<string, Record<string, StoredUse>> };
+const KEYS = "hmac-v1";
 
 const toObj = <V, W>(m: ReadonlyMap<string, V>, f: (v: V) => W) =>
   Object.fromEntries([...m].map(([k, v]) => [k, f(v)]));
 
 export function toPayload(s: UsageSnapshot): Payload {
   return {
-    salt: s.salt,
+    keys: KEYS,
     skills: toObj(s.skills, (teams) =>
       toObj(teams, (u) => ({
         i: u.installed,
@@ -284,8 +304,9 @@ const setMap = (o: Record<string, string[]> | undefined) =>
 export function fromPayload(
   p: Payload,
   window: UsageWindow & { computedAt: string },
-): UsageSnapshot {
-  const salt = p.salt ?? "";
+): UsageSnapshot | null {
+  if (p.keys !== KEYS) return null;
+  const salt = windowKey(window.from);
   const skills = new Map<string, Map<string, TeamUse>>();
   for (const [skillId, teams] of Object.entries(p.skills ?? {}))
     skills.set(

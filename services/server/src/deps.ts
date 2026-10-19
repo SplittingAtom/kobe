@@ -1,4 +1,5 @@
 import type { ForwardDestination } from "./audit/forward/types.js";
+import { configureUsageKey } from "./skills/usage-snapshot.js";
 import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -292,6 +293,8 @@ export interface ServerDeps {
 const digest = (value: string): Buffer => createHash("sha256").update(value).digest();
 
 export function createServerDeps(options: ServerDepsOptions): ServerDeps {
+  // Catalog usage member keys are an HMAC under this secret (KOBE-339, review-341 L1).
+  configureUsageKey(options.authSecret);
   const database = createDb(options.databaseUrl);
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();
