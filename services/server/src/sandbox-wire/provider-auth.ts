@@ -80,7 +80,7 @@ export async function evalExecutionLive(
        WHERE t.team_id = ${teamId} AND t.id = ${threadId} AND t.skill_eval
          AND t.owner_user_id = ${userId} AND r.started_by = ${userId}
          AND x.state IN ('starting', 'running', 'collecting')
-         AND r.status IN ('queued', 'running')`);
+         AND r.status IN ('queued', 'running') AND r.cancel_requested_at IS NULL`);
     return res.rows.length > 0;
   });
 }
