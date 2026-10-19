@@ -113,7 +113,11 @@ describe("the confirming Team admin's approval (KOBE-334 review M2)", () => {
 
       await c.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [ids.second]);
       const refused = await insertVersion(c, "0.4.0", 4, ids.admin);
-      await expect(approve(c, refused, ids.admin)).rejects.toThrow(/second reviewer/);
+      // As the app role, as the server writes it (review-335 L7).
+      if (!db) throw new Error("database not created");
+      await withClient(db.appUrl, async (app) => {
+        await expect(approve(app, refused, ids.admin)).rejects.toThrow(/second reviewer/);
+      });
       expect((await approve(c, refused, ids.second)).rows).toEqual([{ self_approved: false }]);
       // The flag can't be set by hand on someone else's approval.
       await expect(

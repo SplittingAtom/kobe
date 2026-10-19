@@ -1,5 +1,6 @@
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
+import { dutiesProblem } from "./review-duties.js";
 import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
 import { versionRow } from "./review-queue.js";
 
@@ -91,6 +92,10 @@ export async function acknowledge(
     if (!v || v.publisher !== "maintainer") return { ok: false, problem: PROBLEMS.not_found };
     if (!DECIDABLE_STATES.has(v.state)) return { ok: false, problem: PROBLEMS.decided };
     if (!cautionKeys(v.scan).includes(key)) return { ok: false, problem: UNKNOWN };
+    // Separation of duties (review-335 M1): the submitter and the confirming Team admin don't
+    // acknowledge their own findings, except on a single-admin Site (flagged on approval).
+    const duties = await dutiesProblem(tx, v, userId);
+    if (duties.problem) return { ok: false, problem: duties.problem };
     if ((await acknowledgements(tx, v.id)).has(key)) return { ok: true, changed: false };
     await tx.execute(sql`
       INSERT INTO registry_review_events (version_id, actor_id, action, checklist)

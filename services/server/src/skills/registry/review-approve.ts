@@ -2,15 +2,13 @@ import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { blockedAmong } from "../blocklist.js";
 import { listMaintainers, recordFirstMaintainer } from "./maintainers.js";
-import {
-  authoritativeScorecardProblem,
-  isSiteAdmin,
-  siteJudgeAlias,
-  soleReviewer,
-} from "./review-guards.js";
+import { confirmerOf, dutiesProblem } from "./review-duties.js";
+import { authoritativeScorecardProblem, isSiteAdmin, siteJudge } from "./review-guards.js";
 import { cautionKeys, unacknowledgedProblem } from "./review-findings.js";
 import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
+import { inRegistryTx } from "./registry-tx.js";
+import { cancelOpenReruns } from "./rerun.js";
 import { requireRegistryTeam } from "./settings.js";
 
 /**
@@ -44,24 +42,7 @@ export {
   type ProblemCode,
 } from "./review-problems.js";
 
-/** The Team admin who confirmed a Builder's promotion (provenance `confirmedBy`), if any. */
-export function confirmerOf(v: Pick<VersionRow, "provenance">): string | null {
-  const c = v.provenance.confirmedBy as { userId?: unknown } | undefined;
-  return typeof c?.userId === "string" ? c.userId : null;
-}
-
-/** Whether `userId` decides `v` against SK22, and whether the single-admin exception applies. */
-export async function dutiesProblem(
-  tx: KobeTx,
-  v: VersionRow,
-  userId: string,
-): Promise<{ problem: Problem | null; sole: boolean }> {
-  const own = v.submittedBy === userId;
-  const confirmed = confirmerOf(v) === userId;
-  if (!own && !confirmed) return { problem: null, sole: false };
-  if (await soleReviewer(tx, userId)) return { problem: null, sole: true };
-  return { problem: own ? PROBLEMS.own_submission : PROBLEMS.confirmed_by_you, sole: false };
-}
+export { confirmerOf, dutiesProblem } from "./review-duties.js";
 
 async function maintainerProblem(tx: KobeTx, v: VersionRow): Promise<Problem | null> {
   const all = await listMaintainers(tx, v.skillId);
@@ -86,9 +67,12 @@ export async function approveProblems(
   if (!v) return { problems: [...problems, PROBLEMS.not_found], sole: false };
   if (!DECIDABLE_STATES.has(v.state)) problems.push(PROBLEMS.decided);
   else if (v.claimedBy !== null && v.claimedBy !== userId) problems.push(PROBLEMS.claimed);
+  const judge = await siteJudge(tx);
   const card = authoritativeScorecardProblem(v, {
     registryTeamId: registry.ok ? registry.teamId : null,
-    siteJudgeAlias: await siteJudgeAlias(tx),
+    siteJudgeAlias: judge.alias,
+    siteJudgeModel: judge.model,
+    at: new Date(),
   });
   if (card) problems.push(card as Problem);
   if ((await blockedAmong(tx, [v.runtimeHash, v.packageHash])).length > 0)
@@ -142,7 +126,7 @@ export async function approve(
   input: DecisionInput,
 ): Promise<ApproveResult> {
   try {
-    return await db.transaction(async (tx) => {
+    return await inRegistryTx(db, async (tx, registryTeamId) => {
       const v = await versionRow(tx, versionId, true);
       const { problems, sole } = await approveProblems(tx, v, userId, input);
       const first = problems[0];
@@ -180,6 +164,7 @@ export async function approve(
           ...(confirmerApproved ? { confirmerApproved } : {}),
         },
       });
+      if (registryTeamId) await cancelOpenReruns(tx, registryTeamId, v.id);
       return { ok: true as const, version: { ...v, state: "approved" }, selfApproved };
     });
   } catch (err) {

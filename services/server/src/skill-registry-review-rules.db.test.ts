@@ -109,6 +109,18 @@ describe("Caution findings are acknowledged one by one (review M1)", () => {
     expect(keys).toEqual(["prerequisite@SKILL.md:3", "invisible@SKILL.md:7"]);
     const none = await decision("reviewer", v.id, "approve");
     expect([none.status, none.json.code]).toEqual([409, "findings_unacknowledged"]);
+    // The submitter, a Skill reviewer too, can't acknowledge their own findings (review-335 M1).
+    expect(
+      (await as.admin.put(`/v1/site/roles/grants/${ids.author}/skill_reviewer`, {})).status,
+    ).toBe(200);
+    try {
+      const own = await as.author.post(`/v1/site/skills/registry/${v.id}/acknowledgements`, {
+        finding: keys[0],
+      });
+      expect([own.status, own.json.code]).toEqual([403, "own_submission"]);
+    } finally {
+      await as.admin.delete(`/v1/site/roles/grants/${ids.author}/skill_reviewer`);
+    }
     const ack = (key: string) =>
       as.reviewer.post(`/v1/site/skills/registry/${v.id}/acknowledgements`, { finding: key });
     expect((await ack("nope@x:1")).status).toBe(404);

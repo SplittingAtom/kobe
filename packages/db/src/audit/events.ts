@@ -1545,6 +1545,8 @@ export const AUDIT_EVENTS = {
   "registry.retracted": event("site", { registryVersionId: id }),
   /** A reviewer started the Registry team's re-run of a version's evals (KOBE-335, SK23). */
   "registry.evals_rerun": event("site", { registryVersionId: id, evalRunId: id, teamId: id }),
+  /** A reviewer cancelled a re-run; the version's history keeps it (KOBE-335 review M3). */
+  "registry.rerun_cancelled": event("site", { registryVersionId: id, evalRunId: id }),
   /** A re-run completed: its card (numbers only) is the version's authoritative scorecard (system). */
   "registry.authoritative_scorecard": event("site", { registryVersionId: id, evalRunId: id }),
   /** A reviewer sent the version back to its author's Workbench with comments. */

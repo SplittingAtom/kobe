@@ -18,12 +18,14 @@ import {
 } from "../skills/registry/review-decide.js";
 import { REVIEW_CHECKLIST, reviewDetail } from "../skills/registry/review-detail.js";
 import { acknowledge } from "../skills/registry/review-findings.js";
-import { rerunEvals } from "../skills/registry/rerun.js";
+import { diffOneFile, rawFile } from "../skills/registry/review-diff.js";
+import { cancelRerun, rerunEvals } from "../skills/registry/rerun.js";
 import { notifySubmitter } from "../skills/registry/review-notify.js";
 import {
   QUEUE_FILTERS,
   approvedVersion,
   listQueue,
+  versionBytes,
   versionDiff,
   versionRow,
   type VersionRow,
@@ -65,6 +67,7 @@ const refuse = (c: Ctx, p: Problem) =>
   c.json({ code: p.code, message: p.message }, STATUS[p.code] ?? 409);
 
 const NOT_FOUND = { code: "not_found", message: "No such Registry version." } as const;
+const MISSING = { code: "package_missing", message: "The package's bytes are missing." };
 const UNAVAILABLE = { code: "storage_unavailable", message: "Skill storage is not configured." };
 
 /**
@@ -119,13 +122,33 @@ export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const v = id ? await versionRow(db, id) : undefined;
     if (!v || v.publisher !== "maintainer") return c.json(NOT_FOUND, 404);
     const approved = await approvedVersion(db, v.skillId, v.id);
+    // One file on its own, with a request's budget: "Load diff" for a skipped file (M2).
+    const path = c.req.query("path");
+    if (path !== undefined) {
+      const bytes = await versionBytes(deps.blobs, v, approved);
+      if (!bytes) return c.json(MISSING, 409);
+      const file = diffOneFile(bytes.before, bytes.after, path);
+      return file ? c.json(file) : c.json({ code: "not_found", message: "No such file." }, 404);
+    }
     const diff = await versionDiff(deps.blobs, v, approved);
-    if (!diff)
-      return c.json({ code: "package_missing", message: "The package's bytes are missing." }, 409);
+    if (!diff) return c.json(MISSING, 409);
     return c.json({
       against: approved ? { id: approved.id, semver: approved.semver } : null,
       ...diff,
     });
+  });
+
+  // A submitted file as text, whole (to 1 MiB): for files too large or too different to diff (M2).
+  app.get("/:id/file", requireSkillReview(deps, "queue.read"), async (c) => {
+    if (!deps.blobs) return c.json(UNAVAILABLE, 503);
+    const id = versionId(c);
+    const path = c.req.query("path");
+    const v = id ? await versionRow(db, id) : undefined;
+    if (!v || v.publisher !== "maintainer" || !path) return c.json(NOT_FOUND, 404);
+    const bytes = await versionBytes(deps.blobs, v, undefined);
+    if (!bytes) return c.json(MISSING, 409);
+    const file = rawFile(bytes.after, path);
+    return file ? c.json(file) : c.json({ code: "not_found", message: "No such file." }, 404);
   });
 
   app.post("/:id/claim", requireSkillReview(deps, "claim"), async (c) => {
@@ -158,6 +181,16 @@ export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const r = await rerunEvals({ db, blobs: deps.blobs }, id, c.get("user").id);
     if (!r.ok) return c.json({ code: r.code, message: r.message }, r.status);
     return c.json({ evalRunId: r.evalRunId }, 202);
+  });
+
+  // Cancel one re-run (eligible reviewers only; the history keeps it, review-335 M3).
+  app.post("/:id/reruns/:evalRunId/cancel", requireSkillReview(deps, "rerun"), async (c) => {
+    const id = versionId(c);
+    const run = idSchema.safeParse(c.req.param("evalRunId"));
+    if (!id || !run.success) return c.json(NOT_FOUND, 404);
+    const r = await cancelRerun(db, id, run.data, c.get("user").id);
+    if (!r.ok) return c.json({ code: r.code, message: r.message }, r.status);
+    return c.json({ evalRunId: r.evalRunId, status: "cancelled" }, 202);
   });
 
   // One Caution finding acknowledged (review M1): Approve needs every one.

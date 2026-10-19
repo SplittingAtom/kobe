@@ -402,8 +402,10 @@ async function completeIfDone(tx: KobeTx, teamId: string, evalRunId: string): Pr
     started_at: Date | string;
     subject_kind: string;
     subject_id: string;
+    started_by: string;
   }>(sql`
-    SELECT suite, mode, package_hash, run_model, judge_model, started_at, subject_kind, subject_id
+    SELECT suite, mode, package_hash, run_model, judge_model, started_at, subject_kind, subject_id,
+           started_by
       FROM skill_eval_runs
      WHERE team_id = ${teamId} AND id = ${evalRunId}`);
   const r = run.rows[0];
@@ -435,6 +437,7 @@ async function completeIfDone(tx: KobeTx, teamId: string, evalRunId: string): Pr
       versionId: r.subject_id,
       card,
       judgeModel: r.judge_model,
+      startedBy: r.started_by,
     });
   await notifyEval(tx, teamId, evalRunId);
   return true;

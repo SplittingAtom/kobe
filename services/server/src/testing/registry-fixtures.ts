@@ -124,9 +124,11 @@ export async function authoritative(h: Harness, registryVersionId: string): Prom
   await h.admin.query(
     `UPDATE registry_versions v
         SET authoritative_scorecard = jsonb_set($2::jsonb, '{packageHash}', to_jsonb(v.package_hash))
-          || jsonb_build_object('rerun', jsonb_build_object(
+          || jsonb_build_object('at', to_jsonb(now()), 'rerun', jsonb_build_object(
                'teamId', s.registry_team_id, 'evalRunId', gen_random_uuid(),
-               'judgeAlias', s.judge_alias))
+               'startedBy', NULL, 'judgeAlias', s.judge_alias,
+               'judgeModel', (SELECT provider_id || '/' || model FROM model_catalog
+                               WHERE alias = s.judge_alias)))
        FROM site_skill_settings s
       WHERE v.id = $1 AND s.id = 1`,
     [registryVersionId, JSON.stringify(GOLDEN)],

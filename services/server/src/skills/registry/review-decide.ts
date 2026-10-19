@@ -4,6 +4,8 @@ import { addBlockedInTx } from "../blocklist.js";
 import { dutiesProblem, type DecisionInput } from "./review-approve.js";
 import { DECIDABLE_STATES, PROBLEMS, REJECTABLE_STATES, type Problem } from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
+import { inRegistryTx } from "./registry-tx.js";
+import { cancelOpenReruns } from "./rerun.js";
 
 /**
  * The Registry review's other actions (KOBE-334, SK23): claim and release, comment, Request
@@ -29,10 +31,14 @@ async function locked(
   fn: (tx: KobeTx, v: VersionRow) => Promise<{ version: VersionRow; changed: boolean }>,
 ): Promise<ReviewResult> {
   try {
-    return await db.transaction(async (tx) => {
+    return await inRegistryTx(db, async (tx, registryTeamId) => {
       const v = await versionRow(tx, versionId, true);
       if (!v || v.publisher !== "maintainer") throw new Refused(PROBLEMS.not_found);
-      return { ok: true as const, ...(await fn(tx, v)) };
+      const done = await fn(tx, v);
+      // A version decided or retracted needs no more re-runs: stop spending on them (L3).
+      if (registryTeamId && !["submitted", "in_review"].includes(done.version.state))
+        await cancelOpenReruns(tx, registryTeamId, v.id);
+      return { ok: true as const, ...done };
     });
   } catch (err) {
     if (err instanceof Refused) return { ok: false, problem: err.problem };

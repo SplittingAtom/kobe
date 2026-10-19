@@ -53,6 +53,17 @@ describe("a single-admin Site (SK22)", () => {
     const v = await readyTeamVersion(h, admin, team, ids.admin, "solo-skill", "0.1.0");
     const id = await promoteTeamVersion(admin, v.skillId, v.version);
     await authoritative(h, id);
+    // A Caution finding: the single admin acknowledges its own (review-335 M1 exception).
+    await h.admin.query(
+      `UPDATE registry_versions SET verdict = 'caution', scan = jsonb_set(scan, '{findings}',
+         '[{"rule": "prerequisite", "file": "SKILL.md", "line": 2, "severity": "caution"}]')
+        WHERE id = $1`,
+      [id],
+    );
+    const ack = await admin.post(`/v1/site/skills/registry/${id}/acknowledgements`, {
+      finding: "prerequisite@SKILL.md:2",
+    });
+    expect(ack.status, JSON.stringify(ack.json)).toBe(200);
     const claimed = await admin.post(`/v1/site/skills/registry/${id}/claim`, {});
     expect(claimed.status, JSON.stringify(claimed.json)).toBe(200);
     const ok = await approve(id);

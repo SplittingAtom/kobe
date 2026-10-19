@@ -1,5 +1,5 @@
 import { sql, type KobeTx } from "@kobe/db";
-import { rerunProblem } from "./authoritative.js";
+import { catalogModelOf, rerunProblem, type ApproveNow } from "./authoritative.js";
 
 /**
  * Guards the Registry's Approve (KOBE-334, SK22, SK23) shares with the tickets after it.
@@ -36,7 +36,7 @@ export function authoritativeScorecardProblem(
     readonly authoritativeScorecard: Record<string, unknown> | null;
     readonly packageHash: string;
   },
-  now: { readonly registryTeamId: string | null; readonly siteJudgeAlias: string | null },
+  now: ApproveNow,
 ): ScorecardProblem | null {
   const card = version.authoritativeScorecard;
   if (!card) return AUTHORITATIVE_SCORECARD_MISSING;
@@ -48,11 +48,14 @@ export function authoritativeScorecardProblem(
   return rerunProblem(card, now);
 }
 
-/** The Site judge's alias (null: none set). */
-export async function siteJudgeAlias(tx: KobeTx): Promise<string | null> {
+/** The Site judge: its alias and the `provider/model` it names now (null: none set). */
+export async function siteJudge(
+  tx: KobeTx,
+): Promise<{ readonly alias: string | null; readonly model: string | null }> {
   const res = await tx.execute<{ alias: string | null }>(sql`
     SELECT judge_alias AS alias FROM site_skill_settings WHERE id = 1`);
-  return res.rows[0]?.alias ?? null;
+  const alias = res.rows[0]?.alias ?? null;
+  return { alias, model: await catalogModelOf(tx, alias) };
 }
 
 /**

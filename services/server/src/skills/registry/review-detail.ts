@@ -3,7 +3,7 @@ import { listMaintainers, type Maintainer } from "./maintainers.js";
 import { similarCatalogNames } from "./names-db.js";
 import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
 import { acknowledgements, findingKey, type Acknowledgement } from "./review-findings.js";
-import { latestRerun, type RerunStatus } from "./rerun.js";
+import { rerunHistory, type RerunEntry } from "./rerun.js";
 import {
   approvedVersion,
   bumpOf,
@@ -66,8 +66,8 @@ export interface ReviewDetail {
   readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
-  /** The latest re-run in the Registry team (KOBE-335): state and progress only. */
-  readonly rerun: RerunStatus | null;
+  /** Every re-run in the Registry team, oldest first, with its starter and outcome (KOBE-335). */
+  readonly reruns: readonly RerunEntry[];
   readonly manifest: Record<string, unknown>;
   readonly capabilities: {
     readonly egress: readonly EgressCapability[];
@@ -166,7 +166,7 @@ export async function reviewDetail(
     findings: await findingsOf(db, v),
     scorecard: v.scorecard,
     authoritativeScorecard: v.authoritativeScorecard,
-    rerun: await latestRerun(db, v.id),
+    reruns: await rerunHistory(db, v),
     manifest: v.manifest,
     capabilities: {
       egress: caps.egress.map((host) => ({ host, inCeiling: ceiling.has(host) })),
