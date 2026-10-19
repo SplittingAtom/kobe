@@ -97,20 +97,39 @@ export function reviewOfTemplate(t: StoredTemplate): TemplateReview {
   return { ...base, change: "changed", ...approved, ...(live ? { live: version(live) } : {}) };
 }
 
-/** What the review's source diff and preview need: the bytes, as JSON text, never as HTML. */
-export interface TemplateSource {
-  readonly uri: string;
-  readonly approved?: string;
-  readonly live?: string;
+/** One version's bytes with the hashes and meta read together with them (review M1). */
+export interface SourceVersion extends TemplateVersion {
+  readonly html: string;
 }
 
+/**
+ * What the review's source diff needs: the bytes, as JSON text, never as HTML, each with its own
+ * hashes and declared meta from the same read. The web approves with `live.pinnedHash` from here,
+ * so an admin approves exactly the bytes they were shown (or gets `stale`).
+ */
+export interface TemplateSource {
+  readonly uri: string;
+  readonly approved?: SourceVersion;
+  readonly live?: SourceVersion;
+}
+
+const withHtml = (t: Parameters<typeof version>[0]): SourceVersion => ({
+  ...version(t),
+  html: t.html,
+});
+
 export function sourceOfTemplate(t: StoredTemplate): TemplateSource {
-  const live = t.approved ? proposedOf(t)?.html : t.html;
+  const live = invalidOf(t) === undefined ? candidateOf(t) : undefined;
   return {
     uri: t.uri,
-    ...(t.approved ? { approved: t.html } : {}),
-    ...(live === undefined || invalidOf(t) !== undefined ? {} : { live }),
+    ...(t.approved ? { approved: withHtml(t) } : {}),
+    ...(live === undefined ? {} : { live: withHtml(live) }),
   };
+}
+
+/** The bytes the admin preview frame shows (`version` live or approved), if any. */
+export function frameHtmlOf(t: StoredTemplate, which: "live" | "approved"): string | undefined {
+  return sourceOfTemplate(t)[which]?.html;
 }
 
 export type TemplateApproval =
@@ -160,14 +179,33 @@ export async function reviewConnectorTemplates(
   return (await loadTemplates(db, connectorId)).map(reviewOfTemplate);
 }
 
+async function storedTemplate(
+  db: KobeDb,
+  connectorId: string,
+  uri: string,
+): Promise<StoredTemplate | undefined> {
+  const [row] = await db.select({ id: connectors.id }).from(connectors).where(live(connectorId));
+  if (!row) return undefined;
+  return (await loadTemplates(db, connectorId)).find((t) => t.uri === uri);
+}
+
+/** The admin preview's bytes (review M2): served only by the site-admin frame route. */
+export async function connectorTemplateFrame(
+  db: KobeDb,
+  connectorId: string,
+  uri: string,
+  which: "live" | "approved",
+): Promise<string | undefined> {
+  const found = await storedTemplate(db, connectorId, uri);
+  return found ? frameHtmlOf(found, which) : undefined;
+}
+
 export async function connectorTemplateSource(
   db: KobeDb,
   connectorId: string,
   uri: string,
 ): Promise<TemplateSource | undefined> {
-  const [row] = await db.select({ id: connectors.id }).from(connectors).where(live(connectorId));
-  if (!row) return undefined;
-  const found = (await loadTemplates(db, connectorId)).find((t) => t.uri === uri);
+  const found = await storedTemplate(db, connectorId, uri);
   return found ? sourceOfTemplate(found) : undefined;
 }
 

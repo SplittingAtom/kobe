@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { withAppCsp, APP_FRAME_CSP } from "./app-frame";
 import { attachStubBridge, stubBridgeReply } from "./preview-bridge";
 
 afterEach(() => {
@@ -43,18 +42,5 @@ describe("template preview bridge (KOBE-434 ac-2)", () => {
     expect(stubBridgeReply("junk")).toBeUndefined();
     expect(stubBridgeReply({ jsonrpc: "2.0", method: "notifications/message" })).toBeUndefined();
     detach();
-  });
-});
-
-describe("withAppCsp", () => {
-  it("puts the restrictive CSP first in <head>, adding one when missing", () => {
-    expect(withAppCsp("<html><head><title>x</title></head></html>")).toBe(
-      `<html><head><meta http-equiv="Content-Security-Policy" content="${APP_FRAME_CSP}"><title>x</title></head></html>`,
-    );
-    expect(withAppCsp("<p>x</p>")).toMatch(/^<head><meta http-equiv="Content-Security-Policy"/);
-    expect(withAppCsp('<html lang="en"><body/></html>')).toMatch(
-      /^<html lang="en"><head><meta http-equiv/,
-    );
-    expect(APP_FRAME_CSP).toContain("connect-src 'none'");
   });
 });

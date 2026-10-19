@@ -123,7 +123,31 @@ describe("template review (KOBE-434)", () => {
     const source = await root.get(
       `${BASE}/${id}/templates/source?uri=${encodeURIComponent("ui://r/app")}`,
     );
-    expect(source.json.source).toEqual({ uri: "ui://r/app", approved: "v1", live: "<p>v2</p>" });
+    // Each version's bytes come with the hashes and meta of the same read (review M1).
+    expect(source.json.source).toMatchObject({
+      uri: "ui://r/app",
+      approved: { html: "v1", sha256: sha("v1") },
+      live: { html: "<p>v2</p>", sha256: sha("<p>v2</p>"), meta: { prefersBorder: true } },
+    });
+    expect(source.json.source.live.pinnedHash).toBe(at("ui://r/app").live.pinnedHash);
+
+    // The admin preview frame (review M2): text/html only with the sandboxing header CSP.
+    const frameUrl = (uri: string, version: string) =>
+      `${BASE}/${id}/templates/frame?uri=${encodeURIComponent(uri)}&version=${version}`;
+    const frame = await root.get(frameUrl("ui://r/app", "live"));
+    expect(frame.status).toBe(200);
+    expect(frame.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(frame.headers.get("content-security-policy")).toMatch(
+      /^sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';.*connect-src 'none'.*frame-ancestors 'self'$/,
+    );
+    expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(frame.text).toBe("<p>v2</p>");
+    expect((await root.get(frameUrl("ui://r/app", "approved"))).status).toBe(200);
+    expect((await root.get(frameUrl("ui://r/bad", "live"))).status).toBe(404);
+    expect(
+      (await root.get(frameUrl("ui://r/app", "live"), { "sec-fetch-site": "cross-site" })).status,
+    ).toBe(403);
+    expect((await alice.get(frameUrl("ui://r/app", "live"))).status).toBe(403);
     expect(source.headers.get("content-type")).toMatch(/^application\/json/);
     expect(source.headers.get("cache-control")).toBe("no-store");
     expect(source.headers.get("x-content-type-options")).toBe("nosniff");

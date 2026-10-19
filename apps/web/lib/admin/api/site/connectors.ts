@@ -134,12 +134,24 @@ export interface TemplateReview {
   readonly invalid?: string;
 }
 
-/** A template's bytes as text, for the escaped diff and the stubbed preview. */
+/** One version's bytes with the hashes and meta of the same read (KOBE-434 review M1). */
+export interface TemplateSourceVersion extends TemplateVersion {
+  readonly html: string;
+}
+
+/** A template's bytes as text, for the escaped diff; approve with `live.pinnedHash`. */
 export interface TemplateSource {
   readonly uri: string;
-  readonly approved?: string;
-  readonly live?: string;
+  readonly approved?: TemplateSourceVersion;
+  readonly live?: TemplateSourceVersion;
 }
+
+/**
+ * The admin preview frame of one version (review M2): served by Kobe as text/html with a
+ * sandboxing header CSP (opaque origin, no network), like D25 artifacts; never `srcdoc`.
+ */
+export const templateFrameUrl = (id: string, uri: string, version: "live" | "approved") =>
+  `${BASE}/${encodeURIComponent(id)}/templates/frame?uri=${encodeURIComponent(uri)}&version=${version}`;
 
 export async function listConnectorTemplates(
   id: string,

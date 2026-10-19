@@ -22,9 +22,12 @@ import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential
 import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
 import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
+import { isSameSiteFrameRequest } from "../artifacts/serve.js";
+import { APP_FRAME_HEADERS } from "../connectors/app-frame.js";
 import {
   approveConnectorTemplates,
   approveTemplatesSchema,
+  connectorTemplateFrame,
   connectorTemplateSource,
   reviewConnectorTemplates,
 } from "../connectors/template-review.js";
@@ -282,6 +285,26 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     return source
       ? c.json({ source })
       : c.json({ code: "not_found", message: "That template is not pinned or pending." }, 404);
+  });
+
+  // The admin preview of a template's live or approved bytes (KOBE-434 review M2): text/html only
+  // with the app frame's header CSP (sandbox allow-scripts: an opaque origin even top-level, no
+  // network), only into a frame of Kobe's own page. Members never reach this route (site
+  // permission above); MA-5's member route serves only approved templates.
+  app.get("/:id/templates/frame", async (c) => {
+    if (!isSameSiteFrameRequest(c.req.raw.headers, deps.publicUrl)) {
+      return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
+    }
+    const id = idSchema.safeParse(c.req.param("id"));
+    const uri = c.req.query("uri");
+    const which = c.req.query("version");
+    const html =
+      id.success && uri !== undefined && (which === "live" || which === "approved")
+        ? await connectorTemplateFrame(db, id.data, uri, which)
+        : undefined;
+    return html === undefined
+      ? c.json({ code: "not_found", message: "That template version is not there." }, 404)
+      : new Response(html, { headers: APP_FRAME_HEADERS });
   });
 
   // Approve templates, each with the pinned hash of the live version that was reviewed.

@@ -40,7 +40,7 @@ see and remove before sending.
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **D27** MCP                           | It extends D27. D27 lists "MCP resources/prompts UI" as _later_. This spec brings forward **only `ui://` templates rendered as apps**, and keeps everything else D27 says. Resources stay unavailable to Pi, and data is never read through `resources/read` (Catalyst M13 agrees). Templates are pinned and drift exactly like tools. **Chris must approve this amendment (Q1).** |
 | **D29** Policy                        | Unchanged. App calls go through the same decision, at a new enforcement point `app_bridge`, in a mode stricter than `auto`: allowed only if read-only and not denied. Nothing is ever prompted.                                                                                                                                                                                    |
-| **D25** Artifacts                     | The same isolation pattern: an opaque-origin `srcdoc` iframe with a strict CSP injected into it. It is stricter here: `allow-scripts` only, without `allow-forms`.                                                                                                                                                                                                                 |
+| **D25** Artifacts                     | The same isolation pattern: an opaque-origin iframe loaded from a Kobe frame route whose header CSP carries `sandbox` (amended 2026-10-19). It is stricter here: `allow-scripts` only, without `allow-forms`, and no network.                                                                                                                                                      |
 | **D9** One active team                | An app belongs to the active team. Switching team destroys every open app frame.                                                                                                                                                                                                                                                                                                   |
 | **D10** Break-glass                   | Break-glass grants are never used to call connectors, so they never open apps.                                                                                                                                                                                                                                                                                                     |
 | **D32** Schedules, skill evals        | Not involved. Apps run only in a member's browser session.                                                                                                                                                                                                                                                                                                                         |
@@ -73,17 +73,20 @@ session and team data; the integrity of what the model sees and does; other conn
   approved, served by the Kobe server from Postgres. The browser never fetches the template from
   the upstream, and neither does the sandbox. A template that changed upstream is `drifted` and
   is not rendered until it is re-approved (§5).
-- **T2. Iframe isolation.** The frame is `<iframe sandbox="allow-scripts" srcdoc=…>`. Without
+- **T2. Iframe isolation.** The frame is `<iframe sandbox="allow-scripts" src=…>` loading Kobe's
+  app frame route (MA4, amended 2026-10-19: never `srcdoc`, which inherits Kobe's page CSP and
+  blocks the template's inline scripts). Without
   `allow-same-origin` its origin is opaque: no Kobe cookies, storage or DOM. Without
   `allow-top-navigation*`, `allow-popups`, `allow-forms`, `allow-modals` or
   `allow-downloads`, it cannot navigate, open windows, submit forms or download. No `allow`
   permission policy is granted (no camera, microphone, geolocation or clipboard-write).
   `referrerpolicy="no-referrer"`.
-- **T3. CSP.** A `<meta http-equiv="Content-Security-Policy">` is injected as the first element of
-  `<head>`, and Kobe's own page CSP is inherited by the `srcdoc` document. The policy is the
-  ext-apps restrictive default: `default-src 'none'; script-src 'unsafe-inline'; style-src
-'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src 'none';
-frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`.
+- **T3. CSP.** The frame route sends the policy as a **response header** (amended 2026-10-19; no
+  injected meta CSP): `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';
+style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src
+'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action
+'none'; frame-ancestors 'self'`. The `sandbox` directive gives the document an opaque origin even
+  when it is opened top-level, like D25's artifact frames.
   A `_meta.ui.csp` the server declares (domains to connect to, load resources from or frame) is
   **ignored in v1**: no app gets network access. Catalyst omits it (M11). Kobe's web CSP keeps
   `frame-src 'self'` / `about:` only, so no other frame is possible.
@@ -157,11 +160,12 @@ UI (D27 "later"; data would bypass tools, against Catalyst M13).
 **MA2. Rendering stack.** The web app hosts frames with the ext-apps **`AppBridge`**
 (`@modelcontextprotocol/ext-apps` v2.x, MIT) **if** a spike (ticket MA-5) confirms three things:
 it can be driven without a live MCP client in the browser (Kobe proxies `tools/call` through its
-own API); every method handler can be overridden or denied; and its peer dependencies
+own API); every method handler can be overridden or denied; it works in a frame loaded from
+Kobe's frame route (MA4 as amended), not `srcdoc`; and its peer dependencies
 (`@modelcontextprotocol/core`/`client`, Apache-2.0) do not ship transport code that the CSP or
 bundle budget rejects. Otherwise Kobe writes a thin host bridge of its own (about 300 lines, zod,
-against the ext-apps specification text). Kobe's own code does the iframe creation, the CSP
-injection (shared with D25's injector) and the source checks either way. No assistant-ui MCP Apps
+against the ext-apps specification text). Kobe's own code does the iframe creation, the frame
+route with its header CSP (as D25's frame routes) and the source checks either way. No assistant-ui MCP Apps
 renderer was found in the published `@assistant-ui/*` packages as of 2026-10-19
 (`@assistant-ui/react` 0.15.29). If one ships, it is weighed in the same spike. _Rejected:_ the
 ext-apps "sandbox proxy" double-iframe on a second origin, because it needs a second hostname and
@@ -192,11 +196,18 @@ _Rejected:_
 
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
-with the KOBE-431 probe credential), and stored in Postgres. The browser gets them from
-`GET /v1/team/apps/{appId}/template`, which returns **JSON** (`{html, sha256, connectorId,
-uri}`), never `text/html` on Kobe's origin. That response is `Cache-Control: no-store`,
-`X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'`. A template
-document therefore never runs as a top-level page on Kobe's origin.
+with the KOBE-431 probe credential), and stored in Postgres. **Amended 2026-10-19 (coordinator,
+KOBE-434 Q1):** a frame gets the template from a Kobe **frame route**, the way D25 serves
+artifacts: `text/html` only with the header CSP of T3 (`sandbox allow-scripts`, so an opaque
+origin even top-level; `default-src 'none'`; inline script and style only; no network),
+`X-Frame-Options: SAMEORIGIN`, `no-store`, `nosniff`, and only into a frame of Kobe's own page.
+No `srcdoc` and no meta CSP. A template therefore never runs as Kobe's origin. Two routes, never
+one with a flag: the site-admin review preview (KOBE-434,
+`GET /v1/site/connectors/{id}/templates/frame?uri=&version=live|approved`, which may show
+unapproved bytes) and MA-5's member route, which serves only pinned, approved templates. Every
+other template read (the review's source, `GET /v1/team/apps/{appId}/template`) is JSON with
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'`.
 
 **MA5. Browser principal and the decide pipeline.** It is defined in §6. The decision reuses the
 policy engine with `enforcement_point: "app_bridge"` and `mode: "app"`. The evaluation order is
@@ -354,8 +365,9 @@ sha256, pinned_hash, status pinned|drifted, proposed jsonb, pinned_by, pinned_at
   same email and the same in-app notice.
 - **Review.** The site admin's tool review (KOBE-102) shows changed templates with the old and new
   hash, size, declared `_meta.ui`, a source diff (escaped text, never rendered), and an optional
-  **preview** in the same sandboxed frame with the bridge stubbed: calls fail and nothing reaches
-  the upstream. Approval names the reviewed hash, and a stale hash is refused, like tools.
+  **preview** in the same kind of sandboxed frame (the admin frame route, MA4) with the bridge
+  stubbed: calls fail and nothing reaches the upstream. The source response carries the hashes
+  and meta of the same read, and approval sends that hash. Approval names the reviewed hash, and a stale hash is refused, like tools.
 - **Credentials.** Probes use `chooseProbeCredential` (KOBE-431: the site key, else the key of the
   admin who pinned it). The template therefore drift-checks on the same schedule as the tools, and
   an `auth_required` skip is surfaced the same way.
@@ -522,8 +534,8 @@ hidden from Pi's catalog and from the proxy's `tools/list`, and refused at `/cal
 - ac-5: the template endpoint never answers `text/html`.
 
 **MA-5. Host bridge and app frame (web).** A spike decides between AppBridge and Kobe's own
-bridge (MA2) and records the result in the ticket ledger. Then: `AppFrame` (srcdoc,
-`sandbox="allow-scripts"`, the injected CSP shared with D25, a host header, no `allow`
+bridge (MA2) and records the result in the ticket ledger. Then: `AppFrame` (Kobe's member
+frame route with the T3 header CSP, as amended in MA4; `sandbox="allow-scripts"`, a host header, no `allow`
 permissions, inline and expanded placement), the bridge (source and origin check, zod per method,
 the §7 table, per-frame limits) and the licence inventory.
 

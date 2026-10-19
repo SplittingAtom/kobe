@@ -264,8 +264,12 @@ describe("app template review (KOBE-434)", () => {
       {
         source: {
           uri: "ui://c/explorer",
-          approved: "<p>old</p>",
-          live: "<p>old</p>\n<script>alert(1)</script>",
+          approved: { ...version("1".repeat(64), "a".repeat(64), 10), html: "<p>old</p>" },
+          // The source read is newer than the list: its hash is the one approved (review M1).
+          live: {
+            ...version("3".repeat(64), "c".repeat(64), 40),
+            html: "<p>old</p>\n<script>alert(1)</script>",
+          },
         },
       },
     ] as const,
@@ -279,6 +283,10 @@ describe("app template review (KOBE-434)", () => {
     await userEvent.click(screen.getByRole("button", { name: /Review/ }));
     const card = await screen.findByRole("article", { name: "ui://c/explorer" });
     expect(within(card).getByText("2".repeat(64))).toBeTruthy();
+    // No approving blind: Approve waits for the source.
+    expect(
+      (within(card).getByRole("button", { name: /Approve/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     await userEvent.click(within(card).getByRole("button", { name: /Show source/ }));
     const diff = await within(card).findByLabelText("Source changes of ui://c/explorer");
     // Shown as text: the script is a line of the diff, not an element.
@@ -287,7 +295,11 @@ describe("app template review (KOBE-434)", () => {
     await userEvent.click(within(card).getByRole("button", { name: /^Preview/ }));
     const frame = within(card).getByTitle("Preview of ui://c/explorer");
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toMatch(/Content-Security-Policy.*connect-src 'none'/);
+    expect(frame.getAttribute("srcdoc")).toBeNull();
+    expect(frame.getAttribute("src")).toBe(
+      `${BASE}/c-1/templates/frame?uri=${encodeURIComponent("ui://c/explorer")}&version=live`,
+    );
+    expect(within(card).getByText("3".repeat(64))).toBeTruthy();
 
     const broken = screen.getByRole("article", { name: "ui://c/broken" });
     expect(within(broken).getByText("Cannot be approved")).toBeTruthy();
@@ -296,7 +308,7 @@ describe("app template review (KOBE-434)", () => {
     await userEvent.click(within(card).getByRole("button", { name: /Approve/ }));
     const post = calls.find((c) => c.method === "POST");
     expect(JSON.parse(String(post?.body))).toEqual({
-      templates: [{ uri: "ui://c/explorer", pinnedHash: "b".repeat(64) }],
+      templates: [{ uri: "ui://c/explorer", pinnedHash: "c".repeat(64) }],
     });
   });
 });
