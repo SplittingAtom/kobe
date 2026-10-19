@@ -97,6 +97,12 @@ describe("skill eval upgrade (KOBE-325)", () => {
         true,
         true,
       ]);
+      // A result's takeover count starts at 0 (re-review R1).
+      const takeovers = await c.query(
+        `SELECT column_default, is_nullable FROM information_schema.columns
+          WHERE table_name = 'skill_eval_results' AND column_name = 'takeovers'`,
+      );
+      expect(takeovers.rows).toEqual([{ column_default: "0", is_nullable: "NO" }]);
       // The connection's key is still one row per (team, user) for the member's own sandbox.
       const dup = await c
         .query(
