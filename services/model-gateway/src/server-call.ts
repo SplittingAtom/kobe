@@ -173,6 +173,14 @@ export function checkServerCallBody(
   if (parsed.data.messages.some((m) => m.content.length > maxChars)) {
     return bad("A message is longer than the purpose allows.");
   }
+  // The judge samples at its fixed temperature (0) or not at all (KOBE-326 review L4): the
+  // author's run and the Registry re-run must agree.
+  if (
+    claims.purpose === "eval_judge" &&
+    parsed.data.temperature !== SERVER_CALL_LIMITS.eval_judge.temperature
+  ) {
+    return bad("The eval judge runs at temperature 0.");
+  }
   const format = parsed.data.response_format;
   if (format !== undefined && !isDeepStrictEqual(format, formatOf(claims.purpose))) {
     return bad("This purpose may not ask for that response format.");

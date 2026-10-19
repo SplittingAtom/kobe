@@ -346,6 +346,21 @@ describe("server calls: the eval judge (KOBE-326 ac-2)", () => {
     expect(hits).toEqual([]);
   });
 
+  it("pins the judge's temperature to 0 (review L4)", async () => {
+    for (const temperature of [0.2, 1, undefined]) {
+      const r = await post(
+        "/v1/chat/completions",
+        asServer(judgeToken()),
+        judgeBody("data", { temperature }),
+      );
+      expect([r.status, r.code], String(temperature)).toEqual([400, "server_call_body_refused"]);
+    }
+    expect(hits).toEqual([]);
+    expect(
+      (await post("/v1/chat/completions", asServer(judgeToken()), judgeBody("d"))).status,
+    ).toBe(200);
+  });
+
   it("keeps the epilogue's message cap for titles, and the judge's own above it", async () => {
     const long = "x".repeat(SERVER_CALL_LIMITS.title.max_message_chars + 1);
     const title = await post("/v1/chat/completions", asServer(), {
