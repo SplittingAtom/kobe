@@ -80,6 +80,17 @@ skip the first card) and any it left at the end. `KOBE_USER` must be a team admi
 remember limits allowing "this conversation"; a few short model turns:
 `npx playwright test remember-approvals`.
 
+## MCP App frame isolation (KOBE-437)
+
+`app-frame.spec.ts` loads one of the member's live MCP Apps through Kobe's member frame route in
+a `sandbox="allow-scripts"` iframe, keeps the deployment's real response (status and the header
+CSP) and replaces only its body with a hostile probe (`tests/support/app-frame-probe.ts`). From
+inside the frame, `fetch` (remote and Kobe), `XMLHttpRequest`, `WebSocket`, a remote image, a
+form post, `window.open`, top navigation, `document.cookie`, storage and the parent's DOM must
+all fail, and each network attempt must be a CSP violation (not just an unreachable host). It
+needs an app the member can open (`KOBE_APP_ID`, or the first of `GET /v1/team/apps`) and skips
+without one. No tokens; it changes nothing: `npx playwright test app-frame`.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
