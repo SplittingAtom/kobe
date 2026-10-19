@@ -177,7 +177,12 @@ describe("AppFrame (KOBE-437)", () => {
     await fromApp({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }, child);
     await fromApp({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "t" } }, child);
     await settle();
-    expect(child.postMessage).not.toHaveBeenCalled();
+    // The old document is only told to tear down (review LOW-3), never sent B's data.
+    expect(
+      (child.postMessage as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c) => (c[0] as { method?: string }).method,
+      ),
+    ).toEqual(["ui/resource-teardown"]);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     // The new document gets its own card's input.
     await fromApp(
@@ -206,5 +211,16 @@ describe("AppFrame (KOBE-437)", () => {
     expect(request).toBeTruthy();
     await fromApp({ jsonrpc: "2.0", id: request.id, result: {} }, child);
     await expect(done).resolves.toBe(true);
+  });
+
+  it("tells the app to tear down whenever its frame is removed (review LOW-3)", () => {
+    const { posted } = mount();
+    cleanup();
+    expect(posted()).toContainEqual({
+      jsonrpc: "2.0",
+      id: expect.any(String),
+      method: "ui/resource-teardown",
+      params: {},
+    });
   });
 });

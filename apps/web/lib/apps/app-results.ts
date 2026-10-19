@@ -58,7 +58,12 @@ export function listAppResults(
 }
 
 export type StoredResult =
-  | { readonly ok: true; readonly result: Record<string, unknown> }
+  | {
+      readonly ok: true;
+      /** The input the upstream ran (review LOW-2): the app's tool-input, never Pi's entry. */
+      readonly input: Record<string, unknown> | null;
+      readonly result: Record<string, unknown>;
+    }
   | { readonly ok: false; readonly code: string };
 
 export async function readAppResult(
@@ -84,8 +89,11 @@ export async function readAppResult(
     return { ok: false, code: "unavailable" };
   }
   const result = (body as { result?: unknown } | null)?.result;
-  if (res.ok && typeof result === "object" && result !== null && !Array.isArray(result)) {
-    return { ok: true, result: result as Record<string, unknown> };
+  const input = (body as { input?: unknown } | null)?.input;
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  if (res.ok && isObject(result)) {
+    return { ok: true, input: isObject(input) ? input : null, result };
   }
   const code = (body as { code?: unknown } | null)?.code;
   return { ok: false, code: typeof code === "string" ? code.slice(0, 64) : "unavailable" };

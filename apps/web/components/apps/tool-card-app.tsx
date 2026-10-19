@@ -22,7 +22,9 @@ import { useThreadApps, type ThreadApps } from "./thread-apps";
  * - At most 3 live per thread; further cards say "Show app", and a click retires the frame least
  *   recently in view.
  * - Expand moves the app into the artifact column (one live frame per card): the card says
- *   "Opened in the side column" until the tab closes.
+ *   "Opened in the side column" until the tab closes. An expanded app keeps its card's slot
+ *   (review LOW-4): retiring it closes the tab.
+ * - The app's tool-input is the stored input the upstream ran (review LOW-2), not Pi's entry.
  * - A reload rebuilds the app from the stored result; nothing calls the upstream.
  */
 const NEAR = "100% 0px";
@@ -66,11 +68,9 @@ function useWithin(ref: React.RefObject<HTMLElement | null>, margin: string): bo
 
 export function ToolCardApp({
   toolCallId,
-  args,
   hasMarker,
 }: {
   readonly toolCallId: string;
-  readonly args: Record<string, unknown> | undefined;
   /** The live tool result carried an `app` marker (the list may not have it yet). */
   readonly hasMarker: boolean;
 }) {
@@ -90,7 +90,7 @@ export function ToolCardApp({
       </p>
     );
   }
-  return <LiveApp apps={apps} view={view} args={args} />;
+  return <LiveApp apps={apps} view={view} />;
 }
 
 function AppPlaceholder({
@@ -119,15 +119,7 @@ function AppPlaceholder({
   );
 }
 
-function LiveApp({
-  apps,
-  view,
-  args,
-}: {
-  readonly apps: ThreadApps;
-  readonly view: AppResultView;
-  readonly args: Record<string, unknown> | undefined;
-}) {
+function LiveApp({ apps, view }: { readonly apps: ThreadApps; readonly view: AppResultView }) {
   const panel = useArtifactPanel();
   const box = useRef<HTMLDivElement>(null);
   const handle = useRef<AppFrameHandle>(null);
@@ -137,17 +129,28 @@ function LiveApp({
   const expanded = panel?.tabs.open.includes(appTabId(cardKey)) ?? false;
   const slotted = apps.live.includes(cardKey);
   const [result, setResult] = useState<Record<string, unknown> | "failed" | null>(null);
+  const [input, setInput] = useState<Record<string, unknown> | undefined>(undefined);
   const [mounted, setMounted] = useState(false);
   const [height, setHeight] = useState(INLINE_HEIGHT);
   const { take, release, threadId, teamId } = apps;
 
   // Near the viewport: ask for a slot; far beyond it: give it back.
   useEffect(() => {
-    if (near && !expanded) take(cardKey, false);
-  }, [near, expanded, take, cardKey]);
+    if (near) take(cardKey, false);
+  }, [near, take, cardKey]);
   useEffect(() => {
-    if (!within || expanded) release(cardKey);
+    if (!within && !expanded) release(cardKey);
   }, [within, expanded, release, cardKey]);
+  // An expanded app holds its card's slot; when another card retires it, its tab closes.
+  const held = useRef(false);
+  useEffect(() => {
+    if (!expanded) held.current = false;
+    else if (slotted) held.current = true;
+    else if (held.current) {
+      held.current = false;
+      panel?.closeTab(appTabId(cardKey));
+    }
+  }, [expanded, slotted, panel, cardKey]);
   useEffect(() => () => release(cardKey), [release, cardKey]);
 
   // The stored result, read once (a reload rebuilds from it; the upstream is never called).
@@ -156,7 +159,9 @@ function LiveApp({
     if (!wanted || result !== null || threadId === null) return;
     let alive = true;
     void readAppResult(threadId, view.resultRef, teamId).then((read) => {
-      if (alive) setResult(read.ok ? read.result : "failed");
+      if (!alive) return;
+      if (read.ok && read.input !== null) setInput(read.input);
+      setResult(read.ok ? read.result : "failed");
     });
     return () => {
       alive = false;
@@ -191,8 +196,9 @@ function LiveApp({
   );
   const expand = useCallback(() => {
     if (!panel || result === null || result === "failed") return;
-    panel.openApp({ cardKey, app, toolInput: args, toolResult: result });
-  }, [panel, result, cardKey, app, args]);
+    take(cardKey, true);
+    panel.openApp({ cardKey, app, toolInput: input, toolResult: result });
+  }, [panel, result, cardKey, app, input, take]);
 
   let body;
   if (expanded) {
@@ -211,7 +217,7 @@ function LiveApp({
         teamId={teamId}
         cardKey={cardKey}
         placement="inline"
-        toolInput={args}
+        toolInput={input}
         toolResult={result}
         initialHeight={height}
         onHeight={setHeight}

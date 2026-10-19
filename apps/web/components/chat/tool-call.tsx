@@ -286,11 +286,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         result={props.result ?? activity.result?.preview}
       />
       {props.toolName.startsWith("mcp__") && (
-        <ToolCardApp
-          toolCallId={props.toolCallId}
-          args={props.args as Record<string, unknown> | undefined}
-          hasMarker={activity.result?.app !== undefined}
-        />
+        <ToolCardApp toolCallId={props.toolCallId} hasMarker={activity.result?.app !== undefined} />
       )}
     </section>
   );

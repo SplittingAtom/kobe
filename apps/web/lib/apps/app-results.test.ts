@@ -25,8 +25,12 @@ describe("app results client (KOBE-438)", () => {
 
   it("reads a stored result raw, with its keys as the upstream sent them", async () => {
     const result = { structuredContent: { table_name: "t" } };
-    const fetchFn = vi.fn(async () => json(200, { result }));
-    expect(await readAppResult(T, "r", T, fetchFn)).toEqual({ ok: true, result });
+    const fetchFn = vi.fn(async () => json(200, { input: { q: "t" }, result }));
+    expect(await readAppResult(T, "r", T, fetchFn)).toEqual({
+      ok: true,
+      input: { q: "t" },
+      result,
+    });
     const [, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
     expect(new Headers(init.headers).get("x-kobe-team")).toBe(T);
     expect(await readAppResult(T, "r", T, async () => json(409, { code: "text_only" }))).toEqual({

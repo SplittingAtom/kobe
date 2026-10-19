@@ -131,6 +131,24 @@ describe("apps in tool cards (KOBE-438)", () => {
     );
   });
 
+  it("counts an expanded app toward the 3 live frames (review LOW-4)", async () => {
+    const ids = ["tc1", "tc2", "tc3", "tc4"];
+    const { t, prompt } = thread(ids);
+    fake.appResults.set(
+      t,
+      ids.map((id) => view(prompt, id)),
+    );
+    for (const id of ids) fake.appResultBodies.set(`ref-${id}`, { id });
+    openApp(fake, t);
+    await waitFor(() => expect(frames()).toHaveLength(3), { timeout: 4_000 });
+    const first = must(document.querySelector('[data-kobe-app-card="ref-tc1"]')) as HTMLElement;
+    fireEvent.click(within(first).getByRole("button", { name: "Expand" }));
+    await within(first).findByText("Opened in the side column");
+    // Two inline frames and the column's: still three, and the fourth card still waits.
+    await waitFor(() => expect(frames()).toHaveLength(3), { timeout: 4_000 });
+    expect(screen.getByRole("button", { name: "Show app" })).toBeTruthy();
+  });
+
   it("expands into the artifact column and says so in the card", async () => {
     const { t, prompt } = thread(["tc1"]);
     fake.appResults.set(t, [view(prompt, "tc1")]);

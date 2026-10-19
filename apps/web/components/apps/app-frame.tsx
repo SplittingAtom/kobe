@@ -1,7 +1,15 @@
 "use client";
 
 import { AppWindow } from "lucide-react";
-import { useEffect, useImperativeHandle, useRef, useState, type Ref, type RefObject } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+  type RefObject,
+} from "react";
 import { appFrameUrl, callAppTool, listAppTools } from "../../lib/apps/app-api";
 import { APP_FRAME_SANDBOX } from "../../lib/apps/app-frame";
 import type { DisplayMode, ModelContext } from "../../lib/apps/bridge-schema";
@@ -163,6 +171,16 @@ function FrameInstance(
       attached.detach();
     };
   }, [fixed, bridgeRef]);
+
+  // Every removal (scrolled away, a closed tab, a thread or team switch, another branch) tells
+  // the app first (spec §7, review LOW-3): a layout cleanup runs while the iframe is still in the
+  // page, before the bridge detaches. Owners that can wait use `AppFrameHandle.teardown`.
+  useLayoutEffect(
+    () => () => {
+      void bridge.current?.teardown(0);
+    },
+    [],
+  );
 
   useEffect(() => {
     bridge.current?.notify("ui/notifications/host-context-changed", {
