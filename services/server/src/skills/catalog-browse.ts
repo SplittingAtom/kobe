@@ -7,6 +7,7 @@ import { readVerified } from "./blob-read.js";
 import { MIN_TEAMS } from "./catalog-admin.js";
 import { hostStandings } from "../egress/host-standing.js";
 import { readPackage } from "./registry/review-diff.js";
+import { readCatalogSwitches } from "./settings.js";
 
 /**
  * The member's Catalog tab (KOBE-336, SK25): every catalog skill with an approved version, as seen
@@ -42,6 +43,8 @@ export interface TeamState {
   } | null;
   /** The caller added it for themselves in this team (SK25 member add). */
   readonly addedByMe: boolean;
+  /** The caller's Add for me here: its version and pin mode (KOBE-338). */
+  readonly myAdd: { readonly semver: string; readonly pinMode: string } | null;
   /** A Team admin blocked it in this team. */
   readonly blocked: boolean;
 }
@@ -114,6 +117,8 @@ type CardRow = Record<string, unknown> & {
   pin_mode: string | null;
   access: string | null;
   added_by_me: boolean;
+  add_semver: string | null;
+  add_pin_mode: string | null;
   blocked: boolean;
 };
 
@@ -153,15 +158,19 @@ async function cardRows(
              WHERE st.skill_id = s.id AND t.kind = 'topic' AND t.status = 'active'
              ORDER BY t.name) AS topics,
       iv.semver AS install_semver, i.pin_mode::text AS pin_mode, i.access::text AS access,
-      EXISTS (SELECT 1 FROM member_skill_enablements e
-               WHERE e.team_id = ${who.teamId} AND e.user_id = ${who.userId}
-                 AND e.catalog_skill_id = s.id AND e.enabled) AS added_by_me,
+      ma.semver IS NOT NULL AS added_by_me, ma.semver AS add_semver, ma.pin_mode AS add_pin_mode,
       EXISTS (SELECT 1 FROM team_skill_blocks b
                WHERE b.team_id = ${who.teamId} AND b.skill_id = s.id) AS blocked
       FROM registry_skills s
       JOIN LATERAL (${LATEST}) l ON true
       LEFT JOIN team_skill_installs i ON i.team_id = ${who.teamId} AND i.skill_id = s.id
       LEFT JOIN registry_versions iv ON iv.id = i.version_id
+      -- The caller's own Add for me (KOBE-338): a row with a version, not an on/off choice.
+      LEFT JOIN LATERAL (
+        SELECT av.semver, e.pin_mode::text AS pin_mode FROM member_skill_enablements e
+          JOIN registry_versions av ON av.id = e.version_id
+         WHERE e.team_id = ${who.teamId} AND e.user_id = ${who.userId}
+           AND e.catalog_skill_id = s.id AND e.enabled) ma ON true
      WHERE s.status <> 'archived'
        ${skillId ? sql`AND s.id = ${skillId}` : sql``}
        ${
@@ -204,6 +213,8 @@ function toCard(r: CardRow, counts: Map<string, number>): CatalogCard {
         ? { semver: r.install_semver, pinMode: r.pin_mode, access: r.access ?? "available" }
         : null,
       addedByMe: r.added_by_me,
+      myAdd:
+        r.add_semver && r.add_pin_mode ? { semver: r.add_semver, pinMode: r.add_pin_mode } : null,
       blocked: r.blocked,
     },
   };
@@ -215,6 +226,8 @@ export interface CatalogPage {
   readonly skills: readonly CatalogCard[];
   /** Every active topic tag, for the filter. */
   readonly tags: readonly string[];
+  /** The team switch "Members may add catalog skills for themselves" (KOBE-338, SK25). */
+  readonly membersMayAdd: boolean;
 }
 
 export async function browseCatalog(
@@ -224,11 +237,14 @@ export async function browseCatalog(
 ): Promise<CatalogPage> {
   const counts = await teamsInstalled(db);
   const ranks = new Map([...counts].map(([id, n]) => [id, rank(shown(n))]));
-  const rows = await withTeam(db, who.teamId, (tx) => cardRows(tx, who, query, undefined, ranks));
+  const { rows, membersMayAdd } = await withTeam(db, who.teamId, async (tx) => ({
+    rows: await cardRows(tx, who, query, undefined, ranks),
+    membersMayAdd: (await readCatalogSwitches(tx, who.teamId)).membersMayAdd,
+  }));
   const sorted = rows.map((r) => toCard(r, counts));
   const tags = await db.execute<{ name: string }>(sql`
     SELECT name FROM registry_tags WHERE kind = 'topic' AND status = 'active' ORDER BY name`);
-  return { skills: sorted, tags: tags.rows.map((t) => t.name) };
+  return { skills: sorted, tags: tags.rows.map((t) => t.name), membersMayAdd };
 }
 
 export interface CatalogVersion {
@@ -262,6 +278,10 @@ export interface CatalogDetail extends CatalogCard {
   readonly agents: readonly { readonly id: string; readonly name: string }[];
   /** The caller may ask the Team admins for a host (D28 needs `team.chat`, review-336 L3). */
   readonly canRequestEgress: boolean;
+  /** The team switch "Members may add catalog skills for themselves" (KOBE-338). */
+  readonly membersMayAdd: boolean;
+  /** The caller may block the skill in this team (Team admins). */
+  readonly canBlock: boolean;
 }
 
 const PUBLISHED = ["approved", "deprecated", "withdrawn", "revoked"];
@@ -396,6 +416,7 @@ export async function catalogDetail(
           : {},
       hosts,
       agents: await agentsUsing(tx, who.teamId, row.name),
+      membersMayAdd: (await readCatalogSwitches(tx, who.teamId)).membersMayAdd,
     };
   });
   if (!found) return null;
@@ -423,5 +444,7 @@ export async function catalogDetail(
     maintainers: maintainers.rows.map((r) => r.name),
     agents: found.agents,
     canRequestEgress: teamRoleAllows(who.role, "team.chat"),
+    membersMayAdd: found.membersMayAdd,
+    canBlock: teamRoleAllows(who.role, "team.skills.installs.manage"),
   };
 }

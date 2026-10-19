@@ -71,6 +71,7 @@ import { teamOffboardedRoutes } from "./routes/team-offboarded.js";
 import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamSkillInstallRoutes } from "./routes/team-skill-installs.js";
+import { teamSkillBlockRoutes } from "./routes/team-skill-blocks.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
@@ -180,6 +181,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/settings", teamSettingsRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/skills", teamSkillInstallRoutes(deps));
+  api.route("/team/skills", teamSkillBlockRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));

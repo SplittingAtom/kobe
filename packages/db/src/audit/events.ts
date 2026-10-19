@@ -1735,6 +1735,45 @@ export const AUDIT_EVENTS = {
     name: catalogName,
     semver: z.string().max(32),
   }),
+  /** A member added a catalog skill for themselves in the team (KOBE-338, SK25): Add for me. */
+  "skill.member_add.added": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+  }),
+  /** A member changed the version or pin mode of their own add (KOBE-338). */
+  "skill.member_add.changed": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    previous: z.strictObject({
+      semver: z.string().max(32),
+      pinMode: z.enum(["pinned", "within_major", "latest"]),
+    }),
+  }),
+  /** A member removed their own add (KOBE-338). A block's removals are counted on the block. */
+  "skill.member_add.removed": event("team", { skillId: id, name: catalogName }),
+  /**
+   * A Team admin blocked a catalog skill in the team (KOBE-338, SK25): members' adds of it were
+   * removed (`addsRemoved`) and new ones are refused.
+   */
+  "skill.catalog.blocked": event("team", {
+    skillId: id,
+    name: catalogName,
+    addsRemoved: z.number().int().min(0),
+  }),
+  /** A Team admin lifted the team's block of a catalog skill (KOBE-338). */
+  "skill.catalog.unblocked": event("team", { skillId: id, name: catalogName }),
+  /** A member asked the Team admins to install a catalog skill: Request for team (KOBE-338). */
+  "skill.catalog.team_requested": event("team", { skillId: id, name: catalogName }),
+  /** A Team admin dismissed the open requests for a catalog skill (KOBE-338). */
+  "skill.catalog.team_request_dismissed": event("team", {
+    skillId: id,
+    name: catalogName,
+    requests: z.number().int().min(0),
+  }),
 
   // ── skill drafts: the Workbench (KOBE-320, SK11); ids and names, never file contents ──
   /** A member started a draft in the team (private to them until shared). */

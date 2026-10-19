@@ -4,6 +4,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
 import { invalidRequest } from "../teams/http.js";
+import { notifyTeamAdmins, requestForTeam } from "../skills/install-requests.js";
 
 const querySchema = z.object({
   q: z.string().max(200).optional(),
@@ -45,6 +46,32 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
     const who = { teamId: c.get("team").id, userId: c.get("user").id, role: c.get("team").role };
     const detail = await catalogDetail(db, deps.blobs ?? null, who, id.data);
     return detail ? c.json(detail) : c.json(notFound, 404);
+  });
+
+  // Request for team (KOBE-338, SK25): asks this team's admins to install the skill.
+  app.post("/:skillId/request", requireTeamPermission("team.read"), async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json({ code: "not_found", message: "No such catalog skill." }, 404);
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    const r = await requestForTeam(db, { teamId, userId, skillId: id.data });
+    if (!r.ok) {
+      const errors = {
+        not_found: [404, "No such catalog skill."],
+        installed: [409, "The team has this skill installed already."],
+        blocked: [409, "A Team admin blocked this skill in the team."],
+      } as const;
+      const [status, message] = errors[r.code];
+      return c.json({ code: r.code, message }, status);
+    }
+    if (r.alreadyRequested) return c.json({ requested: true, alreadyRequested: true });
+    deps.background.run("skill install request email failed", () =>
+      notifyTeamAdmins(
+        { db, mailer: deps.mailer, publicUrl: new URL(deps.publicUrl).origin },
+        { teamId, userId, skill: r.name },
+      ),
+    );
+    return c.json({ requested: true, alreadyRequested: false }, 202);
   });
 
   return app;
