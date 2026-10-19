@@ -1170,6 +1170,13 @@
       "when": 1792432247293,
       "tag": "0166_skill_usage_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1792432840659,
+      "tag": "0167_notifications_skill_retirement",
+      "breakpoints": true
     }
   ]
 }

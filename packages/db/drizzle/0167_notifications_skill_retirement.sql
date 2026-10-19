@@ -1,0 +1,9 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_kind";--> statement-breakpoint
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_shape";--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "skill_semver" text;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_skill_semver" CHECK ("notifications"."skill_semver" IS NULL OR char_length("notifications"."skill_semver") BETWEEN 5 AND 32);--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_kind" CHECK ("notifications"."kind" IN ('schedule.run.succeeded', 'schedule.run.failed', 'schedule.run.interrupted', 'schedule.run.skipped_actions', 'schedule.paused', 'skill.member_add.blocked', 'skill.deprecated', 'skill.version.deprecated', 'skill.version.withdrawn', 'skill.version.revoked', 'skill.version.unrevoked'));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_shape" CHECK (("notifications"."kind" = 'schedule.paused' AND "notifications"."thread_id" IS NULL AND "notifications"."run_id" IS NULL AND "notifications"."paused_by" IS NOT NULL AND "notifications"."skill_id" IS NULL AND "notifications"."skill_semver" IS NULL)
+        OR ("notifications"."kind" LIKE 'skill.%' AND "notifications"."schedule_id" IS NULL AND "notifications"."thread_id" IS NULL AND "notifications"."run_id" IS NULL AND "notifications"."paused_by" IS NULL AND "notifications"."skill_id" IS NOT NULL
+          AND ("notifications"."skill_semver" IS NOT NULL) = ("notifications"."kind" LIKE 'skill.version.%'))
+        OR ("notifications"."kind" <> 'schedule.paused' AND "notifications"."kind" NOT LIKE 'skill.%' AND "notifications"."thread_id" IS NOT NULL AND "notifications"."run_id" IS NOT NULL AND "notifications"."paused_by" IS NULL AND "notifications"."skill_id" IS NULL AND "notifications"."skill_semver" IS NULL));
