@@ -3,6 +3,7 @@ import { recordAudit } from "../../audit/record.js";
 import { dutiesProblem } from "./review-duties.js";
 import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
 import { versionRow } from "./review-queue.js";
+import { externalCautionFindings } from "./external-scan-result.js";
 
 /**
  * Caution findings are acknowledged one by one before Approve (KOBE-334 review M1, coordinator
@@ -23,10 +24,18 @@ interface StoredFinding {
 export const findingKey = (f: StoredFinding): string =>
   `${String(f.rule ?? "")}@${String(f.file ?? "")}:${Number(f.line ?? 0)}`;
 
-/** The scan's Caution findings' keys (a finding stored without a severity counts as Caution). */
+/**
+ * The scan's Caution findings' keys (a finding stored without a severity counts as Caution), and
+ * the external scanner's Caution findings (KOBE-341: advisory, acknowledged like Kobe's own).
+ */
 export function cautionKeys(scan: Record<string, unknown>): string[] {
   const findings = Array.isArray(scan.findings) ? (scan.findings as StoredFinding[]) : [];
-  return [...new Set(findings.filter((f) => f.severity !== "block").map(findingKey))];
+  return [
+    ...new Set([
+      ...findings.filter((f) => f.severity !== "block").map(findingKey),
+      ...externalCautionFindings(scan).map(findingKey),
+    ]),
+  ];
 }
 
 export interface Acknowledgement {

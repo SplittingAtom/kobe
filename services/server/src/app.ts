@@ -39,7 +39,11 @@ import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
 import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
 import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
 import { skillCatalogRoutes } from "./routes/skill-catalog.js";
-import { skillPromotionRoutes, teamSkillPromotionRoutes } from "./routes/skill-promotions.js";
+import {
+  skillPromotionRoutes,
+  teamSkillPromotionRoutes,
+  type ExternalScanStarter,
+} from "./routes/skill-promotions.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
@@ -101,6 +105,8 @@ export interface AppOptions {
   readonly workspaceFiles?: WorkspaceFilesOptions;
   /** Skill evals (KOBE-325): the event hub and the runner's kick. */
   readonly skillEvals?: SkillEvalRouteOptions;
+  /** The optional external skill scanner (KOBE-341): scans each new Registry submission. */
+  readonly externalScan?: ExternalScanStarter;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -220,8 +226,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/skills/catalog", catalogMaintainerRoutes(deps));
   api.route("/skills/catalog", skillUsageRoutes(deps));
   api.route("/skills/catalog", skillCatalogRoutes(deps));
-  api.route("/skills/promotions", skillPromotionRoutes(deps));
-  api.route("/team/skill-promotions", teamSkillPromotionRoutes(deps));
+  api.route("/skills/promotions", skillPromotionRoutes(deps, options.externalScan));
+  api.route("/team/skill-promotions", teamSkillPromotionRoutes(deps, options.externalScan));
   api.route("/skills", skillRoutes(deps));
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

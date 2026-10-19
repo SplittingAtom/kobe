@@ -43,6 +43,10 @@ export const PROBLEMS = {
     message: "The Registry is not ready: a Site admin creates the Registry team first.",
   },
   not_found: { code: "not_found", message: "No such Registry version." },
+  external_scan_running: {
+    code: "external_scan_running",
+    message: "The external scanner is still scanning this version: wait for its findings.",
+  },
   decided: { code: "decided", message: "This version was already decided." },
   claimed: { code: "claimed", message: "Another reviewer has claimed this version." },
   blocked: {

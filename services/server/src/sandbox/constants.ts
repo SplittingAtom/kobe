@@ -18,6 +18,11 @@ export const ANNOTATION_USER_ID = LABEL_USER_ID;
 /** On the pods (and Job, ConfigMap) of an Orbit eval (KOBE-93); the value is the eval id. */
 export const LABEL_ORBIT_EVAL = `${DOMAIN}/orbit-eval`;
 /**
+ * On the pods (and Job, ConfigMap) of an external skill scan (KOBE-341); the value is the Registry
+ * version id. Their own NetworkPolicy allows nothing (`skillScanNetworkPolicyManifest`).
+ */
+export const LABEL_SKILL_SCAN = `${DOMAIN}/skill-scan`;
+/**
  * Skill eval sandboxes (KOBE-325): label `true` on their claims and pods (the reaper lists them by
  * it); the eval thread on the claim and pod (label for listing, annotation for identity).
  */

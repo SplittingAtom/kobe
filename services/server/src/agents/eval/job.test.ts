@@ -223,7 +223,10 @@ describe("eval NetworkPolicy", () => {
       spec: { podSelector: unknown };
     };
     expect(general.spec.podSelector).toEqual({
-      matchExpressions: [{ key: "kobe.splittingatom.io/orbit-eval", operator: "DoesNotExist" }],
+      matchExpressions: [
+        { key: "kobe.splittingatom.io/orbit-eval", operator: "DoesNotExist" },
+        { key: "kobe.splittingatom.io/skill-scan", operator: "DoesNotExist" },
+      ],
     });
   });
 });

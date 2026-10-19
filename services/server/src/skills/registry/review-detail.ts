@@ -4,6 +4,7 @@ import { listMaintainers, type Maintainer } from "./maintainers.js";
 import { similarCatalogNames } from "./names-db.js";
 import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
 import { acknowledgements, findingKey, type Acknowledgement } from "./review-findings.js";
+import type { ExternalFinding } from "./external-scan-result.js";
 import { rerunHistory, type RerunEntry } from "./rerun.js";
 import {
   approvedVersion,
@@ -48,6 +49,11 @@ export interface ReviewFinding {
   readonly severity: string;
   readonly category: string | null;
   readonly acknowledged: Acknowledgement | null;
+  /** `kobe` (Kobe's own scanner) or `external` (the optional external scanner, KOBE-341). */
+  readonly source: "kobe" | "external";
+  /** External findings: the scanner's title and own severity ("info" ones need no acknowledgement). */
+  readonly title?: string;
+  readonly externalSeverity?: string;
 }
 
 export interface ReviewDetail {
@@ -103,7 +109,7 @@ function capabilitiesOf(manifest: Record<string, unknown>) {
 async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unknown> }) {
   const raw = Array.isArray(v.scan.findings) ? (v.scan.findings as Record<string, unknown>[]) : [];
   const acks = await acknowledgements(db, v.id);
-  return raw.map((f): ReviewFinding => {
+  const own = raw.map((f): ReviewFinding => {
     const key = findingKey(f);
     const severity = f.severity === "block" ? "block" : "caution";
     return {
@@ -114,8 +120,32 @@ async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unkn
       severity,
       category: typeof f.category === "string" ? f.category : null,
       acknowledged: severity === "caution" ? (acks.get(key) ?? null) : null,
+      source: "kobe",
     };
   });
+  const ext = v.scan.external as { status?: unknown; findings?: unknown } | undefined;
+  const external =
+    ext?.status === "done" && Array.isArray(ext.findings)
+      ? (ext.findings as ExternalFinding[])
+      : [];
+  return [
+    ...own,
+    ...external.map((f): ReviewFinding => {
+      const key = findingKey(f);
+      return {
+        key,
+        rule: f.rule,
+        file: f.file,
+        line: f.line,
+        severity: f.severity,
+        category: f.category,
+        acknowledged: f.severity === "caution" ? (acks.get(key) ?? null) : null,
+        source: "external",
+        title: f.title,
+        externalSeverity: f.externalSeverity,
+      };
+    }),
+  ];
 }
 
 async function teamName(db: KobeDb, teamId: unknown): Promise<string | null> {

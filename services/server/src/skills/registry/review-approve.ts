@@ -81,6 +81,9 @@ export async function approveProblems(
     problems.push(PROBLEMS.block_verdict);
   else if (v.verdict === "block" && input && !input.note)
     problems.push(PROBLEMS.scan_override_reason);
+  // The external scanner (KOBE-341) reports before a decision is made on the version.
+  const external = v.scan.external as { status?: unknown } | undefined;
+  if (external?.status === "running") problems.push(PROBLEMS.external_scan_running);
   const findings = await unacknowledgedProblem(tx, v.id, v.scan);
   if (findings) problems.push(findings);
   const duties = await dutiesProblem(tx, v, userId);
