@@ -1051,6 +1051,13 @@
       "when": 1792404101610,
       "tag": "0149_connector_refresh_probe",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1792404145376,
+      "tag": "0150_connector_pinned_by_backfill",
+      "breakpoints": true
     }
   ]
 }
