@@ -14,6 +14,7 @@ import {
 import { canonicalJson } from "@kobe/protocol";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
+import { logger } from "../logger.js";
 import type { ReconcileLock } from "../sandbox/reconcile-lock.js";
 import { applyDrift, approvedHash } from "./drift.js";
 import { buildSnapshot } from "./pin.js";
@@ -42,13 +43,20 @@ import {
  *
  * The same probe re-reads the connector's MCP Apps `ui://` templates (KOBE-433) and applies
  * {@link applyTemplateDrift} to them in the same transaction, so a skip (`auth_required` or any
- * failure) leaves the templates exactly as they were, like the tools.
+ * failure) leaves the templates exactly as they were, like the tools. Template trouble never
+ * stops the tools' refresh: when the proxy skipped the template part, or writing the templates
+ * fails (a savepoint), the tools still refresh and the outcome says `templatesSkipped`.
  */
 export const CONNECTOR_REFRESH_LOCK = "kobe.connector-refresh";
 
+/** Why the template part of a pass did not run (the tools still refreshed). */
+interface TemplatesSkipped {
+  readonly templatesSkipped?: string;
+}
+
 export type RefreshOutcome =
-  | { readonly status: "unchanged" }
-  | {
+  | ({ readonly status: "unchanged" } & TemplatesSkipped)
+  | ({
       readonly status: "drifted";
       readonly changed: number;
       readonly added: number;
@@ -57,11 +65,17 @@ export type RefreshOutcome =
         readonly changed: number;
         readonly added: number;
         readonly removed: number;
+        readonly invalid: number;
       };
-    }
+    } & TemplatesSkipped)
   | { readonly status: "skipped"; readonly reason: string };
 
-const NO_TEMPLATE_DRIFT: Omit<TemplateDrift, "templates"> = { changed: [], added: [], removed: [] };
+const NO_TEMPLATE_DRIFT: Omit<TemplateDrift, "templates"> = {
+  changed: [],
+  added: [],
+  removed: [],
+  invalid: [],
+};
 
 const skipped = (reason: string): RefreshOutcome => ({ status: "skipped", reason });
 
@@ -131,9 +145,10 @@ export async function refreshConnector(
   if (!probed.ok) return recordSkip(db, connectorId, row, probed.failure);
   const live = buildSnapshot(row.name, probed.tools);
   if (!live.ok) return recordSkip(db, connectorId, row, live.failure);
-  // A prober that reports no templates leaves them alone (the real proxy always reports them).
+  // A prober that reports no templates, or skipped them, leaves them alone.
   const liveUi: LiveEntry[] | undefined =
     probed.uiResources === undefined ? undefined : liveTemplates(live.tools, probed.uiResources);
+  const uiSkipped = probed.uiSkipped === undefined ? {} : { templatesSkipped: probed.uiSkipped };
 
   return db.transaction(async (tx): Promise<RefreshOutcome> => {
     const [locked] = await tx
@@ -147,14 +162,16 @@ export async function refreshConnector(
     const drift = applyDrift(before, live.tools);
     const templates =
       liveUi === undefined ? undefined : await driftTemplates(tx, connectorId, liveUi);
-    const ui = templates ?? NO_TEMPLATE_DRIFT;
+    const ui = templates?.ok ? templates.drift : NO_TEMPLATE_DRIFT;
+    const notes = templates?.ok === false ? { templatesSkipped: "write_failed" } : uiSkipped;
     const toolEvents = drift.changed.length + drift.added.length + drift.removed.length;
-    const events = toolEvents + ui.changed.length + ui.added.length + ui.removed.length;
+    const templateEvents =
+      ui.changed.length + ui.added.length + ui.removed.length + ui.invalid.length;
     const toolsSame = canonicalJson(drift.tools) === canonicalJson(before);
     // A drifted tool returning to its approval rewrites the rows without being an event.
-    if (events === 0 && toolsSame) {
+    if (toolEvents + templateEvents === 0 && toolsSame) {
       await markRefreshed(tx, connectorId);
-      return { status: "unchanged" };
+      return { status: "unchanged", ...notes };
     }
     await tx
       .update(connectors)
@@ -166,7 +183,7 @@ export async function refreshConnector(
         updatedAt: sql`now()`,
       })
       .where(eq(connectors.id, connectorId));
-    if (events === 0) return { status: "unchanged" };
+    if (toolEvents + templateEvents === 0) return { status: "unchanged", ...notes };
     await recordAudit(tx, {
       action: "mcp.connector.drift",
       actor: SYSTEM_ACTOR,
@@ -176,7 +193,12 @@ export async function refreshConnector(
         changed: drift.changed,
         added: drift.added,
         removed: drift.removed,
-        templates: { changed: ui.changed, added: ui.added, removed: ui.removed },
+        templates: {
+          changed: ui.changed,
+          added: ui.added,
+          removed: ui.removed,
+          invalid: ui.invalid,
+        },
       },
     });
     return {
@@ -188,21 +210,33 @@ export async function refreshConnector(
         changed: ui.changed.length,
         added: ui.added.length,
         removed: ui.removed.length,
+        invalid: ui.invalid.length,
       },
+      ...notes,
     };
   });
 }
 
-/** Template drift under the connector's row lock; written at once (they have their own rows). */
+/**
+ * Template drift under the connector's row lock, in a savepoint: if writing them fails, the
+ * templates stay as they were and the tools' refresh goes on (review MEDIUM-1).
+ */
 async function driftTemplates(
   tx: KobeTx,
   connectorId: string,
   live: readonly LiveEntry[],
-): Promise<TemplateDrift> {
-  const stored = await loadTemplates(tx, connectorId, { forUpdate: true });
-  const drift = applyTemplateDrift(stored, live);
-  await writeTemplateDrift(tx, connectorId, stored, drift.templates);
-  return drift;
+): Promise<{ readonly ok: true; readonly drift: TemplateDrift } | { readonly ok: false }> {
+  try {
+    return await tx.transaction(async (sp) => {
+      const stored = await loadTemplates(sp, connectorId, { forUpdate: true });
+      const drift = applyTemplateDrift(stored, live);
+      await writeTemplateDrift(sp, connectorId, stored, drift.templates);
+      return { ok: true as const, drift };
+    });
+  } catch (err) {
+    logger.warn({ err, connectorId }, "connector template refresh failed; tools still refreshed");
+    return { ok: false };
+  }
 }
 
 export interface RefreshSummary {
@@ -236,6 +270,12 @@ export async function refreshAllConnectors(
     try {
       const outcome = await refreshConnector(db, prober, id, options);
       if (outcome.status === "drifted") drifted += 1;
+      if (outcome.status !== "skipped" && outcome.templatesSkipped !== undefined) {
+        logger.info(
+          { connectorId: id, reason: outcome.templatesSkipped },
+          "connector templates not refreshed",
+        );
+      }
       if (outcome.status === "skipped") {
         skippedCount += 1;
         logger.info({ connectorId: id, reason: outcome.reason }, "connector refresh skipped");

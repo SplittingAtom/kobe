@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   UI_RESOURCE_MAX_BYTES,
+  UI_RESOURCE_META_MAX_BYTES,
   UI_RESOURCE_MIME_TYPE,
   UI_RESOURCE_URI_PATTERN,
   uiResourceMetaSchema,
@@ -45,6 +46,8 @@ export type LiveEntry = LiveTemplate | InvalidTemplate;
 /** A row of `connector_ui_resources` as drift sees it. */
 export interface StoredTemplate extends LiveTemplate {
   readonly status: "pinned" | "drifted";
+  /** A site admin approved `html` (first pin or review); never true for a refresh-found row. */
+  readonly approved: boolean;
   readonly proposed?: ProposedUiResource | undefined;
 }
 
@@ -78,10 +81,24 @@ export function templatePinnedHash(
   return sha256(canonicalJson({ uri: t.uri, mimeType: t.mimeType, sha256: t.sha256, ui: t.meta }));
 }
 
+/**
+ * `_meta.ui` Postgres will store: no NUL anywhere and at most half the column's cap serialized
+ * (jsonb's text form adds spaces, so the CHECK can never be the first to refuse it).
+ */
+function storableMeta(meta: UiResourceMeta): boolean {
+  const text = JSON.stringify(meta);
+  return (
+    !text.includes("\\u0000") && Buffer.byteLength(text, "utf8") <= UI_RESOURCE_META_MAX_BYTES / 2
+  );
+}
+
 function validate(entry: z.infer<typeof proxyEntrySchema>): LiveEntry {
   if ("error" in entry) return invalid(entry.uri, "ui_resource_invalid");
   if (entry.mimeType !== UI_RESOURCE_MIME_TYPE) return invalid(entry.uri, "ui_resource_invalid");
-  if (/[\uD800-\uDFFF]/u.test(entry.text)) return invalid(entry.uri, "ui_resource_invalid");
+  // Lone surrogates are not UTF-8; Postgres refuses NUL in text and jsonb (review MEDIUM-1).
+  if (/[\uD800-\uDFFF]/u.test(entry.text) || entry.text.includes("\0")) {
+    return invalid(entry.uri, "ui_resource_invalid");
+  }
   if (Buffer.byteLength(entry.text, "utf8") > UI_RESOURCE_MAX_BYTES) {
     return invalid(entry.uri, "ui_resource_invalid");
   }
@@ -91,7 +108,7 @@ function validate(entry: z.infer<typeof proxyEntrySchema>): LiveEntry {
     return invalid(entry.uri, "ui_resource_hash_mismatch");
   }
   const ui = uiResourceMetaSchema.safeParse(entry.meta.ui ?? {});
-  if (!ui.success) return invalid(entry.uri, "ui_resource_invalid");
+  if (!ui.success || !storableMeta(ui.data)) return invalid(entry.uri, "ui_resource_invalid");
   const base = { uri: entry.uri, mimeType: entry.mimeType, sha256: hash, meta: ui.data };
   try {
     return { ...base, html: entry.text, pinnedHash: templatePinnedHash(base) };
@@ -137,13 +154,25 @@ export function pinTemplates(entries: readonly LiveEntry[]): PinTemplatesResult 
   return { ok: true, templates };
 }
 
+export interface InvalidReport {
+  readonly uri: string;
+  readonly reason: UiResourceFailure;
+}
+
 export interface TemplateDrift {
   readonly templates: StoredTemplate[];
   /** URIs newly drifted or drifted further this pass; never content. */
   readonly changed: string[];
+  /** New upstream, or a new one whose live bytes became valid: awaiting a first approval. */
   readonly added: string[];
   readonly removed: string[];
+  /** Live templates that cannot be pinned, newly so this pass (new or approved), with why. */
+  readonly invalid: InvalidReport[];
 }
+
+type Step =
+  | { readonly next: StoredTemplate; readonly event?: "changed" | "added" | "invalid" }
+  | { readonly next?: undefined; readonly event?: undefined };
 
 const approvedOf = (t: StoredTemplate): StoredTemplate => {
   const { proposed: _proposed, ...rest } = t;
@@ -167,46 +196,84 @@ const sameProposal = (a: ProposedUiResource | undefined, b: ProposedUiResource):
     ? "invalid" in b && a.invalid === b.invalid
     : !("invalid" in b) && a.pinned_hash === b.pinned_hash);
 
-/** One stored template against its live entry; `undefined` removes it. */
-function driftOne(
-  stored: StoredTemplate,
-  now: LiveEntry,
-): { readonly next?: StoredTemplate; readonly changed: boolean } {
-  if (stored.status === "drifted" && stored.proposed === undefined) {
-    // New upstream and not yet approved: it follows the live bytes, and goes if they turn invalid.
-    if ("invalid" in now) return { changed: false };
-    return { next: { ...now, status: "drifted" }, changed: false };
-  }
-  if (!("invalid" in now) && now.pinnedHash === stored.pinnedHash) {
-    return { next: approvedOf(stored), changed: false };
-  }
-  const proposal = proposalOf(now);
-  if (sameProposal(stored.proposed, proposal)) return { next: stored, changed: false };
+/**
+ * A row for a new template whose live bytes cannot be pinned: an empty, never approved
+ * placeholder carrying the reason, so the notice can show it and the event is not repeated.
+ */
+function placeholder(now: InvalidTemplate): StoredTemplate {
+  const base = { uri: now.uri, mimeType: UI_RESOURCE_MIME_TYPE, sha256: sha256(""), meta: {} };
   return {
-    next: { ...approvedOf(stored), status: "drifted", proposed: proposal },
-    changed: true,
+    ...base,
+    html: "",
+    pinnedHash: templatePinnedHash(base),
+    status: "drifted",
+    approved: false,
+    proposed: { invalid: now.invalid },
   };
 }
 
-/** Drift for templates, by the same rules as tools (`applyDrift`). */
+/** A template no site admin approved yet: it follows the live bytes and is never pinned here. */
+function driftNew(stored: StoredTemplate, now: LiveEntry): Step {
+  if ("invalid" in now) {
+    if (sameProposal(stored.proposed, proposalOf(now))) return { next: stored };
+    return { next: { ...stored, proposed: { invalid: now.invalid } }, event: "invalid" };
+  }
+  const next: StoredTemplate = { ...now, status: "drifted", approved: false };
+  // It was invalid and now has bytes to review: a new template again.
+  return stored.proposed === undefined ? { next } : { next, event: "added" };
+}
+
+function driftOne(stored: StoredTemplate, now: LiveEntry): Step {
+  if (!stored.approved) return driftNew(stored, now);
+  if (!("invalid" in now) && now.pinnedHash === stored.pinnedHash) {
+    return { next: approvedOf(stored) };
+  }
+  const proposal = proposalOf(now);
+  if (sameProposal(stored.proposed, proposal)) return { next: stored };
+  return {
+    next: { ...approvedOf(stored), status: "drifted", proposed: proposal },
+    event: "invalid" in now ? "invalid" : "changed",
+  };
+}
+
+const reasonOf = (t: StoredTemplate): UiResourceFailure =>
+  t.proposed !== undefined && "invalid" in t.proposed ? t.proposed.invalid : "ui_resource_invalid";
+
+/** Drift for templates, by the same rules as tools (`applyDrift`), plus invalid reports. */
 export function applyTemplateDrift(
   current: readonly StoredTemplate[],
   live: readonly LiveEntry[],
 ): TemplateDrift {
   const liveByUri = new Map(live.map((t) => [t.uri, t]));
   const known = new Set(current.map((t) => t.uri));
-  const result: TemplateDrift = { templates: [], changed: [], added: [], removed: [] };
+  const result: TemplateDrift = {
+    templates: [],
+    changed: [],
+    added: [],
+    removed: [],
+    invalid: [],
+  };
+  const record = (step: Step, uri: string) => {
+    if (step.next === undefined) {
+      result.removed.push(uri);
+      return;
+    }
+    result.templates.push(step.next);
+    if (step.event === "invalid") result.invalid.push({ uri, reason: reasonOf(step.next) });
+    else if (step.event !== undefined) result[step.event].push(uri);
+  };
   for (const stored of current) {
     const now = liveByUri.get(stored.uri);
-    const step = now === undefined ? { changed: false } : driftOne(stored, now);
-    if (step.next === undefined) result.removed.push(stored.uri);
-    else result.templates.push(step.next);
-    if (step.changed) result.changed.push(stored.uri);
+    record(now === undefined ? {} : driftOne(stored, now), stored.uri);
   }
   for (const now of live) {
-    if (known.has(now.uri) || "invalid" in now) continue;
-    result.templates.push({ ...now, status: "drifted" });
-    result.added.push(now.uri);
+    if (known.has(now.uri)) continue;
+    record(
+      "invalid" in now
+        ? { next: placeholder(now), event: "invalid" }
+        : { next: { ...now, status: "drifted", approved: false }, event: "added" },
+      now.uri,
+    );
   }
   return result;
 }

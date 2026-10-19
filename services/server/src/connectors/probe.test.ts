@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProxyProbe } from "./probe.js";
+import { PROBE_MAX_ANSWER_BYTES, createProxyProbe } from "./probe.js";
 
 const make = (respond: () => Response | Promise<Response>) => {
   const seen: { url: string; init: RequestInit }[] = [];
@@ -52,6 +52,32 @@ describe("createProxyProbe", () => {
     expect(await probe.probe("https://x")).toEqual({ ok: true, tools: [], uiResources: ui });
     const bad = make(() => Response.json({ ok: true, tools: [], ui_resources: "x" }));
     expect(await bad.probe.probe("https://x")).toEqual({ ok: false, failure: "proxy_unavailable" });
+  });
+
+  it("passes a skipped template part on, retries without templates on an older proxy, caps the answer", async () => {
+    const skipped = make(() =>
+      Response.json({ ok: true, tools: [], ui_resources_skipped: "rpc_error" }),
+    );
+    expect(await skipped.probe.probe("https://x")).toEqual({
+      ok: true,
+      tools: [],
+      uiSkipped: "rpc_error",
+    });
+    let calls = 0;
+    const old = make(() =>
+      ++calls === 1
+        ? Response.json({ code: "invalid_request" }, { status: 400 })
+        : Response.json({ ok: true, tools: [] }),
+    );
+    expect(await old.probe.probe("https://x")).toEqual({ ok: true, tools: [] });
+    expect(old.seen.map((s) => JSON.parse(String(s.init.body)))).toEqual([
+      { url: "https://x", ui_resources: true },
+      { url: "https://x" },
+    ]);
+    const huge = make(
+      () => new Response(`{"ok":true,"tools":[],"pad":"${"x".repeat(PROBE_MAX_ANSWER_BYTES)}"}`),
+    );
+    expect(await huge.probe.probe("https://x")).toEqual({ ok: false, failure: "too_large" });
   });
 
   it("passes the proxy's failure code through", async () => {

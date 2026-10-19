@@ -80,6 +80,20 @@ describe("liveTemplates (KOBE-433)", () => {
     expect(a && "html" in a).toBe(true);
   });
 
+  it("refuses NUL in the html or the declared _meta.ui, an oversized _meta.ui and a control URI", () => {
+    const entries = liveTemplates(tools("ui://c/1", "ui://c/2", "ui://c/3", "ui://c/\u0000"), [
+      raw("ui://c/1", "a\u0000b"),
+      raw("ui://c/2", "a", { ui: { csp: { connectDomains: ["x\u0000"] } } }),
+      raw("ui://c/3", "a", { ui: { csp: "x".repeat(8 * 1024) } }),
+      raw("ui://c/\u0000", "a"),
+    ]);
+    expect(entries).toEqual([
+      { uri: "ui://c/1", invalid: "ui_resource_invalid" },
+      { uri: "ui://c/2", invalid: "ui_resource_invalid" },
+      { uri: "ui://c/3", invalid: "ui_resource_invalid" },
+    ]);
+  });
+
   it("ignores entries that do not parse", () => {
     expect(liveTemplates(tools("ui://c/a"), [{ uri: 7 }, null, "x"])).toEqual([]);
   });
@@ -107,17 +121,13 @@ describe("applyTemplateDrift", () => {
   const pinned = (uri: string, text: string): StoredTemplate => {
     const e = live(uri, text);
     if (!("html" in e)) throw new Error("fixture");
-    return { ...e, status: "pinned" };
+    return { ...e, status: "pinned", approved: true };
   };
+  const none = { changed: [], added: [], removed: [], invalid: [] };
 
   it("keeps unchanged templates and reports nothing", () => {
     const r = applyTemplateDrift([pinned("ui://c/a", "a")], [live("ui://c/a", "a")]);
-    expect(r).toEqual({
-      templates: [pinned("ui://c/a", "a")],
-      changed: [],
-      added: [],
-      removed: [],
-    });
+    expect(r).toEqual({ templates: [pinned("ui://c/a", "a")], ...none });
   });
 
   it("drifts a changed template, keeping the approved bytes and proposing the live ones", () => {
@@ -134,12 +144,15 @@ describe("applyTemplateDrift", () => {
     expect(back.templates).toEqual([pinned("ui://c/a", "a")]);
   });
 
-  it("drifts an approved template whose live one is invalid, with the reason", () => {
+  it("reports an approved template whose live one is invalid as invalid, with the reason", () => {
     const r = applyTemplateDrift(
       [pinned("ui://c/a", "a")],
       [{ uri: "ui://c/a", invalid: "ui_resource_invalid" }],
     );
-    expect(r.changed).toEqual(["ui://c/a"]);
+    expect(r).toMatchObject({
+      changed: [],
+      invalid: [{ uri: "ui://c/a", reason: "ui_resource_invalid" }],
+    });
     expect(r.templates[0]).toMatchObject({
       status: "drifted",
       html: "a",
@@ -147,30 +160,55 @@ describe("applyTemplateDrift", () => {
     });
   });
 
-  it("adds a new template as drifted, which then follows the live bytes", () => {
+  it("adds a new template as drifted and unapproved, which then follows the live bytes", () => {
     const r = applyTemplateDrift([], [live("ui://c/n", "n1")]);
     expect(r.added).toEqual(["ui://c/n"]);
-    expect(r.templates[0]).toMatchObject({ status: "drifted", html: "n1" });
+    expect(r.templates[0]).toMatchObject({ status: "drifted", approved: false, html: "n1" });
     expect(r.templates[0]).not.toHaveProperty("proposed");
     const again = applyTemplateDrift(r.templates, [live("ui://c/n", "n2")]);
-    expect(again).toMatchObject({ changed: [], added: [], removed: [] });
-    expect(again.templates[0]).toMatchObject({ status: "drifted", html: "n2" });
+    expect(again).toMatchObject(none);
+    expect(again.templates[0]).toMatchObject({ status: "drifted", approved: false, html: "n2" });
+    // Never pinned by drift, even when the live bytes equal its own.
+    expect(applyTemplateDrift(again.templates, [live("ui://c/n", "n2")]).templates[0]?.status).toBe(
+      "drifted",
+    );
   });
 
-  it("never adds an invalid new template, and removes a new one that turned invalid", () => {
-    expect(applyTemplateDrift([], [{ uri: "ui://c/n", invalid: "ui_resource_invalid" }])).toEqual({
-      templates: [],
-      changed: [],
+  it("reports an invalid new template once, with its reason, as an unapproved placeholder", () => {
+    const bad: LiveEntry = { uri: "ui://c/n", invalid: "ui_resource_hash_mismatch" };
+    const r = applyTemplateDrift([], [bad]);
+    expect(r).toMatchObject({
       added: [],
-      removed: [],
+      invalid: [{ uri: "ui://c/n", reason: "ui_resource_hash_mismatch" }],
     });
+    expect(r.templates[0]).toMatchObject({
+      status: "drifted",
+      approved: false,
+      html: "",
+      proposed: { invalid: "ui_resource_hash_mismatch" },
+    });
+    expect(applyTemplateDrift(r.templates, [bad])).toMatchObject(none);
+    // Another reason is a new report; valid bytes later make it a new template to review.
+    const other = applyTemplateDrift(r.templates, [{ ...bad, invalid: "ui_resource_invalid" }]);
+    expect(other.invalid).toEqual([{ uri: "ui://c/n", reason: "ui_resource_invalid" }]);
+    const fixed = applyTemplateDrift(other.templates, [live("ui://c/n", "ok")]);
+    expect(fixed.added).toEqual(["ui://c/n"]);
+    expect(fixed.templates[0]).toMatchObject({ html: "ok", approved: false });
+    expect(fixed.templates[0]).not.toHaveProperty("proposed");
+  });
+
+  it("reports a new template that turned invalid as invalid, not removed", () => {
     const added = applyTemplateDrift([], [live("ui://c/n", "n")]).templates;
     const r = applyTemplateDrift(added, [{ uri: "ui://c/n", invalid: "ui_resource_invalid" }]);
-    expect(r).toMatchObject({ templates: [], removed: ["ui://c/n"] });
+    expect(r).toMatchObject({
+      removed: [],
+      invalid: [{ uri: "ui://c/n", reason: "ui_resource_invalid" }],
+    });
+    expect(r.templates[0]).toMatchObject({ status: "drifted", approved: false });
   });
 
   it("removes a template the server no longer lists", () => {
     const r = applyTemplateDrift([pinned("ui://c/a", "a")], []);
-    expect(r).toEqual({ templates: [], changed: [], added: [], removed: ["ui://c/a"] });
+    expect(r).toEqual({ templates: [], ...none, removed: ["ui://c/a"] });
   });
 });

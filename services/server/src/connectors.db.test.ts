@@ -425,7 +425,7 @@ describe("drift and re-approval (KOBE-102)", () => {
       changed: 1,
       added: 0,
       removed: 0,
-      templates: { changed: 0, added: 0, removed: 0 },
+      templates: { changed: 0, added: 0, removed: 0, invalid: 0 },
     });
     const s = await state(id);
     expect(s.tools_snapshot.map((x) => [x.name, x.status])).toEqual([

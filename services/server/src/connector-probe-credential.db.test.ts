@@ -154,7 +154,7 @@ describe("the periodic refresh of an auth-required connector (ac-1, ac-2)", () =
       changed: 0,
       added: 1,
       removed: 0,
-      templates: { changed: 0, added: 0, removed: 0 },
+      templates: { changed: 0, added: 0, removed: 0, invalid: 0 },
     });
     expect(probedKeys).toEqual([ADMIN_KEY]);
     const r = await row(id);
@@ -340,6 +340,7 @@ describe("site admins are told about an auth_required skip (ac-3)", () => {
       name: "notify-a",
       tools: [],
       templates: [],
+      invalidTemplates: [],
       refreshSkipped: "auth_required",
     });
     const aliceNotices = (await alice.get("/v1/me/connector-notices")).json.notices as {

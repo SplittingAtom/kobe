@@ -26,6 +26,8 @@ export type ProbeResult =
        * templates.ts). Absent when the prober did not report any (refresh then leaves them alone).
        */
       readonly uiResources?: readonly unknown[];
+      /** The proxy skipped the template part (e.g. `resources/list` failed): templates stay. */
+      readonly uiSkipped?: string;
     }
   | { readonly ok: false; readonly failure: ProbeFailure };
 
@@ -51,6 +53,10 @@ const answerSchema = z.discriminatedUnion("ok", [
     ok: z.literal(true),
     tools: z.array(z.unknown()),
     ui_resources: z.array(z.unknown()).optional(),
+    ui_resources_skipped: z
+      .string()
+      .regex(/^[a-z_]{1,32}$/)
+      .optional(),
   }),
   z.object({ ok: z.literal(false), failure: z.enum(FAILURES) }),
 ]);
@@ -66,34 +72,68 @@ export interface ProxyProbeOptions {
   readonly fetch?: typeof fetch;
 }
 
+/** Largest proxy answer the server reads (16 templates of 512 KiB plus tools fit well). */
+export const PROBE_MAX_ANSWER_BYTES = 16 * 1024 * 1024;
+
+/** The body as text, refusing more than `max` bytes while it streams. */
+async function readCapped(res: Response, max: number): Promise<string | undefined> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
   const doFetch = options.fetch ?? fetch;
+  const post = (body: Record<string, unknown>) =>
+    doFetch(`${options.baseUrl}/internal/v1/probe`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${options.internalKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs),
+      redirect: "error",
+    });
   return {
     async probe(url, apiKey) {
+      const base = { url, ...(apiKey === undefined ? {} : { api_key: apiKey }) };
       try {
-        const res = await doFetch(`${options.baseUrl}/internal/v1/probe`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${options.internalKey}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            url,
-            ...(apiKey === undefined ? {} : { api_key: apiKey }),
-            ui_resources: true,
-          }),
-          signal: AbortSignal.timeout(options.timeoutMs),
-          redirect: "error",
-        });
+        let res = await post({ ...base, ui_resources: true });
+        // A proxy older than KOBE-433 refuses the field: probe the tools alone (review LOW-1);
+        // without `uiResources` the refresh leaves the templates as they are.
+        if (res.status === 400) {
+          await res.body?.cancel();
+          res = await post(base);
+        }
         if (res.status !== 200) {
           await res.body?.cancel();
           return { ok: false, failure: "proxy_unavailable" };
         }
-        const parsed = answerSchema.safeParse(await res.json());
+        const text = await readCapped(res, PROBE_MAX_ANSWER_BYTES);
+        if (text === undefined) return { ok: false, failure: "too_large" };
+        const parsed = answerSchema.safeParse(JSON.parse(text));
         if (!parsed.success) return { ok: false, failure: "proxy_unavailable" };
         if (!parsed.data.ok) return parsed.data;
-        const { tools, ui_resources: uiResources } = parsed.data;
-        return uiResources === undefined ? { ok: true, tools } : { ok: true, tools, uiResources };
+        const { tools, ui_resources: uiResources, ui_resources_skipped: uiSkipped } = parsed.data;
+        return {
+          ok: true,
+          tools,
+          ...(uiResources === undefined ? {} : { uiResources }),
+          ...(uiSkipped === undefined ? {} : { uiSkipped }),
+        };
       } catch {
         return { ok: false, failure: "proxy_unavailable" };
       }

@@ -20,7 +20,7 @@ import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../sch
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
-import { UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
+import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
 
 /**
  * The audit event taxonomy (KOBE-15, spec D31). Every audited action is one entry: its dotted name,
@@ -1628,7 +1628,8 @@ export const AUDIT_EVENTS = {
    * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
    * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
    * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
-   * `templates` (KOBE-433): the same for the connector's MCP Apps `ui://` templates, by URI.
+   * `templates` (KOBE-433): the same for the connector's MCP Apps `ui://` templates, by URI, and
+   * `invalid`: live templates that cannot be pinned, with the failure code.
    */
   "mcp.connector.drift": event("site", {
     connectorId: id,
@@ -1641,6 +1642,11 @@ export const AUDIT_EVENTS = {
         changed: z.array(uiUri).max(64),
         added: z.array(uiUri).max(64),
         removed: z.array(uiUri).max(64),
+        /** Live templates that cannot be pinned (newly so), with the reason (review HIGH-2). */
+        invalid: z
+          .array(z.strictObject({ uri: uiUri, reason: z.enum(UI_RESOURCE_FAILURES) }))
+          .max(64)
+          .optional(),
       })
       .optional(),
   }),

@@ -14,7 +14,7 @@ import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { driftRecipients, siteAdminIds, type DriftRecipient } from "./drift-recipients.js";
 import { CONSOLE_PATHS } from "../mail/console-paths.js";
-import { driftedTemplateUris } from "./template-store.js";
+import { driftedTemplates } from "./template-store.js";
 
 /**
  * Emails about connector tool drift (KOBE-103, D27). Driven by the audit log, so no table is
@@ -45,6 +45,8 @@ interface DriftEvent {
   readonly tools: readonly string[];
   /** MCP Apps templates (URIs) changed or new in this event (KOBE-433). */
   readonly templates: readonly string[];
+  /** Templates that cannot be pinned, with the failure code (review HIGH-2). */
+  readonly invalid: readonly InvalidTemplateNote[];
   /** Skip events: whose key the connector uses, for the remedy text (review L2). */
   readonly source?: "member" | "site";
 }
@@ -56,13 +58,29 @@ const bullets = (names: readonly string[]): string[] => {
   return [...shown, ...(more > 0 ? [`  ... and ${more} more`] : [])];
 };
 
+export interface InvalidTemplateNote {
+  readonly uri: string;
+  readonly reason: string;
+}
+
+/** What each failure code means, for the email (never the template itself). */
+const INVALID_REASONS: Readonly<Record<string, string>> = {
+  ui_resource_invalid:
+    "not one UTF-8 HTML document of type text/html;profile=mcp-app up to 512 KiB",
+  ui_resource_hash_mismatch: "its declared contentHash does not match its bytes",
+};
+
 export function driftMessage(
   publicUrl: string,
-  event: Pick<DriftEvent, "name" | "tools"> & { readonly templates?: readonly string[] },
+  event: Pick<DriftEvent, "name" | "tools"> & {
+    readonly templates?: readonly string[];
+    readonly invalid?: readonly InvalidTemplateNote[];
+  },
   to: string,
 ): MailMessage {
   const name = oneLine(event.name);
   const templates = event.templates ?? [];
+  const invalid = event.invalid ?? [];
   const toolPart =
     event.tools.length === 0
       ? []
@@ -81,6 +99,16 @@ export function driftMessage(
           ...bullets(templates),
           "",
         ];
+  const invalidPart =
+    invalid.length === 0
+      ? []
+      : [
+          `These app templates of the ${name} connector cannot be pinned, so Kobe does not show them:`,
+          ...bullets(
+            invalid.map((t) => `${t.uri} (${INVALID_REASONS[t.reason] ?? oneLine(t.reason)})`),
+          ),
+          "",
+        ];
   return {
     to,
     subject:
@@ -90,6 +118,7 @@ export function driftMessage(
     text: [
       ...toolPart,
       ...templatePart,
+      ...invalidPart,
       `Site admins can review them at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
     ].join("\n"),
   };
@@ -131,6 +160,20 @@ export function skippedMessage(
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
 
+/** The `invalid` reports of a drift event's `templates` field. */
+const invalidNotes = (value: unknown): InvalidTemplateNote[] => {
+  const list =
+    typeof value === "object" && value !== null ? (value as { invalid?: unknown }).invalid : [];
+  return Array.isArray(list)
+    ? list.flatMap((x: unknown) => {
+        const e = x as { uri?: unknown; reason?: unknown };
+        return typeof e?.uri === "string" && typeof e.reason === "string"
+          ? [{ uri: e.uri, reason: e.reason }]
+          : [];
+      })
+    : [];
+};
+
 /** The changed and added template URIs of a drift event's `templates` field. */
 const templateNames = (value: unknown): string[] =>
   typeof value === "object" && value !== null
@@ -160,6 +203,7 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
       name: target.name,
       tools: [...strings(target.changed), ...strings(target.added)],
       templates: templateNames(target.templates),
+      invalid: invalidNotes(target.templates),
     });
   }
   return events;
@@ -173,7 +217,7 @@ async function stillDrifted(db: KobeDb, connectorId: string): Promise<boolean> {
     .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)));
   if (!row) return false;
   if (parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted")) return true;
-  return ((await driftedTemplateUris(db)).get(connectorId)?.length ?? 0) > 0;
+  return ((await driftedTemplates(db)).get(connectorId)?.length ?? 0) > 0;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadEnvelope } from "@kobe/db";
+import { canonicalJson } from "@kobe/protocol";
 import { driftNoticesFor } from "./connectors/drift-recipients.js";
 import { notifyDrift } from "./connectors/drift-notify.js";
 import type { ProbeResult } from "./connectors/probe.js";
@@ -34,6 +35,10 @@ interface Upstream {
   resources: Record<string, unknown>[];
   /** Answer only this key (api_key connectors). */
   key?: string;
+  /** The proxy skipped the template part (e.g. resources/list failed). */
+  skipped?: string;
+  /** Runs while the probe is in flight (a concurrent admin edit). */
+  during?: () => Promise<unknown>;
 }
 const upstreams = new Map<string, Upstream>();
 const probedKeys: (string | undefined)[] = [];
@@ -52,11 +57,14 @@ const template = (uri: string, text: string, meta: Record<string, unknown> = {})
   meta: { "io.splittingatom/contentHash": sha(text), ...meta },
 });
 
-function answer(url: string, key: string | undefined): ProbeResult {
+async function answer(url: string, key: string | undefined): Promise<ProbeResult> {
   const up = upstreams.get(new URL(url).hostname);
   if (!up) return { ok: false, failure: "unreachable" };
   if (up.key !== undefined && key !== up.key) return { ok: false, failure: "auth_required" };
-  return { ok: true, tools: up.tools, uiResources: up.resources };
+  await up.during?.();
+  return up.skipped === undefined
+    ? { ok: true, tools: up.tools, uiResources: up.resources }
+    : { ok: true, tools: up.tools, uiSkipped: up.skipped };
 }
 
 beforeAll(async () => {
@@ -228,6 +236,7 @@ describe("template drift (ac-2)", () => {
       changed: ["ui://d/app"],
       added: ["ui://d/new"],
       removed: ["ui://d/old"],
+      invalid: [],
     });
     // The same live state again is no new event.
     expect(await refresh(id)).toEqual({ status: "unchanged" });
@@ -251,7 +260,10 @@ describe("template drift (ac-2)", () => {
     };
     const { id } = await register("apps-invalid", up);
     up.resources = [{ ...template("ui://i/app", "ok"), mimeType: "text/plain" }];
-    expect(await refresh(id)).toMatchObject({ status: "drifted", templates: { changed: 1 } });
+    expect(await refresh(id)).toMatchObject({
+      status: "drifted",
+      templates: { changed: 0, invalid: 1 },
+    });
     expect(await rows(id)).toMatchObject([
       { status: "drifted", html: "ok", proposed: { invalid: "ui_resource_invalid" } },
     ]);
@@ -304,5 +316,162 @@ describe("the refresh credential covers templates (ac-4)", () => {
       await h.admin.query(`SELECT refresh_skipped FROM connectors WHERE id = $1`, [id])
     ).rows;
     expect(skip).toEqual({ refresh_skipped: "auth_required" });
+  });
+});
+
+describe("review fixes (KOBE-433 review)", () => {
+  const toolsOf = async (id: string) =>
+    (await h.admin.query(`SELECT tools_snapshot FROM connectors WHERE id = $1`, [id])).rows[0]
+      ?.tools_snapshot as { name: string; status: string; ui?: unknown; sha256: string }[];
+
+  it("HIGH-1: a tool pinned before KOBE-433 does not drift when its upstream names a template", async () => {
+    // G10's stored state: the tool pinned without `_meta`, so without `ui` in its hash.
+    const plain = { name: "open", description: "Opens the app", inputSchema: { type: "object" } };
+    const up: Upstream = { tools: [plain], resources: [] };
+    const { id } = await register("apps-legacy", up);
+    const [before] = await toolsOf(id);
+    expect(before).not.toHaveProperty("ui");
+    // Exactly G10's pin: SHA-256 of the canonical {name, description, inputSchema}.
+    expect(before?.sha256).toBe(
+      sha(
+        canonicalJson({
+          name: "open",
+          description: "Opens the app",
+          inputSchema: { type: "object" },
+        }),
+      ),
+    );
+    up.tools = [{ ...plain, _meta: { ui: { resourceUri: "ui://l/app" } } }];
+    up.resources = [template("ui://l/app", "<p>app</p>")];
+    expect(await refresh(id)).toMatchObject({
+      status: "drifted",
+      changed: 0,
+      added: 0,
+      removed: 0,
+      templates: { added: 1 },
+    });
+    const [after] = await toolsOf(id);
+    expect(after).toMatchObject({
+      name: "open",
+      status: "pinned",
+      ui: { resource_uri: "ui://l/app" },
+    });
+    expect(await rows(id)).toMatchObject([{ uri: "ui://l/app", status: "drifted" }]);
+    expect(await refresh(id)).toEqual({ status: "unchanged" });
+  });
+
+  it("HIGH-2: an invalid new template is reported once with its reason, never as removed", async () => {
+    const up: Upstream = {
+      tools: [appTool("open", "ui://v/app")],
+      resources: [template("ui://v/app", "ok")],
+    };
+    const { id } = await register("apps-report", up);
+    await h.admin.query(
+      `INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_by) VALUES ($1, $2, 'all', $3)`,
+      [team, id, rootId],
+    );
+    up.tools = [...up.tools, appTool("more", "ui://v/bad")];
+    up.resources = [
+      template("ui://v/app", "ok"),
+      { ...template("ui://v/bad", "x"), meta: { "io.splittingatom/contentHash": sha("y") } },
+    ];
+    expect(await refresh(id)).toMatchObject({
+      status: "drifted",
+      templates: { added: 0, invalid: 1 },
+    });
+    expect((await events("mcp.connector.drift", id)).at(-1)?.templates).toEqual({
+      changed: [],
+      added: [],
+      removed: [],
+      invalid: [{ uri: "ui://v/bad", reason: "ui_resource_hash_mismatch" }],
+    });
+    expect(await refresh(id)).toEqual({ status: "unchanged" });
+    expect(await servedTemplate(db(), id, "ui://v/bad")).toBeUndefined();
+    const notice = (await driftNoticesFor(db(), { id: rootId, siteRole: "admin" })).find(
+      (n) => n.connectorId === id,
+    );
+    expect(notice).toMatchObject({
+      templates: ["ui://v/bad"],
+      invalidTemplates: [{ uri: "ui://v/bad", reason: "ui_resource_hash_mismatch" }],
+    });
+    await notifyDrift({ db: db(), mailer: h.mailer, publicUrl: "https://kobe.test" });
+    const mail = h.mailer.to("root@apps.test").filter((m) => m.subject.includes("apps-report"));
+    expect(mail).toHaveLength(1);
+    expect(must(mail[0]).text).toMatch(/ui:\/\/v\/bad \(its declared contentHash does not match/);
+  });
+
+  it("MEDIUM-1: NUL fails a pin with ui_resource_invalid (no 500) and never breaks the tools' refresh", async () => {
+    const { pin } = await register("apps-nul", {
+      tools: [appTool("open", "ui://n/app")],
+      resources: [template("ui://n/app", "a\u0000b")],
+    });
+    expect(pin).toMatchObject({ ok: false, failure: "ui_resource_invalid" });
+
+    const up: Upstream = {
+      tools: [appTool("open", "ui://n2/app")],
+      resources: [template("ui://n2/app", "ok")],
+    };
+    const { id } = await register("apps-nul2", up);
+    up.tools = [...up.tools, { name: "later", inputSchema: { type: "object" } }];
+    up.resources = [
+      template("ui://n2/app", "ok", { ui: { csp: { connectDomains: ["x\u0000"] } } }),
+    ];
+    expect(await refresh(id)).toMatchObject({
+      status: "drifted",
+      added: 1,
+      templates: { invalid: 1 },
+    });
+    expect((await toolsOf(id)).map((t) => [t.name, t.status])).toEqual([
+      ["open", "pinned"],
+      ["later", "drifted"],
+    ]);
+  });
+
+  it("MEDIUM-3: a skipped template part leaves templates alone while tools refresh", async () => {
+    const up: Upstream = {
+      tools: [appTool("open", "ui://s/app")],
+      resources: [template("ui://s/app", "ok")],
+    };
+    const { id } = await register("apps-skip", up);
+    const before = await rows(id);
+    up.tools = [...up.tools, { name: "later", inputSchema: { type: "object" } }];
+    up.resources = [];
+    up.skipped = "rpc_error";
+    expect(await refresh(id)).toMatchObject({
+      status: "drifted",
+      added: 1,
+      templates: { changed: 0, added: 0, removed: 0, invalid: 0 },
+      templatesSkipped: "rpc_error",
+    });
+    expect(await rows(id)).toEqual(before);
+    expect(await servedTemplate(db(), id, "ui://s/app")).toBeDefined();
+  });
+
+  it("a refresh racing a URL change writes no template", async () => {
+    const up: Upstream = {
+      tools: [appTool("open", "ui://r/app")],
+      resources: [template("ui://r/app", "v1")],
+    };
+    const { id } = await register("apps-race", up);
+    upstreams.set("apps-race2.example", { tools: [], resources: [] });
+    up.resources = [template("ui://r/app", "v2")];
+    up.during = () => root.patch(`${BASE}/${id}`, { url: "https://apps-race2.example/mcp" });
+    expect(await refresh(id)).toEqual({ status: "skipped", reason: "changed" });
+    expect(await rows(id)).toEqual([]);
+  });
+
+  it("serves nothing of a disabled or deleted connector", async () => {
+    const { id } = await register("apps-off", {
+      tools: [appTool("open", "ui://o/app")],
+      resources: [template("ui://o/app", "ok")],
+    });
+    expect(await servedTemplate(db(), id, "ui://o/app")).toBeDefined();
+    await h.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [id]);
+    expect(await servedTemplate(db(), id, "ui://o/app")).toBeUndefined();
+    await h.admin.query(
+      `UPDATE connectors SET status = 'active', deleted_at = now() WHERE id = $1`,
+      [id],
+    );
+    expect(await servedTemplate(db(), id, "ui://o/app")).toBeUndefined();
   });
 });

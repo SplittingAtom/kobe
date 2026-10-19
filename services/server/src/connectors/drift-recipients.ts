@@ -14,7 +14,7 @@ import {
   withTeam,
   type KobeDb,
 } from "@kobe/db";
-import { driftedTemplateUris } from "./template-store.js";
+import { driftedTemplates } from "./template-store.js";
 
 /**
  * Who hears about connector tool drift (KOBE-103, D27). Today: every active site owner and
@@ -86,6 +86,8 @@ export interface DriftNotice {
   readonly tools: string[];
   /** URIs of the MCP Apps templates awaiting review (KOBE-433); they are not rendered meanwhile. */
   readonly templates: string[];
+  /** Those of them whose live template cannot be pinned, and why (review HIGH-2). */
+  readonly invalidTemplates: { readonly uri: string; readonly reason: string }[];
   /**
    * Site admins only (KOBE-431): the refresh cannot check this connector for changes, because it
    * asks for credentials and no site key or admin key is usable.
@@ -108,16 +110,20 @@ export async function driftNoticesFor(
     .from(connectors)
     .where(and(eq(connectors.status, "active"), isNull(connectors.deletedAt)))
     .orderBy(asc(connectors.name));
-  const templatesOf = await driftedTemplateUris(db);
+  const templatesOf = await driftedTemplates(db);
   const notices = rows.map((r): DriftNotice => {
     const tools = parseToolsSnapshot(r.snapshot)
       .filter((t) => t.status === "drifted")
       .map((t) => t.name);
+    const pending = templatesOf.get(r.id) ?? [];
     const notice = {
       connectorId: r.id,
       name: r.name,
       tools,
-      templates: templatesOf.get(r.id) ?? [],
+      templates: pending.map((t) => t.uri),
+      invalidTemplates: pending.flatMap((t) =>
+        t.reason === undefined ? [] : [{ uri: t.uri, reason: t.reason }],
+      ),
     };
     return r.skipped === "auth_required" && user.siteRole !== null
       ? { ...notice, refreshSkipped: "auth_required" }

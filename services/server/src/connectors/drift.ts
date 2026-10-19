@@ -1,5 +1,5 @@
 import type { PinnedTool, ProposedTool } from "@kobe/db";
-import { snapshotHash } from "./pin.js";
+import { snapshotHash, toolHash } from "./pin.js";
 
 /**
  * Drift (KOBE-102, spec D27): compares a connector's stored snapshot with a fresh one built from
@@ -39,6 +39,22 @@ function approvedOf(tool: PinnedTool): PinnedTool {
   return { ...rest, status: "pinned" };
 }
 
+/**
+ * A tool pinned before KOBE-433 has no `ui` and a hash without it. When the live tool names a
+ * template and is otherwise exactly the approved definition, the pin is adopted silently: the
+ * tool keeps its approved fields and gains `ui` and the new hash. The template itself still
+ * arrives as a new, unapproved template (review HIGH-1).
+ */
+function adoptsTemplate(stored: PinnedTool, live: PinnedTool): boolean {
+  if (stored.ui !== undefined || live.ui === undefined) return false;
+  const without = toolHash({
+    name: live.name,
+    description: live.description,
+    inputSchema: live.input_schema,
+  });
+  return without === stored.sha256;
+}
+
 export function applyDrift(
   current: readonly PinnedTool[],
   live: readonly PinnedTool[],
@@ -63,6 +79,8 @@ export function applyDrift(
     }
     if (now.sha256 === tool.sha256) {
       tools.push(approvedOf(tool));
+    } else if (adoptsTemplate(tool, now)) {
+      tools.push({ ...approvedOf(tool), ui: now.ui, sha256: now.sha256 });
     } else if (tool.proposed?.sha256 === now.sha256) {
       tools.push(tool);
     } else {

@@ -10,6 +10,7 @@ import {
   uiResourceMetaSchema,
   type KobeDb,
   type KobeTx,
+  type UiResourceFailure,
 } from "@kobe/db";
 import { canonicalJson } from "@kobe/protocol";
 import type { LiveTemplate, StoredTemplate } from "./templates.js";
@@ -30,6 +31,7 @@ const columns = {
   pinnedHash: connectorUiResources.pinnedHash,
   status: connectorUiResources.status,
   proposed: connectorUiResources.proposed,
+  approved: connectorUiResources.approved,
 };
 
 type Row = Pick<typeof connectorUiResources.$inferSelect, keyof typeof columns>;
@@ -45,7 +47,8 @@ function toStored(row: Row): StoredTemplate {
     meta: meta.success ? meta.data : {},
     pinnedHash: row.pinnedHash,
     status: row.status === "pinned" ? "pinned" : "drifted",
-    // A stored proposal that no longer parses still marks the row as changed (never "new").
+    approved: row.approved,
+    // A stored proposal that no longer parses is treated as an invalid one (never approvable).
     ...(row.proposed === null
       ? {}
       : { proposed: proposed ?? { invalid: "ui_resource_invalid" as const } }),
@@ -77,6 +80,7 @@ const values = (connectorId: string, t: StoredTemplate) => ({
   pinnedHash: t.pinnedHash,
   status: t.status,
   proposed: t.proposed ?? null,
+  approved: t.approved,
 });
 
 /** A first pin: the connector's templates become exactly these, approved by `pinnedBy`. */
@@ -90,7 +94,7 @@ export async function replacePinnedTemplates(
   if (templates.length === 0) return;
   await tx.insert(connectorUiResources).values(
     templates.map((t) => ({
-      ...values(connectorId, { ...t, status: "pinned" }),
+      ...values(connectorId, { ...t, status: "pinned", approved: true }),
       pinnedBy: pinnedBy ?? null,
     })),
   );
@@ -176,16 +180,34 @@ export async function servedTemplate(
   return row;
 }
 
-/** URIs of templates awaiting review, per connector (notices and emails name them). */
-export async function driftedTemplateUris(db: Db): Promise<Map<string, string[]>> {
+export interface DriftedTemplate {
+  readonly uri: string;
+  /** Set when the live template cannot be pinned (review HIGH-2). */
+  readonly reason?: UiResourceFailure;
+}
+
+/** Templates awaiting review, per connector (notices and emails name them). */
+export async function driftedTemplates(db: Db): Promise<Map<string, DriftedTemplate[]>> {
   const rows = await db
-    .select({ connectorId: connectorUiResources.connectorId, uri: connectorUiResources.uri })
+    .select({
+      connectorId: connectorUiResources.connectorId,
+      uri: connectorUiResources.uri,
+      proposed: connectorUiResources.proposed,
+    })
     .from(connectorUiResources)
     .where(eq(connectorUiResources.status, "drifted"))
     .orderBy(connectorUiResources.uri);
-  const byConnector = new Map<string, string[]>();
-  for (const { connectorId, uri } of rows) {
-    byConnector.set(connectorId, [...(byConnector.get(connectorId) ?? []), uri]);
+  const byConnector = new Map<string, DriftedTemplate[]>();
+  for (const { connectorId, uri, proposed } of rows) {
+    const parsed = proposed === null ? undefined : parseProposedUiResource(proposed);
+    const reason =
+      proposed === null
+        ? undefined
+        : parsed !== undefined && !("invalid" in parsed)
+          ? undefined
+          : (parsed?.invalid ?? "ui_resource_invalid");
+    const entry: DriftedTemplate = reason === undefined ? { uri } : { uri, reason };
+    byConnector.set(connectorId, [...(byConnector.get(connectorId) ?? []), entry]);
   }
   return byConnector;
 }

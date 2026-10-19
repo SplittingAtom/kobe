@@ -145,3 +145,34 @@ describe("tools that name an MCP Apps template (KOBE-433)", () => {
     expect(approved.ok && approved.tools[0]).not.toHaveProperty("ui");
   });
 });
+
+describe("tools pinned before KOBE-433 whose upstream names a template (review HIGH-1)", () => {
+  /** A G10 snapshot entry: no `ui`, hashed without it. */
+  const legacy = (): PinnedTool[] => snap(listed("open"));
+  const withUi = (description = "d") => {
+    const s = buildSnapshot("srv", [
+      { ...listed("open", description), _meta: { ui: { resourceUri: "ui://srv/app" } } },
+    ]);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("adopts the template reference silently, keeping the approved fields", () => {
+    const before = legacy();
+    const r = applyDrift(before, withUi());
+    expect(r).toMatchObject({ changed: [], added: [], removed: [] });
+    expect(r.tools[0]).toMatchObject({
+      status: "pinned",
+      ui: { resource_uri: "ui://srv/app" },
+      sha256: withUi()[0]?.sha256,
+    });
+    expect(r.tools[0]).not.toHaveProperty("proposed");
+    // The next pass is stable.
+    expect(applyDrift(r.tools, withUi())).toMatchObject({ changed: [], tools: r.tools });
+  });
+
+  it("still drifts when anything else changed too", () => {
+    const r = applyDrift(legacy(), withUi("sneaky"));
+    expect(r.changed).toEqual(["open"]);
+  });
+});
