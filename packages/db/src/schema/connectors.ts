@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -84,6 +85,17 @@ export const connectors = pgTable(
     refreshSkipped: text(),
     /** When the periodic refresh last probed the connector (skipped or not). */
     refreshedAt: timestamp({ withTimezone: true }),
+    /**
+     * How its tools were pinned (KOBE-433): 1, before tools pinned their MCP Apps template
+     * reference (`ui`); 2, since. Only a version-1 snapshot adopts a `ui` reference silently, once,
+     * on its first refresh; afterwards a tool that starts naming a template drifts.
+     */
+    pinVersion: integer().notNull().default(1),
+    /**
+     * Why the last refresh did not check the MCP Apps templates (KOBE-433 review NEW-2), while the
+     * tools were checked; null after a pass that checked them. Shown to site admins.
+     */
+    templatesSkipped: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -112,6 +124,11 @@ export const connectors = pgTable(
     check(
       "connectors_site_key_api_key",
       sql`${t.credentialSource} = 'member' OR ${t.authKind} = 'api_key'`,
+    ),
+    check("connectors_pin_version", sql`${t.pinVersion} IN (1, 2)`),
+    check(
+      "connectors_templates_skipped",
+      sql`${t.templatesSkipped} IS NULL OR ${t.templatesSkipped} ~ '^[a-z_]{1,32}$'`,
     ),
     check(
       "connectors_refresh_skipped",

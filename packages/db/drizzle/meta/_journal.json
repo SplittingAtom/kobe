@@ -1093,6 +1093,13 @@
       "when": 1792409395852,
       "tag": "0155_connector_ui_resources_approved_check",
       "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1792410366193,
+      "tag": "0156_connector_pin_version",
+      "breakpoints": true
     }
   ]
 }
