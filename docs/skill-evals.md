@@ -230,5 +230,6 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
 In the caller's active team (`api.ts` has the shapes): `POST /v1/skills/drafts/{id}/evals` and
 `POST /v1/skills/{scope}/{id}/versions/{seq}/evals` with `{mode}` → 202 `{evalRunId, estimate}`;
 `GET /v1/skill-evals/{id}`; `GET /v1/skill-evals?draft_id=…` (history); `POST
-/v1/skill-evals/{id}/cancel`. Events `skill.eval.progress` and `skill.eval.completed`; KOBE-325
-picks their transport.
+/v1/skill-evals/{id}/cancel`. Events `skill.eval.progress` and `skill.eval.completed` stream as
+SSE from `GET /v1/skill-evals/{id}/events` (KOBE-325: one progress event per execution done, then
+the completion, then the end of the stream).
