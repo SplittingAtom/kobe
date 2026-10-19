@@ -1,4 +1,4 @@
-import { sql, type KobeTx, type TeamRole } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
 import {
   skillEvalRunSchema,
   type SkillEvalExecutionStatus,
@@ -68,6 +68,27 @@ async function mayRead(tx: KobeTx, who: EvalViewer, r: RunRow): Promise<boolean>
   if (r.subject_kind === "draft")
     return (await visibleDraft(tx, who.teamId, r.subject_id, who)) !== null;
   return false;
+}
+
+/**
+ * What an open eval stream re-checks (re-review R2): the session is live, the account is active,
+ * and the viewer's current role in the team; null when any of that is gone.
+ */
+export async function evalStreamAccess(
+  db: KobeDb,
+  who: { readonly teamId: string; readonly userId: string; readonly sessionId: string },
+): Promise<TeamRole | null> {
+  // In the team's transaction: team_members is a team table (RLS), as in the thread stream's read.
+  const res = await withTeam(db, who.teamId, (tx) =>
+    tx.execute<{ live: boolean; role: TeamRole | null }>(sql`
+    SELECT EXISTS (SELECT 1 FROM sessions s WHERE s.id = ${who.sessionId} AND s.expires_at > now())
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id = ${who.userId} AND u.deactivated_at IS NULL)
+             AS live,
+           (SELECT m.role::text FROM team_members m
+             WHERE m.team_id = ${who.teamId} AND m.user_id = ${who.userId}) AS role`),
+  );
+  const row = res.rows[0];
+  return row?.live && row.role ? row.role : null;
 }
 
 /** Whether `who` may cancel it: its starter, or a team admin (review L6). */

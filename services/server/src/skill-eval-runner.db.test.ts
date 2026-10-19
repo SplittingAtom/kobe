@@ -6,6 +6,8 @@ import { seedGalleryAgents } from "./gallery/seed.js";
 import { SkillEvalRunner } from "./skills/evals/runner.js";
 import { reapSkillEvals } from "./skills/evals/reaper.js";
 import { purgeSkillEvals } from "./retention/skill-evals.js";
+import { skillEvalEventStream } from "./skills/evals/events.js";
+import { evalStreamAccess } from "./skills/evals/views.js";
 import { RawBody } from "./testing/browser.js";
 import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -563,6 +565,51 @@ describe("skill eval runner (KOBE-325)", () => {
       [w.team, evalRunId],
     );
     expect(rows[0]?.status).toBe("cancelled");
+  });
+
+  it("an eval stream ends once the session, the account or the membership is gone (re-review R2)", async () => {
+    const w = await world();
+    const viewer = await f.member(w.team);
+    const { rows: sessions } = await f.fx.admin.query<{ id: string }>(
+      `SELECT id FROM sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [viewer.id],
+    );
+    const sessionId = must(sessions[0], "session").id;
+    const who = { teamId: w.team, userId: viewer.id, sessionId };
+    expect(await evalStreamAccess(f.fx.db, who)).toBe("member");
+    await f.fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [viewer.id]);
+    expect(await evalStreamAccess(f.fx.db, who)).toBeNull();
+    await f.fx.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [viewer.id]);
+    await f.fx.admin.query(`DELETE FROM sessions WHERE id = $1`, [sessionId]);
+    expect(await evalStreamAccess(f.fx.db, who)).toBeNull();
+    // An open eval's stream closes on the next check after access is gone, with no completion.
+    const id = await draftWith(
+      w.owner,
+      "streamed",
+      ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    let allowed = true;
+    const stream = await skillEvalEventStream(
+      { db: f.fx.db, hub: undefined },
+      { teamId: w.team, userId: w.owner.id, role: "team_admin" },
+      started.json.evalRunId as string,
+      {
+        pollMs: 30,
+        revalidateMs: 30,
+        stillAllowed: async () => (allowed ? "team_admin" : null),
+      },
+    );
+    if (typeof stream === "string") throw new Error(stream);
+    setTimeout(() => {
+      allowed = false;
+    }, 100);
+    const text = await new Response(stream).text();
+    expect(text).not.toContain("skill.eval.completed");
+    await closeEvals(w.team);
   });
 
   it("bounds a member's open evals (review M4)", async () => {

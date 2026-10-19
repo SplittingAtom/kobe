@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { getMembership, withTeam } from "@kobe/db";
+import { withTeam } from "@kobe/db";
 import { startSkillEvalBodySchema } from "@kobe/protocol";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -8,7 +8,13 @@ import { logger } from "../logger.js";
 import { skillEvalEventStream, type SkillEvalHub } from "../skills/evals/events.js";
 import { startSkillEval, type StartSubject } from "../skills/evals/start.js";
 import { cancelEvalRun } from "../skills/evals/store.js";
-import { listEvalRuns, mayCancel, readEvalRun, type EvalViewer } from "../skills/evals/views.js";
+import {
+  evalStreamAccess,
+  listEvalRuns,
+  mayCancel,
+  readEvalRun,
+  type EvalViewer,
+} from "../skills/evals/views.js";
 
 // Skill evals (KOBE-325; contract `@kobe/protocol` skill-evals `api.ts`), in the caller's active
 // team: start one for a draft's current revision or a saved version, read it, its history, cancel
@@ -137,7 +143,12 @@ export function skillEvalRoutes(
     const who = viewerOf(c);
     const stream = await skillEvalEventStream({ db, hub: options.hub }, who, id.data, {
       reconnect: c.req.header("last-event-id") !== undefined,
-      stillAllowed: async () => (await getMembership(db, who.teamId, who.userId)) !== null,
+      stillAllowed: () =>
+        evalStreamAccess(db, {
+          teamId: who.teamId,
+          userId: who.userId,
+          sessionId: c.get("sessionId"),
+        }),
     });
     if (stream === "not_found") return error(c, 404, "not_found", "No such eval.");
     // A finished eval's reconnect: 204 tells EventSource to stop (review L5).

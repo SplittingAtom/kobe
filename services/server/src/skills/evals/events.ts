@@ -1,4 +1,4 @@
-import { withTeam, type KobeDb } from "@kobe/db";
+import { withTeam, type KobeDb, type TeamRole } from "@kobe/db";
 import {
   skillEvalCompletedPayloadSchema,
   skillEvalProgressPayloadSchema,
@@ -106,8 +106,13 @@ export async function skillEvalEventStream(
     readonly maxMs?: number;
     /** A reconnect (`Last-Event-ID`): a finished eval answers no stream, so EventSource stops. */
     readonly reconnect?: boolean;
-    /** Re-checked on every read: the viewer is still an active member of the team. */
-    readonly stillAllowed?: () => Promise<boolean>;
+    /**
+     * Re-checked every `revalidateMs` (as the thread stream does, re-review R2): the viewer's
+     * session is live, the account active, and their current role in the team (null: none of
+     * that any more, and the stream ends). The fresh role decides what they may still read.
+     */
+    readonly stillAllowed?: () => Promise<TeamRole | null>;
+    readonly revalidateMs?: number;
   } = {},
 ): Promise<ReadableStream<Uint8Array> | StreamRefusal> {
   const first = await withTeam(deps.db, who.teamId, (tx) => readEvalRun(tx, who, evalRunId));
@@ -117,6 +122,9 @@ export async function skillEvalEventStream(
   if (open >= SKILL_EVAL_STREAMS_PER_USER) return "too_many_streams";
   openStreams.set(who.userId, open + 1);
   let counted = true;
+  let viewer = who;
+  let checkedAt = Date.now();
+  const revalidateMs = options.revalidateMs ?? 30_000;
   const release = () => {
     if (!counted) return;
     counted = false;
@@ -145,9 +153,14 @@ export async function skillEvalEventStream(
     start(controller) {
       const push = (text: string) => controller.enqueue(encoder.encode(text));
       const emit = async () => {
-        if (options.stillAllowed && !(await options.stillAllowed())) return true;
+        if (options.stillAllowed && Date.now() - checkedAt >= revalidateMs) {
+          const role = await options.stillAllowed();
+          if (role === null) return true;
+          viewer = { ...viewer, role };
+          checkedAt = Date.now();
+        }
         const read = await withTeam(deps.db, who.teamId, async (tx) => ({
-          run: await readEvalRun(tx, who, evalRunId),
+          run: await readEvalRun(tx, viewer, evalRunId),
           done: await doneExecutions(tx, who.teamId, evalRunId),
         }));
         if (!read.run) return true;
