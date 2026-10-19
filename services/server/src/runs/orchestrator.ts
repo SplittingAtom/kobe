@@ -1,4 +1,9 @@
 import {
+  resolveAppContexts,
+  withAppContext,
+  type ResolvedAppContext,
+} from "../apps/context-block.js";
+import {
   checkRetry,
   isActiveRunStatus,
   isTerminalRunStatus,
@@ -273,6 +278,14 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     // A member's mentions are checked before any upload is staged (KOBE-223 N1).
     if (command.trigger === "user") checkMentionPaths(command.mentions ?? []);
+    // MCP Apps context chips (KOBE-439): only apps the member can open now, same template.
+    const appContext = await resolveAppContexts(
+      this.#db,
+      actor.team_id,
+      actor.user_id,
+      command.trigger === "user" ? (command.app_context ?? []) : [],
+    );
+    if (appContext === undefined) throw new RunError("app_context_invalid");
     const fileIds = command.file_ids ?? [];
     if (fileIds.length > 0 && this.#attachments === undefined) {
       throw new RunError("attachments_unavailable");
@@ -280,15 +293,32 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const clientKey = options.clientKey ?? null;
     const attach =
       fileIds.length > 0 ? await this.#stageAttachments(actor, command, clientKey) : undefined;
-    if (attach === undefined)
-      return this.#submitInTx(actor, command, clientKey, undefined, () => {}, options.scheduled);
+    if (attach === undefined) {
+      return this.#submitInTx(
+        actor,
+        command,
+        clientKey,
+        undefined,
+        () => {},
+        options.scheduled,
+        appContext,
+      );
+    }
     // The copies stay only when the run row (and the files' claim) committed with them.
     let claimed = false;
     let committed = false;
     try {
-      const result = await this.#submitInTx(actor, command, clientKey, attach, () => {
-        claimed = true;
-      });
+      const result = await this.#submitInTx(
+        actor,
+        command,
+        clientKey,
+        attach,
+        () => {
+          claimed = true;
+        },
+        undefined,
+        appContext,
+      );
       committed = claimed;
       return result;
     } finally {
@@ -331,6 +361,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     attach: StagedAttachments | undefined,
     onAttached: () => void,
     scheduled?: ScheduledSubmit,
+    appContext: readonly ResolvedAppContext[] = [],
   ): Promise<SubmitMessageResult> {
     const teamId = actor.team_id;
     const out = await this.#threadTx(actor, async (tx, viewer) => {
@@ -357,7 +388,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           "mentioned files not found; left as text",
         );
       }
-      const input = mentioned.text;
+      // The member's chips go first, fenced as untrusted data (KOBE-439, spec §8).
+      const input = withAppContext(appContext, mentioned.text);
       // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
       const budgetBlocked = await this.#budgetBlocksSchedule(tx, actor, scheduled !== undefined);
       const parent = command.parent_entry_id ?? null;
