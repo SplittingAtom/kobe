@@ -3,6 +3,7 @@
 import {
   listTeamSkillInstalls,
   reinstallDefault,
+  retirementText,
   uninstallCatalogSkill,
   type CatalogInstall,
   type RemovedDefault,
@@ -146,6 +147,15 @@ export function CatalogInstallsSection() {
                         {i.pinnedBy && (
                           <Notice tone="warn" role="status" className="mt-1">
                             {PINNED_BY[i.pinnedBy]}
+                          </Notice>
+                        )}
+                        {i.retirement && (
+                          <Notice
+                            tone={i.retirement.kind === "deprecated" ? "info" : "warn"}
+                            role="status"
+                            className="mt-1"
+                          >
+                            {retirementText(i.retirement)}
                           </Notice>
                         )}
                       </TableCell>

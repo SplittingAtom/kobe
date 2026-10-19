@@ -18,6 +18,8 @@ export interface KobeNotification {
   readonly pausedBy?: "team_admin" | "deactivation" | undefined;
   readonly skillId?: string | undefined;
   readonly skillName?: string | undefined;
+  /** The retired version (`skill.version.*`, KOBE-340). */
+  readonly skillSemver?: string | undefined;
   readonly readAt: string | null;
   readonly createdAt: string;
 }

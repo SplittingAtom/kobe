@@ -78,6 +78,10 @@ export interface CatalogDetail extends CatalogCard {
   /** The caller may block the skill in this team (Team admins). */
   readonly canBlock?: boolean;
   readonly usageWindow?: UsageWindow;
+  /** A deprecated skill's replacement (KOBE-340). */
+  readonly replacement?: { readonly id: string; readonly name: string } | null;
+  /** The caller may deprecate it (a maintainer or Site admin). */
+  readonly canDeprecate?: boolean;
 }
 
 export interface CatalogFilter {

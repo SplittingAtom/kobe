@@ -16,7 +16,10 @@ function skipped(count: number): string {
   return count === 1 ? "1 action was skipped" : `${count} actions were skipped`;
 }
 
-/** The headline: what happened to the run (or the schedule). */
+const skillVersion = (n: KobeNotification) =>
+  `${n.skillName ?? "A catalog skill"}${n.skillSemver ? ` ${n.skillSemver}` : ""}`;
+
+/** The headline: what happened to the run (or the schedule), or to a catalog skill. */
 export function notificationTitle(n: KobeNotification): string {
   switch (n.kind) {
     case "schedule.run.succeeded":
@@ -31,6 +34,16 @@ export function notificationTitle(n: KobeNotification): string {
       return n.pausedBy === "team_admin"
         ? "Schedule paused by a team admin"
         : "Schedule paused (access deactivated)";
+    case "skill.deprecated":
+      return `${n.skillName ?? "A catalog skill"} was deprecated`;
+    case "skill.version.deprecated":
+      return `${skillVersion(n)} was deprecated`;
+    case "skill.version.withdrawn":
+      return `${skillVersion(n)} was withdrawn — choose a version`;
+    case "skill.version.revoked":
+      return `${skillVersion(n)} was revoked — choose a version`;
+    case "skill.version.unrevoked":
+      return `${skillVersion(n)} is available again`;
     case "skill.member_add.blocked":
       return `A Team admin blocked ${n.skillName ?? "a catalog skill"} in this team; your Add for me was removed`;
   }
@@ -41,7 +54,7 @@ export function notificationLabel(
   n: KobeNotification,
   known: ReadonlyMap<string, ScheduleWhen> | null,
 ): string {
-  if (n.kind === "skill.member_add.blocked") return `Catalog skill ${n.skillName ?? ""}`.trim();
+  if (n.kind.startsWith("skill.")) return `Catalog skill ${n.skillName ?? ""}`.trim();
   return n.scheduleId === null
     ? "A schedule that no longer exists"
     : scheduleLabel(n.scheduleId, known);

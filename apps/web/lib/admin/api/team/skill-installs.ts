@@ -23,6 +23,28 @@ export interface CatalogInstall {
   readonly isDefault: boolean;
   /** A Roll back or Move pin back switched it from tracking to Pinned (KOBE-337 review M1). */
   readonly pinnedBy?: "rollback" | "move" | null;
+  /** What a retirement means for it (KOBE-340): revoked or withdrawn — choose a version, etc. */
+  readonly retirement?: Retirement | null;
+}
+
+export interface Retirement {
+  readonly kind: "revoked" | "withdrawn" | "deprecated" | "suspended";
+  readonly semver: string;
+  readonly replacement: { readonly id: string; readonly name: string } | null;
+}
+
+/** The words an install or add shows for its retirement (SK31). */
+export function retirementText(r: Retirement): string {
+  switch (r.kind) {
+    case "revoked":
+      return `${r.semver} was revoked — choose a version.`;
+    case "withdrawn":
+      return `${r.semver} was withdrawn — choose a version.`;
+    case "suspended":
+      return `${r.semver} is suspended pending review.`;
+    case "deprecated":
+      return `${r.semver} is deprecated.${r.replacement ? ` Use ${r.replacement.name} instead.` : ""}`;
+  }
 }
 
 export interface RemovedDefault {
@@ -170,6 +192,7 @@ export interface MemberAdd {
   /** The version the member's runs load now; null when none can. */
   readonly runs: string | null;
   readonly updatedAt: string;
+  readonly retirement?: Retirement | null;
 }
 
 export interface TeamBlock {

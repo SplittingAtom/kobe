@@ -28,6 +28,7 @@ import {
 import { DateTime, ResourceView } from "../parts";
 import { CatalogMaintainers } from "./skill-catalog-maintainers";
 import { SkillUsagePanel } from "../../skills/skill-usage-panel";
+import { RetirePanel } from "../../skills/retire-panel";
 import { useResource, type Mutation } from "../use-resource";
 
 const majorOf = (semver: string | null) => (semver ? Number(semver.split(".")[0]) : null);
@@ -125,6 +126,7 @@ export function CatalogTagsSection({
   const [editing, setEditing] = useState<string | null>(null);
   const [maintaining, setMaintaining] = useState<string | null>(null);
   const [usageOf, setUsageOf] = useState<string | null>(null);
+  const [retiring, setRetiring] = useState<string | null>(null);
 
   async function move(skill: SiteCatalogSkill, to: number) {
     const done = await mutation.run(
@@ -171,6 +173,13 @@ export function CatalogTagsSection({
                           <CatalogMaintainers skill={s} mutation={mutation} />
                         )}
                         {usageOf === s.id && <SkillUsagePanel skillId={s.id} />}
+                        {retiring === s.id && (
+                          <RetirePanel
+                            skillId={s.id}
+                            name={s.name}
+                            candidates={skills.map((x) => ({ id: x.id, name: x.name }))}
+                          />
+                        )}
                       </TableRowHeader>
                       <TableCell>{s.latest ?? "None approved"}</TableCell>
                       <TableCell>
@@ -200,6 +209,14 @@ export function CatalogTagsSection({
                           onClick={() => setEditing(s.id)}
                         >
                           Edit tags
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          aria-expanded={retiring === s.id}
+                          aria-label={`Retire versions of ${s.name}`}
+                          onClick={() => setRetiring(retiring === s.id ? null : s.id)}
+                        >
+                          Versions
                         </Button>
                         <Button
                           variant="ghost"

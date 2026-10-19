@@ -1,10 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { getCatalogSkill, requestEgress, type CatalogDetail } from "../../lib/skills/catalog-api";
+import {
+  getCatalogSkill,
+  listCatalog,
+  requestEgress,
+  type CatalogDetail,
+} from "../../lib/skills/catalog-api";
 import {
   Badge,
   Button,
+  Notice,
   PageHeader,
   Section,
   Table,
@@ -23,6 +29,8 @@ import { useMutation, useResource, type Mutation } from "../admin/use-resource";
 import { CatalogInstall } from "./catalog-install";
 import { CatalogMemberActions } from "./catalog-member";
 import { SkillUsagePanel } from "./skill-usage-panel";
+import { RetirePanel } from "./retire-panel";
+import { catalogHref } from "./catalog-tab";
 import { shownCount, shownShare, windowLabel } from "../../lib/skills/catalog-api";
 import { TeamStateBadges } from "./catalog-tab";
 import { visibleText } from "../../lib/admin/visible-text";
@@ -90,6 +98,20 @@ function EgressCheck({
   );
 }
 
+/** The retire panel, with the catalog's other skills as possible replacements (KOBE-340). */
+function RetireWithCandidates(props: {
+  readonly teamId: string;
+  readonly skillId: string;
+  readonly name: string;
+}) {
+  const { state } = useResource(() =>
+    listCatalog(props.teamId, { q: "", tag: null, sort: "name" }),
+  );
+  const candidates =
+    state.status === "ready" ? state.data.skills.map((c) => ({ id: c.id, name: c.name })) : [];
+  return <RetirePanel skillId={props.skillId} name={props.name} candidates={candidates} />;
+}
+
 /**
  * A catalog skill's detail (KOBE-336, SK25): its SKILL.md, files, versions and changelogs, the
  * authoritative scorecard, capabilities with this team's egress check, license, maintainers and
@@ -122,6 +144,22 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
                 <Badge key={t}>{t}</Badge>
               ))}
             </p>
+            {d.status === "deprecated" && (
+              <Notice tone="warn" role="status">
+                This skill is deprecated.{" "}
+                {d.replacement ? (
+                  <>
+                    Use{" "}
+                    <Link href={catalogHref(d.replacement.id)} className="underline">
+                      {visibleText(d.replacement.name)}
+                    </Link>{" "}
+                    instead.
+                  </>
+                ) : (
+                  "New installs need a Team admin."
+                )}
+              </Notice>
+            )}
             <MutationStatus error={mutation.error} notice={mutation.notice} />
             <CatalogMemberActions detail={d} teamId={teamId} mutation={mutation} onDone={reload} />
             {mayInstall && (
@@ -149,6 +187,14 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
               )}
               <SkillUsagePanel skillId={d.id} />
             </Section>
+            {d.canDeprecate && (
+              <Section
+                title="Retire versions"
+                description="Maintainers deprecate; Site admins also withdraw, revoke and unrevoke."
+              >
+                <RetireWithCandidates teamId={teamId} skillId={d.id} name={d.name} />
+              </Section>
+            )}
             <Section title="Capabilities">
               <EgressCheck detail={d} teamId={teamId} mutation={mutation} />
             </Section>

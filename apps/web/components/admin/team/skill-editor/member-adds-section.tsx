@@ -6,6 +6,7 @@ import {
   listInstallRequests,
   listMemberAdds,
   listTeamBlocks,
+  retirementText,
   unblockSkill,
   type InstallRequest,
   type MemberAdd,
@@ -52,6 +53,7 @@ function AddsTable({ adds }: { readonly adds: readonly MemberAdd[] }) {
               <div className="text-sm text-console-muted">
                 {a.runs ? `runs ${a.runs}` : "no version can run"}
               </div>
+              {a.retirement && <div className="text-sm">{retirementText(a.retirement)}</div>}
             </TableCell>
             <TableCell className="whitespace-nowrap">
               <DateTime value={a.updatedAt} />
