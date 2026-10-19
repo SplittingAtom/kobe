@@ -1,0 +1,1313 @@
+{
+  "3-Clause BSD License": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "protobuf",
+      "versions": [
+        "5.29.6"
+      ]
+    }
+  ],
+  "Apache 2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-cloud-aiplatform",
+      "versions": [
+        "1.148.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-cloud-bigquery",
+      "versions": [
+        "3.41.0"
+      ]
+    }
+  ],
+  "Apache License 2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "multidict",
+      "versions": [
+        "6.7.1"
+      ]
+    }
+  ],
+  "Apache-2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "aiosignal",
+      "versions": [
+        "1.4.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "boto3",
+      "notice": "boto3\nCopyright 2013-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.",
+      "versions": [
+        "1.42.97"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "botocore",
+      "notice": "Botocore\nCopyright 2012-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.\n\n----\n\nBotocore includes vendorized parts of the requests python library for backwards compatibility.\n\nRequests License\n================\n\nCopyright 2013 Kenneth Reitz\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.\n\nBotocore includes vendorized parts of the urllib3 library for backwards compatibility.\n\nUrllib3 License\n===============\n\nThis is the MIT license: http://www.opensource.org/licenses/mit-license.php\n\nCopyright 2008-2011 Andrey Petrov and contributors (see CONTRIBUTORS.txt),\nModifications copyright 2012 Kenneth Reitz.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this\nsoftware and associated documentation files (the \"Software\"), to deal in the Software\nwithout restriction, including without limitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of the Software, and to permit persons\nto whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or\nsubstantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,\nINCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE\nFOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR\nOTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n\nBundle of CA Root Certificates\n==============================\n\n***** BEGIN LICENSE BLOCK *****\nThis Source Code Form is subject to the terms of the\nMozilla Public License, v. 2.0. If a copy of the MPL\nwas not distributed with this file, You can obtain\none at http://mozilla.org/MPL/2.0/.\n\n***** END LICENSE BLOCK *****",
+      "versions": [
+        "1.42.97"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "cisco-ai-skill-scanner",
+      "versions": [
+        "2.2.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "distro",
+      "versions": [
+        "1.9.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "flatbuffers",
+      "versions": [
+        "25.12.19"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "frozenlist",
+      "versions": [
+        "1.8.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-ai-generativelanguage",
+      "versions": [
+        "0.6.15"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-api-core",
+      "versions": [
+        "2.25.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-api-python-client",
+      "versions": [
+        "2.194.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-auth",
+      "versions": [
+        "2.49.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-auth-httplib2",
+      "versions": [
+        "0.3.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-cloud-core",
+      "versions": [
+        "2.5.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-cloud-resource-manager",
+      "versions": [
+        "1.17.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-cloud-storage",
+      "versions": [
+        "3.4.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-genai",
+      "versions": [
+        "1.73.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-generativeai",
+      "versions": [
+        "0.8.6"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-resumable-media",
+      "versions": [
+        "2.8.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "googleapis-common-protos",
+      "versions": [
+        "1.74.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "grpc-google-iam-v1",
+      "versions": [
+        "0.14.4"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "grpcio",
+      "versions": [
+        "1.80.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "grpcio-status",
+      "versions": [
+        "1.71.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "hf-xet",
+      "versions": [
+        "1.4.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "huggingface_hub",
+      "versions": [
+        "1.12.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "importlib_metadata",
+      "versions": [
+        "8.5.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "magika",
+      "versions": [
+        "1.0.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "openai",
+      "versions": [
+        "2.24.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "propcache",
+      "notice": "Copyright 2016-2021, Andrew Svetlov and aio-libs team\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.",
+      "versions": [
+        "0.4.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "proto-plus",
+      "versions": [
+        "1.27.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "python-multipart",
+      "versions": [
+        "0.0.32"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "requests",
+      "notice": "Requests\nCopyright 2019 Kenneth Reitz",
+      "versions": [
+        "2.33.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "s3transfer",
+      "notice": "s3transfer\nCopyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.",
+      "versions": [
+        "0.16.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "tenacity",
+      "versions": [
+        "9.1.4"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "tokenizers",
+      "versions": [
+        "0.22.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "yarl",
+      "notice": "Copyright 2016-2021, Andrew Svetlov and aio-libs team\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.",
+      "versions": [
+        "1.23.0"
+      ]
+    }
+  ],
+  "Apache-2.0 AND CNRI-Python": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "regex",
+      "versions": [
+        "2026.4.4"
+      ]
+    }
+  ],
+  "Apache-2.0 AND MIT": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "aiohttp",
+      "versions": [
+        "3.14.3"
+      ]
+    }
+  ],
+  "Apache-2.0 OR BSD-2-Clause": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "packaging",
+      "versions": [
+        "26.2"
+      ]
+    }
+  ],
+  "Apache-2.0 OR BSD-3-Clause": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "cryptography",
+      "versions": [
+        "50.0.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "python-dateutil",
+      "versions": [
+        "2.9.0.post0"
+      ]
+    }
+  ],
+  "Apache-2.0 OR MIT": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "sniffio",
+      "versions": [
+        "1.3.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "uvloop",
+      "versions": [
+        "0.22.1"
+      ]
+    }
+  ],
+  "BSD 3-Clause OR Apache-2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "uritemplate",
+      "versions": [
+        "4.2.0"
+      ]
+    }
+  ],
+  "BSD-2-Clause": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pyasn1",
+      "versions": [
+        "0.6.4"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pygments",
+      "versions": [
+        "2.20.0"
+      ]
+    }
+  ],
+  "BSD-3-Clause": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "click",
+      "versions": [
+        "8.4.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "easygui",
+      "versions": [
+        "0.98.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "fastuuid",
+      "versions": [
+        "0.14.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "fsspec",
+      "versions": [
+        "2026.3.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "httpcore",
+      "versions": [
+        "1.0.9"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "httpx",
+      "versions": [
+        "0.28.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "idna",
+      "versions": [
+        "3.18"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "jinja2",
+      "versions": [
+        "3.1.6"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "markupsafe",
+      "versions": [
+        "3.0.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "olefile",
+      "versions": [
+        "0.47"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "oletools",
+      "versions": [
+        "0.60.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pyasn1_modules",
+      "versions": [
+        "0.4.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pycparser",
+      "versions": [
+        "3.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "python-dotenv",
+      "versions": [
+        "1.2.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "starlette",
+      "versions": [
+        "1.3.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "uvicorn",
+      "versions": [
+        "0.46.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "websockets",
+      "versions": [
+        "16.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "yara-x",
+      "versions": [
+        "1.20.0"
+      ]
+    }
+  ],
+  "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "numpy",
+      "versions": [
+        "2.4.4"
+      ]
+    }
+  ],
+  "GNU General Public License v3 (GPLv3)": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pcodedmp",
+      "versions": [
+        "1.2.6"
+      ]
+    }
+  ],
+  "ISC": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "shellingham",
+      "versions": [
+        "1.5.4"
+      ]
+    }
+  ],
+  "MIT": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "annotated-doc",
+      "versions": [
+        "0.0.4"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "annotated-types",
+      "versions": [
+        "0.7.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "anthropic",
+      "versions": [
+        "0.97.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "anyio",
+      "versions": [
+        "4.14.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "attrs",
+      "versions": [
+        "26.1.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "azure-core",
+      "versions": [
+        "1.39.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "azure-identity",
+      "versions": [
+        "1.25.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "cffi",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "charset-normalizer",
+      "versions": [
+        "3.4.7"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "colorclass",
+      "versions": [
+        "2.2.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "confusable-homoglyphs",
+      "versions": [
+        "3.3.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "docstring_parser",
+      "versions": [
+        "0.18.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "fastapi",
+      "versions": [
+        "0.136.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "filelock",
+      "versions": [
+        "3.29.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "h11",
+      "versions": [
+        "0.16.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "httplib2",
+      "versions": [
+        "0.32.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "httptools",
+      "versions": [
+        "0.7.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "jiter",
+      "versions": [
+        "0.14.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "jmespath",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "jsonschema",
+      "versions": [
+        "4.26.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "jsonschema-specifications",
+      "versions": [
+        "2025.9.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "linkify-it-py",
+      "versions": [
+        "2.1.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "litellm",
+      "versions": [
+        "1.89.7"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "markdown-it-py",
+      "versions": [
+        "4.0.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "mdit-py-plugins",
+      "versions": [
+        "0.5.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "mdurl",
+      "versions": [
+        "0.1.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "msal",
+      "versions": [
+        "1.37.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "msal-extensions",
+      "versions": [
+        "1.3.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "msoffcrypto-tool",
+      "notice": "This software contains derivative works from https://github.com/herumi/msoffice\nwhich is licensed under the BSD 3-Clause License.\n\nhttps://github.com/herumi/msoffice/blob/c3cdb1ea0a5285a2a1718fee2dc893fd884bdad0/COPYRIGHT\n\nCopyright (c) 2007-2015 Cybozu Labs, Inc.\nAll rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\nRedistributions of source code must retain the above copyright notice, this\nlist of conditions and the following disclaimer.\nRedistributions in binary form must reproduce the above copyright notice,\nthis list of conditions and the following disclaimer in the documentation\nand/or other materials provided with the distribution.\nNeither the name of the Cybozu Labs, Inc. nor the names of its contributors may\nbe used to endorse or promote products derived from this software without\nspecific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE\nARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE\nLIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR\nCONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF\nSUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS\nINTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN\nCONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)\nARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF\nTHE POSSIBILITY OF SUCH DAMAGE.",
+      "versions": [
+        "6.0.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "onnxruntime",
+      "versions": [
+        "1.25.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pdfid",
+      "versions": [
+        "1.1.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "platformdirs",
+      "versions": [
+        "4.9.6"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pydantic",
+      "versions": [
+        "2.12.5"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pydantic_core",
+      "versions": [
+        "2.41.5"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pyjwt",
+      "versions": [
+        "2.15.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pyparsing",
+      "versions": [
+        "3.3.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "python-frontmatter",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "pyyaml",
+      "versions": [
+        "6.0.3"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "referencing",
+      "versions": [
+        "0.37.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "rich",
+      "versions": [
+        "14.3.4"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "rpds-py",
+      "versions": [
+        "0.30.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "six",
+      "versions": [
+        "1.17.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "tabulate",
+      "versions": [
+        "0.10.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "textual",
+      "versions": [
+        "8.2.8"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "typer",
+      "versions": [
+        "0.23.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "typing-inspection",
+      "versions": [
+        "0.4.2"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "uc-micro-py",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "urllib3",
+      "versions": [
+        "2.8.0"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "watchfiles",
+      "versions": [
+        "1.1.1"
+      ]
+    },
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "zipp",
+      "versions": [
+        "3.23.1"
+      ]
+    }
+  ],
+  "MIT License": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "tiktoken",
+      "versions": [
+        "0.12.0"
+      ]
+    }
+  ],
+  "MPL-2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "certifi",
+      "versions": [
+        "2026.4.22"
+      ]
+    }
+  ],
+  "MPL-2.0 AND MIT": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "tqdm",
+      "versions": [
+        "4.67.3"
+      ]
+    }
+  ],
+  "PSF-2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "typing_extensions",
+      "versions": [
+        "4.15.0"
+      ]
+    }
+  ],
+  "Python-2.0": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "aiohappyeyeballs",
+      "versions": [
+        "2.6.1"
+      ]
+    }
+  ],
+  "UNKNOWN": [
+    {
+      "ecosystem": "pypi",
+      "locations": [
+        "python"
+      ],
+      "name": "google-crc32c",
+      "versions": [
+        "1.8.0"
+      ]
+    }
+  ]
+}

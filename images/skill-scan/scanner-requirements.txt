@@ -1,0 +1,5 @@
+# Cisco skill-scanner 2.2.1 (Apache-2.0, KOBE-341): the release wheels' sha256 from PyPI. Its
+# dependencies are the hashed lock in requirements.txt, installed first with --no-deps.
+cisco-ai-skill-scanner==2.2.1 \
+    --hash=sha256:cd6ab22b72c4c8124c7a20f8d0b10582408336f17d340ace1fe7d9e3ba256680 \
+    --hash=sha256:e5e6a3d7f956afccae73c7326e3a1a2d43203a431b7cbd598333f6098b3190e6
