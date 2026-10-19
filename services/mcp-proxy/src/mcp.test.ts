@@ -404,6 +404,23 @@ describe("initialize, ping, tools/list", () => {
       expect((await rpc(method)).json?.error.code, method).toBe(-32601);
     }
   });
+
+  it("keeps resources/* method-not-found for Pi even for a pinned ui:// template (KOBE-433)", async () => {
+    fake.options = {
+      resources: [{ uri: "ui://jira/app", mimeType: "text/html;profile=mcp-app", text: "<p/>" }],
+    };
+    for (const [method, params] of [
+      ["resources/list", {}],
+      ["resources/read", { uri: "ui://jira/app" }],
+      ["resources/templates/list", {}],
+      ["resources/subscribe", { uri: "ui://jira/app" }],
+    ] as const) {
+      const res = await rpc(method, params);
+      expect(res.json?.error.code, method).toBe(-32601);
+      expect(res.json?.result, method).toBeUndefined();
+    }
+    expect(fake.received).toEqual([]);
+  });
 });
 
 describe("tools/call", () => {

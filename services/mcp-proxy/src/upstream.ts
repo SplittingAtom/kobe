@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { AddressPolicy } from "./address-policy.js";
 import type { UpstreamPolicy } from "./config.js";
+import { readUiResources } from "./ui-resources.js";
 
 /**
  * The proxy's MCP client towards remote servers (D27: Streamable HTTP only, no stdio). One short
@@ -58,11 +59,18 @@ export interface UpstreamCall extends UpstreamBase {
 
 export interface UpstreamClient {
   callTool(call: UpstreamCall): Promise<UpstreamResult>;
-  /** The live `tools/list` (all pages) as `{ tools: unknown[] }`, for the server's pinning probe. */
-  listTools(call: UpstreamBase): Promise<UpstreamResult>;
+  /**
+   * The live `tools/list` (all pages) as `{ tools: unknown[] }`, for the server's pinning probe;
+   * with `uiResources`, also `ui_resources`: the `ui://` templates the tools name (KOBE-433).
+   */
+  listTools(call: UpstreamBase, options?: ListToolsOptions): Promise<UpstreamResult>;
   /** Session DELETEs still in flight (bounded by `maxPendingDeletes`). */
   readonly pendingDeletes: number;
   close(): Promise<void>;
+}
+
+export interface ListToolsOptions {
+  readonly uiResources?: boolean;
 }
 
 export interface UpstreamOptions {
@@ -380,26 +388,30 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       request(url, call, session, 2, "tools/call", { name: call.tool, arguments: call.arguments }),
     );
 
-  async function listTools(call: UpstreamBase): Promise<UpstreamResult> {
+  async function listTools(
+    call: UpstreamBase,
+    listOptions: ListToolsOptions = {},
+  ): Promise<UpstreamResult> {
     return inSession(call, async (url, session) => {
+      let id = 2;
+      const next = (method: string, params: Record<string, unknown>) =>
+        request(url, call, session, id++, method, params);
       const tools: unknown[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
-        const answer = await request(
-          url,
-          call,
-          session,
-          2 + page,
-          "tools/list",
-          cursor === undefined ? {} : { cursor },
-        );
+        const answer = await next("tools/list", cursor === undefined ? {} : { cursor });
         if (!answer.ok) return answer;
         const pageTools = answer.result.tools;
         if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
         tools.push(...pageTools);
-        const next = answer.result.nextCursor;
-        if (typeof next !== "string" || next === "") return { ok: true, result: { tools } };
-        cursor = next;
+        const nextCursor = answer.result.nextCursor;
+        if (typeof nextCursor !== "string" || nextCursor === "") {
+          if (!listOptions.uiResources) return { ok: true, result: { tools } };
+          const ui = await readUiResources(tools, next);
+          if (!ui.ok) return ui;
+          return { ok: true, result: { tools, ui_resources: ui.resources } };
+        }
+        cursor = nextCursor;
       }
       return { ok: false, failure: "too_large" };
     });
