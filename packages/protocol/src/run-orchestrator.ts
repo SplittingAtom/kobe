@@ -1,3 +1,4 @@
+import { appContextFieldSchema } from "./app-context.js";
 import { z } from "zod";
 import {
   approvalModeSchema,
@@ -51,6 +52,11 @@ export const submitMessageBodySchema = z.strictObject({
    * `@file(...)` markers of these paths in `content` are rewritten to `/workspace/...`.
    */
   mentions: mentionsFieldSchema.optional(),
+  /**
+   * MCP Apps context chips the member sends with this message (KOBE-439, app-context.ts): at
+   * most one per app, each at most 8 KiB, handed to Pi fenced as untrusted data.
+   */
+  app_context: appContextFieldSchema.optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
