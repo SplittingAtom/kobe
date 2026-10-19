@@ -4,7 +4,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
 import { invalidRequest } from "../teams/http.js";
-import { notifyTeamAdmins, requestForTeam } from "../skills/install-requests.js";
+import { REQUESTS_PER_DAY, notifyTeamAdmins, requestForTeam } from "../skills/install-requests.js";
 
 const querySchema = z.object({
   q: z.string().max(200).optional(),
@@ -58,8 +58,11 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
     if (!r.ok) {
       const errors = {
         not_found: [404, "No such catalog skill."],
-        installed: [409, "The team has this skill installed already."],
         blocked: [409, "A Team admin blocked this skill in the team."],
+        request_limit: [
+          429,
+          `You can ask for up to ${REQUESTS_PER_DAY} skills a day. Try again tomorrow.`,
+        ],
       } as const;
       const [status, message] = errors[r.code];
       return c.json({ code: r.code, message }, status);
@@ -68,7 +71,7 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
     deps.background.run("skill install request email failed", () =>
       notifyTeamAdmins(
         { db, mailer: deps.mailer, publicUrl: new URL(deps.publicUrl).origin },
-        { teamId, userId, skill: r.name },
+        { teamId, userId, skill: r.name, installed: r.installed },
       ),
     );
     return c.json({ requested: true, alreadyRequested: false }, 202);

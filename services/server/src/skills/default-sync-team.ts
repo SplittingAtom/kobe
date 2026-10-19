@@ -1,4 +1,5 @@
 import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
+import { installAnswers } from "./install-answers.js";
 import { recordAudit } from "../audit/record.js";
 import {
   defaultTargets,
@@ -86,7 +87,10 @@ export async function addInTeam(
     WHERE EXISTS (${installable(version.id)})
     ON CONFLICT (team_id, skill_id) DO NOTHING
     RETURNING 1`);
-  if (inserted.rows.length > 0) return { ...NOTHING, installed: 1 };
+  if (inserted.rows.length > 0) {
+    await installAnswers(tx, teamId, skillId);
+    return { ...NOTHING, installed: 1 };
+  }
   const existing = await tx.execute<{ origin: string }>(sql`
     SELECT origin FROM team_skill_installs WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
   const origin = existing.rows[0]?.origin;

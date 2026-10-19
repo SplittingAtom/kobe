@@ -1,7 +1,7 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { publishedVersions, runningVersion, type PublishedVersion } from "./install-versions.js";
-import { lockSkillInstall } from "./default-target.js";
+import { lockSkillInstall, lockTeamSkillNames } from "./default-target.js";
 import { readCatalogSwitches } from "./settings.js";
 
 /**
@@ -13,9 +13,9 @@ import { readCatalogSwitches } from "./settings.js";
  * The rules mirror a team install's (`installCatalogSkill`): an approved version only (a deprecated
  * one is a Team admin's override, SK31; withdrawn, revoked, suspended and blocklisted versions
  * never), no add while the team blocks the skill (the database refuses it too, 0133), none of a
- * skill the team installed Required (it loads anyway) or Hidden (only for agents that name it),
- * and none whose name is one of the team's own skills (SK27). One row per member and skill: an add
- * replaces the member's on/off choice for the team's install of the same skill.
+ * skill the team installed in any mode (the install governs; Request for team asks for another
+ * version, review M3), and none whose name is one of the team's own skills (SK27). Installing
+ * turns existing adds into the members' "on" choice for the install (`installAnswers`).
  */
 export type PinMode = "pinned" | "within_major" | "latest";
 
@@ -41,8 +41,7 @@ export type AddRefusal =
   | "deprecated"
   | "blocked"
   | "adds_off"
-  | "hidden"
-  | "required"
+  | "installed"
   | "name_clash";
 
 export type AddResult =
@@ -54,7 +53,7 @@ export type AddResult =
     }
   | { readonly ok: false; readonly code: AddRefusal };
 
-const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+const iso = (v: unknown) => new Date(v as string | Date).toISOString();
 
 /** One writer of a member's choices in a team at a time (the enablement toggles take it too). */
 async function lockMember(tx: KobeTx, teamId: string, userId: string): Promise<void> {
@@ -82,7 +81,8 @@ async function teamGate(
   );
   const r = rows[0];
   if (r?.blocked) return "blocked";
-  if (r?.access === "hidden" || r?.access === "required") return r.access;
+  // The team's install governs (review M3): a member asks for another version with Request for team.
+  if (r?.access) return "installed";
   if (r?.clash) return "name_clash";
   return null;
 }
@@ -118,6 +118,8 @@ export function addForMe(
     // The install lock orders the add after a concurrent block (or install), so the block's
     // removal of adds and this add's block check see each other (`blockCatalogSkill`).
     await lockSkillInstall(tx, teamId, skillId);
+    // The team's skill-name lock (review L1): a team skill made meanwhile sees this add's name.
+    await lockTeamSkillNames(tx, teamId);
     const skill = await tx.execute<{ name: string }>(sql`
       SELECT name FROM registry_skills WHERE id = ${skillId} AND status <> 'archived'`);
     const name = skill.rows[0]?.name;

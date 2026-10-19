@@ -101,7 +101,7 @@ describe("team blocks and the member-add switch (S1)", () => {
     expect(r.skills).toEqual([]);
   });
 
-  it("member adds load only while the team allows them, and never for a Hidden install", async () => {
+  it("member adds load only while the team allows them, and never for an installed skill", async () => {
     const { team, me, catalog } = await world();
     const hidden = await catalog("hid", [["1.0.0", "approved"]]);
     const free = await catalog("free", [["1.0.0", "approved"]]);
@@ -114,9 +114,11 @@ describe("team blocks and the member-add switch (S1)", () => {
     await memberAdd(team, me, hidden.skill, must(hidden.ids["1.0.0"]));
     await memberAdd(team, me, free.skill, must(free.ids["1.0.0"]));
     await memberAdd(team, me, onByDefault.skill, must(onByDefault.ids["1.0.0"]));
+    // The team's install governs (KOBE-338 review M3): the add of the On by default install is the
+    // member's "on" choice at the team's pin; the add of the Hidden install loads nothing.
     const on = await resolveFor(team, me, []);
     expect(on.skills.sort()).toEqual(
-      [`${free.name}@1.0.0:catalog`, `${onByDefault.name}@1.0.0:catalog`].sort(),
+      [`${free.name}@1.0.0:catalog`, `${onByDefault.name}@1.1.0:catalog`].sort(),
     );
     await admin().query(
       `INSERT INTO team_skill_settings (team_id, members_may_add_catalog, updated_by)

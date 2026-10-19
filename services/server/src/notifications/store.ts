@@ -13,8 +13,8 @@ import { z } from "zod";
 /**
  * The caller's notifications in the active team (KOBE-179; contract in KOBE-176): every query is
  * in `withTeam()` (RLS) and names the caller's `user_id`, so nobody reads or marks anyone
- * else's. Rows whose schedule was deleted since (`schedule_id` set null) are left out: the
- * contract requires the schedule id.
+ * else's. Schedule rows whose schedule was deleted since (`schedule_id` set null) are left out:
+ * the contract requires the schedule id. Skill rows (KOBE-338) name a catalog skill instead.
  */
 export interface Viewer {
   readonly teamId: string;
@@ -53,11 +53,13 @@ export function decodeCursor(raw: string): Cursor | null {
 type Row = {
   id: string;
   kind: NotificationKind;
-  schedule_id: string;
+  schedule_id: string | null;
   thread_id: string | null;
   run_id: string | null;
   skipped_count: number | null;
   paused_by: "team_admin" | "deactivation" | null;
+  skill_id: string | null;
+  skill_name: string | null;
   read_at: Date | null;
   created_at: Date;
   created_key: string;
@@ -76,13 +78,19 @@ function toNotification(row: Row): Notification {
       ? { skipped_count: row.skipped_count }
       : {}),
     ...(row.paused_by !== null ? { paused_by: row.paused_by } : {}),
+    ...(row.skill_id !== null && row.skill_name !== null
+      ? { skill_id: row.skill_id, skill_name: row.skill_name }
+      : {}),
     read_at: row.read_at === null ? null : iso(row.read_at),
     created_at: iso(row.created_at),
   };
 }
 
+// A schedule notification needs its schedule (the contract names it); a skill notification
+// (KOBE-338) names a catalog skill instead.
 const mine = (v: Viewer) =>
-  sql`team_id = ${v.teamId} AND user_id = ${v.userId} AND schedule_id IS NOT NULL`;
+  sql`team_id = ${v.teamId} AND user_id = ${v.userId}
+    AND (schedule_id IS NOT NULL OR kind = 'skill.member_add.blocked')`;
 
 async function unreadCount(tx: KobeTx, v: Viewer): Promise<number> {
   const res = await tx.execute<{ n: number }>(sql`
@@ -99,8 +107,10 @@ export async function listNotifications(
 ): Promise<ListNotificationsResponse> {
   return withTeam(db, v.teamId, async (tx) => {
     const res = await tx.execute<Row>(sql`
-      SELECT id, kind, schedule_id, thread_id, run_id, skipped_count, paused_by, read_at,
-             created_at,
+      SELECT id, kind, schedule_id, thread_id, run_id, skipped_count, paused_by, skill_id,
+             (SELECT r.name FROM registry_skills r WHERE r.id = notifications.skill_id)
+               AS skill_name,
+             read_at, created_at,
              to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_key
         FROM notifications
        WHERE ${mine(v)}

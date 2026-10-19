@@ -8,6 +8,9 @@ import { lockSkillInstall } from "./default-target.js";
  * (the trigger on `member_skill_enablements`, and `addForMe` first with a clear answer). A blocked
  * skill can't be installed, reinstalled as a removed default, or reached by the Default sync.
  *
+ * Members whose adds the block removed get an in-app notification (`skill.member_add.blocked`);
+ * open Request for team rows of the skill are answered (deleted).
+ *
  * A skill the team has installed is not blocked: the Team admin uninstalls it first (on a Site
  * default that records the opt-out), so a block never silently switches off an install.
  */
@@ -39,16 +42,28 @@ export function blockCatalogSkill(
     const installed = await tx.execute(sql`
       SELECT 1 FROM team_skill_installs WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     if (installed.rows.length > 0) return { ok: false, code: "installed" };
-    const adds = await tx.execute<{ n: number }>(sql`
-      SELECT count(*)::int AS n FROM member_skill_enablements
-       WHERE team_id = ${teamId} AND catalog_skill_id = ${skillId} AND version_id IS NOT NULL`);
-    const inserted = await tx.execute(sql`
+    const already = await tx.execute(sql`
+      SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    if (already.rows.length > 0) return { ok: true, changed: false, addsRemoved: 0 };
+    // The adds go first, so the block knows whose they were (review N1, L6); the 0133 trigger on
+    // the block's insert stays as the backstop and finds nothing more to delete.
+    const removedRows = await tx.execute<{ user_id: string }>(sql`
+      DELETE FROM member_skill_enablements
+       WHERE team_id = ${teamId} AND catalog_skill_id = ${skillId} AND version_id IS NOT NULL
+      RETURNING user_id`);
+    const removed = removedRows.rows.map((r) => r.user_id);
+    await tx.execute(sql`
       INSERT INTO team_skill_blocks (team_id, skill_id, blocked_by)
-      VALUES (${teamId}, ${skillId}, ${input.userId})
-      ON CONFLICT (team_id, skill_id) DO NOTHING
-      RETURNING 1`);
-    if (inserted.rows.length === 0) return { ok: true, changed: false, addsRemoved: 0 };
-    const addsRemoved = Number(adds.rows[0]?.n ?? 0);
+      VALUES (${teamId}, ${skillId}, ${input.userId})`);
+    // Each member whose add went is told in-app (no email).
+    const addsRemoved = removed.length;
+    for (const userId of removed)
+      await tx.execute(sql`
+        INSERT INTO notifications (team_id, user_id, kind, skill_id)
+        VALUES (${teamId}, ${userId}, 'skill.member_add.blocked', ${skillId})`);
+    // A blocked skill answers members' requests for it.
+    await tx.execute(sql`
+      DELETE FROM team_skill_requests WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     await recordAudit(tx, {
       action: "skill.catalog.blocked",
       teamId,
@@ -96,7 +111,7 @@ export function listTeamBlocks(db: KobeDb, teamId: string): Promise<TeamBlock[]>
       name: r.name,
       blockedBy: r.blocked_by,
       blockedByName: r.by_name,
-      at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
+      at: new Date(r.at).toISOString(),
     }));
   });
 }

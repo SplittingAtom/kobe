@@ -107,15 +107,10 @@ const ADD_ERRORS = {
   ),
   blocked: refusal("blocked", 409, "A Team admin blocked this skill in the team."),
   adds_off: refusal("adds_off", 403, "This team doesn't let members add catalog skills."),
-  hidden: refusal(
-    "hidden",
+  installed: refusal(
+    "installed",
     409,
-    "The team installed it Hidden: it loads only for agents that name it.",
-  ),
-  required: refusal(
-    "required",
-    409,
-    "The team installed it Required: it loads in every run already.",
+    "The team has this skill installed: its install governs. Use Request for team to ask for another version.",
   ),
   name_clash: refusal("name_clash", 409, "One of this team's own skills has the same name."),
 } as const satisfies Record<AddRefusal, unknown>;

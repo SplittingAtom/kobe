@@ -182,7 +182,8 @@ describe("Add for me (ac-1)", () => {
     const bad = await add("otherA", { version: "1.0", pinMode: "pinned" });
     expect(bad.status).toBe(400);
 
-    for (const access of ["hidden", "required"] as const) {
+    // The team's install governs, in every mode (review M3).
+    for (const access of ["available", "default_on", "hidden", "required"] as const) {
       const i = await as.adminA.put(`/v1/team/skills/installs/${secondId}`, {
         version: "1.0.0",
         pinMode: "pinned",
@@ -190,10 +191,59 @@ describe("Add for me (ac-1)", () => {
       });
       expect(i.status, JSON.stringify(i.json)).toBe(200);
       const r = await add("otherA", { version: "1.0.0", pinMode: "pinned" }, secondId);
-      expect([r.status, r.json.code], access).toEqual([409, access]);
+      expect([r.status, r.json.code], access).toEqual([409, "installed"]);
     }
     expect((await as.adminA.request("DELETE", `/v1/team/skills/installs/${secondId}`)).status).toBe(
       200,
+    );
+  });
+
+  it("an install turns existing adds into the member's on choice at the team's pin", async () => {
+    expect((await add("otherA", { version: "1.0.0", pinMode: "latest" }, secondId)).status).toBe(
+      200,
+    );
+    expect(await offered(teamA, ids.otherA)).toEqual([`${SECOND}@1.0.0`]);
+    const i = await as.adminA.put(`/v1/team/skills/installs/${secondId}`, {
+      version: "1.0.0",
+      pinMode: "pinned",
+      access: "available",
+    });
+    expect(i.status).toBe(200);
+    const row = await h.admin.query(
+      `SELECT enabled, version_id, pin_mode FROM member_skill_enablements
+        WHERE team_id = $1 AND user_id = $2 AND catalog_skill_id = $3`,
+      [teamA, ids.otherA, secondId],
+    );
+    expect(row.rows).toEqual([{ enabled: true, version_id: null, pin_mode: null }]);
+    expect(await offered(teamA, ids.otherA)).toEqual([`${SECOND}@1.0.0`]);
+    expect((await as.otherA.get("/v1/me/skills/adds")).json.adds).toEqual([]);
+    // An add left on an installed skill counts as "on" at the install's pin, never its own.
+    await h.admin.query(
+      `UPDATE member_skill_enablements SET version_id = (SELECT id FROM registry_versions
+         WHERE skill_id = $3 AND semver = '1.0.0'), pin_mode = 'latest'
+        WHERE team_id = $1 AND user_id = $2 AND catalog_skill_id = $3`,
+      [teamA, ids.otherA, secondId],
+    );
+    expect(await offered(teamA, ids.otherA)).toEqual([`${SECOND}@1.0.0`]);
+    // Turning the install off clears that version (review L4).
+    const off = await as.otherA.put("/v1/me/skills/enablements", {
+      kind: "catalog",
+      skillId: secondId,
+      enabled: false,
+    });
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    const after = await h.admin.query(
+      `SELECT enabled, version_id FROM member_skill_enablements
+        WHERE team_id = $1 AND user_id = $2 AND catalog_skill_id = $3`,
+      [teamA, ids.otherA, secondId],
+    );
+    expect(after.rows).toEqual([{ enabled: false, version_id: null }]);
+    expect((await as.adminA.request("DELETE", `/v1/team/skills/installs/${secondId}`)).status).toBe(
+      200,
+    );
+    await h.admin.query(
+      `DELETE FROM member_skill_enablements WHERE team_id = $1 AND catalog_skill_id = $2`,
+      [teamA, secondId],
     );
   });
 
@@ -249,6 +299,21 @@ describe("the team switch and blocks (ac-2)", () => {
     const b = await block("adminA");
     expect(b.status, JSON.stringify(b.json)).toBe(200);
     expect(b.json).toMatchObject({ blocked: true, addsRemoved: 1 });
+    // The member whose add went is told in-app; nobody else, and not in team B (review N1).
+    const notes = await as.memberA.get("/v1/notifications");
+    expect(notes.status, JSON.stringify(notes.json)).toBe(200);
+    expect(notes.json.unread_count).toBe(1);
+    expect(notes.json.notifications).toEqual([
+      expect.objectContaining({
+        kind: "skill.member_add.blocked",
+        skill_id: skillId,
+        skill_name: NAME,
+        schedule_id: null,
+        thread_id: null,
+      }),
+    ]);
+    expect((await as.otherA.get("/v1/notifications")).json.notifications).toEqual([]);
+    expect((await as.adminB.get("/v1/notifications")).json.notifications).toEqual([]);
     expect(await offered(teamA, ids.memberA)).toEqual([]);
     expect((await as.memberA.get("/v1/me/skills/adds")).json.adds).toEqual([]);
     expect(await offered(teamB, ids.memberA)).toEqual([`${NAME}@1.0.0`]);
@@ -265,6 +330,7 @@ describe("the team switch and blocks (ac-2)", () => {
     expect(cardB.state.blocked).toBe(false);
     // Again: nothing changes, nothing audited twice.
     expect((await block("adminA")).json).toMatchObject({ blocked: true, changed: false });
+    expect((await as.memberA.get("/v1/notifications")).json.unread_count).toBe(1);
     const blocks = await as.adminA.get("/v1/team/skills/blocks");
     expect(blocks.json.blocks).toEqual([
       expect.objectContaining({ skillId, name: NAME, blockedBy: ids.adminA }),
@@ -329,13 +395,56 @@ describe("Request for team (ac-3)", () => {
       teamA,
     ]);
 
-    // Dismissed, it leaves the list until someone asks again.
+    // Dismissed, it leaves the list; asking again the same day doesn't bring it back or email
+    // anyone (review M1).
     const d = await as.adminA.post(`/v1/team/skills/install-requests/${secondId}/dismiss`, {});
     expect(d.status).toBe(200);
     expect((await as.adminA.get("/v1/team/skills/install-requests")).json.requests).toEqual([]);
+    const afterDismiss = await as.memberA.post(`/v1/skills/catalog/${secondId}/request`, {});
+    expect([afterDismiss.status, afterDismiss.json.alreadyRequested]).toEqual([200, true]);
+    await h.mailer.settle();
+    expect(h.mailer.to("admina@adds.test")).toHaveLength(2);
+    expect((await as.adminA.get("/v1/team/skills/install-requests")).json.requests).toEqual([]);
+    // A day later it is a new request.
+    await h.admin.query(
+      `UPDATE team_skill_requests SET last_at = now() - interval '25 hours',
+         first_at = now() - interval '25 hours' WHERE team_id = $1 AND user_id = $2`,
+      [teamA, ids.memberA],
+    );
+    expect((await as.memberA.post(`/v1/skills/catalog/${secondId}/request`, {})).status).toBe(202);
+    expect((await as.adminA.get("/v1/team/skills/install-requests")).json.requests).toEqual([
+      expect.objectContaining({ skillId: secondId, count: 1 }),
+    ]);
   });
 
-  it("refuses a skill already installed or blocked here, and an unknown one", async () => {
+  it("caps a member at five skills a day, and lists only active members", async () => {
+    const extra: string[] = [];
+    for (let n = 0; n < 5; n += 1) {
+      const row = await h.admin.query<{ id: string }>(
+        `INSERT INTO registry_skills (name, summary) VALUES ($1, 'Extra.') RETURNING id`,
+        [`extra-skill-${n}`],
+      );
+      const id = row.rows[0]?.id as string;
+      await version(id, `extra-skill-${n}`, "1.0.0", 1, "approved");
+      extra.push(id);
+    }
+    // otherA asked for SECOND today already: four more fit, the fifth is over the cap.
+    for (const id of extra.slice(0, 4))
+      expect((await as.otherA.post(`/v1/skills/catalog/${id}/request`, {})).status).toBe(202);
+    const over = await as.otherA.post(`/v1/skills/catalog/${extra[4]}/request`, {});
+    expect([over.status, over.json.code]).toEqual([429, "request_limit"]);
+    expect(over.json.message).toMatch(/up to 5 skills a day/);
+    // A deactivated member's requests leave the console list (review L2).
+    await h.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.otherA]);
+    const list = (await as.adminA.get("/v1/team/skills/install-requests")).json.requests as {
+      skillId: string;
+      requesters: { userId: string }[];
+    }[];
+    expect(list.flatMap((r) => r.requesters.map((u) => u.userId))).not.toContain(ids.otherA);
+    await h.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.otherA]);
+  });
+
+  it("an install answers requests; installed, members ask for a change; refuses blocked and unknown", async () => {
     expect(
       (
         await as.adminA.put(`/v1/team/skills/installs/${secondId}`, {
@@ -345,8 +454,25 @@ describe("Request for team (ac-3)", () => {
         })
       ).status,
     ).toBe(200);
-    const installed = await as.otherA.post(`/v1/skills/catalog/${secondId}/request`, {});
-    expect([installed.status, installed.json.code]).toEqual([409, "installed"]);
+    // The install answered the requests made before it (review L3).
+    expect(
+      (await h.admin.query(`SELECT 1 FROM team_skill_requests WHERE skill_id = $1`, [secondId]))
+        .rows,
+    ).toEqual([]);
+    // Installed, a member asks for a change instead of adding it (review M3).
+    h.mailer.sent.length = 0;
+    const change = await as.adminB.post(`/v1/skills/catalog/${secondId}/request`, {});
+    expect(change.status).toBe(202);
+    const asked = await as.memberA.post(`/v1/skills/catalog/${secondId}/request`, {});
+    expect(asked.status, JSON.stringify(asked.json)).toBe(202);
+    await h.mailer.settle();
+    expect(h.mailer.to("admina@adds.test").at(-1)?.text).toMatch(
+      /asked for a change to the team's install of the catalog skill invoice-other \(now 1\.0\.0\)/,
+    );
+    expect(h.mailer.to("admina@adds.test").at(-1)?.text).toContain('"membera" <membera@adds.test>');
+    expect((await as.adminA.get("/v1/team/skills/install-requests")).json.requests).toEqual(
+      expect.arrayContaining([expect.objectContaining({ skillId: secondId, installed: "1.0.0" })]),
+    );
     expect((await block("adminA")).status).toBe(200);
     const blocked = await as.otherA.post(`/v1/skills/catalog/${skillId}/request`, {});
     expect([blocked.status, blocked.json.code]).toEqual([409, "blocked"]);

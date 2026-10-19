@@ -8,7 +8,8 @@ import { recordAudit } from "../audit/record.js";
  *   leaves it out of their runs in this team only (and out of the team's review queue).
  * - **team:** a team skill On by default can be turned off, an Available one on. Required and
  *   Hidden skills are not the member's to toggle; archived ones are not offered.
- * - **catalog:** the same for the team's installs (not a member add: that has its own version).
+ * - **catalog:** the same for the team's installs (not a member add: that has its own version; a
+ *   toggle of an installed skill clears an add left from before the install, KOBE-338 review L4).
  * Every real change is audited in the team (names and ids only).
  */
 export type EnablementKind = "personal" | "team" | "catalog";
@@ -165,7 +166,8 @@ export function setEnablement(
     const wasOn = skill.access === null ? was !== false : effective(skill.access, was ?? null);
     if (before.rows.length > 0)
       await tx.execute(sql`
-        UPDATE member_skill_enablements SET enabled = ${enabled}, updated_at = now()
+        UPDATE member_skill_enablements SET enabled = ${enabled}, updated_at = now(),
+          version_id = NULL, pin_mode = NULL
         WHERE team_id = ${teamId} AND user_id = ${userId} AND ${column} = ${skillId}`);
     else
       await tx.execute(sql`

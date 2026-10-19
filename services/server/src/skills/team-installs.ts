@@ -1,6 +1,7 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { addInTeam } from "./default-sync-team.js";
+import { installAnswers } from "./install-answers.js";
 import { readCatalogSwitches } from "./settings.js";
 import { requiredCount } from "./access.js";
 import { publishedVersions, runningVersion } from "./install-versions.js";
@@ -386,6 +387,7 @@ export async function installCatalogSkill(
           ELSE team_skill_installs.team_changed_at END`);
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
+    if (!previous) await installAnswers(tx, teamId, skillId);
     if (input.act && previous)
       await recordAudit(tx, {
         action: input.act === "move" ? "skill.catalog.pin_moved" : "skill.catalog.rolled_back",
