@@ -131,7 +131,18 @@ else
   fail "the MCP proxy allows the fake server: $(printf '%s' "$out" | tail -3)"
 fi
 ((RESTORE_HELM)) && UNDO+=("$HELM upgrade $RELEASE $CHART -n $NS -f $saved --reset-values --wait --timeout 8m")
-$KUBECTL -n "$NS" rollout status "$SERVER" --timeout=300s >/dev/null 2>&1 || true
+# The upgrade rolls the release's pods (server, scheduler, mcp-proxy, web, ...): wait until every
+# deployment has rolled out and the server answers through its Service, as e2e/run.sh does,
+# before any step talks to it (CI run 3: a step started mid-roll and timed out connecting).
+for d in $($KUBECTL -n "$NS" get deploy -l "app.kubernetes.io/instance=$RELEASE" -o name 2>/dev/null); do
+  $KUBECTL -n "$NS" rollout status "$d" --timeout=300s >/dev/null 2>&1 || fail "$d rolled out after the upgrade"
+done
+server_answers() {
+  $KUBECTL -n "$NS" exec "$SERVER" -c server -- node -e \
+    "fetch('$BASE/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))" >/dev/null 2>&1
+}
+if until_ok 180 server_answers; then ok "the server answers through its Service after the upgrade"
+else fail "the server answers through its Service after the upgrade"; fi
 CONNECTORS=$(printf '[{"key":"apps","name":"e2e-apps"},{"key":"key","name":"e2e-apps-key","authKind":"api_key","adminKey":"%s"}]' "$MEMBER_KEY")
 setup=$(step apps-setup "\"admin\":$U_AD,\"url\":\"http://$MCP_IP/mcp\",\"connectors\":$CONNECTORS")
 show "setup" "$setup"
@@ -162,7 +173,8 @@ contains "the turn that leaves the default out completes" '^terminal=run.complet
 r2=$(step apps-results "\"user\":$U_AD,\"threadId\":\"$(field thread "$defaulted")\"")
 show "results" "$r2"
 contains "...its tool card gets the app too" '^result=tool:app:-:in$' "$r2"
-upstream=$($KUBECTL -n "$INFRA_NS" logs fake-mcp 2>&1 | grep '^CALL open_explorer' | tail -2 | tr '\n' ' ')
+# Safe under set -euo pipefail when nothing matches: a failed check must reach the verdict.
+upstream=$({ $KUBECTL -n "$INFRA_NS" logs fake-mcp 2>&1 || true; } | { grep '^CALL open_explorer' || true; } | tail -2 | tr '\n' ' ')
 printf '     upstream saw: %s\n' "$upstream"
 # What Pi recorded is the model's raw arguments; what reached the upstream is Pi's conversion.
 contains "the upstream received Pi's converted arguments (5, not \"5\")" 'CALL open_explorer \{"depth":5\}' "$upstream"

@@ -6,6 +6,33 @@
 // database is read for evidence only (what Pi sent, audit rows), and the internal listener is
 // called only to show it refuses forged reports.
 
+/**
+ * Connection errors are retried briefly (a step that starts while the chart upgrade rolls the
+ * server pods, CI run 3): only failures to connect, where no request reached the server, so a
+ * retried POST never runs twice. Anything else, and the 6th failure, is thrown as is.
+ */
+const CONNECT_ERRORS = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+{
+  const once = globalThis.fetch;
+  globalThis.fetch = async (...args) => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await once(...args);
+      } catch (err) {
+        const code = err?.cause?.code ?? err?.code;
+        if (!CONNECT_ERRORS.has(code) || attempt >= 6) throw err;
+        await sleep(5_000);
+      }
+    }
+  };
+}
+
 /** The app's connector registered, pinned (templates approved) and enabled; keys set. */
 async function appsSetup() {
   const owner = await ownerClient();
