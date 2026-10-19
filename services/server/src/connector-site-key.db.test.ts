@@ -7,7 +7,8 @@ import { logger } from "./logger.js";
 import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.js";
+import { signSessionToken } from "@kobe/session-token";
+import { INTERNAL_KEY, MCP_SESSION_KEY, leaseRun, mcpToken } from "./testing/mcp-fixtures.js";
 
 /**
  * A site-wide API key for an MCP connector (KOBE-303): a site admin sets one key, every member of
@@ -34,7 +35,14 @@ let carolId = "";
 let internal: ReturnType<typeof createInternalApp>;
 const probedKeys: (string | undefined)[] = [];
 const logged: string[] = [];
-const tools = [{ name: "lookup", description: "d", inputSchema: { type: "object" } }];
+const tools = [
+  {
+    name: "lookup",
+    description: "d",
+    inputSchema: { type: "object" },
+    annotations: { readOnlyHint: true },
+  },
+];
 
 const answer = (key: string | undefined): ProbeResult =>
   key === SITE_KEY || key === SITE_KEY2
@@ -323,6 +331,133 @@ describe("the refresh probes with the site key", () => {
       }),
     ).toEqual({ status: "unchanged" });
     expect(probedKeys).toEqual([SITE_KEY]);
+  });
+});
+
+describe("review follow-ups", () => {
+  it("serves no key once the URL changed outside the registry, and says to re-enter it (M2)", async () => {
+    const id = await siteConnector("site-bound");
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(200);
+    // An older release's edit: the URL changes and the key row stays.
+    await h.admin.query(
+      `UPDATE connectors SET url = 'https://elsewhere.example/mcp' WHERE id = $1`,
+      [id],
+    );
+    expect(await siteKeyRow(id)).toBeDefined();
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(404);
+    probedKeys.length = 0;
+    await refreshConnector(h.deps.database.db, h.deps.connectorProbe, id, {
+      envelope: h.deps.envelope,
+    });
+    expect(probedKeys).toEqual([undefined]);
+    expect((await root.get(`${BASE}/${id}`)).json.connector).toMatchObject({
+      siteKeyStale: true,
+    });
+    // Re-entered for the new URL, it is served again.
+    await root.put(`${BASE}/${id}/site-key`, { api_key: SITE_KEY2 });
+    expect((await grantFor(teamOn, aliceId, id)).body.api_key).toBe(SITE_KEY2);
+    expect((await root.get(`${BASE}/${id}`)).json.connector.siteKeyStale).toBe(false);
+  });
+
+  it("gives a skill eval's sandbox no site key (test 3)", async () => {
+    const id = await siteConnector("site-eval");
+    const now = Math.floor(Date.now() / 1000);
+    const token = signSessionToken(
+      {
+        iss: "kobe-server",
+        aud: "kobe.mcp-proxy",
+        sub: randomUUID(),
+        team_id: teamOn,
+        user_id: aliceId,
+        eval_thread: randomUUID(),
+        iat: now,
+        exp: now + 600,
+        jti: `test-${randomUUID()}`,
+      },
+      MCP_SESSION_KEY,
+    );
+    const res = await internal.request(`/internal/v1/mcp/connectors/${id}/grant`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${INTERNAL_KEY}`, "kobe-sandbox-token": token },
+    });
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(JSON.parse(body)).toMatchObject({ code: "not_connected" });
+    expect(body).not.toContain(SITE_KEY);
+  });
+
+  it("a scheduled run calls it with the site key, decided and audited as the member (test 4)", async () => {
+    const id = await siteConnector("site-sched");
+    const sandboxId = randomUUID();
+    const threadId = randomUUID();
+    const runId = randomUUID();
+    await h.admin.query(
+      `INSERT INTO threads (team_id, id, owner_user_id, status) VALUES ($1, $2, $3, 'running')`,
+      [teamOn, threadId, aliceId],
+    );
+    await h.admin.query(
+      `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at)
+       VALUES ($1, $2, $3, 'schedule', 'running', now())`,
+      [teamOn, runId, threadId],
+    );
+    await leaseRun(h.admin, teamOn, runId, aliceId, sandboxId);
+    const token = mcpToken({ sandboxId, teamId: teamOn, userId: aliceId });
+    const res = await internal.request(`/internal/v1/mcp/connectors/${id}/calls`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${INTERNAL_KEY}`,
+        "kobe-sandbox-token": token,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ tool: "lookup", arguments: {}, thread_id: threadId }),
+    });
+    expect(await res.json()).toMatchObject({ decision: "allow" });
+    const grant = await internal.request(`/internal/v1/mcp/connectors/${id}/grant`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${INTERNAL_KEY}`, "kobe-sandbox-token": token },
+    });
+    expect(await grant.json()).toEqual({ kind: "api_key", api_key: SITE_KEY });
+    const audited = await h.admin.query(
+      `SELECT actor_id, target FROM audit_log WHERE action = 'mcp.tool_call'
+        AND target->>'connectorId' = $1`,
+      [id],
+    );
+    expect(audited.rows).toHaveLength(1);
+    expect(audited.rows[0]).toMatchObject({
+      actor_id: aliceId,
+      target: { userId: aliceId, decision: "allowed", runId },
+    });
+  });
+
+  it("refuses a member removed from the team (test 5)", async () => {
+    const id = await siteConnector("site-left");
+    await h.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      teamOn,
+      bobId,
+    ]);
+    expect((await grantFor(teamOn, bobId, id)).status).toBe(401);
+    const revealed = await h.deps.mcp.revealCredential(
+      { sandboxId: randomUUID(), teamId: teamOn, userId: bobId },
+      id,
+    );
+    expect(revealed).toEqual({ ok: false, failure: "not_available" });
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [teamOn, bobId],
+    );
+  });
+
+  it("refuses site mode on a connector that is not api_key with a clear 400 (L4)", async () => {
+    const created = await root.post(BASE, {
+      name: "site-oauth-patch",
+      url: "https://site-oauth-patch.example/mcp",
+      authKind: "oauth",
+    });
+    const res = await root.patch(`${BASE}/${created.json.connector.id}`, {
+      credentialSource: "site",
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.message).toMatch(/API-key connectors only/);
   });
 });
 

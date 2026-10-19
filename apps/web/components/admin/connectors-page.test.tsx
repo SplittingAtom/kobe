@@ -17,6 +17,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   driftedCount: 0,
   credentialSource: "member",
   siteKeyHint: null,
+  siteKeyStale: false,
   refreshSkipped: null,
   refreshedAt: null,
   createdAt: "2026-10-05T10:00:00.000Z",
@@ -318,5 +319,49 @@ describe("site-wide key (KOBE-303)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Remove key" }));
     await answerConfirm(/Remove the site-wide key/, "Remove key");
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
+  });
+});
+
+describe("site-wide key review follow-ups", () => {
+  it("says to re-enter a key whose server URL changed (M2)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              credentialSource: "site",
+              siteKeyHint: "••••wxyz",
+              siteKeyStale: true,
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText(/re-enter it \(the server URL changed\)/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Site key/ }));
+    expect(screen.getByText(/enter the key again/)).toBeTruthy();
+  });
+
+  it("tells admins of a skipped site-key connector to set the site key (L2)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              authKind: "api_key",
+              credentialSource: "site",
+              refreshSkipped: "auth_required",
+            }),
+          ],
+        },
+      ],
+    });
+    renderSite(<ConnectorsPage />);
+    expect(await screen.findByText(/Set the site-wide key\./)).toBeTruthy();
+    expect(screen.queryByText(/My connector keys/)).toBeNull();
   });
 });

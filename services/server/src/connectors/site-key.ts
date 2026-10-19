@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   Envelope,
   and,
@@ -26,13 +27,23 @@ import { maskHint } from "./mask.js";
 /** A site-wide record has no team: the envelope binds to the nil team id (as web search does). */
 const SITE_TEAM = "00000000-0000-0000-0000-000000000000";
 
-export function siteKeyContext(connectorId: string) {
-  return { teamId: SITE_TEAM, kind: "connector_site_key", recordId: connectorId } as const;
+/** SHA-256 (hex) of a connector URL: what a site key is bound to (review M2). */
+export const urlSha256 = (url: string): string => createHash("sha256").update(url).digest("hex");
+
+/** Envelope binding: the key opens only for this connector at this URL. */
+export function siteKeyContext(connectorId: string, url: string) {
+  return {
+    teamId: SITE_TEAM,
+    kind: "connector_site_key",
+    recordId: `${connectorId}:${urlSha256(url)}`,
+  } as const;
 }
 
 /**
- * The connector's site key, if it is a live `api_key` connector in `site` mode and has one.
- * Fails closed: a ciphertext that does not open (another envelope key, tampering) is no key.
+ * The connector's site key, if it is a live `api_key` connector in `site` mode, has one, and still
+ * has the URL the key was set for. Fails closed: a URL that changed by any path (an older release
+ * that knows nothing of site keys included), or a ciphertext that does not open (another envelope
+ * key, tampering), is no key.
  */
 export async function revealSiteKey(
   db: KobeDb | KobeTx,
@@ -40,7 +51,11 @@ export async function revealSiteKey(
   connectorId: string,
 ): Promise<string | undefined> {
   const [row] = await db
-    .select({ sealed: connectorSiteKeys.sealed })
+    .select({
+      sealed: connectorSiteKeys.sealed,
+      boundTo: connectorSiteKeys.urlSha256,
+      url: connectors.url,
+    })
     .from(connectorSiteKeys)
     .innerJoin(connectors, eq(connectors.id, connectorSiteKeys.connectorId))
     .where(
@@ -51,9 +66,9 @@ export async function revealSiteKey(
         isNull(connectors.deletedAt),
       ),
     );
-  if (!row) return undefined;
+  if (!row || row.boundTo !== urlSha256(row.url)) return undefined;
   try {
-    return envelope.openString(row.sealed, siteKeyContext(connectorId));
+    return envelope.openString(row.sealed, siteKeyContext(connectorId, row.url));
   } catch {
     return undefined;
   }
@@ -71,18 +86,11 @@ export async function setSiteKey(
   apiKey: string,
   userId: string,
 ): Promise<SetSiteKeyOutcome> {
-  const sealed = envelope.seal(apiKey, siteKeyContext(connectorId));
-  const values = {
-    connectorId,
-    sealed,
-    keyId: Envelope.keyIdOf(sealed),
-    hint: maskHint(apiKey),
-    updatedBy: userId,
-  };
   return db.transaction(async (tx): Promise<SetSiteKeyOutcome> => {
     const [connector] = await tx
       .select({
         name: connectors.name,
+        url: connectors.url,
         source: connectors.credentialSource,
         authKind: connectors.authKind,
       })
@@ -93,6 +101,16 @@ export async function setSiteKey(
     if (connector.source !== "site" || connector.authKind !== "api_key") {
       return { ok: false, failure: "not_site_key" };
     }
+    // Sealed for the URL read under the row lock, so a concurrent URL edit cannot be missed.
+    const sealed = envelope.seal(apiKey, siteKeyContext(connectorId, connector.url));
+    const values = {
+      connectorId,
+      sealed,
+      keyId: Envelope.keyIdOf(sealed),
+      urlSha256: urlSha256(connector.url),
+      hint: maskHint(apiKey),
+      updatedBy: userId,
+    };
     const [existing] = await tx
       .select({ id: connectorSiteKeys.connectorId })
       .from(connectorSiteKeys)
@@ -105,6 +123,7 @@ export async function setSiteKey(
         set: {
           sealed: values.sealed,
           keyId: values.keyId,
+          urlSha256: values.urlSha256,
           hint: values.hint,
           updatedBy: userId,
           updatedAt: sql`now()`,

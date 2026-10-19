@@ -45,13 +45,21 @@ shown to site admins on the connector page and as a drift notification.
 - `connectors.db.test.ts` audit test now expects `mcp.connector.probe_credential` rows.
 - Web: `components/admin/connectors-page.test.tsx` "refresh skips (KOBE-431)".
 
+## Review fixes (2026-10-19, review-g10 M1, L2, L3, tests 1 and 6)
+
+- **M1 (coordinator decision):** `nextPinnedBy` (probe-credential.ts) moves `pinned_by` to the
+  approving or pinning admin only when their own key is usable, or when the admin named now has
+  no usable key (null, deactivated, demoted, keyless); otherwise it stays. Used by
+  `POST /:id/tools/approve` and every pin.
+- **L2:** the remedy text depends on `credentialSource` (pin message, skip email, registry page):
+  for a site-key connector, "set (or re-enter) its site-wide key".
+- **L3:** `mcp.connector.drift_notified` carries `kind` (drift | skipped); the email rate limit is
+  per connector, recipient and kind, so a skip email never holds back a drift email.
+- Tests: keyless approver keeps a keyed `pinned_by`; keyed approver takes over; keyless approver
+  takes over from a keyless admin; refresh audit only on change (admin_key → none → admin_key);
+  a drift email after a skip email; site-key remedy text (server and web).
+
 ## Open
 
-- Literal "last pinned or approved": an approval by an admin with no key moves `pinned_by` to
-  them, so the next refresh skips (surfaced) until they add a key. Alternative: only move it when
-  the approving admin has a usable key.
 - ac-4's gate1 e2e against Catalyst is a deploy step (not run here): after deploy, the Catalyst
-  connector's `pinned_by` comes from the backfill (the owner pinned it on 2026-10-13/19); the next
-  pass should drift the 5 new tools.
-- The rate limit of drift emails is per connector and recipient across both kinds, so a skip
-  email can suppress a drift email for the same connector within 24 h (in-app notice still shows).
+  connector's `pinned_by` comes from the backfill; the next pass should drift the 5 new tools.

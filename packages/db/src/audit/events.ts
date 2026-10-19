@@ -1635,6 +1635,8 @@ export const AUDIT_EVENTS = {
     driftSeq: z.number().int().positive(),
     recipientId: id,
     emailed: z.boolean(),
+    /** KOBE-431: `skipped` for a refresh-skip event (rate-limited apart from drift); absent = drift. */
+    kind: z.enum(["drift", "skipped"]).optional(),
   }),
   /** A site admin re-approved drifted tools (KOBE-102); they are offered again. */
   "mcp.connector.reapproved": event("site", {

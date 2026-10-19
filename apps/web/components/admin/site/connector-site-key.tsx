@@ -81,7 +81,11 @@ export function SiteKeyPanel({
         which member made each call.
       </Notice>
       <p className="m-0 my-3 text-sm text-console-muted">
-        {hasKey ? `A key ending ${c.siteKeyHint} is set.` : "No key is set: members' calls fail."}
+        {!hasKey
+          ? "No key is set: members' calls fail."
+          : c.siteKeyStale
+            ? "The server URL changed since this key was set, so it is not used: enter the key again."
+            : `A key ending ${c.siteKeyHint} is set.`}
       </p>
       <form onSubmit={save} aria-label={`Site-wide key for ${c.name}`}>
         <FormRow className="mb-0">

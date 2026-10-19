@@ -18,7 +18,7 @@ import {
   reviewConnectorTools,
 } from "../connectors/reapproval.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
-import { adminPinCredential } from "../connectors/probe-credential.js";
+import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential.js";
 import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
 import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
@@ -59,10 +59,21 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
 };
 
 /** The `pin` part of a response: what happened to the tool surface (never the server's own text). */
-const pinBody = (pin: PinOutcome) =>
+/** A site-key connector is fixed by its key, not by anyone's own key (review L2). */
+const SITE_AUTH_REQUIRED =
+  "The server asked for credentials: set (or re-enter) this connector's site-wide key. Tools stay unpinned (none are offered).";
+
+const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: string }) =>
   pin.ok
     ? { ok: true as const, tools: pin.tools }
-    : { ok: false as const, failure: pin.failure, message: PIN_MESSAGES[pin.failure] };
+    : {
+        ok: false as const,
+        failure: pin.failure,
+        message:
+          pin.failure === "auth_required" && connector?.credentialSource === "site"
+            ? SITE_AUTH_REQUIRED
+            : PIN_MESSAGES[pin.failure],
+      };
 
 const invalidFields =
   "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth, credentialSource is member or site (site needs api_key).";
@@ -78,11 +89,11 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   app.use(requireSitePermission("site.connectors.manage"));
 
   // Pins as the acting admin: the site key, else their own grant, never a member's (KOBE-431).
-  const pinAs = (c: Context, connectorId: string) => {
+  const pinAs = async (c: Context, connectorId: string) => {
     const adminId = c.get("user").id;
     return pinConnector(db, deps.connectorProbe, connectorId, {
       credential: adminPinCredential(db, deps.envelope, adminId),
-      pinnedBy: adminId,
+      pinnedBy: await nextPinnedBy(db, deps.envelope, connectorId, adminId),
     });
   };
 
@@ -107,7 +118,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     // Registering snapshots and pins every tool; a failed probe leaves it registered, unpinned.
     const pin = await pinAs(c, result.connector.id);
     const connector = (await getConnector(db, result.connector.id)) ?? result.connector;
-    return c.json({ connector, ...(pin ? { pin: pinBody(pin) } : {}) }, 201);
+    return c.json({ connector, ...(pin ? { pin: pinBody(pin, connector) } : {}) }, 201);
   });
 
   app.patch("/:id", async (c) => {
@@ -122,13 +133,21 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       patch = { ...input, url: checked.url };
     }
     const result = await updateConnector(db, id.data, patch);
-    if (!result.ok)
-      return result.error === "not_found" ? notFound(c) : nameConflict(c, result.error);
+    if (!result.ok) {
+      if (result.error === "not_found") return notFound(c);
+      if (result.error === "site_needs_api_key") {
+        return invalidRequest(
+          c,
+          "A site-wide key is for API-key connectors only: set authKind to api_key as well.",
+        );
+      }
+      return nameConflict(c, result.error);
+    }
     // A new URL cleared the old pins; pin the new server's tools (no-op when pins still exist).
     const pin = patch.url === undefined ? undefined : await pinAs(c, id.data);
     const connector = (await getConnector(db, id.data)) ?? result.connector;
     const shown =
-      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
+      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin, connector) } : {};
     return c.json({ connector, ...shown });
   });
 
@@ -139,7 +158,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!id.success || !pin) return notFound(c);
     const connector = await getConnector(db, id.data);
     return c.json(
-      { connector, pin: pinBody(pin) },
+      { connector, pin: pinBody(pin, connector) },
       pin.ok || pin.failure === "already_pinned" ? 200 : 502,
     );
   });
@@ -174,7 +193,7 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const pin = await pinAs(c, id.data);
     const connector = await getConnector(db, id.data);
     const shown =
-      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
+      pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin, connector) } : {};
     return c.json({ connector, replaced: result.replaced, ...shown });
   });
 
@@ -202,7 +221,8 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!input) {
       return invalidRequest(c, "Send tools: a list of { name, sha256 } of the reviewed tools.");
     }
-    const result = await approveConnectorTools(db, id.data, input, c.get("user").id);
+    const pinnedBy = await nextPinnedBy(db, deps.envelope, id.data, c.get("user").id);
+    const result = await approveConnectorTools(db, id.data, input, pinnedBy);
     if (result.ok) return c.json({ approved: result.approved });
     if (result.error === "not_found") return notFound(c);
     return c.json(

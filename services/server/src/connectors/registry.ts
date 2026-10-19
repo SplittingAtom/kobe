@@ -92,6 +92,8 @@ export interface ConnectorView {
   readonly credentialSource: (typeof CONNECTOR_CREDENTIAL_SOURCES)[number];
   /** The site key's masked hint (last four characters at most); null when none is set. */
   readonly siteKeyHint: string | null;
+  /** The URL changed since the key was set (review M2): it is not used until re-entered. */
+  readonly siteKeyStale: boolean;
   readonly status: (typeof STATUSES)[number];
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
@@ -111,6 +113,7 @@ const columns = {
   iconUrl: connectors.iconUrl,
   authKind: connectors.authKind,
   credentialSource: connectors.credentialSource,
+  siteKeyStale: sql<boolean>`COALESCE((SELECT ${connectorSiteKeys.urlSha256} <> encode(sha256(convert_to(${connectors.url}, 'UTF8')), 'hex') FROM ${connectorSiteKeys} WHERE ${connectorSiteKeys.connectorId} = ${connectors.id}), false)`,
   siteKeyHint: sql<
     string | null
   >`(SELECT ${connectorSiteKeys.hint} FROM ${connectorSiteKeys} WHERE ${connectorSiteKeys.connectorId} = ${connectors.id})`,
@@ -190,7 +193,8 @@ export async function updateConnector(
   id: string,
   input: UpdateInput,
 ): Promise<
-  { ok: true; connector: ConnectorView } | { ok: false; error: NameConflict | "not_found" }
+  | { ok: true; connector: ConnectorView }
+  | { ok: false; error: NameConflict | "not_found" | "site_needs_api_key" }
 > {
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -199,6 +203,10 @@ export async function updateConnector(
       .where(and(eq(connectors.id, id), live))
       .for("update");
     if (!current) return { ok: false as const, error: "not_found" as const };
+    // Asking for a site-wide key on a connector that will not be api_key is refused (review L4).
+    if (input.credentialSource === "site" && (input.authKind ?? current.authKind) !== "api_key") {
+      return { ok: false as const, error: "site_needs_api_key" as const };
+    }
     if (input.name !== undefined && input.name !== current.name) {
       const conflict = await nameConflict(tx, input.name, id);
       if (conflict) return { ok: false as const, error: conflict };

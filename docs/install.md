@@ -473,6 +473,14 @@ so a replaced or removed key takes effect on the next call. Setting and removing
 (`mcp.connector.site_key_set` / `_removed`), never the value; the start-up sealed-key check covers
 it like members' keys.
 
+The key is bound to the connector URL it was set for: if the URL changes by any path, Kobe stops
+using it (members' calls fail, probes go without it) and the registry says to re-enter it. **Rollback
+and rolling upgrades:** a release older than site-wide keys ignores them. After a `helm rollback`,
+members of a site-key connector get "not connected" (the key stays stored, unused, and is used again
+after rolling forward); while old and new server pods run side by side, an old pod may accept a
+member's own key for a site-key connector (the new pods ignore it) and fails an auth-kind edit of a
+site-key connector (a database check refuses it). Avoid editing site-key connectors during a rollout.
+
 **Probing and drift.** Kobe pins a connector's tools from its `tools/list`, and re-checks every
 pinned connector each `KOBE_CONNECTOR_REFRESH_SECONDS` (default 3600) for changed tools, which stay
 disabled until a site admin approves them. For a connector that asks for a credential, both probes

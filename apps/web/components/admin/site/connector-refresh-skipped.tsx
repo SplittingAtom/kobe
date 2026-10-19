@@ -17,7 +17,9 @@ export function RefreshSkipped({ connector: c }: { readonly connector: Connector
         {auth ? "Not checked for changes: needs a key" : "Last check for changes failed"}
       </Badge>{" "}
       {auth
-        ? "Kobe checks it with its site-wide key, else the own key of the site admin who last pinned or approved its tools. Add your key for it at My connector keys, then pin or approve its tools."
+        ? c.credentialSource === "site"
+          ? "Kobe checks it with its site-wide key, which is not set or must be re-entered. Set the site-wide key."
+          : "Kobe checks it with the own key of the site admin who last pinned or approved its tools. Add your key for it at My connector keys, then pin or approve its tools."
         : `The server could not be checked (${c.refreshSkipped.replaceAll("_", " ")}).`}
       {c.refreshedAt ? (
         <>

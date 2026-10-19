@@ -345,10 +345,14 @@ function ConnectorTable({
                 {AUTH_LABELS[c.authKind]}
                 {c.credentialSource === "site" ? (
                   <span className="ms-1 inline-flex flex-wrap items-center gap-1.5">
-                    <Badge tone={c.siteKeyHint === null ? "attention" : "neutral"}>
+                    <Badge
+                      tone={c.siteKeyHint === null || c.siteKeyStale ? "attention" : "neutral"}
+                    >
                       {c.siteKeyHint === null
                         ? "Site-wide key: not set"
-                        : `Site-wide key ${c.siteKeyHint}`}
+                        : c.siteKeyStale
+                          ? "Site-wide key: re-enter it (the server URL changed)"
+                          : `Site-wide key ${c.siteKeyHint}`}
                     </Badge>
                     <Button size="sm" onClick={() => onSiteKey(c)}>
                       Site key<span className="sr-only"> of {c.name}</span>

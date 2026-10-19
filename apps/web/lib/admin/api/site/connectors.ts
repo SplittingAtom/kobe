@@ -17,6 +17,8 @@ export interface Connector {
   readonly credentialSource: CredentialSource;
   /** The site key's masked hint (last four characters at most); null when none is set. */
   readonly siteKeyHint: string | null;
+  /** The server URL changed since the key was set: it is not used until re-entered. */
+  readonly siteKeyStale: boolean;
   readonly status: ConnectorStatus;
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */

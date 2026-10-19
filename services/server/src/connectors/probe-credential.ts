@@ -65,9 +65,44 @@ export async function chooseProbeCredential(
   const siteKey = await revealSiteKey(db, envelope, connectorId);
   if (siteKey !== undefined) return { source: "site_key", apiKey: siteKey };
   const adminId = admin === "pinned_by" ? row.pinnedBy : admin;
-  if (adminId === null || !(await isActiveSiteAdmin(db, adminId))) return NONE;
-  const apiKey = await adminProbeKey(db, envelope, adminId, connectorId);
-  return apiKey === undefined ? NONE : { source: "admin_key", adminId, apiKey };
+  const apiKey = await usableAdminKey(db, envelope, connectorId, adminId);
+  return apiKey === undefined || adminId === null ? NONE : { source: "admin_key", adminId, apiKey };
+}
+
+/** The admin's own key, while they are an active site admin; never anyone else's. */
+async function usableAdminKey(
+  db: KobeDb,
+  envelope: Envelope,
+  connectorId: string,
+  adminId: string | null,
+): Promise<string | undefined> {
+  if (adminId === null || !(await isActiveSiteAdmin(db, adminId))) return undefined;
+  return adminProbeKey(db, envelope, adminId, connectorId);
+}
+
+/**
+ * Who `connectors.pinned_by` should name after `adminId` pins or re-approves the connector
+ * (KOBE-431 review M1): `adminId` when their own key can probe it, or when the admin named now
+ * has no usable key either (null, deactivated, demoted or keyless); otherwise unchanged
+ * (undefined), so an approval by a keyless admin never stops the refresh of a connector another
+ * admin's key still checks.
+ */
+export async function nextPinnedBy(
+  db: KobeDb,
+  envelope: Envelope | undefined,
+  connectorId: string,
+  adminId: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ authKind: connectors.authKind, pinnedBy: connectors.pinnedBy })
+    .from(connectors)
+    .where(eq(connectors.id, connectorId));
+  if (!row) return undefined;
+  if (row.pinnedBy === adminId) return undefined;
+  if (row.authKind !== "api_key" || !envelope) return adminId;
+  if ((await usableAdminKey(db, envelope, connectorId, adminId)) !== undefined) return adminId;
+  const current = await usableAdminKey(db, envelope, connectorId, row.pinnedBy);
+  return current === undefined ? adminId : undefined;
 }
 
 export type ProbePurpose = "pin" | "refresh";

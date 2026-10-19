@@ -55,6 +55,23 @@ unchanged); site key only, no personal-key override.
   `AUTH <header>`) sees `Bearer <site key>` twice; no key in sandbox env, SandboxTemplates, audit,
   server logs; stored sealed. **Not run locally** (needs k3d); first run is CI's e2e job.
 
+## Review fixes (2026-10-19, review-g10 M2, L1, L4, L5, tests 2-5)
+
+- **M2:** `connector_site_keys.url_sha256` (0151 regenerated: unreleased) and the envelope
+  `recordId` `<connectorId>:<sha256(url)>` bind the key to the URL it was set for.
+  `revealSiteKey` serves nothing (members' calls and probes alike) when the URL no longer
+  matches; views carry `siteKeyStale` and the page says to re-enter the key.
+- **L1:** rollback and rolling-upgrade behaviour documented in `docs/install.md`.
+- **L4:** PATCH `credentialSource: site` on a connector that will not be `api_key` → 400 with
+  "A site-wide key is for API-key connectors only".
+- **L5 (rotation):** grants are not re-sealed under a new KEK anywhere: the only KEK-id sweep is
+  the start-up report (KOBE-425, `startup/sealed-keys.ts`), which names rows sealed with a key
+  the server does not hold. Site keys match that: same report family, no re-wrap. A re-wrap job
+  (`Envelope.rewrap`, unused today) would cover grants and site keys together.
+- Tests: URL changed by raw SQL → no key served or probed, `siteKeyStale`, re-entry restores;
+  eval principal → 404 `not_connected`; scheduled run → allowed, site key served, `mcp.tool_call`
+  audited as the member; member removed from the team refused; L4 400.
+
 ## Open
 
 - Skill evals (KOBE-325) get no credential at all, including a site key. Kept; say if evals

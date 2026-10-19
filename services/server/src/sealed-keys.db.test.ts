@@ -13,7 +13,7 @@ import {
   withTeam,
 } from "@kobe/db";
 import pino from "pino";
-import { siteKeyContext } from "./connectors/site-key.js";
+import { siteKeyContext, urlSha256 } from "./connectors/site-key.js";
 import { checkSealedKeys, sealedFamilies, unknownKeys } from "./startup/sealed-keys.js";
 import { EventStreamFixture } from "./testing/event-stream-fixture.js";
 
@@ -69,10 +69,17 @@ beforeAll(async () => {
     })
     .returning({ id: connectors.id });
   const connectorId = (connector as { id: string }).id;
-  const sealed = new Envelope(SOURCE.envelope).seal("site-secret", siteKeyContext(connectorId));
-  await f.db
-    .insert(connectorSiteKeys)
-    .values({ connectorId, sealed, keyId: Envelope.keyIdOf(sealed), hint: "••••" });
+  const sealed = new Envelope(SOURCE.envelope).seal(
+    "site-secret",
+    siteKeyContext(connectorId, "https://sealed.invalid/mcp"),
+  );
+  await f.db.insert(connectorSiteKeys).values({
+    connectorId,
+    sealed,
+    keyId: Envelope.keyIdOf(sealed),
+    urlSha256: urlSha256("https://sealed.invalid/mcp"),
+    hint: "••••",
+  });
   await withTeam(f.db, teamId, (tx) =>
     tx.insert(modelGatewayKeys).values({
       teamId,

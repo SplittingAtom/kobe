@@ -226,20 +226,62 @@ describe("the periodic refresh of an auth-required connector (ac-1, ac-2)", () =
     await h.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [otherId]);
   });
 
-  it("re-approval makes the approving admin the one whose key probes", async () => {
-    const id = await pinnedByRoot("refresh-d");
-    tools = [...tools, { name: "b", description: "new", inputSchema: { type: "object" } }];
+  /** Adds a drifted tool and has `who` approve it. */
+  async function approveNew(id: string, who: TestBrowser, tool: string, before?: () => unknown) {
+    tools = [...tools, { name: tool, description: "new", inputSchema: { type: "object" } }];
     await refresh(id);
-    const review = (await other.get(`${BASE}/${id}/tools`)).json.tools as {
+    await before?.();
+    const review = (await who.get(`${BASE}/${id}/tools`)).json.tools as {
       name: string;
       live?: { sha256: string };
     }[];
-    const b = must(review.find((t) => t.name === "b"));
-    const ok = await other.post(`${BASE}/${id}/tools/approve`, {
-      tools: [{ name: "b", sha256: must(b.live).sha256 }],
+    const pending = must(review.find((t) => t.name === tool));
+    const ok = await who.post(`${BASE}/${id}/tools/approve`, {
+      tools: [{ name: tool, sha256: must(pending.live).sha256 }],
     });
     expect(ok.status).toBe(200);
+  }
+
+  it("a keyless approver leaves a keyed pinned_by in place (review M1)", async () => {
+    const id = await pinnedByRoot("refresh-d");
+    await approveNew(id, other, "b");
+    expect((await row(id)).pinned_by).toBe(rootId);
+    probedKeys.length = 0;
+    await refresh(id);
+    expect(probedKeys).toEqual([ADMIN_KEY]);
+  });
+
+  it("an approver with a usable key takes over pinned_by", async () => {
+    const id = await pinnedByRoot("refresh-d2");
+    expect((await saveKey(other, id, OTHER_ADMIN_KEY)).status).toBe(201);
+    await approveNew(id, other, "b");
     expect((await row(id)).pinned_by).toBe(otherId);
+  });
+
+  it("a keyless approver takes over when the admin named has no usable key either", async () => {
+    const id = await pinnedByRoot("refresh-d3");
+    await approveNew(id, other, "b", () => root.delete(`/v1/connector-grants/${id}`));
+    expect((await row(id)).pinned_by).toBe(otherId);
+  });
+
+  it("audits the refresh's choice only when it changes: admin_key, none, admin_key (review test 6)", async () => {
+    const id = await pinnedByRoot("refresh-audit");
+    const refreshChoices = async () =>
+      (await events("mcp.connector.probe_credential", id))
+        .map((e) => e.target as { purpose: string; credential: string })
+        .filter((t) => t.purpose === "refresh")
+        .map((t) => t.credential);
+    await refresh(id);
+    await refresh(id);
+    expect(await refreshChoices()).toEqual(["admin_key"]);
+    await root.delete(`/v1/connector-grants/${id}`);
+    await refresh(id);
+    await refresh(id);
+    expect(await refreshChoices()).toEqual(["admin_key", "none"]);
+    await saveKey(root, id, ADMIN_KEY);
+    await refresh(id);
+    await refresh(id);
+    expect(await refreshChoices()).toEqual(["admin_key", "none", "admin_key"]);
   });
 
   it("a connector without auth probes with no key and no lookup", async () => {
@@ -297,5 +339,37 @@ describe("site admins are told about an auth_required skip (ac-3)", () => {
       connectorId: string;
     }[];
     expect(aliceNotices.some((n) => n.connectorId === id)).toBe(false);
+
+    // The skip email does not hold back a drift email for the same connector (review L3).
+    await saveKey(root, id, ADMIN_KEY);
+    tools = [...tools, { name: "later", description: "new", inputSchema: { type: "object" } }];
+    expect((await refresh(id)).status).toBe("drifted");
+    await sweep();
+    const drift = h.mailer
+      .to("root@probe.test")
+      .filter((m) => m.subject === "Connector notify-a: tools changed and are disabled");
+    expect(drift).toHaveLength(1);
+  });
+
+  it("tells admins of a site-key connector to set the site key, not to add their own (review L2)", async () => {
+    const created = await root.post(BASE, {
+      name: "notify-site",
+      url: "https://notify-site.example/mcp",
+      authKind: "api_key",
+      credentialSource: "site",
+    });
+    expect(created.json.pin.message).toMatch(/site-wide key/);
+    expect(created.json.pin.message).not.toMatch(/My connector keys/);
+    const id = created.json.connector.id as string;
+    await h.admin.query(`UPDATE connectors SET tools_hash = $1 WHERE id = $2`, [
+      "0".repeat(64),
+      id,
+    ]);
+    await refresh(id);
+    await notifyDrift({ db: db(), mailer: h.mailer, publicUrl: "https://kobe.test" });
+    const mail = h.mailer.to("root@probe.test").filter((m) => m.subject.includes("notify-site"));
+    expect(mail).toHaveLength(1);
+    expect(must(mail[0]).text).toMatch(/Set \(or re-enter\) its site-wide key/);
+    expect(must(mail[0]).text).not.toMatch(/My connector keys/);
   });
 });
