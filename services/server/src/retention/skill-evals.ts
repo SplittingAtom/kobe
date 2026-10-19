@@ -3,8 +3,9 @@ import { logger } from "../logger.js";
 import type { BlobStore } from "./blobs.js";
 
 // Skill eval runs (KOBE-325) follow team retention by their start and offboarding by their
-// starter. A held starter's run is skipped silently by its row trigger (0146): DELETE … RETURNING
-// returns only the rows really deleted, and only their objects (the runtime bundle, the fixtures)
+// starter. Held starters' runs are left out of each batch (a batch of held rows would stall the
+// purge, review M3); the row trigger (0146) stays the backstop. DELETE … RETURNING returns only
+// the rows really deleted, and only their objects (the runtime bundle, the fixtures)
 // are removed from the bucket, after the delete committed. Open runs are never purged; their
 // eval threads are ordinary team threads with their own retention.
 
@@ -73,6 +74,7 @@ export function purgeSkillEvals(
          SELECT k.id FROM skill_eval_runs k
           WHERE k.team_id = ${teamId} AND k.started_at < ${cutoff.toISOString()}
             AND k.status IN ${FINISHED}
+            AND NOT public.legal_hold_covers(k.team_id, k.started_by)
           ORDER BY k.started_at, k.id LIMIT ${BATCH})
       RETURNING r.bundle_key, r.fixtures_key`),
   );
@@ -96,6 +98,7 @@ export function purgeDepartedSkillEvals(
          SELECT k.id FROM skill_eval_runs k
           WHERE k.team_id = ${teamId} AND k.status IN ${FINISHED}
             AND k.finished_at <= now() - make_interval(days => ${retainDays})
+            AND NOT public.legal_hold_covers(k.team_id, k.started_by)
             AND NOT EXISTS (
               SELECT 1 FROM team_members m JOIN users u ON u.id = m.user_id
                WHERE m.team_id = k.team_id AND m.user_id = k.started_by

@@ -5,6 +5,7 @@ import type { EvalWorkspaceSnapshot } from "@kobe/protocol";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { SkillEvalRunner } from "./skills/evals/runner.js";
 import { reapSkillEvals } from "./skills/evals/reaper.js";
+import { purgeSkillEvals } from "./retention/skill-evals.js";
 import { RawBody } from "./testing/browser.js";
 import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -424,6 +425,41 @@ describe("skill eval runner (KOBE-325)", () => {
       { case_id: "b", state: "queued", attempt: 1 },
     ]);
     expect(provider.deleted).toEqual([dead]);
+  });
+
+  it("retention purges past held starters' runs instead of stalling behind them (review M3)", async () => {
+    const w = await world();
+    const held = await f.member(w.team);
+    const [placer, approver] = [await f.fx.person("placer325"), await f.fx.person("appr325")];
+    for (const p of [placer, approver])
+      await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [p.id]);
+    const insertRuns = (userId: string, n: number, age: string) =>
+      f.fx.admin.query(
+        `INSERT INTO skill_eval_runs (team_id, started_by, subject_kind, subject_id, subject_rev,
+           skill_name, package_hash, runtime_hash, bundle_key, bundle_size, mode, status, suite,
+           limits, progress_total, started_at, finished_at)
+         SELECT $1, $2, 'draft', gen_random_uuid(), 1, 'old', $3, $3, 'k-' || i, 10, 'full',
+                'cancelled', '{"cases":[]}', '{}', 1, now() - $4::interval, now() - $4::interval
+           FROM generate_series(1, $5) i`,
+        [w.team, userId, "e".repeat(64), age, n],
+      );
+    await insertRuns(held.id, 210, "400 days");
+    await insertRuns(w.owner.id, 1, "300 days");
+    const hold = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'matter', $3) RETURNING id`,
+      [w.team, held.id, placer.id],
+    );
+    await f.fx.admin.query(
+      `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+      [hold.rows[0]?.id, approver.id],
+    );
+    const purged = await purgeSkillEvals(f.fx.db, blobs, w.team, new Date(Date.now() - 86_400_000));
+    expect(purged.runs).toBe(1);
+    const { rows } = await f.fx.admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM skill_eval_runs WHERE team_id = $1 AND skill_name = 'old'`,
+      [w.team],
+    );
+    expect(rows[0]?.n).toBe(210);
   });
 
   it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
