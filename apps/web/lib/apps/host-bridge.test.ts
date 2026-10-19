@@ -103,6 +103,47 @@ describe("source and origin (spec T4, ac-2)", () => {
     expect(t.handlers.sizeChanged).not.toHaveBeenCalled();
   });
 
+  it("posts nothing after detach, not even a late answer (review MEDIUM-1)", async () => {
+    let finish: (a: ToolCallAnswer) => void = () => undefined;
+    const t = setup({
+      callTool: vi.fn(() => new Promise<ToolCallAnswer>((resolve) => (finish = resolve))),
+    });
+    t.send(rpc(1, "tools/call", { name: "t" }));
+    await t.flush();
+    t.bridge.detach();
+    finish({ ok: true, result: { secret: 1 } });
+    await t.flush();
+    t.bridge.notify("ui/notifications/tool-result", {});
+    expect(t.replies()).toEqual([]);
+  });
+
+  it("stays bound to the first window; a different one later is neither heard nor answered", async () => {
+    let window1 = { postMessage: vi.fn() } as unknown as Window;
+    const window2 = { postMessage: vi.fn() } as unknown as Window;
+    const base = setup();
+    base.bridge.detach();
+    const handlers = base.handlers;
+    const bridge = attachHostBridge(window, {
+      frame: () => window1,
+      handlers,
+      hostContext: () => ({}),
+    });
+    detach = bridge.detach;
+    bridge.notify("ui/notifications/tool-input", { arguments: {} });
+    expect(window1.postMessage).toHaveBeenCalledTimes(1);
+    window1 = window2;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: rpc(1, "ui/initialize"),
+        source: window2,
+        origin: "null",
+      }),
+    );
+    bridge.notify("ui/notifications/tool-result", {});
+    await new Promise((r) => setTimeout(r, 0));
+    expect(window2.postMessage).not.toHaveBeenCalled();
+  });
+
   it("stops listening once detached", async () => {
     const t = setup();
     t.bridge.detach();
@@ -206,12 +247,20 @@ describe("the §7 method table (ac-3)", () => {
       }),
     );
     t.send(rpc(3, "ui/message", { role: "assistant", content: [{ type: "text", text: "hi" }] }));
+    // 4 KiB of UTF-8, not 4,096 UTF-16 units (review LOW-7).
+    t.send(
+      rpc(4, "ui/message", {
+        role: "user",
+        content: [{ type: "text", text: "\u00e9".repeat(2049) }],
+      }),
+    );
     await t.flush();
     expect(t.handlers.message).toHaveBeenCalledTimes(1);
     expect(t.handlers.message).toHaveBeenCalledWith("Use table `c.n.t`");
     expect(t.reply(1)?.result).toEqual({});
     expect(t.reply(2)?.error).toMatchObject({ code: -32602 });
     expect(t.reply(3)?.error).toMatchObject({ code: -32602 });
+    expect(t.reply(4)?.error).toMatchObject({ code: -32602 });
   });
 
   it("stores model context up to 8 KiB and refuses more", async () => {
@@ -302,7 +351,7 @@ describe("per-frame limits (spec T4)", () => {
     expect(t.reply(13)?.result).toEqual({ mode: "inline" });
   });
 
-  it("keeps at most 4 calls in flight", async () => {
+  it("runs calls one at a time and admits at most 4 (review LOW-3)", async () => {
     const pending: (() => void)[] = [];
     const t = setup({
       callTool: vi.fn(
@@ -315,13 +364,60 @@ describe("per-frame limits (spec T4)", () => {
     detach = t.bridge.detach;
     for (let i = 1; i <= 5; i++) t.send(rpc(i, "tools/call", { name: "t" }));
     await t.flush();
-    expect(t.handlers.callTool).toHaveBeenCalledTimes(BRIDGE_LIMITS.callsInFlight);
+    expect(t.handlers.callTool).toHaveBeenCalledTimes(1);
     expect(t.reply(5)?.error).toMatchObject({ data: { reason: "too_many_calls" } });
-    pending.shift()?.();
+    for (let done = 1; done <= 4; done++) {
+      pending.shift()?.();
+      await t.flush();
+      expect(t.reply(done)?.result).toEqual({});
+    }
+    expect(t.handlers.callTool).toHaveBeenCalledTimes(BRIDGE_LIMITS.callsInFlight);
+  });
+
+  it("retries a call once when the server's validator is busy", async () => {
+    vi.useFakeTimers();
+    try {
+      const busy = { ok: false as const, code: "validation_busy", message: "busy" };
+      const answers: ToolCallAnswer[] = [busy, { ok: true, result: { n: 1 } }, busy, busy];
+      const t = setup({ callTool: vi.fn(async () => answers.shift() as ToolCallAnswer) });
+      detach = t.bridge.detach;
+      t.send(rpc(1, "tools/call", { name: "t" }));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(t.reply(1)?.result).toEqual({ n: 1 });
+      t.send(rpc(2, "tools/call", { name: "t" }));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(t.reply(2)?.error).toMatchObject({ data: { reason: "validation_busy" } });
+      expect(t.handlers.callTool).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops messages beyond 40 a second, notifications included, before measuring them", async () => {
+    const t = setup();
+    detach = t.bridge.detach;
+    for (let i = 0; i < 60; i++) {
+      t.send({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: i } });
+    }
+    t.send(rpc(1, "ui/request-display-mode", { mode: "inline" }));
     await t.flush();
-    t.send(rpc(6, "tools/call", { name: "t" }));
+    expect(t.handlers.sizeChanged).toHaveBeenCalledTimes(BRIDGE_LIMITS.messagesPerSecond);
+    expect(t.replies()).toEqual([]);
+    t.tick(1_001);
+    t.send("x".repeat(BRIDGE_LIMITS.messageBytes + 1));
+    t.send(rpc(2, "ui/request-display-mode", { mode: "inline" }));
     await t.flush();
-    expect(t.handlers.callTool).toHaveBeenCalledTimes(5);
+    expect(t.reply(2)?.result).toEqual({ mode: "inline" });
+  });
+
+  it("honours initialized once per frame", async () => {
+    const t = setup();
+    detach = t.bridge.detach;
+    for (let i = 0; i < 3; i++) {
+      t.send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    }
+    await t.flush();
+    expect(t.handlers.initialized).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a tool result over the size cap", async () => {

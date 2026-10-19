@@ -15,6 +15,7 @@ import {
   type ModelContext,
   type SizeChanged,
 } from "./bridge-schema";
+import { callQueue, roughlyTooLarge, windowCounter } from "./bridge-limits";
 
 /**
  * Kobe's host bridge for MCP Apps (KOBE-437, spec MA2, T4, T5, §7 and §8). Kobe's own, not the
@@ -29,23 +30,30 @@ import {
  *   (dropped, counted). Everything else, `ui/open-link`, `ui/download-file`, `resources/*`,
  *   `sampling/*` and `elicitation/*` included, is denied with `-32601`
  *   `{reason: "not_allowed_in_kobe"}`.
- * - Per frame: 64 KiB per message, 10 requests per second, 4 tool calls in flight, and results
- *   capped at 4 MiB.
+ * - Per frame: 40 messages per second in all (more are dropped unread), 64 KiB per message
+ *   (checked cheaply first), 10 requests per second, tool calls one at a time with at most 4
+ *   admitted (a `validation_busy` answer is retried once), results capped at 4 MiB, and
+ *   `initialized` honoured once.
+ * - The bridge binds to the first window `frame()` names; if that changes (a re-used iframe
+ *   navigated to another app), or once detached, it neither answers nor posts (review MEDIUM-1).
  * - Replies go only to the frame's `contentWindow`, with target `"*"` (an opaque origin cannot be
  *   named), so a reply never carries anything the app is not entitled to.
  */
 export const NOT_ALLOWED = "not_allowed_in_kobe";
 export const BRIDGE_LIMITS = Object.freeze({
   messageBytes: 64 * 1024,
+  messagesPerSecond: 40,
   requestsPerSecond: 10,
   callsInFlight: 4,
   resultBytes: 4 * 1024 * 1024,
 });
-/** `ui/message` text (spec §8). */
+/** `ui/message` text in UTF-8 bytes (spec §8). */
 export const MESSAGE_TEXT_MAX = 4 * 1024;
 /** `ui/update-model-context`, serialized (spec §8). */
 export const MODEL_CONTEXT_MAX = 8 * 1024;
 const HOST_VERSION = "1";
+/** One retry of a call the server's validator had no room for (review LOW-3). */
+const BUSY_RETRY_MS = 250;
 
 export type ToolCallAnswer =
   | { readonly ok: true; readonly result: unknown }
@@ -118,43 +126,47 @@ export function attachHostBridge(
 ): HostBridge {
   const { handlers } = options;
   const now = options.now ?? (() => Date.now());
-  const recent: number[] = [];
-  let inFlight = 0;
+  const messages = windowCounter(BRIDGE_LIMITS.messagesPerSecond, now);
+  const requests = windowCounter(BRIDGE_LIMITS.requestsPerSecond, now);
+  const calls = callQueue(BRIDGE_LIMITS.callsInFlight);
   let dropped = 0;
   let nextId = 1;
+  let detached = false;
+  let initialized = false;
+  let bound: Window | null = null;
   const pending = new Map<Id, (ok: boolean) => void>();
 
+  /** The frame's window while it is still the one this bridge was bound to. */
+  const current = (): Window | null => {
+    if (detached) return null;
+    const frame = options.frame();
+    if (frame !== null && bound === null) bound = frame;
+    return frame !== null && frame === bound ? frame : null;
+  };
   const post = (message: Record<string, unknown>) => {
-    options.frame()?.postMessage({ jsonrpc: "2.0", ...message }, "*");
+    current()?.postMessage({ jsonrpc: "2.0", ...message }, "*");
   };
   const answer = (id: Id, reply: Reply) => post({ id, ...reply });
 
-  const allowRequest = (): boolean => {
-    const t = now();
-    while (recent.length > 0 && t - (recent[0] as number) >= 1000) recent.shift();
-    if (recent.length >= BRIDGE_LIMITS.requestsPerSecond) return false;
-    recent.push(t);
-    return true;
+  const callOnce = async (name: string, args: Record<string, unknown>) => {
+    const done = await handlers.callTool(name, args);
+    if (done.ok || done.code !== "validation_busy" || detached) return done;
+    await new Promise((r) => setTimeout(r, BUSY_RETRY_MS));
+    return detached ? done : handlers.callTool(name, args);
   };
 
   const callTool = async (params: unknown): Promise<Reply> => {
     const call = parse(callToolParams, params);
     if (!call) return INVALID;
-    if (inFlight >= BRIDGE_LIMITS.callsInFlight) {
-      return failure(-32000, "Too many calls in flight.", "too_many_calls");
+    const queued = calls.run(() => callOnce(call.name, call.arguments ?? {}));
+    if (!queued) return failure(-32000, "Too many calls in flight.", "too_many_calls");
+    const done = await queued;
+    if (!done.ok) return failure(-32000, done.message, done.code);
+    const size = sizeOf(done.result);
+    if (size === undefined || size > BRIDGE_LIMITS.resultBytes) {
+      return failure(-32000, "The result is too large.", "result_too_large");
     }
-    inFlight += 1;
-    try {
-      const done = await handlers.callTool(call.name, call.arguments ?? {});
-      if (!done.ok) return failure(-32000, done.message, done.code);
-      const size = sizeOf(done.result);
-      if (size === undefined || size > BRIDGE_LIMITS.resultBytes) {
-        return failure(-32000, "The result is too large.", "result_too_large");
-      }
-      return { result: done.result };
-    } finally {
-      inFlight -= 1;
-    }
+    return { result: done.result };
   };
 
   const handleRequest = async (method: string, params: unknown): Promise<Reply> => {
@@ -193,7 +205,7 @@ export function attachHostBridge(
           .filter((b) => b.type === "text" && typeof b["text"] === "string")
           .map((b) => b["text"] as string)
           .join("\n");
-        if (text === "" || text.length > MESSAGE_TEXT_MAX) return INVALID;
+        if (text === "" || new TextEncoder().encode(text).length > MESSAGE_TEXT_MAX) return INVALID;
         return handlers.message(text) ? { result: {} } : { result: { isError: true } };
       }
       case "ui/update-model-context": {
@@ -216,6 +228,9 @@ export function attachHostBridge(
       const size = parse(sizeChangedParams, params);
       if (size) handlers.sizeChanged(size);
     } else if (method === "ui/notifications/initialized") {
+      // Once per frame: each one would post the card's input and result again (review LOW-1).
+      if (initialized) return;
+      initialized = true;
       handlers.initialized();
     } else if (method === "notifications/message") {
       dropped += 1;
@@ -224,17 +239,20 @@ export function attachHostBridge(
   };
 
   const onMessage = (event: MessageEvent) => {
-    const frame = options.frame();
+    const frame = current();
     if (frame === null || event.source !== frame || event.origin !== "null") return;
+    // Every message counts, before it is measured or parsed (review LOW-1, LOW-2).
+    if (!messages.take()) return;
     const data: unknown = event.data;
-    const request = parse(requestSchema, data);
+    if (roughlyTooLarge(data, BRIDGE_LIMITS.messageBytes)) return;
     const size = sizeOf(data);
+    const request = parse(requestSchema, data);
     if (size === undefined || size > BRIDGE_LIMITS.messageBytes) {
       if (request) answer(request.id, failure(-32600, "The message is too large.", "too_large"));
       return;
     }
     if (request) {
-      if (!allowRequest()) {
+      if (!requests.take()) {
         answer(request.id, failure(-32000, "Too many requests.", "rate_limited"));
         return;
       }
@@ -246,7 +264,8 @@ export function attachHostBridge(
     }
     const response = parse(responseSchema, data);
     if (response && !("method" in (data as object))) {
-      pending.get(response.id)?.(response.error === undefined);
+      // Any answer, even an error, means the app saw the request.
+      pending.get(response.id)?.(true);
       return;
     }
     const notification = parse(notificationSchema, data);
@@ -270,6 +289,7 @@ export function attachHostBridge(
       }),
     droppedLogs: () => dropped,
     detach: () => {
+      detached = true;
       target.removeEventListener("message", onMessage);
       for (const settle of [...pending.values()]) settle(false);
     },

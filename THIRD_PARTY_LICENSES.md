@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-855 packages, 573 of them shipped in an image.
+861 packages, 573 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -182,6 +182,9 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @levischuck/tiny-cbor | 0.2.11 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@levischuck/tiny-cbor@0.2.11/LICENSE) |
 | @levischuck/tiny-cbor | 0.3.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@levischuck/tiny-cbor@0.3.6/LICENSE) |
 | @mermaid-js/parser | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@mermaid-js/parser@1.2.1/LICENSE) |
+| @modelcontextprotocol/client | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/client@2.3.1/LICENSE) |
+| @modelcontextprotocol/core | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/core@2.3.1/LICENSE) |
+| @modelcontextprotocol/ext-apps | 2.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/ext-apps@2.0.3/LICENSE) |
 | @next/env | 16.3.8 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/@next/env/v/16.3.8) |
 | @next/swc-darwin-arm64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
 | @next/swc-darwin-x64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
@@ -561,6 +564,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | esutils | 2.0.3 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/esutils@2.0.3/LICENSE.BSD) |
 | events-universal | 1.0.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/events-universal@1.0.1/LICENSE) |
 | events | 3.3.0 | MIT | linked, bundled | server | [license](https://unpkg.com/events@3.3.0/LICENSE) |
+| eventsource-parser | 3.1.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eventsource-parser@3.1.1/LICENSE) |
+| eventsource | 3.0.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eventsource@3.0.7/LICENSE) |
 | expect-type | 1.4.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/expect-type@1.4.0/LICENSE) |
 | extend | 3.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/extend@3.0.2/LICENSE) |
 | fast-deep-equal | 3.1.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/fast-deep-equal@3.1.3/LICENSE) |
@@ -749,6 +754,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | pino-abstract-transport | 3.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-abstract-transport@3.0.0/LICENSE) |
 | pino-std-serializers | 7.1.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-std-serializers@7.1.0/LICENSE) |
 | pino | 10.4.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino@10.4.0/LICENSE) |
+| pkce-challenge | 5.0.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/pkce-challenge@5.0.1/LICENSE) |
 | points-on-curve | 0.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-curve@0.2.0/LICENSE) |
 | points-on-path | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-path@0.2.1/LICENSE) |
 | postcss | 8.5.23 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.23/LICENSE) |
