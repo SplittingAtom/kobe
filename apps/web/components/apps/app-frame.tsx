@@ -44,6 +44,10 @@ export interface AppFrameProps {
   /** `ui/request-display-mode`: the mode actually shown. */
   readonly onDisplayMode?: ((mode: DisplayMode) => DisplayMode) | undefined;
   readonly fetchFn?: typeof fetch | undefined;
+  /** Start at this height (a card coming back keeps its last one, MA10). */
+  readonly initialHeight?: number | undefined;
+  /** The app's height after each size change. */
+  readonly onHeight?: ((height: number) => void) | undefined;
 }
 
 const maxHeight = (placement: Placement) =>
@@ -104,7 +108,9 @@ function FrameInstance(
   const { app, teamId, placement, bridgeRef } = props;
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useRef<HostBridge | null>(null);
-  const [height, setHeight] = useState(INLINE_HEIGHT);
+  const [height, setHeight] = useState(() =>
+    Math.min(props.initialHeight ?? INLINE_HEIGHT, maxHeight(placement)),
+  );
   // The latest props for the bridge's handlers, without re-attaching it on every render.
   const latest = useRef(props);
   latest.current = props;
@@ -136,7 +142,9 @@ function FrameInstance(
           (current().placement === "expanded" ? "fullscreen" : "inline"),
         sizeChanged: ({ height: wanted }) => {
           if (wanted === undefined) return;
-          setHeight(Math.min(Math.max(Math.round(wanted), 1), maxHeight(current().placement)));
+          const next = Math.min(Math.max(Math.round(wanted), 1), maxHeight(current().placement));
+          setHeight(next);
+          current().onHeight?.(next);
         },
         initialized: () => {
           const { toolInput, toolResult } = current();

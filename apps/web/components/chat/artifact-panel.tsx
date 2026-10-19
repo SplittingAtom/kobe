@@ -26,6 +26,8 @@ import { cn } from "../../lib/utils";
 import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
 import { FileTabContent } from "../files/file-tab";
+import { AppFrame } from "../apps/app-frame";
+import { isAppTab, type AppTabSpec } from "../../lib/apps/app-tabs";
 import { ErrorNotice } from "../admin/error-notice";
 import { ArtifactResizeHandle } from "../shell/artifact-resize";
 import { IconAction } from "../shell/icon-action";
@@ -170,7 +172,7 @@ function useTabTitles(open: readonly string[]) {
   const listed = new Map(panel?.artifacts?.map((a) => [a.id, a.title]));
   const tabs = open.map((id, index) => {
     const path = filePathOfTab(id);
-    const title = path === null ? undefined : fileName(path);
+    const title = path === null ? panel?.appTabs.get(id)?.app.title : fileName(path);
     return {
       id,
       title:
@@ -236,6 +238,26 @@ function FileTab({
       reload={reload.count}
       onGone={onGone}
     />
+  );
+}
+
+/**
+ * An app expanded from its card (KOBE-438, spec MA3): the same app, input and stored result in
+ * the column's full height; its calls still go through the viewer's own MA-4 endpoint.
+ */
+function AppTab({ spec }: { readonly spec: AppTabSpec }) {
+  const session = useChatSession();
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-2" id={artifactTitleId(`app:${spec.cardKey}`)}>
+      <AppFrame
+        app={spec.app}
+        teamId={session.teamId}
+        cardKey={spec.cardKey}
+        placement="expanded"
+        toolInput={spec.toolInput}
+        toolResult={spec.toolResult}
+      />
+    </div>
   );
 }
 
@@ -307,7 +329,11 @@ export function ArtifactPanel({
             hidden={id !== active}
             className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex"
           >
-            {path === null ? (
+            {isAppTab(id) ? (
+              panel.appTabs.get(id) ? (
+                <AppTab spec={panel.appTabs.get(id) as AppTabSpec} />
+              ) : null
+            ) : path === null ? (
               <PanelContent
                 id={id}
                 initialVersion={request?.id === id ? request.version : undefined}

@@ -365,6 +365,13 @@ export class FakeKobe {
     return id;
   }
 
+  /**
+   * MCP Apps (KOBE-438): `GET /v1/threads/{id}/app-results` (wire casing) by thread id, and the
+   * stored results `GET …/app-results/{ref}` serves, by ref.
+   */
+  readonly appResults = new Map<string, Json[]>();
+  readonly appResultBodies = new Map<string, Json>();
+
   /** `GET /v1/threads/{id}/markers` (KOBE-209), wire casing, by thread id. */
   readonly threadMarkers = new Map<
     string,
@@ -1357,6 +1364,18 @@ export class FakeKobe {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
       const latest = this.threadLatestCall.get(thread.thread_id) ?? null;
       return json(200, { thread_id: thread.thread_id, runs, latest_call: latest });
+    }
+    if (action === "app-results" && method === "GET") {
+      if (sub === undefined) {
+        return json(200, {
+          results: this.appResults.get(thread.thread_id) ?? [],
+          truncated: false,
+        });
+      }
+      const body = this.appResultBodies.get(sub);
+      return body === undefined
+        ? error(409, "text_only", "This app shows as text for you.")
+        : json(200, { result: body });
     }
     if (action === "markers" && method === "GET") {
       return json(200, this.threadMarkers.get(thread.thread_id) ?? { runs: [], approvals: [] });

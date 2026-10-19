@@ -42,6 +42,7 @@ import {
 } from "../../lib/shell/preferences";
 import { artifactAsSheet } from "../../lib/shell/layout";
 import { fileTabId } from "../../lib/files/preview";
+import { appTabId, isAppTab, type AppTabSpec } from "../../lib/apps/app-tabs";
 import { useRail } from "../shell/rail-state";
 import { useShellBand } from "../shell/shell-band";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
@@ -89,6 +90,13 @@ export interface ArtifactPanelApi {
   readonly hidden: boolean;
   /** Hides or shows the column (the sheet, under 820 px); false when there is nothing to show. */
   toggleColumn(): boolean;
+  /**
+   * MCP Apps (KOBE-438, spec MA3): expands a card's app into a transient `app` tab (or the sheet
+   * under 820 px). Its card shows "Opened in the side column" until the tab closes.
+   */
+  openApp(spec: AppTabSpec): void;
+  /** The open app tabs' specs, by tab id. */
+  readonly appTabs: ReadonlyMap<string, AppTabSpec>;
 }
 
 const ArtifactPanelContext = createContext<ArtifactPanelApi | null>(null);
@@ -309,6 +317,25 @@ export function ArtifactPanelProvider({
     return true;
   }, [sheet, hasTabs, newest, openArtifact, hidden, threadId]);
   const openFile = useCallback((path: string) => openArtifact(fileTabId(path)), [openArtifact]);
+  const [appSpecs, setAppSpecs] = useState<ReadonlyMap<string, AppTabSpec>>(new Map());
+  const openApp = useCallback(
+    (spec: AppTabSpec) => {
+      const id = appTabId(spec.cardKey);
+      setAppSpecs((prev) => new Map(prev).set(id, spec));
+      openArtifact(id);
+    },
+    [openArtifact],
+  );
+  // Only the tabs still open (a closed tab, or another thread's, has no spec).
+  const openTabs = t.tabs.open;
+  const appTabs = useMemo(
+    () =>
+      new Map([...appSpecs].filter(([id]) => isAppTab(id) && openTabs.includes(id))) as ReadonlyMap<
+        string,
+        AppTabSpec
+      >,
+    [appSpecs, openTabs],
+  );
   const [gone, setGone] = useState<{ readonly path: string; readonly threadId?: string } | null>(
     null,
   );
@@ -344,8 +371,12 @@ export function ArtifactPanelProvider({
       setWidth,
       hidden,
       toggleColumn,
+      openApp,
+      appTabs,
     }),
     [
+      openApp,
+      appTabs,
       hidden,
       toggleColumn,
       openFile,
