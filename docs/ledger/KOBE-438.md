@@ -2,6 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+**Renumbered by db:rebase (2026-10-19, on main 05a92778):** the generated migrations are one, 0153_mcp_apps (old 0152, 0153, 0155, 0156, 0157, 0159, 0162); the custom ones keep their SQL: 0154 approved backfill (old 0154), 0155 RLS and legal hold (old 0158), 0156 run-end discard (old 0160), 0157 hold lock first (old 0161). Numbers below are the new ones.
+
 Group MCP Apps (`group-ma-apps`), after KOBE-437. Spec `docs/specs/mcp-apps-host.md` MA10 (and
 MA11's `entry_id` for MA-6). Nothing pushed; Hadron untouched.
 
@@ -9,9 +11,9 @@ MA11's `entry_id` for MA-6). Nothing pushed; Hadron untouched.
 
 - `92f6279c` protocol: `tool.result.app {connector_id, app_id, template_sha256, result_ref}`
   (`toolResultAppSchema`). **Its own commit, for its own PR** (docs/parallel-work.md).
-- `8228e7f5` db: generated migration **0157** `thread_app_results` (plus the probe fixture and
+- `8228e7f5` db: generated migration **0153** `thread_app_results` (plus the probe fixture and
   the upgrade test, staged with it).
-- `64782746` db: custom migration **0158**: ENABLE + FORCE RLS, `team_isolation`, the
+- `64782746` db: custom migration **0155**: ENABLE + FORCE RLS, `team_isolation`, the
   artifacts-style legal-hold delete and truncate guards, and `(team_id, run_id) → runs ON DELETE
 SET NULL (run_id)` (drizzle cannot name the column list). No `break_glass_read`: break-glass
   readers get the text card.
@@ -55,7 +57,7 @@ no_access` (T12: the viewer's own `memberApps`). `GET …/app-results/:ref` → 
    `BLOB_REF_COLUMNS` (thread tree), so the generic purge queues the objects; the guards refuse a
    held thread's deletes and TRUNCATE.
 
-Schema rework (before review): 0157/0158 were regenerated once in this ticket (local only,
+Schema rework (before review): 0153/0155 were regenerated once in this ticket (local only,
 unpushed): the first draft's run FK cascaded, which would have deleted a fork's copies with
 the source's purge. Rows are now placed by `(prompt_entry_id, tool_call_id)`.
 
@@ -103,14 +105,14 @@ web 2,028; typecheck, lint, format, `license:check`.
 
 ## Review fixes (review-ma9: MEDIUM-1, LOW-1..9), `39bce30f..`
 
-- **MEDIUM-1:** migration **0160** (custom): an `AFTER UPDATE OF status` trigger on `runs`
+- **MEDIUM-1:** migration **0156** (custom): an `AFTER UPDATE OF status` trigger on `runs`
   drops a run's unclaimed rows and queues their blobs (due now) when it leaves the active
   states, in every end state (upgrade test per state); held threads keep them. At most 20
   unclaimed rows per run (429 `too_many_unclaimed`).
 - **LOW-1:** the claim is exact or nothing: with more than one pending candidate for (run, tool,
   digest), none is claimed (text). No "oldest row of the tool" fallback. (The proxy cannot carry
   a per-call nonce Pi would echo, so ambiguity falls back to text.)
-- **LOW-2:** migration **0159** (generated): `input jsonb` (≤ 64 KiB). The report carries the
+- **LOW-2:** migration **0153** (generated): `input jsonb` (≤ 64 KiB). The report carries the
   input (digest must equal the ticket's); `GET …/:ref` answers `{input, result}`; the app's
   `tool-input` comes from there. Fork copies it.
 - **LOW-3:** `FrameInstance` posts `ui/resource-teardown` in a layout cleanup (iframe still

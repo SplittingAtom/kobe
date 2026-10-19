@@ -96,7 +96,7 @@ export const threadAppResults = pgTable(
       columns: [t.teamId, t.threadId],
       foreignColumns: [threads.teamId, threads.id],
     }).onDelete("cascade"),
-    // The run key (team_id, run_id) → runs ON DELETE SET NULL (run_id) is in 0158 (custom SQL:
+    // The run key (team_id, run_id) → runs ON DELETE SET NULL (run_id) is in 0155 (custom SQL:
     // drizzle cannot name the column list). A fork's copies have no run.
     // One result per tool call of a run, and per placed tool call of a thread.
     unique("thread_app_results_tool_call").on(t.teamId, t.runId, t.toolCallId),

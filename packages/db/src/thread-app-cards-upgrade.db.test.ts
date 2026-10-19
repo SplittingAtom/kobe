@@ -11,12 +11,13 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-440 (0162) as an upgrade runs it: app cards a member launched during a run wait as
- * `thread_app_results` rows with their card text and who opened them (`queued_at` set) until the
- * run ends. Existing rows keep NULLs; only an app card row can wait; the text is capped; a queued
- * row needs its text; deleting the member clears `opened_by` only.
+ * KOBE-440 as an upgrade runs it (since db:rebase part of 0153_mcp_apps, which creates the table):
+ * app cards a member launched during a run wait as `thread_app_results` rows with their card text
+ * and who opened them (`queued_at` set) until the run ends. A card row without them keeps NULLs;
+ * only an app card row can wait; the text is capped; a queued row needs its text; deleting the
+ * member clears `opened_by` only.
  */
-const MARKER = 'ADD COLUMN "queued_at"';
+const MARKER = 'CREATE TABLE "thread_app_results"';
 const HEX = "a".repeat(64);
 
 let db: TestDatabase | undefined;
@@ -98,14 +99,6 @@ beforeAll(async () => {
       `INSERT INTO threads (id, team_id, owner_user_id, title) VALUES ($1, $2, $3, 'T')`,
       [threadId, teamId, userId],
     );
-    await c.query(
-      `INSERT INTO thread_app_results
-         (team_id, id, thread_id, entry_id, connector_id, tool, template_uri, template_sha256,
-          app_id, storage, result, bytes)
-       VALUES ($1, $2, $3, 'ka-000000000000000000000001', $4, 'open', 'ui://c/app', $5, $5,
-               'inline', '{}'::jsonb, 2)`,
-      [teamId, existing, threadId, randomUUID(), HEX],
-    );
   });
 }, 120_000);
 
@@ -114,10 +107,20 @@ afterAll(async () => {
   if (older) rmSync(older, { recursive: true, force: true });
 });
 
-describe("queued app cards on upgrade (KOBE-440, 0162)", () => {
-  it("keeps existing rows as inserted cards", async () => {
+describe("queued app cards on upgrade (KOBE-440, 0153)", () => {
+  it("keeps a card row without them as an inserted card", async () => {
     const { ownerUrl, appRole } = database();
     await runMigrations({ databaseUrl: ownerUrl, appRole });
+    await withClient(database().adminUrl, async (c) => {
+      await c.query(
+        `INSERT INTO thread_app_results
+         (team_id, id, thread_id, entry_id, connector_id, tool, template_uri, template_sha256,
+          app_id, storage, result, bytes)
+       VALUES ($1, $2, $3, 'ka-000000000000000000000001', $4, 'open', 'ui://c/app', $5, $5,
+               'inline', '{}'::jsonb, 2)`,
+        [teamId, existing, threadId, randomUUID(), HEX],
+      );
+    });
     await asTeam(async (c) => {
       const { rows } = await c.query(
         `SELECT card_text, opened_by, queued_at FROM thread_app_results WHERE id = $1`,

@@ -329,7 +329,7 @@ describe("review fixes (KOBE-433 review)", () => {
     const plain = { name: "open", description: "Opens the app", inputSchema: { type: "object" } };
     const up: Upstream = { tools: [plain], resources: [] };
     const { id } = await register("apps-legacy", up);
-    // What G10 left: pin_version 1 (the column default on upgrade, 0156).
+    // What G10 left: pin_version 1 (the column default on upgrade, 0153).
     await h.admin.query(`UPDATE connectors SET pin_version = 1 WHERE id = $1`, [id]);
     const [before] = await toolsOf(id);
     expect(before).not.toHaveProperty("ui");

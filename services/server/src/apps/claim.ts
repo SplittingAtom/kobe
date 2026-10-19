@@ -14,7 +14,7 @@ import { inputDigest } from "../mcp/decide.js";
  * Exact or nothing (review LOW-1): a call's own report always lands before its tool.result, so
  * exactly one candidate is that call's result. With two or more (identical calls in parallel),
  * the reports' order need not be Pi's, so none is claimed and the cards stay text; the rows are
- * dropped when the run ends (0160).
+ * dropped when the run ends (0156).
  */
 interface Event {
   readonly type: string;

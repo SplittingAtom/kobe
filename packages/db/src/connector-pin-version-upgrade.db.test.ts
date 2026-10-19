@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-433 re-review (0156) as an upgrade runs it: every existing connector is a legacy pin
+ * KOBE-433 re-review (0153) as an upgrade runs it: every existing connector is a legacy pin
  * (`pin_version` 1, which may adopt a template reference once) with no template skip recorded.
  */
 const MARKER = 'ADD COLUMN "pin_version"';

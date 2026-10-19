@@ -11,11 +11,12 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-433 review (0153-0155) as an upgrade runs it: rows that were pinned, or drifted with a
- * proposal, count as approved; a drifted row with no proposal (new upstream) does not; then an
- * unapproved row can never be pinned, URIs are printable ASCII and `meta` is capped.
+ * KOBE-433 review as an upgrade runs it. Since db:rebase the table and its `approved` column ship
+ * in one migration (0153_mcp_apps), so no row predates the column and the backfill (0154) has
+ * nothing to do; it runs, and then an unapproved row can never be pinned, URIs are printable
+ * ASCII and `meta` is capped.
  */
-const MARKER = 'ADD COLUMN "approved"';
+const MARKER = 'CREATE TABLE "connector_ui_resources"';
 const MIME = "text/html;profile=mcp-app";
 const HEX = "a".repeat(64);
 
@@ -54,9 +55,6 @@ beforeAll(async () => {
       `INSERT INTO connectors (id, name, url) VALUES ($1, 'apps', 'https://x.example/mcp')`,
       [connectorId],
     );
-    await insert(c, "ui://c/pinned", "pinned", null);
-    await insert(c, "ui://c/changed", "drifted", { invalid: "ui_resource_invalid" });
-    await insert(c, "ui://c/new", "drifted", null);
   });
 }, 120_000);
 
@@ -66,18 +64,14 @@ afterAll(async () => {
 });
 
 describe("connector ui resources approval on upgrade (KOBE-433 review)", () => {
-  it("backfills approved and then holds the new checks", async () => {
+  it("runs the (now empty) backfill and holds the checks", async () => {
     const { ownerUrl, appRole, appUrl } = database();
     await runMigrations({ databaseUrl: ownerUrl, appRole });
     await withClient(appUrl, async (c) => {
-      const { rows } = await c.query(
-        `SELECT uri, approved FROM connector_ui_resources ORDER BY uri`,
+      expect((await c.query(`SELECT count(*)::int AS n FROM connector_ui_resources`)).rows).toEqual(
+        [{ n: 0 }],
       );
-      expect(rows).toEqual([
-        { uri: "ui://c/changed", approved: true },
-        { uri: "ui://c/new", approved: false },
-        { uri: "ui://c/pinned", approved: true },
-      ]);
+      await insert(c, "ui://c/new", "drifted", null);
       await expect(
         c.query(`UPDATE connector_ui_resources SET status = 'pinned' WHERE uri = 'ui://c/new'`),
       ).rejects.toThrow(/connector_ui_resources_approved/);

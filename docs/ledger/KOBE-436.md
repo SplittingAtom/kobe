@@ -2,6 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+**Renumbered by db:rebase (2026-10-19, on main 05a92778):** the generated migrations are one, 0153_mcp_apps (old 0152, 0153, 0155, 0156, 0157, 0159, 0162); the custom ones keep their SQL: 0154 approved backfill (old 0154), 0155 RLS and legal hold (old 0158), 0156 run-end discard (old 0160), 0157 hold lock first (old 0161). Numbers below are the new ones.
+
 ## HANDOFF for MA-5 onward (2026-10-19, written for a fresh agent)
 
 **Branch** `group-ma-apps` in worktree `../Kobe-ma`, built on G10 (`group-10-connectors`
@@ -10,11 +12,11 @@ Hadron is untouched. Next in order: MA-5 KOBE-437, MA-9 KOBE-438, MA-7 KOBE-439,
 MA-8 KOBE-441 (gate). The spec `docs/specs/mcp-apps-host.md` was amended for MA4/T2/T3 (frame
 route). Ledgers: `docs/ledger/KOBE-433.md` .. `KOBE-436.md`.
 
-**Migrations (all site-wide, no RLS, one release; 0152 never shipped):** 0152
+**Migrations (all site-wide, no RLS, one release; 0153 never shipped):** 0153
 `connector_ui_resources` (generated); 0153 `approved` column, printable-ASCII URI check, meta
-≤ 16 KiB (generated); 0154 approved backfill (custom); 0155 CHECK `approved OR status =
-'drifted'` (generated); 0156 `connectors.pin_version` (1 = pre-433, adopts `ui` once) and
-`templates_skipped` (generated). The next free number is 0157. MA-9's `thread_app_results` is a
+≤ 16 KiB (generated); 0154 approved backfill (custom); 0153 CHECK `approved OR status =
+'drifted'` (generated); 0153 `connectors.pin_version` (1 = pre-433, adopts `ui` once) and
+`templates_skipped` (generated). The next free number is 0158. MA-9's `thread_app_results` is a
 **team** table: a generated migration, then the RLS policy in a separate custom migration, probe
 fixtures, an upgrade test, and FORCE-RLS backfills wrapped in NO FORCE/FORCE.
 

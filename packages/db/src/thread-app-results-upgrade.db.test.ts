@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-438's migrations (0157 table, 0158 RLS and legal hold) as an upgrade runs them (the owner
+ * KOBE-438's migrations (0153 table, 0155 RLS and legal hold) as an upgrade runs them (the owner
  * role) over an existing thread and run: the app role stores results only in its own team
  * (FORCE RLS), the checks hold (storage, sizes, origin), a thread delete cascades, a held
  * thread's results cannot be deleted, and TRUNCATE is refused while a hold is active.
@@ -152,7 +152,7 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     });
   });
 
-  it("keeps the call's input up to 64 KiB (0159)", async () => {
+  it("keeps the call's input up to 64 KiB (0153)", async () => {
     await asTeam(teamId, async (c) => {
       const { rows } = await insert(c);
       const id = (rows[0] as { id: string }).id;
@@ -218,7 +218,7 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     });
   });
 
-  it("drops a run's unclaimed results (and queues their blobs) whenever the run ends (0160)", async () => {
+  it("drops a run's unclaimed results (and queues their blobs) whenever the run ends (0156)", async () => {
     const { adminUrl } = database();
     for (const status of ["completed", "failed", "cancelled", "interrupted", "budget_stopped"]) {
       const thread = randomUUID();
@@ -273,7 +273,7 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     }
   });
 
-  it("takes the legal-hold lock before the run-end discard checks for a hold (0161)", async () => {
+  it("takes the legal-hold lock before the run-end discard checks for a hold (0157)", async () => {
     const { rows } = await withClient(database().adminUrl, (c) =>
       c.query<{ src: string }>(
         `SELECT prosrc AS src FROM pg_proc WHERE proname = 'thread_app_results_discard_unclaimed'`,

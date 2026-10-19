@@ -2,6 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+**Renumbered by db:rebase (2026-10-19, on main 05a92778):** the generated migrations are one, 0153_mcp_apps (old 0152, 0153, 0155, 0156, 0157, 0159, 0162); the custom ones keep their SQL: 0154 approved backfill (old 0154), 0155 RLS and legal hold (old 0158), 0156 run-end discard (old 0160), 0157 hold lock first (old 0161). Numbers below are the new ones.
+
 Group MCP Apps (`group-ma-apps`, on top of G10 `group-10-connectors` c2d7f110). Spec
 `docs/specs/mcp-apps-host.md` §5, MA1, MA9. Stopped after MA-1 for an Opus review.
 
@@ -83,7 +85,7 @@ pinned_hash}`; the same proposal again is no new event;
 
 - **Migrations** 0153 (generated: `approved boolean DEFAULT false`, URI check printable ASCII
   `^ui://[!-~]+$`, `octet_length(meta::text) <= 16384`), 0154 (custom backfill: pinned or with a
-  proposal = approved), 0155 (generated CHECK `approved OR status = 'drifted'`: nothing a site
+  proposal = approved), 0153 (generated CHECK `approved OR status = 'drifted'`: nothing a site
   admin never approved can be pinned). Upgrade test
   `connector-ui-resources-approved-upgrade.db.test.ts`.
 - **HIGH-1:** `applyDrift` adopts a pre-433 pin (no `ui`) whose live tool equals it except for
@@ -116,7 +118,7 @@ pinned_hash}`; the same proposal again is no new event;
 
 ## Re-review fixes (NEW-1..3)
 
-- **Migration 0156** (generated): `connectors.pin_version` (1 = pinned before 433, the upgrade
+- **Migration 0153** (generated): `connectors.pin_version` (1 = pinned before 433, the upgrade
   default; 2 since) and `templates_skipped`. Upgrade test `connector-pin-version-upgrade.db.test.ts`.
 - **NEW-1:** `applyDrift(..., {adoptLegacyUi})` adopts a `ui` reference only for a version-1
   snapshot; every pin and checked refresh sets version 2. Afterwards a tool that starts naming a

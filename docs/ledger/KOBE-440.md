@@ -2,6 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+**Renumbered by db:rebase (2026-10-19, on main 05a92778):** the generated migrations are one, 0153_mcp_apps (old 0152, 0153, 0155, 0156, 0157, 0159, 0162); the custom ones keep their SQL: 0154 approved backfill (old 0154), 0155 RLS and legal hold (old 0158), 0156 run-end discard (old 0160), 0157 hold lock first (old 0161). Numbers below are the new ones.
+
 Group MCP Apps (`group-ma-apps`), after KOBE-439. Spec `docs/specs/mcp-apps-host.md` MA3, MA8,
 MA11 (amended), §6. Merged origin/main (G10 `aa2b5a14`) first. Nothing pushed; Hadron untouched.
 
@@ -11,9 +13,9 @@ MA11 (amended), §6. Merged origin/main (G10 `aa2b5a14`) first. Nothing pushed; 
 - `1203f203` protocol (**its own commit, for its own PR**): `app-cards.ts`
   (`APP_CARD_CUSTOM_TYPE` `kobe.app_card`, `CAPABILITY_APP_CARDS`, `ka-` ids, `appCardContent`,
   `appCardEntrySchema`, launch body and response) and `run.start.app_cards` (≤ 20).
-- `4653b1c9` db **0162** (generated, alone): `thread_app_results.opened_by` (users, set null),
+- `4653b1c9` db **0153** (generated, alone): `thread_app_results.opened_by` (users, set null),
   `card_text`, `queued_at`, CHECK `thread_app_results_queued`; upgrade test
-  `thread-app-cards-upgrade.db.test.ts`. **Next free: 0163.** (Not renumbered: the coordinator's.)
+  `thread-app-cards-upgrade.db.test.ts`. **Next free: 0158.**
 - `e5caa61e` server, `3c252de0` server (`needsKey`), `7e035178` sandbox-agent, `65a077e5` web,
   `08f95e28` Markdown export, then docs.
 
@@ -89,7 +91,7 @@ opened_by_member="true" untrusted="true">` with the text blocks (≤ 8 KiB UTF-8
 
 ## Tests run (all green)
 
-protocol 931; db unit 598, probe 657, upgrade (0157-0162) 11; server unit 2,116; server DB
+protocol 931; db unit 598, probe 657, upgrade (0153-0153) 11; server unit 2,116; server DB
 `app-cards` 8, `app-context`, `app-results`, `team-apps`, `sandbox-wire(-entries)`, `runs`,
 `runs-queue-*`, `run-prompt`, `thread-fork`, `thread-compact`, `runs-interrupted`, `retention`,
 `retention-forks`: 205+; sandbox-agent 859 (+1 real Pi); web 2,055; typecheck, lint, format,

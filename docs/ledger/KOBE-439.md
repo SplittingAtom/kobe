@@ -2,6 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+**Renumbered by db:rebase (2026-10-19, on main 05a92778):** the generated migrations are one, 0153_mcp_apps (old 0152, 0153, 0155, 0156, 0157, 0159, 0162); the custom ones keep their SQL: 0154 approved backfill (old 0154), 0155 RLS and legal hold (old 0158), 0156 run-end discard (old 0160), 0157 hold lock first (old 0161). Numbers below are the new ones.
+
 ## HANDOFF for MA-6 and MA-8 (2026-10-19, written for a fresh agent)
 
 **Branch** `group-ma-apps` in worktree `../Kobe-ma`, built on G10 (`group-10-connectors`
@@ -11,10 +13,10 @@ KOBE-440 (rail launcher and app cards), then MA-8 KOBE-441 (the Kobe Explorer Ga
 `docs/specs/mcp-apps-host.md` (amended for MA4, T3, T11, MA10 and §8) and the ledgers
 `KOBE-433.md` .. `KOBE-439.md`; reviews are in the session scratchpad (`review-ma*.md`).
 
-**Migrations (one release, none shipped):** 0152-0156 site-wide templates and pins (MA-1..3);
-0157 `thread_app_results` (generated, team table), 0158 RLS + legal-hold guards + run key
-`ON DELETE SET NULL (run_id)` (custom), 0159 `input jsonb` (generated), 0160 run-end discard of
-unclaimed results (custom trigger), 0161 the same with the hold lock first (custom); MA-6 added 0162 (generated, queued app cards). **Next free: 0163.**
+**Migrations (one release, none shipped):** 0153-0153 site-wide templates and pins (MA-1..3);
+0153 `thread_app_results` (generated, team table), 0155 RLS + legal-hold guards + run key
+`ON DELETE SET NULL (run_id)` (custom), 0153 `input jsonb` (generated), 0156 run-end discard of
+unclaimed results (custom trigger), 0157 the same with the hold lock first (custom); MA-6 added 0153 (generated, queued app cards). **Next free: 0158.**
 
 **Protocol commits (each meant for its own PR, ahead of the feature PR; the coordinator decides
 against the one-PR-per-group rule):** `92f6279c` (`tool.result.app`), `32a4ad26`
@@ -123,7 +125,7 @@ structuredContent?}}` of at most 8 KiB. `daa1470f` protocol: `APP_CONTEXT_PREAMB
   until the member edits or confirms (web tests: Enter in the app frame sends nothing).
 - MEDIUM-3: `memberText` strips context from first message, last exchange, title fallback and
   eval copies (DB test: the thread card shows only the member's text).
-- LOW-A/B: the store locks the run row (cap tested with 25 parallel reports); LOW-C: 0161.
+- LOW-A/B: the store locks the run row (cap tested with 25 parallel reports); LOW-C: 0157.
 - LOW-E: imitation refused (server 422 `invalid_content`, web channel); queued edits keep the
   block. LOW-F: compact JSON, 413 `message_too_large`. LOW-H: channel keyed by thread. LOW-I:
   invisible and bidi characters escaped in the fence and dropped from chip summaries.
