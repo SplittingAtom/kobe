@@ -162,9 +162,20 @@ export const skillEvalLimitsSchema = z.strictObject({
 export type SkillEvalLimits = z.infer<typeof skillEvalLimitsSchema>;
 
 /** The optional monthly team eval cap (SK18, Team admin): dollars or tokens; null is none. */
+/** Whole cents (the column is numeric(14,2): anything finer would be rounded, review-327 L4). */
+const wholeCents = (v: number) => Math.abs(Math.round(v * 100) - v * 100) < 1e-6;
+export const TEAM_EVAL_CAP_USD_MESSAGE =
+  "A dollar eval cap is at least $0.01, in whole cents, and at most $1,000,000.";
+
 export const teamEvalCapSchema = z
   .union([
-    z.strictObject({ usd: z.number().gt(0).max(1_000_000) }),
+    z.strictObject({
+      usd: z
+        .number()
+        .min(0.01, TEAM_EVAL_CAP_USD_MESSAGE)
+        .max(1_000_000, TEAM_EVAL_CAP_USD_MESSAGE)
+        .refine(wholeCents, TEAM_EVAL_CAP_USD_MESSAGE),
+    }),
     z.strictObject({ tokens: z.number().int().min(1).max(1e12) }),
   ])
   .nullable();

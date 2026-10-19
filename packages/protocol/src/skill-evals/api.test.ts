@@ -204,4 +204,15 @@ describe("eval run API shapes", () => {
     expect(teamEvalCapSchema.safeParse(null).success).toBe(true);
     expect(SKILL_EVAL_USAGE_KINDS).toEqual(["eval", "eval_judge"]);
   });
+
+  it("takes a dollar eval cap in whole cents from $0.01 only (KOBE-327 review L4)", () => {
+    const ok = (usd: number) => teamEvalCapSchema.safeParse({ usd }).success;
+    expect(ok(0.01)).toBe(true);
+    expect(ok(12.35)).toBe(true);
+    expect(ok(0.001)).toBe(false);
+    expect(ok(12.345)).toBe(false);
+    expect(ok(0)).toBe(false);
+    expect(teamEvalCapSchema.safeParse({ tokens: 1 }).success).toBe(true);
+    expect(teamEvalCapSchema.safeParse(null).success).toBe(true);
+  });
 });
