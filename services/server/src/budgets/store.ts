@@ -79,6 +79,52 @@ export interface TeamBudgetsView {
   /** The per-user request rate members get (the site's, or the team's lower one). */
   readonly effective_requests_per_minute: number;
   readonly members: readonly MemberBudgetView[];
+  /**
+   * This month's team spend by `run_usage` kind (KOBE-327): runs, titles, follow-ups, skill
+   * evals' sandboxes and their judge, apart. Every kind counts against the budgets above.
+   */
+  readonly spent_by_kind: readonly {
+    readonly kind: string;
+    readonly usd: number;
+    readonly tokens: number;
+  }[];
+  /** The team eval cap (KOBE-327, SK18; set in the skill settings) and the eval spend it counts. */
+  readonly eval_cap: {
+    readonly usd: number | null;
+    readonly tokens: number | null;
+    readonly month_usd: number;
+    readonly month_tokens: number;
+  };
+}
+
+/** The team's spend this month by usage kind (from the ledger; the team index on `at`). */
+async function spendByKind(tx: KobeTx, teamId: string, month: string) {
+  const res = await tx.execute<Row>(sql`
+    SELECT kind, COALESCE(sum(cost_usd), 0) AS usd,
+           sum(input_tokens::bigint + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens
+      FROM run_usage WHERE team_id = ${teamId}::uuid AND at >= ${month}::date
+     GROUP BY kind ORDER BY kind`);
+  return res.rows.map((r) => ({
+    kind: String(r.kind),
+    usd: Math.round(Number(r.usd ?? 0) * 1e6) / 1e6,
+    tokens: Number(r.tokens ?? 0),
+  }));
+}
+
+/** The eval cap and this month's eval spend (the counters' eval columns). */
+async function evalCapOf(tx: KobeTx, teamId: string, month: string) {
+  const res = await tx.execute<Row>(sql`
+    SELECT (SELECT eval_cap_usd FROM team_skill_settings WHERE team_id = ${teamId}::uuid) AS usd,
+           (SELECT eval_cap_tokens FROM team_skill_settings WHERE team_id = ${teamId}::uuid) AS tokens,
+           COALESCE(sum(eval_cost_usd), 0) AS month_usd, COALESCE(sum(eval_tokens), 0) AS month_tokens
+      FROM model_spend_daily WHERE team_id = ${teamId}::uuid AND day >= ${month}::date`);
+  const r = res.rows[0] ?? {};
+  return {
+    usd: r.usd === null || r.usd === undefined ? null : Number(r.usd),
+    tokens: r.tokens === null || r.tokens === undefined ? null : Number(r.tokens),
+    month_usd: Math.round(Number(r.month_usd ?? 0) * 1e6) / 1e6,
+    month_tokens: Number(r.month_tokens ?? 0),
+  };
 }
 
 type Row = Record<string, unknown>;
@@ -250,6 +296,8 @@ export async function teamBudgetsView(
         teamRpm ?? site.user_requests_per_minute,
       ),
       members: members.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+      spent_by_kind: await spendByKind(tx, teamId, starts.month),
+      eval_cap: await evalCapOf(tx, teamId, starts.month),
     };
   });
 }

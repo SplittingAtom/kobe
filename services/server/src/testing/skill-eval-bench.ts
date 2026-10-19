@@ -216,7 +216,7 @@ export class SkillEvalBench {
         },
         { timeout: 60_000, interval: 200 },
       )
-      .toMatch(/completed|failed|cancelled/);
+      .toMatch(/completed|failed|cancelled|budget_stopped/);
     await runner.idle();
   }
 

@@ -6,7 +6,7 @@ import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import { skillEvalEventStream, type SkillEvalHub } from "../skills/evals/events.js";
-import { startSkillEval, type StartSubject } from "../skills/evals/start.js";
+import { estimateSkillEval, startSkillEval, type StartSubject } from "../skills/evals/start.js";
 import { cancelEvalRun } from "../skills/evals/store.js";
 import {
   evalStreamAccess,
@@ -77,6 +77,35 @@ export function skillEvalRoutes(
     options.kick?.();
     return c.json(started.value, 202);
   };
+
+  // "≈ $X, ≈ N min" before Run (KOBE-327, SK18): `?mode=full|with_only`; nothing is stored.
+  const estimate = async (c: Ctx, subject: StartSubject) => {
+    if (!deps.blobs)
+      return error(c, 503, "storage_unavailable", "Object storage is not configured.");
+    const mode = startSkillEvalBodySchema.shape.mode.safeParse(c.req.query("mode") ?? "full");
+    if (!mode.success) return error(c, 400, "invalid_request", "Give mode: full or with_only.");
+    const out = await estimateSkillEval({ db, blobs: deps.blobs }, viewerOf(c), subject, mode.data);
+    if (!out.ok) {
+      const { status, code, message, issues } = out.refusal;
+      return c.json({ code, message, ...(issues ? { issues } : {}) }, status);
+    }
+    return c.json(out.value);
+  };
+
+  app.get("/skills/drafts/:id/evals/estimate", team, async (c) => {
+    const id = uuid.safeParse(c.req.param("id"));
+    if (!id.success) return error(c, 404, "skill_not_found", "No such draft.");
+    return estimate(c, { kind: "draft", draftId: id.data });
+  });
+
+  app.get("/skills/:scope/:id/versions/:seq/evals/estimate", team, async (c) => {
+    const scope = c.req.param("scope");
+    const id = uuid.safeParse(c.req.param("id"));
+    const n = seq.safeParse(c.req.param("seq"));
+    if ((scope !== "team" && scope !== "personal") || !id.success || !n.success)
+      return error(c, 404, "skill_not_found", "No such skill version.");
+    return estimate(c, { kind: "version", scope, skillId: id.data, seq: n.data });
+  });
 
   app.post("/skills/drafts/:id/evals", team, async (c) => {
     const id = uuid.safeParse(c.req.param("id"));

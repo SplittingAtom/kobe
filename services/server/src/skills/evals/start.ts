@@ -17,6 +17,7 @@ import {
   EVAL_CASES_PATH,
   planSkillEvalExecutions,
   SkillPackageError,
+  type SkillEvalEstimate,
   type SkillEvalJudgeModel,
   type SkillEvalMode,
   type SkillEvalRunModel,
@@ -46,6 +47,8 @@ import {
   putEvalObject,
   sha256Hex,
 } from "./storage.js";
+import { evalBudgetBlock, evalBudgetBlockIn } from "./budget.js";
+import { estimateSkillEvalIn } from "./estimate.js";
 import { insertEvalRun } from "./store.js";
 
 // Starting a skill eval (KOBE-325, SK16; routes in routes/skill-evals.ts): the subject's package
@@ -239,15 +242,12 @@ async function openEvalsRefusal(tx: KobeTx, who: EvalStarter): Promise<string | 
   return null;
 }
 
-export async function startSkillEval(
+/** The subject's package, validated and gated, with its suite parsed (no scan yet). */
+async function prepareSubject(
   deps: { readonly db: KobeDb; readonly blobs: BlobStore },
   who: EvalStarter,
   subject: StartSubject,
-  mode: SkillEvalMode,
-): Promise<{ ok: true; value: SkillEvalStarted } | { ok: false; refusal: StartRefusal }> {
-  // Bounded queues (review M4): refused before the scan, checked again under the team's lock.
-  const full = await withTeam(deps.db, who.teamId, (tx) => openEvalsRefusal(tx, who));
-  if (full) return refuse(409, "too_many_evals", full);
+) {
   const pkg = await loadPackage(deps.db, deps.blobs, who, subject);
   if (!pkg) return refuse(404, "skill_not_found", "No such skill version or draft revision.");
   let zip: Uint8Array;
@@ -270,9 +270,9 @@ export async function startSkillEval(
   });
   if (!parsed.ok)
     return {
-      ok: false,
+      ok: false as const,
       refusal: {
-        status: 422,
+        status: 422 as const,
         code: "invalid_suite",
         message: `${EVAL_CASES_PATH} has problems.`,
         issues: parsed.issues,
@@ -287,14 +287,89 @@ export async function startSkillEval(
   if (gate === "blocklisted")
     return refuse(409, "skill_blocklisted", "This skill is on the site's blocklist.");
   if (gate) return refuse(403, gate, "This team's settings don't allow evaluating this skill.");
-  const scanned = await scanPackage(valid.value.packageZip ?? runtime, who.userId);
+  return { ok: true as const, pkg, valid: valid.value, runtime, runtimeHash, suite, limits };
+}
+
+/** A budget or the team eval cap that stops new evals, as a refusal (KOBE-327, D30, SK18). */
+async function budgetRefusal(db: KobeDb, who: EvalStarter) {
+  const block = await evalBudgetBlock(db, who.teamId, who.userId);
+  return block ? refuse(409, block.code, block.message) : null;
+}
+
+/**
+ * "≈ $X, ≈ N min" before Run (KOBE-327, SK18): the same subject, gates and suite as a start,
+ * the plan of `mode`, on the run model a start would use; no scan, nothing stored. Also says
+ * whether a budget or the team eval cap would refuse the start (`blocked`).
+ */
+export async function estimateSkillEval(
+  deps: { readonly db: KobeDb; readonly blobs: BlobStore },
+  who: EvalStarter,
+  subject: StartSubject,
+  mode: SkillEvalMode,
+): Promise<
+  | {
+      ok: true;
+      value: {
+        estimate: SkillEvalEstimate;
+        runModel: SkillEvalRunModel;
+        blocked: { code: string; message: string } | null;
+      };
+    }
+  | { ok: false; refusal: StartRefusal }
+> {
+  const prepared = await prepareSubject(deps, who, subject);
+  if (!prepared.ok) return prepared;
+  const plan = planSkillEvalExecutions(prepared.suite, mode);
+  const result = await withTeam(deps.db, who.teamId, async (tx) => {
+    const run = await runModelFor(tx, who.teamId, prepared.suite.model);
+    if (!run) return null;
+    const estimate = await estimateSkillEvalIn(tx, {
+      teamId: who.teamId,
+      runModel: run.used,
+      suite: prepared.suite,
+      plan,
+      concurrency: prepared.limits.maxConcurrentSandboxes,
+    });
+    return { run, estimate, blocked: await evalBudgetBlockIn(tx, who.teamId, who.userId) };
+  });
+  if (!result) return refuse(409, "no_model", "The team has no model enabled for evals.");
+  return {
+    ok: true,
+    value: { estimate: result.estimate, runModel: result.run, blocked: result.blocked },
+  };
+}
+
+export async function startSkillEval(
+  deps: { readonly db: KobeDb; readonly blobs: BlobStore },
+  who: EvalStarter,
+  subject: StartSubject,
+  mode: SkillEvalMode,
+): Promise<{ ok: true; value: SkillEvalStarted } | { ok: false; refusal: StartRefusal }> {
+  // Bounded queues (review M4): refused before the scan, checked again under the team's lock.
+  const full = await withTeam(deps.db, who.teamId, (tx) => openEvalsRefusal(tx, who));
+  if (full) return refuse(409, "too_many_evals", full);
+  // A budget or the team eval cap that is used up refuses the start, saying which (KOBE-327).
+  const blocked = await budgetRefusal(deps.db, who);
+  if (blocked) return blocked;
+  const prepared = await prepareSubject(deps, who, subject);
+  if (!prepared.ok) return prepared;
+  const { pkg, valid, runtime, runtimeHash, suite, limits } = prepared;
+  const scanned = await scanPackage(valid.packageZip ?? runtime, who.userId);
   if (!scanned.ok) return scanned;
   const plan = planSkillEvalExecutions(suite, mode);
   const models = await withTeam(deps.db, who.teamId, async (tx) => {
     const run = await runModelFor(tx, who.teamId, suite.model);
     if (!run) return null;
     const rubric = suite.cases.some((c) => c.expect.judge !== undefined);
-    return { run, judge: rubric ? await judgeModelFor(tx, who.teamId, run) : null };
+    // From the team's history before this run is stored (it has none of its own yet).
+    const estimate = await estimateSkillEvalIn(tx, {
+      teamId: who.teamId,
+      runModel: run.used,
+      suite,
+      plan,
+      concurrency: limits.maxConcurrentSandboxes,
+    });
+    return { run, judge: rubric ? await judgeModelFor(tx, who.teamId, run) : null, estimate };
   });
   if (!models) return refuse(409, "no_model", "The team has no model enabled for evals.");
   const id = randomUUID();
@@ -313,8 +388,8 @@ export async function startSkillEval(
       id,
       startedBy: who.userId,
       subject: { kind: pkg.kind, id: pkg.id, rev: pkg.rev },
-      skillName: valid.value.name,
-      packageHash: valid.value.packageHash,
+      skillName: valid.name,
+      packageHash: valid.packageHash,
       runtimeHash,
       bundleKey,
       bundleSize: runtime.length,
@@ -338,10 +413,6 @@ export async function startSkillEval(
   }
   return {
     ok: true,
-    value: {
-      evalRunId: id,
-      // KOBE-327 adds the estimate from the team's history.
-      estimate: { executions: plan.length, costUsd: null, minutes: null, basis: "none" },
-    },
+    value: { evalRunId: id, estimate: models.estimate },
   };
 }

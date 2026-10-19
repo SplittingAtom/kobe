@@ -1,4 +1,5 @@
 import { MODEL_ALIAS_PATTERN } from "@kobe/db";
+import { teamEvalCapSchema } from "@kobe/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -15,6 +16,7 @@ import {
 } from "../skills/review.js";
 import {
   getCatalogSwitches,
+  getEvalCap,
   getEvalJudgeAlias,
   getPersonalSkillsDisabled,
   setTeamSkillSettings,
@@ -47,6 +49,8 @@ const settingsSchema = z
     buildersMayInstallCatalog: z.boolean().optional(),
     /** The team's eval judge (KOBE-326): one of its enabled models, or null for the default. */
     evalJudgeAlias: z.string().regex(new RegExp(MODEL_ALIAS_PATTERN)).max(64).nullable().optional(),
+    /** The monthly team eval cap (KOBE-327): `{usd}` or `{tokens}`, or null for none. */
+    evalCap: teamEvalCapSchema.optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined));
 const idSchema = z.uuid();
@@ -196,6 +200,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       buildersMayInstallCatalog: catalog.buildersMayInstall,
       // Null: the team default judges (also when the chosen model was disabled since).
       evalJudgeAlias: await getEvalJudgeAlias(db, teamId),
+      evalCap: await getEvalCap(db, teamId),
     };
   };
 
@@ -208,7 +213,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     if (!body)
       return invalidRequest(
         c,
-        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog (true or false) and evalJudgeAlias (a model alias or null).",
+        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog (true or false) evalJudgeAlias (a model alias or null) and evalCap ({usd} or {tokens} per month, or null).",
       );
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -226,6 +231,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           : {}),
       },
       ...(body.evalJudgeAlias !== undefined ? { evalJudgeAlias: body.evalJudgeAlias } : {}),
+      ...(body.evalCap !== undefined ? { evalCap: body.evalCap } : {}),
     });
     if (!set.ok)
       return c.json(

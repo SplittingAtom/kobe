@@ -184,7 +184,10 @@ export function loadTeamBudgetLines(
   tx: KobeTx,
   teamId: string,
   now = new Date(),
-): Promise<{ readonly lines: readonly BudgetLine[]; readonly requestsPerMinute: number }> {
+): Promise<{
+  readonly lines: readonly BudgetLine[];
+  readonly requestsPerMinute: number;
+}> {
   return budgetLines(tx, teamId, undefined, now);
 }
 
@@ -193,7 +196,10 @@ async function budgetLines(
   teamId: string,
   member: string | undefined,
   now: Date,
-): Promise<{ readonly lines: readonly BudgetLine[]; readonly requestsPerMinute: number }> {
+): Promise<{
+  readonly lines: readonly BudgetLine[];
+  readonly requestsPerMinute: number;
+}> {
   const starts = periodStarts(now);
   const site = await sitePart(tx, starts);
   const budgets = await tx.execute<Row>(sql`

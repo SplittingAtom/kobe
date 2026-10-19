@@ -1400,6 +1400,15 @@ export const AUDIT_EVENTS = {
    * for the team default. Used when the Site's judge is not enabled in the team.
    */
   "skill.eval_judge.changed": event("team", { alias: modelAlias.nullable() }),
+  /** A Team admin set or removed the team's monthly eval cap (KOBE-327, SK18). */
+  "skill.eval_cap.changed": event("team", {
+    cap: z
+      .union([
+        z.strictObject({ usd: z.number().positive().max(1_000_000) }),
+        z.strictObject({ tokens: z.number().int().positive().max(1e12) }),
+      ])
+      .nullable(),
+  }),
   /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
   "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** A site admin took a bundle hash off the blocklist (KOBE-81). */

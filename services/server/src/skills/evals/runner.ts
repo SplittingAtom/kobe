@@ -34,7 +34,9 @@ import { messageText } from "../../threads/messages.js";
 import { evalChecks, type EvalJudge, type EvalObservation } from "./checks.js";
 import { errorAttempt, type EvalAttempt } from "./execution.js";
 import { caseFixtureList, readFixtures } from "./storage.js";
+import { evalBudgetBlock } from "./budget.js";
 import {
+  budgetStopEvalRun,
   claimNextExecution,
   evalRunOpen,
   hasQueuedExecution,
@@ -98,7 +100,7 @@ interface AttemptState {
 }
 
 class EvalAbort extends Error {
-  constructor(readonly reason: "cancelled" | "timeout" | "start" | "shutdown") {
+  constructor(readonly reason: "cancelled" | "timeout" | "start" | "shutdown" | "budget") {
     super(reason);
   }
 }
@@ -200,7 +202,9 @@ export class SkillEvalRunner {
     try {
       attempt = await this.#attempt(team, claim, started, state);
     } catch (err) {
-      const shutdown = err instanceof EvalAbort && err.reason === "shutdown";
+      // A shutdown, or a budget stop (the eval run ended): back to queued, its attempt unused.
+      const shutdown =
+        err instanceof EvalAbort && (err.reason === "shutdown" || err.reason === "budget");
       if (!(err instanceof EvalAbort))
         this.#o.log.warn(
           { err, team_id: claim.teamId, eval_run_id: claim.evalRunId, case_id: claim.caseId },
@@ -223,6 +227,10 @@ export class SkillEvalRunner {
           ),
         );
     }
+    // D30 / SK18 (KOBE-327): an attempt that didn't pass because a budget or the team eval cap
+    // is used up (the gateway refused its calls, or the budget monitor stopped its run) ends the
+    // whole eval `budget_stopped`, with no retry; its result is then not recorded.
+    if (attempt !== null && attempt.status !== "passed") await this.#stopIfBudget(claim);
     try {
       if (attempt === null) await requeueExecution(this.#o.db, claim);
       else await recordAttempt(this.#o.db, claim, attempt, claim.runModel);
@@ -243,6 +251,8 @@ export class SkillEvalRunner {
   ): Promise<EvalAttempt> {
     const c = claim.suite.cases.find((x) => x.id === claim.caseId);
     if (!c) throw new Error(`the suite has no case ${claim.caseId}`);
+    // Nothing starts once a budget or the team eval cap is used up (KOBE-327).
+    if (await this.#stopIfBudget(claim)) throw new EvalAbort("budget");
     const target: SandboxTarget = {
       teamId: claim.teamId,
       userId: claim.userId,
@@ -327,6 +337,19 @@ export class SkillEvalRunner {
       threadId: claim.threadId,
       runId,
     };
+  }
+
+  /** Ends the eval `budget_stopped` when a budget or the eval cap stops it; whether it did. */
+  async #stopIfBudget(claim: ClaimedExecution): Promise<boolean> {
+    try {
+      const block = await evalBudgetBlock(this.#o.db, claim.teamId, claim.userId);
+      if (!block) return false;
+      await budgetStopEvalRun(this.#o.db, claim.teamId, claim.evalRunId, block);
+      return true;
+    } catch (err) {
+      this.#o.log.warn({ err, eval_run_id: claim.evalRunId }, "skill evals: budget check failed");
+      return false;
+    }
   }
 
   /**
@@ -429,7 +452,7 @@ export class SkillEvalRunner {
         SELECT status, skills_used FROM runs WHERE team_id = ${claim.teamId} AND id = ${runId}`);
       const usage = await tx.execute<{ cost: string | number | null; n: string | number }>(sql`
         SELECT coalesce(sum(cost_usd), 0) AS cost, count(*) AS n FROM run_usage
-         WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND kind = 'run'`);
+         WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND kind IN ('run', 'eval')`);
       const denied = await tx.execute<{ n: string | number }>(sql`
         SELECT count(*) AS n FROM run_events
          WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND type = 'policy.denied'`);
@@ -459,7 +482,7 @@ async function runState(tx: KobeTx, teamId: string, runId: string) {
   const res = await tx.execute<{ ended: boolean; turns: string | number }>(sql`
     SELECT r.status NOT IN ('queued', 'running', 'waiting_approval') AS ended,
            (SELECT count(*) FROM run_usage u
-             WHERE u.team_id = r.team_id AND u.run_id = r.id AND u.kind = 'run') AS turns
+             WHERE u.team_id = r.team_id AND u.run_id = r.id AND u.kind IN ('run', 'eval')) AS turns
       FROM runs r WHERE r.team_id = ${teamId} AND r.id = ${runId}`);
   const row = res.rows[0];
   return { ended: row?.ended ?? true, turns: Number(row?.turns ?? 0) };

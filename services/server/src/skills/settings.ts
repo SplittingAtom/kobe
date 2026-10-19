@@ -1,4 +1,14 @@
-import { eq, sql, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import {
+  MODELS_BUDGETS_PREFIX,
+  eq,
+  notifyModels,
+  sql,
+  teamSkillSettings,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
+import type { TeamEvalCap } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { isModelEnabled } from "../models/team-store.js";
 
@@ -180,10 +190,56 @@ async function writeEvalJudgeAlias(
   return { ok: true, alias };
 }
 
+/**
+ * The team eval cap (KOBE-327, SK18): monthly dollars or tokens, or null (none, the default).
+ * Enforced per eval call through `kobe_reserve_budget`; new evals are refused once it is used up.
+ */
+export async function readEvalCap(tx: KobeTx, teamId: string): Promise<TeamEvalCap> {
+  const [row] = await tx
+    .select({ usd: teamSkillSettings.evalCapUsd, tokens: teamSkillSettings.evalCapTokens })
+    .from(teamSkillSettings)
+    .where(eq(teamSkillSettings.teamId, teamId));
+  if (row?.usd !== null && row?.usd !== undefined) return { usd: Number(row.usd) };
+  if (row?.tokens !== null && row?.tokens !== undefined) return { tokens: Number(row.tokens) };
+  return null;
+}
+
+export function getEvalCap(db: KobeDb, teamId: string): Promise<TeamEvalCap> {
+  return withTeam(db, teamId, (tx) => readEvalCap(tx, teamId));
+}
+
+const sameCap = (a: TeamEvalCap, b: TeamEvalCap) => JSON.stringify(a) === JSON.stringify(b);
+
+async function writeEvalCap(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  cap: TeamEvalCap,
+): Promise<void> {
+  await lockSettings(tx, teamId);
+  if (sameCap(await readEvalCap(tx, teamId), cap)) return;
+  const set = {
+    evalCapUsd: cap && "usd" in cap ? cap.usd : null,
+    evalCapTokens: cap && "tokens" in cap ? cap.tokens : null,
+    updatedBy: userId,
+  };
+  await tx
+    .insert(teamSkillSettings)
+    .values({ teamId, ...set })
+    .onConflictDoUpdate({
+      target: teamSkillSettings.teamId,
+      set: { ...set, updatedAt: new Date() },
+    });
+  await recordAudit(tx, { action: "skill.eval_cap.changed", teamId, target: { cap } });
+  // The gateways judge eval calls by the cap: drop their cached budget state for the team.
+  await notifyModels(tx, `${MODELS_BUDGETS_PREFIX}${teamId}`);
+}
+
 export interface TeamSkillSettingsChange {
   readonly personalSkillsDisabled?: boolean;
   readonly catalog?: Partial<CatalogSwitches>;
   readonly evalJudgeAlias?: string | null;
+  readonly evalCap?: TeamEvalCap;
 }
 
 /**
@@ -206,6 +262,7 @@ export function setTeamSkillSettings(
       await writePersonalSkillsDisabled(tx, teamId, userId, change.personalSkillsDisabled);
     if (change.catalog && Object.keys(change.catalog).length > 0)
       await writeCatalogSwitches(tx, teamId, userId, change.catalog);
+    if (change.evalCap !== undefined) await writeEvalCap(tx, teamId, userId, change.evalCap);
     return { ok: true } as const;
   });
 }

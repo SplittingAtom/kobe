@@ -482,3 +482,26 @@ export async function failEvalRun(
     if (res.rowCount === 1) await notifyEval(tx, teamId, evalRunId);
   });
 }
+
+/**
+ * Ends an open eval run `budget_stopped` (D30, SK18; KOBE-327): a budget that applies to the
+ * starter, or the team eval cap, is used up. Nothing more starts (claims take open runs only);
+ * executions running now end on their own (the gateway refuses their calls) and are not scored.
+ * Only a completed run has a scorecard, so a budget-stopped one is never evidence.
+ */
+export async function budgetStopEvalRun(
+  db: KobeDb,
+  teamId: string,
+  evalRunId: string,
+  failure: { readonly code: string; readonly message: string },
+): Promise<boolean> {
+  return withTeam(db, teamId, async (tx) => {
+    const res = await tx.execute(sql`
+      UPDATE skill_eval_runs
+         SET status = 'budget_stopped', failure = ${JSON.stringify(failure)}::jsonb,
+             finished_at = now(), updated_at = now()
+       WHERE team_id = ${teamId} AND id = ${evalRunId} AND status IN ${OPEN}`);
+    if (res.rowCount === 1) await notifyEval(tx, teamId, evalRunId);
+    return res.rowCount === 1;
+  });
+}
