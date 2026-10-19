@@ -8,6 +8,8 @@ export const sandbox = defineDomain({
     "sandbox_connections",
     "sandbox_commands",
     "sandbox_run_leases",
+    // An eval thread's ephemeral sandbox connection (KOBE-325).
+    "sandbox_eval_connections",
     "sandboxes",
     "workspace_sync",
     "workspace_files",

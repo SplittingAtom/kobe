@@ -44,4 +44,5 @@ export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "registry_versions", column: "runtime_storage_key", site: true }, // catalog runtime zip (KOBE-317)
   { table: "registry_versions", column: "package_storage_key", site: true }, // its package zip (KOBE-317)
   { table: "skill_eval_runs", column: "bundle_key" }, // an eval's runtime zip (KOBE-325); its own tree
+  { table: "skill_eval_runs", column: "fixtures_key" }, // its fixtures zip, same tree (KOBE-325)
 ];

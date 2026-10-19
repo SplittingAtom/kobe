@@ -79,11 +79,11 @@ export class ConnectionRegistry {
         INSERT INTO sandbox_connections
           (team_id, user_id, sandbox_id, connection_id, replica_id, connected_at, last_seen_at)
         VALUES (${teamId}, ${userId}, ${conn.sandboxId}, ${conn.id}, ${this.#replicaId}, now(), now())
-        ON CONFLICT (team_id, user_id, slot) DO NOTHING`);
+        ON CONFLICT (team_id, user_id) DO NOTHING`);
       if (inserted.rowCount === 1) return { previous: undefined, generation: ++this.#generation };
       const old = await tx.execute<{ connection_id: string; closed_at: Date | null }>(sql`
         SELECT connection_id, closed_at FROM sandbox_connections
-         WHERE team_id = ${teamId} AND user_id = ${userId} AND slot = '' FOR UPDATE`);
+         WHERE team_id = ${teamId} AND user_id = ${userId} FOR UPDATE`);
       // Holding the row lock: the order of this increment is the commit order on this replica.
       const gen = ++this.#generation;
       await tx.execute(sql`
@@ -91,7 +91,7 @@ export class ConnectionRegistry {
            SET sandbox_id = ${conn.sandboxId}, connection_id = ${conn.id},
                replica_id = ${this.#replicaId}, connected_at = now(), last_seen_at = now(),
                closed_at = NULL
-         WHERE team_id = ${teamId} AND user_id = ${userId} AND slot = ''`);
+         WHERE team_id = ${teamId} AND user_id = ${userId}`);
       const row = old.rows[0];
       if (row && row.closed_at === null && row.connection_id !== conn.id) {
         await this.#bus.notifyInTx(tx, { kind: "kick", id: row.connection_id });

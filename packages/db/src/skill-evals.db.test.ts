@@ -7,8 +7,8 @@ import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
 import { withTeam } from "./with-team.js";
 
 /**
- * KOBE-325 (SK16): skill_eval_runs / skill_eval_results constraints, eval threads, the wire's
- * sandbox slots and the silent legal hold (team isolation: probe.db.test; RLS text: catalog.db.test).
+ * KOBE-325 (SK16): skill_eval_runs / skill_eval_results constraints, eval threads, eval sandbox
+ * connections, the wire's slot rules and the silent legal hold (team isolation: probe.db.test; RLS text: catalog.db.test).
  */
 const app = createDb(inject("appUrl"), { max: 4 });
 const appClient = new pg.Client({ connectionString: inject("appUrl") });
@@ -234,25 +234,147 @@ describe("skill eval rows (KOBE-325)", () => {
   });
 });
 
-describe("sandbox slots (KOBE-325)", () => {
-  it("lets one member hold their own sandbox and eval sandboxes at once, slots well-formed", async () => {
+describe("eval sandboxes on the wire (KOBE-325)", () => {
+  const thread = async (t: string, u: string, evalThread: boolean, runId?: string) => {
+    const id = randomUUID();
+    await inTeam(
+      t,
+      `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_eval_run_id)
+       VALUES ('${t}', '${id}', '${u}', 't', ${evalThread}, ${runId ? `'${runId}'` : "NULL"})`,
+    );
+    return id;
+  };
+  const evalConnection = (t: string, u: string, threadId: string) =>
+    inTeam(
+      t,
+      `INSERT INTO sandbox_eval_connections (team_id, thread_id, user_id, sandbox_id, connection_id, replica_id)
+       VALUES ('${t}', '${threadId}', '${u}', '${randomUUID()}', '${randomUUID()}', 'r1')`,
+    );
+  const command = (t: string, u: string, threadId: string, slot: string) =>
+    inTeam(
+      t,
+      `INSERT INTO sandbox_commands (team_id, user_id, slot, thread_id, kind, frame, requester_replica, expires_at)
+       VALUES ('${t}', '${u}', '${slot}', '${threadId}', 'run.stop', '{}', 'r1', now() + interval '1 minute')`,
+    );
+  const lease = async (t: string, u: string, threadId: string, slot: string) => {
+    const run = await inTeam(
+      t,
+      `INSERT INTO runs (team_id, thread_id, trigger, status, started_at, ended_at)
+       VALUES ('${t}', '${threadId}', 'user', 'completed', now(), now()) RETURNING id`,
+    );
+    const runId = (run.rows[0] as { id: string }).id;
+    return inTeam(
+      t,
+      `INSERT INTO sandbox_run_leases (team_id, run_id, user_id, slot, thread_id, sandbox_id)
+       VALUES ('${t}', '${runId}', '${u}', '${slot}', '${threadId}', '${randomUUID()}')`,
+    );
+  };
+
+  it("keeps a member's own connection apart from their eval sandboxes, one per eval thread", async () => {
     const t = await team();
     const u = await user("Member");
-    const evalSlot = `e-${randomUUID()}`;
-    const insert = (slot: string) =>
+    const other = await user("Other");
+    await inTeam(
+      t,
+      `INSERT INTO sandbox_connections (team_id, user_id, sandbox_id, connection_id, replica_id)
+       VALUES ('${t}', '${u}', '${randomUUID()}', '${randomUUID()}', 'r1')`,
+    );
+    const a = await thread(t, u, true);
+    const b = await thread(t, u, true);
+    await evalConnection(t, u, a);
+    await evalConnection(t, u, b);
+    expect(await pgCode(evalConnection(t, u, a))).toBe("23505");
+    // Only an eval thread, and only as its owner.
+    expect(await pgCode(evalConnection(t, u, await thread(t, u, false)))).toBe("23514");
+    expect(await pgCode(evalConnection(t, other, await thread(t, u, true)))).toBe("23514");
+    expect(await pgCode(evalConnection(t, u, randomUUID()))).toBe("23503");
+    const own = await inTeam(
+      t,
+      `SELECT count(*)::int AS n FROM sandbox_connections WHERE user_id = '${u}'`,
+    );
+    expect(own.rows).toEqual([{ n: 1 }]);
+    await inTeam(t, `DELETE FROM threads WHERE id = '${a}'`);
+    const left = await inTeam(
+      t,
+      `SELECT thread_id FROM sandbox_eval_connections WHERE user_id = '${u}'`,
+    );
+    expect(left.rows).toEqual([{ thread_id: b }]);
+  });
+
+  it("routes a normal thread's commands and leases only to the member's sandbox, an eval thread's only to its own", async () => {
+    const t = await team();
+    const u = await user("Member");
+    const normal = await thread(t, u, false);
+    const ev = await thread(t, u, true);
+    const ev2 = await thread(t, u, true);
+    for (const insert of [command, lease]) {
+      await insert(t, u, normal, "");
+      await insert(t, u, ev, `e-${ev}`);
+      // A normal thread never reaches an eval sandbox, its own id or another's.
+      expect(await pgCode(insert(t, u, normal, `e-${normal}`))).toBe("23514");
+      expect(await pgCode(insert(t, u, normal, `e-${ev}`))).toBe("23514");
+      // An eval thread never reaches the member's sandbox or another eval thread's.
+      expect(await pgCode(insert(t, u, ev, ""))).toBe("23514");
+      expect(await pgCode(insert(t, u, ev, `e-${ev2}`))).toBe("23514");
+      expect(await pgCode(insert(t, u, normal, "e-not-a-uuid"))).toBe("23514");
+    }
+    expect(
+      await pgCode(inTeam(t, `UPDATE sandbox_commands SET slot = '' WHERE thread_id = '${ev}'`)),
+    ).toBe("23514");
+  });
+
+  it("never turns a thread into an eval thread or back", async () => {
+    const t = await team();
+    const u = await user("Member");
+    const normal = await thread(t, u, false);
+    const ev = await thread(t, u, true);
+    expect(
+      await pgCode(inTeam(t, `UPDATE threads SET skill_eval = true WHERE id = '${normal}'`)),
+    ).toBe("55000");
+    expect(
+      await pgCode(inTeam(t, `UPDATE threads SET skill_eval = false WHERE id = '${ev}'`)),
+    ).toBe("55000");
+    await inTeam(t, `UPDATE threads SET title = 'renamed' WHERE id = '${ev}'`);
+  });
+
+  it("ties a result's thread to an eval thread of its own eval run", async () => {
+    const t = await team();
+    const u = await user("Author");
+    const id = await evalRun(t, u);
+    const otherRun = await evalRun(t, u);
+    const result = (threadId: string) =>
       inTeam(
         t,
-        `INSERT INTO sandbox_connections (team_id, user_id, slot, sandbox_id, connection_id, replica_id)
-         VALUES ('${t}', '${u}', '${slot}', '${randomUUID()}', '${randomUUID()}', 'r1')`,
+        `INSERT INTO skill_eval_results (team_id, eval_run_id, case_id, with_skill, state, thread_id, deadline_at)
+         VALUES ('${t}', '${id}', 'a', true, 'running', '${threadId}', now())`,
       );
-    await insert("");
-    await insert(evalSlot);
-    expect(await pgCode(insert(evalSlot))).toBe("23505");
-    expect(await pgCode(insert("e-not-a-uuid"))).toBe("23514");
-    const rows = await inTeam(
+    expect(await pgCode(result(await thread(t, u, false)))).toBe("23514");
+    expect(await pgCode(result(await thread(t, u, true, otherRun)))).toBe("23514");
+    expect(await pgCode(result(await thread(t, u, true)))).toBe("23514");
+    await result(await thread(t, u, true, id));
+  });
+
+  it("returns a purged run's object keys only when the delete removed it", async () => {
+    const t = await team();
+    const u = await user("Held");
+    const id = await evalRun(t, u);
+    await inTeam(
       t,
-      `SELECT slot FROM sandbox_connections WHERE user_id = '${u}' ORDER BY slot`,
+      `UPDATE skill_eval_runs SET fixtures_key = 'teams/x/skill-evals/y/fixtures.zip' WHERE id = '${id}'`,
     );
-    expect(rows.rows).toEqual([{ slot: "" }, { slot: evalSlot }]);
+    const h = await hold(t, u);
+    const held = await inTeam(
+      t,
+      `DELETE FROM skill_eval_runs WHERE id = '${id}' RETURNING bundle_key, fixtures_key`,
+    );
+    expect(held.rows).toEqual([]);
+    await release(h);
+    const purged = await inTeam(
+      t,
+      `DELETE FROM skill_eval_runs WHERE id = '${id}' RETURNING bundle_key, fixtures_key`,
+    );
+    expect(purged.rows).toEqual([
+      { bundle_key: "k", fixtures_key: "teams/x/skill-evals/y/fixtures.zip" },
+    ]);
   });
 });

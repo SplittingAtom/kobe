@@ -4,6 +4,7 @@ import {
   runs,
   sandboxCommands,
   sandboxConnections,
+  sandboxEvalConnections,
   sandboxRunLeases,
   sandboxes,
   threads,
@@ -49,6 +50,24 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
     const { userId } = await insertRun(tx, teamId);
     await tx.insert(sandboxConnections).values({
       teamId,
+      userId,
+      sandboxId: randomUUID(),
+      connectionId: randomUUID(),
+      replicaId: "probe",
+    });
+  },
+  sandbox_eval_connections: async (tx, teamId) => {
+    // An eval thread's sandbox, beside a normal command for it (KOBE-325).
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    const [thread] = await tx
+      .insert(threads)
+      .values({ teamId, ownerUserId: userId, skillEval: true })
+      .returning({ id: threads.id });
+    if (!thread) throw new Error("probe: thread insert returned nothing");
+    await tx.insert(sandboxEvalConnections).values({
+      teamId,
+      threadId: thread.id,
       userId,
       sandboxId: randomUUID(),
       connectionId: randomUUID(),
