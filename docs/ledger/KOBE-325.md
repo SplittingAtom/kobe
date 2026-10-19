@@ -2,6 +2,36 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+## Handoff for KOBE-326 (the judge) — read first
+
+- **Where it plugs in:** the `EvalJudge` type in `services/server/src/skills/evals/checks.ts`
+  (`(input: {rubric, prompt, answer, outputs}) => Promise<EvalJudgeResult>`, result `passed` /
+  `rejected` with a reason / `failed` / `unparseable`, each with `costUsd`). Pass it as
+  `judge` in `SkillEvalRunnerOptions` (`runner.ts`); `index.ts` builds the runner without one
+  today. `evalChecks` calls it last, only when every other check passed (the 324 estimate counts
+  on that), and maps the result to `judge_rejected` / `judge_failed` / `judge_unparseable`.
+- **Stubbed:** with no judge a `judge` check fails `judge_failed` (cost 0). `outputs` holds the
+  matched files' entries (path, size, type) only: **no file contents reach the server yet**. 326
+  needs a sandbox-side read of the matched files under the contract (`O_NOFOLLOW`, `fstat` a
+  regular file of the walked size, at most 256 KiB, `judgeOutputText` for binary); the natural
+  place is a new `eval.read` command beside `eval.prepare` / `eval.snapshot` (new command kind: a
+  generated migration on `sandbox_commands_kind`, frames in `protocol/sandbox-wire/eval-frames.ts`,
+  the agent's `skill-eval/` hooks, the delivery guard in `sandbox-wire/delivery.ts`).
+- **Already decided:** the judge model is chosen at start (`judgeModelFor` in `start.ts`: the
+  Site's `judgeAlias` if the team enabled it, else the team default; stored as
+  `skill_eval_runs.judge_model`, on the scorecard). Use the protocol's `skillEvalJudgeMessages`
+  (fixed system text + the rubric only, data between nonce lines, a fresh 128-bit nonce per call
+  the sandbox never sees) and `parseSkillEvalJudgeVerdict`; temperature 0 and the structured-output
+  schema where the model allows; no tools, no SKILL.md, no history. The judge is a server-side
+  model call, so it goes through the KOBE-234 server calls (`createServerCalls`, deps.ts), never
+  the sandbox. A retry re-judges (`judgeCostUsd` totals both attempts). Registry re-runs (Phase C)
+  use the Site judge and run without the reviewer's personal keys.
+- **Must:** the judge call carries its **own timeout**: the reaper ends only executions whose
+  heartbeat stopped, so a beating runner stuck in a judge call is never cut short by anyone
+  else. The runner keeps beating while it judges (state `collecting`).
+- **Later (327):** `run_usage` kinds `eval` / `eval_judge`, estimates, team eval caps; today eval
+  runs bill as kind `run` and the judge's spend is only on the scorecard.
+
 ## Handoff (read first)
 
 - **Branch:** `group-skills-b` in `../Kobe-skB`. **325 is complete** (step 1 DB layer reviewed and
@@ -24,9 +54,12 @@
   1.34.6 with a scratch namespace, removed), M2 heartbeat + shutdown requeue + reaper by heartbeat,
   M3 retention skips held starters, M4 ≤ 3 open evals per member / 20 per team, L1–L9, L11, L12
   (coordinator: eval runs ignore the starter's remembered approvals; tested), the minor items.
+  Re-review R1–R4 fixed too: takeovers counted (`skill_eval_results.takeovers`; the third
+  records an error attempt), the reaper claims before it stops anything, departed starters' open
+  evals are cancelled, streams re-check session, account and role every 30 s.
   **Not done:** L10 (UID precondition on claim deletes; optional, thread ids are never reused);
-  an SSE stream is not cut on session revocation (membership is re-checked every read, and a
-  stream ends after 30 min).
+  the `/proc/self/fd` snapshot branch is untested on the Mac (CI's Linux runs it): verify one real
+  eval with `outputs` on gate1 under gVisor.
 - **Known limits:** `max_turns` is enforced by polling `run_usage`: the run is stopped once the
   turn past the limit is recorded (it fails `over_limit`), not before it starts. A shutdown or a
   dead replica requeues an execution without using its attempt (an execution that kills its
