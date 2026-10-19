@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { inputDigest } from "../mcp/decide.js";
+import { appInputDigest, pinnedInputSchema } from "./input-canonical.js";
 import { logger } from "../logger.js";
 import type { McpPrincipal } from "../mcp/decide.js";
 import { verifyCaptureTicket } from "./capture-ticket.js";
@@ -55,9 +55,11 @@ export async function reportCapturedResult(
   }
   // An error result is not an app's data: the card shows Pi's text.
   if (report.result["isError"] === true) return { ok: false, code: "ticket_invalid" };
-  // The input the app is shown is the one the upstream ran (review LOW-2), never Pi's entry.
+  // The input the app is shown is the one the upstream ran (review LOW-2), never Pi's entry; its
+  // canonical digest is the ticket's (KOBE-441).
+  const schema = await pinnedInputSchema(deps.store.db, claims.connectorId, claims.tool);
   if (
-    inputDigest(report.input as never) !== claims.inputSha256 ||
+    appInputDigest(schema, report.input) !== claims.inputSha256 ||
     Buffer.byteLength(JSON.stringify(report.input), "utf8") > APP_RESULT_INPUT_MAX_BYTES
   ) {
     return { ok: false, code: "ticket_invalid" };

@@ -1,6 +1,6 @@
 import { sql, type KobeTx } from "@kobe/db";
 import { toolInputSchema } from "@kobe/protocol";
-import { inputDigest } from "../mcp/decide.js";
+import { appInputDigest, pinnedInputSchema } from "./input-canonical.js";
 
 /**
  * Claims stored MCP App results for a run's tool results (KOBE-438, spec MA10). mcp-proxy cannot
@@ -90,7 +90,17 @@ export async function claimAppResultsInTx(
   for (const event of results) {
     const input = toolInputSchema.safeParse(inputs.get(event.payload.tool_call_id));
     if (!input.success || "kobe_omitted" in input.data) continue;
-    const digest = inputDigest(input.data);
+    // The canonical digest against the tool's pinned schema, as the capture ticket's (KOBE-441):
+    // Pi records the model's raw arguments but converts them before calling the tool.
+    const pendingTool = await tx.execute<{ connector_id: string; tool: string }>(sql`
+      SELECT connector_id, tool FROM thread_app_results
+       WHERE team_id = ${teamId} AND run_id = ${runId} AND pi_name = ${event.payload.tool}
+         AND tool_call_id IS NULL AND entry_id IS NULL
+       LIMIT 1`);
+    const target = pendingTool.rows[0];
+    if (!target) continue;
+    const schema = await pinnedInputSchema(tx, target.connector_id, target.tool);
+    const digest = appInputDigest(schema, input.data);
     const candidates = await tx.execute<{ n: number }>(sql`
       SELECT count(*)::int AS n FROM thread_app_results
        WHERE team_id = ${teamId} AND run_id = ${runId} AND pi_name = ${event.payload.tool}

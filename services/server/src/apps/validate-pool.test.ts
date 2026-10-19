@@ -31,6 +31,16 @@ describe("createValidatorPool", () => {
     expect(await pool.validate(schema, { q: "ok" }, "u1")).toBe("valid");
   });
 
+  it("never counts a worker's start-up against the deadline (CI: a cold worker took 135 ms)", async () => {
+    const cold = createValidatorPool({ deadlineMs: 25, size: 1 });
+    try {
+      // 25 ms is below a cold worker's start-up, but a task waits for a ready worker first.
+      expect(await cold.validate({ type: "object" }, {}, "u1")).toBe("valid");
+    } finally {
+      await cold.close();
+    }
+  });
+
   it("fails closed on a schema the validator cannot use", async () => {
     expect(await pool.validate({ $ref: "#/nowhere" }, {}, "u1")).toBe("invalid");
   });
@@ -60,6 +70,8 @@ describe("fair use (re-review R-LOW-1)", () => {
   it("answers busy when the queue is full", async () => {
     const p = createValidatorPool({ deadlineMs: 100, size: 1, maxQueue: 1 });
     try {
+      // Its one worker is up (a task waits in the queue until a worker has loaded its library).
+      expect(await p.validate(schema, { q: "ok" }, "warm")).toBe("valid");
       const running = p.validate(schema, SLOW, "a");
       const queued = p.validate(schema, { q: "ok" }, "b");
       expect(await p.validate(schema, { q: "ok" }, "c")).toBe("busy");

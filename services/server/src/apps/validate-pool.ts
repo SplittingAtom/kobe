@@ -46,6 +46,8 @@ const WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { Validator } = require(workerData.library);
 const cache = new Map();
+// Ready only once the library is loaded: the deadline covers validation, never the start-up.
+parentPort.postMessage({ ready: true });
 parentPort.on("message", ({ id, key, schema, instance }) => {
   let ok = false;
   try {
@@ -74,9 +76,14 @@ interface Task {
 
 interface Slot {
   worker: Worker;
+  /** The worker loaded its library (it said so); only a ready worker takes a task. */
+  ready: boolean;
   busy: Task | undefined;
   timer: NodeJS.Timeout | undefined;
 }
+
+/** A worker that is not ready after this long is replaced (it never takes a task meanwhile). */
+const STARTUP_MS = 15_000;
 
 export interface ValidatorPoolOptions {
   readonly size?: number;
@@ -117,9 +124,19 @@ export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaV
 
   const attach = (slot: Slot) => {
     const worker = slot.worker;
+    slot.ready = false;
+    const startup = setTimeout(() => {
+      if (slot.worker === worker && !slot.ready) replace(slot);
+    }, STARTUP_MS);
+    startup.unref();
     // Events of a worker already replaced are ignored.
-    worker.on("message", (m: { id: number; ok: boolean }) => {
-      if (slot.worker === worker && slot.busy?.id === m.id) finish(slot, m.ok);
+    worker.on("message", (m: { id?: number; ok?: boolean; ready?: boolean }) => {
+      if (slot.worker !== worker) return;
+      if (m.ready === true) {
+        clearTimeout(startup);
+        slot.ready = true;
+        pump();
+      } else if (slot.busy !== undefined && slot.busy.id === m.id) finish(slot, m.ok === true);
     });
     worker.on("error", () => {
       if (slot.worker === worker) replace(slot);
@@ -137,14 +154,14 @@ export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaV
   };
 
   const slots: Slot[] = Array.from({ length: options.size ?? POOL_SIZE }, () => {
-    const slot: Slot = { worker: spawn(), busy: undefined, timer: undefined };
+    const slot: Slot = { worker: spawn(), ready: false, busy: undefined, timer: undefined };
     attach(slot);
     return slot;
   });
 
   function pump(): void {
     for (const slot of slots) {
-      if (slot.busy || queue.length === 0 || closed) continue;
+      if (!slot.ready || slot.busy || queue.length === 0 || closed) continue;
       const task = queue.shift() as Task;
       slot.busy = task;
       // Missed deadline: terminate (a busy regex cannot be interrupted otherwise) and refuse.

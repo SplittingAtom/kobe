@@ -1,3 +1,4 @@
+import { appInputDigest } from "../apps/input-canonical.js";
 import { modelVisible } from "../connectors/visibility.js";
 import { appIdOf } from "../apps/app-id.js";
 import { signCaptureTicket } from "../apps/capture-ticket.js";
@@ -496,7 +497,9 @@ export async function decideMcpCall(
       runId: named.runId,
       connectorId: connector.id,
       tool: pinned,
-      inputSha256: inputDigest(input.data),
+      // The capture's digest is of the canonical input (KOBE-441): the claim digests Pi's raw
+      // arguments the same way, so Pi's conversions and schema defaults do not drop the app.
+      inputSha256: appInputDigest(pinned.input_schema as Record<string, unknown>, input.data),
       now: now(),
     });
     // The record of the call comes first: no audit row, no upstream call.

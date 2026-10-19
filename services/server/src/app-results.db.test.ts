@@ -448,6 +448,72 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
   });
 });
 
+describe("Pi's converted arguments (KOBE-441 gate: args drift)", () => {
+  it('claims when Pi recorded "5" for an integer and the proxy captured 5, or left a default out', async () => {
+    const w = await world();
+    const schema = {
+      type: "object",
+      properties: { depth: { type: "integer", default: 2 } },
+      additionalProperties: false,
+    };
+    const typed = await registerConnector(fx.admin, {
+      tools: [
+        { name: "open_typed", readOnly: true, ui: { resource_uri: URI }, inputSchema: schema },
+      ],
+    });
+    await enableConnector(fx.admin, w.team, typed.id, w.owner.id, "all");
+    await fx.admin.query(
+      `INSERT INTO connector_ui_resources
+         (connector_id, uri, mime_type, html, sha256, pinned_hash, status, approved)
+       VALUES ($1, $2, 'text/html;profile=mcp-app', $3, $4, $4, 'pinned', true)`,
+      [typed.id, URI, HTML, TEMPLATE_SHA],
+    );
+    const callAs = async (proxyInput: object, piInput: object, toolCallId: string) => {
+      const allowed = await post(
+        `/connectors/${typed.id}/calls`,
+        { tool: "open_typed", thread_id: w.threadId, arguments: proxyInput },
+        w.token,
+      );
+      const ticket = allowed.json.app_capture?.ticket as string;
+      expect(ticket).toEqual(expect.any(String));
+      const stored = await post(
+        `/connectors/${typed.id}/results`,
+        { ticket, input: proxyInput, result: RESULT },
+        w.token,
+      );
+      expect(stored.status).toBe(201);
+      const events = await withTeam(fx.db, w.team, (tx) =>
+        claimAppResultsInTx(tx, w.team, w.runId, [
+          {
+            type: "tool.call",
+            payload: {
+              tool_call_id: toolCallId,
+              tool: piName(typed.name, "open_typed"),
+              input: piInput,
+              risk: "read",
+            },
+          },
+          {
+            type: "tool.result",
+            payload: {
+              tool_call_id: toolCallId,
+              tool: piName(typed.name, "open_typed"),
+              is_error: false,
+              preview: "x",
+              truncated: false,
+            },
+          },
+        ]),
+      );
+      return (events[1]?.payload as Body).app;
+    };
+    expect(await callAs({ depth: 5 }, { depth: "5" }, "tc-coerced")).toBeDefined();
+    expect(await callAs({ depth: 2 }, {}, "tc-default")).toBeDefined();
+    // Different values never match.
+    expect(await callAs({ depth: 7 }, { depth: "8" }, "tc-other")).toBeUndefined();
+  });
+});
+
 describe("review fixes (KOBE-438 review)", () => {
   it("claims nothing when two identical calls are pending (LOW-1)", async () => {
     const w = await world();
