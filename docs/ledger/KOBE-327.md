@@ -56,6 +56,25 @@
   transaction with the other switches, audited `skill.eval_cap.changed`.
 - **No backfill** of `eval_*` counters: the eval kinds are new in this release (0148).
 
+## Review-327 fixes (`review-327.md`)
+
+- **M1:** the runner reads why a run failed: `run.failed` with `model_budget_exhausted` /
+  `model_budget_too_small` (the gateway's 402 as Pi reports it), a `budget_stopped` run, or a
+  judge call refused `budget_exhausted` / `budget_below_call` / `budget_soft_limit` ends the eval
+  `budget_stopped` at once: the attempt is not recorded, retried or scored. The message names the
+  line that spend plus live reservations reached (else a general one). Test: cap with a held
+  eval reservation, the gateway's refusal → `budget_stopped`, no execution recorded.
+- **L1 (aggregates only):** the estimate uses team-wide per-model means only with at least 3
+  members behind them (`ESTIMATE_MIN_MEMBERS`), else the caller's own history alone; it never
+  shows one member's usage. The cap message no longer shows the team's eval spend (amounts stay
+  in the admins' budget view).
+- **L2:** docs/install.md: the rollout gap (old gateways bill eval calls `run`, don't hold them
+  against the cap, refuse `eval_judge`). **L3:** `spent_by_kind` from the UTC month start.
+  **L4:** a dollar cap is at least $0.01 in whole cents (`TEAM_EVAL_CAP_USD_MESSAGE`, 400).
+  **L5:** DB tests for two connections racing at the cap, the UTC month and day periods, the
+  member share, settle with `keep_ms`; gateway test for a cap on a team without budgets.
+  **L6:** the estimate is fetched 500 ms after the last edit; Run is freed when saving fails.
+
 ## How ac-2's ±50 % is verified
 
 1. **Recorded reference usage (CI):** `services/server/src/skill-eval-budget.db.test.ts` runs the
