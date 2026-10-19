@@ -55,8 +55,11 @@ export const WEBRTC_GUARD =
   "try{delete window[n[i]]}catch(e){}try{Object.defineProperty(window,n[i]," +
   "{value:undefined,writable:false,configurable:false})}catch(e){}}})()</script>";
 
-/** A leading doctype (after an optional BOM and whitespace): the guard goes right after it. */
-const DOCTYPE = /^\uFEFF?\s*<!doctype[^>]*>/i;
+/**
+ * A leading doctype (after an optional BOM, whitespace and comments): the guard goes right after
+ * it, so the document keeps its standards mode.
+ */
+const DOCTYPE = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i;
 
 /**
  * The template with {@link WEBRTC_GUARD} first: after a leading doctype (so the document keeps

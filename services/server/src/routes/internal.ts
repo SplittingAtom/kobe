@@ -26,8 +26,8 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
  * 401 `unauthorized` (internal key), 401 `sandbox_unauthorized` (token, liveness, membership),
  * POST /internal/v1/mcp/connectors/{id}/grant → 200 `{kind: "api_key", api_key}` for the sandbox's own
  *      user only (KOBE-108); 404 `not_connected` | `connector_not_available`, 503 `unavailable`
- * POST /internal/v1/mcp/connectors/{id}/results `{ticket, result}` (KOBE-438) → 201 `{storage}`;
- *      403 `ticket_invalid`, 409 `run_not_active` (the allow's `app_capture.ticket`, MCP Apps)
+ * POST /internal/v1/mcp/connectors/{id}/results `{ticket, input, result}` (KOBE-438) → 201
+ *      `{storage}`; 403 `ticket_invalid`, 409 `run_not_active`, 429 `too_many_unclaimed` (the allow's `app_capture.ticket`, MCP Apps)
  * 429 `rate_limited` (per sandbox, `DECIDE_RATE`),
  * 404 `connector_not_available`, 400 `invalid_request`.
  */
@@ -179,9 +179,13 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const stored = await reportCapturedResult(deps.appResults, auth.principal, id.data, body.data);
     if (stored.ok) return c.json({ storage: stored.storage }, 201);
-    return stored.code === "ticket_invalid"
-      ? c.json({ code: "ticket_invalid", message: "Not a capture of this sandbox." }, 403)
-      : c.json({ code: "run_not_active", message: "The run has ended." }, 409);
+    if (stored.code === "ticket_invalid") {
+      return c.json({ code: "ticket_invalid", message: "Not a capture of this sandbox." }, 403);
+    }
+    if (stored.code === "too_many_unclaimed") {
+      return c.json({ code: "too_many_unclaimed", message: "Too many unclaimed results." }, 429);
+    }
+    return c.json({ code: "run_not_active", message: "The run has ended." }, 409);
   });
 
   app.route("/internal/v1/mcp", mcp);

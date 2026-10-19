@@ -174,12 +174,22 @@ export async function appResultViews(
 const readBlob = createReadLimiter({ max: 4, queueMax: 16, waitMs: 5_000 });
 const BLOB_READ_MS = 15_000;
 const MAX_RESULT_BLOB_BYTES = 4 * 1024 * 1024 + 1024;
+/** Result reads one member may have in flight on this pod (review LOW-5). */
+const READS_PER_USER = 2;
+const readsInFlight = new Map<string, number>();
 
 export type StoredResult =
-  | { readonly ok: true; readonly result: Record<string, unknown> }
+  | {
+      readonly ok: true;
+      readonly input: Record<string, unknown> | null;
+      readonly result: Record<string, unknown>;
+    }
   | { readonly ok: false; readonly code: "not_found" | "text_only" | "busy" | "unavailable" };
 
-/** One stored result, only when the viewer may open it as an app now. */
+/**
+ * One stored result, only when the viewer may open it as an app now: that row alone is decided
+ * (review LOW-5), with the call's stored input (LOW-2).
+ */
 export async function readAppResult(
   db: KobeDb,
   tx: KobeTx,
@@ -188,33 +198,63 @@ export async function readAppResult(
   ref: string,
   signal?: AbortSignal,
 ): Promise<StoredResult> {
-  const { results } = await appResultViews(db, tx, ids);
-  const view = results.find((r) => r.result_ref === ref);
-  if (!view) return { ok: false, code: "not_found" };
-  if (view.view !== "app") return { ok: false, code: "text_only" };
   const [row] = await tx
-    .select({ result: threadAppResults.result, blobRef: threadAppResults.blobRef })
+    .select({
+      id: threadAppResults.id,
+      runId: threadAppResults.runId,
+      toolCallId: threadAppResults.toolCallId,
+      entryId: threadAppResults.entryId,
+      connectorId: threadAppResults.connectorId,
+      tool: threadAppResults.tool,
+      templateUri: threadAppResults.templateUri,
+      templateSha256: threadAppResults.templateSha256,
+      appId: threadAppResults.appId,
+      storage: threadAppResults.storage,
+      input: threadAppResults.input,
+      result: threadAppResults.result,
+      blobRef: threadAppResults.blobRef,
+    })
     .from(threadAppResults)
-    .where(and(eq(threadAppResults.teamId, ids.teamId), eq(threadAppResults.id, ref)));
-  if (!row) return { ok: false, code: "not_found" };
-  if (row.result) return { ok: true, result: row.result };
-  if (!row.blobRef) return { ok: false, code: "text_only" };
-  const key = row.blobRef;
-  const read = await readBlob(() => {
-    const bound = AbortSignal.timeout(BLOB_READ_MS);
-    return readOffloadedJson(
-      blobs,
-      { teamId: ids.teamId, threadId: ids.threadId, reader: "app result" },
-      key,
-      MAX_RESULT_BLOB_BYTES,
-      signal ? AbortSignal.any([signal, bound]) : bound,
+    .where(
+      and(
+        eq(threadAppResults.teamId, ids.teamId),
+        eq(threadAppResults.threadId, ids.threadId),
+        eq(threadAppResults.id, ref),
+        or(isNotNull(threadAppResults.toolCallId), isNotNull(threadAppResults.entryId)),
+      ),
     );
-  }, signal);
-  if (!read.ok) return { ok: false, code: "busy" };
-  if (!read.value.ok) return { ok: false, code: "unavailable" };
-  const body = read.value.body;
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return { ok: false, code: "unavailable" };
+  if (!row) return { ok: false, code: "not_found" };
+  const live = (await memberApps(db, ids.teamId, ids.userId)).find((a) => a.appId === row.appId);
+  const served = await servedTemplateHash(db, row.connectorId, row.templateUri);
+  if (decide(row, live, served).view !== "app") return { ok: false, code: "text_only" };
+  const input = row.input ?? null;
+  if (row.result) return { ok: true, input, result: row.result };
+  if (!row.blobRef) return { ok: false, code: "text_only" };
+  const inFlight = readsInFlight.get(ids.userId) ?? 0;
+  if (inFlight >= READS_PER_USER) return { ok: false, code: "busy" };
+  readsInFlight.set(ids.userId, inFlight + 1);
+  const key = row.blobRef;
+  try {
+    const read = await readBlob(() => {
+      const bound = AbortSignal.timeout(BLOB_READ_MS);
+      return readOffloadedJson(
+        blobs,
+        { teamId: ids.teamId, threadId: ids.threadId, reader: "app result" },
+        key,
+        MAX_RESULT_BLOB_BYTES,
+        signal ? AbortSignal.any([signal, bound]) : bound,
+      );
+    }, signal);
+    if (!read.ok) return { ok: false, code: "busy" };
+    if (!read.value.ok) return { ok: false, code: "unavailable" };
+    const body = read.value.body;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return { ok: false, code: "unavailable" };
+    }
+    return { ok: true, input, result: body as Record<string, unknown> };
+  } finally {
+    const left = (readsInFlight.get(ids.userId) ?? 1) - 1;
+    if (left <= 0) readsInFlight.delete(ids.userId);
+    else readsInFlight.set(ids.userId, left);
   }
-  return { ok: true, result: body as Record<string, unknown> };
 }

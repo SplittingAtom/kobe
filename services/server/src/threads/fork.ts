@@ -80,7 +80,12 @@ export async function forkThread(
   run: RunAsViewer,
   blobs: BlobStore | undefined,
   id: string,
-  options: { entryId?: string | undefined; title?: string | undefined },
+  options: {
+    entryId?: string | undefined;
+    title?: string | undefined;
+    /** The team storage quota's default, for copied MCP Apps results (KOBE-438). */
+    quotaDefaultBytes?: number | undefined;
+  },
 ): Promise<ForkResult> {
   let planned;
   try {
@@ -175,7 +180,11 @@ async function planFork(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
-  options: { entryId?: string | undefined; title?: string | undefined },
+  options: {
+    entryId?: string | undefined;
+    title?: string | undefined;
+    quotaDefaultBytes?: number | undefined;
+  },
 ): Promise<{ ok: true; value: Plan } | { ok: false; error: ThreadError }> {
   const found = await findThread(tx, viewer, id);
   if (!found || found.thread.isTest) return { ok: false, error: "thread_not_found" };
@@ -214,12 +223,7 @@ async function planFork(
       newId: randomUUID(),
       title: options.title,
       path,
-      apps: await planAppCopies(
-        tx,
-        viewer.teamId,
-        id,
-        path.map((e) => e.entryId),
-      ),
+      apps: await planAppCopies(tx, viewer.teamId, id, path, options.quotaDefaultBytes),
     },
   };
 }

@@ -33,9 +33,23 @@ export interface AppResultStoreDeps {
 
 export type StoreOutcome =
   | { readonly ok: true; readonly id: string; readonly storage: ThreadAppResultStorage }
-  | { readonly ok: false; readonly code: "run_not_active" };
+  | { readonly ok: false; readonly code: "run_not_active" | "too_many_unclaimed" };
+
+/**
+ * Unclaimed results one run may hold (review MEDIUM-1): a run whose calls never get claimed (Pi
+ * changed the input, a replay) cannot fill the team's quota before it ends and they are dropped.
+ */
+export const MAX_UNCLAIMED_PER_RUN = 20;
 
 const PENDING_GRACE = sql.raw(`interval '1 hour'`);
+
+async function unclaimed(tx: KobeTx, claims: CaptureClaims): Promise<number> {
+  const res = await tx.execute<{ n: number }>(sql`
+    SELECT count(*)::int AS n FROM thread_app_results
+     WHERE team_id = ${claims.teamId} AND run_id = ${claims.runId}
+       AND tool_call_id IS NULL AND entry_id IS NULL`);
+  return res.rows[0]?.n ?? 0;
+}
 
 async function runActive(tx: KobeTx, claims: CaptureClaims): Promise<boolean> {
   const res = await tx.execute(sql`
@@ -50,6 +64,7 @@ function rowFor(
   id: string,
   storage: ThreadAppResultStorage,
   bytes: number,
+  input: Record<string, unknown>,
   content: { result?: Record<string, unknown>; blobRef?: string } = {},
 ): typeof threadAppResults.$inferInsert {
   return {
@@ -64,6 +79,7 @@ function rowFor(
     templateUri: claims.templateUri,
     templateSha256: claims.templateSha256,
     appId: claims.appId,
+    input,
     storage,
     result: content.result ?? null,
     blobRef: content.blobRef ?? null,
@@ -79,6 +95,7 @@ export function appResultBlobKey(prefix: string, claims: CaptureClaims, id: stri
 export async function storeCapturedResult(
   deps: AppResultStoreDeps,
   claims: CaptureClaims,
+  input: Record<string, unknown>,
   result: Record<string, unknown>,
 ): Promise<StoreOutcome> {
   const json = JSON.stringify(result);
@@ -90,6 +107,7 @@ export async function storeCapturedResult(
   ) =>
     withTeam(deps.db, claims.teamId, async (tx) => {
       if (!(await runActive(tx, claims))) return false;
+      if ((await unclaimed(tx, claims)) >= MAX_UNCLAIMED_PER_RUN) return "capped" as const;
       // Stored bytes count against the team's quota (D26); a refusal keeps the text card.
       const fits =
         storage === "too_large" ||
@@ -97,7 +115,7 @@ export async function storeCapturedResult(
       const kept = fits ? storage : "too_large";
       await tx
         .insert(threadAppResults)
-        .values(rowFor(claims, id, kept, bytes, kept === storage ? content : {}));
+        .values(rowFor(claims, id, kept, bytes, input, kept === storage ? content : {}));
       if (content?.blobRef !== undefined && kept === storage) {
         await tx.execute(sql`
           DELETE FROM retention_blob_deletions
@@ -106,9 +124,16 @@ export async function storeCapturedResult(
       return kept;
     });
 
+  const outcome = (kept: ThreadAppResultStorage | false | "capped"): StoreOutcome =>
+    kept === false
+      ? { ok: false, code: "run_not_active" }
+      : kept === "capped"
+        ? { ok: false, code: "too_many_unclaimed" }
+        : { ok: true, id, storage: kept };
+
   if (bytes <= APP_RESULT_INLINE_MAX_BYTES) {
     const kept = await write("inline", { result });
-    return kept === false ? { ok: false, code: "run_not_active" } : { ok: true, id, storage: kept };
+    return outcome(kept);
   }
   const blobs = deps.blobs;
   const key = blobs ? appResultBlobKey(blobs.prefix, claims, id) : undefined;
@@ -119,7 +144,7 @@ export async function storeCapturedResult(
     !threadKey(blobs.prefix, claims.teamId, claims.threadId, key)
   ) {
     const kept = await write("too_large");
-    return kept === false ? { ok: false, code: "run_not_active" } : { ok: true, id, storage: kept };
+    return outcome(kept);
   }
   try {
     await withTeam(deps.db, claims.teamId, (tx) =>
@@ -132,7 +157,7 @@ export async function storeCapturedResult(
   } catch (err) {
     logger.error({ err, team_id: claims.teamId }, "app result upload failed; kept as text only");
     const kept = await write("too_large");
-    return kept === false ? { ok: false, code: "run_not_active" } : { ok: true, id, storage: kept };
+    return outcome(kept);
   }
   const kept = await write("blob", { blobRef: key });
   if (kept !== "blob") {
@@ -142,5 +167,5 @@ export async function storeCapturedResult(
       logger.warn({ err }, "app result: could not delete an unused upload");
     }
   }
-  return kept === false ? { ok: false, code: "run_not_active" } : { ok: true, id, storage: kept };
+  return outcome(kept);
 }

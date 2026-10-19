@@ -10,6 +10,11 @@ import { inputDigest } from "../mcp/decide.js";
  * unclaimed row with the same run, tool and input digest is given the call's `tool_call_id`, and
  * the event gets the `app` marker. The marker is the server's own: nothing the sandbox sends can
  * set it (the translator builds `tool.result` itself).
+ *
+ * Exact or nothing (review LOW-1): a call's own report always lands before its tool.result, so
+ * exactly one candidate is that call's result. With two or more (identical calls in parallel),
+ * the reports' order need not be Pi's, so none is claimed and the cards stay text; the rows are
+ * dropped when the run ends (0160).
  */
 interface Event {
   readonly type: string;
@@ -85,6 +90,12 @@ export async function claimAppResultsInTx(
   for (const event of results) {
     const input = toolInputSchema.safeParse(inputs.get(event.payload.tool_call_id));
     if (!input.success || "kobe_omitted" in input.data) continue;
+    const digest = inputDigest(input.data);
+    const candidates = await tx.execute<{ n: number }>(sql`
+      SELECT count(*)::int AS n FROM thread_app_results
+       WHERE team_id = ${teamId} AND run_id = ${runId} AND pi_name = ${event.payload.tool}
+         AND input_sha256 = ${digest} AND tool_call_id IS NULL AND entry_id IS NULL`);
+    if ((candidates.rows[0]?.n ?? 0) !== 1) continue;
     const claimed = await tx.execute<{
       id: string;
       connector_id: string;
@@ -97,7 +108,7 @@ export async function claimAppResultsInTx(
        WHERE team_id = ${teamId} AND id = (
          SELECT id FROM thread_app_results
           WHERE team_id = ${teamId} AND run_id = ${runId} AND pi_name = ${event.payload.tool}
-            AND input_sha256 = ${inputDigest(input.data)}
+            AND input_sha256 = ${digest}
             AND tool_call_id IS NULL AND entry_id IS NULL
           ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
          AND NOT EXISTS (

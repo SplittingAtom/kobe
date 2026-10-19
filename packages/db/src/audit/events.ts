@@ -278,7 +278,14 @@ export const MCP_APPROVAL_FAILURES = [...APPROVAL_REJECT_REASONS, "unavailable"]
 export const RETENTION_PURGE_REASONS = ["retention", "trash", "offboarding"] as const;
 const retentionPeriod = z.enum(RETENTION_PERIODS);
 /** What a purge deleted (counts only). */
-const purgeCounts = { entries: count, runs: count, events: count, blobs: count };
+const purgeCounts = {
+  entries: count,
+  runs: count,
+  events: count,
+  blobs: count,
+  /** MCP Apps results of the purged threads (KOBE-438); absent from earlier rows. */
+  appResults: count.optional(),
+};
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,

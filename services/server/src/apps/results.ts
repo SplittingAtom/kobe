@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { inputDigest } from "../mcp/decide.js";
 import { logger } from "../logger.js";
 import type { McpPrincipal } from "../mcp/decide.js";
 import { verifyCaptureTicket } from "./capture-ticket.js";
@@ -20,9 +21,16 @@ export interface AppResultsDeps {
   readonly now?: () => Date;
 }
 
-/** The report body: the ticket and an MCP `CallToolResult` (an object). */
+/** Largest call input kept with a result (the MA-4 cap). */
+export const APP_RESULT_INPUT_MAX_BYTES = 64 * 1024;
+
+/**
+ * The report body: the ticket, the call's input as the upstream ran it (its canonical digest must
+ * be the ticket's), and an MCP `CallToolResult` (an object).
+ */
 export const resultReportSchema = z.strictObject({
   ticket: z.string().min(1).max(4096),
+  input: z.record(z.string(), z.unknown()),
   result: z.record(z.string(), z.unknown()),
 });
 
@@ -47,5 +55,12 @@ export async function reportCapturedResult(
   }
   // An error result is not an app's data: the card shows Pi's text.
   if (report.result["isError"] === true) return { ok: false, code: "ticket_invalid" };
-  return storeCapturedResult(deps.store, claims, report.result);
+  // The input the app is shown is the one the upstream ran (review LOW-2), never Pi's entry.
+  if (
+    inputDigest(report.input as never) !== claims.inputSha256 ||
+    Buffer.byteLength(JSON.stringify(report.input), "utf8") > APP_RESULT_INPUT_MAX_BYTES
+  ) {
+    return { ok: false, code: "ticket_invalid" };
+  }
+  return storeCapturedResult(deps.store, claims, report.input, report.result);
 }

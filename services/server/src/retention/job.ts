@@ -139,6 +139,7 @@ export function purgeRecorder(teamId: string, reason: Reason, userId?: string) {
         runs: counts.runs,
         events: counts.events,
         blobs: counts.blobs,
+        ...(counts.appResults > 0 ? { appResults: counts.appResults } : {}),
         ...(userId ? { userId } : {}),
       },
     });

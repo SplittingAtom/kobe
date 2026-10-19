@@ -32,9 +32,9 @@ describe("withWebRtcGuard", () => {
       `${BOM}  <!doctype html >${WEBRTC_GUARD}<p>a</p>`,
     );
     expect(withWebRtcGuard("<p>no doctype</p>")).toBe(`${WEBRTC_GUARD}<p>no doctype</p>`);
-    // A comment before the doctype keeps the doctype first only if the guard goes first too.
-    expect(withWebRtcGuard("<!-- c --><!doctype html>")).toBe(
-      `${WEBRTC_GUARD}<!-- c --><!doctype html>`,
+    // Comments before the doctype: still after the doctype (standards mode kept).
+    expect(withWebRtcGuard("<!-- c --> <!doctype html><p>")).toBe(
+      `<!-- c --> <!doctype html>${WEBRTC_GUARD}<p>`,
     );
   });
 

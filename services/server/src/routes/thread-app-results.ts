@@ -14,7 +14,8 @@ import { uuidSchema } from "../threads/schemas.js";
  *
  * - `GET /v1/threads/{id}/app-results`: the thread's results as this viewer sees them, the live
  *   app or the text card with its reason (`apps/thread-results.ts`); newest 500, oldest first.
- * - `GET /v1/threads/{id}/app-results/{ref}`: one stored result `{result}`, only when the viewer
+ * - `GET /v1/threads/{id}/app-results/{ref}`: one stored result `{input, result}` (the input the
+ *   upstream ran, null for results stored before it was kept), only when the viewer
  *   may open it as an app now (409 `text_only` otherwise). JSON only: `no-store`, `nosniff`,
  *   `default-src 'none'`. Reads Postgres and the thread's own S3 tree; never the upstream.
  */
@@ -63,7 +64,7 @@ export function threadAppResultRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     if (!found)
       return c.json({ code: "thread_not_found", message: "No thread with that id." }, 404);
     const read = found.value;
-    if (read.ok) return c.json({ result: read.result });
+    if (read.ok) return c.json({ input: read.input, result: read.result });
     if (read.code === "not_found") return c.json(NOT_FOUND, 404);
     if (read.code === "text_only") {
       return c.json({ code: "text_only", message: "This app shows as text for you." }, 409);

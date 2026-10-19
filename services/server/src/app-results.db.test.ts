@@ -101,8 +101,13 @@ const decide = (w: World, tool = "open_explorer") =>
     { tool, thread_id: w.threadId, arguments: ARGS },
     w.token,
   );
-const report = (w: World, ticket: string, result: unknown, token = w.token) =>
-  post(`/connectors/${w.connector.id}/results`, { ticket, result }, token);
+const report = (
+  w: World,
+  ticket: string,
+  result: unknown,
+  token = w.token,
+  input: unknown = ARGS,
+) => post(`/connectors/${w.connector.id}/results`, { ticket, input, result }, token);
 
 const RESULT = {
   content: [{ type: "text", text: "3 namespaces" }],
@@ -176,7 +181,7 @@ describe("capture (ac-1)", () => {
       (
         await post(
           `/connectors/${w.connector.id}/results`,
-          { ticket, result: RESULT },
+          { ticket, input: ARGS, result: RESULT },
           w.token,
           "x".repeat(40),
         )
@@ -190,9 +195,16 @@ describe("capture (ac-1)", () => {
     const otherToken = mcpToken({ sandboxId: other, teamId: w.team, userId: w.owner.id });
     expect((await report(w, ticket, RESULT, otherToken)).status).toBe(403);
     expect(
-      (await post(`/connectors/${randomUUID()}/results`, { ticket, result: RESULT }, w.token))
-        .status,
+      (
+        await post(
+          `/connectors/${randomUUID()}/results`,
+          { ticket, input: ARGS, result: RESULT },
+          w.token,
+        )
+      ).status,
     ).toBe(403);
+    // An input other than the one the ticket was issued for.
+    expect((await report(w, ticket, RESULT, w.token, { q: "other" })).status).toBe(403);
     // An error result is never stored.
     expect((await report(w, ticket, { ...RESULT, isError: true })).status).toBe(403);
     expect(await rows(w.team)).toEqual([]);
@@ -221,7 +233,7 @@ describe("capture (ac-1)", () => {
     const read = await w.owner.browser.get(
       `/v1/threads/${w.threadId}/app-results/${view?.result_ref}`,
     );
-    expect(read.json).toEqual({ result: big });
+    expect(read.json).toEqual({ input: ARGS, result: big });
   });
 
   it("keeps text only for a result over 4 MiB, and over the team's quota", async () => {
@@ -289,7 +301,7 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
     expect(read.status).toBe(200);
     expect(read.headers.get("content-type")).toMatch(/^application\/json/);
     expect(read.headers.get("content-security-policy")).toBe("default-src 'none'");
-    expect(read.json).toEqual({ result: RESULT });
+    expect(read.json).toEqual({ input: ARGS, result: RESULT });
   });
 
   it("gives text with the right reason: drift, visibility, no access, a reader without the thread", async () => {
@@ -338,7 +350,21 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
        VALUES ($1, $2, 'e1', NULL, 'message', $3)`,
       [w.team, w.threadId, JSON.stringify({ message: { role: "user", content: "open it" } })],
     );
-    await fx.admin.query(`UPDATE threads SET leaf_entry_id = 'e1' WHERE id = $1`, [w.threadId]);
+    await fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       VALUES ($1, $2, 'e2', 'e1', 'message', $3)`,
+      [
+        w.team,
+        w.threadId,
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "tc1", name: "x", arguments: ARGS }],
+          },
+        }),
+      ],
+    );
+    await fx.admin.query(`UPDATE threads SET leaf_entry_id = 'e2' WHERE id = $1`, [w.threadId]);
     await fx.admin.query(`UPDATE runs SET user_entry_id = 'e1' WHERE id = $1`, [w.runId]);
     await claim(w, "tc1");
     const forked = await w.owner.browser.post(`/v1/threads/${w.threadId}/fork`, {});
@@ -352,7 +378,7 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
       view: "app",
     });
     const read = await w.owner.browser.get(`/v1/threads/${fork}/app-results/${copy?.result_ref}`);
-    expect(read.json).toEqual({ result: RESULT });
+    expect(read.json).toEqual({ input: ARGS, result: RESULT });
   });
 
   it("copies a stored blob into the fork's own tree", async () => {
@@ -365,7 +391,21 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
        VALUES ($1, $2, 'e1', NULL, 'message', $3)`,
       [w.team, w.threadId, JSON.stringify({ message: { role: "user", content: "open it" } })],
     );
-    await fx.admin.query(`UPDATE threads SET leaf_entry_id = 'e1' WHERE id = $1`, [w.threadId]);
+    await fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       VALUES ($1, $2, 'e2', 'e1', 'message', $3)`,
+      [
+        w.team,
+        w.threadId,
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "tc1", name: "x", arguments: ARGS }],
+          },
+        }),
+      ],
+    );
+    await fx.admin.query(`UPDATE threads SET leaf_entry_id = 'e2' WHERE id = $1`, [w.threadId]);
     await fx.admin.query(`UPDATE runs SET user_entry_id = 'e1' WHERE id = $1`, [w.runId]);
     await claim(w, "tc1");
     const fork = (await w.owner.browser.post(`/v1/threads/${w.threadId}/fork`, {})).json
@@ -380,7 +420,7 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
     const [copy] = (await views(w.owner, fork)).json.results as Body[];
     expect(
       (await w.owner.browser.get(`/v1/threads/${fork}/app-results/${copy?.result_ref}`)).json,
-    ).toEqual({ result: big });
+    ).toEqual({ input: ARGS, result: big });
   });
 
   it("exports text only: never the structured result or the template", async () => {
@@ -404,5 +444,77 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
       .join("\n");
     expect(all).not.toContain("namespaces");
     expect(all).not.toContain("explorer</p>");
+  });
+});
+
+describe("review fixes (KOBE-438 review)", () => {
+  it("claims nothing when two identical calls are pending (LOW-1)", async () => {
+    const w = await world();
+    const t1 = (await decide(w)).json.app_capture.ticket as string;
+    const t2 = (await decide(w)).json.app_capture.ticket as string;
+    await report(w, t1, RESULT);
+    await report(w, t2, { ...RESULT, structuredContent: { other: true } });
+    expect(((await claim(w, "tc1"))[1]?.payload as Body).app).toBeUndefined();
+    expect((await rows(w.team)).every((r) => r.tool_call_id === null)).toBe(true);
+  });
+
+  it("drops a run's unclaimed results when the run ends (MEDIUM-1)", async () => {
+    const w = await world();
+    await captured(w);
+    await fx.complete(w.team, w.runId);
+    expect(await rows(w.team)).toEqual([]);
+  });
+
+  it("caps a run's unclaimed results (MEDIUM-1)", async () => {
+    const w = await world();
+    for (let i = 0; i < 20; i++) {
+      const ticket = (await decide(w)).json.app_capture.ticket as string;
+      expect((await report(w, ticket, RESULT)).status).toBe(201);
+    }
+    const ticket = (await decide(w)).json.app_capture.ticket as string;
+    expect((await report(w, ticket, RESULT)).status).toBe(429);
+  });
+
+  it("does not copy a result into a fork at the prompt, before its tool call (LOW-7)", async () => {
+    const w = await world();
+    await captured(w);
+    await fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       VALUES ($1, $2, 'e1', NULL, 'message', $3)`,
+      [w.team, w.threadId, JSON.stringify({ message: { role: "user", content: "open it" } })],
+    );
+    await fx.admin.query(`UPDATE threads SET leaf_entry_id = 'e1' WHERE id = $1`, [w.threadId]);
+    await fx.admin.query(`UPDATE runs SET user_entry_id = 'e1' WHERE id = $1`, [w.runId]);
+    await claim(w, "tc1");
+    const fork = (await w.owner.browser.post(`/v1/threads/${w.threadId}/fork`, {})).json
+      .thread_id as string;
+    expect((await views(w.owner, fork)).json.results).toEqual([]);
+  });
+
+  it("counts app results in the audited purge and queues their blobs (LOW-6)", async () => {
+    const w = await world();
+    const big = { content: [{ type: "text", text: "z".repeat(300 * 1024) }] };
+    const ticket = (await decide(w)).json.app_capture.ticket as string;
+    expect((await report(w, ticket, big)).json).toEqual({ storage: "blob" });
+    await claim(w, "tc1");
+    const { rows: stored } = await fx.admin.query<{ blob_ref: string }>(
+      `SELECT blob_ref FROM thread_app_results WHERE team_id = $1`,
+      [w.team],
+    );
+    const key = must(stored[0], "row").blob_ref;
+    await fx.complete(w.team, w.runId);
+    await fx.admin.query(`UPDATE threads SET deleted_at = now() WHERE id = $1`, [w.threadId]);
+    expect((await w.owner.browser.post(`/v1/threads/${w.threadId}/purge`)).status).toBe(204);
+    const { rows: audit } = await fx.admin.query<{ target: Body }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'thread.purged'`,
+      [w.team],
+    );
+    expect(audit[0]?.target).toMatchObject({ appResults: 1, blobs: 1 });
+    const { rows: queued } = await fx.admin.query(
+      `SELECT 1 FROM retention_blob_deletions WHERE team_id = $1 AND key = $2`,
+      [w.team, key],
+    );
+    expect(queued).toHaveLength(1);
+    expect(await rows(w.team)).toEqual([]);
   });
 });
