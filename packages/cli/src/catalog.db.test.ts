@@ -51,10 +51,11 @@ describe("blob-ref columns on an older schema", () => {
     const present = await existingColumns(conn(), asked);
     const names = present.map((c) => `${c.table}.${c.column}`);
     // Added after that level: the hold history (KOBE-304), personal_skill_versions (the 0128
-    // rename), the skill package keys (KOBE-310), catalog bytes (KOBE-317) and eval bundles
-    // (KOBE-325).
+    // rename), the skill package keys (KOBE-310), catalog bytes (KOBE-317), eval bundles
+    // (KOBE-325) and MCP App results (KOBE-438).
     const later = (c: { table: string; column: string }) =>
       c.table === "workspace_file_hold_history" ||
+      c.table === "thread_app_results" ||
       c.table === "skill_eval_runs" ||
       c.table === "personal_skill_versions" ||
       c.table === "registry_versions" ||
@@ -67,7 +68,7 @@ describe("blob-ref columns on an older schema", () => {
 
   it("would fail reading every column of this release on that schema", async () => {
     await expect(referencedObjectKeys(conn(), BLOB_REF_COLUMNS)).rejects.toThrow(
-      /workspace_file_hold_history" does not exist/,
+      /"(public\.)?(workspace_file_hold_history|thread_app_results)" does not exist/,
     );
   });
 });
