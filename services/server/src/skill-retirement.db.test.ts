@@ -245,6 +245,12 @@ describe("Revoke and Unrevoke (ac-1, ac-3)", () => {
     expect(listed.rows).toHaveLength(1);
     // Team 3 tracked latest: major 2 has nothing left, and it never drops back to major 1.
     expect(await runs(teams.t3, ids.a3)).toEqual({ loads: [], omitted: ["revoked"] });
+    // An agent naming it gets it through the install: omitted the same way.
+    const named = await withTeam(h.deps.database.db, teams.t3, (tx) =>
+      loadCatalogFacts(tx, { teamId: teams.t3, userId: ids.a3 as string, namedCatalog: [NAME] }),
+    );
+    expect(named.named).toEqual([]);
+    expect(named.namedOmissions).toEqual([{ name: NAME, reason: "revoked" }]);
     expect((await installsOf("a3"))[0]?.retirement).toMatchObject({
       kind: "revoked",
       semver: "1.0.0",
