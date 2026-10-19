@@ -2,7 +2,7 @@ import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { siteRoleAllows, type SiteRole } from "../../authz/permissions.js";
 import type { CatalogVersion } from "../../resolver/catalog-pins.js";
-import { addBlockedInTx, removeBlockedInTx } from "../blocklist.js";
+import { addBlockedInTx, blockEntryOf, removeBlockEntryInTx } from "../blocklist.js";
 import { inRegistryTx } from "./registry-tx.js";
 
 /**
@@ -51,6 +51,13 @@ export interface Retired {
   readonly state: string;
   /** The skill's versions as they were before the act (who was running what). */
   readonly before: readonly CatalogVersion[];
+  /**
+   * Other versions of the skill with the same runtime hash (review L3): a revoke's blocklist entry
+   * stops them too, so their installs are told as well.
+   */
+  readonly siblingIds: readonly string[];
+  /** Unrevoke: when the revoke it undoes happened (its notices name the people to tell again). */
+  readonly revokedAt: string | null;
 }
 
 export type RetireResult =
@@ -125,6 +132,10 @@ export function retireVersion(
     if (!(await mayAct(tx, act, skillId, actor))) return { ok: false, code: "forbidden" };
     if (!FROM[act].includes(v.state)) return { ok: false, code: "wrong_state" };
     const before = await versionsBefore(tx, skillId);
+    const siblingIds = before
+      .filter((x) => x.id !== v.id && x.runtimeHash === v.runtime_hash)
+      .map((x) => x.id);
+    let revokedAt: string | null = null;
     let to: string = EVENT[act];
     let checklist: Record<string, unknown> = { from: v.state };
     const target = { registryVersionId: v.id, skillId, name: v.name, semver: input.semver };
@@ -137,17 +148,28 @@ export function retireVersion(
         ),
         userId: actor.userId,
       });
-      checklist = { ...checklist, blocklisted: added !== null };
+      // Which entry this revoke added (review L2): Unrevoke lifts exactly that one.
+      const addedAt = added ? await blockEntryOf(tx, v.runtime_hash) : null;
+      checklist = { ...checklist, blocklisted: added !== null, ...(addedAt ? { addedAt } : {}) };
     }
     if (act === "unrevoke") {
       // The state the revoke left, and whether that revoke put the hash on the blocklist.
-      const last = await tx.execute<{ checklist: { from?: string; blocklisted?: boolean } }>(sql`
-        SELECT checklist FROM registry_review_events
+      const last = await tx.execute<{
+        checklist: { from?: string; blocklisted?: boolean; addedAt?: string };
+        at: string;
+      }>(sql`
+        SELECT checklist, at::text AS at FROM registry_review_events
          WHERE version_id = ${v.id} AND action = 'revoked' ORDER BY id DESC LIMIT 1`);
       const prior = last.rows[0]?.checklist ?? {};
+      revokedAt = last.rows[0]?.at ?? null;
       to = prior.from && FROM.revoke.includes(prior.from) ? prior.from : "approved";
-      const unblocked = prior.blocklisted === true && (await removeBlockedInTx(tx, v.runtime_hash));
-      checklist = { to, unblocked };
+      // Only the entry the revoke added, while it is still that entry (review L2).
+      const unblocked =
+        prior.blocklisted === true &&
+        prior.addedAt !== undefined &&
+        (await removeBlockEntryInTx(tx, { hash: v.runtime_hash, addedAt: prior.addedAt }));
+      const blockReplaced = prior.blocklisted === true && !unblocked;
+      checklist = { to, unblocked, ...(blockReplaced ? { blockReplaced } : {}) };
     }
     await tx.execute(sql`
       UPDATE registry_versions SET state = ${to}::registry_version_state, updated_at = now()
@@ -165,7 +187,12 @@ export function retireVersion(
     else if (act === "unrevoke")
       await recordAudit(tx, {
         action: "registry.unrevoked",
-        target: { ...target, to, unblocked: checklist.unblocked === true },
+        target: {
+          ...target,
+          to,
+          unblocked: checklist.unblocked === true,
+          ...(checklist.blockReplaced === true ? { blockReplaced: true } : {}),
+        },
       });
     else
       await recordAudit(tx, {
@@ -182,6 +209,8 @@ export function retireVersion(
         act,
         state: to,
         before,
+        siblingIds,
+        revokedAt,
       },
     };
   });
@@ -219,9 +248,15 @@ export function deprecateSkill(
       UPDATE registry_skills SET status = 'deprecated', replacement_id = ${input.replacementId ?? null},
         updated_at = now()
        WHERE id = ${skillId}`);
+    // `from` (review L1): where an undo returns it to.
     await recordAudit(tx, {
       action: "skill.catalog.deprecated",
-      target: { skillId, name: s.name, replacementId: input.replacementId ?? null },
+      target: {
+        skillId,
+        name: s.name,
+        replacementId: input.replacementId ?? null,
+        from: s.status as "active" | "unmaintained",
+      },
     });
     return {
       ok: true,
@@ -233,6 +268,8 @@ export function deprecateSkill(
         act: "deprecate",
         state: "deprecated",
         before,
+        siblingIds: [],
+        revokedAt: null,
       },
     };
   });

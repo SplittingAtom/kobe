@@ -169,3 +169,28 @@ export function removeBlockedInTx(tx: KobeTx, hash: string): Promise<boolean> {
 /** Serializes blocklist writes, so two adds in one alias group can't both see it unblocked. */
 const lockBlocklist = (tx: KobeTx) =>
   tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.skill_blocklist', 0))`);
+
+/** The listed entry for exactly `hash` (its `added_at` as Postgres prints it), or null. */
+export async function blockEntryOf(tx: KobeTx, hash: string): Promise<string | null> {
+  const r = await tx.execute<{ at: string }>(sql`
+    SELECT added_at::text AS at FROM skill_blocklist WHERE content_hash = ${hash}`);
+  return r.rows[0]?.at ?? null;
+}
+
+/**
+ * Removes one entry, only while it is still the same row (same hash, same `added_at`): an entry
+ * removed and added again since (another reason) stays (Unrevoke, KOBE-340 review L2). Audited.
+ */
+export async function removeBlockEntryInTx(
+  tx: KobeTx,
+  entry: { readonly hash: string; readonly addedAt: string },
+): Promise<boolean> {
+  await lockBlocklist(tx);
+  const rows = await tx.execute<{ hash: string }>(sql`
+    DELETE FROM skill_blocklist
+     WHERE content_hash = ${entry.hash} AND added_at = ${entry.addedAt}::timestamptz
+    RETURNING content_hash AS hash`);
+  if (rows.rows.length === 0) return false;
+  await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: entry.hash } });
+  return true;
+}

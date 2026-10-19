@@ -18,7 +18,13 @@ const OTHER = "retire-other";
 let skillId = "";
 let otherId = "";
 const v: Record<string, string> = {};
-const teams = { t1: randomUUID(), t2: randomUUID(), t3: randomUUID(), t4: randomUUID() };
+const teams = {
+  t1: randomUUID(),
+  t2: randomUUID(),
+  t3: randomUUID(),
+  t4: randomUUID(),
+  t5: randomUUID(),
+};
 const ids: Record<string, string> = {};
 const as: Record<string, TestBrowser> = {};
 
@@ -26,7 +32,13 @@ async function user(key: string, siteRole?: "admin") {
   ids[key] = await h.createUser(`${key.toLowerCase()}@retire.test`, siteRole);
 }
 
-async function version(skill: string, name: string, semver: string, seq: number) {
+async function version(
+  skill: string,
+  name: string,
+  semver: string,
+  seq: number,
+  runtimeOf = semver,
+) {
   const r = await h.admin.query<{ id: string }>(
     `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash, manifest,
        provenance, source, scan, verdict, state, submitted_by, reviewed_by, approved_at)
@@ -36,7 +48,7 @@ async function version(skill: string, name: string, semver: string, seq: number)
       skill,
       semver,
       seq,
-      hashOf(`${name}@${semver}:runtime`),
+      hashOf(`${name}@${runtimeOf}:runtime`),
       hashOf(`${name}@${semver}:package`),
       ids.maintainer,
       ids.admin,
@@ -55,7 +67,19 @@ async function install(team: string, semver: string, pinMode: string) {
 
 beforeAll(async () => {
   h = await openHarness();
-  for (const k of ["maintainer", "a1", "b1", "a2", "a3", "m4", "reviewer", "outsider"])
+  for (const k of [
+    "maintainer",
+    "a1",
+    "b1",
+    "a2",
+    "a3",
+    "r3",
+    "g3",
+    "m4",
+    "a5",
+    "reviewer",
+    "outsider",
+  ])
     await user(k);
   await user("admin", "admin");
   for (const [i, team] of Object.values(teams).entries())
@@ -68,6 +92,13 @@ beforeAll(async () => {
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'),
        ($1, $3, 'builder'), ($4, $5, 'team_admin'), ($6, $7, 'team_admin'), ($8, $9, 'member')`,
     [teams.t1, ids.a1, ids.b1, teams.t2, ids.a2, teams.t3, ids.a3, teams.t4, ids.m4],
+  );
+  // Team 3 also has a member who ran 2.0.0 lately and one whose agent names the skill; team 5's
+  // admin (installed later) pins a version that shares a runtime hash.
+  await h.admin.query(
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member'),
+       ($1, $3, 'builder'), ($4, $5, 'team_admin')`,
+    [teams.t3, ids.r3, ids.g3, teams.t5, ids.a5],
   );
   await h.admin.query(
     `INSERT INTO site_grants (user_id, "grant", granted_by) VALUES ($1, 'skill_reviewer', $2)`,
@@ -91,6 +122,33 @@ beforeAll(async () => {
   await install(teams.t1, "1.1.0", "pinned");
   await install(teams.t2, "1.0.0", "within_major");
   await install(teams.t3, "1.0.0", "latest");
+  const thread = randomUUID();
+  await h.admin.query(
+    `INSERT INTO threads (team_id, id, owner_user_id, title) VALUES ($1, $2, $3, 't')`,
+    [teams.t3, thread, ids.r3],
+  );
+  await h.admin.query(
+    `INSERT INTO runs (team_id, thread_id, trigger, status, started_at, ended_at, created_at,
+       skill_refs)
+     VALUES ($1, $2, 'user', 'completed', now(), now(), now() - interval '2 days', $3::jsonb)`,
+    [teams.t3, thread, JSON.stringify([{ name: NAME, source: "catalog", semver: "2.0.0" }])],
+  );
+  const agent = randomUUID();
+  await h.admin.query(
+    `INSERT INTO team_agents (team_id, id, slug, frontmatter, owner_user_id)
+     VALUES ($1, $2, 'namer', $3::jsonb, $4)`,
+    [teams.t3, agent, JSON.stringify({ name: "Namer", skills: [NAME] }), ids.g3],
+  );
+  await h.admin.query(
+    `INSERT INTO team_agent_versions (team_id, agent_id, version, frontmatter, prompt,
+       tool_manifest, published_by, skill_manifest, draft_revision)
+     VALUES ($1, $2, 1, $3::jsonb, 'p', '{}', $4, '{"skills": []}', 1)`,
+    [teams.t3, agent, JSON.stringify({ name: "Namer", skills: [NAME] }), ids.g3],
+  );
+  await h.admin.query(`UPDATE team_agents SET current_version = 1 WHERE team_id = $1 AND id = $2`, [
+    teams.t3,
+    agent,
+  ]);
   await h.admin.query(
     `INSERT INTO member_skill_enablements (team_id, user_id, catalog_skill_id, enabled, version_id,
        pin_mode)
@@ -259,11 +317,22 @@ describe("Revoke and Unrevoke (ac-1, ac-3)", () => {
       semver: "1.0.0",
     });
     expect(await notices(teams.t3, ids.a3)).toEqual(["skill.version.revoked@2.0.0"]);
-    // Everyone with it, in-app and email; and the maintainers.
+    // Everyone with it (review M3): the member who ran it lately and the agent's owner too.
+    expect(await notices(teams.t3, ids.r3)).toEqual(["skill.version.revoked@2.0.0"]);
+    expect(await notices(teams.t3, ids.g3)).toEqual(["skill.version.revoked@2.0.0"]);
+    // In-app and email; and the maintainers.
     await h.mailer.settle();
-    expect(h.mailer.to("a3@retire.test")).toHaveLength(1);
-    expect(h.mailer.to("maintainer@retire.test")).toHaveLength(1);
+    for (const who of ["a3", "r3", "g3", "maintainer"])
+      expect(h.mailer.to(`${who}@retire.test`), who).toHaveLength(1);
     expect(h.mailer.to("a1@retire.test")).toEqual([]);
+
+    // Before the undo, team 3 pins 1.0.0 and the agent's owner is deactivated: Unrevoke still
+    // tells exactly the people the revoke told, and emails the active ones.
+    await h.admin.query(`UPDATE team_skill_installs SET pin_mode = 'pinned' WHERE team_id = $1`, [
+      teams.t3,
+    ]);
+    await h.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.g3]);
+    h.mailer.sent.length = 0;
     expect(await audits("registry.revoked")).toEqual([
       expect.objectContaining({ semver: "2.0.0", from: "approved", blocklisted: true }),
     ]);
@@ -277,6 +346,16 @@ describe("Revoke and Unrevoke (ac-1, ac-3)", () => {
         ])
       ).rows,
     ).toEqual([]);
+    await h.admin.query(`UPDATE team_skill_installs SET pin_mode = 'latest' WHERE team_id = $1`, [
+      teams.t3,
+    ]);
+    await h.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.g3]);
+    for (const who of ["r3", "g3"])
+      expect((await notices(teams.t3, ids[who])).at(-1), who).toBe("skill.version.unrevoked@2.0.0");
+    await h.mailer.settle();
+    for (const who of ["a3", "r3", "maintainer"])
+      expect(h.mailer.to(`${who}@retire.test`), who).toHaveLength(1);
+    expect(h.mailer.to("g3@retire.test")).toEqual([]);
     expect((await runs(teams.t3, ids.a3)).loads).toEqual(["2.0.0"]);
     expect(await notices(teams.t3, ids.a3)).toEqual([
       "skill.version.revoked@2.0.0",
@@ -307,6 +386,50 @@ describe("Revoke and Unrevoke (ac-1, ac-3)", () => {
       hash,
     ]);
     expect(still.rows).toHaveLength(1);
+  });
+
+  it("keeps a block that stands for something else since (review L2)", async () => {
+    const hash = hashOf(`${NAME}@2.0.0:runtime`);
+    expect((await act("admin", "2.0.0", "revoke")).status).toBe(200);
+    // A Site admin lifts the revoke's entry and blocks the hash again for another reason.
+    await h.admin.query(`DELETE FROM skill_blocklist WHERE content_hash = $1`, [hash]);
+    await h.admin.query(
+      `INSERT INTO skill_blocklist (content_hash, reason, added_by) VALUES ($1, 'Malware.', $2)`,
+      [hash, ids.admin],
+    );
+    expect((await act("admin", "2.0.0", "unrevoke")).status).toBe(200);
+    expect((await audits("registry.unrevoked")).at(-1)).toMatchObject({
+      unblocked: false,
+      blockReplaced: true,
+    });
+    const still = await h.admin.query<{ reason: string }>(
+      `SELECT reason FROM skill_blocklist WHERE content_hash = $1`,
+      [hash],
+    );
+    expect(still.rows).toEqual([{ reason: "Malware." }]);
+    await h.admin.query(`DELETE FROM skill_blocklist WHERE content_hash = $1`, [hash]);
+  });
+
+  it("tells and marks installs of a version that shares the revoked runtime hash (review L3)", async () => {
+    v["3.0.0"] = await version(skillId, NAME, "3.0.0", 6);
+    v["3.0.1"] = await version(skillId, NAME, "3.0.1", 7, "3.0.0");
+    await h.admin.query(
+      `INSERT INTO team_skill_installs (team_id, skill_id, version_id, pin_mode, access,
+         installed_by)
+       VALUES ($1, $2, $3, 'pinned', 'default_on', $4)`,
+      [teams.t5, skillId, v["3.0.1"], ids.admin],
+    );
+    expect((await act("admin", "3.0.0", "revoke")).status).toBe(200);
+    expect(await notices(teams.t5, ids.a5)).toEqual(["skill.version.revoked@3.0.0"]);
+    const a5 = await h.signIn("a5@retire.test");
+    expect((await a5.put("/v1/me/teams/active", { teamId: teams.t5 })).status).toBe(200);
+    a5.team = teams.t5;
+    const list = (await a5.get("/v1/team/skills/installs")).json.installs as {
+      retirement: unknown;
+    }[];
+    expect(list[0]?.retirement).toMatchObject({ kind: "revoked", semver: "3.0.1" });
+    expect((await act("admin", "3.0.0", "unrevoke")).status).toBe(200);
+    await h.admin.query(`DELETE FROM team_skill_installs WHERE team_id = $1`, [teams.t5]);
   });
 });
 
@@ -340,7 +463,7 @@ describe("Deprecate a whole skill (ac-1)", () => {
     });
     expect(b?.status).toBe(403);
     expect(await audits("skill.catalog.deprecated")).toEqual([
-      { skillId, name: NAME, replacementId: otherId },
+      { skillId, name: NAME, replacementId: otherId, from: "active" },
     ]);
   });
 });

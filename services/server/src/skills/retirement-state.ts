@@ -36,6 +36,9 @@ export function retirementOf(
       return { kind: pick.reason, semver: pinned?.semver ?? "", replacement };
     return null;
   }
+  // A version sharing a revoked version's runtime hash is blocklisted with it (review L3).
+  if ((pick.version as { blocklisted?: boolean }).blocklisted === true)
+    return { kind: "revoked", semver: pick.version.semver, replacement };
   if (pin.pinMode === "pinned" && pinned?.state === "withdrawn")
     return { kind: "withdrawn", semver: pinned.semver, replacement };
   if (pick.version.state === "deprecated" || skill.status === "deprecated")

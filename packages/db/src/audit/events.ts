@@ -1593,12 +1593,16 @@ export const AUDIT_EVENTS = {
     semver: z.string().max(32),
     to: z.string().max(32),
     unblocked: z.boolean(),
+    /** The revoke's entry was removed or replaced since: the block stays (review L2). */
+    blockReplaced: z.literal(true).optional(),
   }),
   /** A maintainer or Site admin deprecated a whole catalog skill, naming its replacement or not. */
   "skill.catalog.deprecated": event("site", {
     skillId: id,
     name: catalogName,
     replacementId: id.nullable(),
+    /** The status it left, where an undo returns it (review L1). */
+    from: z.enum(["active", "unmaintained"]).optional(),
   }),
 
   // ── catalog maintainers (KOBE-332, SK24): ids only ──
