@@ -5,7 +5,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import { APP_ID_PATTERN } from "../apps/app-id.js";
 import { callApp, takeRateToken, type BrowserPrincipal } from "../apps/call.js";
 import { appCallDepsFor } from "../apps/call-deps.js";
-import { memberApp, memberAppHtml, memberApps, viewOf } from "../apps/catalog.js";
+import { memberApp, memberAppHtml, memberApps, missingKeyApps, viewOf } from "../apps/catalog.js";
 import { checkAppTool } from "../apps/decide.js";
 import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
 import { uuidSchema } from "../threads/schemas.js";
@@ -67,9 +67,15 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     c.header("X-Content-Type-Options", "nosniff");
   });
 
+  // The rail's Apps section (KOBE-440): the member's apps, and the ones a key of their own adds.
   app.get("/", async (c) => {
-    const apps = await memberApps(db, c.get("team").id, c.get("user").id);
-    return c.json({ apps: apps.map(viewOf) });
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    const apps = await memberApps(db, teamId, userId);
+    return c.json({
+      apps: apps.map(viewOf),
+      needsKey: await missingKeyApps(db, teamId, userId),
+    });
   });
 
   app.get("/:appId/template", async (c) => {

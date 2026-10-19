@@ -508,6 +508,29 @@ describe("credentials (ac-2) and who may call (ac-3)", () => {
     expect(logged.join("\n")).not.toContain(MEMBER_KEY);
   });
 
+  it("hints 'Add your key' only for an app missing just the member's own key (KOBE-440, MA8)", async () => {
+    const own = await connector("apps6-own", { authKind: "api_key" });
+    const ownApp = appIdOf(own, "ui://cat/explorer");
+    const site = await connector("apps6-site", { authKind: "api_key", credentialSource: "site" });
+    await h.admin.query(`DELETE FROM connector_site_keys WHERE connector_id = $1`, [site]);
+    const list = (await bob.get("/v1/team/apps")).json;
+    expect(list.apps.map((a: { appId: string }) => a.appId)).not.toContain(ownApp);
+    expect(list.needsKey).toContainEqual({
+      connectorId: own,
+      connectorName: "apps6-own",
+      title: "open_explorer",
+    });
+    // A site key that is missing is not the member's to add.
+    expect(list.needsKey.map((k: { connectorId: string }) => k.connectorId)).not.toContain(site);
+    // Once the member adds a key, the app is theirs and the hint goes.
+    expect((await bob.put(`/v1/connector-grants/${own}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const after = (await bob.get("/v1/team/apps")).json;
+    expect(after.apps.map((a: { appId: string }) => a.appId)).toContain(ownApp);
+    expect(after.needsKey.map((k: { connectorId: string }) => k.connectorId)).not.toContain(own);
+  });
+
   it("refuses a member removed from the team and a deactivated member at once", async () => {
     const id = await connector("apps4-who");
     const appId = appIdOf(id, "ui://cat/explorer");

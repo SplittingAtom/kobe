@@ -158,11 +158,8 @@ function openingTool(c: MemberAppConnector, uri: string): PinnedTool | undefined
   return [...candidates].sort((a, b) => rank(a) - rank(b) || (a.name < b.name ? -1 : 1))[0];
 }
 
-/** Every app live for the member in the team (MA8), with its connector (no template bytes). */
-export async function memberApps(db: KobeDb, teamId: string, userId: string): Promise<MemberApp[]> {
-  const { rows, grants } = await enabledConnectors(db, teamId, userId);
-  const siteKeys = await liveSiteKeys(db, rows);
-  const callable = rows.filter((c) => canCall(c, grants, siteKeys));
+/** The apps of `callable` connectors: pinned, approved templates with an opening tool. */
+async function appsOf(db: KobeDb, callable: readonly MemberAppConnector[]): Promise<MemberApp[]> {
   if (callable.length === 0) return [];
   const templates = await db
     .select({
@@ -197,6 +194,47 @@ export async function memberApps(db: KobeDb, teamId: string, userId: string): Pr
     });
   }
   return apps;
+}
+
+/** Every app live for the member in the team (MA8), with its connector (no template bytes). */
+export async function memberApps(db: KobeDb, teamId: string, userId: string): Promise<MemberApp[]> {
+  const { rows, grants } = await enabledConnectors(db, teamId, userId);
+  const siteKeys = await liveSiteKeys(db, rows);
+  return appsOf(
+    db,
+    rows.filter((c) => canCall(c, grants, siteKeys)),
+  );
+}
+
+/** An app the member would have with a key of their own (MA8 "Add your key", KOBE-440). */
+export interface MissingKeyApp {
+  readonly connectorId: string;
+  readonly connectorName: string;
+  readonly title: string;
+}
+
+/**
+ * Apps missing only because the member holds no key of their own for the connector: everything
+ * else of MA8 holds (enabled, exposed, pinned and approved). A connector on the site-wide key
+ * (KOBE-303) is not the member's to fix, so it gives no hint.
+ */
+export async function missingKeyApps(
+  db: KobeDb,
+  teamId: string,
+  userId: string,
+): Promise<MissingKeyApp[]> {
+  const { rows, grants } = await enabledConnectors(db, teamId, userId);
+  const own = rows.filter(
+    (c) =>
+      c.authKind !== "none" &&
+      c.credentialSource !== "site" &&
+      !canCall(c, grants, new Set<string>()),
+  );
+  return (await appsOf(db, own)).map((app) => ({
+    connectorId: app.connector.id,
+    connectorName: app.connector.name,
+    title: viewOf(app).title,
+  }));
 }
 
 /** One app by id, live for the member, or undefined. */
