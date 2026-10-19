@@ -260,6 +260,17 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
   attempt failed, while one is used up ends `budget_stopped` (no retry, no scorecard, nothing
   more starts); its calls are refused by the gateway meanwhile.
 
+## The Workbench evals panel (KOBE-328)
+
+In the draft editor: **Suggest trigger cases** appends cases to `evals/cases.yaml` (or starts it):
+positive ones from the description's "Use when …" requests and always negative ones (a near miss
+and unrelated asks), for the author to edit as YAML in the file pane. The built-in
+skill-creator (1.1.0) proposes the same shape in a chat. Then the estimate and **Run evals**
+(baseline on or off), live progress while an eval is queued or running, the history of every
+eval of the draft by revision, and the scorecard of the picked one: every metric of
+`SkillEvalScorecard` and each case's executions with a link to their eval threads. The team eval
+cap is edited in Team admin › Budgets.
+
 ## Limits and settings
 
 | Limit                              | Value                                                                        |
