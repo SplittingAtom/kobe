@@ -227,6 +227,7 @@ async function serverCall(purpose: ServerCallTokenPurpose) {
         { role: "user", content: purpose === "eval_judge" ? "Grade." : "Suggest follow-ups." },
       ],
       max_tokens: cap,
+      ...(purpose === "eval_judge" ? { temperature: 0 } : {}),
     }),
   });
   const body = (await res.json()) as { error?: { code?: string } };

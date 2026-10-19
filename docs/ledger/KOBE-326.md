@@ -66,10 +66,21 @@
   client as titles; absent when server calls aren't configured).
 - **Web:** usage "By kind" labels for `eval` / `eval_judge`.
 
+## Review-326 fixes (`review-326.md`)
+
+- **M1:** `parseSkillEvalJudgeVerdict` counts the top-level keys (escaped spellings decoded); a
+  repeated key is `judge_unparseable` (`judge.test.ts`, incl. an answer steering a half-verdict).
+- **M2:** `judge-outputs.test.ts` (order, count, caps, refused / skipped, > 100 files, binary).
+- **L1:** `eval.read` refuses `nlink > 1` (`link`) and another device (`off_volume`).
+  **L2:** unread files reach the judge as `unread`, not `binary`. **L3:** control, format and
+  separator characters in the reason become one space. **L4:** the gateway refuses an
+  `eval_judge` body whose temperature isn't 0. **L5:** the server refuses an `eval.read` reply
+  over 1 MiB in all. **L6:** one transaction per settings PUT (`setTeamSkillSettings`).
+- Coordinator: no catalog flag for structured output; non-openai providers use the prompt and
+  the strict parser (DB test: no `response_format` for an ollama judge).
+
 ## Open questions (for the reviewer / coordinator)
 
-- Structured output for `ollama` / `openai_compatible` (gate1's Ollama Cloud): add a catalog flag
-  later, or keep prompt + strict parser only? Today only kind `openai` gets `response_format`.
 - During a rolling upgrade an old gateway refuses `eval_judge` tokens (`judge_failed`); covered by
   install.md's "start evals only after every deployment rolled".
 
