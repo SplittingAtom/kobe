@@ -39,6 +39,7 @@ function installAnswer(c: Ctx, r: SkillInstallResult) {
   if (r.ok)
     return c.json({
       semver: r.semver,
+      pinMode: r.pinMode,
       deprecated: r.deprecated,
       requiredCount: r.requiredCount,
       ...(r.requiredCount >= REQUIRED_WARN_AT ? { warning: "many_required" } : {}),
@@ -125,19 +126,13 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
   const moveTo = async (c: Ctx, version: string, act: "move" | "rollback") => {
     const id = idSchema.safeParse(c.req.param("skillId"));
     if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
-    const teamId = c.get("team").id;
-    const current = (await listTeamSkillInstalls(db, teamId)).installs.find(
-      (i) => i.skillId === id.data,
-    );
-    if (!current) return c.json(SKILL_INSTALL_MISSING, 404);
+    // Pin mode and access are read under the install's lock inside (review-337 L4).
     const r = await installCatalogSkill(db, {
-      teamId,
+      teamId: c.get("team").id,
       skillId: id.data,
       userId: c.get("user").id,
       asBuilder: !teamRoleAllows(c.get("team").role, "team.skills.installs.manage"),
       version,
-      pinMode: current.pinMode,
-      access: current.access,
       act,
     });
     return installAnswer(c, r);

@@ -11,6 +11,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  Notice,
   Section,
   Table,
   TableBody,
@@ -36,6 +37,12 @@ const ACCESS: Record<CatalogInstall["access"], string> = {
   required: "Required",
   hidden: "Hidden",
 };
+/** A move back pinned a tracking install (KOBE-337 review M1, coordinator's wording). */
+export const PINNED_BY = {
+  rollback: "Pinned by roll back; switch back to tracking to get updates again.",
+  move: "Pinned by moving the pin back; switch back to tracking to get updates again.",
+} as const;
+
 const PIN: Record<CatalogInstall["pinMode"], string> = {
   pinned: "Pinned",
   within_major: "Track within major",
@@ -136,6 +143,11 @@ export function CatalogInstallsSection() {
                       <TableCell>
                         {i.semver}
                         <div className="text-sm text-console-muted">{PIN[i.pinMode]}</div>
+                        {i.pinnedBy && (
+                          <Notice tone="warn" role="status" className="mt-1">
+                            {PINNED_BY[i.pinnedBy]}
+                          </Notice>
+                        )}
                       </TableCell>
                       <TableCell>{ACCESS[i.access]}</TableCell>
                       <TableCell className="whitespace-nowrap">

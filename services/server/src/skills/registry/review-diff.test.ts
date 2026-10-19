@@ -7,6 +7,8 @@ import {
   changedFileCount,
   diffOneFile,
   diffPackages,
+  escapeInvalid,
+  isUtf8,
   rawFile,
 } from "./review-diff.js";
 
@@ -172,5 +174,18 @@ describe("diffPackages (KOBE-334, SK23)", () => {
       encoding: "escaped",
       text: "echo h\\xE9\n",
     });
+  });
+
+  it("validates UTF-8 by hand and tells a literal \\x from a bad byte (review-337 L6)", () => {
+    expect(isUtf8(strToU8("héllo €"))).toBe(true);
+    for (const bad of [
+      [0xc0, 0x80],
+      [0xe0, 0x80, 0x80],
+      [0xed, 0xa0, 0x80],
+      [0xf4, 0x90, 0, 0],
+      [0xe9],
+    ])
+      expect(isUtf8(new Uint8Array(bad)), String(bad)).toBe(false);
+    expect(escapeInvalid(new Uint8Array([...strToU8("a\\xE9"), 0xe9]))).toBe("a\\\\xE9\\xE9");
   });
 });

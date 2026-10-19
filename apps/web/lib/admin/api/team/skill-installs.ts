@@ -21,6 +21,8 @@ export interface CatalogInstall {
   readonly updatedAt: string;
   /** The skill carries the Site's Default tag. */
   readonly isDefault: boolean;
+  /** A Roll back or Move pin back switched it from tracking to Pinned (KOBE-337 review M1). */
+  readonly pinnedBy?: "rollback" | "move" | null;
 }
 
 export interface RemovedDefault {
@@ -73,6 +75,8 @@ export interface SkillInstallChange {
 
 export interface SkillInstallResult {
   readonly semver: string;
+  /** The pin mode after the change (Pinned after a move back). */
+  readonly pinMode?: CatalogInstall["pinMode"];
   /** The version is deprecated: installed with a warning (SK31). */
   readonly deprecated: boolean;
   /** Required team skills and installs now; the console warns from 5. */

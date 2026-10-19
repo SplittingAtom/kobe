@@ -98,7 +98,11 @@ export function InstallUpdatesPanel({
     setState(r.ok ? r.data : r.error.message);
   };
   const act = async (fn: () => Promise<ApiResult<SkillInstallResult>>) => {
-    if (await run(fn, (r) => skillInstallNotice(install.name, r))) await load();
+    const notice = (r: SkillInstallResult) =>
+      r.pinMode === "pinned" && install.pinMode !== "pinned"
+        ? `${skillInstallNotice(install.name, r)} It is Pinned there now: switch back to tracking to get updates again.`
+        : skillInstallNotice(install.name, r);
+    if (await run(fn, notice)) await load();
   };
   return (
     <details onToggle={(e) => (e.currentTarget.open && state === null ? void load() : undefined)}>

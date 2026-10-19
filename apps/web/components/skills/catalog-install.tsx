@@ -108,6 +108,15 @@ export function CatalogInstall({
           </Button>
         </FormRow>
       </form>
+      {detail.egress.some((e) => !e.enabledHere) && (
+        <Notice tone="info" role="status">
+          {detail.egress
+            .filter((e) => !e.enabledHere)
+            .map((e) => `Needs ${e.host} — not enabled here.`)
+            .join(" ")}{" "}
+          It installs anyway; runs can't reach those hosts until a Team admin enables them.
+        </Notice>
+      )}
       {deprecated && (
         <Notice tone="warn" role="status">
           {version} is deprecated: it installs with a warning, and only a Team admin can install it.

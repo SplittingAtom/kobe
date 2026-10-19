@@ -87,17 +87,44 @@ function filesOf(zip: Uint8Array | null): Map<string, Uint8Array> {
   return new Map(Object.entries(unzipSync(zip)).filter(([path]) => !path.endsWith("/")));
 }
 
-const strict = new TextDecoder("utf-8", { fatal: true });
 const lossy = new TextDecoder("utf-8");
+
+/**
+ * The length of the valid UTF-8 sequence at `i` (1–4), or 0 when the byte there starts none:
+ * checked by hand (continuation bytes, overlongs, surrogates, the U+10FFFF limit), so crafted
+ * input never costs an exception per byte (review-337 L6).
+ */
+export function utf8SequenceAt(bytes: Uint8Array, i: number): number {
+  const b = bytes[i] as number;
+  if (b < 0x80) return 1;
+  const cont = (k: number) => {
+    const c = bytes[i + k];
+    return c !== undefined && (c & 0xc0) === 0x80;
+  };
+  if (b >= 0xc2 && b <= 0xdf) return cont(1) ? 2 : 0;
+  if (b >= 0xe0 && b <= 0xef) {
+    const c1 = bytes[i + 1] ?? 0;
+    if (b === 0xe0 && c1 < 0xa0) return 0; // overlong
+    if (b === 0xed && c1 > 0x9f) return 0; // surrogates
+    return cont(1) && cont(2) ? 3 : 0;
+  }
+  if (b >= 0xf0 && b <= 0xf4) {
+    const c1 = bytes[i + 1] ?? 0;
+    if (b === 0xf0 && c1 < 0x90) return 0; // overlong
+    if (b === 0xf4 && c1 > 0x8f) return 0; // above U+10FFFF
+    return cont(1) && cont(2) && cont(3) ? 4 : 0;
+  }
+  return 0;
+}
 
 /** Whether `bytes` are valid UTF-8. */
 export function isUtf8(bytes: Uint8Array): boolean {
-  try {
-    strict.decode(bytes);
-    return true;
-  } catch {
-    return false;
+  for (let i = 0; i < bytes.length;) {
+    const n = utf8SequenceAt(bytes, i);
+    if (n === 0) return false;
+    i += n;
   }
+  return true;
 }
 
 /** The file as text (invalid bytes as U+FFFD), or null when it is binary (has a NUL byte). */
@@ -273,30 +300,22 @@ export interface RawFile {
   readonly truncated: boolean;
 }
 
-/** `bytes` as text with every byte that isn't part of valid UTF-8 written `\xNN`. */
+/**
+ * `bytes` as text with every byte that isn't part of valid UTF-8 written `\xNN`, and every literal
+ * backslash written `\\`, so the two can't be mistaken (review-337 L6).
+ */
 export function escapeInvalid(bytes: Uint8Array): string {
   let out = "";
-  let i = 0;
-  while (i < bytes.length) {
-    const b = bytes[i] as number;
-    const len =
-      b < 0x80
-        ? 1
-        : b >= 0xc2 && b < 0xe0
-          ? 2
-          : b >= 0xe0 && b < 0xf0
-            ? 3
-            : b >= 0xf0 && b < 0xf5
-              ? 4
-              : 0;
-    const seq = len > 0 ? bytes.subarray(i, i + len) : null;
-    if (seq && seq.length === len && isUtf8(seq)) {
-      out += strict.decode(seq);
-      i += len;
-    } else {
-      out += `\\x${b.toString(16).toUpperCase().padStart(2, "0")}`;
+  for (let i = 0; i < bytes.length;) {
+    const n = utf8SequenceAt(bytes, i);
+    if (n === 0) {
+      out += `\\x${(bytes[i] as number).toString(16).toUpperCase().padStart(2, "0")}`;
       i += 1;
+      continue;
     }
+    const ch = lossy.decode(bytes.subarray(i, i + n));
+    out += ch === "\\" ? "\\\\" : ch;
+    i += n;
   }
   return out;
 }

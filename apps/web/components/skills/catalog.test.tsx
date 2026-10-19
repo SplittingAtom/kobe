@@ -153,7 +153,7 @@ describe("Catalog detail", () => {
       ],
       authoritative_scorecard: null,
       license: null,
-      egress: [],
+      egress: [{ host: "pypi.org", enabled_here: false, in_ceiling: true }],
       packages: {},
       maintainers: [],
       agents: [],
@@ -174,6 +174,10 @@ describe("Catalog detail", () => {
     expect(Array.from(form.querySelectorAll("option")).map((o) => o.textContent)).not.toContain(
       "Required (always loaded)",
     );
+    // The install doesn't need the egress, but it says what isn't enabled (review-337 L5).
+    expect(
+      screen.getByText(/Needs pypi\.org — not enabled here\. It installs anyway/),
+    ).toBeTruthy();
     // Revoked versions are not offered.
     expect(Array.from(form.querySelectorAll("option")).map((o) => o.textContent)).not.toContain(
       "0.9.0",

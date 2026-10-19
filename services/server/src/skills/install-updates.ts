@@ -1,6 +1,6 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { BlobStore } from "../retention/blobs.js";
-import { pickCatalogVersion, type CatalogVersion } from "../resolver/catalog-pins.js";
+import { publishedVersions, runningVersion, type PublishedVersion } from "./install-versions.js";
 import { cardScore, type CardScore } from "./catalog-browse.js";
 import { diffPackages, readPackage, type PackageDiff } from "./registry/review-diff.js";
 import { compareSemver } from "./semver.js";
@@ -46,49 +46,15 @@ export interface InstallUpdates {
   readonly rollbackTo: string | null;
 }
 
-interface VersionRow extends CatalogVersion {
-  readonly manifest: Record<string, unknown>;
-  readonly authoritativeScorecard: Record<string, unknown> | null;
-}
-
 const majorOf = (semver: string) => Number(semver.split(".", 1)[0]);
-
-async function versionsOf(tx: KobeTx, skillId: string): Promise<VersionRow[]> {
-  const res = await tx.execute<{
-    id: string;
-    semver: string;
-    seq: number;
-    state: string;
-    suspended: boolean;
-    runtime_hash: string;
-    package_hash: string;
-    manifest: Record<string, unknown>;
-    authoritative_scorecard: Record<string, unknown> | null;
-  }>(sql`
-    SELECT id, semver, seq, state::text AS state, suspended_at IS NOT NULL AS suspended,
-      runtime_hash, package_hash, manifest, authoritative_scorecard
-      FROM registry_versions
-     WHERE skill_id = ${skillId}
-       AND state::text IN ('approved', 'deprecated', 'withdrawn', 'revoked')`);
-  return res.rows.map((r) => ({
-    id: r.id,
-    semver: r.semver,
-    seq: Number(r.seq),
-    state: r.state,
-    suspended: r.suspended,
-    runtimeHash: r.runtime_hash,
-    packageHash: r.package_hash,
-    manifest: r.manifest,
-    authoritativeScorecard: r.authoritative_scorecard,
-  }));
-}
 
 const delta = (a: number | null | undefined, b: number | null | undefined) =>
   typeof a === "number" && typeof b === "number" ? Math.round((a - b) * 1000) / 1000 : null;
 
 /**
- * The version a Roll back returns to: the one the install ran before the change that set its
- * current version, from the team's own audit rows (configured, moved, rolled back).
+ * The version a Roll back returns to (review-337 L1): the one the install ran before the change
+ * that set its current version, from the team's own audit rows. A roll back undoes the change
+ * before it, so both are skipped: a second Roll back goes further back, never forward again.
  */
 export async function rollbackTarget(
   tx: KobeTx,
@@ -101,8 +67,17 @@ export async function rollbackTarget(
      WHERE team_id = ${teamId} AND target ->> 'skillId' = ${skillId}
        AND action IN ('skill.catalog.configured', 'skill.catalog.pin_moved',
                       'skill.catalog.rolled_back')
-     ORDER BY seq DESC LIMIT 50`);
+     ORDER BY seq DESC LIMIT 100`);
+  let undone = 0;
   for (const r of res.rows) {
+    if (r.action === "skill.catalog.rolled_back") {
+      undone += 1;
+      continue;
+    }
+    if (undone > 0) {
+      undone -= 1;
+      continue;
+    }
     const t = r.target;
     const to = r.action === "skill.catalog.configured" ? t.semver : t.to;
     const from =
@@ -110,7 +85,7 @@ export async function rollbackTarget(
         ? (t.previous as { semver?: unknown } | undefined)?.semver
         : t.from;
     if (to !== current) return null;
-    if (typeof from === "string" && from !== current) return from;
+    return typeof from === "string" && from !== current ? from : null;
   }
   return null;
 }
@@ -127,6 +102,33 @@ async function installRow(tx: KobeTx, teamId: string, skillId: string) {
   return res.rows[0];
 }
 
+/**
+ * What Roll back returns to: when tracking moved past the pinned version by itself, the newest
+ * runnable version below what runs; otherwise the audit chain's previous version (review-337 M1).
+ */
+async function rollbackOf(
+  tx: KobeTx,
+  teamId: string,
+  skillId: string,
+  versions: readonly PublishedVersion[],
+  pinned: PublishedVersion,
+  running: PublishedVersion | null,
+): Promise<string | null> {
+  if (running && running.id !== pinned.id) {
+    const below = versions
+      .filter(
+        (v) =>
+          (v.state === "approved" || v.state === "deprecated") &&
+          !v.suspended &&
+          !v.blocklisted &&
+          compareSemver(v.semver, running.semver) < 0,
+      )
+      .sort((a, b) => compareSemver(b.semver, a.semver));
+    return below[0]?.semver ?? null;
+  }
+  return rollbackTarget(tx, teamId, skillId, pinned.semver);
+}
+
 export async function installUpdates(
   db: KobeDb,
   teamId: string,
@@ -135,18 +137,17 @@ export async function installUpdates(
   return withTeam(db, teamId, async (tx) => {
     const install = await installRow(tx, teamId, skillId);
     if (!install) return null;
-    const versions = await versionsOf(tx, skillId);
+    const versions = await publishedVersions(tx, skillId);
     const pinned = versions.find((v) => v.id === install.version_id);
     if (!pinned) return null;
-    const pick = pickCatalogVersion(versions, {
+    const running = runningVersion(versions, {
       pinMode: install.pin_mode,
       versionId: install.version_id,
     });
-    const running = pick.ok ? (versions.find((v) => v.id === pick.version.id) ?? null) : null;
     const base = running ?? pinned;
     const baseScore = cardScore(base.authoritativeScorecard);
     // What the pin would pick if this version were published: whether it moves there by itself.
-    const takes = (v: VersionRow) =>
+    const takes = (v: PublishedVersion) =>
       install.pin_mode === "latest" ||
       (install.pin_mode === "within_major" && majorOf(v.semver) === majorOf(pinned.semver));
     const updates = versions
@@ -154,6 +155,7 @@ export async function installUpdates(
         (v) =>
           (v.state === "approved" || v.state === "deprecated") &&
           !v.suspended &&
+          !v.blocklisted &&
           compareSemver(v.semver, base.semver) > 0,
       )
       .sort((a, b) => compareSemver(b.semver, a.semver))
@@ -180,7 +182,7 @@ export async function installUpdates(
       pinned: { versionId: pinned.id, semver: pinned.semver },
       running: running ? { versionId: running.id, semver: running.semver } : null,
       updates,
-      rollbackTo: await rollbackTarget(tx, teamId, skillId, pinned.semver),
+      rollbackTo: await rollbackOf(tx, teamId, skillId, versions, pinned, running),
     };
   });
 }
@@ -212,7 +214,12 @@ export async function installDiff(
       SELECT id, semver, package_hash, package_storage_key, runtime_hash, runtime_storage_key,
              runtime_size_bytes
         FROM registry_versions
-       WHERE skill_id = ${skillId} AND (id = ${fromId} OR semver = ${toSemver})
+       WHERE skill_id = ${skillId}
+         AND (id = ${fromId}
+              -- The target is a version Updates may offer: never a withdrawn or revoked one's
+              -- files (review-337 L2).
+              OR (semver = ${toSemver} AND state::text IN ('approved', 'deprecated')
+                  AND suspended_at IS NULL))
          AND state::text IN ('approved', 'deprecated', 'withdrawn', 'revoked')`);
     const from = res.rows.find((r) => r.id === fromId);
     const to = res.rows.find((r) => r.semver === toSemver);

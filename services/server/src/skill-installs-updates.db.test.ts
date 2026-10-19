@@ -186,7 +186,8 @@ describe("updates, Move pin and Roll back (ac-2, ac-3, ac-4)", () => {
       pinMode: "within_major",
       pinned: { semver: "1.0.0" },
       running: { semver: "1.1.0" },
-      rollbackTo: null,
+      // Tracking moved past the pin by itself: Roll back offers the version below what runs.
+      rollbackTo: "1.0.0",
     });
     // Within major runs 1.1.0 already; 2.0.0 is a major it never takes by itself.
     expect(u.json.updates).toEqual([
@@ -217,11 +218,23 @@ describe("updates, Move pin and Roll back (ac-2, ac-3, ac-4)", () => {
     });
     const back = await as.adminA.post(`/v1/team/skills/installs/${skillId}/rollback`, {});
     expect(back.status, JSON.stringify(back.json)).toBe(200);
-    expect(await loaded(teamA, ids.adminA)).toEqual({ required: [], offered: ["1.1.0"] });
+    // Back past what ran: the install is Pinned at 1.0.0, so 1.0.0 runs (review-337 M1).
+    expect(back.json.pinMode).toBe("pinned");
+    expect(await loaded(teamA, ids.adminA)).toEqual({ required: [], offered: ["1.0.0"] });
     expect((await audits("skill.catalog.rolled_back")).at(-1)).toMatchObject({
       team_id: teamA,
-      target: { from: "2.0.0", to: "1.0.0" },
+      target: {
+        from: "2.0.0",
+        to: "1.0.0",
+        pinMode: "pinned",
+        pinModeFrom: "within_major",
+        runningFrom: "2.0.0",
+        runningTo: "1.0.0",
+      },
     });
+    // A second Roll back never re-applies 2.0.0 (review-337 L1).
+    const again = await as.adminA.post(`/v1/team/skills/installs/${skillId}/rollback`, {});
+    expect([again.status, again.json.code]).toEqual([409, "no_rollback"]);
     // Moving to a withdrawn version is refused like installing it.
     const bad = await as.adminA.post(`/v1/team/skills/installs/${skillId}/move`, {
       version: "1.2.0",
@@ -258,5 +271,72 @@ describe("updates, Move pin and Roll back (ac-2, ac-3, ac-4)", () => {
   it("refuses a Roll back with nothing to go back to", async () => {
     const r = await as.adminB.post(`/v1/team/skills/installs/${skillId}/rollback`, {});
     expect([r.status, r.json.code]).toEqual([409, "no_rollback"]);
+  });
+
+  it("pins a tracking install moved back, for both track modes, and says so (review-337 M1)", async () => {
+    // Track within major at 1.0.0 runs 1.1.0 by itself: Roll back pins it at 1.0.0.
+    expect(
+      (await install("adminA", { version: "1.0.0", pinMode: "within_major", access: "default_on" }))
+        .status,
+    ).toBe(200);
+    const u = await as.adminA.get(`/v1/team/skills/installs/${skillId}/updates`);
+    expect(u.json).toMatchObject({ running: { semver: "1.1.0" }, rollbackTo: "1.0.0" });
+    const back = await as.adminA.post(`/v1/team/skills/installs/${skillId}/rollback`, {});
+    expect([back.status, back.json.pinMode]).toEqual([200, "pinned"]);
+    expect(await loaded(teamA, ids.adminA)).toEqual({ required: [], offered: ["1.0.0"] });
+    const list = await as.adminA.get("/v1/team/skills/installs");
+    expect((list.json.installs as { pinnedBy: string | null }[])[0]?.pinnedBy).toBe("rollback");
+
+    // Track latest at 1.0.0 runs 2.0.0: Move pin to 1.1.0 pins it there.
+    expect(
+      (await install("adminA", { version: "1.0.0", pinMode: "latest", access: "default_on" }))
+        .status,
+    ).toBe(200);
+    expect(await loaded(teamA, ids.adminA)).toEqual({ required: [], offered: ["2.0.0"] });
+    const moved = await as.adminA.post(`/v1/team/skills/installs/${skillId}/move`, {
+      version: "1.1.0",
+    });
+    expect([moved.status, moved.json.pinMode]).toEqual([200, "pinned"]);
+    expect(await loaded(teamA, ids.adminA)).toEqual({ required: [], offered: ["1.1.0"] });
+    expect((await audits("skill.catalog.pin_moved")).at(-1)).toMatchObject({
+      target: { pinModeFrom: "latest", runningFrom: "2.0.0", runningTo: "1.1.0" },
+    });
+    const list2 = await as.adminA.get("/v1/team/skills/installs");
+    expect((list2.json.installs as { pinnedBy: string | null }[])[0]?.pinnedBy).toBe("move");
+    // Switching back to tracking clears it.
+    await install("adminA", { version: "1.1.0", pinMode: "latest", access: "default_on" });
+    const list3 = await as.adminA.get("/v1/team/skills/installs");
+    expect((list3.json.installs as { pinnedBy: string | null }[])[0]?.pinnedBy).toBeNull();
+  });
+
+  it("never diffs or offers withdrawn, revoked or blocklisted versions (review-337 L2, L3)", async () => {
+    for (const to of ["0.9.0", "1.2.0"])
+      expect(
+        (await as.adminA.get(`/v1/team/skills/installs/${skillId}/diff?to=${to}`)).status,
+        to,
+      ).toBe(404);
+    await install("adminA", { version: "1.0.0", pinMode: "pinned", access: "default_on" });
+    const hash = (
+      await h.admin.query<{ runtime_hash: string }>(
+        `SELECT runtime_hash FROM registry_versions WHERE skill_id = $1 AND semver = '2.0.0'`,
+        [skillId],
+      )
+    ).rows[0]?.runtime_hash;
+    await h.admin.query(
+      `INSERT INTO skill_blocklist (content_hash, reason, added_by) VALUES ($1, 'test', $2)`,
+      [hash, ids.adminB],
+    );
+    try {
+      const u = await as.adminA.get(`/v1/team/skills/installs/${skillId}/updates`);
+      expect((u.json.updates as { semver: string }[]).map((x) => x.semver)).toEqual(["1.1.0"]);
+      const r = await install("adminA", {
+        version: "2.0.0",
+        pinMode: "pinned",
+        access: "available",
+      });
+      expect([r.status, r.json.code]).toEqual([409, "not_installable"]);
+    } finally {
+      await h.admin.query(`DELETE FROM skill_blocklist WHERE content_hash = $1`, [hash]);
+    }
   });
 });

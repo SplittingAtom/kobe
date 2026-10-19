@@ -1708,6 +1708,11 @@ export const AUDIT_EVENTS = {
     from: z.string().max(32),
     to: z.string().max(32),
     pinMode: z.enum(["pinned", "within_major", "latest"]),
+    /** The tracking mode a move back left for Pinned (review-337 M1). */
+    pinModeFrom: z.enum(["within_major", "latest"]).optional(),
+    /** The version runs loaded before and after (null: none could run). */
+    runningFrom: z.string().max(32).nullable().optional(),
+    runningTo: z.string().max(32).nullable().optional(),
     deprecated: z.boolean(),
   }),
   /** Roll back (KOBE-337, SK25): the install returns to the version it ran before its last move. */
@@ -1717,6 +1722,11 @@ export const AUDIT_EVENTS = {
     from: z.string().max(32),
     to: z.string().max(32),
     pinMode: z.enum(["pinned", "within_major", "latest"]),
+    /** The tracking mode a move back left for Pinned (review-337 M1). */
+    pinModeFrom: z.enum(["within_major", "latest"]).optional(),
+    /** The version runs loaded before and after (null: none could run). */
+    runningFrom: z.string().max(32).nullable().optional(),
+    runningTo: z.string().max(32).nullable().optional(),
     deprecated: z.boolean(),
   }),
   /** A Team admin reinstalled a removed Default skill, clearing the team's opt-out (SK7). */
