@@ -25,11 +25,17 @@ export function appCallDepsFor(deps: ServerDeps): AppCallDeps {
       (pool ??= createValidatorPool()).validate(schema, instance, owner),
     close: async () => pool?.close(),
   };
+  // The MCP service and the proxy caller are read at call time: building the routes touches no
+  // dependency but the database (history reads never wake sandboxes, threads.db.test.ts).
   const callDeps: AppCallDeps = {
     db,
-    mcp: deps.mcp,
+    get mcp() {
+      return deps.mcp;
+    },
     rules: createDbRuleSource(db),
-    caller: deps.appCaller,
+    get caller() {
+      return deps.appCaller;
+    },
     validator,
     limiter: createRateLimiter(APP_CALL_RATE),
     limitedAudits: createRateLimiter({ capacity: 1, refillPerSecond: 1 / 60 }),

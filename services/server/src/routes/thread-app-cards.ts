@@ -50,9 +50,14 @@ function answer(c: Context, outcome: LaunchOutcome) {
 
 export function threadAppCardRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
+  // Read at request time, like the app calls' own dependencies (call-deps.ts).
   const cardDeps = {
-    call: appCallDepsFor(deps),
-    store: deps.appResults.store,
+    get call() {
+      return appCallDepsFor(deps);
+    },
+    get store() {
+      return deps.appResults.store;
+    },
     launches: createRateLimiter(APP_LAUNCH_RATE),
     abortHoldMs: () => deps.runs.abortHoldMs ?? RUN_DEFAULTS.stopGraceMs,
   };
