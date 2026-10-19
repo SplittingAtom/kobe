@@ -339,6 +339,18 @@ export const AUDIT_EVENTS = {
   "identity.team_invitation.declined": event("team", {}),
   "identity.member.role_changed": event("team", { userId: id, from: role, to: role }),
   "identity.member.removed": event("team", { userId: id, role }),
+  /**
+   * Kobe added someone to the team on its own (KOBE-331): a Skill reviewer joins the Registry
+   * team as a member when granted, or when the team becomes the Registry team (SK22).
+   */
+  "identity.member.added": event("team", {
+    userId: id,
+    role,
+    via: z.enum(["skill_reviewer_grant"]),
+  }),
+  /** The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22). */
+  "identity.site_grant.granted": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
+  "identity.site_grant.revoked": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
 
   // ── site: site-wide settings ──
   "site.settings.updated": event("site", {

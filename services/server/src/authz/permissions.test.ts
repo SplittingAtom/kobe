@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   SITE_PERMISSIONS,
   TEAM_PERMISSIONS,
+  SKILL_REVIEW_ACTIONS,
   sitePermissionsFor,
   siteRoleAllows,
+  skillReviewAllows,
   teamPermissionsFor,
   teamRoleAllows,
   type SitePermission,
@@ -68,6 +70,8 @@ describe("site permission matrix (spec D8)", () => {
     ["site.usage.read", false, true, true],
     ["site.budgets.manage", false, true, true],
     ["site.skills.catalog.manage", false, true, true],
+    ["site.skills.review", false, true, true],
+    ["site.grants.manage", false, true, true],
     ["site.break_glass.request", false, true, true],
     ["site.roles.manage", false, false, true],
     ["site.ownership.transfer", false, false, true],
@@ -86,5 +90,56 @@ describe("site permission matrix (spec D8)", () => {
     const site = Object.keys(SITE_PERMISSIONS);
     expect(site.every((p) => p.startsWith("site."))).toBe(true);
     expect(Object.keys(TEAM_PERMISSIONS).every((p) => p.startsWith("team."))).toBe(true);
+  });
+});
+
+describe("Skill reviewer grant beside the ladder (KOBE-331, SK22)", () => {
+  const reviewer = { siteRole: null, grants: ["skill_reviewer"] } as const;
+  const user = { siteRole: null, grants: [] } as const;
+  const admin = { siteRole: "admin", grants: [] } as const;
+  const owner = { siteRole: "owner", grants: [] } as const;
+
+  it.each<[(typeof SKILL_REVIEW_ACTIONS)[number], boolean]>([
+    // action, Skill reviewer may
+    ["queue.read", true],
+    ["claim", true],
+    ["comment", true],
+    ["approve", true],
+    ["request_changes", true],
+    ["reject", true],
+    ["reject_and_block", false],
+    ["withdraw", false],
+    ["revoke", false],
+    ["tag_default", false],
+    ["settings", false],
+  ])("%s: reviewer=%s, Site admins and the Owner always, users never", (action, mayReview) => {
+    expect(skillReviewAllows(reviewer, action)).toBe(mayReview);
+    expect(skillReviewAllows(admin, action)).toBe(true);
+    expect(skillReviewAllows(owner, action)).toBe(true);
+    expect(skillReviewAllows(user, action)).toBe(false);
+  });
+
+  it("covers every review action in the matrix", () => {
+    expect([...SKILL_REVIEW_ACTIONS].sort()).toEqual(
+      [
+        "approve",
+        "claim",
+        "comment",
+        "queue.read",
+        "reject",
+        "reject_and_block",
+        "request_changes",
+        "revoke",
+        "settings",
+        "tag_default",
+        "withdraw",
+      ].sort(),
+    );
+  });
+
+  it("leaves the site role ladder unchanged: the grant adds no site permission (ac-3)", () => {
+    expect(sitePermissionsFor(null)).toEqual([]);
+    expect(siteRoleAllows(null, "site.skills.review")).toBe(false);
+    expect(sitePermissionsFor("admin")).not.toContain("site.roles.manage");
   });
 });

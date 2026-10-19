@@ -3,10 +3,13 @@ import { z } from "zod";
 import { eq, getMembership, sessionActiveTeams, teams, type TeamRole } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { grantsOf } from "../skills/registry/grants.js";
 import {
   siteRoleAllows,
+  skillReviewAllows,
   teamRoleAllows,
   type SitePermission,
+  type SkillReviewAction,
   type TeamPermission,
 } from "./permissions.js";
 
@@ -107,6 +110,24 @@ export function requireTeamPermission(permission: TeamPermission) {
   return createMiddleware<{ Variables: TeamVariables }>(async (c, next) => {
     if (!teamRoleAllows(c.get("team").role, permission)) {
       return c.json({ code: "forbidden", message: "Your team role doesn't allow that." }, 403);
+    }
+    await next();
+  });
+}
+
+/**
+ * Requires a Skill Registry action (KOBE-331, SK22): Site admins and the Owner, or a Skill
+ * reviewer for the reviewer's actions. The grant is read on every request, so taking it works at
+ * once.
+ */
+export function requireSkillReview(deps: ServerDeps, action: SkillReviewAction) {
+  return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
+    const siteRole = c.get("siteRole");
+    const grants = siteRoleAllows(siteRole, "site.skills.review")
+      ? []
+      : await grantsOf(deps.database.db, c.get("user").id);
+    if (!skillReviewAllows({ siteRole, grants }, action)) {
+      return c.json({ code: "forbidden", message: "You don't have permission to do that." }, 403);
     }
     await next();
   });

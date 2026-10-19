@@ -1,7 +1,7 @@
 import { registrySettingsUpdateSchema } from "@kobe/protocol";
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
-import { requireSitePermission } from "../authz/middleware.js";
+import { requireSitePermission, requireSkillReview } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { readRegistrySettings, updateRegistrySettings } from "../skills/registry/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -16,6 +16,12 @@ export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   app.use("/settings", requireSitePermission("site.skills.catalog.manage"));
 
   app.get("/settings", async (c) => c.json(await readRegistrySettings(db)));
+
+  // Whether the Registry is ready (SK21), for everyone who sees the queue (KOBE-331).
+  app.get("/status", requireSkillReview(deps, "queue.read"), async (c) => {
+    const s = await readRegistrySettings(db);
+    return c.json({ ready: s.ready, registryTeam: s.registryTeam });
+  });
 
   app.put("/settings", async (c) => {
     const body = await parseBody(c, registrySettingsUpdateSchema);

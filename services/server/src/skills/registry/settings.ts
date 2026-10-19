@@ -11,6 +11,7 @@ import {
 } from "@kobe/protocol";
 import { eq, modelCatalog, siteSkillSettings, teams, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
+import { joinRegistryTeam, reviewerIds } from "./grants.js";
 
 /**
  * Registry settings (KOBE-330, SK20, SK21): the one `site_skill_settings` row, read with every
@@ -92,6 +93,20 @@ export type RegistryUpdateResult =
     };
 
 export async function updateRegistrySettings(
+  db: KobeDb,
+  update: RegistrySettingsUpdate,
+  userId: string,
+): Promise<RegistryUpdateResult> {
+  const result = await writeSettings(db, update, userId);
+  // Reviewers are the Registry team's members (SK21, KOBE-331): a newly named team gets them.
+  if (result.ok && update.registryTeamId) {
+    await joinRegistryTeam(db, update.registryTeamId, await reviewerIds(db));
+    return { ok: true, settings: await readRegistrySettings(db) };
+  }
+  return result;
+}
+
+function writeSettings(
   db: KobeDb,
   update: RegistrySettingsUpdate,
   userId: string,
