@@ -6,71 +6,73 @@
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-297 (`runs.skills_used`, `skill_refs` with semver), KOBE-275 (ratings and
   its minimum-raters rule), KOBE-336 (catalog cards), KOBE-338
-- **Migrations:** none
+- **Migrations (review M1):** 0166 `skill_usage_snapshots` (generated; site table, app role
+  SELECT/INSERT/DELETE, a startup seed); upgrade test
+  `packages/db/src/skill-usage-snapshots-upgrade.db.test.ts`
 
 ## What shipped
 
-- **Nightly snapshot** (`services/server/src/skills/usage-snapshot.ts`): for the last 30 finished
-  UTC days (ending at the start of the snapshot's UTC day), per catalog skill and team: the
-  install and the version it runs (`pickCatalogVersion`), a Default opt-out, and per version the
-  runs that read the skill (`skills_used`, catalog source, version from `skill_refs`), the members
-  whose runs did (thread owners) and the thumbs on those runs' answers rated in the window. Each
-  team read under its own RLS (`scanTeams`); the Registry team, test chats and eval threads left
-  out. Computed once per UTC day per replica (single flight), warmed by the server job
-  `skill-usage-snapshot` at start and at 00:05 UTC; reads only, kept in memory.
-- **The rule** (`skills/usage-views.ts`): a cross-team number shows only when at least 3 teams
-  **other than every team the viewer belongs to** contribute (and, for thumbs, at least 20 of
-  their ratings); otherwise "few", zero included (none can't be told from few). A per-version
-  column is withheld whole when any non-empty cell is "few". Own-team thumbs need 5 raters other
-  than the viewer (`FEEDBACK_MIN_RATERS`, as KOBE-275), per version only when every rated version
-  has them.
+- **Windows** (review M2): fixed, non-overlapping 30-day periods counted from the Unix epoch
+  (UTC). The current period always shows the **last closed** window; its numbers never change.
+- **Snapshot** (`services/server/src/skills/usage-snapshot.ts`): once a window closes, one
+  replica (session advisory lock on a dedicated connection, as the rescan's) computes, per
+  catalog skill and team: the install and the version it then ran, a Default opt-out, and per
+  version the window's runs that read the skill (`skills_used`, version from `skill_refs`), their
+  members (the thread's owner) and the thumbs on those runs' answers. Each team in its own
+  transaction under its RLS; the Registry team, test chats and eval threads left out. Stored once
+  in `skill_usage_snapshots` (`ON CONFLICT DO NOTHING`), windows older than the previous one
+  purged. Every replica serves the stored row (cached; while the newest isn't stored yet, the
+  newest stored window; with none, every number reads "few"). Job `skill-usage-snapshot`: at
+  start and hourly.
+- **The rule** (`skills/usage-views.ts`), with the viewer's teams read **at request time**
+  (review M3, `viewerTeamsOf`): a cross-team number shows only when at least 3 teams outside the
+  viewer's teams contribute, none of them more than 80% of what those teams give together
+  (review L2), and for thumbs at least 20 of their ratings; otherwise "few", zero included. A
+  per-version column carries an **other** cell (runs without a version, installs whose pin runs
+  nothing, unlisted versions; review L1) and is withheld whole when any non-empty cell is "few".
+- **Own team** (coordinator): runs and members show only with at least 3 members other than the
+  viewer; the version table is withheld whole when any version reads "few"; thumbs need 5 raters
+  other than the viewer (as KOBE-275).
 - **Members** (catalog): cards and detail carry `teamsInstalled`, `usage {members, thumbsUp}`
-  and the page/detail `usageWindow`; "Sort by teams installed" ranks by the shown values (the old
-  5-minute live `scanTeams` count is gone). No thumbs sort, no leaderboard.
-- **Team admins:** `GET /v1/team/skills/usage` (`team.skills.installs.manage`): per catalog skill
-  the team used or installed: runs, members, thumbs, and runs/members (and thumbs) per version.
-- **Maintainers and Site admins:** `GET /v1/skills/catalog/:skillId/usage` (active maintainers of
-  the skill, or `site.skills.catalog.manage`): totals (teams installed, members, runs, thumbs,
-  Default opt-outs) and per-version columns (teams running it, members, runs, thumbs).
-- Both usage routes take **no parameters** (400 on any query): fixed windows only.
+  and `usageWindow`; "Sort by teams installed" ranks by the shown values. No thumbs sort.
+- **Team admins:** `GET /v1/team/skills/usage` (`team.skills.installs.manage`).
+- **Maintainers and Site admins:** `GET /v1/skills/catalog/:skillId/usage` (active maintainers or
+  `site.skills.catalog.manage`; 404 for a skill without a published version, review L4): totals,
+  per-version columns, Default opt-outs.
+- **Site console** (review M4): the catalog table's Default opt-out count comes from the snapshot
+  under the rule (no live count); a **Usage** button opens the per-version panel.
+- Both usage routes take **no parameters** (400 on any query).
 - **Web:** cards ("12 teams", "40 members in 30 days", "95% thumbs up" or "Few …"); the detail's
-  **Usage** section with the window and, for maintainers and Site admins, the per-version panel
-  (`skill-usage-panel.tsx`, shown only on 200); the team console's **Catalog skill usage**
-  (`team-usage-section.tsx`); the Site console's catalog table gets **Usage** per skill.
+  **Usage** section; `skill-usage-panel.tsx` (shown only on 200; "Withheld", "Other or
+  unknown"); the team console's **Catalog skill usage** ("Few", "Withheld: too few members").
 
 ## Decisions
 
-- **No table:** the snapshot is deterministic for a UTC day (fixed window ending at midnight), so
-  it lives in memory per replica and needs no migration; every read on one day sees the same
-  numbers (tested: a run added after the first read changes nothing until tomorrow).
-- **"Other teams than the viewer's":** subtracting what a viewer knows of their own teams (they
-  may be in several) still leaves at least 3 teams mixed, for every role, Site admins included.
-- **Own-team runs and members are exact** for Team admins (SK26 gives them their own team's runs
-  and members; no member is named); only thumbs carry the 5-rater rule, as KOBE-275's. Question
-  below.
-- Members are distinct users across teams; a run's member is its thread's owner.
-- **Residual (accepted, as KOBE-275):** consecutive days' windows differ by one day at each end,
-  so comparing two days' numbers can narrow down that day's change; the 3-team and 20-rating
-  thresholds still apply to each number shown.
-- The Site console's existing live Default opt-out count (KOBE-314) is unchanged; the snapshot's
-  opt-out count is in the maintainers' and Site admins' usage view.
+- A run's member is its **thread's owner** (review L5): runs record no starter; in a shared
+  thread another member's run counts to the owner. Ratings count by their run's window.
+- Installs and opt-outs are as they stood when the window was computed (just after it closed).
+- **Residual (accepted):** a member who left a team during the window still knows its numbers,
+  but it no longer counts as theirs; teams are walls, and departed memberships aren't kept.
+- `catalog.db.test.ts` was missing `skill_promotion_requests`' break-glass clause (KOBE-333);
+  added.
 
 ## Open questions (for Chris or the coordinator)
 
-- Should own-team runs and members also need a minimum (say 5 members) for Team admins? A count
-  of 1 tells a Team admin that one member used the skill, not who.
+- none
 
 ## Evidence (acceptance criteria → test or command output)
 
 - **ac-1** `services/server/src/skills/usage-views.test.ts` (three other teams, none reads few,
-  thumbs on 20 other ratings from 3 teams, opt-outs); `skills/usage-snapshot.test.ts` (window,
-  00:05 UTC); DB `services/server/src/skill-usage-signals.db.test.ts` "members see…" (4 teams,
-  5 members, 95%; today's run, a 31-day-old run, the Registry team and a test chat not counted).
-- **ac-2** same DB file "no team names or ids": every usage answer of every role is searched
-  for the teams' names and other teams' ids.
-- **ac-3** same DB file: members (cards, detail), a viewer in two teams sees few, Team admins
-  (team 1: thumbs not enough; team 3: 5 raters → 7 up), maintainers and Site admins per version,
-  members and outsiders 403. Web `apps/web/components/skills/skill-usage.test.tsx`,
-  `components/admin/skill-tags-page.test.tsx`.
-- **ac-4** DB: `?window=`, `?from=` refused (400); per-version columns withheld when 2.0.0 runs in
-  one team; the same answer after new use within the day. Unit: withheld columns.
+  thumbs on 20 other ratings, dominance, opt-outs, own-team minimum and withheld versions);
+  `skills/usage-snapshot.test.ts` (epoch windows never overlap, payload round trip); DB
+  `services/server/src/skill-usage-signals.db.test.ts`: two concurrent `ensureUsageSnapshot`
+  store once; runs of the open period, before the window, the Registry team and a test chat not
+  counted.
+- **ac-2** same DB file: every usage answer of every role is searched for team names and other
+  teams' ids.
+- **ac-3** same DB file: members (cards, detail), a viewer in two teams sees few, joining a team
+  now makes it few, Team admins (team 1 few and withheld, team 3 shown), maintainers and Site
+  admins per version with the other cell, outsiders 403. Web
+  `apps/web/components/skills/skill-usage.test.tsx`, `components/admin/skill-tags-page.test.tsx`.
+- **ac-4** DB: `?window=`, `?from=` refused; a closed window answers the same after new use, a
+  restart and another replica's check (one stored row). Unit: withheld columns, other cell.
