@@ -57,7 +57,12 @@ export function useMyTeams(activate: boolean): MyTeamsState {
         if (!cancelled) setMy({ ...teams, activeTeamId: pick });
         // Views that asked for the active team before this one existed ask again.
         window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
-      } else if (!cancelled) setMy(teams);
+      } else if (!cancelled) {
+        // Already active (activated by an earlier load, or another tab): remember it all the same,
+        // so the last team is the one in use even when that load ended before it was stored.
+        if (activate && teams.activeTeamId !== null) remember(teams.activeTeamId);
+        setMy(teams);
+      }
     })().catch((e: unknown) => {
       if (!cancelled) setError(e instanceof Error ? e.message : "Could not load your teams.");
     });

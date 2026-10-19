@@ -163,6 +163,14 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     expect(localStorage.getItem(LAST_TEAM_KEY)).toBe("t-2");
   });
 
+  it("remembers the session's active team on load, though it was active already", async () => {
+    expect(localStorage.getItem(LAST_TEAM_KEY)).toBeNull();
+    openApp(fake);
+    await composer();
+    await waitFor(() => expect(localStorage.getItem(LAST_TEAM_KEY)).toBe(fake.teamId), WAIT);
+    expect(fake.requests.some((r) => r.path === "/v1/me/teams/active")).toBe(false);
+  });
+
   it("a member in one team sees the name without a menu", async () => {
     openApp(fake);
     await composer();
