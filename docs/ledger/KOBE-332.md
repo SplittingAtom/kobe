@@ -40,6 +40,12 @@
   (SK25) is a later ticket and gets the same panel.
 - A deprecated skill whose maintainer leaves stays deprecated (only `active` becomes Unmaintained).
 
+## Review fixes (review-c2.md)
+
+- C3-M1 (coordinator): an Unmaintained skill (maintainer rows, none active) refuses every former
+  maintainer with `unmaintained` until a Site admin reassigns it; the pre-approval branch needs no
+  maintainer rows at all (`skill-maintainers.db.test.ts`). C3-M2 (freeing names) is KOBE-334's.
+
 ## Open questions (for Chris or the coordinator)
 
 - none
