@@ -10,6 +10,7 @@ import type { EgressWiring } from "../egress/egress-wiring.js";
 import type { ModelWiring } from "../models/types.js";
 import type { McpWiring } from "../mcp/pi-mcp-config.js";
 import type { PiIdentities } from "../pi/identities.js";
+import type { SkillEvalHooks } from "../skill-eval/hooks.js";
 import type { SkillStore } from "../skills/store.js";
 import type { ExecWiring } from "../threads/exec-wiring.js";
 
@@ -71,6 +72,8 @@ export interface HarnessOptions {
   readonly tmpRoot?: string;
   /** The tool executor (KOBE-167); absent = Pi runs its own tools, as before. */
   readonly exec?: { readonly extension: string; readonly wiring: ExecWiring };
+  /** Skill eval hooks (KOBE-325); absent = no `skill_eval` capability. */
+  readonly skillEval?: (workspaceDir: string) => SkillEvalHooks;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -128,6 +131,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.toolsExtension === undefined ? {} : { toolsExtension: options.toolsExtension }),
     ...(options.skills === undefined ? {} : { skills: options.skills }),
     ...(options.exec === undefined ? {} : { exec: options.exec }),
+    ...(options.skillEval === undefined ? {} : { skillEval: options.skillEval(workspace) }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}

@@ -165,6 +165,9 @@ export const WIRE_DEFAULTS: WireTuning = {
     "pi.command": 60_000,
     // KOBE-213: Pi's compact is a slow command (10 min in the agent), plus waking the sandbox.
     "thread.compact": 720_000,
+    // KOBE-325: a case's fixtures (≤ 20 files) in; the after-snapshot (≤ 10 walks) out.
+    "eval.prepare": 120_000,
+    "eval.snapshot": 120_000,
   } satisfies Record<SandboxCommandKind, number>,
 };
 

@@ -145,6 +145,29 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  evalPrepare(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalPrepare"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.prepare", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      files: request.files.map((f) => ({ path: f.path, sha256: f.sha256, size: f.size })),
+    });
+  }
+
+  evalSnapshot(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["evalSnapshot"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "eval.snapshot", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      roots: [...request.roots],
+      hash_paths: [...request.hashPaths],
+    });
+  }
+
   compactThread(
     target: SandboxTarget,
     request: Parameters<SandboxRouter["compactThread"]>[1],

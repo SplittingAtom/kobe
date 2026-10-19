@@ -9,6 +9,7 @@ import {
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
+  CAPABILITY_SKILL_EVAL,
   CAPABILITY_THREAD_COMPACT,
   serverToSandboxFrameSchema,
   threadCompactFrameSchema,
@@ -400,6 +401,18 @@ export class CommandDelivery {
     const frame = this.#frameFor(row, commandId);
     if (!frame) {
       await this.#fail(row, failure("invalid_command", "the stored command is not a valid frame"));
+      return;
+    }
+    // Skill eval commands (KOBE-325) only to a skill eval's own sandbox whose agent knows them.
+    if (
+      (row.kind === "eval.prepare" || row.kind === "eval.snapshot") &&
+      (this.#host.target.evalThreadId !== row.threadId ||
+        !this.#host.hasCapability(CAPABILITY_SKILL_EVAL))
+    ) {
+      await this.#fail(
+        row,
+        failure("skill_eval_unsupported", "this sandbox can't take skill eval commands"),
+      );
       return;
     }
     // A stop still reaches a run the server already ended (Stop, budget, failed start): ending

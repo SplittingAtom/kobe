@@ -175,6 +175,27 @@ export interface SandboxRouter {
     request: PiCommandRequest,
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * KOBE-325, to a skill eval's own sandbox only (an eval thread): copy the case's fixtures in
+   * (`eval.prepare`), or take the after-snapshot (`eval.snapshot`; `data` untrusted: validate it).
+   */
+  evalPrepare(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly files: readonly { path: string; sha256: string; size: number }[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  evalSnapshot(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly roots: readonly string[];
+      readonly hashPaths: readonly string[];
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
   /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */
   compactThread(
     target: SandboxTarget,
