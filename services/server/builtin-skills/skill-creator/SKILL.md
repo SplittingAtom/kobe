@@ -66,6 +66,27 @@ Also test triggering: write five prompts that should use the skill and five near
 not, and judge from the description alone whether each would trigger. Tighten the wording when a
 near miss would trigger or a real request would not.
 
+Then propose the skill's eval suite for the Workbench: `/workspace/skills/NAME/evals/cases.yaml`
+(Kobe runs it, with and without the skill, and scores lift and trigger precision and recall).
+Turn the trigger prompts into cases: each real request into a positive case (`triggers: true`,
+plus `contains`, `outputs` or a `judge` rubric when the result can be checked), and **always at
+least one near miss into a negative case** (`triggers: false`), so precision can be measured:
+
+```yaml
+cases:
+  - id: monthly-report
+    prompt: "Build the March sales report from sales.csv"
+    files: [fixtures/sales.csv]
+    expect: {triggers: true, outputs: ["outputs/*.xlsx"]}
+  - id: near-miss-chart
+    prompt: "What does this chart show?"
+    expect: {triggers: false}
+```
+
+Case ids are lowercase letters, digits and hyphens; fixtures live under `evals/fixtures/`. The
+`evals/` folder is never part of what the agent loads. Show the user the cases and let them edit
+before saving.
+
 ## 4. Improve and repeat
 
 Change the skill based on the feedback, then rerun the tests into `eval-<id>-v2/` and compare.
