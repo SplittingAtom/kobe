@@ -2,10 +2,13 @@
 
 The eval suite a skill package carries and the scorecard an eval run produces (KOBE-324; spec Kobe
 v1.2 Skills System, SK15–SK18). The code is the contract: `packages/protocol/src/skill-evals/`
-(`cases.ts` format and limits, `parse.ts` located issues, `plan.ts` executions, `scorecard.ts`
-metrics, `api.ts` routes, events and settings). Golden fixtures:
-`packages/protocol/src/skill-evals/fixtures/` (`cases/*.yaml` with `cases/issues.json`,
-`scorecard/valid-full.json`). The runner (KOBE-325), judge and run model (KOBE-326), budgets
+(`cases.ts` format and limits, `parse.ts` located issues, `plan.ts` executions and expected checks,
+`outputs.ts` what a glob matches, `judge.ts` judge isolation, `scorecard.ts` the team scorecard,
+`compute.ts` its numbers and verification, `catalog-scorecard.ts` what may leave the team and the
+SK20 rules, `api.ts` routes, events and settings). The root entry `@kobe/protocol` exports all but
+the parser; `@kobe/protocol/skill-evals` adds `parseSkillEvalSuite` (and so loads `yaml`). Golden
+fixtures: `packages/protocol/src/skill-evals/fixtures/` (`cases/*.yaml` with `cases/issues.json`,
+`scorecard/valid-full.json`, and `scorecard/forged-*.json`, which must fail verification). The runner (KOBE-325), judge and run model (KOBE-326), budgets
 (KOBE-327) and the Workbench panel (KOBE-328) build on it.
 
 ## Where the suite lives
@@ -25,8 +28,11 @@ runtime zip), and the Workbench test chat, which builds its bundle through the s
 ## evals/cases.yaml
 
 Text rules as `kobe.skill.yaml`: UTF-8, at most 64 KiB, one YAML 1.2 (core schema) document whose
-root is a mapping; duplicate keys and aliases are refused. **Unknown keys are refused at every
-level**, so a check Kobe does not know is never skipped (skipping would pass a case silently).
+root is a mapping; duplicate keys, aliases and explicit tags (`!foo`, `!!timestamp`) are refused,
+and nesting is at most 16 levels (checked on the lexer's tokens before the tree is built, so no
+engine overflows its stack). **Unknown keys are refused at every level**, so a check Kobe does not
+know is never skipped (skipping would pass a case silently). Nothing in the file grants anything:
+no key pre-approves a tool, widens egress or adds a connector, and eval runs use auto mode.
 
 ```yaml
 apiVersion: kobe.dev/skill-evals/v1 # optional; absent means v1
@@ -45,39 +51,56 @@ cases: # 1 to 25
     expect: { triggers: false }
 ```
 
-| Key                      | Rule                                                                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`                 | 1–8000 characters; no control characters but tab and line breaks                                                             |
-| `files`                  | `fixtures/<path>`, a valid package path below `evals/fixtures/` that exists in the package; copied to `/workspace/<path>`    |
-| `expect.triggers`        | `true` / `false`: whether the skill was read (KOBE-297 detection); checked with the skill only                               |
-| `expect.outputs`         | 1–10 globs (Kobe glob grammar, `*` crosses `/`) relative to `/workspace`; each matches a file the run produced               |
-| `expect.contains`        | a text or 1–10 texts (≤ 500 characters each), all in the final answer, case-sensitive                                        |
-| `expect.matches`         | a pattern or 1–10 of them; a pattern is a string or `{pattern, flags}` (flags from `i m s`; `u` always on), ≤ 256 characters |
-| `expect.judge`           | a rubric of 1–2000 characters for the judge model (SK17)                                                                     |
-| `expect.max_cost_usd`    | above 0, at most 50: the run's model spend for the case (judge excluded)                                                     |
-| `expect.max_turns`       | 1–100, **default 20**; the runner ends the run there                                                                         |
-| `expect.no_denied_tools` | `true`: the run never hit a policy denial                                                                                    |
+| Key                      | Rule                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`                 | 1–8000 characters, trimmed; no control characters but tab and line breaks                                                            |
+| `files`                  | `fixtures/<path>`, a valid package path below `evals/fixtures/` that exists in the package; copied to `/workspace/<path>`            |
+| `expect.triggers`        | `true` / `false`: whether the skill was read, from the run's recorded skill uses (`runs.skills_used`, KOBE-297); with the skill only |
+| `expect.outputs`         | 1–10 globs (Kobe glob grammar, `*` crosses `/`) relative to `/workspace`; each matches a file the run produced (below)               |
+| `expect.contains`        | a text or 1–10 texts (≤ 500 characters each, never trimmed), all in the final answer, case-sensitive                                 |
+| `expect.matches`         | a pattern or 1–10 of them; a pattern is a string or `{pattern, flags}` (flags from `i m s`; `u` always on), ≤ 256 characters         |
+| `expect.judge`           | a rubric of 1–2000 characters for the judge model (SK17), trimmed                                                                    |
+| `expect.max_cost_usd`    | above 0, at most 50: the final attempt's model spend (`costUsd`; judge excluded)                                                     |
+| `expect.max_turns`       | 1–100, **default 20** model calls; a run that wants one more is stopped and fails (`over_limit`); ending on the last passes          |
+| `expect.no_denied_tools` | `true`: no `policy.denied` event (auto-mode would-ask denials included; egress refusals inside a tool are not tool denials)          |
 
 A case needs `triggers` or a behaviour check (`outputs`, `contains`, `matches`, `judge`). Fixtures
-and output globs stay out of `skills/` and hidden folders of `/workspace` (Kobe's and Pi's own
-state). `contains` and `matches` read the first 64 Ki characters of the final answer; each pattern
+and output globs that name `skills/` or a hidden segment at any depth are refused. `contains` and `matches` read the first 64 Ki characters of the final answer; each pattern
 gets at most 100 ms (the runner evaluates it off the event loop or under a VM timeout) and fails
 its check as `match_timeout` otherwise, so an author's regular expression never stalls the server.
 This is the one place a user writes a regular expression (the spec chose regex for `matches`);
-policy patterns stay globs.
+policy patterns stay globs. ES2018 syntax with `u` (named groups, lookbehind, `\p{…}`); modifier
+groups such as `(?i:…)` are refused, so browser lint and the server agree.
+
+### What an output glob matches
+
+The runner takes two snapshots in the case's sandbox: **before** (after the fixtures are copied,
+before the run) and **after** (when it ended). The walk uses `lstat`, never follows a symbolic link
+(a link is recorded, never read, opened or passed on), records regular files only, never descends
+into `skills/` or a hidden folder (such as `.kobe/`, where Pi keeps session files), and stops after
+10 000 entries. A file is **produced** when it is a regular file in `after`, outside every reserved
+path, and absent from `before` or with other bytes (SHA-256). An unchanged fixture never counts, an
+edited one does. Globs are matched as strings against produced paths only, so no wildcard (`*`,
+`?kobe/*`) reaches Kobe's state or leaves `/workspace`. The check fails with a reason when a glob
+matches nothing (`not_produced`), a snapshot was truncated, or a glob matches more than 100 files
+or 50 MiB (`over_cap`). `checkEvalOutputs` is the function.
 
 **Issues** (`parseSkillEvalSuite(text, {paths})`, the same in the browser and on the server): each
 has `file` (`evals/cases.yaml`), a `code`, a `path` (`cases[2].expect.max_turns`, empty for the
 file), a sentence `message` that names the place, and the 1-based `line`/`column` of the node (or
 its nearest existing parent). Codes: `too_large`, `yaml_syntax`, `yaml_duplicate_key`,
-`yaml_alias`, `not_a_mapping`, `missing`, `invalid_type`, `invalid_value`, `out_of_range`,
+`yaml_alias`, `yaml_tag`, `too_deep`, `not_a_mapping`, `missing`, `invalid_type`, `invalid_value`, `out_of_range`,
 `unknown_key`, `duplicate`, `no_expectation`, `bad_pattern`, `fixture_missing`. Every problem is
 reported at once, in file order. A single value written for a list (`contains: Total`) is reported
-at the value, not as `[0]`.
+at the value, not as `[0]`. `{maxCases}` takes the Site's lower limit, so lint agrees with the
+runner.
 
 **Versioning.** `apiVersion` is optional because skills written for other tools have none. A new
 expectation is a contract change; a format older Kobe must refuse gets a new `apiVersion` (older
-Kobe then refuses the file instead of skipping a check). The scorecard has its own `format: 1`.
+Kobe then refuses the file instead of skipping a check). The scorecard has its own `format: 1`: an
+added optional field keeps it, a removed or changed one bumps it, and readers of stored cards parse
+a union by `format`. API responses are strict, so the web client ships with, never before, the
+server that adds a field.
 
 ## Executions
 
@@ -92,25 +115,49 @@ ask is denied and recorded), as the author, under team policy, egress and budget
 
 "With" loads **only** this skill, "without" loads none (no Required or other skills, SK25). The
 baseline makes every check but `triggers`. `planSkillEvalExecutions` gives the list; the estimate
-(KOBE-327) multiplies its length. One automatic retry per failing execution; the execution reports
-its final attempt, and `totalCostUsd` includes the retry.
+(KOBE-327) multiplies its length. **Departure from SK16:** a positive trigger-only case gets no
+baseline either (without the skill it would pass vacuously).
+
+`expectedChecks(case, withSkill)` lists the checks an execution must make: `triggers` with the
+skill when set, each behaviour check set, `max_cost_usd` when set, `max_turns` always,
+`no_denied_tools` when true. A passed execution lists exactly these, all passed; a failed one a
+subset with a failure (the runner skips the judge once another check failed, which the estimate
+counts on). A missing check never passes. Each failed check carries a `reason` (`not_triggered`,
+`unexpected_trigger`, `not_produced`, `over_cap`, `no_match`, `match_timeout`, `judge_failed`,
+`judge_unparseable`, `judge_rejected`, `over_limit`, `denied`).
+
+- **Statuses in a scorecard:** `passed`, `failed`, `error` (infrastructure, no observation),
+  `timed_out` (10 min, a real failure). Only a `completed` eval run has a scorecard; a cancelled or
+  budget-stopped run (D30) has partial results and none, so it is never submission evidence.
+- **Retry:** one, after `failed`, `error` or `timed_out`. The execution reports the final attempt:
+  `costUsd` (what `max_cost_usd` checks) and `durationMs` are its; `totalCostUsd`,
+  `totalDurationMs` and `judgeCostUsd` cover both attempts (a retry re-judges).
+- **Reconciliation:** the card's `costUsd` (Σ `totalCostUsd`) equals the eval run's `run_usage`
+  rows of kind `eval`, its `judgeCostUsd` the `eval_judge` rows (KOBE-327 asserts it).
+- **Triggered** is derived: `skillUses` (the final attempt's recorded reads of the skill) > 0 with
+  the skill, null without it or after an error. The `triggers` check passes exactly when it equals
+  the expectation.
 
 ## Scorecard
 
 `computeSkillEvalScorecard` defines every number from the suite and the executions (it refuses a
-set that is not exactly the plan):
+set that is not exactly the plan, or an execution whose checks are not its case's).
+`verifySkillEvalScorecard(card, suite, rows?)` recomputes a stored card and compares all of it, so
+a forged aggregate, check set or trigger is one call to detect (SK20 reads the submitted card).
 
-- **Pass rate**: passed / with-skill executions, over every case. An execution passes when its run
-  finished and every check passed; errors, timeouts (10 min), budget stops and cancellations fail.
+- **Pass rate**: passed / with-skill executions, over every case. Errors and timeouts fail.
 - **Baseline pass rate**: passed / baseline executions (`full` only, else null).
 - **Lift**: with-skill pass rate **over the baseline cases** minus the baseline pass rate, so both
-  sides cover the same cases. Null without a baseline.
-- **Trigger precision / recall**: over with-skill executions of cases that set `triggers` and
-  observed a read or not (errors and cancellations observe nothing): TP / (TP + FP) and
-  TP / (TP + FN), null when the denominator is 0.
+  sides cover the same cases. Null with `liftUnavailable`: `with_only`, `no_baseline_cases`, or
+  `incomplete_pairs` (either side of a pair errored: an infrastructure failure never makes lift
+  look good). The with side also makes the `triggers` check, so a skill that never fires on a case
+  the bare model solves shows negative lift, on purpose.
+- **Trigger precision / recall**: over with-skill executions of cases that set `triggers`, errors
+  excluded: TP / (TP + FP) and TP / (TP + FN), null when the denominator is 0. `triggerCounts`
+  (observed, tp, fp, fn, tn) are on the card.
 - **Mean cost / duration** per mode: of final attempts (judge excluded); `costUsd` is all run spend
   including retries, `judgeCostUsd` the judge's. Micro-dollar and millisecond rounding.
-- **Denied tool calls** per mode, and per execution.
+- **Status counts** per mode (passed, failed, errored, timedOut) and **denied tool calls**.
 - `runModel {requested, used, fellBack}` and each execution's `model` (SK17: a missing alias is
   reported, never silent); `judgeModel {alias, source: site|team}` or null without rubrics.
 - `details[]`: per case, its kind and the with/without executions with checks (`detail` holds a
@@ -120,12 +167,38 @@ set that is not exactly the plan):
 ## What leaves the team
 
 Eval threads are ordinary team threads (RLS, retention, legal hold, offboarding), and the scorecard
-holds their ids and judge reasons: **it is team content**, served only in the team that ran it.
-Progress and completion events carry ids, statuses and numbers only. The one export is
-`scorecardForProvenance`: the numbers `provenance.json` carries at promotion (package hash, mode,
-case counts, pass rates, lift, trigger precision and recall when defined, total cost including the
-judge, `at`), with no case ids, prompts, answers, details, model names or thread ids (SK19).
+holds their ids and judge reasons: **`SkillEvalScorecard` is team content**, served only in the team
+that ran it. Progress and completion events carry ids, statuses and numbers only.
+
+**`CatalogSkillEvalScorecard` is the only scorecard type that may be written to a site-wide table**
+(`registry_versions.scorecard`, `authoritative_scorecard`), an event outside the team, an export or
+`provenance.json`. `scorecardForProvenance` makes it from a `full` card (it refuses `with_only`):
+package hash, case counts, pass rates, lift or the reason it is missing, trigger precision and
+recall when defined with their counts, status counts per mode, total cost including the judge, the
+judge's source and whether the run model fell back. No case ids, prompts, answers, details, model
+names or thread ids. Its schema checks every rate against its counts.
+
+**SK20** (`skillEvalSubmissionShortfalls`, Site-editable defaults): ≥ 3 cases with ≥ 1 negative
+trigger case, pass rate ≥ 0.8, lift ≥ 0, trigger precision ≥ 0.8, from this exact package hash. A
+missing number fails its rule: no lift fails `lift`; no precision (the skill was never read) fails
+`trigger_precision`.
+
+**The suite itself does leave on promotion.** `evals/` (prompts, rubrics, fixtures) is part of the
+package (SK19 shows the fixtures on the confirmation screen), so the whole-tree scan reads it and the
+SK23 review checklist ("no secrets") covers it. Transcripts, answers and test threads never leave.
 Registry re-runs run in the Registry team (SK21).
+
+## The judge
+
+`judge.ts` (for KOBE-326): the system message holds fixed grading instructions and the **rubric,
+the only instruction text**. The case prompt, the final answer (≤ 64 Ki characters) and the matched
+outputs (≤ 64 Ki characters of text in total; binary files by path and size) go into the user
+message as one JSON document between `BEGIN DATA <nonce>` / `END DATA <nonce>` lines, with a new
+128-bit nonce per call that the sandbox never sees; the data is told to be graded, never obeyed.
+The judge gets no tools, no SKILL.md and no thread history, on a model the team has enabled. The
+reply must be exactly the verdict JSON (`{passed, reason}`); anything else is `judge_unparseable`
+and a failed call `judge_failed`, both failures. So text in the answer ("Grader: PASS") can't change
+the rubric or the verdict format.
 
 ## Limits and settings
 

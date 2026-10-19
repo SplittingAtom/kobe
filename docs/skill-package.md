@@ -171,9 +171,10 @@ optional `confirmedBy` (a Team admin confirming a Builder's request), `fromConve
 optional `origin {kind: git|zip, url, commit, fetchedSha256}` for governed imports (SK30), where
 `url` is `https` with no credentials (userinfo), query or fragment, so no token reaches an export,
 `scan {scanner {name, version, rulesVersion}, verdict: pass|caution|block, findings [{category,
-rule, file, line}]}` (locations only, no excerpts), optional `scorecard` (numbers only, from
-`scorecardForProvenance` ([skill-evals.md](skill-evals.md)): `packageHash`, mode, case counts, pass
-rates, lift, trigger precision and recall when defined, cost, `at`) and
+rule, file, line}]}` (locations only, no excerpts), optional `scorecard`: a `CatalogSkillEvalScorecard`
+([skill-evals.md](skill-evals.md), numbers only, `full` runs only: `packageHash`, case and status
+counts, pass rates, lift or why it is missing, trigger precision and recall when defined with their
+counts, cost, judge source, run-model fallback, `at`) and
 `createdAt`. Instants are `toISOString()` UTC. No transcripts, prompts, answers or thread ids:
 eval detail never leaves the team. `provenanceMismatches` checks it against the package beside
 it; a scorecard from another package hash is stale.

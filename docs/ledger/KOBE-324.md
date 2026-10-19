@@ -7,15 +7,18 @@
 - **Branch:** `group-skills-b` in `../Kobe-skB`; 320–323 reviewed, 324 is the contract (stop for
   review before 325). Earlier handoffs: `KOBE-320.md` … `KOBE-323.md` (323 lists what 325 reuses:
   `prepareDraftTest`, `draftSkillForRun`, `withDraftTests`/`onlySkill`).
-- **Contract:** `packages/protocol/src/skill-evals/` + [docs/skill-evals.md](../skill-evals.md).
-  325 should use: `parseSkillEvalSuite(text, {paths})` (refuse a run with issues),
-  `planSkillEvalExecutions(suite, mode)` (one sandbox per entry), `fixtureWorkspacePath`,
-  `skillEvalExecutionSchema` (one row per execution), `computeSkillEvalScorecard` (never compute
-  numbers elsewhere), `skillEvalRunSchema`/progress/completed payloads, `skillEvalLimitsSchema`,
-  `EVAL_MATCH_TIMEOUT_MS` and `EVAL_ANSWER_CHECK_MAX_CHARS` (run `matches` under a VM timeout or in
-  a worker). 326: `skillEvalJudgeVerdictSchema`, `runModel.fellBack`, `judgeModel.source`. 327:
-  `SKILL_EVAL_USAGE_KINDS`, `skillEvalEstimateSchema`, `teamEvalCapSchema`. 328: issues carry
-  line/column for lint; `scorecardForProvenance` is the only export path.
+- **Contract:** `packages/protocol/src/skill-evals/` + [docs/skill-evals.md](../skill-evals.md),
+  revised after review-324 (B1, B2, S1–S8, nits). 325 should use: `parseSkillEvalSuite(text,
+{paths, maxCases})` from `@kobe/protocol/skill-evals` (refuse a run with issues),
+  `planSkillEvalExecutions`, `expectedChecks`, `fixtureWorkspacePath`, the snapshot types and
+  `checkEvalOutputs` (the sandbox side walks with lstat, never following links), `skillUses` from
+  `runs.skills_used`, `skillEvalExecutionSchema` (one row per execution),
+  `computeSkillEvalScorecard` / `verifySkillEvalScorecard` (never compute numbers elsewhere),
+  `skillEvalRunSchema` and the payloads, `skillEvalLimitsSchema`, `EVAL_MATCH_TIMEOUT_MS`. 326:
+  `skillEvalJudgeMessages`, `parseSkillEvalJudgeVerdict`, `runModel.fellBack`, `judgeModel.source`.
+  327: `SKILL_EVAL_USAGE_KINDS`, the cost reconciliation rule, `skillEvalEstimateSchema`,
+  `teamEvalCapSchema`. 328: issues carry line/column; Phase C: `CatalogSkillEvalScorecard` is the
+  only type for site-wide storage, `skillEvalSubmissionShortfalls` for SK20.
 - **For 325:** add a test that `EVAL_MODEL_ALIAS_PATTERN` equals `@kobe/db` `MODEL_ALIAS_PATTERN`
   (protocol can't import db). Decide the event transport (run SSE or team stream; the doc says
   325 picks it). Startup seeds / jobs (e.g. a stale-eval-sandbox sweep) must be written to slot
@@ -40,34 +43,62 @@
   team cap, judge verdict, usage kinds.
 - `docs/skill-evals.md`; links from `docs/skill-package.md` and the protocol README.
 
+## Review-324 fixes (`review-324.md`)
+
+- **B1:** outputs match only produced files: regular files in the after-snapshot outside
+  `skills/` and hidden segments (any depth), absent from the before-snapshot or with other bytes.
+  Links are never followed or read. Caps: 10 000 entries walked, 100 files / 50 MiB per glob,
+  over-cap fails `over_cap`. Literal reserved globs are lint errors.
+- **B2:** `expectedChecks`; compute refuses check sets that aren't the case's, and a `triggers`
+  check that contradicts `triggered`; `triggered` is derived from `skillUses`
+  (`runs.skills_used`); `verifySkillEvalScorecard`; `completedAt ≥ startedAt`; 10 forged fixtures.
+- **S1:** status counts per mode; a pair with an errored side makes lift null
+  (`liftUnavailable: incomplete_pairs`); scorecards hold only passed/failed/error/timed_out
+  (cancelled and budget-stopped runs have none). Lift asymmetry documented.
+- **S2/S3:** `CatalogSkillEvalScorecard` (full only, rates checked against counts, `triggerCounts`,
+  status counts, `judge.source`, `runModelFellBack`) replaces provenance's scorecard block;
+  `skillEvalSubmissionShortfalls` (missing lift or precision fails its rule).
+- **S4:** `judge.ts`: rubric-only system message, nonce-delimited JSON data, caps, strict verdict.
+- **S5:** explicit tags refused (`yaml_tag`), nesting ≤ 16 (`too_deep`, lexer pre-scan + tree);
+  the parser moved to the `@kobe/protocol/skill-evals` subpath (root entry has no `yaml`).
+- **S6/S7:** cost, duration, judge cost and `max_cost_usd` pinned; cost reconciles with
+  `run_usage`; run schema ties scorecard to status, package, mode and progress; with_only never
+  exported.
+- **Nits:** `casesExpectingTrigger` vs kind count; `maxCases` lint option; `contains` untrimmed;
+  modifier groups refused; check `reason` enum; turns and denials defined; format rule; "nothing
+  grants anything".
+
 ## Decisions
 
 - **Baseline only for behaviour cases.** Trigger-only cases (positive or negative) run with the
   skill only: without it the trigger check can't be made and the case would pass vacuously.
 - **Lift over the same cases:** with-skill pass rate over the baseline cases minus the baseline
   pass rate (the headline pass rate covers all cases). Documented in the doc and code.
-- **Errors count as failed** for pass rates, but executions with no observation (error,
-  cancelled) are left out of trigger precision/recall; null when a denominator is 0.
+- **Errors count as failed** for pass rates, but errored executions are left out of trigger
+  precision/recall (null when a denominator is 0) and make lift unavailable.
 - **Outputs relative to `/workspace`**, not only `/workspace/outputs/`: the spec's
   `outputs/*.xlsx` works as written, and the Workbench templates (KOBE-322) write `/workspace/out/`.
-  `skills/` and hidden folders are refused for outputs and fixtures.
+  Safe because only produced files outside reserved paths are matched (B1).
 - **Regex for `matches`** (spec SK15) while policy stays glob-only: ≤ 256 characters, compiled with
   `u`, flags `i m s`, evaluated by the runner with a 100 ms limit on the first 64 Ki characters.
 - **Retries:** an execution reports its final attempt; `totalCostUsd` includes the retry.
 - **`yaml` moved to `@kobe/protocol` dependencies** so lint and the runner share one parser with
-  positions. Already shipped by server, web and the sandbox image; ISC; licences regenerated (the
-  row now lists every image that bundles protocol), `license:check` green.
+  positions; only the `@kobe/protocol/skill-evals` subpath loads it. ISC, already shipped by server,
+  web and the sandbox image; licences regenerated, `license:check` green.
+- **Limits** (coordinator): 25 cases and 10 minutes are ceilings a Site may lower, never raise.
 
 ## Departures
 
-- `provenance.json` `scorecard.triggerPrecision` / `triggerRecall` became optional (were
-  required): a suite may have nothing to measure them on. A loosening; old documents stay valid.
+- `provenance.json` `scorecard` is now `CatalogSkillEvalScorecard` (precision/recall optional with
+  counts, status counts, lift reason, judge source, run-model fallback, `mode: full` only). Nothing
+  writes provenance yet (Phase C); fixtures updated.
+- SK16 runs every case but negative ones both ways; trigger-only positive cases get no baseline
+  either (it would pass vacuously).
 - `.prettierignore` lists the one deliberately invalid YAML fixture.
 
 ## Open questions (for review)
 
 - Event transport for `skill.eval.*` (left to 325).
-- Should a Site be able to raise the 25-case / 10-minute limits? The contract makes them ceilings.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -80,5 +111,8 @@
 - **ac-3** `api.test.ts` "the runtime bundle never carries evals/" (zip entries, runtime hash
   invariant under suite edits); server `skills/bundle-package.test.ts`,
   `skill-package-upload.db.test.ts` ("an evals-only change … same runtime hash").
-- `@kobe/protocol`: test 868 passed, typecheck, lint, build; server and web typecheck;
+- Review fixes: `outputs.test.ts`, `judge.test.ts`, `scorecard.test.ts` (forged fixtures,
+  errored baseline, SK20), `cases.test.ts` (tags, depth, `__proto__`, reserved globs, maxCases),
+  `api.test.ts` (run ↔ scorecard).
+- `@kobe/protocol`: test 900 passed, typecheck, lint, build; server and web typecheck;
   `license:check`, site wording, public hygiene ok.
