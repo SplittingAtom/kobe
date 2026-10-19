@@ -1,2 +1,0 @@
-ALTER TABLE "thread_app_results" ADD COLUMN "input" jsonb;--> statement-breakpoint
-ALTER TABLE "thread_app_results" ADD CONSTRAINT "thread_app_results_input_size" CHECK ("thread_app_results"."input" IS NULL OR octet_length("thread_app_results"."input"::text) <= 65536);
