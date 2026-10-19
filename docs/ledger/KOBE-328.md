@@ -65,6 +65,11 @@
   words (`lib/skills/eval-format.ts`, shared); L5 as above; L6 `aria-pressed` and a named Show; a
   vanished pick falls back; L7 the stream.
 
+- **Re-review L9–L11:** a stream that errors is reopened after 1 s, 2 s, 4 s (any event resets
+  the backoff) before polling takes over; when polling gives up after 5 failed reads the panel,
+  the version history and the eval page say "Progress isn't updating…"; hook tests cover the
+  backoff, the fallback, the stall and cleanup on unmount and on a change of open evals.
+
 ## Open questions (for the reviewer / coordinator)
 
 - Personal skills have no version view to put their eval history on; add one?

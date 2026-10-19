@@ -10,7 +10,7 @@ import { evalHref } from "../../lib/skills/eval-href";
 import { RUN_STATUS_TEXT, isOpen, liftText, pct } from "../../lib/skills/eval-format";
 import { listDraftEvals, subjectLabel, type SkillEvalRun } from "../../lib/skills/evals-api";
 import { SKILL_MD, splitSkillMd } from "../../lib/skills/skill-md";
-import { useLiveEval } from "../../lib/skills/use-live-eval";
+import { STALLED_MESSAGE, useLiveEval } from "../../lib/skills/use-live-eval";
 import {
   Button,
   Notice,
@@ -72,7 +72,7 @@ export function EvalsPanel({
   }, [reload]);
 
   const openIds = (runs ?? []).filter((r) => isOpen(r.status)).map((r) => r.id);
-  useLiveEval(openIds, reload, eventSource);
+  const { stalled } = useLiveEval(openIds, reload, eventSource);
 
   async function suggest() {
     setNotice(null);
@@ -135,6 +135,11 @@ export function EvalsPanel({
         <p className="text-sm">Add cases to {CASES_PATH} to run evals.</p>
       )}
       {error && <ErrorNotice error={error} />}
+      {stalled && (
+        <Notice tone="warn">
+          <p>{STALLED_MESSAGE}</p>
+        </Notice>
+      )}
       {runs && runs.length > 0 && (
         <Table caption="Eval history">
           <TableHead>

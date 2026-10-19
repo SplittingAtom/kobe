@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { listSkillEvals, type SkillEvalRun } from "../../lib/skills/evals-api";
 import { evalHref } from "../../lib/skills/eval-href";
 import { RUN_STATUS_TEXT, isOpen, liftText, pct, usd } from "../../lib/skills/eval-format";
-import { useLiveEval } from "../../lib/skills/use-live-eval";
+import { STALLED_MESSAGE, useLiveEval } from "../../lib/skills/use-live-eval";
 import type { EventSourceFactory } from "../../lib/chat/stream";
 import { ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
 import {
   EmptyState,
+  Notice,
   Section,
   Table,
   TableBody,
@@ -50,15 +52,17 @@ export function SkillEvalHistory({
   /** Tests inject the event stream. */
   readonly eventSource?: EventSourceFactory;
 }) {
-  const { state, reload } = useResource(() => listSkillEvals(teamId, scope, skillId));
-  // A running eval updates here too (its stream, else polling).
-  const openIds =
-    state.status === "ready" ? state.data.filter((r) => isOpen(r.status)).map((r) => r.id) : [];
-  useLiveEval(
+  const { state } = useResource(() => listSkillEvals(teamId, scope, skillId));
+  // A running eval updates here too (its stream, else polling); live reads replace the first.
+  const [live, setLive] = useState<readonly SkillEvalRun[] | null>(null);
+  const current = live ?? (state.status === "ready" ? state.data : []);
+  const openIds = current.filter((r) => isOpen(r.status)).map((r) => r.id);
+  const { stalled } = useLiveEval(
     openIds,
     async () => {
-      reload();
-      return true;
+      const res = await listSkillEvals(teamId, scope, skillId);
+      if (res.ok) setLive(res.data);
+      return res.ok;
     },
     eventSource,
   );
@@ -68,9 +72,14 @@ export function SkillEvalHistory({
       title="Evals by version"
       description="Each saved version's eval scorecards, newest first. Open one for every metric and each case's runs."
     >
+      {stalled && (
+        <Notice tone="warn">
+          <p>{STALLED_MESSAGE}</p>
+        </Notice>
+      )}
       <ResourceView state={state} label="eval history">
-        {(runs) => {
-          const versions = byVersion(runs);
+        {(first) => {
+          const versions = byVersion(live ?? first);
           if (versions.length === 0)
             return <EmptyState title="No saved version of this skill has been evaluated yet." />;
           return (

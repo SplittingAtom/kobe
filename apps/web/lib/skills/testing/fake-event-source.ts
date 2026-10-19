@@ -33,3 +33,19 @@ export class FakeSource implements EventSourceLike {
     this.onerror?.(new Event("error"));
   }
 }
+
+/**
+ * Breaks the stream of `url` until the hook gives up on it: each failure is followed by the
+ * retry delay (doubling), until `retries` reopenings have failed too.
+ */
+export async function breakStream(
+  stream: FakeEvalStream,
+  advance: (ms: number) => Promise<unknown>,
+  retries: number,
+  firstDelayMs: number,
+): Promise<void> {
+  for (let i = 0; i <= retries; i += 1) {
+    stream.sources.at(-1)?.fail();
+    if (i < retries) await advance(firstDelayMs * 2 ** i + 10);
+  }
+}

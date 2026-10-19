@@ -5,7 +5,14 @@ import type { SkillEvalScorecard } from "@kobe/protocol";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SkillAdminPage } from "../admin/team/skill-editor/skill-admin-page";
-import { FakeEvalStream } from "../../lib/skills/testing/fake-event-source";
+import { FakeEvalStream, breakStream } from "../../lib/skills/testing/fake-event-source";
+import {
+  EVAL_POLL_MS,
+  MAX_POLL_FAILURES,
+  STALLED_MESSAGE,
+  STREAM_RETRIES,
+  STREAM_RETRY_MS,
+} from "../../lib/skills/use-live-eval";
 import { renderTeam, stubApi } from "../admin/testing";
 import { EvalRunPage } from "./eval-run-page";
 import { SkillEvalHistory, byVersion } from "./skill-eval-history";
@@ -174,3 +181,34 @@ function must<T>(x: T | undefined): T {
   if (x === undefined) throw new Error("missing");
   return x;
 }
+
+describe("when live progress gives up", () => {
+  it("says so on the eval page", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const stream = new FakeEvalStream();
+      stubApi({
+        "GET /v1/skill-evals/e-6": [
+          [
+            200,
+            run("e-6", 2, { status: "running", scorecard: null, progress: { done: 1, total: 5 } }),
+          ],
+          [500, { code: "internal", message: "down" }],
+        ],
+      });
+      renderTeam(<EvalRunPage evalRunId="e-6" eventSource={stream.factory} />);
+      await screen.findByText(/1 of 5 runs done/);
+      await waitFor(() => expect(stream.sources).toHaveLength(1));
+      await breakStream(
+        stream,
+        (ms) => vi.advanceTimersByTimeAsync(ms),
+        STREAM_RETRIES,
+        STREAM_RETRY_MS,
+      );
+      await vi.advanceTimersByTimeAsync(EVAL_POLL_MS * (MAX_POLL_FAILURES + 1));
+      expect(await screen.findByText(STALLED_MESSAGE)).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

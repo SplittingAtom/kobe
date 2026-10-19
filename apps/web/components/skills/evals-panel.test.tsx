@@ -7,8 +7,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderTeam, stubApi } from "../admin/testing";
 import { EvalScorecard, evalThreadHref } from "./eval-scorecard";
-import { FakeEvalStream } from "../../lib/skills/testing/fake-event-source";
-import { EVAL_POLL_MS } from "../../lib/skills/use-live-eval";
+import { FakeEvalStream, breakStream } from "../../lib/skills/testing/fake-event-source";
+import { EVAL_POLL_MS, STREAM_RETRIES, STREAM_RETRY_MS } from "../../lib/skills/use-live-eval";
 import { must } from "../../lib/testing/must";
 import { CASES_PATH, EvalsPanel } from "./evals-panel";
 import type { DraftEditor } from "./use-draft-editor";
@@ -223,8 +223,13 @@ describe("the evals panel", () => {
       await waitFor(() => expect(stream.urls).toEqual(["/v1/skill-evals/e-7/events"]));
       must(stream.sources[0]).emit("skill.eval.progress", { done: 2 });
       await screen.findByText("Running (2 of 5)");
-      // The stream breaks: polling takes over.
-      must(stream.sources[0]).fail();
+      // The stream breaks for good (its retries too): polling takes over.
+      await breakStream(
+        stream,
+        (ms) => vi.advanceTimersByTimeAsync(ms),
+        STREAM_RETRIES,
+        STREAM_RETRY_MS,
+      );
       await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
       await screen.findByText("Running (3 of 5)");
       expect(
@@ -259,7 +264,12 @@ describe("the evals panel", () => {
       renderTeam(<EvalsPanel teamId="t-1" editor={ed} eventSource={stream.factory} />);
       await screen.findByText("Queued (0 of 5)");
       await waitFor(() => expect(stream.sources).toHaveLength(1));
-      must(stream.sources[0]).fail();
+      await breakStream(
+        stream,
+        (ms) => vi.advanceTimersByTimeAsync(ms),
+        STREAM_RETRIES,
+        STREAM_RETRY_MS,
+      );
       await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
       expect(await screen.findByRole("alert")).toBeDefined();
       await vi.advanceTimersByTimeAsync(EVAL_POLL_MS + 50);
