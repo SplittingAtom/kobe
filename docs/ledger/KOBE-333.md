@@ -117,6 +117,8 @@
   the version; C4-L3 `kobe.skill.yaml` listed as leaving. Tests: team-rejected and unreviewed
   refused, decline-then-confirm and racing decisions, true path for a conversation draft, its
   fork and a personal skill promoted from another team; a direct upload is false.
+- Re-review LOW-R1 (0158 team bound) and LOW-R2 (team review re-checked in `submit`) are done
+  with KOBE-334 (see its ledger); must-dos 1 to 5 above are built there.
 - L-a (pre-review reviewers left in an ordinary team): no install ran that code (gate1 was
   checked: no designation, no grants), so nothing is migrated; 0153's comment overstates that
   nothing was recorded (the memberships were made, never marked).
