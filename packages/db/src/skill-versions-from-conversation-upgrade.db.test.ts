@@ -24,6 +24,7 @@ const suffix = randomBytes(4).toString("hex");
 const ids = {
   user: randomUUID(),
   team: randomUUID(),
+  otherTeam: randomUUID(),
   teamSkill: randomUUID(),
   personal: randomUUID(),
   draft: randomUUID(),
@@ -60,9 +61,11 @@ beforeAll(async () => {
       ids.user,
       `u-${suffix}@example.test`,
     ]);
-    await c.query(`INSERT INTO teams (id, slug, name) VALUES ($1, $2, 'T')`, [
+    await c.query(`INSERT INTO teams (id, slug, name) VALUES ($1, $2, 'T'), ($3, $4, 'O')`, [
       ids.team,
       `t-${suffix}`,
+      ids.otherTeam,
+      `o-${suffix}`,
     ]);
     await c.query("BEGIN");
     await c.query(`SELECT set_config('kobe.team_id', $1, true)`, [ids.team]);
@@ -110,6 +113,12 @@ beforeAll(async () => {
       scope: "team",
       version: 2,
       draftId: ids.blankDraft,
+    });
+    // Review LOW-R1: another team's draft row with the blank draft's id (a look-alike) counts
+    // for nothing: a team version's draft is its own team's.
+    await audit(c, "skill.draft.created", ids.otherTeam, {
+      draftId: ids.blankDraft,
+      startedFrom: "thread",
     });
     await audit(c, "skill.draft.personalized", ids.team, {
       skillId: ids.personal,
