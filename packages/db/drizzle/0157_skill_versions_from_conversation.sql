@@ -1,2 +1,0 @@
-ALTER TABLE "personal_skill_versions" ADD COLUMN "from_conversation" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "team_skill_versions" ADD COLUMN "from_conversation" boolean DEFAULT false NOT NULL;

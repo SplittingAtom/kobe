@@ -1,2 +1,0 @@
-ALTER TABLE "skill_eval_runs" DROP CONSTRAINT "skill_eval_runs_subject_kind";--> statement-breakpoint
-ALTER TABLE "skill_eval_runs" ADD CONSTRAINT "skill_eval_runs_subject_kind" CHECK ("skill_eval_runs"."subject_kind" IN ('draft', 'team', 'personal', 'registry'));

@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "skill_drafts_thread_sync_uq" ON "skill_drafts" USING btree ("team_id","owner_user_id","from_thread_id","name") WHERE "skill_drafts"."from_thread_id" IS NOT NULL AND "skill_drafts"."synced_rev" IS NOT NULL;
