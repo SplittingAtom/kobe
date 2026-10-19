@@ -1518,7 +1518,7 @@ export const AUDIT_EVENTS = {
   /** A reviewer commented on a version under review. */
   "registry.commented": event("site", { registryVersionId: id }),
   /**
-   * A reviewer approved a version into the Catalog. `selfApproved`: the single admin approved
+   * A reviewer approved a version into the Catalog, with its scan verdict. `selfApproved`: the single admin approved
    * their own submission (SK22); `confirmerApproved`: the single admin approved a promotion they
    * confirmed as Team admin.
    */
@@ -1528,6 +1528,8 @@ export const AUDIT_EVENTS = {
     name: catalogName,
     semver: z.string().max(32),
     selfApproved: z.boolean(),
+    /** The scan verdict approved: `block` is a Site admin's override (SK32). */
+    verdict: z.enum(["pass", "caution", "block"]),
     confirmerApproved: z.boolean().optional(),
   }),
   /** A reviewer sent the version back to its author's Workbench with comments. */

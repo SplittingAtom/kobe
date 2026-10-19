@@ -283,6 +283,31 @@ describe("separation of duties and reviewer limits (ac-2)", () => {
   });
 });
 
+describe("what the scanner and the blocklist say (SK32, D22)", () => {
+  it("refuses a blocklisted package, and leaves a Block verdict to Site admins", async () => {
+    const v = await submitted("author", "listed-skill", "0.1.0");
+    await authoritative(h, v.id);
+    await h.admin.query(
+      `INSERT INTO skill_blocklist (content_hash, reason, added_by)
+       SELECT runtime_hash, 'test', $2 FROM registry_versions WHERE id = $1`,
+      [v.id, ids.admin1],
+    );
+    const listed = await decision("admin2", v.id, "approve");
+    expect([listed.status, listed.json.code]).toEqual([409, "blocked"]);
+
+    const w = await submitted("author", "block-verdict", "0.1.0");
+    await authoritative(h, w.id);
+    await h.admin.query(`UPDATE registry_versions SET verdict = 'block' WHERE id = $1`, [w.id]);
+    const byReviewer = await decision("reviewer", w.id, "approve");
+    expect([byReviewer.status, byReviewer.json.code]).toEqual([403, "block_verdict"]);
+    const byAdmin = await decision("admin2", w.id, "approve");
+    expect(byAdmin.status, JSON.stringify(byAdmin.json)).toBe(200);
+    expect((await audit("registry.approved")).at(-1)).toMatchObject({
+      target: { registryVersionId: w.id, verdict: "block" },
+    });
+  });
+});
+
 describe("claims and the first decision (ac-2)", () => {
   it("holds a claimed version for its reviewer; a Site admin can release it", async () => {
     const v = await submitted("author", "claimed-skill", "0.1.0");

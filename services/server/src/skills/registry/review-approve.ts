@@ -1,7 +1,8 @@
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
+import { blockedAmong } from "../blocklist.js";
 import { listMaintainers, recordFirstMaintainer } from "./maintainers.js";
-import { authoritativeScorecardProblem, soleReviewer } from "./review-guards.js";
+import { authoritativeScorecardProblem, isSiteAdmin, soleReviewer } from "./review-guards.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
 import { requireRegistryTeam } from "./settings.js";
 
@@ -13,6 +14,8 @@ import { requireRegistryTeam } from "./settings.js";
  * 2. the version, locked `FOR UPDATE`, still Submitted or In review (the first decision wins),
  *    and not claimed by another reviewer;
  * 3. the authoritative scorecard (KOBE-335's re-run; until then "authoritative scorecard missing");
+ *    the package not on the site blocklist (D22), and a Block verdict only by a Site admin (SK32,
+ *    an override the audit row records with the verdict);
  * 4. separation of duties (SK22): not the submitter's own, not the confirming Team admin's, except
  *    on a single-admin Site (the database decides and flags the submitter's case itself);
  * 5. the submitter may still submit under this name: once the skill has maintainers, only an
@@ -35,6 +38,8 @@ export type ProblemCode =
   | "claimed"
   | "authoritative_scorecard_missing"
   | "authoritative_scorecard_stale"
+  | "blocked"
+  | "block_verdict"
   | "own_submission"
   | "confirmed_by_you"
   | "not_maintainer";
@@ -49,6 +54,14 @@ export const PROBLEMS = {
   not_found: { code: "not_found", message: "No such Registry version." },
   decided: { code: "decided", message: "This version was already decided." },
   claimed: { code: "claimed", message: "Another reviewer has claimed this version." },
+  blocked: {
+    code: "blocked",
+    message: "The package is on the site skill blocklist: it can't be approved.",
+  },
+  block_verdict: {
+    code: "block_verdict",
+    message: "The scanner blocks this package: only a Site admin can approve it.",
+  },
   own_submission: {
     code: "own_submission",
     message: "You submitted this version: another reviewer must decide it.",
@@ -101,6 +114,10 @@ export async function approveProblems(
   else if (v.claimedBy !== null && v.claimedBy !== userId) problems.push(PROBLEMS.claimed);
   const card = authoritativeScorecardProblem(v);
   if (card) problems.push(card as Problem);
+  if ((await blockedAmong(tx, [v.runtimeHash, v.packageHash])).length > 0)
+    problems.push(PROBLEMS.blocked);
+  if (v.verdict === "block" && !(await isSiteAdmin(tx, userId)))
+    problems.push(PROBLEMS.block_verdict);
   const duties = await dutiesProblem(tx, v, userId);
   if (duties.problem) problems.push(duties.problem);
   const right = await maintainerProblem(tx, v);
@@ -168,6 +185,7 @@ export async function approve(
           name: v.name,
           semver: v.semver,
           selfApproved,
+          verdict: v.verdict as "pass" | "caution" | "block",
           ...(confirmerApproved ? { confirmerApproved } : {}),
         },
       });

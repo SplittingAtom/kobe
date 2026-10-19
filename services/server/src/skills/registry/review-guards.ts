@@ -58,3 +58,10 @@ export async function soleReviewer(tx: KobeTx, userId: string): Promise<boolean>
   const row = res.rows[0];
   return row?.admin === true && row.others === false;
 }
+
+/** Whether `userId` is an active Site admin or the Owner (the Block-verdict override, SK32). */
+export async function isSiteAdmin(tx: KobeTx, userId: string): Promise<boolean> {
+  const res = await tx.execute<{ admin: boolean }>(sql`
+    SELECT public.break_glass_is_site_admin(${userId}) AS admin`);
+  return res.rows[0]?.admin === true;
+}

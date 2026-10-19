@@ -53,6 +53,7 @@ const decisionSchema = z
 const STATUS: Readonly<Record<string, 403 | 404 | 409>> = {
   not_found: 404,
   own_submission: 403,
+  block_verdict: 403,
   confirmed_by_you: 403,
 };
 
