@@ -226,9 +226,9 @@ describe("BudgetGate (KOBE-42)", () => {
   });
 
   it("the share caps a member's first call too once others hold reservations", async () => {
-    // $150 left: a member's share is $37.5, below one $200 call.
+    // $700 left: a member's share is $175, below one $200 call.
     const { g } = gate(() => ({
-      lines: [line({ limit: 10_000, spent: 9_850 })],
+      lines: [line({ limit: 10_000, spent: 9_300 })],
       requestsPerMinute: 1_000,
     }));
     // Nothing reserved yet: a lone call is admitted.
@@ -237,6 +237,21 @@ describe("BudgetGate (KOBE-42)", () => {
     expect(await g.admit(call(randomUUID()))).toMatchObject({
       ok: false,
       code: "too_many_calls_in_flight",
+    });
+  });
+
+  it("a lone call that holds more than is left fills the line (KOBE-443: holds count in full)", async () => {
+    // $150 left: the lone $200 call is admitted (it may overshoot by itself), and its hold counts
+    // in full, not at the $37.5 share left, so a newcomer finds the line full.
+    const { g } = gate(() => ({
+      lines: [line({ limit: 10_000, spent: 9_850 })],
+      requestsPerMinute: 1_000,
+    }));
+    expect((await g.admit(call(randomUUID()))).ok).toBe(true);
+    expect(await g.admit(call(randomUUID()))).toMatchObject({
+      ok: false,
+      status: 402,
+      code: "budget_exhausted",
     });
   });
 
@@ -528,16 +543,16 @@ describe("BudgetGate: the team eval cap (KOBE-327)", () => {
   });
 
   it("holds eval calls' reservations against the cap (in memory as in Postgres)", async () => {
-    // 200 tokens held per call in flight against a cap of 200 tokens.
+    // 200 tokens held per call in flight against a cap of 700 tokens (a member's share: 175).
     const { g } = gate(() => ({
       lines: [],
       evalLines: [
         line({
           scope: "eval",
           unit: "tokens",
-          limit: 200,
+          limit: 700,
           spent: 0,
-          limitExact: "200",
+          limitExact: "700",
           spentExact: "0",
         }),
       ],
