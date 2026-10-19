@@ -6,7 +6,7 @@
  */
 import { isTerminalRunStatus, type KobeEvent, type ThinkingLevel } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
-import type { ChatApi, CompactResult, ForkOptions } from "./api";
+import type { AppContextWire, ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
 import {
   browserResumeStore,
@@ -615,9 +615,10 @@ export class ThreadController {
     parentEntryId?: string,
     attach?: MessageFiles,
     mentions?: readonly string[],
+    appContext?: readonly AppContextWire[],
   ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId, attach, mentions);
+      return await this.#send(text, parentEntryId, attach, mentions, appContext);
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -631,6 +632,7 @@ export class ThreadController {
     parentEntryId?: string,
     attach?: MessageFiles,
     mentions?: readonly string[],
+    appContext?: readonly AppContextWire[],
   ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
@@ -646,7 +648,7 @@ export class ThreadController {
       followups: undefined, // shown until the next send (KOBE-222)
       queuePaused: false, // sending releases a queue held by Stop
     }));
-    const body = { content: text, parentEntryId, fileIds: attach?.fileIds, mentions };
+    const body = { content: text, parentEntryId, fileIds: attach?.fileIds, mentions, appContext };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;

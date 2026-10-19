@@ -14,11 +14,19 @@ import {
 import { canonicalJson } from "@kobe/protocol";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
+import { logger } from "../logger.js";
 import type { ReconcileLock } from "../sandbox/reconcile-lock.js";
 import { applyDrift, approvedHash } from "./drift.js";
 import { buildSnapshot } from "./pin.js";
 import type { ConnectorProbe } from "./probe.js";
 import { auditProbeCredential, chooseProbeCredential } from "./probe-credential.js";
+import { loadTemplates, writeTemplateDrift } from "./template-store.js";
+import {
+  applyTemplateDrift,
+  liveTemplates,
+  type LiveEntry,
+  type TemplateDrift,
+} from "./templates.js";
 
 /**
  * Periodic refresh (KOBE-102, spec D27): re-probes every pinned, active connector through the MCP
@@ -32,18 +40,42 @@ import { auditProbeCredential, chooseProbeCredential } from "./probe-credential.
  * it; never a member's). Each pass records when it probed and, if it skipped, why
  * (`refresh_skipped`, shown on the connector page); the start of an `auth_required` skip is an
  * `mcp.connector.refresh_skipped` event, which site admins are emailed about.
+ *
+ * The same probe re-reads the connector's MCP Apps `ui://` templates (KOBE-433) and applies
+ * {@link applyTemplateDrift} to them in the same transaction, so a skip (`auth_required` or any
+ * failure) leaves the templates exactly as they were, like the tools. Template trouble never
+ * stops the tools' refresh: when the proxy skipped the template part, or writing the templates
+ * fails (a savepoint), the tools still refresh and the outcome says `templatesSkipped`.
  */
 export const CONNECTOR_REFRESH_LOCK = "kobe.connector-refresh";
 
+/** Why the template part of a pass did not run (the tools still refreshed). */
+interface TemplatesSkipped {
+  readonly templatesSkipped?: string;
+}
+
 export type RefreshOutcome =
-  | { readonly status: "unchanged" }
-  | {
+  | ({ readonly status: "unchanged" } & TemplatesSkipped)
+  | ({
       readonly status: "drifted";
       readonly changed: number;
       readonly added: number;
       readonly removed: number;
-    }
+      readonly templates: {
+        readonly changed: number;
+        readonly added: number;
+        readonly removed: number;
+        readonly invalid: number;
+      };
+    } & TemplatesSkipped)
   | { readonly status: "skipped"; readonly reason: string };
+
+const NO_TEMPLATE_DRIFT: Omit<TemplateDrift, "templates"> = {
+  changed: [],
+  added: [],
+  removed: [],
+  invalid: [],
+};
 
 const skipped = (reason: string): RefreshOutcome => ({ status: "skipped", reason });
 
@@ -89,11 +121,34 @@ async function recordSkip(
   return skipped(reason);
 }
 
-const markRefreshed = (tx: KobeTx, connectorId: string) =>
-  tx
-    .update(connectors)
-    .set({ refreshSkipped: null, refreshedAt: sql`now()` })
-    .where(eq(connectors.id, connectorId));
+/** A checked pass: no tool skip, the snapshot is post-433 now, and the template skip (if any). */
+const passState = (templatesSkipped: string | undefined) => ({
+  refreshSkipped: null,
+  refreshedAt: sql`now()`,
+  pinVersion: 2,
+  templatesSkipped: templatesSkipped ?? null,
+});
+
+const markRefreshed = (tx: KobeTx, connectorId: string, templatesSkipped: string | undefined) =>
+  tx.update(connectors).set(passState(templatesSkipped)).where(eq(connectors.id, connectorId));
+
+/**
+ * The start of a template skip (or a new reason) is audited and warned about, so site admins are
+ * told like an `auth_required` skip (re-review NEW-2); a repeat is not.
+ */
+async function noteTemplatesSkipped(
+  tx: KobeTx,
+  connector: { readonly id: string; readonly name: string; readonly before: string | null },
+  reason: string | undefined,
+): Promise<void> {
+  if (reason === undefined || reason === connector.before) return;
+  logger.warn({ connectorId: connector.id, reason }, "connector templates not checked for changes");
+  await recordAudit(tx, {
+    action: "mcp.connector.templates_skipped",
+    actor: SYSTEM_ACTOR,
+    target: { connectorId: connector.id, name: connector.name, reason },
+  });
+}
 
 export async function refreshConnector(
   db: KobeDb,
@@ -113,34 +168,55 @@ export async function refreshConnector(
   if (!probed.ok) return recordSkip(db, connectorId, row, probed.failure);
   const live = buildSnapshot(row.name, probed.tools);
   if (!live.ok) return recordSkip(db, connectorId, row, live.failure);
+  // A prober that reports no templates, or skipped them, leaves them alone.
+  const liveUi: LiveEntry[] | undefined =
+    probed.uiResources === undefined ? undefined : liveTemplates(live.tools, probed.uiResources);
+  const uiSkipped = probed.uiSkipped === undefined ? {} : { templatesSkipped: probed.uiSkipped };
 
   return db.transaction(async (tx): Promise<RefreshOutcome> => {
     const [locked] = await tx
-      .select({ url: connectors.url, name: connectors.name, snapshot: connectors.toolsSnapshot })
+      .select({
+        url: connectors.url,
+        name: connectors.name,
+        snapshot: connectors.toolsSnapshot,
+        pinVersion: connectors.pinVersion,
+        templatesSkipped: connectors.templatesSkipped,
+      })
       .from(connectors)
       .where(refreshable(connectorId))
       .for("update");
     if (!locked || locked.url !== row.url) return skipped("changed");
 
     const before = parseToolsSnapshot(locked.snapshot);
-    const drift = applyDrift(before, live.tools);
-    const events = drift.changed.length + drift.added.length + drift.removed.length;
+    const drift = applyDrift(before, live.tools, { adoptLegacyUi: locked.pinVersion === 1 });
+    const templates =
+      liveUi === undefined ? undefined : await driftTemplates(tx, connectorId, liveUi);
+    const ui = templates?.ok ? templates.drift : NO_TEMPLATE_DRIFT;
+    const notes = templates?.ok === false ? { templatesSkipped: "write_failed" } : uiSkipped;
+    await noteTemplatesSkipped(
+      tx,
+      { id: connectorId, name: locked.name, before: locked.templatesSkipped },
+      notes.templatesSkipped,
+    );
+    const toolEvents = drift.changed.length + drift.added.length + drift.removed.length;
+    const templateEvents =
+      ui.changed.length + ui.added.length + ui.removed.length + ui.invalid.length;
+    const toolsSame = canonicalJson(drift.tools) === canonicalJson(before);
     // A drifted tool returning to its approval rewrites the rows without being an event.
-    if (events === 0 && canonicalJson(drift.tools) === canonicalJson(before)) {
-      await markRefreshed(tx, connectorId);
-      return { status: "unchanged" };
+    if (toolEvents + templateEvents === 0 && toolsSame) {
+      await markRefreshed(tx, connectorId, notes.templatesSkipped);
+      return { status: "unchanged", ...notes };
     }
     await tx
       .update(connectors)
       .set({
         toolsSnapshot: drift.tools,
         toolsHash: approvedHash(drift.tools),
-        refreshSkipped: null,
-        refreshedAt: sql`now()`,
+        ...passState(notes.templatesSkipped),
         updatedAt: sql`now()`,
       })
       .where(eq(connectors.id, connectorId));
-    if (events === 0) return { status: "unchanged" };
+    if (toolEvents + templateEvents === 0) return { status: "unchanged", ...notes };
     await recordAudit(tx, {
       action: "mcp.connector.drift",
       actor: SYSTEM_ACTOR,
@@ -150,6 +226,12 @@ export async function refreshConnector(
         changed: drift.changed,
         added: drift.added,
         removed: drift.removed,
+        templates: {
+          changed: ui.changed,
+          added: ui.added,
+          removed: ui.removed,
+          invalid: ui.invalid,
+        },
       },
     });
     return {
@@ -157,8 +239,37 @@ export async function refreshConnector(
       changed: drift.changed.length,
       added: drift.added.length,
       removed: drift.removed.length,
+      templates: {
+        changed: ui.changed.length,
+        added: ui.added.length,
+        removed: ui.removed.length,
+        invalid: ui.invalid.length,
+      },
+      ...notes,
     };
   });
+}
+
+/**
+ * Template drift under the connector's row lock, in a savepoint: if writing them fails, the
+ * templates stay as they were and the tools' refresh goes on (review MEDIUM-1).
+ */
+async function driftTemplates(
+  tx: KobeTx,
+  connectorId: string,
+  live: readonly LiveEntry[],
+): Promise<{ readonly ok: true; readonly drift: TemplateDrift } | { readonly ok: false }> {
+  try {
+    return await tx.transaction(async (sp) => {
+      const stored = await loadTemplates(sp, connectorId, { forUpdate: true });
+      const drift = applyTemplateDrift(stored, live);
+      await writeTemplateDrift(sp, connectorId, stored, drift.templates);
+      return { ok: true as const, drift };
+    });
+  } catch (err) {
+    logger.warn({ err, connectorId }, "connector template refresh failed; tools still refreshed");
+    return { ok: false };
+  }
 }
 
 export interface RefreshSummary {

@@ -4,6 +4,7 @@ import {
   CONNECTOR_NAME_PATTERN,
   CONNECTOR_URL_MAX,
   connectorSiteKeys,
+  connectorUiResources,
   and,
   asc,
   connectors,
@@ -19,6 +20,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { dropConnectorGrants } from "./grants.js";
 import { dropSiteKey } from "./site-key.js";
+import { dropTemplates } from "./template-store.js";
 
 /**
  * The site connector registry (KOBE-100, spec D6, D27): MCP servers a site admin registers.
@@ -98,10 +100,13 @@ export interface ConnectorView {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  readonly templatesDriftedCount: number;
   /** Why the last periodic refresh was skipped (e.g. `auth_required`, KOBE-431); null when it ran. */
   readonly refreshSkipped: string | null;
   /** When the periodic refresh last probed it; null before the first pass. */
   readonly refreshedAt: Date | null;
+  /** Why the last refresh did not check its MCP Apps templates (KOBE-433); site admins only. */
+  readonly templatesSkipped: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -123,8 +128,14 @@ const columns = {
     sql<number>`(SELECT count(*) FROM jsonb_array_elements(${connectors.toolsSnapshot}) AS t WHERE t->>'status' = 'drifted')`.mapWith(
       Number,
     ),
+  /** MCP Apps templates awaiting review (KOBE-434). */
+  templatesDriftedCount:
+    sql<number>`(SELECT count(*) FROM ${connectorUiResources} WHERE ${connectorUiResources.connectorId} = ${connectors.id} AND ${connectorUiResources.status} = 'drifted')`.mapWith(
+      Number,
+    ),
   refreshSkipped: connectors.refreshSkipped,
   refreshedAt: connectors.refreshedAt,
+  templatesSkipped: connectors.templatesSkipped,
   createdAt: connectors.createdAt,
   updatedAt: connectors.updatedAt,
 } as const;
@@ -223,7 +234,10 @@ export async function updateConnector(
       set.toolsSnapshot = [];
       set.toolsHash = null;
       set.refreshSkipped = null;
+      set.templatesSkipped = null;
       changed.push("url");
+      // Its MCP Apps templates too (KOBE-433): nothing of the old server is ever rendered.
+      await dropTemplates(tx, id);
       // Credentials were issued for the old server: drop them (users reconnect), same transaction.
       await dropConnectorGrants(tx, id, current.name);
       await dropSiteKey(tx, { id, name: current.name }, "url_changed");

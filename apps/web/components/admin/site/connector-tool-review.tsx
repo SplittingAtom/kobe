@@ -10,12 +10,41 @@ import {
 import { Button, Card, Section } from "../../ui/console";
 import { ResourceView } from "../parts";
 import { useResource, type Mutation } from "../use-resource";
+import { TemplateReviewSection } from "./connector-template-review";
+
+/** Who may see the tool (KOBE-435): Pi ("the model"), apps, both or neither. */
+function visibilityText(v: readonly string[] | undefined): string {
+  if (v === undefined) return "the model and apps (default)";
+  const parts = [v.includes("model") ? "the model" : null, v.includes("app") ? "apps" : null];
+  const shown = parts.filter((p) => p !== null);
+  return shown.length === 0 ? "nobody" : `${shown.join(" and ")} only`;
+}
+
+/** Annotations and MCP Apps fields (KOBE-434 review M4): changing them changes what runs. */
+function Extras({ def }: { readonly def: ToolDefinition }) {
+  const hints = Object.entries(def.annotations ?? {}).filter(([k]) => k !== "title");
+  return (
+    <dl className="my-1 grid grid-cols-[auto_1fr] gap-x-2 text-sm">
+      <dt className="text-console-muted">Hints</dt>
+      <dd className="m-0">
+        {hints.length === 0 ? "none" : hints.map(([k, v]) => `${k}: ${String(v)}`).join(", ")}
+      </dd>
+      <dt className="text-console-muted">Visible to</dt>
+      <dd className="m-0">{visibilityText(def.ui?.visibility)}</dd>
+      <dt className="text-console-muted">App template</dt>
+      <dd className="m-0 break-all">
+        {def.ui?.resourceUri === undefined ? "none" : <code>{def.ui.resourceUri}</code>}
+      </dd>
+    </dl>
+  );
+}
 
 function Definition({ label, def }: { readonly label: string; readonly def: ToolDefinition }) {
   return (
     <section aria-label={label} className="min-w-0">
       <h4 className="m-0 text-sm font-semibold">{label}</h4>
       <p className="my-1">{def.description === "" ? "(no description)" : def.description}</p>
+      <Extras def={def} />
       <pre className="m-0 max-h-64 overflow-auto rounded-md border border-console-border bg-console-panel p-2 text-xs">
         {JSON.stringify(def.inputSchema, null, 2)}
       </pre>
@@ -102,6 +131,7 @@ export function ToolReviewPanel({
           );
         }}
       </ResourceView>
+      <TemplateReviewSection connector={connector} mutation={mutation} onChanged={onChanged} />
     </Section>
   );
 }

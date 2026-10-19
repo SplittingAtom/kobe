@@ -1,6 +1,7 @@
 import {
   isActiveRunStatus,
   queueMayAdvance,
+  type AppCardEntry,
   type ApprovalMode,
   type ErrorInfo,
   type PiThreadConfig,
@@ -13,6 +14,7 @@ import { projectRunContext } from "../projects/run-context.js";
 import { listRunAttachments } from "../uploads/attach-list.js";
 import { and, eq, runs, sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
+import { appCardChain, insertQueuedAppCardsInTx } from "../apps/app-cards.js";
 import { piBranchPoint } from "./run-prompt.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { readApprovalFloor } from "../policy/approval-floor.js";
@@ -72,6 +74,8 @@ export interface StartPlan {
   readonly omissions: readonly Omission[];
   /** The model's catalog limits (KOBE-259); the dispatcher fills in the site defaults. */
   readonly modelLimits?: CatalogTokenLimits;
+  /** App cards Pi may not have yet, ending at the branch point (KOBE-440); absent = none. */
+  readonly appCards?: readonly AppCardEntry[];
 }
 
 export interface Promotion {
@@ -129,8 +133,14 @@ export async function promoteInTx(
   let thread = await lockThreadRow(tx, teamId, threadId);
   if (!thread || thread.deletedAt !== null) return { transitions };
   // Pi is still aborting a stopped run of this thread: the next start would be refused (KOBE-26).
+  // Waiting app cards wait too (re-review LOW-R2): Pi's last entries of the stopped run may still
+  // be mirrored and move the leaf, which would leave a card on a side branch the model never sees.
   const hold = options.abortHoldMs ?? 0;
   if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
+  // App cards launched during the run that just ended go in first (KOBE-440, D17).
+  if (!(await threadRunRows(tx, teamId, threadId)).some((r) => isActiveRunStatus(r.status))) {
+    thread = { ...thread, ...(await insertQueuedAppCardsInTx(tx, teamId, thread)) };
+  }
   // Stop paused the queue (KOBE-26): it waits for Resume or a new message.
   const paused = await isQueuePaused(tx, teamId, threadId);
   const fail = async (
@@ -245,25 +255,28 @@ export async function promoteInTx(
     }
     return {
       transitions,
-      plan: withProject(
-        withAttachments(
-          planOf(
-            thread,
-            { ...next, parentEntryId, approvalMode },
-            resolved,
-            model,
-            resolution.limits,
-            thinkingLevel,
+      plan: withAppCards(
+        withProject(
+          withAttachments(
+            planOf(
+              thread,
+              { ...next, parentEntryId, approvalMode },
+              resolved,
+              model,
+              resolution.limits,
+              thinkingLevel,
+            ),
+            await listRunAttachments(
+              tx,
+              teamId,
+              threadId,
+              next.id,
+              await modelAcceptsImages(tx, model?.alias),
+            ),
           ),
-          await listRunAttachments(
-            tx,
-            teamId,
-            threadId,
-            next.id,
-            await modelAcceptsImages(tx, model?.alias),
-          ),
+          await projectRunContext(tx, { teamId, userId: thread.ownerUserId }, thread.projectId),
         ),
-        await projectRunContext(tx, { teamId, userId: thread.ownerUserId }, thread.projectId),
+        await appCardChain(tx, teamId, threadId, parentEntryId),
       ),
     };
   }
@@ -401,23 +414,30 @@ export async function restartPlanInTx(
   const recorded = await recordedThinkingLevel(tx, run.teamId, run.id);
   const thinkingLevel =
     recorded === undefined ? undefined : startThinkingLevel(resolution, recorded);
-  return withProject(
-    withAttachments(
-      planOf(thread, run, resolved, resolution.model, resolution.limits, thinkingLevel),
-      await listRunAttachments(
+  return withAppCards(
+    withProject(
+      withAttachments(
+        planOf(thread, run, resolved, resolution.model, resolution.limits, thinkingLevel),
+        await listRunAttachments(
+          tx,
+          run.teamId,
+          thread.id,
+          run.id,
+          await modelAcceptsImages(tx, resolution.model?.alias),
+        ),
+      ),
+      await projectRunContext(
         tx,
-        run.teamId,
-        thread.id,
-        run.id,
-        await modelAcceptsImages(tx, resolution.model?.alias),
+        { teamId: run.teamId, userId: thread.ownerUserId },
+        thread.projectId,
       ),
     ),
-    await projectRunContext(
-      tx,
-      { teamId: run.teamId, userId: thread.ownerUserId },
-      thread.projectId,
-    ),
+    await appCardChain(tx, run.teamId, thread.id, run.parentEntryId),
   );
+}
+
+function withAppCards(plan: StartPlan, appCards: readonly AppCardEntry[]): StartPlan {
+  return appCards.length === 0 ? plan : { ...plan, appCards };
 }
 
 function withProject(plan: StartPlan, project: RunProjectContext | undefined): StartPlan {

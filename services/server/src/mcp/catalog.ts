@@ -1,3 +1,4 @@
+import { modelVisible } from "../connectors/visibility.js";
 import {
   isOpenWorld,
   parseMcpToolName,
@@ -99,12 +100,13 @@ export function describePinnedTool(connectorId: string, tool: PinnedTool): ToolD
 
 /**
  * Tools a team's agents may see (D27 exposure): pinned only (drifted tools are disabled until
- * re-approved), and `read_only` = `readOnlyHint: true`, `all` = every pinned tool, `custom` = the
- * team's `enabled_tools`. Matches the engine's exposure gate (`policy/gates.ts`).
+ * re-approved), visible to the model (an app-only tool never reaches Pi, KOBE-435), and
+ * `read_only` = `readOnlyHint: true`, `all` = every pinned tool, `custom` = the team's
+ * `enabled_tools`. Matches the engine's exposure gate (`policy/gates.ts`).
  */
 export function exposedTools(connector: TeamConnector): PinnedTool[] {
   return connector.tools.filter((tool) => {
-    if (tool.status !== "pinned") return false;
+    if (tool.status !== "pinned" || !modelVisible(tool)) return false;
     if (connector.exposure === "all") return true;
     if (connector.exposure === "read_only") return tool.annotations.readOnlyHint === true;
     return connector.enabledTools.includes(tool.pi_name);

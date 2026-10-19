@@ -1,5 +1,6 @@
 "use client";
 
+import { ToolCardApp } from "../apps/tool-card-app";
 import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { BanIcon, CheckIcon, CircleAlertIcon, ClockIcon, LoaderIcon } from "lucide-react";
 import { REMEMBER_SCOPE_LABELS } from "@kobe/protocol";
@@ -292,6 +293,9 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         toolCallId={props.toolCallId}
         result={props.result ?? activity.result?.preview}
       />
+      {props.toolName.startsWith("mcp__") && (
+        <ToolCardApp toolCallId={props.toolCallId} hasMarker={activity.result?.app !== undefined} />
+      )}
     </section>
   );
 }

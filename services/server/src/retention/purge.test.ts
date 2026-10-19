@@ -15,7 +15,7 @@ describe("purgeThreads on a lock conflict (KOBE-216 ac-4)", () => {
     );
     expect(outcome).toEqual({
       status: "busy",
-      counts: { threads: 0, entries: 0, runs: 0, events: 0, blobs: 0 },
+      counts: { threads: 0, entries: 0, runs: 0, events: 0, blobs: 0, appResults: 0 },
     });
   });
 

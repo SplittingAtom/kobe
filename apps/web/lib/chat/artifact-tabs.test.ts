@@ -137,3 +137,18 @@ describe("width floors (CE7)", () => {
     expect(clampArtifactWidth(Number.NaN, 1000)).toBe(500);
   });
 });
+
+describe("app tabs (KOBE-438)", () => {
+  it("are kept by the artifact list's pruning and never remembered", () => {
+    const tabs = openTab(openTab(NO_TABS, "app:tc1"), "11111111-1111-4111-8111-111111111111");
+    expect(retainTabs(tabs, new Set())).toEqual({ open: ["app:tc1"], active: "app:tc1" });
+    const key = tabsKey("t", "th");
+    writeTabs(key, tabs);
+    expect(readTabs(key)).toEqual({
+      open: ["11111111-1111-4111-8111-111111111111"],
+      active: "11111111-1111-4111-8111-111111111111",
+    });
+    writeTabs(key, openTab(NO_TABS, "app:tc1"));
+    expect(readTabs(key)).toEqual(NO_TABS);
+  });
+});

@@ -129,6 +129,37 @@ describe("thread.skill_updated (KOBE-315, CE12)", () => {
   });
 });
 
+describe("tool.result app marker (KOBE-438, MCP Apps MA10)", () => {
+  const schema = EVENT_PAYLOAD_SCHEMAS["tool.result"];
+  const base = {
+    tool_call_id: "tc_9",
+    tool: "mcp__cat__open_explorer",
+    is_error: false,
+    preview: "3 namespaces",
+    truncated: false,
+  };
+  const app = {
+    connector_id: EXAMPLE_IDS.thread,
+    app_id: "a".repeat(64),
+    template_sha256: "b".repeat(64),
+    result_ref: EXAMPLE_IDS.run,
+  };
+
+  it("carries an optional app marker that names the stored result", () => {
+    expect(schema.safeParse(base).success).toBe(true);
+    expect(schema.safeParse({ ...base, app }).success).toBe(true);
+  });
+
+  it("rejects malformed markers and extra keys", () => {
+    expect(schema.safeParse({ ...base, app: { ...app, app_id: "x" } }).success).toBe(false);
+    expect(
+      schema.safeParse({ ...base, app: { ...app, template_sha256: "B".repeat(64) } }).success,
+    ).toBe(false);
+    expect(schema.safeParse({ ...base, app: { ...app, result_ref: "r1" } }).success).toBe(false);
+    expect(schema.safeParse({ ...base, app: { ...app, html: "<p>" } }).success).toBe(false);
+  });
+});
+
 describe("event payloads", () => {
   it.each(KOBE_EVENT_TYPES)("accepts the example payload for %s", (type) => {
     expect(parseEventPayload(type, EVENT_PAYLOAD_EXAMPLES[type])).toEqual(

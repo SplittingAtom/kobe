@@ -74,6 +74,7 @@ export async function deleteForever(
         runs: counts.runs,
         events: counts.events,
         blobs: counts.blobs,
+        ...(counts.appResults > 0 ? { appResults: counts.appResults } : {}),
       },
     });
   };

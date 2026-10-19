@@ -30,13 +30,15 @@ export async function storageLimit(
  * into the workspace (`workspace_sync.live_bytes`), so it counts there only: unattached `files`
  * rows plus all live workspace bytes plus the project files, once each (members' mounts of them
  * are not counted in `live_bytes`, KOBE-162). The thread copy of an attached file stays in S3 until the
- * thread is purged but is not counted again.
+ * thread is purged but is not counted again. MCP Apps results (KOBE-438) count when stored.
  */
 export async function storageUsed(tx: KobeTx, teamId: string): Promise<number> {
   const res = await tx.execute<{ used: string }>(sql`
     SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId} AND run_id IS NULL)
          + (SELECT COALESCE(SUM(live_bytes), 0) FROM workspace_sync WHERE team_id = ${teamId})
          + (SELECT COALESCE(SUM(size_bytes), 0) FROM project_files WHERE team_id = ${teamId})
+         + (SELECT COALESCE(SUM(bytes), 0) FROM thread_app_results
+             WHERE team_id = ${teamId} AND storage <> 'too_large')
            AS used`);
   return Number(res.rows[0]?.used ?? 0);
 }

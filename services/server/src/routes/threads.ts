@@ -422,6 +422,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const result = await forkThread((fn) => asViewer(c, fn), deps.blobs, id, {
       entryId: body.entry_id,
       title: body.title,
+      quotaDefaultBytes: deps.appResults.store.defaultQuotaBytes,
     });
     return result.ok ? c.json({ thread_id: result.thread.thread_id }, 201) : fail(c, result.error);
   });

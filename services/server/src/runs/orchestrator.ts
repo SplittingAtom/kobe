@@ -1,3 +1,10 @@
+import { imitatesAppContext, splitAppContext } from "@kobe/protocol";
+import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
+import {
+  resolveAppContexts,
+  withAppContext,
+  type ResolvedAppContext,
+} from "../apps/context-block.js";
 import {
   checkRetry,
   isActiveRunStatus,
@@ -152,6 +159,8 @@ interface StagedAttachments {
 
 /** The orchestrator plus what the server wires around it (wire hooks, sweeps, isolation). */
 export interface ServerRunOrchestrator extends RunOrchestrator {
+  /** The Stop grace a promotion waits for Pi's abort (KOBE-26); app-card launches wait it too. */
+  readonly abortHoldMs?: number;
   /** `submitMessage` with a client idempotency key (unique per thread). */
   submitMessage(
     actor: ActorContext,
@@ -258,6 +267,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (options.sweep !== false) this.#scheduleSweep();
   }
 
+  get abortHoldMs(): number {
+    return this.#tuning.stopGraceMs;
+  }
+
   /** Promotion waits for Pi's abort of a stopped run, at most the Stop grace (KOBE-26). */
   get #hold(): { readonly abortHoldMs: number } {
     return { abortHoldMs: this.#tuning.stopGraceMs };
@@ -273,6 +286,19 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     // A member's mentions are checked before any upload is staged (KOBE-223 N1).
     if (command.trigger === "user") checkMentionPaths(command.mentions ?? []);
+    // Only the server writes app context (KOBE-439 review LOW-E): a member's text that imitates
+    // it would show as a chip in history and could be mistaken for an app's data.
+    if (command.trigger === "user" && imitatesAppContext(command.content)) {
+      throw new RunError("invalid_content");
+    }
+    // MCP Apps context chips (KOBE-439): only apps the member can open now, same template.
+    const appContext = await resolveAppContexts(
+      this.#db,
+      actor.team_id,
+      actor.user_id,
+      command.trigger === "user" ? (command.app_context ?? []) : [],
+    );
+    if (appContext === undefined) throw new RunError("app_context_invalid");
     const fileIds = command.file_ids ?? [];
     if (fileIds.length > 0 && this.#attachments === undefined) {
       throw new RunError("attachments_unavailable");
@@ -280,15 +306,32 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const clientKey = options.clientKey ?? null;
     const attach =
       fileIds.length > 0 ? await this.#stageAttachments(actor, command, clientKey) : undefined;
-    if (attach === undefined)
-      return this.#submitInTx(actor, command, clientKey, undefined, () => {}, options.scheduled);
+    if (attach === undefined) {
+      return this.#submitInTx(
+        actor,
+        command,
+        clientKey,
+        undefined,
+        () => {},
+        options.scheduled,
+        appContext,
+      );
+    }
     // The copies stay only when the run row (and the files' claim) committed with them.
     let claimed = false;
     let committed = false;
     try {
-      const result = await this.#submitInTx(actor, command, clientKey, attach, () => {
-        claimed = true;
-      });
+      const result = await this.#submitInTx(
+        actor,
+        command,
+        clientKey,
+        attach,
+        () => {
+          claimed = true;
+        },
+        undefined,
+        appContext,
+      );
       committed = claimed;
       return result;
     } finally {
@@ -331,6 +374,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     attach: StagedAttachments | undefined,
     onAttached: () => void,
     scheduled?: ScheduledSubmit,
+    appContext: readonly ResolvedAppContext[] = [],
   ): Promise<SubmitMessageResult> {
     const teamId = actor.team_id;
     const out = await this.#threadTx(actor, async (tx, viewer) => {
@@ -357,7 +401,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           "mentioned files not found; left as text",
         );
       }
-      const input = mentioned.text;
+      // The member's chips go first, fenced as untrusted data (KOBE-439, spec §8).
+      const input = withAppContext(appContext, mentioned.text);
+      // The rendered blocks count toward the input's limit (review LOW-F): a clear 413.
+      if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
       const budgetBlocked = await this.#budgetBlocksSchedule(tx, actor, scheduled !== undefined);
       const parent = command.parent_entry_id ?? null;
@@ -441,6 +488,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
+    // As for a send (re-review LOW-M): only the server writes app context.
+    if (imitatesAppContext(body.content)) throw new RunError("invalid_content");
     const { run, message } = await this.#threadTx(actor, async (tx, viewer) => {
       const found = await ownedRun(tx, viewer, runId, false);
       await this.#assertMayRun(tx, actor, false);
@@ -548,12 +597,20 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (run.status !== "queued") {
         throw new RunError("invalid_transition", "Only queued messages can be edited.");
       }
-      const { text: input } = await rewriteMentions(
+      if (imitatesAppContext(body.content)) throw new RunError("invalid_content");
+      const { text } = await rewriteMentions(
         tx,
         ownerOf(actor.team_id, thread),
         body.content,
         body.mentions ?? [],
       );
+      // An edit changes the member's text only; the app context sent with it stays (LOW-E).
+      const before = await tx.execute<{ input: string }>(sql`
+        SELECT input FROM runs WHERE team_id = ${actor.team_id} AND id = ${runId}`);
+      const old = before.rows[0]?.input ?? "";
+      const kept = splitAppContext(old);
+      const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + text : text;
+      if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       await tx.execute(sql`
         UPDATE runs SET input = ${input} WHERE team_id = ${actor.team_id} AND id = ${runId}`);
       await touchThread(tx, actor.team_id, run.threadId);

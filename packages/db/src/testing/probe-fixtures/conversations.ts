@@ -7,6 +7,7 @@ import {
   events,
   runEvents,
   runs,
+  threadAppResults,
   threadEntries,
   threads,
   users,
@@ -115,6 +116,25 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
       ratedAt: now,
       ratedUpdatedAt: now,
       change: "cleared",
+    });
+  },
+  thread_app_results: async (tx, teamId) => {
+    const threadId = await insertThread(tx, teamId);
+    const runId = await insertRun(tx, teamId, threadId);
+    await tx.insert(threadAppResults).values({
+      teamId,
+      threadId,
+      runId,
+      piName: "mcp__probe__open",
+      inputSha256: "0".repeat(64),
+      connectorId: randomUUID(),
+      tool: "open",
+      templateUri: "ui://probe/app",
+      templateSha256: "1".repeat(64),
+      appId: "2".repeat(64),
+      storage: "inline",
+      result: { content: [] },
+      bytes: 14,
     });
   },
 };

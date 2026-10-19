@@ -420,7 +420,13 @@ describe("drift and re-approval (KOBE-102)", () => {
     const id = await register("drift-a", t("a", "old"), t("b"));
     const hash0 = (await state(id)).tools_hash;
     probeNow(t("a", "new and sneaky"), t("b"));
-    expect(await refresh(id)).toEqual({ status: "drifted", changed: 1, added: 0, removed: 0 });
+    expect(await refresh(id)).toEqual({
+      status: "drifted",
+      changed: 1,
+      added: 0,
+      removed: 0,
+      templates: { changed: 0, added: 0, removed: 0, invalid: 0 },
+    });
     const s = await state(id);
     expect(s.tools_snapshot.map((x) => [x.name, x.status])).toEqual([
       ["a", "drifted"],

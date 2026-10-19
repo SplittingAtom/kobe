@@ -75,6 +75,20 @@ export function isKobeEventType(value: unknown): value is KobeEventType {
  */
 const messageId = idSchema;
 
+const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** The `tool.result` `app` marker (KOBE-438, MCP Apps MA10). */
+export const toolResultAppSchema = z.strictObject({
+  connector_id: uuidSchema,
+  /** SHA-256 of `connectorId:uri` (KOBE-436). */
+  app_id: sha256Hex,
+  /** The pinned template the result was captured for; another one renders as text. */
+  template_sha256: sha256Hex,
+  /** The `thread_app_results` row. */
+  result_ref: uuidSchema,
+});
+export type ToolResultApp = z.infer<typeof toolResultAppSchema>;
+
 /**
  * Size bounds (UTF-8 bytes of the JSON text), as the server already enforces them (KOBE-24/31):
  * a whole event payload at most {@link EVENT_PAYLOAD_MAX_BYTES} (bigger content lives in S3 by
@@ -193,6 +207,13 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     preview: z.string().max(65_536),
     blob_ref: z.string().min(1).max(1024).optional(),
     truncated: z.boolean(),
+    /**
+     * MCP Apps (KOBE-438, spec MA10): the call's tool opens a pinned `ui://` template, and the
+     * upstream's full result was stored from mcp-proxy's report (never from the sandbox). Set by
+     * the server only; the card renders the app from `result_ref`
+     * (`GET /v1/threads/{threadId}/app-results/{result_ref}`) and falls back to `preview`.
+     */
+    app: toolResultAppSchema.optional(),
   }),
   "approval.requested": z.strictObject({
     approval_id: uuidSchema,

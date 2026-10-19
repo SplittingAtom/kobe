@@ -44,10 +44,18 @@ const decisionSchema = z.discriminatedUnion("decision", [
       url: z.string(),
       auth_kind: z.enum(["oauth", "api_key", "none"]),
     }),
-    tool: z.object({ name: z.string(), pi_name: z.string() }),
+    // `model_visible`: a server with KOBE-435 checked MCP Apps visibility; absent from an older
+    // server, and then the proxy checks the upstream itself (review M3).
+    tool: z.object({
+      name: z.string(),
+      pi_name: z.string(),
+      model_visible: z.literal(true).optional(),
+    }),
     input_sha256: z.string().regex(/^[0-9a-f]{64}$/),
     reason: z.string(),
     approval_id: z.string().optional(),
+    // MCP Apps (KOBE-438): report the upstream's full result with this ticket before answering.
+    app_capture: z.object({ ticket: z.string().min(1).max(4096) }).optional(),
   }),
   z.object({
     decision: z.literal("deny"),
@@ -83,6 +91,18 @@ export interface PolicyServer {
   decide(token: string, query: CallQuery): Promise<ServerAnswer<CallDecision>>;
   /** The sandbox's own user's API key or OAuth access token for a connector; never cached. */
   fetchGrant(token: string, connectorId: string): Promise<GrantAnswer>;
+  /**
+   * MCP Apps (KOBE-438): the upstream's full result of an allowed UI tool call, with the ticket
+   * the allow carried. True when the server stored it; never throws (a failure only means the
+   * card renders as text).
+   */
+  reportResult(
+    token: string,
+    connectorId: string,
+    ticket: string,
+    input: Record<string, unknown>,
+    result: Record<string, unknown>,
+  ): Promise<boolean>;
 }
 
 export interface PolicyServerOptions {
@@ -179,8 +199,39 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
     }
   }
 
+  async function reportResult(
+    token: string,
+    connectorId: string,
+    ticket: string,
+    input: Record<string, unknown>,
+    result: Record<string, unknown>,
+  ): Promise<boolean> {
+    try {
+      const res = await doFetch(
+        `${options.baseUrl}/internal/v1/mcp/connectors/${encodeURIComponent(connectorId)}/results`,
+        {
+          method: "POST",
+          headers: injectTraceHeaders({
+            authorization: `Bearer ${options.internalKey}`,
+            "kobe-sandbox-token": token,
+            "content-type": "application/json",
+          }),
+          body: JSON.stringify({ ticket, input, result }),
+          signal: AbortSignal.timeout(options.timeoutMs),
+          redirect: "error",
+        },
+      );
+      await res.body?.cancel();
+      return res.status === 201;
+    } catch (error) {
+      options.onError?.(error);
+      return false;
+    }
+  }
+
   return {
     fetchGrant,
+    reportResult,
     listTools: (token, connectorId) =>
       post(
         `/connectors/${encodeURIComponent(connectorId)}/tools`,

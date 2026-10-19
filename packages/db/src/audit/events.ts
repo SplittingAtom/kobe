@@ -20,6 +20,7 @@ import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../sch
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
+import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
 
 /**
  * The audit event taxonomy (KOBE-15, spec D31). Every audited action is one entry: its dotted name,
@@ -44,6 +45,34 @@ export type AuditScope =
   | "any";
 
 const id = z.uuid();
+/**
+ * Why an app call was allowed or denied (KOBE-436, spec §6, MA5). `app_no_prompt`: an ask rule
+ * matched, and the browser principal is never prompted; `app_read_only`: not a read tool;
+ * `validation_busy`: the argument validator had no room for the member's call (one at a time per
+ * member, a bounded queue), so nothing was judged.
+ */
+export const APP_CALL_REASONS = [
+  "allowed",
+  "app_not_available",
+  "tool_not_in_app",
+  "tool_drifted",
+  "tool_not_read_only",
+  "tool_not_app_visible",
+  "connector_exposure",
+  "invalid_arguments",
+  "validation_busy",
+  "site_deny_rule",
+  "team_deny_rule",
+  "app_no_prompt",
+  "app_read_only",
+  "not_connected",
+  "credential_unavailable",
+  "rate_limited",
+  "upstream_failed",
+] as const;
+export type AppCallReason = (typeof APP_CALL_REASONS)[number];
+/** An MCP Apps template URI (KOBE-433): `ui://...`, never another scheme. */
+const uiUri = z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN);
 /** A short human label (team or agent name): no control characters, bounded. */
 const label = z
   .string()
@@ -265,7 +294,14 @@ export const MCP_APPROVAL_FAILURES = [...APPROVAL_REJECT_REASONS, "unavailable"]
 export const RETENTION_PURGE_REASONS = ["retention", "trash", "offboarding"] as const;
 const retentionPeriod = z.enum(RETENTION_PERIODS);
 /** What a purge deleted (counts only). */
-const purgeCounts = { entries: count, runs: count, events: count, blobs: count };
+const purgeCounts = {
+  entries: count,
+  runs: count,
+  events: count,
+  blobs: count,
+  /** MCP Apps results of the purged threads (KOBE-438); absent from earlier rows. */
+  appResults: count.optional(),
+};
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -669,6 +705,43 @@ export const AUDIT_EVENTS = {
   }),
 
   // ── mcp: tool calls through the MCP proxy (KOBE-58, D27, D29); metadata only, never inputs ──
+  /**
+   * An MCP App's own `tools/call` under the viewing member's browser principal (KOBE-436, spec §6):
+   * read-only, app-visible tools of the app's connector only. Every decision is recorded (denials
+   * throttled per member and reason, rate-limit refusals once a minute). Never arguments, results
+   * or credentials.
+   */
+  "mcp.app_call": event("team", {
+    connectorId: id,
+    userId: id,
+    /** The upstream tool name (MCP grammar). */
+    tool: z
+      .string()
+      .max(128)
+      .regex(/^[A-Za-z0-9_.-]{1,128}$/),
+    decision: z.enum(["allowed", "denied"]),
+    reason: z.enum(APP_CALL_REASONS),
+    /** The pinned template of the app the call came from. */
+    templateSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  }),
+  /**
+   * A rail-launched app card that waited for a run was not inserted (KOBE-440, review LOW-2): the
+   * member could no longer open the app (`no_access`), it waited more than 10 minutes
+   * (`expired`), it would have made too many cards in a row, or it was not a valid card.
+   */
+  "mcp.app_card_dropped": event("team", {
+    connectorId: id,
+    userId: id,
+    threadId: id,
+    tool: z
+      .string()
+      .max(128)
+      .regex(/^[A-Za-z0-9_.-]{1,128}$/),
+    reason: z.enum(["no_access", "expired", "too_many_cards", "invalid"]),
+  }),
   /**
    * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
    * allowed call is recorded before the proxy forwards it; denied calls are throttled per sandbox.
@@ -1910,12 +1983,20 @@ export const AUDIT_EVENTS = {
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
   }),
-  /** Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools. */
+  /**
+   * Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools.
+   * `templates`: the MCP Apps `ui://` templates pinned with them and Kobe's SHA-256 of each
+   * (KOBE-433); URIs and hashes only, never the template.
+   */
   "mcp.connector.pinned": event("site", {
     connectorId: id,
     name: z.string().max(64),
     tools: z.number().int().nonnegative(),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
+    templates: z
+      .array(z.strictObject({ uri: uiUri, sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+      .max(64)
+      .optional(),
   }),
   // ── connectors: team enablement (KOBE-104); names and Pi tool names, never URLs or credentials ──
   /** A team admin enabled a connector for the team, changed its exposure or tick list, or disabled it. */
@@ -1931,6 +2012,8 @@ export const AUDIT_EVENTS = {
    * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
    * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
    * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
+   * `templates` (KOBE-433): the same for the connector's MCP Apps `ui://` templates, by URI, and
+   * `invalid`: live templates that cannot be pinned, with the failure code.
    */
   "mcp.connector.drift": event("site", {
     connectorId: id,
@@ -1938,6 +2021,18 @@ export const AUDIT_EVENTS = {
     changed: z.array(z.string().max(128)).max(500),
     added: z.array(z.string().max(128)).max(500),
     removed: z.array(z.string().max(128)).max(500),
+    templates: z
+      .strictObject({
+        changed: z.array(uiUri).max(64),
+        added: z.array(uiUri).max(64),
+        removed: z.array(uiUri).max(64),
+        /** Live templates that cannot be pinned (newly so), with the reason (review HIGH-2). */
+        invalid: z
+          .array(z.strictObject({ uri: uiUri, reason: z.enum(UI_RESOURCE_FAILURES) }))
+          .max(64)
+          .optional(),
+      })
+      .optional(),
   }),
   /**
    * A recipient was handled for one drift event (KOBE-103): `driftSeq` is the `mcp.connector.drift`
@@ -1950,13 +2045,18 @@ export const AUDIT_EVENTS = {
     recipientId: id,
     emailed: z.boolean(),
     /** KOBE-431: `skipped` for a refresh-skip event (rate-limited apart from drift); absent = drift. */
-    kind: z.enum(["drift", "skipped"]).optional(),
+    kind: z.enum(["drift", "skipped", "templates_skipped"]).optional(),
   }),
   /** A site admin re-approved drifted tools (KOBE-102); they are offered again. */
   "mcp.connector.reapproved": event("site", {
     connectorId: id,
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
+    /** MCP Apps templates approved (KOBE-434): URI and Kobe's SHA-256 of the approved bytes. */
+    templates: z
+      .array(z.strictObject({ uri: uiUri, sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+      .max(64)
+      .optional(),
   }),
   /**
    * Which credential probes a connector's `tools/list` (KOBE-431): the connector's site-wide key
@@ -1979,6 +2079,16 @@ export const AUDIT_EVENTS = {
     connectorId: id,
     name: z.string().max(64),
     reason: z.enum(["auth_required"]),
+  }),
+  /**
+   * The refresh began not checking a connector's MCP Apps templates while its tools were checked
+   * (KOBE-433 re-review NEW-2): `resources/list` failed, an outdated proxy, a failed write. Site
+   * admins are told; only approved bytes are ever served meanwhile.
+   */
+  "mcp.connector.templates_skipped": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.string().regex(/^[a-z_]{1,32}$/),
   }),
   /** A site admin set or replaced a connector's site-wide API key (KOBE-303); never the key or its hint. */
   "mcp.connector.site_key_set": event("site", {

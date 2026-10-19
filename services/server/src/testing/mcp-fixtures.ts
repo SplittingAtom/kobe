@@ -18,6 +18,10 @@ export interface ToolSpec {
   /** `false` → write; undefined (and not read-only) → destructive (D29). */
   readonly destructive?: boolean;
   readonly status?: PinnedTool["status"];
+  /** The pinned `_meta.ui` (KOBE-433/435). */
+  readonly ui?: PinnedTool["ui"];
+  /** The pinned input schema; default `{q: string}`. */
+  readonly inputSchema?: Record<string, unknown>;
 }
 
 export function piName(connectorName: string, tool: string): string {
@@ -26,7 +30,10 @@ export function piName(connectorName: string, tool: string): string {
 
 export function pinnedTool(connectorName: string, spec: ToolSpec): PinnedTool {
   const description = `${spec.name} (pinned)`;
-  const input_schema = { type: "object", properties: { q: { type: "string" } } };
+  const input_schema = spec.inputSchema ?? {
+    type: "object",
+    properties: { q: { type: "string" } },
+  };
   return {
     name: spec.name,
     pi_name: piName(connectorName, spec.name),
@@ -40,6 +47,7 @@ export function pinnedTool(connectorName: string, spec: ToolSpec): PinnedTool {
       .update(JSON.stringify([spec.name, description, input_schema]))
       .digest("hex"),
     status: spec.status ?? "pinned",
+    ...(spec.ui === undefined ? {} : { ui: spec.ui }),
   };
 }
 

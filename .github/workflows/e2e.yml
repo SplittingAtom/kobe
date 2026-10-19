@@ -177,7 +177,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [suite, cold-start, gate1, gate2, gate3, gate4, gate5-a, gate5-b, executor, restore]
+        shard:
+          [
+            suite,
+            cold-start,
+            gate1,
+            gate2,
+            gate3,
+            gate4,
+            gate5-a,
+            gate5-b,
+            gate-apps,
+            executor,
+            restore,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -195,7 +208,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         if: matrix.shard == 'restore'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: matrix.shard == 'gate3' || matrix.shard == 'restore' || startsWith(matrix.shard, 'gate5')
+        if: matrix.shard == 'gate3' || matrix.shard == 'restore' || startsWith(matrix.shard, 'gate5') || matrix.shard == 'gate-apps'
         with:
           node-version-file: .nvmrc
           cache: ${{ matrix.shard == 'restore' && 'pnpm' || '' }}
@@ -211,7 +224,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends postgresql-client-17
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - name: Playwright and Chromium for the browser checks
-        if: matrix.shard == 'gate3' || startsWith(matrix.shard, 'gate5')
+        if: matrix.shard == 'gate3' || startsWith(matrix.shard, 'gate5') || matrix.shard == 'gate-apps'
         run: |
           cd e2e/browser
           npm ci --no-audit --no-fund
@@ -315,6 +328,10 @@ jobs:
             # halves on their own clusters to keep each shard short (docs/gates/gate-5.md).
             gate5-a) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && KOBE_GATE5_STORIES="U17 U18 U19 U20" e2e/gate5.sh 2>&1 | tee "${logs}/gate5-a.log" ;;
             gate5-b) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && KOBE_GATE5_STORIES="U21 U22 U23 U24" e2e/gate5.sh 2>&1 | tee "${logs}/gate5-b.log" ;;
+            # The Kobe Explorer Gate (KOBE-441, MCP Apps): an app in the conversation, then from the
+            # rail, against the fake MCP server's ui:// test app, in Chromium plus API checks
+            # (docs/gates/gate-apps.md). The gate install's Catalyst run is the coordinator's.
+            gate-apps) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate-apps.sh 2>&1 | tee "${logs}/gate-apps.log" ;;
             *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
           esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -326,7 +343,7 @@ jobs:
           if-no-files-found: warn
       # Gate 5's Playwright report and traces (screenshots, DOM snapshots) when a browser check fails.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ failure() && startsWith(matrix.shard, 'gate5') }}
+        if: ${{ failure() && (startsWith(matrix.shard, 'gate5') || matrix.shard == 'gate-apps') }}
         with:
           name: playwright-${{ matrix.shard }}
           path: |

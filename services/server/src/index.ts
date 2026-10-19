@@ -1,3 +1,4 @@
+import { createProxyAppCaller } from "./apps/app-caller.js";
 import type { Server } from "node:http";
 import { ExternalScanRunner } from "./skills/registry/external-scan.js";
 import { serve } from "@hono/node-server";
@@ -137,6 +138,11 @@ if (config.process === "scheduler") {
     ...(config.mcpProxyUrl && config.mcpProxyInternalKey
       ? {
           connectorProbe: createProxyProbe({
+            baseUrl: config.mcpProxyUrl,
+            internalKey: config.mcpProxyInternalKey,
+            timeoutMs: PROBE_TIMEOUT_MS,
+          }),
+          appCaller: createProxyAppCaller({
             baseUrl: config.mcpProxyUrl,
             internalKey: config.mcpProxyInternalKey,
             timeoutMs: PROBE_TIMEOUT_MS,
@@ -481,6 +487,7 @@ const internalServer =
           fetch: createInternalApp({
             internalKey: config.mcpProxyInternalKey,
             mcp: deps.mcp,
+            appResults: deps.appResults,
             auth: {
               db: deps.database.db,
               sessionKey: sandbox.sessionKeys["kobe.mcp-proxy"],

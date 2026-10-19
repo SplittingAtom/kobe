@@ -23,9 +23,13 @@ export interface Connector {
   readonly toolCount: number;
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
+  /** MCP Apps templates awaiting review (KOBE-434). */
+  readonly templatesDriftedCount?: number;
   /** Why the last periodic refresh was skipped (`auth_required`, `unreachable`, ...; KOBE-431). */
   readonly refreshSkipped: string | null;
   readonly refreshedAt: string | null;
+  /** Why the last refresh did not check the connector's app templates (KOBE-433). */
+  readonly templatesSkipped?: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -84,6 +88,10 @@ export interface ToolDefinition {
   readonly title?: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
+  /** Risk hints (KOBE-434 review M4). */
+  readonly annotations?: Record<string, unknown>;
+  /** MCP Apps: the template it opens and who may see it (KOBE-433/435). */
+  readonly ui?: { readonly resourceUri?: string; readonly visibility?: readonly string[] };
 }
 
 /** One tool of a connector; a drifted one carries the live definition awaiting approval. */
@@ -110,6 +118,78 @@ export const approveConnectorTools = (
   apiRequest(`${BASE}/${encodeURIComponent(id)}/tools/approve`, {
     method: "POST",
     json: { tools },
+  });
+
+/** One version of an MCP Apps template (KOBE-434): never its bytes. */
+export interface TemplateVersion {
+  readonly sha256: string;
+  readonly pinnedHash: string;
+  readonly bytes: number;
+  readonly mimeType: string;
+  readonly meta: Record<string, unknown>;
+}
+
+export interface TemplateReview {
+  readonly uri: string;
+  readonly status: "pinned" | "drifted";
+  readonly change: "changed" | "added" | "invalid" | null;
+  readonly approved?: TemplateVersion;
+  readonly live?: TemplateVersion;
+  readonly invalid?: string;
+}
+
+/** One version's bytes with the hashes and meta of the same read (KOBE-434 review M1). */
+export interface TemplateSourceVersion extends TemplateVersion {
+  readonly html: string;
+}
+
+/** A template's bytes as text, for the escaped diff; approve with `live.pinnedHash`. */
+export interface TemplateSource {
+  readonly uri: string;
+  readonly approved?: TemplateSourceVersion;
+  readonly live?: TemplateSourceVersion;
+}
+
+/**
+ * The admin preview frame of one version (review M2): served by Kobe as text/html with a
+ * sandboxing header CSP (opaque origin, no network), like D25 artifacts; never `srcdoc`.
+ */
+export const templateFrameUrl = (
+  id: string,
+  uri: string,
+  version: "live" | "approved",
+  /** The bytes the admin's source read showed; the route answers 409 if they changed. */
+  sha256: string,
+) =>
+  `${BASE}/${encodeURIComponent(id)}/templates/frame?uri=${encodeURIComponent(uri)}&version=${version}&sha256=${sha256}`;
+
+export async function listConnectorTemplates(
+  id: string,
+): Promise<ApiResult<readonly TemplateReview[]>> {
+  const res = await apiRequest<{ templates: readonly TemplateReview[] }>(
+    `${BASE}/${encodeURIComponent(id)}/templates`,
+  );
+  return res.ok ? { ...res, data: res.data.templates } : res;
+}
+
+export async function getTemplateSource(
+  id: string,
+  uri: string,
+): Promise<ApiResult<TemplateSource>> {
+  const res = await apiRequest<{ source: TemplateSource }>(
+    `${BASE}/${encodeURIComponent(id)}/templates/source?uri=${encodeURIComponent(uri)}`,
+  );
+  return res.ok ? { ...res, data: res.data.source } : res;
+}
+
+/** Approve the reviewed live templates; each names the pinned hash that was shown. */
+export const approveConnectorTemplates = (
+  id: string,
+  templates: readonly { readonly uri: string; readonly pinnedHash: string }[],
+): Promise<ApiResult<{ approved: readonly string[] }>> =>
+  apiRequest(`${BASE}/${encodeURIComponent(id)}/templates/approve`, {
+    method: "POST",
+    json: { templates },
   });
 
 /** Sets or replaces the site-wide key (KOBE-303); the key never comes back, only a hint. */

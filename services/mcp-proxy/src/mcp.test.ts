@@ -97,6 +97,26 @@ class FakePolicyServer implements PolicyServer {
     return Promise.resolve<GrantAnswer>({ ok: false, failure: "not_connected" });
   }
 
+  /** MCP Apps result reports (KOBE-438), and what the server answers. */
+  readonly reports: {
+    token: string;
+    connectorId: string;
+    ticket: string;
+    input: unknown;
+    result: unknown;
+  }[] = [];
+  reportAnswer = true;
+  reportResult(
+    token: string,
+    connectorId: string,
+    ticket: string,
+    input: Record<string, unknown>,
+    result: Record<string, unknown>,
+  ) {
+    this.reports.push({ token, connectorId, ticket, input, result });
+    return Promise.resolve(this.reportAnswer);
+  }
+
   decide(t: string, query: CallQuery) {
     this.asked.push({ token: t, query });
     if (this.next) return Promise.resolve(this.next(query));
@@ -110,7 +130,7 @@ class FakePolicyServer implements PolicyServer {
           url: this.upstreamUrl,
           auth_kind: "none",
         },
-        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}` },
+        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}`, model_visible: true },
         input_sha256: sha(query.arguments),
         reason: "risk_read",
       },
@@ -404,9 +424,127 @@ describe("initialize, ping, tools/list", () => {
       expect((await rpc(method)).json?.error.code, method).toBe(-32601);
     }
   });
+
+  it("keeps resources/* method-not-found for Pi even for a pinned ui:// template (KOBE-433)", async () => {
+    fake.options = {
+      resources: [{ uri: "ui://jira/app", mimeType: "text/html;profile=mcp-app", text: "<p/>" }],
+    };
+    for (const [method, params] of [
+      ["resources/list", {}],
+      ["resources/read", { uri: "ui://jira/app" }],
+      ["resources/templates/list", {}],
+      ["resources/subscribe", { uri: "ui://jira/app" }],
+    ] as const) {
+      const res = await rpc(method, params);
+      expect(res.json?.error.code, method).toBe(-32601);
+      expect(res.json?.result, method).toBeUndefined();
+    }
+    expect(fake.received).toEqual([]);
+  });
+});
+
+describe("an allow from a server older than KOBE-435 (review M3)", () => {
+  const oldAllow = (query: CallQuery): ServerAnswer<CallDecision> => ({
+    ok: true,
+    value: {
+      decision: "allow",
+      connector: {
+        id: query.connectorId,
+        name: "jira",
+        url: server.upstreamUrl,
+        auth_kind: "none",
+      },
+      tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}` },
+      input_sha256: sha(query.arguments),
+      reason: "risk_read",
+    },
+  });
+
+  it("refuses an app-only tool by the upstream's own tools/list, before calling it", async () => {
+    server.next = oldAllow;
+    fake.options = {
+      tools: [{ name: "get_issue", inputSchema: {}, _meta: { ui: { visibility: ["app"] } } }],
+    };
+    const res = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(res.json?.result).toMatchObject({ isError: true });
+    expect(JSON.stringify(res.json)).toContain("only to apps");
+    expect(fake.calls()).toHaveLength(0);
+    expect(fake.received.map((r) => r.method)).toContain("tools/list");
+  });
+
+  it("calls a model-visible tool after checking, and refuses one the upstream no longer lists", async () => {
+    server.next = oldAllow;
+    fake.options = {
+      tools: [{ name: "get_issue", inputSchema: {}, _meta: { ui: { visibility: "app" } } }],
+    };
+    const ok = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(ok.json?.result?.isError).toBeUndefined();
+    expect(fake.calls()).toHaveLength(1);
+    fake.options = { tools: [] };
+    const gone = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(gone.json?.result).toMatchObject({ isError: true });
+    expect(fake.calls()).toHaveLength(1);
+  });
+
+  it("does not list first when the server says it checked visibility", async () => {
+    fake.options = { tools: [] };
+    await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(fake.received.map((r) => r.method)).not.toContain("tools/list");
+    expect(fake.calls()).toHaveLength(1);
+  });
 });
 
 describe("tools/call", () => {
+  describe("MCP Apps result capture (KOBE-438)", () => {
+    const allowWithTicket = (query: CallQuery): ServerAnswer<CallDecision> => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: {
+          id: query.connectorId,
+          name: "jira",
+          url: server.upstreamUrl,
+          auth_kind: "none",
+        },
+        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}`, model_visible: true },
+        input_sha256: sha(query.arguments),
+        reason: "risk_read",
+        app_capture: { ticket: "ticket-1" },
+      },
+    });
+
+    it("reports the upstream's full result with the ticket, then answers Pi unchanged", async () => {
+      server.next = allowWithTicket;
+      const res = await rpc("tools/call", { name: "get_issue", arguments: { id: "1" } });
+      const result = { content: [{ type: "text", text: 'get_issue:{"id":"1"}' }] };
+      expect(res.json?.result).toEqual(result);
+      expect(server.reports).toEqual([
+        {
+          token: expect.any(String),
+          connectorId: CONNECTOR,
+          ticket: "ticket-1",
+          input: { id: "1" },
+          result,
+        },
+      ]);
+    });
+
+    it("reports nothing without a ticket", async () => {
+      await rpc("tools/call", { name: "get_issue", arguments: { id: "1" } });
+      expect(server.reports).toEqual([]);
+    });
+
+    it("still answers Pi when the report is refused", async () => {
+      server.next = allowWithTicket;
+      server.reportAnswer = false;
+      const res = await rpc("tools/call", { name: "get_issue", arguments: { id: "2" } });
+      expect(res.json?.result).toEqual({
+        content: [{ type: "text", text: 'get_issue:{"id":"2"}' }],
+      });
+      expect(server.reports).toHaveLength(1);
+    });
+  });
+
   it("asks the server first, then forwards exactly the decided (canonical) input", async () => {
     const res = await rpc("tools/call", {
       name: "get_issue",

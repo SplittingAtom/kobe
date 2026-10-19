@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { mkdir, open, readdir, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
-import { uuidSchema, type PiSessionEntry, type PiSessionHeader } from "@kobe/protocol";
+import {
+  uuidSchema,
+  type AppCardEntry,
+  type PiSessionEntry,
+  type PiSessionHeader,
+} from "@kobe/protocol";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
 import { openAgentTemp } from "../atomic-file.js";
 import { assertOnVolume, shareOnVolume } from "../workspace/volume.js";
@@ -126,6 +131,74 @@ export async function appendBranchMarker(
     await handle.close();
   }
   return { ok: true, entryId };
+}
+
+export type AppCardsResult =
+  | { readonly ok: true; readonly appended: number }
+  | { readonly ok: false; readonly message: string };
+
+/** Which of `cards` the session file does not have yet (none when there is no file). */
+export async function missingAppCards(
+  file: string,
+  cards: readonly AppCardEntry[],
+): Promise<AppCardEntry[]> {
+  if (cards.length === 0) return [];
+  if (!(await fileExists(file))) return [...cards];
+  const ids = await readEntryIds(file);
+  return cards.filter((c) => !ids.has(c.id));
+}
+
+/**
+ * App cards (KOBE-440, `run.start.app_cards`): entries the server wrote while the thread's Pi did
+ * not run (a rail launch inserts a `kobe.app_card` `custom_message`, which Pi turns into a user
+ * message of its content). With the thread's Pi stopped, the agent appends the ones the session
+ * lacks, oldest first, each under a parent the session has; Pi then resumes at the last one, and
+ * the run's branch marker hangs below it. A new thread whose first entry is a card has no session
+ * file yet: it is written like a restore (header, then the cards). All or nothing.
+ */
+export async function appendAppCards(
+  file: string,
+  cards: readonly AppCardEntry[],
+  header: () => PiSessionHeader,
+  maxBytes: number,
+  /** The workspace volume root the file must be on (KOBE-71); unchecked when absent. */
+  volume?: string,
+): Promise<AppCardsResult> {
+  const exists = await fileExists(file);
+  const ids = exists ? await readEntryIds(file) : new Set<string>();
+  const missing: AppCardEntry[] = [];
+  for (const card of cards) {
+    if (ids.has(card.id)) continue;
+    if (card.parentId !== null && !ids.has(card.parentId)) {
+      return { ok: false, message: "app card parent not in session" };
+    }
+    ids.add(card.id);
+    missing.push(card);
+  }
+  if (missing.length === 0) return { ok: true, appended: 0 };
+  if (!exists) {
+    const restore = new SessionRestore(file, maxBytes, volume);
+    try {
+      await restore.writePart(0, header(), missing, header);
+      await restore.commit();
+    } catch (error) {
+      await restore.abort();
+      throw error;
+    }
+    return { ok: true, appended: missing.length };
+  }
+  // Same rules as the branch marker: never through a symlink, never off the volume.
+  const handle = await open(
+    file,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  try {
+    if (volume !== undefined) await assertOnVolume(handle, volume, file);
+    await handle.write(missing.map((card) => encodeJsonl(card)).join(""));
+  } finally {
+    await handle.close();
+  }
+  return { ok: true, appended: missing.length };
 }
 
 /**

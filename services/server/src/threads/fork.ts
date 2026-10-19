@@ -9,6 +9,12 @@ import { canCreateInProject } from "./references.js";
 import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { createThread, findThread, type ThreadError, type Viewer } from "./repository.js";
+import {
+  forkedAppResultKey,
+  planAppCopies,
+  storeAppCopies,
+  type AppCopy,
+} from "../apps/fork-results.js";
 import type { ThreadSummary } from "./schemas.js";
 
 /** Entry rows per INSERT (8 columns each: far below Postgres' 65,535 bind parameters). */
@@ -34,6 +40,8 @@ interface Plan {
   readonly newId: string;
   readonly title: string | null | undefined;
   readonly path: readonly Row[];
+  /** MCP Apps results of the copied entries (KOBE-438). */
+  readonly apps: readonly AppCopy[];
 }
 type ThreadSummaryLike = NonNullable<Awaited<ReturnType<typeof findThread>>>["thread"];
 
@@ -72,7 +80,12 @@ export async function forkThread(
   run: RunAsViewer,
   blobs: BlobStore | undefined,
   id: string,
-  options: { entryId?: string | undefined; title?: string | undefined },
+  options: {
+    entryId?: string | undefined;
+    title?: string | undefined;
+    /** The team storage quota's default, for copied MCP Apps results (KOBE-438). */
+    quotaDefaultBytes?: number | undefined;
+  },
 ): Promise<ForkResult> {
   let planned;
   try {
@@ -80,8 +93,14 @@ export async function forkThread(
       const plan = await planFork(tx, viewer, id, options);
       if (!plan.ok) return plan;
       // Nothing offloaded: plan and store in one transaction.
-      if (plan.value.path.every((e) => e.blobRef === null)) {
-        return { ok: true as const, done: await storeFork(tx, viewer, plan.value, new Map()) };
+      if (
+        plan.value.path.every((e) => e.blobRef === null) &&
+        plan.value.apps.every((a) => a.storage !== "blob")
+      ) {
+        return {
+          ok: true as const,
+          done: await storeFork(tx, viewer, plan.value, new Map(), new Map()),
+        };
       }
       return { ok: true as const, plan: plan.value };
     });
@@ -106,7 +125,15 @@ async function forkWithBodies(
   plan: Plan,
 ): Promise<ForkResult> {
   const copies = new Map<string, string>();
+  const appCopies = new Map<string, string>();
   try {
+    for (const a of plan.apps) {
+      if (a.storage !== "blob" || a.blobRef === null) continue;
+      if (!threadKey(blobs.prefix, plan.teamId, id, a.blobRef)) continue; // stays a text card
+      const to = forkedAppResultKey(blobs.prefix, plan.teamId, plan.newId, a.newId);
+      await blobs.objects.copy(a.blobRef, to);
+      appCopies.set(a.newId, to);
+    }
     for (const e of plan.path) {
       if (e.blobRef === null) continue;
       if (!threadKey(blobs.prefix, plan.teamId, id, e.blobRef)) {
@@ -119,17 +146,22 @@ async function forkWithBodies(
     }
   } catch (err) {
     await removeCopies(blobs, copies);
+    await removeCopies(blobs, appCopies);
     // The source may have been purged, its bodies with it, while they were copied (review-281 L2).
     const gone = await run(async (tx, viewer) => (await findThread(tx, viewer, id)) === null);
     if (gone) return { ok: false, error: "thread_not_found" };
     throw err;
   }
   try {
-    const stored = await run((tx, viewer) => storeFork(tx, viewer, plan, copies));
-    if (!stored.ok) await removeCopies(blobs, copies);
+    const stored = await run((tx, viewer) => storeFork(tx, viewer, plan, copies, appCopies));
+    if (!stored.ok) {
+      await removeCopies(blobs, copies);
+      await removeCopies(blobs, appCopies);
+    }
     return stored;
   } catch (err) {
     await removeCopies(blobs, copies);
+    await removeCopies(blobs, appCopies);
     if (isForeignKeyViolation(err, FORK_LINK_FK)) return { ok: false, error: "thread_not_found" };
     throw err;
   }
@@ -148,7 +180,11 @@ async function planFork(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
-  options: { entryId?: string | undefined; title?: string | undefined },
+  options: {
+    entryId?: string | undefined;
+    title?: string | undefined;
+    quotaDefaultBytes?: number | undefined;
+  },
 ): Promise<{ ok: true; value: Plan } | { ok: false; error: ThreadError }> {
   const found = await findThread(tx, viewer, id);
   if (!found || found.thread.isTest) return { ok: false, error: "thread_not_found" };
@@ -181,7 +217,14 @@ async function planFork(
   if (path.length === 0) return { ok: false, error: "nothing_to_fork" };
   return {
     ok: true,
-    value: { source, teamId: viewer.teamId, newId: randomUUID(), title: options.title, path },
+    value: {
+      source,
+      teamId: viewer.teamId,
+      newId: randomUUID(),
+      title: options.title,
+      path,
+      apps: await planAppCopies(tx, viewer.teamId, id, path, options.quotaDefaultBytes),
+    },
   };
 }
 
@@ -190,11 +233,12 @@ async function storeFork(
   viewer: Viewer,
   plan: Plan,
   copies: ReadonlyMap<string, string>,
+  appCopies: ReadonlyMap<string, string>,
 ): Promise<ForkResult> {
   const { source, path } = plan;
   const forkPoint = path.at(-1)?.entryId;
   if (forkPoint === undefined) return { ok: false, error: "nothing_to_fork" };
-  if (copies.size > 0) {
+  if (copies.size > 0 || appCopies.size > 0) {
     // Time passed while the bodies were copied: the viewer must still be able to read the source.
     const again = await findThread(tx, viewer, source.id);
     if (!again || again.thread.isTest) return { ok: false, error: "thread_not_found" };
@@ -239,6 +283,7 @@ async function storeFork(
       })),
     );
   }
+  await storeAppCopies(tx, viewer.teamId, created.thread_id, plan.apps, appCopies);
   await tx
     .update(threads)
     .set({ leafEntryId: forkPoint })

@@ -14,6 +14,7 @@ import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { driftRecipients, siteAdminIds, type DriftRecipient } from "./drift-recipients.js";
 import { CONSOLE_PATHS } from "../mail/console-paths.js";
+import { driftedTemplates } from "./template-store.js";
 
 /**
  * Emails about connector tool drift (KOBE-103, D27). Driven by the audit log, so no table is
@@ -38,31 +39,89 @@ export interface DriftNotifyDeps {
 interface DriftEvent {
   readonly seq: number;
   /** `skipped`: the refresh began skipping it for want of credentials (KOBE-431). */
-  readonly kind: "drift" | "skipped";
+  /** `templates_skipped`: the refresh began not checking its app templates (KOBE-433). */
+  readonly kind: "drift" | "skipped" | "templates_skipped";
+  /** Why the templates were not checked (templates_skipped events). */
+  readonly reason?: string;
   readonly connectorId: string;
   readonly name: string;
   readonly tools: readonly string[];
+  /** MCP Apps templates (URIs) changed or new in this event (KOBE-433). */
+  readonly templates: readonly string[];
+  /** Templates that cannot be pinned, with the failure code (review HIGH-2). */
+  readonly invalid: readonly InvalidTemplateNote[];
   /** Skip events: whose key the connector uses, for the remedy text (review L2). */
   readonly source?: "member" | "site";
 }
 
+/** A bounded bullet list of names. */
+const bullets = (names: readonly string[]): string[] => {
+  const shown = names.slice(0, MAX_NAMES).map((t) => `  - ${oneLine(t)}`);
+  const more = names.length - shown.length;
+  return [...shown, ...(more > 0 ? [`  ... and ${more} more`] : [])];
+};
+
+export interface InvalidTemplateNote {
+  readonly uri: string;
+  readonly reason: string;
+}
+
+/** What each failure code means, for the email (never the template itself). */
+const INVALID_REASONS: Readonly<Record<string, string>> = {
+  ui_resource_invalid:
+    "not one UTF-8 HTML document of type text/html;profile=mcp-app up to 512 KiB",
+  ui_resource_hash_mismatch: "its declared contentHash does not match its bytes",
+};
+
 export function driftMessage(
   publicUrl: string,
-  event: Pick<DriftEvent, "name" | "tools">,
+  event: Pick<DriftEvent, "name" | "tools"> & {
+    readonly templates?: readonly string[];
+    readonly invalid?: readonly InvalidTemplateNote[];
+  },
   to: string,
 ): MailMessage {
   const name = oneLine(event.name);
-  const shown = event.tools.slice(0, MAX_NAMES).map((t) => `  - ${oneLine(t)}`);
-  const more = event.tools.length - shown.length;
+  const templates = event.templates ?? [];
+  const invalid = event.invalid ?? [];
+  const toolPart =
+    event.tools.length === 0
+      ? []
+      : [
+          `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
+          "a site admin reviews and re-approves them:",
+          ...bullets(event.tools),
+          "",
+        ];
+  const templatePart =
+    templates.length === 0
+      ? []
+      : [
+          `These app templates of the ${name} connector changed upstream or are new. Kobe shows`,
+          "their tools' results as text until a site admin reviews and approves them:",
+          ...bullets(templates),
+          "",
+        ];
+  const invalidPart =
+    invalid.length === 0
+      ? []
+      : [
+          `These app templates of the ${name} connector cannot be pinned, so Kobe does not show them:`,
+          ...bullets(
+            invalid.map((t) => `${t.uri} (${INVALID_REASONS[t.reason] ?? oneLine(t.reason)})`),
+          ),
+          "",
+        ];
   return {
     to,
-    subject: `Connector ${name}: tools changed and are disabled`,
+    subject:
+      event.tools.length === 0
+        ? `Connector ${name}: app templates changed and are disabled`
+        : `Connector ${name}: tools changed and are disabled`,
     text: [
-      `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
-      "a site admin reviews and re-approves them:",
-      ...shown,
-      ...(more > 0 ? [`  ... and ${more} more`] : []),
-      "",
+      ...toolPart,
+      ...templatePart,
+      ...invalidPart,
       `Site admins can review them at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
     ].join("\n"),
   };
@@ -101,8 +160,61 @@ export function skippedMessage(
   };
 }
 
+/** KOBE-433 re-review NEW-2: the refresh checks the tools but not the app templates. */
+export function templatesSkippedMessage(
+  publicUrl: string,
+  event: Pick<DriftEvent, "name" | "reason">,
+  to: string,
+): MailMessage {
+  const name = oneLine(event.name);
+  const why =
+    event.reason === "proxy_outdated"
+      ? "Kobe's MCP proxy is older than this server and cannot read app templates: upgrade it."
+      : `The server's app templates could not be read (${oneLine(event.reason ?? "unknown")}).`;
+  return {
+    to,
+    subject: `Connector ${name}: app templates are not checked for changes`,
+    text: [
+      `Kobe checks the tools of the ${name} connector but not its app templates (ui://).`,
+      "Only templates a site admin approved are shown; changes on the server are not noticed.",
+      "",
+      why,
+      "",
+      `Site admins can review it at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
+    ].join("\n"),
+  };
+}
+
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+
+/** The `invalid` reports of a drift event's `templates` field. */
+const invalidNotes = (value: unknown): InvalidTemplateNote[] => {
+  const list =
+    typeof value === "object" && value !== null ? (value as { invalid?: unknown }).invalid : [];
+  return Array.isArray(list)
+    ? list.flatMap((x: unknown) => {
+        const e = x as { uri?: unknown; reason?: unknown };
+        return typeof e?.uri === "string" && typeof e.reason === "string"
+          ? [{ uri: e.uri, reason: e.reason }]
+          : [];
+      })
+    : [];
+};
+
+/** The changed and added template URIs of a drift event's `templates` field. */
+const templateNames = (value: unknown): string[] =>
+  typeof value === "object" && value !== null
+    ? [
+        ...strings((value as Record<string, unknown>).changed),
+        ...strings((value as Record<string, unknown>).added),
+      ]
+    : [];
+
+const KINDS: Readonly<Record<string, DriftEvent["kind"]>> = {
+  "mcp.connector.refresh_skipped": "skipped",
+  "mcp.connector.templates_skipped": "templates_skipped",
+};
 
 async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
   const rows = await db.execute<{
@@ -111,7 +223,8 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
     target: Record<string, unknown>;
   }>(sql`
     SELECT seq, action, target FROM audit_log
-     WHERE action IN ('mcp.connector.drift', 'mcp.connector.refresh_skipped')
+     WHERE action IN ('mcp.connector.drift', 'mcp.connector.refresh_skipped',
+                      'mcp.connector.templates_skipped')
        AND at > now() - make_interval(hours => ${MAX_AGE_HOURS})
      ORDER BY seq`);
   const events: DriftEvent[] = [];
@@ -119,22 +232,27 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
     if (typeof target.connectorId !== "string" || typeof target.name !== "string") continue;
     events.push({
       seq: Number(seq),
-      kind: action === "mcp.connector.refresh_skipped" ? "skipped" : "drift",
+      kind: KINDS[action] ?? "drift",
+      ...(typeof target.reason === "string" ? { reason: target.reason } : {}),
       connectorId: target.connectorId,
       name: target.name,
       tools: [...strings(target.changed), ...strings(target.added)],
+      templates: templateNames(target.templates),
+      invalid: invalidNotes(target.templates),
     });
   }
   return events;
 }
 
-/** Still has tools awaiting re-approval (an approval or a removal ends the notice). */
+/** Still has tools or templates awaiting re-approval (an approval or a removal ends the notice). */
 async function stillDrifted(db: KobeDb, connectorId: string): Promise<boolean> {
   const [row] = await db
     .select({ snapshot: connectors.toolsSnapshot })
     .from(connectors)
     .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)));
-  return !!row && parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted");
+  if (!row) return false;
+  if (parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted")) return true;
+  return ((await driftedTemplates(db)).get(connectorId)?.length ?? 0) > 0;
 }
 
 /**
@@ -149,12 +267,23 @@ async function stillSkipped(db: KobeDb, event: DriftEvent): Promise<DriftEvent |
   return row?.skipped === "auth_required" ? { ...event, source: row.source } : undefined;
 }
 
-const stillCurrent = async (db: KobeDb, event: DriftEvent): Promise<DriftEvent | undefined> =>
-  event.kind === "skipped"
-    ? stillSkipped(db, event)
-    : (await stillDrifted(db, event.connectorId))
-      ? event
-      : undefined;
+/** Templates still not checked, for the same reason (a checked pass ends the notice). */
+async function stillTemplatesSkipped(
+  db: KobeDb,
+  event: DriftEvent,
+): Promise<DriftEvent | undefined> {
+  const [row] = await db
+    .select({ skipped: connectors.templatesSkipped })
+    .from(connectors)
+    .where(and(eq(connectors.id, event.connectorId), isNull(connectors.deletedAt)));
+  return row?.skipped !== null && row?.skipped === event.reason ? event : undefined;
+}
+
+const stillCurrent = async (db: KobeDb, event: DriftEvent): Promise<DriftEvent | undefined> => {
+  if (event.kind === "skipped") return stillSkipped(db, event);
+  if (event.kind === "templates_skipped") return stillTemplatesSkipped(db, event);
+  return (await stillDrifted(db, event.connectorId)) ? event : undefined;
+};
 
 /** Who hears about an event: a skip only concerns site admins, who can fix it. */
 const recipientsOf = async (db: KobeDb, event: DriftEvent) => {
@@ -225,7 +354,12 @@ export async function notifyDrift(
             await record(deps.db, event, recipient, false);
             continue;
           }
-          const message = event.kind === "skipped" ? skippedMessage : driftMessage;
+          const message =
+            event.kind === "skipped"
+              ? skippedMessage
+              : event.kind === "templates_skipped"
+                ? templatesSkippedMessage
+                : driftMessage;
           await deps.mailer.send(message(deps.publicUrl, event, recipient.email));
           sent += 1;
           await record(deps.db, event, recipient, true);

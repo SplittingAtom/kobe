@@ -128,3 +128,91 @@ describe("buildSnapshot", () => {
     ).toEqual({ ok: false, failure: "ambiguous_tool_names" });
   });
 });
+
+describe("MCP Apps template references (KOBE-433)", () => {
+  const withUi = (resourceUri: unknown) => ({ ...tool, _meta: { ui: { resourceUri } } });
+
+  it("pins the ui:// template a tool names, as part of its hash", () => {
+    const result = buildSnapshot("jira", [withUi("ui://jira/app")]);
+    expect(result.ok && result.tools[0]?.ui).toEqual({ resource_uri: "ui://jira/app" });
+    const other = buildSnapshot("jira", [withUi("ui://jira/other")]);
+    const plain = buildSnapshot("jira", [tool]);
+    const hashes = [result, other, plain].map((r) => (r.ok ? r.tools[0]?.sha256 : undefined));
+    expect(new Set(hashes).size).toBe(3);
+  });
+
+  it("keeps the hash of a tool without a template as before (no drift on upgrade)", () => {
+    const plain = buildSnapshot("jira", [tool]);
+    expect(plain.ok && plain.tools[0]?.sha256).toBe(toolHash(tool));
+    expect(plain.ok && plain.tools[0]?.ui).toBeUndefined();
+  });
+
+  it("ignores a template reference that is not a ui:// URI", () => {
+    for (const uri of ["https://x.example/app", 7, "ui://"]) {
+      const r = buildSnapshot("jira", [withUi(uri)]);
+      expect(r.ok && r.tools[0]?.ui, String(uri)).toBeUndefined();
+    }
+  });
+});
+
+describe("visibility (KOBE-435)", () => {
+  const withVisibility = (visibility: unknown) => ({ ...tool, _meta: { ui: { visibility } } });
+  const pinned = (v: unknown) => {
+    const r = buildSnapshot("jira", [withVisibility(v)]);
+    if (!r.ok) throw new Error("fixture");
+    return r.tools[0];
+  };
+
+  it("pins a visibility other than the default, normalized, as part of the hash", () => {
+    expect(pinned(["app"])?.ui).toEqual({ visibility: ["app"] });
+    expect(pinned(["model", "app", "app", "user"])?.ui).toBeUndefined();
+    expect(pinned(["model", "x"])?.ui).toEqual({ visibility: ["model"] });
+    expect(pinned([])?.ui).toEqual({ visibility: [] });
+    // Malformed (not an array): the model only, never apps (review L4).
+    expect(pinned("app")?.ui).toEqual({ visibility: ["model"] });
+    expect(pinned({ app: true })?.ui).toEqual({ visibility: ["model"] });
+    expect(pinned(["app"])?.sha256).not.toBe(pinned(["model"])?.sha256);
+    // Spelling out the default is no change.
+    expect(pinned(["app", "model"])?.sha256).toBe(toolHash(tool));
+  });
+});
+
+describe("schema complexity caps (KOBE-436 review HIGH-1)", () => {
+  const withSchema = (inputSchema: Record<string, unknown>) =>
+    buildSnapshot("jira", [{ ...tool, inputSchema }]);
+
+  it("pins ordinary schemas, including patterns a safe-regex check would refuse", () => {
+    expect(
+      withSchema({
+        type: "object",
+        properties: { q: { type: "string", pattern: "^(\\w+\\s?)*$" } },
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("refuses schemas too deep, too large, with too many patterns or refs, or a huge pattern", () => {
+    let deep: Record<string, unknown> = { type: "string" };
+    for (let i = 0; i < 40; i += 1) deep = { type: "object", properties: { x: deep } };
+    expect(withSchema(deep)).toEqual({ ok: false, failure: "invalid_tool" });
+    const wide = Object.fromEntries(
+      Array.from({ length: 3000 }, (_, i) => [`p${i}`, { type: "string" }]),
+    );
+    expect(withSchema({ type: "object", properties: wide })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    const patterned = Object.fromEntries(
+      Array.from({ length: 101 }, (_, i) => [`p${i}`, { type: "string", pattern: "a" }]),
+    );
+    expect(withSchema({ type: "object", properties: patterned })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    expect(withSchema({ type: "string", pattern: "a".repeat(2000) })).toEqual({
+      ok: false,
+      failure: "invalid_tool",
+    });
+    const refs = Array.from({ length: 201 }, () => ({ $ref: "#" }));
+    expect(withSchema({ anyOf: refs })).toEqual({ ok: false, failure: "invalid_tool" });
+  });
+});

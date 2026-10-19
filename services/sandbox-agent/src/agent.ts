@@ -1,5 +1,6 @@
 import {
   CAPABILITY_ARTIFACTS,
+  CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_FILES,
@@ -443,6 +444,8 @@ export class Agent {
       ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
+      // App cards (KOBE-440): appended to the session before the run, like the branch marker.
+      CAPABILITY_APP_CARDS,
       // Compaction (KOBE-213) summarizes through the gateway with the run's token: same condition.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
       // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.

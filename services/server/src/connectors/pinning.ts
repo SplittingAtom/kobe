@@ -1,7 +1,9 @@
-import { and, connectors, eq, isNull, sql, type KobeDb } from "@kobe/db";
+import { and, connectors, eq, isNull, sql, type KobeDb, type UiResourceFailure } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { buildSnapshot, type PinFailure } from "./pin.js";
 import type { ConnectorProbe, ProbeFailure } from "./probe.js";
+import { replacePinnedTemplates } from "./template-store.js";
+import { liveTemplates, pinTemplates } from "./templates.js";
 
 /**
  * Probes a registered connector through the MCP proxy and pins its tools (KOBE-101, D27). Pins are
@@ -9,12 +11,17 @@ import type { ConnectorProbe, ProbeFailure } from "./probe.js";
  * cleared them) and still has the probed URL, so a probe never overwrites reviewed pins and a
  * slow probe of an old URL cannot pin the wrong server's tools. Changing pins that exist is the
  * drift re-approval flow (later tickets).
+ *
+ * The `ui://` templates the tools name (MCP Apps, KOBE-433) are pinned in the same transaction,
+ * hashed by Kobe; a template that fails validation (size, type, encoding, a `contentHash` that
+ * does not match) fails the whole pin with its code, like a tool that cannot be pinned.
  */
 export type PinOutcome =
-  | { readonly ok: true; readonly tools: number }
+  | { readonly ok: true; readonly tools: number; readonly templates: number }
   | {
       readonly ok: false;
-      readonly failure: ProbeFailure | PinFailure | "already_pinned" | "changed";
+      readonly failure:
+        ProbeFailure | PinFailure | UiResourceFailure | "already_pinned" | "changed";
     };
 
 export async function pinConnector(
@@ -46,6 +53,8 @@ export async function pinConnector(
   if (!probed.ok) return probed;
   const snapshot = buildSnapshot(row.name, probed.tools);
   if (!snapshot.ok) return snapshot;
+  const templates = pinTemplates(liveTemplates(snapshot.tools, probed.uiResources ?? []));
+  if (!templates.ok) return { ok: false, failure: templates.failure };
 
   return db.transaction(async (tx): Promise<PinOutcome> => {
     const written = await tx
@@ -55,6 +64,9 @@ export async function pinConnector(
         toolsHash: snapshot.hash,
         ...(options.pinnedBy === undefined ? {} : { pinnedBy: options.pinnedBy }),
         refreshSkipped: null,
+        // Pinned with template references (KOBE-433): never a legacy snapshot.
+        pinVersion: 2,
+        templatesSkipped: probed.uiSkipped ?? null,
         updatedAt: sql`now()`,
       })
       .where(
@@ -67,6 +79,7 @@ export async function pinConnector(
       )
       .returning({ id: connectors.id });
     if (written.length === 0) return { ok: false, failure: "changed" };
+    await replacePinnedTemplates(tx, connectorId, templates.templates, options.pinnedBy);
     await recordAudit(tx, {
       action: "mcp.connector.pinned",
       target: {
@@ -74,8 +87,11 @@ export async function pinConnector(
         name: row.name,
         tools: snapshot.tools.length,
         hash: snapshot.hash,
+        ...(templates.templates.length === 0
+          ? {}
+          : { templates: templates.templates.map((t) => ({ uri: t.uri, sha256: t.sha256 })) }),
       },
     });
-    return { ok: true, tools: snapshot.tools.length };
+    return { ok: true, tools: snapshot.tools.length, templates: templates.templates.length };
   });
 }

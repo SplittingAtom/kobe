@@ -112,3 +112,99 @@ describe("approveTools", () => {
     expect(approvedHash(drifted())).toBe(approvedHash(snap(listed("a", "old"), listed("b"))));
   });
 });
+
+describe("tools that name an MCP Apps template (KOBE-433)", () => {
+  const withUi = (name: string, uri: string) => ({
+    ...listed(name),
+    _meta: { ui: { resourceUri: uri } },
+  });
+  const snapOf = (...tools: Record<string, unknown>[]): PinnedTool[] => {
+    const s = buildSnapshot("srv", tools);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("drifts a tool pointed at another template, and approval takes the new reference", () => {
+    const pinned = snapOf(withUi("open", "ui://srv/a"));
+    const r = applyDrift(pinned, snapOf(withUi("open", "ui://srv/b")));
+    expect(r.changed).toEqual(["open"]);
+    expect(byName(r.tools, "open")).toMatchObject({
+      status: "drifted",
+      ui: { resource_uri: "ui://srv/a" },
+      proposed: { ui: { resource_uri: "ui://srv/b" } },
+    });
+    const live = byName(r.tools, "open")?.proposed?.sha256 ?? "";
+    const approved = approveTools(r.tools, [{ name: "open", sha256: live }]);
+    expect(approved.ok && approved.tools[0]?.ui).toEqual({ resource_uri: "ui://srv/b" });
+  });
+
+  it("drops the reference when the approved definition no longer names a template", () => {
+    const r = applyDrift(snapOf(withUi("open", "ui://srv/a")), snapOf(listed("open")));
+    const live = byName(r.tools, "open")?.proposed?.sha256 ?? "";
+    const approved = approveTools(r.tools, [{ name: "open", sha256: live }]);
+    expect(approved.ok && approved.tools[0]).not.toHaveProperty("ui");
+  });
+});
+
+describe("tools pinned before KOBE-433 whose upstream names a template (review HIGH-1)", () => {
+  /** A G10 snapshot entry: no `ui`, hashed without it. */
+  const legacy = (): PinnedTool[] => snap(listed("open"));
+  const withUi = (description = "d") => {
+    const s = buildSnapshot("srv", [
+      { ...listed("open", description), _meta: { ui: { resourceUri: "ui://srv/app" } } },
+    ]);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("adopts the template reference silently, keeping the approved fields", () => {
+    const before = legacy();
+    const r = applyDrift(before, withUi(), { adoptLegacyUi: true });
+    expect(r).toMatchObject({ changed: [], added: [], removed: [] });
+    expect(r.tools[0]).toMatchObject({
+      status: "pinned",
+      ui: { resource_uri: "ui://srv/app" },
+      sha256: withUi()[0]?.sha256,
+    });
+    expect(r.tools[0]).not.toHaveProperty("proposed");
+    // The next pass is stable.
+    expect(applyDrift(r.tools, withUi())).toMatchObject({ changed: [], tools: r.tools });
+  });
+
+  it("still drifts when anything else changed too", () => {
+    const r = applyDrift(legacy(), withUi("sneaky"), { adoptLegacyUi: true });
+    expect(r.changed).toEqual(["open"]);
+  });
+
+  it("drifts a tool that starts naming a template after KOBE-433 (re-review NEW-1)", () => {
+    const r = applyDrift(legacy(), withUi());
+    expect(r.changed).toEqual(["open"]);
+    expect(r.tools[0]).toMatchObject({
+      status: "drifted",
+      proposed: { ui: { resource_uri: "ui://srv/app" } },
+    });
+    expect(r.tools[0]).not.toHaveProperty("ui");
+  });
+});
+
+describe("visibility changes drift (KOBE-435 ac-2)", () => {
+  const vis = (visibility: string[]) => {
+    const s = buildSnapshot("srv", [{ ...listed("t"), _meta: { ui: { visibility } } }]);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("drifts a tool whose visibility changed, and approval takes the new one", () => {
+    const r = applyDrift(vis(["model", "app"]), vis(["app"]));
+    expect(r.changed).toEqual(["t"]);
+    expect(r.tools[0]).toMatchObject({
+      status: "drifted",
+      proposed: { ui: { visibility: ["app"] } },
+    });
+    const approved = approveTools(r.tools, [
+      { name: "t", sha256: r.tools[0]?.proposed?.sha256 ?? "" },
+    ]);
+    expect(approved.ok && approved.tools[0]?.ui).toEqual({ visibility: ["app"] });
+    expect(applyDrift(vis(["app"]), vis(["model", "app"])).changed).toEqual(["t"]);
+  });
+});

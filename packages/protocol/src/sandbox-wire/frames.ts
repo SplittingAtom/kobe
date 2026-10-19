@@ -35,6 +35,7 @@ import {
   skillDraftSaveFrameSchema,
   skillDraftSaveResultFrameSchema,
 } from "./skill-draft-frames.js";
+import { APP_CARDS_PER_RUN_MAX, appCardEntrySchema } from "../app-cards.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
@@ -458,6 +459,12 @@ export const runStartFrameSchema = frame("run.start", {
    * `trace_spans`, and only when the server traces this run. Absent = record and send no spans.
    */
   trace: wireTraceContextSchema.optional(),
+  /**
+   * App cards (KOBE-440, app-cards.ts) the thread got since Pi's last entry, oldest first: only for
+   * agents with capability `app_cards`. With Pi stopped, the agent appends each one it does not
+   * have to the thread's session before the branch marker, so the model sees them in this run.
+   */
+  app_cards: z.array(appCardEntrySchema).max(APP_CARDS_PER_RUN_MAX).optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */

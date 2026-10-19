@@ -54,9 +54,18 @@ export interface PurgeCounts {
   readonly events: number;
   /** Object-store keys queued for deletion. */
   readonly blobs: number;
+  /** MCP Apps results (KOBE-438, MA10: counted in the audited purge). */
+  readonly appResults: number;
 }
 
-export const NO_PURGE: PurgeCounts = { threads: 0, entries: 0, runs: 0, events: 0, blobs: 0 };
+export const NO_PURGE: PurgeCounts = {
+  threads: 0,
+  entries: 0,
+  runs: 0,
+  events: 0,
+  blobs: 0,
+  appResults: 0,
+};
 
 export interface BatchLimits {
   /** Threads per batch. */
@@ -149,7 +158,12 @@ async function queueBlobs(tx: KobeTx, teamId: string, ids: readonly string[]): P
 
 /** What deleting the threads takes with it (for the audit event; counts only). */
 async function countOwned(tx: KobeTx, teamId: string, ids: readonly string[]) {
-  const res = await tx.execute<{ entries: string; runs: string; events: string }>(sql`
+  const res = await tx.execute<{
+    entries: string;
+    runs: string;
+    events: string;
+    app_results: string;
+  }>(sql`
     SELECT
       (SELECT count(*) FROM thread_entries e
         WHERE e.team_id = ${teamId} AND e.thread_id = ANY(${uuidArray(ids)})) AS entries,
@@ -158,9 +172,16 @@ async function countOwned(tx: KobeTx, teamId: string, ids: readonly string[]) {
       (SELECT count(*) FROM run_events v
          JOIN runs r ON r.team_id = v.team_id AND r.id = v.run_id
         WHERE v.team_id = ${teamId} AND r.team_id = ${teamId}
-          AND r.thread_id = ANY(${uuidArray(ids)})) AS events`);
+          AND r.thread_id = ANY(${uuidArray(ids)})) AS events,
+      (SELECT count(*) FROM thread_app_results a
+        WHERE a.team_id = ${teamId} AND a.thread_id = ANY(${uuidArray(ids)})) AS app_results`);
   const row = res.rows[0];
-  return { entries: num(row?.entries), runs: num(row?.runs), events: num(row?.events) };
+  return {
+    entries: num(row?.entries),
+    runs: num(row?.runs),
+    events: num(row?.events),
+    appResults: num(row?.app_results),
+  };
 }
 
 /**
@@ -293,6 +314,7 @@ function add(a: PurgeCounts, b: PurgeCounts): PurgeCounts {
     runs: a.runs + b.runs,
     events: a.events + b.events,
     blobs: a.blobs + b.blobs,
+    appResults: a.appResults + b.appResults,
   };
 }
 

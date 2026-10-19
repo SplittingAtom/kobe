@@ -17,21 +17,13 @@ default), **external** (operated by the site, not shipped by Kobe), **dev-only**
 
 ## Pending gate review
 
-Outside the allowed family and not decided yet; every gate review clears this list with
-Chris (`pnpm license:gate` fails while it is not empty):
-
-- protobuf 5.29.6 (3-Clause BSD License, exception in images/skill-scan/license-exceptions.json): BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341).
-- multidict 6.7.1 (Apache License 2.0, exception in images/skill-scan/license-exceptions.json): Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341).
-- regex 2026.4.4 (Apache-2.0 AND CNRI-Python, exception in images/skill-scan/license-exceptions.json): Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341).
-- tiktoken 0.12.0 (MIT License, exception in images/skill-scan/license-exceptions.json): MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341).
-- typing_extensions 4.15.0 (PSF-2.0, exception in images/skill-scan/license-exceptions.json): Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341).
-- aiohappyeyeballs 2.6.1 (Python-2.0, exception in images/skill-scan/license-exceptions.json): PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341).
+Nothing is pending: every component outside the allowed family has Chris's approval.
 
 ## Web and services: npm packages (pnpm workspace)
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-855 packages, 573 of them shipped in an image.
+861 packages, 573 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -77,6 +69,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @braintree/sanitize-url | 7.1.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@braintree/sanitize-url@7.1.2/LICENSE) |
 | @cacheable/memory | 2.2.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/memory@2.2.0/LICENSE) |
 | @cacheable/utils | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/utils@2.5.0/LICENSE) |
+| @cfworker/json-schema | 4.1.1 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/@cfworker/json-schema/v/4.1.1) |
 | @chevrotain/types | 11.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/@chevrotain/types@11.1.2/LICENSE.txt) |
 | @drizzle-team/brocli | 0.10.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@drizzle-team/brocli/v/0.10.2) |
 | @esbuild-kit/core-utils | 3.3.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@esbuild-kit/core-utils@3.3.2/LICENSE) |
@@ -189,6 +182,9 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @levischuck/tiny-cbor | 0.2.11 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@levischuck/tiny-cbor@0.2.11/LICENSE) |
 | @levischuck/tiny-cbor | 0.3.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@levischuck/tiny-cbor@0.3.6/LICENSE) |
 | @mermaid-js/parser | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@mermaid-js/parser@1.2.1/LICENSE) |
+| @modelcontextprotocol/client | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/client@2.3.1/LICENSE) |
+| @modelcontextprotocol/core | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/core@2.3.1/LICENSE) |
+| @modelcontextprotocol/ext-apps | 2.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/ext-apps@2.0.3/LICENSE) |
 | @next/env | 16.3.8 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/@next/env/v/16.3.8) |
 | @next/swc-darwin-arm64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
 | @next/swc-darwin-x64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
@@ -535,7 +531,6 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | detect-libc | 2.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/detect-libc@2.1.2/LICENSE) |
 | detect-node-es | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/detect-node-es@1.1.0/LICENSE) |
 | devlop | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/devlop@1.1.0/license) |
-| diff | 9.0.0 | BSD-3-Clause | linked, bundled | server | [license](https://unpkg.com/diff@9.0.0/LICENSE) |
 | dom-accessibility-api | 0.5.16 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/dom-accessibility-api@0.5.16/LICENSE.md) |
 | dompurify | 3.4.16 | (MPL-2.0 OR Apache-2.0) | linked, bundled | web | [license](https://unpkg.com/dompurify@3.4.16/LICENSE) |
 | drizzle-kit | 0.31.11 | MIT | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/drizzle-kit/v/0.31.11) |
@@ -569,6 +564,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | esutils | 2.0.3 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/esutils@2.0.3/LICENSE.BSD) |
 | events-universal | 1.0.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/events-universal@1.0.1/LICENSE) |
 | events | 3.3.0 | MIT | linked, bundled | server | [license](https://unpkg.com/events@3.3.0/LICENSE) |
+| eventsource-parser | 3.1.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eventsource-parser@3.1.1/LICENSE) |
+| eventsource | 3.0.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eventsource@3.0.7/LICENSE) |
 | expect-type | 1.4.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/expect-type@1.4.0/LICENSE) |
 | extend | 3.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/extend@3.0.2/LICENSE) |
 | fast-deep-equal | 3.1.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/fast-deep-equal@3.1.3/LICENSE) |
@@ -757,6 +754,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | pino-abstract-transport | 3.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-abstract-transport@3.0.0/LICENSE) |
 | pino-std-serializers | 7.1.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-std-serializers@7.1.0/LICENSE) |
 | pino | 10.4.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino@10.4.0/LICENSE) |
+| pkce-challenge | 5.0.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/pkce-challenge@5.0.1/LICENSE) |
 | points-on-curve | 0.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-curve@0.2.0/LICENSE) |
 | points-on-path | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-path@0.2.1/LICENSE) |
 | postcss | 8.5.23 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.23/LICENSE) |
@@ -1303,115 +1301,6 @@ Documented exceptions (`images/orbit-eval/license-exceptions.json`):
 - `tiktoken` 0.13.0 (MIT License): MIT, declared with the full license text in the License field instead of an SPDX id. Inspect AI dependency (KOBE-92). Approved by Chris on 2026-10-04.
 - `typing_extensions` 4.16.0 (PSF-2.0): Python Software Foundation license: permissive (BSD-style), not copyleft. Transitive dependency of pydantic/Inspect AI. Same exception as the sandbox image (KOBE-92). Approved by Chris on 2026-10-04.
 
-## External skill scanner image: Python packages
-
-What the same script finds in the optional external skill scanner image (`kobe-skill-scan`, KOBE-341): Cisco skill-scanner 2.2.1 (Apache-2.0) with the dependencies of its hashed lock exported without extras and without pcodedmp (`images/skill-scan/requirements.txt`, `scanner-requirements.txt`); its bundled CEL helper is the `skill-scan-cel-go` row. The image runs only when a Site admin turns the external scanner on, as a Job with no network. The committed report is `images/skill-scan/third-party-licenses.json`; CI `skill-scan-image` compares it with the built image.
-
-91 packages, 91 of them shipped in an image.
-
-| Component | Version | License (SPDX) | How used | Where | License text |
-| --- | --- | --- | --- | --- | --- |
-| aiohappyeyeballs | 2.6.1 | Python-2.0 (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiohappyeyeballs/2.6.1/) |
-| aiohttp | 3.14.3 | Apache-2.0 AND MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiohttp/3.14.3/) |
-| aiosignal | 1.4.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiosignal/1.4.0/) |
-| annotated-doc | 0.0.4 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/annotated-doc/0.0.4/) |
-| annotated-types | 0.7.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/annotated-types/0.7.0/) |
-| anthropic | 0.97.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/anthropic/0.97.0/) |
-| anyio | 4.14.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/anyio/4.14.2/) |
-| attrs | 26.1.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/attrs/26.1.0/) |
-| certifi | 2026.4.22 | MPL-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/certifi/2026.4.22/) |
-| cffi | 2.0.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/cffi/2.0.0/) |
-| charset-normalizer | 3.4.7 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/charset-normalizer/3.4.7/) |
-| cisco-ai-skill-scanner | 2.2.1 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/cisco-ai-skill-scanner/2.2.1/) |
-| click | 8.4.2 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/click/8.4.2/) |
-| colorclass | 2.2.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/colorclass/2.2.2/) |
-| confusable-homoglyphs | 3.3.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/confusable-homoglyphs/3.3.1/) |
-| cryptography | 50.0.0 | Apache-2.0 OR BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/cryptography/50.0.0/) |
-| distro | 1.9.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/distro/1.9.0/) |
-| docstring_parser | 0.18.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/docstring_parser/0.18.0/) |
-| easygui | 0.98.3 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/easygui/0.98.3/) |
-| fastapi | 0.136.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/fastapi/0.136.1/) |
-| fastuuid | 0.14.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/fastuuid/0.14.0/) |
-| filelock | 3.29.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/filelock/3.29.0/) |
-| flatbuffers | 25.12.19 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/flatbuffers/25.12.19/) |
-| frozenlist | 1.8.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/frozenlist/1.8.0/) |
-| fsspec | 2026.6.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/fsspec/2026.6.0/) |
-| h11 | 0.16.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/h11/0.16.0/) |
-| hf-xet | 1.4.3 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/hf-xet/1.4.3/) |
-| httpcore | 1.0.9 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/httpcore/1.0.9/) |
-| httptools | 0.7.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/httptools/0.7.1/) |
-| httpx | 0.28.1 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/httpx/0.28.1/) |
-| huggingface_hub | 1.12.2 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/huggingface_hub/1.12.2/) |
-| idna | 3.18 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/idna/3.18/) |
-| importlib_metadata | 8.5.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/importlib_metadata/8.5.0/) |
-| jinja2 | 3.1.6 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/jinja2/3.1.6/) |
-| jiter | 0.14.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/jiter/0.14.0/) |
-| jsonschema-specifications | 2025.9.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/jsonschema-specifications/2025.9.1/) |
-| jsonschema | 4.26.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/jsonschema/4.26.0/) |
-| linkify-it-py | 2.1.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/linkify-it-py/2.1.0/) |
-| litellm | 1.89.7 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/litellm/1.89.7/) |
-| magika | 1.0.2 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/magika/1.0.2/) |
-| markdown-it-py | 4.0.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/markdown-it-py/4.0.0/) |
-| markupsafe | 3.0.3 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/markupsafe/3.0.3/) |
-| mdit-py-plugins | 0.5.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/mdit-py-plugins/0.5.0/) |
-| mdurl | 0.1.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/mdurl/0.1.2/) |
-| msoffcrypto-tool | 6.0.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/msoffcrypto-tool/6.0.0/) |
-| multidict | 6.7.1 | Apache License 2.0 (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/multidict/6.7.1/) |
-| numpy | 2.4.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/numpy/2.4.4/) |
-| olefile | 0.47 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/olefile/0.47/) |
-| oletools | 0.60.2 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/oletools/0.60.2/) |
-| onnxruntime | 1.25.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/onnxruntime/1.25.1/) |
-| openai | 2.24.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/openai/2.24.0/) |
-| packaging | 26.2 | Apache-2.0 OR BSD-2-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/packaging/26.2/) |
-| pdfid | 1.1.3 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pdfid/1.1.3/) |
-| platformdirs | 4.9.6 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/platformdirs/4.9.6/) |
-| propcache | 0.4.1 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/propcache/0.4.1/) |
-| protobuf | 5.29.6 | 3-Clause BSD License (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/protobuf/5.29.6/) |
-| pycparser | 3.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pycparser/3.0/) |
-| pydantic_core | 2.41.5 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pydantic_core/2.41.5/) |
-| pydantic | 2.12.5 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pydantic/2.12.5/) |
-| pygments | 2.20.0 | BSD-2-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pygments/2.20.0/) |
-| pyjwt | 2.15.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pyjwt/2.15.1/) |
-| pyparsing | 3.3.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pyparsing/3.3.2/) |
-| python-dotenv | 1.2.2 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/python-dotenv/1.2.2/) |
-| python-frontmatter | 1.1.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/python-frontmatter/1.1.0/) |
-| python-multipart | 0.0.32 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/python-multipart/0.0.32/) |
-| pyyaml | 6.0.3 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/pyyaml/6.0.3/) |
-| referencing | 0.37.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/referencing/0.37.0/) |
-| regex | 2026.4.4 | Apache-2.0 AND CNRI-Python (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/regex/2026.4.4/) |
-| requests | 2.33.1 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/requests/2.33.1/) |
-| rich | 14.3.4 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/rich/14.3.4/) |
-| rpds-py | 0.30.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/rpds-py/0.30.0/) |
-| shellingham | 1.5.4 | ISC | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/shellingham/1.5.4/) |
-| sniffio | 1.3.1 | Apache-2.0 OR MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/sniffio/1.3.1/) |
-| starlette | 1.3.1 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/starlette/1.3.1/) |
-| tabulate | 0.10.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/tabulate/0.10.0/) |
-| textual | 8.2.8 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/textual/8.2.8/) |
-| tiktoken | 0.12.0 | MIT License (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/tiktoken/0.12.0/) |
-| tokenizers | 0.22.2 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/tokenizers/0.22.2/) |
-| tqdm | 4.67.3 | MPL-2.0 AND MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/tqdm/4.67.3/) |
-| typer | 0.23.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/typer/0.23.1/) |
-| typing_extensions | 4.15.0 | PSF-2.0 (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/typing_extensions/4.15.0/) |
-| typing-inspection | 0.4.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/typing-inspection/0.4.2/) |
-| uc-micro-py | 2.0.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/uc-micro-py/2.0.0/) |
-| urllib3 | 2.8.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/urllib3/2.8.0/) |
-| uvicorn | 0.46.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/uvicorn/0.46.0/) |
-| uvloop | 0.22.1 | Apache-2.0 OR MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/uvloop/0.22.1/) |
-| watchfiles | 1.1.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/watchfiles/1.1.1/) |
-| websockets | 16.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/websockets/16.0/) |
-| yara-x | 1.20.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/yara-x/1.20.0/) |
-| yarl | 1.23.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/yarl/1.23.0/) |
-| zipp | 3.23.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/zipp/3.23.1/) |
-
-Documented exceptions (`images/skill-scan/license-exceptions.json`):
-
-- `aiohappyeyeballs` 2.6.1 (Python-2.0): PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341). Pending gate review.
-- `multidict` 6.7.1 (Apache License 2.0): Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341). Pending gate review.
-- `protobuf` 5.29.6 (3-Clause BSD License): BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341). Pending gate review.
-- `regex` 2026.4.4 (Apache-2.0 AND CNRI-Python): Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341). Pending gate review.
-- `tiktoken` 0.12.0 (MIT License): MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341). Pending gate review.
-- `typing_extensions` 4.15.0 (PSF-2.0): Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341). Pending gate review.
-
 ## Container and base images
 
 Base images of Kobe's own images (every Dockerfile FROM) and what they bring along. The Debian packages are separate, unmodified programs that agents or the image invoke; Kobe does not link against them. Native libraries that Python wheels bundle are listed here too.
@@ -1419,8 +1308,7 @@ Base images of Kobe's own images (every Dockerfile FROM) and what they bring alo
 | Component | Version | License (SPDX) | How used | Where | License text | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | Node.js official image (`node`) | 24-slim (services, web); 22-trixie-slim, digest-pinned (sandbox build stages and the node binary in the sandbox) | MIT | bundled (base image; Node.js runs Kobe's services) | images web, server, mcp-proxy, egress-proxy, model-gateway, sandbox | [license](https://github.com/nodejs/node/blob/main/LICENSE) | Node.js is MIT; its LICENSE lists the licenses of the libraries it bundles. The slim images are Debian-based (see the Debian base system row). |
-| Python official image (`python`), CPython 3.12 | 3.12-slim-trixie, digest-pinned | Python-2.0 | bundled (base image; separate process) | images sandbox, orbit-eval, skill-scan | [license](https://docs.python.org/3.12/license.html) | The Python interpreter is a separate program that runs agents' code, the Orbit runner and the external skill scanner; the PSF license is permissive (BSD-style), not copyleft. Approved by Chris on 2026-10-17 (KOBE-375). |
-| Cisco skill-scanner's CEL helper (skill-scanner-cel-go-linux-amd64) | helper 2.2.1 (cel-go v0.32.0), inside the cisco-ai-skill-scanner wheel | Apache-2.0 AND BSD-3-Clause | bundled (separate process) | image skill-scan | [license](https://github.com/cisco-ai-defense/skill-scanner/releases/download/2.2.1/cel-go-dependencies.json) | A compiled Go program the scanner starts to evaluate its CEL policy rules: cel-go (Apache-2.0) with the Go standard library, antlr4-go, protobuf-go and golang.org/x (BSD-3-Clause), as the release's cel-go-dependencies.json lists. The Python report records only the wheel (review-341 L8). |
+| Python official image (`python`), CPython 3.12 | 3.12-slim-trixie, digest-pinned | Python-2.0 | bundled (base image; separate process) | images sandbox, orbit-eval | [license](https://docs.python.org/3.12/license.html) | The Python interpreter is a separate program that runs agents' code and the Orbit runner; the PSF license is permissive (BSD-style), not copyleft. Approved by Chris on 2026-10-17 (KOBE-375). |
 | Debian 13 (trixie) / 12 (bookworm) base system (libc6, bash, coreutils, perl-base, ...) | as in the pinned base images | GPL-2.0-or-later AND LGPL-2.1-or-later AND MIT AND BSD-3-Clause | bundled (base image; separate programs and system libraries) | every Kobe image | [license](https://www.debian.org/legal/licenses/) | The operating system of the base images, shipped unmodified; Kobe's programs run on it and use the C library through Node.js/Python, as every program on the system does. Per-package copyright files are in /usr/share/doc/<package>/copyright in each image. Approved by Chris on 2026-10-17 (KOBE-375). |
 | Sandbox tools from Debian: git, less, procps | git 1:2.47.3-0+deb13u1, less 668-1, procps 2:4.0.4-9 | GPL-2.0-only AND (GPL-3.0-or-later OR BSD-2-Clause) AND GPL-2.0-or-later | bundled (separate process) | sandbox image | [license](https://sources.debian.org/src/git/1:2.47.3-0+deb13u1/debian/copyright/) | Separate, unmodified programs that agents invoke from the shell; Kobe does not link against them, so GPL obligations stay with those programs (source from Debian). Approved by Chris on 2026-10-17 (KOBE-375). |
 | Sandbox tools from Debian: curl, jq, ripgrep, file, zip, unzip, libcap2-bin, ca-certificates | curl 8.14.1-2+deb13u7, jq 1.7.1-6+deb13u4, ripgrep 14.1.1-1+b4, file 1:5.46-5, zip 3.0-15+deb13u1, unzip 6.0-29+deb13u1, libcap2-bin 1:2.75-10+deb13u1+b3, ca-certificates 20250419 | curl AND MIT AND (MIT OR Unlicense) AND BSD-2-Clause AND Info-ZIP AND (BSD-3-Clause OR GPL-2.0-only) AND MPL-2.0 | bundled (separate process) | sandbox image | [license](https://www.debian.org/legal/licenses/) | Separate, unmodified programs (curl's and Info-ZIP's licenses are permissive, MIT-like); setcap from libcap2-bin is used at build time only. Approved by Chris on 2026-10-17 (KOBE-375). |

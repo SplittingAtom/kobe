@@ -132,6 +132,16 @@ async function stalledThreads(tx: KobeTx, teamId: string, stallMs: number) {
        AND NOT EXISTS (SELECT 1 FROM runs a
                         WHERE a.team_id = q.team_id AND a.thread_id = q.thread_id
                           AND (a.status IN ('running', 'waiting_approval')
+                               OR a.ended_at > now() - make_interval(secs => ${secs(stallMs)})))
+    UNION
+    -- App cards still waiting with no run left to end (KOBE-440 re-review LOW-R2: they wait out
+    -- Stop's abort hold, then the promotion inserts them).
+    SELECT DISTINCT w.thread_id FROM thread_app_results w
+      JOIN threads t ON t.team_id = w.team_id AND t.id = w.thread_id
+     WHERE w.team_id = ${teamId} AND w.queued_at IS NOT NULL AND t.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM runs a
+                        WHERE a.team_id = w.team_id AND a.thread_id = w.thread_id
+                          AND (a.status IN ('running', 'waiting_approval')
                                OR a.ended_at > now() - make_interval(secs => ${secs(stallMs)})))`);
   return res.rows.map((r) => ({ teamId, threadId: r.thread_id }));
 }

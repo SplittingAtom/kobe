@@ -1,4 +1,5 @@
 import type {
+  AppCardEntry,
   ApprovalMode,
   ApprovalToken,
   ErrorInfo,
@@ -105,6 +106,11 @@ export interface RunStartRequest {
   readonly project?: RunProjectContext;
   /** Effective MCP connectors (KOBE-111); dropped for agents without the `mcp` capability. */
   readonly mcp?: RunMcpContext;
+  /**
+   * App cards Pi may not have yet, ending at `parentEntryId` (KOBE-440). An agent without the
+   * `app_cards` capability gets none and starts below them instead.
+   */
+  readonly appCards?: readonly AppCardEntry[];
 }
 
 export interface RunSteerRequest {

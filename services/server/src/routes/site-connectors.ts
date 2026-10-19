@@ -22,6 +22,14 @@ import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential
 import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
 import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
+import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
+import {
+  approveConnectorTemplates,
+  approveTemplatesSchema,
+  connectorTemplateFrame,
+  connectorTemplateSource,
+  reviewConnectorTemplates,
+} from "../connectors/template-review.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
@@ -54,6 +62,10 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
   invalid_tool: "The server listed a tool Kobe cannot pin (invalid name, description or schema).",
   ambiguous_tool_names:
     "The server lists tools whose names collide once - . and _ are treated alike, so none was pinned.",
+  ui_resource_invalid:
+    "An app template (ui://) of the server is not one UTF-8 HTML document of type text/html;profile=mcp-app of at most 512 KiB, so nothing was pinned.",
+  ui_resource_hash_mismatch:
+    "An app template's declared contentHash does not match its bytes, so nothing was pinned.",
   already_pinned: "This connector already has pinned tools; changing them needs re-approval.",
   changed: "The connector changed while it was being probed. Probe it again.",
 };
@@ -65,7 +77,12 @@ const SITE_AUTH_REQUIRED =
 
 const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: string }) =>
   pin.ok
-    ? { ok: true as const, tools: pin.tools }
+    ? {
+        ok: true as const,
+        tools: pin.tools,
+        // MCP Apps templates pinned with the tools (KOBE-433), named only when there are any.
+        ...(pin.templates > 0 ? { templates: pin.templates } : {}),
+      }
     : {
         ok: false as const,
         failure: pin.failure,
@@ -74,6 +91,12 @@ const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: strin
             ? SITE_AUTH_REQUIRED
             : PIN_MESSAGES[pin.failure],
       };
+
+const TEMPLATE_APPROVAL_MESSAGES = {
+  stale: "That template changed again since you reviewed it. Review it again.",
+  not_pending: "That template is not waiting for approval.",
+  invalid: "That template cannot be pinned (size, type, encoding or hash). It cannot be approved.",
+} as const;
 
 const invalidFields =
   "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth, credentialSource is member or site (site needs api_key).";
@@ -237,6 +260,81 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
             tool: result.tool,
             message: "That tool is not waiting for approval.",
           },
+      409,
+    );
+  });
+
+  // MCP Apps templates (KOBE-434): approved vs live versions for the review, without the bytes.
+  app.get("/:id/templates", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const templates = id.success ? await reviewConnectorTemplates(db, id.data) : undefined;
+    return templates ? c.json({ templates }) : notFound(c);
+  });
+
+  // A template's bytes for the escaped diff and the stubbed preview: JSON only, never text/html,
+  // never cached, never sniffed or run as a page on Kobe's origin (spec MA4).
+  app.get("/:id/templates/source", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const uri = c.req.query("uri");
+    const source =
+      id.success && uri !== undefined ? await connectorTemplateSource(db, id.data, uri) : undefined;
+    c.header("Cache-Control", "no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", "default-src 'none'");
+    return source
+      ? c.json({ source })
+      : c.json({ code: "not_found", message: "That template is not pinned or pending." }, 404);
+  });
+
+  // The admin preview of a template's live or approved bytes (KOBE-434 review M2): text/html only
+  // with the app frame's header CSP (sandbox allow-scripts: an opaque origin even top-level, no
+  // network), only into a frame of Kobe's own page. Members never reach this route (site
+  // permission above); MA-5's member route serves only approved templates.
+  app.get("/:id/templates/frame", async (c) => {
+    // Only into a frame of Kobe's own page (review LOW-1).
+    if (!mayLoadAppFrame(c.req.raw.headers, deps.publicUrl)) {
+      return c.json(
+        { code: "forbidden_origin", message: "Only Kobe's own frames load this." },
+        403,
+      );
+    }
+    const id = idSchema.safeParse(c.req.param("id"));
+    const uri = c.req.query("uri");
+    const which = c.req.query("version");
+    const html =
+      id.success && uri !== undefined && (which === "live" || which === "approved")
+        ? await connectorTemplateFrame(db, id.data, uri, which)
+        : undefined;
+    if (html === undefined) {
+      return c.json({ code: "not_found", message: "That template version is not there." }, 404);
+    }
+    // The preview runs exactly the bytes the admin's source read showed (review LOW-2).
+    const document = appFrameDocument(html, c.req.query("sha256"));
+    if (document === "stale") {
+      return c.json(
+        { code: "stale", message: "The template changed. Show the source again." },
+        409,
+      );
+    }
+    return document;
+  });
+
+  // Approve templates, each with the pinned hash of the live version that was reviewed.
+  app.post("/:id/templates/approve", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const input = await parseBody(c, approveTemplatesSchema);
+    if (!input) {
+      return invalidRequest(
+        c,
+        "Send templates: a list of { uri, pinnedHash } of the reviewed templates.",
+      );
+    }
+    const result = await approveConnectorTemplates(db, id.data, input, c.get("user").id);
+    if (result.ok) return c.json({ approved: result.approved });
+    if (result.error === "not_found") return notFound(c);
+    return c.json(
+      { code: result.error, uri: result.uri, message: TEMPLATE_APPROVAL_MESSAGES[result.error] },
       409,
     );
   });

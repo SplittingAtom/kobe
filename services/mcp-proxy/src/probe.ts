@@ -1,8 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { apiKeyHeaders } from "./credentials.js";
+import { keyMatches } from "./internal-key.js";
 import type { UpstreamClient } from "./upstream.js";
 
 /**
@@ -11,6 +11,10 @@ import type { UpstreamClient } from "./upstream.js";
  * the sandboxes' calls use. Only the server's internal key may call it; sandboxes cannot, and the
  * answer goes to the server, which pins it, never to a sandbox. Without an `api_key` in the request
  * no credentials are attached, so connectors that need a grant answer `auth_required`.
+ *
+ * With `ui_resources: true` (KOBE-433) the answer also carries `ui_resources`: the `ui://`
+ * templates the live tools name, read in the same upstream session (see ui-resources.ts). The
+ * proxy derives the URIs from the tools it just listed, so the server needs one probe, not two.
  */
 export interface ProbeDeps {
   readonly internalKey: string;
@@ -26,14 +30,8 @@ const bodySchema = z.strictObject({
     .string()
     .regex(/^[\x21-\x7e]{1,2048}$/)
     .optional(),
+  ui_resources: z.literal(true).optional(),
 });
-
-function keyMatches(presented: string | undefined, expected: string): boolean {
-  if (presented === undefined) return false;
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
 
 export function probeRoutes(deps: ProbeDeps): Hono {
   const app = new Hono();
@@ -45,22 +43,28 @@ export function probeRoutes(deps: ProbeDeps): Hono {
     }),
     async (c) => {
       c.header("Cache-Control", "no-store");
-      if (
-        !keyMatches(
-          /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1],
-          deps.internalKey,
-        )
-      ) {
+      if (!keyMatches(c.req.header("authorization"), deps.internalKey)) {
         return c.json({ code: "unauthorized" }, 401);
       }
       const body = bodySchema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return c.json({ code: "invalid_request" }, 400);
-      const result = await deps.upstream.listTools({
-        url: body.data.url,
-        headers: body.data.api_key === undefined ? {} : apiKeyHeaders(body.data.api_key),
-        signal: AbortSignal.timeout(deps.timeoutMs),
-      });
-      if (result.ok) return c.json({ ok: true, tools: result.result.tools });
+      const result = await deps.upstream.listTools(
+        {
+          url: body.data.url,
+          headers: body.data.api_key === undefined ? {} : apiKeyHeaders(body.data.api_key),
+          signal: AbortSignal.timeout(deps.timeoutMs),
+        },
+        { uiResources: body.data.ui_resources === true },
+      );
+      if (result.ok) {
+        const { tools, ui_resources: uiResources, ui_resources_skipped: uiSkipped } = result.result;
+        return c.json({
+          ok: true,
+          tools,
+          ...(uiResources === undefined ? {} : { ui_resources: uiResources }),
+          ...(uiSkipped === undefined ? {} : { ui_resources_skipped: uiSkipped }),
+        });
+      }
       return c.json({ ok: false, failure: result.failure });
     },
   );

@@ -3,6 +3,7 @@
  * the active tab are remembered per thread in this browser (localStorage, CE6: transient state);
  * missing, blocked or garbled storage reads as no tabs. Every function returns a new value.
  */
+import { isAppTab } from "../apps/app-tabs";
 import { filePathOfTab, fileTabId } from "../files/preview";
 
 export interface ArtifactTabs {
@@ -47,7 +48,10 @@ export function closeTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
  * (KOBE-268) are not the list's: the file viewer drops one when its file is gone.
  */
 export function retainTabs(tabs: ArtifactTabs, existing: ReadonlySet<string>): ArtifactTabs {
-  const open = tabs.open.filter((id) => existing.has(id) || filePathOfTab(id) !== null);
+  // App tabs (KOBE-438) are not the list's either: they close with their card.
+  const open = tabs.open.filter(
+    (id) => existing.has(id) || filePathOfTab(id) !== null || isAppTab(id),
+  );
   if (open.length === tabs.open.length) return tabs;
   return normalise(open, tabs.active);
 }
@@ -106,9 +110,13 @@ export function readTabs(key: string): ArtifactTabs {
 
 /** Remembers a thread's tabs; no tabs forgets the thread. Blocked storage is ignored. */
 export function writeTabs(key: string, tabs: ArtifactTabs): void {
+  // An expanded app (KOBE-438) is transient: it is never remembered.
+  const open = tabs.open.filter((id) => !isAppTab(id));
+  const active =
+    tabs.active !== null && isAppTab(tabs.active) ? (open.at(-1) ?? null) : tabs.active;
   try {
-    if (tabs.open.length === 0) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify({ open: tabs.open, active: tabs.active }));
+    if (open.length === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify({ open, active }));
   } catch {
     // Storage blocked or full: the tabs last for this page only.
   }
