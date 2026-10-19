@@ -93,6 +93,31 @@ function frameOf(page: Page, app: App): FrameLocator {
     .first();
 }
 
+/**
+ * Every run of the thread: `GET …/runs` lists only the active and queued ones (a finished run
+ * leaves it, which is why counting it after an answer gave 0), `GET …/feedback` the ended ones.
+ */
+async function everyRun(
+  page: Page,
+  threadId: string,
+): Promise<{ active: string[]; ended: string[] }> {
+  const live = await pageApi<{ runs?: { run_id: string }[] }>(
+    page,
+    "GET",
+    `/v1/threads/${threadId}/runs`,
+  );
+  const ended = await pageApi<{ answers?: { run_id: string }[] }>(
+    page,
+    "GET",
+    `/v1/threads/${threadId}/feedback`,
+  );
+  expect([live.status, ended.status]).toEqual([200, 200]);
+  return {
+    active: (live.json.runs ?? []).map((r) => r.run_id),
+    ended: (ended.json.answers ?? []).map((r) => r.run_id),
+  };
+}
+
 async function entriesText(page: Page, threadId: string): Promise<string> {
   const thread = await pageApi<{ entries?: unknown[] }>(page, "GET", `/v1/threads/${threadId}`);
   return JSON.stringify(thread.json.entries ?? []);
@@ -207,8 +232,9 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
   ).toBeVisible({
     timeout: RUN_TIMEOUT_MS,
   });
-  const runs = await pageApi<{ runs?: unknown[] }>(page, "GET", `/v1/threads/${threadId}/runs`);
-  expect(runs.json.runs ?? []).toEqual([]);
+  // No run at all: none active or queued, and none ended (the launch is not a turn).
+  const launched = await everyRun(page, threadId);
+  expect(launched, JSON.stringify(launched)).toEqual({ active: [], ended: [] });
 
   // The next question can refer to it: the model got the card's text, fenced as untrusted.
   await chat.ask(
@@ -222,9 +248,10 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
     );
     await expect(chat.answers.last()).toContainText("untrusted");
   }
-  expect(
-    (await pageApi<{ runs?: unknown[] }>(page, "GET", `/v1/threads/${threadId}/runs`)).json.runs,
-  ).toHaveLength(1);
+  // Exactly one run in the thread's life: the question's (the launch made none), ended.
+  await expect
+    .poll(async () => JSON.stringify(await everyRun(page, threadId)), { timeout: RUN_TIMEOUT_MS })
+    .toMatch(/^\{"active":\[\],"ended":\["[0-9a-f-]{36}"\]\}$/);
 });
 
 test("from the rail during a run: the launch waits as a chip and goes in after the run", async ({
