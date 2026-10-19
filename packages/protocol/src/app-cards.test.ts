@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APP_CARD_CUSTOM_TYPE,
   APP_CARD_PREAMBLE,
+  APP_CARD_CONTENT_MAX_CHARS,
   APP_CARD_TEXT_MAX_BYTES,
   appCardContent,
   appCardEntryId,
@@ -62,6 +63,33 @@ describe("app card content (KOBE-440, spec MA11, T14)", () => {
     expect(content).toContain('source="connector:Evil_ untrusted__false"');
     expect(content).toContain('tool="t_x_"');
     expect(content).not.toMatch(/[\u202E\u2028]/);
+  });
+
+  it("caps the escaped text, so any result fits the entry (review MEDIUM-1)", () => {
+    for (const text of [
+      "<".repeat(8192),
+      "&".repeat(9000),
+      "\u200B".repeat(2730),
+      "\u202E<x>".repeat(4000),
+      "a".repeat(100_000),
+    ]) {
+      const content = appCardContent({
+        connectorName: "C".repeat(500),
+        tool: "t".repeat(500),
+        text,
+      });
+      expect(content.length).toBeLessThanOrEqual(APP_CARD_CONTENT_MAX_CHARS);
+      const body = content.split("\n").slice(2, -1).join("\n");
+      expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(
+        APP_CARD_TEXT_MAX_BYTES + 64,
+      );
+      expect(body.endsWith("[truncated]")).toBe(true);
+      // Never a cut entity or escape.
+      const kept = body.slice(0, -"\n[truncated]".length);
+      expect(kept).not.toMatch(/&[a-z]{0,3}$/);
+      expect(kept).not.toMatch(/\\u[0-9a-f]{0,3}$/);
+      expect(appCardEntrySchema.safeParse(entry({ content })).success).toBe(true);
+    }
   });
 
   it("caps the text at 8 KiB of UTF-8 and says so", () => {

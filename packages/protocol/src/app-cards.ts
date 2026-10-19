@@ -56,35 +56,48 @@ function attribute(value: string): string {
   return value.replace(/[^\p{L}\p{N} ._:/-]/gu, "_").slice(0, 120);
 }
 
-/** `text` cut to at most `max` bytes of UTF-8, on a character boundary. */
-function capUtf8(text: string, max: number): { readonly text: string; readonly cut: boolean } {
-  const encoder = new TextEncoder();
-  if (encoder.encode(text).length <= max) return { text, cut: false };
-  let bytes = 0;
-  let end = 0;
-  for (const ch of text) {
-    const size = encoder.encode(ch).length;
-    if (bytes + size > max) break;
-    bytes += size;
-    end += ch.length;
-  }
-  return { text: text.slice(0, end), cut: true };
+/** One character as the card writes it: `<`, `>`, `&` as entities, invisible ones as `\uXXXX`. */
+function escaped(ch: string): string {
+  const entity = ENTITIES[ch];
+  if (entity !== undefined) return entity;
+  INVISIBLE.lastIndex = 0;
+  return INVISIBLE.test(ch) ? unicodeEscape(ch) : ch;
 }
 
 /**
- * The card's `content`: the preamble, then the text result (at most 8 KiB, `<`, `>` and `&` as
- * entities, invisible characters escaped) in an `<app-card … untrusted="true">` fence that the
- * text cannot close.
+ * The escaped text, cut to at most `max` bytes of UTF-8 **after** escaping (review MEDIUM-1), so
+ * no result can make the card outgrow its entry; never inside an entity or an escape.
+ */
+function escapedCapped(
+  text: string,
+  max: number,
+): { readonly body: string; readonly cut: boolean } {
+  const encoder = new TextEncoder();
+  const out: string[] = [];
+  let bytes = 0;
+  for (const ch of text) {
+    const piece = escaped(ch);
+    const size = piece.length === 1 && ch.charCodeAt(0) < 0x80 ? 1 : encoder.encode(piece).length;
+    if (bytes + size > max) return { body: out.join(""), cut: true };
+    bytes += size;
+    out.push(piece);
+  }
+  return { body: out.join(""), cut: false };
+}
+
+/**
+ * The card's `content`: the preamble, then the text result (`<`, `>` and `&` as entities,
+ * invisible characters escaped, then cut to 8 KiB with a `[truncated]` marker) in an
+ * `<app-card … untrusted="true">` fence that the text cannot close. Always within
+ * {@link APP_CARD_CONTENT_MAX_CHARS}.
  */
 export function appCardContent(card: {
   readonly connectorName: string;
   readonly tool: string;
   readonly text: string;
 }): string {
-  const capped = capUtf8(card.text, APP_CARD_TEXT_MAX_BYTES);
-  const body =
-    capped.text.replace(/[<>&]/g, (c) => ENTITIES[c] ?? c).replace(INVISIBLE, unicodeEscape) +
-    (capped.cut ? `\n${TRUNCATED}` : "");
+  const capped = escapedCapped(card.text, APP_CARD_TEXT_MAX_BYTES);
+  const body = capped.body + (capped.cut ? `\n${TRUNCATED}` : "");
   return (
     `${APP_CARD_PREAMBLE}\n` +
     `<app-card source="connector:${attribute(card.connectorName)}" tool="${attribute(card.tool)}"` +
