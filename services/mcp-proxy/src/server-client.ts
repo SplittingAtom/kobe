@@ -44,7 +44,13 @@ const decisionSchema = z.discriminatedUnion("decision", [
       url: z.string(),
       auth_kind: z.enum(["oauth", "api_key", "none"]),
     }),
-    tool: z.object({ name: z.string(), pi_name: z.string() }),
+    // `model_visible`: a server with KOBE-435 checked MCP Apps visibility; absent from an older
+    // server, and then the proxy checks the upstream itself (review M3).
+    tool: z.object({
+      name: z.string(),
+      pi_name: z.string(),
+      model_visible: z.literal(true).optional(),
+    }),
     input_sha256: z.string().regex(/^[0-9a-f]{64}$/),
     reason: z.string(),
     approval_id: z.string().optional(),

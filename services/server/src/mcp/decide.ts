@@ -82,7 +82,16 @@ export type McpCallDecision =
   | {
       readonly decision: "allow";
       readonly connector: McpUpstreamTarget;
-      readonly tool: { readonly name: string; readonly pi_name: string };
+      /**
+       * `model_visible: true` (KOBE-435 review M3): this server checked the tool's MCP Apps
+       * visibility. A proxy that gets an allow without it (an older server mid-rollout) checks
+       * the upstream's own `tools/list` before calling.
+       */
+      readonly tool: {
+        readonly name: string;
+        readonly pi_name: string;
+        readonly model_visible: true;
+      };
       /** SHA-256 (hex) of `canonicalJson(input)`: the proxy forwards exactly these bytes. */
       readonly input_sha256: string;
       readonly reason: PolicyReasonCode;
@@ -486,7 +495,7 @@ export async function decideMcpCall(
         url: connector.url,
         auth_kind: connector.authKind,
       },
-      tool: { name: pinned.name, pi_name: pinned.pi_name },
+      tool: { name: pinned.name, pi_name: pinned.pi_name, model_visible: true },
       input_sha256: inputDigest(input.data),
       reason,
       ...(approvalId === undefined ? {} : { approval_id: approvalId }),

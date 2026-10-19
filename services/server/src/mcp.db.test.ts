@@ -226,7 +226,12 @@ describe("tools/call: the server decides every call", () => {
     const res = await callTool(w, { tool: "get_issue", tool_call_id: "toolu_1" });
     expect(res.json).toMatchObject({
       decision: "allow",
-      tool: { name: "get_issue", pi_name: piName(w.connector.name, "get_issue") },
+      tool: {
+        name: "get_issue",
+        pi_name: piName(w.connector.name, "get_issue"),
+        // KOBE-435 review M3: tells the proxy this server checked MCP Apps visibility.
+        model_visible: true,
+      },
       connector: { id: w.connector.id, url: "https://mcp.example.com/mcp", auth_kind: "none" },
       input_sha256: digest({ q: "x" }),
     });

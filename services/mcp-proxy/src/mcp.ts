@@ -61,6 +61,7 @@ const UPSTREAM_MESSAGES: Readonly<Record<UpstreamFailure, string>> = {
   http_error: "The connector's server answered with an error.",
   protocol_error: "The connector's server did not answer as an MCP server.",
   too_large: "The connector's answer was too large.",
+  not_offered: "This tool is not offered to agents (the connector offers it only to apps).",
 };
 
 function toMcpTool(tool: ExposedTool): Record<string, unknown> {
@@ -352,6 +353,9 @@ async function decideAndForward(
       headers: credentials.headers,
       tool: decision.tool.name,
       arguments: args,
+      // An allow from a server older than KOBE-435 did not check MCP Apps visibility: the proxy
+      // checks the upstream's own tools/list in the same session (review M3).
+      ...(decision.tool.model_visible === true ? {} : { checkModelVisible: true }),
       signal: AbortSignal.timeout(deps.limits.upstreamTimeoutMs),
     });
     if (result.ok) {

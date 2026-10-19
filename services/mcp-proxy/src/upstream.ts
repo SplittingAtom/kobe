@@ -4,6 +4,7 @@ import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { AddressPolicy } from "./address-policy.js";
 import type { UpstreamPolicy } from "./config.js";
 import { readUiResources } from "./ui-resources.js";
+import { upstreamModelVisible } from "./visibility.js";
 
 /**
  * The proxy's MCP client towards remote servers (D27: Streamable HTTP only, no stdio). One short
@@ -30,7 +31,9 @@ export type UpstreamFailure =
   | "auth_required"
   | "http_error"
   | "protocol_error"
-  | "too_large";
+  | "too_large"
+  /** The upstream offers this tool only to apps, or no longer lists it (KOBE-435 review M3). */
+  | "not_offered";
 
 export type UpstreamResult =
   | { readonly ok: true; readonly result: Record<string, unknown> }
@@ -55,6 +58,12 @@ export interface UpstreamBase {
 export interface UpstreamCall extends UpstreamBase {
   readonly tool: string;
   readonly arguments: Record<string, unknown>;
+  /**
+   * List the upstream's tools first, in the same session, and refuse (`not_offered`) unless it
+   * lists this tool as visible to the model. Set when the server's allow did not say it checked
+   * MCP Apps visibility (an older server pod, KOBE-435 review M3).
+   */
+  readonly checkModelVisible?: boolean;
 }
 
 export interface UpstreamClient {
@@ -383,10 +392,44 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     return { ok: true, result: response.result };
   }
 
+  type Next = (method: string, params: Record<string, unknown>) => Promise<UpstreamResult>;
+
+  /** Every `tools/list` page, or the failure. */
+  async function allTools(next: Next): Promise<UpstreamResult> {
+    const tools: unknown[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
+      const answer = await next("tools/list", cursor === undefined ? {} : { cursor });
+      if (!answer.ok) return answer;
+      const pageTools = answer.result.tools;
+      if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
+      tools.push(...pageTools);
+      const nextCursor = answer.result.nextCursor;
+      if (typeof nextCursor !== "string" || nextCursor === "")
+        return { ok: true, result: { tools } };
+      cursor = nextCursor;
+    }
+    return { ok: false, failure: "too_large" };
+  }
+
   const callTool = (call: UpstreamCall): Promise<UpstreamResult> =>
-    inSession(call, (url, session) =>
-      request(url, call, session, 2, "tools/call", { name: call.tool, arguments: call.arguments }),
-    );
+    inSession(call, async (url, session) => {
+      let id = 2;
+      const next: Next = (method, params) => request(url, call, session, id++, method, params);
+      if (call.checkModelVisible === true) {
+        const listed = await allTools(next);
+        if (!listed.ok) return listed;
+        const tools = listed.result.tools as unknown[];
+        const tool = tools.find(
+          (t) =>
+            typeof t === "object" && t !== null && (t as { name?: unknown }).name === call.tool,
+        );
+        if (tool === undefined || !upstreamModelVisible(tool)) {
+          return { ok: false, failure: "not_offered" };
+        }
+      }
+      return next("tools/call", { name: call.tool, arguments: call.arguments });
+    });
 
   /**
    * The template part of a probe (KOBE-433): `ui_resources`, or `ui_resources_skipped` with a
@@ -425,24 +468,11 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
   ): Promise<UpstreamResult> {
     return inSession(call, async (url, session) => {
       let id = 2;
-      const next = (method: string, params: Record<string, unknown>) =>
-        request(url, call, session, id++, method, params);
-      const tools: unknown[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
-        const answer = await next("tools/list", cursor === undefined ? {} : { cursor });
-        if (!answer.ok) return answer;
-        const pageTools = answer.result.tools;
-        if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
-        tools.push(...pageTools);
-        const nextCursor = answer.result.nextCursor;
-        if (typeof nextCursor !== "string" || nextCursor === "") {
-          if (!listOptions.uiResources) return { ok: true, result: { tools } };
-          return { ok: true, result: { tools, ...(await uiPart(tools, next, call.signal)) } };
-        }
-        cursor = nextCursor;
-      }
-      return { ok: false, failure: "too_large" };
+      const next: Next = (method, params) => request(url, call, session, id++, method, params);
+      const listed = await allTools(next);
+      if (!listed.ok || !listOptions.uiResources) return listed;
+      const tools = listed.result.tools as unknown[];
+      return { ok: true, result: { tools, ...(await uiPart(tools, next, call.signal)) } };
     });
   }
 

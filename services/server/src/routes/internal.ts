@@ -19,7 +19,8 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
  *
  * POST /internal/v1/mcp/connectors/{id}/tools → 200 `{connector, tools}` (pinned + exposed)
  * POST /internal/v1/mcp/connectors/{id}/calls  `{tool, arguments, thread_id?, tool_call_id?}`
- *      → 200 `{decision: "allow", connector, tool, input_sha256, reason, approval_id?}`
+ *      → 200 `{decision: "allow", connector, tool: {name, pi_name, model_visible: true},
+ *        input_sha256, reason, approval_id?}` (`model_visible`: KOBE-435, see install.md)
  *      | 200 `{decision: "deny", code, message, approval_failure?}`
  * 401 `unauthorized` (internal key), 401 `sandbox_unauthorized` (token, liveness, membership),
  * POST /internal/v1/mcp/connectors/{id}/grant → 200 `{kind: "api_key", api_key}` for the sandbox's own

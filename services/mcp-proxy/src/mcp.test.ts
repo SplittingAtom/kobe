@@ -110,7 +110,7 @@ class FakePolicyServer implements PolicyServer {
           url: this.upstreamUrl,
           auth_kind: "none",
         },
-        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}` },
+        tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}`, model_visible: true },
         input_sha256: sha(query.arguments),
         reason: "risk_read",
       },
@@ -420,6 +420,57 @@ describe("initialize, ping, tools/list", () => {
       expect(res.json?.result, method).toBeUndefined();
     }
     expect(fake.received).toEqual([]);
+  });
+});
+
+describe("an allow from a server older than KOBE-435 (review M3)", () => {
+  const oldAllow = (query: CallQuery): ServerAnswer<CallDecision> => ({
+    ok: true,
+    value: {
+      decision: "allow",
+      connector: {
+        id: query.connectorId,
+        name: "jira",
+        url: server.upstreamUrl,
+        auth_kind: "none",
+      },
+      tool: { name: query.tool, pi_name: `mcp__jira__${query.tool}` },
+      input_sha256: sha(query.arguments),
+      reason: "risk_read",
+    },
+  });
+
+  it("refuses an app-only tool by the upstream's own tools/list, before calling it", async () => {
+    server.next = oldAllow;
+    fake.options = {
+      tools: [{ name: "get_issue", inputSchema: {}, _meta: { ui: { visibility: ["app"] } } }],
+    };
+    const res = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(res.json?.result).toMatchObject({ isError: true });
+    expect(JSON.stringify(res.json)).toContain("only to apps");
+    expect(fake.calls()).toHaveLength(0);
+    expect(fake.received.map((r) => r.method)).toContain("tools/list");
+  });
+
+  it("calls a model-visible tool after checking, and refuses one the upstream no longer lists", async () => {
+    server.next = oldAllow;
+    fake.options = {
+      tools: [{ name: "get_issue", inputSchema: {}, _meta: { ui: { visibility: "app" } } }],
+    };
+    const ok = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(ok.json?.result?.isError).toBeUndefined();
+    expect(fake.calls()).toHaveLength(1);
+    fake.options = { tools: [] };
+    const gone = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(gone.json?.result).toMatchObject({ isError: true });
+    expect(fake.calls()).toHaveLength(1);
+  });
+
+  it("does not list first when the server says it checked visibility", async () => {
+    fake.options = { tools: [] };
+    await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(fake.received.map((r) => r.method)).not.toContain("tools/list");
+    expect(fake.calls()).toHaveLength(1);
   });
 });
 
