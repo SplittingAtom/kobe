@@ -79,8 +79,10 @@ describe("DbReservations through BudgetGate (KOBE-120)", () => {
     const first = await a.admit(call(user));
     const second = await b.admit(call(user));
     if (!first.ok || !second.ok) throw new Error("refused");
-    expect(await a.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
-    expect(await b.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
+    // Full of holds, not of spend: wait and retry (KOBE-443 review H1).
+    const held = { ok: false, status: 429, code: "too_many_calls_in_flight" };
+    expect(await a.admit(call(user))).toMatchObject(held);
+    expect(await b.admit(call(user))).toMatchObject(held);
     first.release?.(false);
     // The release is fire-and-forget: wait for it rather than a fixed delay (KOBE-253).
     await aIdle();
