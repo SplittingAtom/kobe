@@ -39,6 +39,19 @@ export function sameSchema(a, b) {
  * A branch with both hand-written and generated migrations is refused: drizzle-kit would diff the
  * hand-written schema change as well (and prompt, or drop and re-create). Land them separately.
  */
+/**
+ * The longest name of the one regenerated migration: drizzle-kit writes `<idx>_<name>.sql`, and a
+ * long branch's joined names pass the file-name limit (and drizzle-kit then writes the journal and
+ * snapshot but no SQL, without failing).
+ */
+export const MAX_GENERATED_NAME = 120;
+
+function generatedName(generated) {
+  const joined = generated.map((m) => m.name).join("_");
+  if (joined.length <= MAX_GENERATED_NAME) return joined;
+  return `${generated[0].name}_and_${generated.length - 1}_more`.slice(0, MAX_GENERATED_NAME);
+}
+
 export function regenerationSteps(migrations) {
   const handWritten = migrations.filter((m) => m.handWritten);
   const generated = migrations.filter((m) => !m.custom && !m.handWritten);
@@ -49,10 +62,7 @@ export function regenerationSteps(migrations) {
         "land them in separate PRs, or renumber by hand",
     );
   }
-  const steps =
-    generated.length > 0
-      ? [{ kind: "generate", name: generated.map((m) => m.name).join("_") }]
-      : [];
+  const steps = generated.length > 0 ? [{ kind: "generate", name: generatedName(generated) }] : [];
   for (const m of migrations.filter((x) => x.custom || x.handWritten)) {
     steps.push(
       m.handWritten

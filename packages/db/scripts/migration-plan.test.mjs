@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_GENERATED_NAME,
   handWrittenBaseProblem,
   isHandWritten,
   rechainSnapshot,
@@ -77,5 +78,16 @@ describe("db:rebase plan for hand-written migrations (KOBE-256)", () => {
       id: "new",
       prevId: "base-last",
     });
+  });
+});
+
+describe("db:rebase names the regenerated migration", () => {
+  it("joins a few names, and keeps a long list's name short enough for a file name", () => {
+    const gen = (name) => ({ name, sql: "", handWritten: false, custom: false });
+    expect(regenerationSteps([gen("a"), gen("b")])).toEqual([{ kind: "generate", name: "a_b" }]);
+    const many = Array.from({ length: 20 }, (_, i) => gen(`a_rather_long_migration_name_${i}`));
+    const [step] = regenerationSteps(many);
+    expect(step.name.length).toBeLessThanOrEqual(MAX_GENERATED_NAME);
+    expect(step.name).toBe("a_rather_long_migration_name_0_and_19_more");
   });
 });

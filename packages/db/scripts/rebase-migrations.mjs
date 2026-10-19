@@ -164,6 +164,9 @@ function regenerate(migrations) {
   for (const step of regenerationSteps(migrations)) {
     if (step.kind === "generate") {
       drizzleGenerate("--name", step.name);
+      // drizzle-kit can fail to write the SQL and still exit 0: check it is there.
+      if (!existsSync(join(DRIZZLE, `${newestTag()}.sql`)))
+        throw new Error(`drizzle-kit wrote no SQL for ${newestTag()}`);
       continue;
     }
     drizzleGenerate("--custom", "--name", step.name);
