@@ -17,13 +17,14 @@ import { useTeamAccess } from "../../console-context";
 import { ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 
+const few = (v: number | "few") => (v === "few" ? "Few" : String(v));
 const thumbs = (t: TeamThumbs) =>
   t.enough ? `${t.up} up, ${t.down} down` : "Not enough ratings yet";
 
 /**
  * This team's use of catalog skills (KOBE-339, SK26), for Team admins: runs, members and thumbs
- * per skill and version over the last 30 finished UTC days, refreshed nightly. Thumbs need five
- * raters other than you (as the agents' ratings); nothing names a member.
+ * per skill and version over the last closed 30-day period. Runs and members need three members
+ * other than you, thumbs five raters (as the agents' ratings); nothing names a member.
  */
 export function TeamUsageSection() {
   const teamId = useTeamAccess().team.id;
@@ -34,7 +35,8 @@ export function TeamUsageSection() {
         {(data) => (
           <>
             <p className="text-sm text-console-muted">
-              {windowLabel(data.window)}, refreshed nightly.
+              {windowLabel(data.window)}: the last closed 30-day period. Runs and members need three
+              members other than you, thumbs five raters; otherwise Few.
             </p>
             {data.skills.length === 0 ? (
               <EmptyState title="No catalog skill was used here in the window." />
@@ -53,19 +55,22 @@ export function TeamUsageSection() {
                   {data.skills.map((s) => (
                     <TableRow key={s.skillId}>
                       <TableRowHeader>{s.name}</TableRowHeader>
-                      <TableCell>{s.runs}</TableCell>
-                      <TableCell>{s.members}</TableCell>
+                      <TableCell>{few(s.runs)}</TableCell>
+                      <TableCell>{few(s.members)}</TableCell>
                       <TableCell>{thumbs(s.thumbs)}</TableCell>
                       <TableCell>
-                        {s.versions.map((v) => {
-                          const vt = s.versionThumbs?.find((x) => x.semver === v.semver);
-                          return (
-                            <div key={v.semver} className="text-sm">
-                              {v.semver || "Unknown"}: {v.runs} runs, {v.members} members
-                              {vt ? `, ${thumbs(vt.thumbs)}` : ""}
-                            </div>
-                          );
-                        })}
+                        {s.versions === null
+                          ? "Withheld: too few members"
+                          : s.versions.map((v) => {
+                              const vt = s.versionThumbs?.find((x) => x.semver === v.semver);
+                              return (
+                                <div key={v.semver} className="text-sm">
+                                  {v.semver || "Unknown"}: {few(v.runs)} runs, {few(v.members)}{" "}
+                                  members
+                                  {vt ? `, ${thumbs(vt.thumbs)}` : ""}
+                                </div>
+                              );
+                            })}
                       </TableCell>
                     </TableRow>
                   ))}

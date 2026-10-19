@@ -32,8 +32,9 @@ function Panel({ usage }: { readonly usage: SiteSkillUsage }) {
   return (
     <div className="mt-2">
       <p className="text-sm text-console-muted">
-        {windowLabel(usage.window)}, refreshed nightly. Numbers from fewer than three teams (other
-        than yours) or 20 ratings read Few; a column that would give one away is withheld.
+        {windowLabel(usage.window)}: the last closed 30-day period. Numbers from fewer than three
+        teams other than yours, one team dominating, or under 20 ratings read Few; a column that
+        would give one away is withheld.
       </p>
       <Table caption="Site-wide usage">
         <TableHead>
@@ -68,7 +69,7 @@ function Panel({ usage }: { readonly usage: SiteSkillUsage }) {
           <TableBody>
             {usage.versions.map((v, i) => (
               <TableRow key={v}>
-                <TableRowHeader>{v || "Unknown"}</TableRowHeader>
+                <TableRowHeader>{v === "other" ? "Other or unknown" : v}</TableRowHeader>
                 {COLUMNS.map(([k, , show]) => {
                   const col = usage.perVersion[k];
                   const cell = col?.[i];

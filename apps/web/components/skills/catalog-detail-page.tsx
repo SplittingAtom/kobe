@@ -143,8 +143,8 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
               </p>
               {d.usageWindow && (
                 <p className="text-sm text-console-muted">
-                  {windowLabel(d.usageWindow)}, refreshed nightly; fewer than three other teams or
-                  20 ratings read Few.
+                  {windowLabel(d.usageWindow)}: the last closed 30-day period; fewer than three
+                  other teams or 20 ratings read Few.
                 </p>
               )}
               <SkillUsagePanel skillId={d.id} />

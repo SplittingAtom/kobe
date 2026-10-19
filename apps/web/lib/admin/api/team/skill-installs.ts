@@ -227,14 +227,18 @@ export type TeamThumbs =
 export interface TeamSkillUsage {
   readonly skillId: string;
   readonly name: string;
-  readonly runs: number;
-  readonly members: number;
+  /** "few" under three members other than you (KOBE-339 review). */
+  readonly runs: number | "few";
+  readonly members: number | "few";
   readonly thumbs: TeamThumbs;
-  readonly versions: readonly {
-    readonly semver: string;
-    readonly runs: number;
-    readonly members: number;
-  }[];
+  /** Null: withheld (one version would read few). */
+  readonly versions:
+    | readonly {
+        readonly semver: string;
+        readonly runs: number | "few";
+        readonly members: number | "few";
+      }[]
+    | null;
   readonly versionThumbs:
     readonly { readonly semver: string; readonly thumbs: TeamThumbs }[] | null;
 }

@@ -62,8 +62,8 @@ describe("catalog cards", () => {
 
 const SITE = {
   totals: { teams_installed: 4, members: 5, runs: 23, thumbs_up: 0.95, opt_outs: "few" },
-  versions: ["2.0.0", "1.0.0"],
-  per_version: { teams_running: null, members: ["few", 5], runs: null, thumbs_up: null },
+  versions: ["2.0.0", "1.0.0", "other"],
+  per_version: { teams_running: null, members: ["few", 5, "few"], runs: null, thumbs_up: null },
   window: WINDOW,
   refreshed_at: "2026-10-19T00:05:00.000Z",
 };
@@ -79,6 +79,7 @@ describe("maintainers' and Site admins' usage panel", () => {
     expect(within(per).getAllByText("Withheld").length).toBeGreaterThan(0);
     expect(within(per).getByText("5")).toBeTruthy();
     expect(screen.getByText(/2026-09-19 to 2026-10-18/)).toBeTruthy();
+    expect(within(per).getByText("Other or unknown")).toBeTruthy();
   });
 
   it("shows nothing to others (403)", async () => {
@@ -108,10 +109,10 @@ describe("Team admins' usage section", () => {
             {
               skill_id: "s2",
               name: "other",
-              runs: 1,
-              members: 1,
+              runs: "few",
+              members: "few",
               thumbs: { enough: false },
-              versions: [],
+              versions: null,
               version_thumbs: null,
             },
           ],
@@ -128,5 +129,9 @@ describe("Team admins' usage section", () => {
     expect(within(table).getByText("usage-report")).toBeTruthy();
     expect(within(table).getByText("6 up, 1 down")).toBeTruthy();
     expect(within(table).getByText("Not enough ratings yet")).toBeTruthy();
+    // Under three members other than the viewer: Few, and no version table.
+    expect(within(table).getAllByText("Few")).toHaveLength(2);
+    expect(within(table).getByText("Withheld: too few members")).toBeTruthy();
+    expect(within(table).getByText(/1\.0\.0: 7 runs, 2 members/)).toBeTruthy();
   });
 });
