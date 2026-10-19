@@ -1072,6 +1072,41 @@
       "when": 1792420255509,
       "tag": "0152_reserve_full_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1792428832081,
+      "tag": "0153_connector_ui_resources_connector_ui_resources_approved_connector_ui_resources_approved_check_connector_pin_version_thread_app_results_thread_app_results_input_thread_app_results_queued",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1792428833042,
+      "tag": "0154_connector_ui_resources_approved_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1792428834035,
+      "tag": "0155_thread_app_results_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1792428835111,
+      "tag": "0156_thread_app_results_discard_unclaimed",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1792428836571,
+      "tag": "0157_thread_app_results_discard_hold_lock",
+      "breakpoints": true
     }
   ]
 }
