@@ -25,7 +25,10 @@ export class FakeSandboxAuth {
   readonly #tokens = new Map<string, SessionTokenClaims>();
   readonly dead = new Set<string>();
 
-  issue(claims: { sandboxId: string; teamId: string; userId: string }, ttlSeconds = 900): string {
+  issue(
+    claims: { sandboxId: string; teamId: string; userId: string; evalThreadId?: string },
+    ttlSeconds = 900,
+  ): string {
     const token = `tok-${randomUUID()}`;
     const now = Math.floor(Date.now() / 1000);
     this.#tokens.set(token, {
@@ -34,6 +37,7 @@ export class FakeSandboxAuth {
       sub: claims.sandboxId,
       team_id: claims.teamId,
       user_id: claims.userId,
+      ...(claims.evalThreadId ? { eval_thread: claims.evalThreadId } : {}),
       iat: now,
       exp: now + ttlSeconds,
       jti: randomUUID(),

@@ -34,6 +34,7 @@ import {
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
 import { mintRunToken } from "./run-token.js";
+import { slotOf } from "./slots.js";
 import {
   RUNTIME_TAMPERED,
   auditRuntimeTamperInTx,
@@ -467,12 +468,23 @@ export class CommandDelivery {
     }
     const claimed = await withTeam(ctx.db, teamId, async (tx) => {
       // Only the sandbox's current connection delivers (a replaced one may not have noticed yet).
-      const current = await tx.execute(sql`
+      const evalThreadId = this.#host.target.evalThreadId;
+      const current = await tx.execute(
+        evalThreadId === undefined
+          ? sql`
         SELECT 1 FROM sandbox_connections
          WHERE team_id = ${teamId} AND user_id = ${userId}
            AND connection_id = ${this.#host.id} AND closed_at IS NULL
-         FOR SHARE`);
+         FOR SHARE`
+          : sql`
+        SELECT 1 FROM sandbox_eval_connections
+         WHERE team_id = ${teamId} AND thread_id = ${evalThreadId} AND user_id = ${userId}
+           AND connection_id = ${this.#host.id} AND closed_at IS NULL
+         FOR SHARE`,
+      );
       if (current.rowCount !== 1) return "replaced" as const;
+      // An eval sandbox (KOBE-325) takes only its own thread's commands (the slot already says so).
+      if (evalThreadId !== undefined && row.threadId !== evalThreadId) return "gone" as const;
       if (starts) {
         // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
         // first is seen here (not active → refused); one that commits later finds the lease and
@@ -489,12 +501,16 @@ export class CommandDelivery {
           return "run_not_active" as const;
         }
         const leased = await tx.execute(sql`
-          INSERT INTO sandbox_run_leases (team_id, run_id, user_id, thread_id, sandbox_id)
-          VALUES (${teamId}, ${row.runId}, ${userId}, ${row.threadId}, ${this.#host.sandboxId})
+          INSERT INTO sandbox_run_leases (team_id, run_id, user_id, slot, thread_id, sandbox_id)
+          VALUES (${teamId}, ${row.runId}, ${userId}, ${slotOf(this.#host.target)}, ${row.threadId},
+                  ${this.#host.sandboxId})
           ON CONFLICT (team_id, run_id) DO UPDATE
             SET sandbox_id = EXCLUDED.sandbox_id, leased_at = now()
             WHERE sandbox_run_leases.user_id = EXCLUDED.user_id
-              AND sandbox_run_leases.thread_id = EXCLUDED.thread_id`);
+              AND sandbox_run_leases.thread_id = EXCLUDED.thread_id
+              AND sandbox_run_leases.slot = EXCLUDED.slot
+              AND (sandbox_run_leases.slot = ''
+                OR sandbox_run_leases.sandbox_id = EXCLUDED.sandbox_id)`);
         if (leased.rowCount !== 1) return "run_not_active" as const;
         if (!(await markDelivered(tx, teamId, row.id, this.#host.id))) return "gone" as const;
         // Only to agents that can hand it to Pi alone (KOBE-118); older ones keep the legacy path.
@@ -565,12 +581,15 @@ export class CommandDelivery {
     ) as ServerToSandboxFrame;
     // Project files: the user's workspace is brought in line with their memberships before the
     // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
-    if (row.kind === "run.start") {
+    // An eval sandbox (KOBE-325) has no member workspace and gets no memory: an eval sees only
+    // its case's fixtures, the same for every member.
+    const evalSandbox = this.#host.target.evalThreadId !== undefined;
+    if (row.kind === "run.start" && !evalSandbox) {
       const { teamId, userId } = this.#host.target;
       await this.#ctx.projectMounts?.reconcileUser(teamId, userId);
     }
     // Memory indexes only reach agents that know the field (KOBE-156).
-    if (row.kind === "run.start" && this.#host.hasCapability(CAPABILITY_MEMORY)) {
+    if (row.kind === "run.start" && !evalSandbox && this.#host.hasCapability(CAPABILITY_MEMORY)) {
       const memory = await this.#runMemory(row.threadId);
       if (memory) out = { ...out, memory } as ServerToSandboxFrame;
     }

@@ -19,6 +19,8 @@ export interface SandboxPrincipal {
   readonly sandboxId: string;
   readonly teamId: string;
   readonly userId: string;
+  /** A skill eval's ephemeral sandbox (KOBE-325): its eval thread (claim `e-<thread>`). */
+  readonly evalThreadId?: string;
 }
 
 export type IssuedSessionTokens = {
@@ -48,6 +50,7 @@ export function issueSessionTokens(
           sub: principal.sandboxId,
           team_id: principal.teamId,
           user_id: principal.userId,
+          ...(principal.evalThreadId ? { eval_thread: principal.evalThreadId } : {}),
           iat,
           exp,
           jti: randomBytes(18).toString("base64url"),

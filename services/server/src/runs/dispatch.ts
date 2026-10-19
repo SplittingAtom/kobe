@@ -141,7 +141,7 @@ export class RunDispatcher {
     const target = { teamId: run.teamId, userId: run.ownerUserId };
     const clear = () =>
       withAppendTx(db, run.teamId, (tx) => clearStop(tx, run.teamId, run.runId, mode));
-    if (!(await router.isConnected(target))) {
+    if (!(await router.isConnected(target, run.threadId))) {
       await clear();
       return undefined;
     }

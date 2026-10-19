@@ -20,31 +20,57 @@ const secs = (ms: number) => ms / 1000;
 /**
  * "This sandbox has no live connection": none at all, closed for longer than the grace period (a
  * reconnect within it resumes the run), or still open but not touched for `staleConnectionMs`
- * (its replica died with the socket).
+ * (its replica died with the socket). `c` is the member's connection row, `e` an eval sandbox's
+ * (KOBE-325): an eval lease is judged only by its own sandbox's row (its thread and claim UID), a
+ * member's only by the member's, so a closed eval sandbox never interrupts the member's runs.
  */
 function goneSql(tuning: WireTuning) {
-  return sql`(c.user_id IS NULL
-      OR (c.closed_at IS NOT NULL
-          AND c.closed_at < now() - make_interval(secs => ${secs(tuning.lostGraceMs)}))
-      OR (c.closed_at IS NULL
-          AND c.last_seen_at < now() - make_interval(secs => ${secs(tuning.staleConnectionMs)})))`;
+  const gone = (a: string) => {
+    const t = sql.raw(a);
+    return sql`(${t}.user_id IS NULL
+      OR (${t}.closed_at IS NOT NULL
+          AND ${t}.closed_at < now() - make_interval(secs => ${secs(tuning.lostGraceMs)}))
+      OR (${t}.closed_at IS NULL
+          AND ${t}.last_seen_at < now() - make_interval(secs => ${secs(tuning.staleConnectionMs)})))`;
+  };
+  return sql`(CASE WHEN l.slot = '' THEN ${gone("c")} ELSE ${gone("e")} END)`;
 }
 
-async function lostRuns(
-  tx: KobeTx,
-  teamId: string,
-  tuning: WireTuning,
-): Promise<{ runId: string; userId: string }[]> {
-  const res = await tx.execute<{ run_id: string; user_id: string }>(sql`
-    SELECT l.run_id, l.user_id
+const connectionJoins = sql`
+      LEFT JOIN sandbox_connections c
+        ON l.slot = '' AND c.team_id = l.team_id AND c.user_id = l.user_id
+      LEFT JOIN sandbox_eval_connections e
+        ON l.slot <> '' AND e.team_id = l.team_id AND e.thread_id = l.thread_id
+       AND e.sandbox_id = l.sandbox_id`;
+
+interface LostRun {
+  readonly runId: string;
+  readonly userId: string;
+  readonly threadId: string;
+  readonly slot: string;
+}
+
+async function lostRuns(tx: KobeTx, teamId: string, tuning: WireTuning): Promise<LostRun[]> {
+  const res = await tx.execute<{
+    run_id: string;
+    user_id: string;
+    thread_id: string;
+    slot: string;
+  }>(sql`
+    SELECT l.run_id, l.user_id, l.thread_id, l.slot
       FROM sandbox_run_leases l
       JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
-      LEFT JOIN sandbox_connections c ON c.team_id = l.team_id AND c.user_id = l.user_id
+      ${connectionJoins}
      WHERE l.team_id = ${teamId}
        AND r.status IN ('running', 'waiting_approval')
        AND l.leased_at < now() - make_interval(secs => ${secs(tuning.lostGraceMs)})
        AND ${goneSql(tuning)}`);
-  return res.rows.map((r) => ({ runId: r.run_id, userId: r.user_id }));
+  return res.rows.map((r) => ({
+    runId: r.run_id,
+    userId: r.user_id,
+    threadId: r.thread_id,
+    slot: r.slot,
+  }));
 }
 
 /**
@@ -56,16 +82,22 @@ async function lostRuns(
 async function interruptIfStillGone(
   db: KobeDb,
   teamId: string,
-  run: { runId: string; userId: string },
+  run: LostRun,
   tuning: WireTuning,
 ): Promise<{ ended: boolean; threadId?: string }> {
   return withAppendTx(db, teamId, async (tx) => {
-    await tx.execute(sql`
+    await tx.execute(
+      run.slot === ""
+        ? sql`
       SELECT 1 FROM sandbox_connections
-       WHERE team_id = ${teamId} AND user_id = ${run.userId} FOR UPDATE`);
+       WHERE team_id = ${teamId} AND user_id = ${run.userId} FOR UPDATE`
+        : sql`
+      SELECT 1 FROM sandbox_eval_connections
+       WHERE team_id = ${teamId} AND thread_id = ${run.threadId} FOR UPDATE`,
+    );
     const still = await tx.execute(sql`
       SELECT 1 FROM sandbox_run_leases l
-        LEFT JOIN sandbox_connections c ON c.team_id = l.team_id AND c.user_id = l.user_id
+        ${connectionJoins}
        WHERE l.team_id = ${teamId} AND l.run_id = ${run.runId} AND ${goneSql(tuning)}`);
     if (still.rowCount !== 1) return { ended: false };
     return endRunInTx(tx, teamId, run.runId, { status: "interrupted" }, "sandbox_gone");

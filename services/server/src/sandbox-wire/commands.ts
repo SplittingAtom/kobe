@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql, withTeam, type KobeDb, type KobeTx, type SandboxCommandKind } from "@kobe/db";
 import type { SandboxBus } from "./bus.js";
+import { slotOf, targetForThread } from "./slots.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
 
 /** A command row as the holder delivers it. */
@@ -35,17 +36,27 @@ export interface LiveConnection {
   readonly replicaId: string;
 }
 
-/** The live connection of a sandbox: open and touched within `staleMs`. */
+/**
+ * The live connection of a sandbox: open and touched within `staleMs`. An eval sandbox's is in
+ * `sandbox_eval_connections` (KOBE-325), never the member's row.
+ */
 export async function liveConnection(
   tx: KobeTx,
   target: SandboxTarget,
   staleMs: number,
 ): Promise<LiveConnection | undefined> {
-  const res = await tx.execute<{ connection_id: string; replica_id: string }>(sql`
+  const fresh = sql`closed_at IS NULL
+       AND last_seen_at > now() - make_interval(secs => ${staleMs / 1000})`;
+  const res = await tx.execute<{ connection_id: string; replica_id: string }>(
+    target.evalThreadId === undefined
+      ? sql`
     SELECT connection_id, replica_id FROM sandbox_connections
-     WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
-       AND closed_at IS NULL
-       AND last_seen_at > now() - make_interval(secs => ${staleMs / 1000})`);
+     WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND ${fresh}`
+      : sql`
+    SELECT connection_id, replica_id FROM sandbox_eval_connections
+     WHERE team_id = ${target.teamId} AND thread_id = ${target.evalThreadId}
+       AND user_id = ${target.userId} AND ${fresh}`,
+  );
   const row = res.rows[0];
   return row ? { connectionId: row.connection_id, replicaId: row.replica_id } : undefined;
 }
@@ -53,7 +64,10 @@ export async function liveConnection(
 /**
  * Requester side: stores the command and hints the holding replica in the same transaction (the
  * hint is delivered only on commit). Refuses a thread that is not the target user's: a command can
- * never be routed into another user's sandbox, whatever the caller passes.
+ * never be routed into another user's sandbox, whatever the caller passes. The sandbox follows the
+ * thread (KOBE-325): an eval thread's command goes to its own eval sandbox (`evalThread` in the
+ * answer: never woken, the eval runner starts it), any other thread's to the member's; a caller's
+ * `target.evalThreadId` naming another thread is refused.
  */
 export async function enqueueCommand(
   db: KobeDb,
@@ -68,29 +82,42 @@ export async function enqueueCommand(
     readonly timeoutMs: number;
     readonly staleMs: number;
   },
-): Promise<{ id: string; live?: LiveConnection } | { error: "thread_not_found" }> {
-  const { target } = input;
-  return withTeam(db, target.teamId, async (tx) => {
-    const owner = await tx.execute<{ owner_user_id: string }>(sql`
-      SELECT owner_user_id FROM threads WHERE team_id = ${target.teamId} AND id = ${input.threadId}`);
-    if (owner.rows[0]?.owner_user_id !== target.userId)
+): Promise<
+  { id: string; live?: LiveConnection; evalThread: boolean } | { error: "thread_not_found" }
+> {
+  const { teamId, userId } = input.target;
+  return withTeam(db, teamId, async (tx) => {
+    const owner = await tx.execute<{ owner_user_id: string; skill_eval: boolean }>(sql`
+      SELECT owner_user_id, skill_eval FROM threads
+       WHERE team_id = ${teamId} AND id = ${input.threadId}`);
+    const thread = owner.rows[0];
+    if (thread?.owner_user_id !== userId) return { error: "thread_not_found" as const };
+    if (
+      input.target.evalThreadId !== undefined &&
+      (!thread.skill_eval || input.target.evalThreadId !== input.threadId)
+    )
       return { error: "thread_not_found" as const };
+    const target = targetForThread(teamId, userId, input.threadId, thread.skill_eval);
     // Activity (D14, KOBE-25): a routed command keeps an awake sandbox awake. Takes the
     // `sandboxes` row lock: a hibernation deciding right now finishes first, and then this
-    // command finds no live connection below and wakes the sandbox.
-    await tx.execute(sql`
-      UPDATE sandboxes SET last_active_at = now()
-       WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND state = 'running'`);
+    // command finds no live connection below and wakes the sandbox. An eval sandbox never
+    // hibernates and is not the member's.
+    if (!thread.skill_eval)
+      await tx.execute(sql`
+        UPDATE sandboxes SET last_active_at = now()
+         WHERE team_id = ${teamId} AND user_id = ${userId} AND state = 'running'`);
     const id = randomUUID();
     await tx.execute(sql`
       INSERT INTO sandbox_commands
-        (team_id, id, user_id, thread_id, run_id, kind, frame, requester_replica, expires_at)
-      VALUES (${target.teamId}, ${id}, ${target.userId}, ${input.threadId}, ${input.runId ?? null},
-              ${input.kind}, ${JSON.stringify(input.frame)}::jsonb, ${input.requesterReplica},
-              now() + make_interval(secs => ${input.timeoutMs / 1000}))`);
+        (team_id, id, user_id, slot, thread_id, run_id, kind, frame, requester_replica, expires_at)
+      VALUES (${teamId}, ${id}, ${userId}, ${slotOf(target)}, ${input.threadId},
+              ${input.runId ?? null}, ${input.kind}, ${JSON.stringify(input.frame)}::jsonb,
+              ${input.requesterReplica}, now() + make_interval(secs => ${input.timeoutMs / 1000}))`);
     const live = await liveConnection(tx, target, input.staleMs);
     if (live) await bus.notifyInTx(tx, { kind: "cmd", id: live.connectionId });
-    return live ? { id, live } : { id };
+    return live
+      ? { id, live, evalThread: thread.skill_eval }
+      : { id, evalThread: thread.skill_eval };
   });
 }
 
@@ -145,8 +172,8 @@ export async function pendingCommands(
     requester_replica: string;
   }>(sql`
     SELECT id, kind, thread_id, run_id, frame, requester_replica FROM sandbox_commands
-     WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND status = 'pending'
-       AND expires_at > now()
+     WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
+       AND slot = ${slotOf(target)} AND status = 'pending' AND expires_at > now()
      ORDER BY created_at, id
      LIMIT ${limit}`);
   return res.rows.map((r) => ({
@@ -209,6 +236,7 @@ export async function orphanedDeliveries(
   const res = await tx.execute<{ id: string; kind: SandboxCommandKind; run_id: string | null }>(sql`
     SELECT id, kind, run_id FROM sandbox_commands
      WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
+       AND slot = ${slotOf(target)}
        AND status = 'delivered' AND connection_id <> ${currentConnectionId}`);
   return res.rows.map((r) => ({ id: r.id, kind: r.kind, runId: r.run_id }));
 }

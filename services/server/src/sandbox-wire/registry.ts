@@ -1,5 +1,6 @@
-import { sql, withTeam, type KobeDb } from "@kobe/db";
+import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { SandboxBus } from "./bus.js";
+import { sandboxKey } from "./slots.js";
 import type { SandboxTarget } from "./types.js";
 
 /** What the registry needs from a connection. */
@@ -16,7 +17,7 @@ export interface RegisteredConnection {
   workspaceMoved(): void;
 }
 
-const key = (t: SandboxTarget) => `${t.teamId}:${t.userId}`;
+const key = sandboxKey;
 
 interface Entry {
   readonly conn: RegisteredConnection;
@@ -65,6 +66,7 @@ export class ConnectionRegistry {
   async register(conn: RegisteredConnection): Promise<"registered" | "replaced" | "hibernating"> {
     const { teamId, userId } = conn.target;
     const outcome = await withTeam(this.#db, teamId, async (tx) => {
+      if (conn.target.evalThreadId !== undefined) return this.#registerEval(tx, conn);
       // A live sandbox the lifecycle has no row for yet (created before KOBE-25, or by an
       // operator tool) is adopted here, so the idle policy covers it from its first connection.
       await tx.execute(sql`
@@ -120,8 +122,8 @@ export class ConnectionRegistry {
       this.#bySandbox.delete(key(conn.target));
     await withTeam(this.#db, conn.target.teamId, (tx) =>
       tx.execute(sql`
-        UPDATE sandbox_connections SET closed_at = now()
-         WHERE team_id = ${conn.target.teamId} AND user_id = ${conn.target.userId}
+        UPDATE ${connectionTable(conn.target)} SET closed_at = now()
+         WHERE ${connectionKey(conn.target)}
            AND connection_id = ${conn.id} AND closed_at IS NULL`),
     );
   }
@@ -130,11 +132,46 @@ export class ConnectionRegistry {
   async touch(conn: RegisteredConnection): Promise<boolean> {
     const res = await withTeam(this.#db, conn.target.teamId, (tx) =>
       tx.execute(sql`
-        UPDATE sandbox_connections SET last_seen_at = now()
-         WHERE team_id = ${conn.target.teamId} AND user_id = ${conn.target.userId}
+        UPDATE ${connectionTable(conn.target)} SET last_seen_at = now()
+         WHERE ${connectionKey(conn.target)}
            AND connection_id = ${conn.id} AND closed_at IS NULL`),
     );
     return res.rowCount === 1;
+  }
+
+  /**
+   * An eval sandbox's connection (KOBE-325): its own row keyed by its thread, never the member's
+   * `sandbox_connections` row, and no `sandboxes` lifecycle (it never hibernates). A reconnect of
+   * the same sandbox replaces the old connection as for a member's.
+   */
+  async #registerEval(
+    tx: KobeTx,
+    conn: RegisteredConnection,
+  ): Promise<{ previous: string | undefined; generation: number }> {
+    const { teamId, userId, evalThreadId } = conn.target;
+    const inserted = await tx.execute(sql`
+      INSERT INTO sandbox_eval_connections
+        (team_id, thread_id, user_id, sandbox_id, connection_id, replica_id, connected_at, last_seen_at)
+      VALUES (${teamId}, ${evalThreadId}, ${userId}, ${conn.sandboxId}, ${conn.id},
+              ${this.#replicaId}, now(), now())
+      ON CONFLICT (team_id, thread_id) DO NOTHING`);
+    if (inserted.rowCount === 1) return { previous: undefined, generation: ++this.#generation };
+    const old = await tx.execute<{ connection_id: string; closed_at: Date | null }>(sql`
+      SELECT connection_id, closed_at FROM sandbox_eval_connections
+       WHERE team_id = ${teamId} AND thread_id = ${evalThreadId} FOR UPDATE`);
+    const gen = ++this.#generation;
+    await tx.execute(sql`
+      UPDATE sandbox_eval_connections
+         SET sandbox_id = ${conn.sandboxId}, connection_id = ${conn.id},
+             replica_id = ${this.#replicaId}, connected_at = now(), last_seen_at = now(),
+             closed_at = NULL
+       WHERE team_id = ${teamId} AND thread_id = ${evalThreadId} AND user_id = ${userId}`);
+    const row = old.rows[0];
+    if (row && row.closed_at === null && row.connection_id !== conn.id) {
+      await this.#bus.notifyInTx(tx, { kind: "kick", id: row.connection_id });
+      return { previous: row.connection_id, generation: gen };
+    }
+    return { previous: undefined, generation: gen };
   }
 
   /** Every connection of a user on this replica (deactivation). */
@@ -142,3 +179,15 @@ export class ConnectionRegistry {
     return this.all().filter((c) => c.target.userId === userId);
   }
 }
+
+/** The table holding a sandbox's connection row (KOBE-325: eval sandboxes have their own). */
+const connectionTable = (t: SandboxTarget) =>
+  t.evalThreadId === undefined
+    ? sql.raw("sandbox_connections")
+    : sql.raw("sandbox_eval_connections");
+
+/** That row's key. */
+const connectionKey = (t: SandboxTarget) =>
+  t.evalThreadId === undefined
+    ? sql`team_id = ${t.teamId} AND user_id = ${t.userId}`
+    : sql`team_id = ${t.teamId} AND thread_id = ${t.evalThreadId} AND user_id = ${t.userId}`;

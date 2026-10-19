@@ -213,9 +213,19 @@ export async function loadGatewayPrincipal(
           eq(orbitEvals.requestedBy, userId),
         ),
       );
+    // A skill eval's ephemeral sandbox (KOBE-325): live while it is connected as an eval thread's
+    // sandbox of this member and that execution runs; never judged by the member's own row.
+    const skillEval = await tx.execute(sql`
+      SELECT 1 FROM sandbox_eval_connections c
+        JOIN skill_eval_results x ON x.team_id = c.team_id AND x.thread_id = c.thread_id
+       WHERE c.team_id = ${teamId} AND c.sandbox_id = ${sandboxId} AND c.user_id = ${userId}
+         AND x.state IN ('starting', 'running', 'collecting')
+       LIMIT 1`);
     let sandbox: SandboxLiveness = "unrecorded";
     if (evalRun) {
       sandbox = evalRun.status === "running" ? "live" : "revoked";
+    } else if (skillEval.rows.length > 0) {
+      sandbox = "live";
     } else if (box?.sandboxId) {
       sandbox =
         box.sandboxId === sandboxId && box.state === "running" ? "live" : ("revoked" as const);

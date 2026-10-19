@@ -32,6 +32,12 @@ export const sessionTokenClaimsSchema = z.strictObject({
   sub: uuidSchema,
   team_id: uuidSchema,
   user_id: uuidSchema,
+  /**
+   * Set only for a skill eval's ephemeral sandbox (KOBE-325): its eval thread. The sandbox is the
+   * claim `e-<thread>`, not the member's own `u-<user>`; services that serve only the member's own
+   * sandbox (workspace sync) refuse it because `sub` is not that claim's UID.
+   */
+  eval_thread: uuidSchema.optional(),
   /** Seconds since the epoch. */
   iat: z.number().int().positive(),
   exp: z.number().int().positive(),
