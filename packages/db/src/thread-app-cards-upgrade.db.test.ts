@@ -58,7 +58,10 @@ async function asTeam<T>(fn: (c: pg.Client) => Promise<T>): Promise<T> {
 }
 
 function card(c: pg.Client, fields: Record<string, unknown>) {
-  const row = { entry_id: `ka-${randomUUID().replaceAll("-", "").slice(0, 24)}`, ...fields };
+  const row: Record<string, unknown> = {
+    entry_id: `ka-${randomUUID().replaceAll("-", "").slice(0, 24)}`,
+    ...fields,
+  };
   return c.query(
     `INSERT INTO thread_app_results
        (team_id, thread_id, entry_id, connector_id, tool, template_uri, template_sha256, app_id,
