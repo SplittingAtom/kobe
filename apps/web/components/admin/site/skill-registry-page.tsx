@@ -20,7 +20,7 @@ import {
 } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
-import { useMutation, useResource } from "../use-resource";
+import { useMutation, useResource, type Mutation } from "../use-resource";
 
 /**
  * Registry settings (KOBE-330, SK20, SK21): the Registry team that runs all site-side work (until
@@ -33,6 +33,8 @@ export const NOT_READY =
 
 export function SkillRegistryPage() {
   const { state, reload } = useResource(getRegistrySettings);
+  // Outside the form, which remounts on the saved settings: the notice outlives the reload.
+  const mutation = useMutation();
   return (
     <>
       <PageHeader title="Skill Registry" />
@@ -51,7 +53,13 @@ export function SkillRegistryPage() {
                 <CreateRegistryTeam onCreated={reload} />
               </>
             )}
-            <RegistryForm key={settings.updatedAt} settings={settings} onSaved={reload} />
+            <RegistryForm
+              key={settings.updatedAt}
+              settings={settings}
+              mutation={mutation}
+              onSaved={reload}
+            />
+            <MutationStatus error={mutation.error} notice={mutation.notice} />
           </>
         )}
       </ResourceView>
@@ -144,12 +152,13 @@ export function updateOf(saved: RegistrySettings, d: Draft): RegistrySettingsUpd
 
 function RegistryForm({
   settings,
+  mutation,
   onSaved,
 }: {
   readonly settings: RegistrySettings;
+  readonly mutation: Mutation;
   readonly onSaved: () => void;
 }) {
-  const mutation = useMutation();
   const [draft, setDraft] = useState<Draft>(() => draftOf(settings));
   const set = (k: string) => (e: { target: { value: string } }) =>
     setDraft((d) => ({ ...d, [k]: e.target.value }));
@@ -233,7 +242,6 @@ function RegistryForm({
       <Button type="submit" variant="primary" disabled={mutation.pending || !dirty}>
         Save
       </Button>
-      <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>
   );
 }
