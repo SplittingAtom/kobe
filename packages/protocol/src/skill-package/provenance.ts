@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { catalogSkillEvalScorecardSchema } from "../skill-evals/catalog-scorecard.js";
 import {
   packagePathProblem,
   SEMVER_PATTERN,
@@ -65,8 +66,6 @@ const originUrl = z
       u.href === s
     );
   }, "an https URL without credentials, query or fragment");
-const ratio = z.number().min(0).max(1);
-const count = z.number().int().min(0);
 
 export const SCAN_VERDICTS = ["pass", "caution", "block"] as const;
 
@@ -120,22 +119,11 @@ export const provenanceSchema = z.strictObject({
       .max(MAX_PROVENANCE_FINDINGS),
   }),
   /** Numbers only (SK19), from an eval of this exact package hash (SK20 freshness). */
-  scorecard: z
-    .strictObject({
-      packageHash: sha256,
-      mode: z.enum(["full", "with_only"]),
-      cases: count,
-      negativeTriggerCases: count,
-      passRateWith: ratio,
-      passRateWithout: ratio.optional(),
-      lift: z.number().min(-1).max(1).optional(),
-      /** Absent when the eval had nothing to measure them on (KOBE-324: null in the scorecard). */
-      triggerPrecision: ratio.optional(),
-      triggerRecall: ratio.optional(),
-      costUsd: z.number().min(0).max(1_000_000),
-      at: instant,
-    })
-    .optional(),
+  /**
+   * Numbers only (SK19), from a full eval of this exact package hash (SK20 freshness): the
+   * catalog scorecard, the one scorecard type that may leave the team (KOBE-324).
+   */
+  scorecard: catalogSkillEvalScorecardSchema.optional(),
   createdAt: instant,
 });
 

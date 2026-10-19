@@ -1,10 +1,21 @@
-import { isMap, isScalar, isSeq, LineCounter, parseDocument, visit, type Document } from "yaml";
+import {
+  isCollection,
+  isMap,
+  isScalar,
+  isSeq,
+  Lexer,
+  LineCounter,
+  parseDocument,
+  visit,
+  type Document,
+} from "yaml";
 import type { z } from "zod";
 import { EVALS_DIR } from "../skill-package/layout.js";
 import { MANIFEST_YAML_OPTIONS } from "../skill-package/manifest.js";
 import {
   EVAL_CASES_MAX_BYTES,
   EVAL_CASES_PATH,
+  EVAL_MAX_CASES,
   skillEvalSuiteSchema,
   type SkillEvalSuite,
 } from "./cases.js";
@@ -13,13 +24,24 @@ import {
  * Reading `evals/cases.yaml` with located, sentence-form issues (KOBE-324 ac-2): what Workbench
  * lint shows on every edit and what the eval runner refuses before it starts a sandbox. The same
  * function runs in the browser and on the server, so both say the same thing about a file.
+ *
+ * YAML limits: the size first (before parsing), then flow nesting on the lexer's tokens (an
+ * iterative scan, so no stack overflow in any engine), then the parsed tree: no alias, no explicit
+ * tag (`!foo`, `!!timestamp`: the core schema's plain types only), at most
+ * {@link EVAL_YAML_MAX_DEPTH} levels. Exported from `@kobe/protocol/skill-evals`, not the root
+ * entry, so services that never read a suite don't load the YAML parser.
  */
+
+/** Nesting a suite needs: root, cases, case, expect, matches, match is 6. */
+export const EVAL_YAML_MAX_DEPTH = 16;
 
 export const SKILL_EVAL_ISSUE_CODES = [
   "too_large",
   "yaml_syntax",
   "yaml_duplicate_key",
   "yaml_alias",
+  "yaml_tag",
+  "too_deep",
   "not_a_mapping",
   "missing",
   "invalid_type",
@@ -53,6 +75,8 @@ export type SkillEvalParseResult =
 export interface ParseSkillEvalSuiteOptions {
   /** Every path of the package; when given, each case's `files` must be among them. */
   readonly paths?: Iterable<string>;
+  /** The Site's case limit (`eval_limits.maxCases`, at most 25), so lint agrees with the runner. */
+  readonly maxCases?: number;
 }
 
 type Segment = string | number;
@@ -228,6 +252,67 @@ function duplicateIdIssues(doc: Document, lines: LineCounter, raw: unknown): Ski
   return out;
 }
 
+/** The lexer's document, flow-error-end and scalar markers. */
+const LEXER_MARKERS: ReadonlySet<string> = new Set(["\u0002", "\u0018", "\u001f"]);
+
+/** Offset of the first flow collection opened past the depth limit, or null (lexer tokens). */
+function flowTooDeep(text: string): number | null {
+  let depth = 0;
+  let offset = 0;
+  for (const token of new Lexer().lex(text)) {
+    if (token === "[" || token === "{") {
+      depth += 1;
+      if (depth > EVAL_YAML_MAX_DEPTH) return offset;
+    } else if (token === "]" || token === "}") depth -= 1;
+    // The lexer's own control tokens (document, scalar, flow-end markers) are not in the source.
+    if (!LEXER_MARKERS.has(token)) offset += token.length;
+  }
+  return null;
+}
+
+/** The first node deeper than the limit, walked without recursion. */
+function treeTooDeep(doc: Document): unknown {
+  const stack: [unknown, number][] = [[doc.contents, 1]];
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop() as [unknown, number];
+    if (!isCollection(node)) continue;
+    if (depth > EVAL_YAML_MAX_DEPTH) return node;
+    for (const item of node.items as unknown[]) {
+      const value = (item as { value?: unknown }).value;
+      stack.push([isMap(node) ? value : item, depth + 1]);
+    }
+  }
+  return null;
+}
+
+/** Aliases and explicit tags, located. */
+function nodeIssues(doc: Document, lines: LineCounter): SkillEvalIssue[] {
+  const out: SkillEvalIssue[] = [];
+  const at = (node: unknown) => lines.linePos(rangeStart(node));
+  visit(doc, {
+    Alias(_, node) {
+      out.push(
+        fileIssue(
+          "yaml_alias",
+          "YAML aliases (*name) are not allowed; write the value out.",
+          at(node),
+        ),
+      );
+    },
+    Node(_, node) {
+      if ((node as { tag?: string }).tag)
+        out.push(
+          fileIssue(
+            "yaml_tag",
+            "YAML tags (!name, !!type) are not allowed; write a plain value.",
+            at(node),
+          ),
+        );
+    },
+  });
+  return out;
+}
+
 const byPosition = (a: SkillEvalIssue, b: SkillEvalIssue) =>
   a.line - b.line || a.column - b.column || a.path.localeCompare(b.path);
 
@@ -247,6 +332,21 @@ export function parseSkillEvalSuite(
       ],
     };
   const lines = new LineCounter();
+  const deepAt = flowTooDeep(text);
+  if (deepAt !== null) {
+    lines.addNewLine(0);
+    for (let i = 0; i < text.length; i += 1) if (text[i] === "\n") lines.addNewLine(i + 1);
+    return {
+      ok: false,
+      issues: [
+        fileIssue(
+          "too_deep",
+          `Nested deeper than ${EVAL_YAML_MAX_DEPTH} levels.`,
+          lines.linePos(deepAt),
+        ),
+      ],
+    };
+  }
   const doc = parseDocument(text, { ...MANIFEST_YAML_OPTIONS, lineCounter: lines });
   if (doc.errors.length > 0)
     return {
@@ -265,19 +365,20 @@ export function parseSkillEvalSuite(
             ),
       ),
     };
-  const aliases: SkillEvalIssue[] = [];
-  visit(doc, {
-    Alias(_, node) {
-      aliases.push(
+  const refused = nodeIssues(doc, lines);
+  if (refused.length > 0) return { ok: false, issues: refused.sort(byPosition) };
+  const deep = treeTooDeep(doc);
+  if (deep !== null)
+    return {
+      ok: false,
+      issues: [
         fileIssue(
-          "yaml_alias",
-          "YAML aliases (*name) are not allowed; write the value out.",
-          lines.linePos(rangeStart(node)),
+          "too_deep",
+          `Nested deeper than ${EVAL_YAML_MAX_DEPTH} levels.`,
+          lines.linePos(rangeStart(deep)),
         ),
-      );
-    },
-  });
-  if (aliases.length > 0) return { ok: false, issues: aliases };
+      ],
+    };
   if (!isMap(doc.contents))
     return {
       ok: false,
@@ -300,6 +401,24 @@ export function parseSkillEvalSuite(
       ...duplicateIdIssues(doc, lines, raw),
     ];
     return { ok: false, issues: issues.sort(byPosition) };
+  }
+  const maxCases = options.maxCases ?? EVAL_MAX_CASES;
+  if (parsed.data.cases.length > maxCases) {
+    const { node } = locate(doc, ["cases"]);
+    const pos = lines.linePos(rangeStart(node));
+    return {
+      ok: false,
+      issues: [
+        {
+          file: EVAL_CASES_PATH,
+          code: "out_of_range",
+          path: "cases",
+          message: sentence("cases", `this Site runs at most ${maxCases} cases per suite.`),
+          line: pos.line,
+          column: pos.col,
+        },
+      ],
+    };
   }
   const missing = options.paths ? fixtureIssues(doc, lines, parsed.data, options.paths) : [];
   if (missing.length > 0) return { ok: false, issues: missing.sort(byPosition) };

@@ -1,0 +1,253 @@
+{
+  "format": 1,
+  "mode": "full",
+  "packageHash": "1f0c6b7e2a9d4c3b8e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819",
+  "runModel": {
+    "requested": "smart",
+    "used": "smart",
+    "fellBack": false
+  },
+  "judgeModel": {
+    "alias": "smart",
+    "source": "site"
+  },
+  "cases": 3,
+  "negativeTriggerCases": 1,
+  "baselineCases": 2,
+  "passRate": 0.1,
+  "baselinePassRate": 0,
+  "lift": 1,
+  "liftUnavailable": null,
+  "triggerPrecision": 1,
+  "triggerRecall": 1,
+  "triggerCounts": {
+    "observed": 2,
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "tn": 1
+  },
+  "with": {
+    "executions": 3,
+    "passed": 3,
+    "failed": 0,
+    "errored": 0,
+    "timedOut": 0,
+    "passRate": 1,
+    "meanCostUsd": 0.14,
+    "meanDurationMs": 31667,
+    "deniedToolCalls": 0
+  },
+  "without": {
+    "executions": 2,
+    "passed": 0,
+    "failed": 2,
+    "errored": 0,
+    "timedOut": 0,
+    "passRate": 0,
+    "meanCostUsd": 0.075,
+    "meanDurationMs": 35000,
+    "deniedToolCalls": 1
+  },
+  "costUsd": 0.82,
+  "judgeCostUsd": 0.01,
+  "details": [
+    {
+      "caseId": "q3-workbook",
+      "kind": "behaviour",
+      "expectsTrigger": true,
+      "with": {
+        "caseId": "q3-workbook",
+        "withSkill": true,
+        "status": "passed",
+        "attempts": 1,
+        "skillUses": 1,
+        "triggered": true,
+        "checks": [
+          {
+            "check": "triggers",
+            "passed": true
+          },
+          {
+            "check": "outputs",
+            "passed": true
+          },
+          {
+            "check": "judge",
+            "passed": true,
+            "detail": "Four region sheets, each with a totals row."
+          },
+          {
+            "check": "max_cost_usd",
+            "passed": true
+          },
+          {
+            "check": "max_turns",
+            "passed": true
+          }
+        ],
+        "model": "smart",
+        "costUsd": 0.3,
+        "totalCostUsd": 0.3,
+        "judgeCostUsd": 0.01,
+        "durationMs": 60000,
+        "totalDurationMs": 60000,
+        "turns": 6,
+        "deniedToolCalls": 0,
+        "threadId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e01",
+        "runId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e02"
+      },
+      "without": {
+        "caseId": "q3-workbook",
+        "withSkill": false,
+        "status": "failed",
+        "attempts": 2,
+        "skillUses": 0,
+        "triggered": null,
+        "checks": [
+          {
+            "check": "outputs",
+            "passed": false,
+            "reason": "not_produced",
+            "detail": "no file matches outputs/*.xlsx"
+          },
+          {
+            "check": "max_cost_usd",
+            "passed": true
+          },
+          {
+            "check": "max_turns",
+            "passed": true
+          }
+        ],
+        "model": "smart",
+        "costUsd": 0.1,
+        "totalCostUsd": 0.2,
+        "judgeCostUsd": 0,
+        "durationMs": 50000,
+        "totalDurationMs": 95000,
+        "turns": 5,
+        "deniedToolCalls": 0,
+        "threadId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e03",
+        "runId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e04"
+      }
+    },
+    {
+      "caseId": "totals-in-answer",
+      "kind": "behaviour",
+      "expectsTrigger": null,
+      "with": {
+        "caseId": "totals-in-answer",
+        "withSkill": true,
+        "status": "passed",
+        "attempts": 2,
+        "skillUses": 0,
+        "triggered": false,
+        "checks": [
+          {
+            "check": "contains",
+            "passed": true
+          },
+          {
+            "check": "matches",
+            "passed": true
+          },
+          {
+            "check": "max_turns",
+            "passed": true
+          },
+          {
+            "check": "no_denied_tools",
+            "passed": true
+          }
+        ],
+        "model": "smart",
+        "costUsd": 0.1,
+        "totalCostUsd": 0.25,
+        "judgeCostUsd": 0,
+        "durationMs": 30000,
+        "totalDurationMs": 55000,
+        "turns": 4,
+        "deniedToolCalls": 0,
+        "threadId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e05",
+        "runId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e06"
+      },
+      "without": {
+        "caseId": "totals-in-answer",
+        "withSkill": false,
+        "status": "failed",
+        "attempts": 1,
+        "skillUses": 0,
+        "triggered": null,
+        "checks": [
+          {
+            "check": "contains",
+            "passed": true
+          },
+          {
+            "check": "matches",
+            "passed": false,
+            "reason": "no_match",
+            "detail": "matches[1] found nothing"
+          },
+          {
+            "check": "max_turns",
+            "passed": true
+          },
+          {
+            "check": "no_denied_tools",
+            "passed": false,
+            "reason": "denied",
+            "detail": "1 denied tool call"
+          }
+        ],
+        "model": "smart",
+        "costUsd": 0.05,
+        "totalCostUsd": 0.05,
+        "judgeCostUsd": 0,
+        "durationMs": 20000,
+        "totalDurationMs": 20000,
+        "turns": 3,
+        "deniedToolCalls": 1,
+        "threadId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e07",
+        "runId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e08"
+      }
+    },
+    {
+      "caseId": "unrelated-question",
+      "kind": "negative_trigger",
+      "expectsTrigger": false,
+      "with": {
+        "caseId": "unrelated-question",
+        "withSkill": true,
+        "status": "passed",
+        "attempts": 1,
+        "skillUses": 0,
+        "triggered": false,
+        "checks": [
+          {
+            "check": "triggers",
+            "passed": true
+          },
+          {
+            "check": "max_turns",
+            "passed": true
+          }
+        ],
+        "model": "smart",
+        "costUsd": 0.02,
+        "totalCostUsd": 0.02,
+        "judgeCostUsd": 0,
+        "durationMs": 5000,
+        "totalDurationMs": 5000,
+        "turns": 1,
+        "deniedToolCalls": 0,
+        "threadId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e09",
+        "runId": "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e0a"
+      },
+      "without": null
+    }
+  ],
+  "startedAt": "2026-10-18T09:00:00.000Z",
+  "completedAt": "2026-10-18T09:04:10.000Z"
+}

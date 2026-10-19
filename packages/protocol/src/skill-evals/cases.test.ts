@@ -12,7 +12,7 @@ import {
   skillEvalSuiteCounts,
   skillEvalSuiteSchema,
   type SkillEvalIssue,
-} from "./index.js";
+} from "./entry.js";
 
 const DIR = join(import.meta.dirname, "fixtures", "cases");
 const read = (file: string) => readFileSync(join(DIR, file), "utf8");
@@ -143,6 +143,32 @@ describe("parsing evals/cases.yaml", () => {
     ]);
   });
 
+  it("refuses explicit tags of every kind, and deep nesting in any form", () => {
+    const codes = (text: string) => parseSkillEvalSuite(text).issues.map((i) => i.code);
+    const one = (value: string) =>
+      `cases:\n  - id: a\n    prompt: p\n    expect: { triggers: true, contains: ${value} }\n`;
+    expect(codes(one("!!timestamp 2020-01-01"))).toEqual(["yaml_tag"]);
+    expect(codes(one("!!str x"))).toEqual(["yaml_tag"]);
+    expect(codes(one("x"))).toEqual([]);
+    expect(codes(`a: ${"[".repeat(5000)}${"]".repeat(5000)}\n`)).toEqual(["too_deep"]);
+    const block = Array.from({ length: 20 }, (_, i) => `${" ".repeat(i)}k:`).join("\n");
+    expect(codes(`${block}\n${" ".repeat(20)}v: 1\n`)).toEqual(["too_deep"]);
+  });
+
+  it("takes the Site's lower case limit, so lint agrees with the runner", () => {
+    const result = parseSkillEvalSuite(read("valid-full.yaml"), { maxCases: 2 });
+    expect(shape(result.issues)).toEqual([{ code: "out_of_range", path: "cases", line: 5 }]);
+    expect(result.issues[0]?.message).toBe("cases: this Site runs at most 2 cases per suite.");
+  });
+
+  it("keeps contains exactly as written and refuses engine-specific regex syntax", () => {
+    const suite = (expect_: object) =>
+      skillEvalSuiteSchema.safeParse({ cases: [{ id: "a", prompt: "x", expect: expect_ }] });
+    expect(suite({ contains: "  Total  " }).data?.cases[0]?.expect.contains).toEqual(["  Total  "]);
+    expect(suite({ matches: "(?i:total)" }).success).toBe(false);
+    expect(suite({ matches: "(?<year>\\d{4})" }).success).toBe(true);
+  });
+
   it("refuses controls in prompts, bad flags, escaping and duplicate globs", () => {
     const suite = (expect_: object, extra: object = {}) =>
       skillEvalSuiteSchema.safeParse({
@@ -157,6 +183,8 @@ describe("parsing evals/cases.yaml", () => {
     expect(suite({ outputs: ["../x"] })).toBe(false);
     expect(suite({ outputs: ["out/*.png", "out/*.png"] })).toBe(false);
     expect(suite({ outputs: ["skills/x/*"] })).toBe(false);
+    expect(suite({ outputs: [".kobe/*"] })).toBe(false);
+    expect(suite({ outputs: ["*"] })).toBe(true);
     expect(suite({ contains: "" })).toBe(false);
     expect(suite({ triggers: true, max_cost_usd: 0 })).toBe(false);
     expect(suite({ triggers: true, max_cost_usd: 50 })).toBe(true);
@@ -186,7 +214,8 @@ describe("case kinds and the executions a run makes", () => {
     ).toBe("positive_trigger");
     expect(skillEvalSuiteCounts(suite)).toEqual({
       cases: 3,
-      positiveTriggerCases: 1,
+      positiveTriggerCases: 0,
+      casesExpectingTrigger: 1,
       negativeTriggerCases: 1,
       behaviourCases: 2,
       baselineCases: 2,

@@ -95,8 +95,22 @@ export const skillEvalRunSchema = z
     startedAt: timestampSchema,
     finishedAt: timestampSchema.nullable(),
   })
-  .refine((r) => r.progress.done <= r.progress.total, "done ≤ total")
-  .refine((r) => r.status !== "completed" || r.scorecard !== null, "completed has a scorecard");
+  .superRefine((r, ctx) => {
+    const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+    if (r.progress.done > r.progress.total) fail("done ≤ total");
+    // Only a completed run has a scorecard: a cancelled or budget-stopped one is no evidence.
+    if ((r.status === "completed") !== (r.scorecard !== null))
+      fail("a scorecard exactly when completed");
+    const stopped = r.status === "failed" || r.status === "budget_stopped";
+    if (stopped !== (r.failure !== null)) fail("a failure exactly when failed or budget-stopped");
+    const card = r.scorecard;
+    if (!card) return;
+    if (card.packageHash !== r.packageHash) fail("the scorecard is of the run's package");
+    if (card.mode !== r.mode) fail("the scorecard is of the run's mode");
+    const executions = card.details.reduce((n, d) => n + (d.without ? 2 : 1), 0);
+    if (r.progress.total !== executions || r.progress.done !== executions)
+      fail("progress counts the scorecard's executions");
+  });
 export type SkillEvalRun = z.infer<typeof skillEvalRunSchema>;
 
 export const skillEvalProgressPayloadSchema = z.strictObject({
@@ -155,10 +169,3 @@ export const teamEvalCapSchema = z
   ])
   .nullable();
 export type TeamEvalCap = z.infer<typeof teamEvalCapSchema>;
-
-/** What the judge returns for one rubric (SK17, KOBE-326). The reason is team content. */
-export const skillEvalJudgeVerdictSchema = z.strictObject({
-  passed: z.boolean(),
-  reason: z.string().min(1).max(1000),
-});
-export type SkillEvalJudgeVerdict = z.infer<typeof skillEvalJudgeVerdictSchema>;

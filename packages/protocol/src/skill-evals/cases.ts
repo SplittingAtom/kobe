@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { globSchema } from "../glob.js";
 import { EVALS_DIR, packagePathProblem } from "../skill-package/layout.js";
+import { isReservedWorkspacePath } from "./outputs.js";
 
 /**
  * `evals/cases.yaml` (KOBE-324, spec SK15): a skill's eval suite. It lives in the package, never
@@ -15,6 +16,9 @@ import { EVALS_DIR, packagePathProblem } from "../skill-package/layout.js";
  * would pass a case silently). A new expectation therefore needs a new contract, and a format that
  * older Kobe must refuse a new `apiVersion`. `apiVersion` may be left out (skills written for
  * other tools have none); it then means v1.
+ *
+ * Nothing in it grants anything: no key pre-approves a tool, widens egress or adds a connector.
+ * Eval runs use auto mode, where every call that would ask is denied and recorded (SK16).
  */
 
 export const SKILL_EVALS_API_VERSION = "kobe.dev/skill-evals/v1";
@@ -50,19 +54,18 @@ export const EVAL_ANSWER_CHECK_MAX_CHARS = 64 * 1024;
 export const EVAL_MATCH_TIMEOUT_MS = 100;
 /** A model alias as the model catalog writes it (`@kobe/db` MODEL_ALIAS_PATTERN). */
 export const EVAL_MODEL_ALIAS_PATTERN = /^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$/;
-/**
- * Roots of `/workspace` an eval may not write fixtures to or count as outputs: skill folders and
- * hidden (dot) folders, where Kobe and Pi keep their own state.
- */
-const RESERVED_WORKSPACE_ROOT = /^(skills(\/|$)|\.)/;
+/** ES2025 modifier groups (`(?i:…)`): browsers that lint may not know them, so they are refused. */
+const MODIFIER_GROUP = /\(\?[a-z]*-?[a-z]*:/;
 /** Text an author writes: no C0 controls but tab, newline and carriage return, no DEL. */
 // eslint-disable-next-line no-control-regex
 const TEXT = /^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]*$/u;
 
-const text = (max: number, what: string) =>
-  z
-    .string({ error: what })
-    .trim()
+/** Author text, trimmed (prompts and rubrics). */
+const text = (max: number, what: string) => untrimmedText(max, what, true);
+
+/** Author text; `contains` keeps its spaces, so it is never trimmed. */
+const untrimmedText = (max: number, what: string, trim = false) =>
+  (trim ? z.string({ error: what }).trim() : z.string({ error: what }))
     .min(1, { error: what })
     .max(max, { error: what })
     .regex(TEXT, { error: `${what} No control characters.` });
@@ -101,6 +104,7 @@ function isPlainObject(v: unknown): boolean {
 
 /** Why `pattern` with `flags` is not a regular expression the runner can compile, or null. */
 export function evalMatchProblem(pattern: string, flags = ""): string | null {
+  if (MODIFIER_GROUP.test(pattern)) return "modifier groups such as (?i:…) are not supported";
   try {
     new RegExp(pattern, `u${flags}`);
     return null;
@@ -139,14 +143,18 @@ const matchSchema = z.preprocess(
     }),
 );
 
-/** An output glob: Kobe's glob grammar, relative to `/workspace` (`outputs/*.xlsx`). */
+/**
+ * An output glob: Kobe's glob grammar, relative to `/workspace` (`outputs/*.xlsx`). A glob that
+ * names a reserved path literally is refused here; wildcards never reach one either, because the
+ * runner matches globs only against produced files outside them (`checkEvalOutputs`).
+ */
 const outputGlob = globSchema.superRefine((g, ctx) => {
   const segments = g.split("/");
   if (
     g.startsWith("/") ||
     g.includes("\\") ||
     segments.some((s) => s === ".." || s === "." || s === "") ||
-    RESERVED_WORKSPACE_ROOT.test(g)
+    isReservedWorkspacePath(g)
   )
     ctx.addIssue({
       code: "custom",
@@ -168,7 +176,7 @@ const fixturePath = z
           "case files come from evals/fixtures/: write fixtures/<name>, such as fixtures/sales.csv.",
         params: { kobe: "invalid_value" },
       });
-    else if (RESERVED_WORKSPACE_ROOT.test(below))
+    else if (isReservedWorkspacePath(below))
       ctx.addIssue({
         code: "custom",
         message: "a fixture can't land in skills/ or a hidden folder of /workspace.",
@@ -187,17 +195,23 @@ export const EVAL_BEHAVIOUR_CHECKS = ["outputs", "contains", "matches", "judge"]
 export const skillEvalExpectSchema = z
   .strictObject(
     {
-      /** Whether the skill was read (KOBE-297 detection). Checked with the skill only. */
+      /**
+       * Whether the skill was read: derived from the run's recorded skill uses (KOBE-297
+       * `runs.skills_used`), never from what the model says. Checked with the skill only.
+       */
       triggers: z.boolean({ error: "true or false." }).optional(),
-      /** Every glob matches at least one file the run produced under `/workspace`. */
+      /** Every glob matches a file the run produced under `/workspace` (`checkEvalOutputs`). */
       outputs: uniqueList(
         outputGlob,
         EVAL_MAX_OUTPUTS,
         `1 to ${EVAL_MAX_OUTPUTS} globs.`,
       ).optional(),
-      /** Every text appears in the final answer (case-sensitive). */
+      /** Every text appears in the final answer (case-sensitive, exactly as written). */
       contains: listOf(
-        text(EVAL_CONTAINS_MAX_CHARS, `text of 1 to ${EVAL_CONTAINS_MAX_CHARS} characters.`),
+        untrimmedText(
+          EVAL_CONTAINS_MAX_CHARS,
+          `text of 1 to ${EVAL_CONTAINS_MAX_CHARS} characters.`,
+        ),
         EVAL_MAX_CONTAINS,
         `a text or a list of 1 to ${EVAL_MAX_CONTAINS} texts.`,
       ).optional(),
@@ -212,7 +226,7 @@ export const skillEvalExpectSchema = z
         EVAL_RUBRIC_MAX_CHARS,
         `a rubric of 1 to ${EVAL_RUBRIC_MAX_CHARS} characters.`,
       ).optional(),
-      /** The run's model spend for this case at most (judge spend not included). */
+      /** The final attempt's model spend at most (`costUsd`; judge spend not included). */
       max_cost_usd: z
         .number({ error: `a number of dollars above 0 and at most ${EVAL_MAX_COST_USD_MAX}.` })
         .gt(0, { error: `a number of dollars above 0 and at most ${EVAL_MAX_COST_USD_MAX}.` })
@@ -220,14 +234,20 @@ export const skillEvalExpectSchema = z
           error: `a number of dollars above 0 and at most ${EVAL_MAX_COST_USD_MAX}.`,
         })
         .optional(),
-      /** Model turns at most; the runner ends the case's run there. */
+      /**
+       * Model turns (model calls of the run) at most. The runner stops a run that wants a turn
+       * past it, and the check then fails (`over_limit`); a run that ends on that turn passes.
+       */
       max_turns: z
         .number({ error: `a whole number from 1 to ${EVAL_MAX_TURNS_MAX}.` })
         .int({ error: `a whole number from 1 to ${EVAL_MAX_TURNS_MAX}.` })
         .min(1, { error: `a whole number from 1 to ${EVAL_MAX_TURNS_MAX}.` })
         .max(EVAL_MAX_TURNS_MAX, { error: `a whole number from 1 to ${EVAL_MAX_TURNS_MAX}.` })
         .default(EVAL_MAX_TURNS_DEFAULT),
-      /** The run never hit a policy denial (in auto mode, anything that would ask is denied). */
+      /**
+       * The run had no `policy.denied` event (in auto mode, anything that would ask is denied).
+       * Egress refusals inside a tool (`egress.blocked`) are not tool denials.
+       */
       no_denied_tools: z.boolean({ error: "true or false." }).optional(),
     },
     { error: "a mapping of expectations." },

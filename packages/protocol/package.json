@@ -17,6 +17,10 @@
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
     },
+    "./skill-evals": {
+      "types": "./dist/skill-evals/entry.d.ts",
+      "default": "./dist/skill-evals/entry.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"

@@ -7,7 +7,6 @@ import {
   SKILL_EVAL_DEFAULT_LIMITS,
   SKILL_EVAL_USAGE_KINDS,
   skillEvalCompletedPayloadSchema,
-  skillEvalJudgeVerdictSchema,
   skillEvalLimitsSchema,
   skillEvalProgressPayloadSchema,
   skillEvalRunSchema,
@@ -15,7 +14,7 @@ import {
   skillEvalSubjectSchema,
   startSkillEvalBodySchema,
   teamEvalCapSchema,
-} from "./index.js";
+} from "./entry.js";
 
 const ID = "0b6d3a52-4c1e-4f7a-9d2b-1a2b3c4d5e01";
 const HASH = "a".repeat(64);
@@ -121,6 +120,41 @@ describe("eval run API shapes", () => {
     ).toBe(true);
   });
 
+  it("ties a completed run to its scorecard: same package, mode and executions", () => {
+    const card = JSON.parse(
+      readFileSync(join(import.meta.dirname, "fixtures/scorecard/valid-full.json"), "utf8"),
+    ) as { packageHash: string };
+    const done = {
+      id: ID,
+      subject: { kind: "draft", draftId: ID, rev: 1 },
+      packageHash: card.packageHash,
+      mode: "full",
+      status: "completed",
+      progress: { done: 5, total: 5 },
+      scorecard: card,
+      failure: null,
+      startedBy: ID,
+      startedAt: "2026-10-18T09:00:00.000Z",
+      finishedAt: "2026-10-18T09:04:10.000Z",
+    };
+    const ok = (patch: object) => skillEvalRunSchema.safeParse({ ...done, ...patch }).success;
+    expect(ok({})).toBe(true);
+    expect(ok({ packageHash: HASH })).toBe(false);
+    expect(ok({ mode: "with_only" })).toBe(false);
+    expect(ok({ progress: { done: 4, total: 4 } })).toBe(false);
+    expect(ok({ scorecard: null })).toBe(false);
+    expect(
+      ok({ status: "budget_stopped", failure: { code: "budget_exhausted", message: "Spent." } }),
+    ).toBe(false);
+    expect(
+      ok({
+        status: "budget_stopped",
+        scorecard: null,
+        failure: { code: "budget_exhausted", message: "Spent." },
+      }),
+    ).toBe(true);
+  });
+
   it("streams progress and completion as numbers and ids only", () => {
     expect(
       skillEvalProgressPayloadSchema.safeParse({
@@ -169,14 +203,5 @@ describe("eval run API shapes", () => {
     expect(teamEvalCapSchema.safeParse({ usd: 50, tokens: 1 }).success).toBe(false);
     expect(teamEvalCapSchema.safeParse(null).success).toBe(true);
     expect(SKILL_EVAL_USAGE_KINDS).toEqual(["eval", "eval_judge"]);
-  });
-
-  it("takes a judge verdict with a short reason", () => {
-    expect(skillEvalJudgeVerdictSchema.safeParse({ passed: true, reason: "ok" }).success).toBe(
-      true,
-    );
-    expect(
-      skillEvalJudgeVerdictSchema.safeParse({ passed: true, reason: "x".repeat(1001) }).success,
-    ).toBe(false);
   });
 });
