@@ -16,8 +16,11 @@ import { isSameSiteFrameRequest } from "../artifacts/serve.js";
 export const APP_FRAME_CSP =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
   "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; " +
-  "connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; " +
-  "base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+  "connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; " +
+  "object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; " +
+  // CSP3 (KOBE-437 review MEDIUM-2): `connect-src` does not govern WebRTC; browsers that know
+  // this directive refuse peer connections. Chromium ignores it today (WEBRTC_GUARD below).
+  "webrtc 'block'";
 
 export const APP_FRAME_HEADERS: Readonly<Record<string, string>> = {
   "content-type": "text/html; charset=utf-8",
@@ -40,12 +43,39 @@ export function mayLoadAppFrame(headers: Headers, publicUrl: string): boolean {
 }
 
 /**
+ * The first script of every app frame document (KOBE-437 review MEDIUM-2, coordinator decision):
+ * it removes the WebRTC constructors before the template's own scripts run, for browsers that
+ * do not enforce `webrtc 'block'`. Defence in depth, not a guarantee (a template could look for
+ * another realm); the residual risk is in the spec's threat model (§3). Inline, so the CSP's
+ * `script-src 'unsafe-inline'` allows it; it never changes the pinned bytes or their hash.
+ */
+export const WEBRTC_GUARD =
+  '<script>(function(){var n=["RTCPeerConnection","webkitRTCPeerConnection",' +
+  '"mozRTCPeerConnection","RTCDataChannel"];for(var i=0;i<n.length;i++){' +
+  "try{delete window[n[i]]}catch(e){}try{Object.defineProperty(window,n[i]," +
+  "{value:undefined,writable:false,configurable:false})}catch(e){}}})()</script>";
+
+/** A leading doctype (after an optional BOM and whitespace): the guard goes right after it. */
+const DOCTYPE = /^\uFEFF?\s*<!doctype[^>]*>/i;
+
+/**
+ * The template with {@link WEBRTC_GUARD} first: after a leading doctype (so the document keeps
+ * its standards mode), otherwise at the very start.
+ */
+export function withWebRtcGuard(html: string): string {
+  const doctype = DOCTYPE.exec(html);
+  if (!doctype) return WEBRTC_GUARD + html;
+  const end = doctype[0].length;
+  return html.slice(0, end) + WEBRTC_GUARD + html.slice(end);
+}
+
+/**
  * The frame document, or `stale` when the caller named other bytes than the stored ones
  * (`wanted`: the hex SHA-256 the page was given; a template changed in between is refused).
  */
 export function appFrameDocument(html: string, wanted: string | undefined): Response | "stale" {
   if (wanted !== undefined && sha256Hex(html) !== wanted) return "stale";
-  return new Response(html, { headers: APP_FRAME_HEADERS });
+  return new Response(withWebRtcGuard(html), { headers: APP_FRAME_HEADERS });
 }
 
 const sha256Hex = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");

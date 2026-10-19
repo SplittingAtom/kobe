@@ -84,9 +84,14 @@ session and team data; the integrity of what the model sees and does; other conn
 - **T3. CSP.** The frame route sends the policy as a **response header** (amended 2026-10-19; no
   injected meta CSP): `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';
 style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src
-'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action
-'none'; frame-ancestors 'self'`. The `sandbox` directive gives the document an opaque origin even
-  when it is opened top-level, like D25's artifact frames.
+'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri
+'none'; form-action 'none'; frame-ancestors 'self'; webrtc 'block'`. The `sandbox` directive gives
+  the document an opaque origin even when it is opened top-level, like D25's artifact frames.
+  `connect-src` does not govern WebRTC, so the CSP3 `webrtc 'block'` directive is added for the
+  browsers that enforce it, and the frame route puts a small script before the template's bytes
+  that removes `RTCPeerConnection`, `webkitRTCPeerConnection`, `mozRTCPeerConnection` and
+  `RTCDataChannel` (amended 2026-10-19, KOBE-437 review MEDIUM-2; defence in depth, see the
+  residual risks below).
   A `_meta.ui.csp` the server declares (domains to connect to, load resources from or frame) is
   **ignored in v1**: no app gets network access. Catalyst omits it (M11). Kobe's web CSP keeps
   `frame-src 'self'` / `about:` only, so no other frame is possible.
@@ -146,6 +151,13 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
 - An app can put misleading text in the composer. The member reads it before sending.
 - The upstream sees each call under the member's credential (or the shared site key, KOBE-303).
   The upstream's own authorization applies, as it does for model-initiated calls.
+- **WebRTC in browsers without `webrtc 'block'`** (amended 2026-10-19, coordinator decision on
+  the KOBE-437 review). Chromium does not enforce the directive, and `connect-src` does not cover
+  ICE. An approved but malicious template (or a template bug that third-party data triggers)
+  could get past the removal script, for example from another realm, and leak tool results or
+  tool input over STUN or TURN (a server name, a username, UDP). The mitigations are the site
+  admin's review of the hash-pinned template (T1, §5), the removal script, and `webrtc 'block'`
+  where browsers enforce it. The KOBE-437 browser test records what each browser does.
 
 ## 4. Decisions
 

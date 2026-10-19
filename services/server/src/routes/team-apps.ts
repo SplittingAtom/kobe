@@ -32,7 +32,8 @@ import { parseBody } from "../teams/http.js";
  *   Kobe's own page, only for the team the page names (a frame cannot send `X-Kobe-Team`).
  *   Separate from the admin preview route, which may show unapproved bytes.
  * - `GET /v1/team/apps/:appId/tools`: the bridge's `tools/list` (spec §7): the tools of the
- *   app's connector that pass `checkAppTool`, in MCP's shape.
+ *   app's connector that pass `checkAppTool`, in MCP's shape, under the calls' rate limit.
+ * Frame documents start with `WEBRTC_GUARD` and the CSP carries `webrtc 'block'` (MEDIUM-2).
  */
 export const APP_CALL_RATE = { capacity: 30, refillPerSecond: 5 } as const;
 /** 64 KiB of arguments plus the JSON envelope (review MEDIUM-1). */
@@ -143,6 +144,12 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
 
   app.get("/:appId/tools", async (c) => {
     const appId = c.req.param("appId");
+    if (!APP_ID_PATTERN.test(appId)) return c.json(NOT_FOUND, 404);
+    // Same per-member budget as calls (review LOW-8).
+    const limited = await takeRateToken(callDeps, principal(c), appId);
+    if (limited && !limited.ok) {
+      return c.json({ error: { code: limited.code, message: limited.message } }, limited.status);
+    }
     const found = APP_ID_PATTERN.test(appId)
       ? await memberApp(db, c.get("team").id, c.get("user").id, appId)
       : undefined;

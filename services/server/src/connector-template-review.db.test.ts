@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProbeResult } from "./connectors/probe.js";
 import { refreshConnector } from "./connectors/refresh.js";
+import { withWebRtcGuard } from "./connectors/app-frame.js";
 import { servedTemplate } from "./connectors/template-store.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -138,10 +139,10 @@ describe("template review (KOBE-434)", () => {
     expect(frame.status).toBe(200);
     expect(frame.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(frame.headers.get("content-security-policy")).toMatch(
-      /^sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';.*connect-src 'none'.*frame-ancestors 'self'$/,
+      /^sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline';.*connect-src 'none'.*frame-ancestors 'self'; webrtc 'block'$/,
     );
     expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
-    expect(frame.text).toBe("<p>v2</p>");
+    expect(frame.text).toBe(withWebRtcGuard("<p>v2</p>"));
     expect((await root.get(frameUrl("ui://r/app", "approved"))).status).toBe(200);
     // Exactly the bytes the source read showed (review LOW-2), and only into a frame (LOW-1).
     expect(

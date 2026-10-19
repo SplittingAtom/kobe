@@ -4,6 +4,7 @@ import { loadEnvelope } from "@kobe/db";
 import type { AppCallRequest } from "./apps/app-caller.js";
 import { appIdOf } from "./apps/app-id.js";
 import type { ProbeResult } from "./connectors/probe.js";
+import { withWebRtcGuard } from "./connectors/app-frame.js";
 import { refreshConnector } from "./connectors/refresh.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { logger } from "./logger.js";
@@ -321,13 +322,15 @@ describe("member app frame and tools/list (KOBE-437, MA-5)", () => {
     const ok = { team, sha256: sha(TEMPLATE) };
     const frame = await alice.get(frameUrl(appId, ok), { "sec-fetch-dest": "iframe" });
     expect(frame.status).toBe(200);
-    expect(frame.text).toBe(TEMPLATE);
+    // The pinned bytes, after the WebRTC guard (review MEDIUM-2).
+    expect(frame.text).toBe(withWebRtcGuard(TEMPLATE));
     expect(frame.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(frame.headers.get("content-security-policy")).toBe(
       "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; " +
         "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; " +
-        "connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; " +
-        "base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+        "connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; " +
+        "object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; " +
+        "webrtc 'block'",
     );
     expect(frame.headers.get("x-frame-options")).toBe("SAMEORIGIN");
     expect(frame.headers.get("referrer-policy")).toBe("no-referrer");
@@ -359,6 +362,32 @@ describe("member app frame and tools/list (KOBE-437, MA-5)", () => {
     await refreshConnector(db(), h.deps.connectorProbe, id);
     expect(await status(alice, ok)).toBe(404);
     expect(await status(alice, { ...ok, sha256: sha("<p>changed upstream</p>") })).toBe(404);
+  });
+
+  it("refuses a member without a key (404) and someone removed from the team (403)", async () => {
+    const own = await connector("apps5-own", { authKind: "api_key" });
+    const ownApp = appIdOf(own, "ui://cat/explorer");
+    const url = frameUrl(ownApp, { team, sha256: sha(TEMPLATE) });
+    // Bob holds no key for this connector: the app is not his.
+    expect((await bob.get(url)).status).toBe(404);
+    expect((await bob.get(`/v1/team/apps/${ownApp}/tools`)).status).toBe(404);
+    const id = await connector("apps5-gone");
+    const goneApp = appIdOf(id, "ui://cat/explorer");
+    const gone = frameUrl(goneApp, { team, sha256: sha(TEMPLATE) });
+    const daveId = await h.createUser("dave@apps5.test");
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [team, daveId],
+    );
+    const dave = await h.signIn("dave@apps5.test");
+    await dave.put("/v1/me/teams/active", { teamId: team });
+    dave.team = team;
+    expect((await dave.get(gone)).status).toBe(200);
+    await h.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      team,
+      daveId,
+    ]);
+    expect((await dave.get(gone)).status).toBe(403);
   });
 
   it("lists only the tools the app may call, in MCP's shape", async () => {
