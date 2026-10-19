@@ -11,7 +11,7 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-443: a site of the release before (through 0148) with live reservations a member took at a
+ * KOBE-443: a site of the release before (through 0151) with live reservations a member took at a
  * larger share migrates as the non-superuser owner. The holds survive and, from the upgrade on,
  * count in full: the call the old function admitted is refused. The app role still calls the
  * function, which stays invoker's rights with its search_path pinned.

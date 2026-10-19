@@ -28,7 +28,7 @@ True exposure: 780 = 12 calls.
 
 ## Decisions
 
-- Custom migration `0149_reserve_full_holds` (`CREATE OR REPLACE`, same signature): every live
+- Custom migration `0152_reserve_full_holds` (`CREATE OR REPLACE`, same signature): every live
   hold counts in full (`sum(m.amt)`), and the share join that is no longer needed goes. Everything
   else is 0148's: invoker's rights (no SECURITY DEFINER), `search_path` pinned, the team set
   transaction-locally and a different team refused, the team lock then the site lock, one snapshot
@@ -43,7 +43,7 @@ True exposure: 780 = 12 calls.
   calls in flight, which end or expire, so the answer is 429 `too_many_calls_in_flight` with
   Retry-After 2, which the sandbox retries. That is the KOBE-259 promise: overlapping calls wait.
   It also covers the settle window's double count and a crashed replica's holds. Some gate and DB
-  tests used to expect 402 for holds-only lines. Several did even before 0149 (user lines had no
+  tests used to expect 402 for holds-only lines. Several did even before 0152 (user lines had no
   cap), so they now expect 429. New unit tests cover a stale cache (402 after the re-read) and a
   fresh spend still below the limit (429). Gateway-only change, no SQL or wire change.
 - `MemoryReservations.inFlight` (gateway, tests and single replica) changed the same way.
@@ -52,7 +52,7 @@ True exposure: 780 = 12 calls.
 
 ## Open questions (for Chris or the coordinator)
 
-- 0149 collides with G10's 0149–0151 (#317). The coordinator runs `db:rebase`.
+- Renumbered 0149 → 0152 by `db:rebase` after G10 (#317, 0149–0151) merged (aa2b5a14).
 - If "one member's lone large call cannot block the others" must stay, store each reservation's
   counted amount when it is taken (`least(cost, share_then)`, a new column) and sum that. Not done:
   it needs a schema change, and the full count is the safe default.

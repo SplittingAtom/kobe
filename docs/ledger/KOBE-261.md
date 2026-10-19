@@ -18,7 +18,7 @@ the live holds on a shared line were counted per member only up to the member sh
 what is left. Once the spend is read fresh (KOBE-286), that share shrinks while calls are in
 flight, so holds taken at a larger share were undercounted and a call was admitted although spend
 plus the live holds already reached the limit. KOBE-443 counts every live hold in full (migration
-`0149_reserve_full_holds`, and the same change in the memory store). The interleaving and the
+`0152_reserve_full_holds`, and the same change in the memory store). The interleaving and the
 tests are in `KOBE-443.md`.
 
 The KOBE-278/286 changes stay correct and are needed. This was a second, independent undercount.
