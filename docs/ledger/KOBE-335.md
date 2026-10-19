@@ -43,12 +43,41 @@
 - Re-runs run as the reviewer, not a system identity: `started_by` is a person (budgets, the
   eval thread owner, audit), and the Registry team is the reviewers' own team. Site admins who
   aren't members are refused rather than added (teams are walls).
+- (Superseded by review M3) the submitter may not start a re-run of their own submission.
 - The catalog card's shape is the promotion's (`catalogSkillEvalScorecardSchema`), so the catalog
   (KOBE-336) shows submitted and authoritative cards alike; `rerun` sits beside it.
-- The submitter may start a re-run of their own submission: it measures, it doesn't decide.
+
+## Review fixes (review-335.md)
+
+- **M1** (coordinator) acknowledging a Caution finding follows separation of duties: not the
+  submitter or the confirming Team admin, except the single admin (`review-duties.ts`). Tests:
+  rules file (403 `own_submission`), self-approve file (the single admin may).
+- **M2** (coordinator) the diff reads SKILL.md, kobe.skill.yaml, `scripts/`, then the rest, so
+  decoys can't push SKILL.md out of the budget; `GET /:id/diff?path=` loads a skipped file alone
+  (a whole request's budget) and `GET /:id/file?path=` shows a too-large or too-different file
+  whole (to 1 MiB, hidden characters marked). Unit test with six decoys and a changed SKILL.md.
+- **M3** (coordinator) only reviewers who are neither submitter nor confirmer start or cancel
+  re-runs (cancel at `/:id/reruns/:evalRunId/cancel`; the team's eval cancel refuses re-runs);
+  every re-run stays in the review screen's history (from the Registry's own events, so a purged
+  run shows `gone`) with starter, outcome and canceller; the card is the latest completed run's,
+  and earlier completed runs that scored lower are marked. DB test: fail, cancel, pass.
+- **L1** full diffs cached by package pair (50); 200 files under the caps stay under 2.5 s.
+  **L2** a card the catalog contract refuses is logged, the eval still completes. **L3** decide,
+  approve and retract cancel the version's open re-runs in their transaction (run in the Registry
+  team's context, `registry-tx.ts`). **L4** cards older than 30 days, judged by another model
+  than the Site alias names now, or with every execution errored are refused. **L5** the
+  `not_registry_member` message (see the question). **L6** documented: re-runs read no personal
+  key, but the Registry team's own connectors connect, so it should enable no keyed connector.
+  **L7** tests: the Registry team's open-eval limit, the package guard on a completing card,
+  0161's refusal as the app role. Not added: a budget-cap re-run test and a personal-connector
+  re-run test (both go through the shared eval start and `withSkillEvals`, tested by
+  `skill-eval-budget` and the runner tests).
 
 ## Open questions (for Chris or the coordinator)
 
+- L5: "give yourself the Skill reviewer grant" can't work: KOBE-331 refuses the grant to
+  oneself and to Site admins. The message now says reviewers join with the grant and others are
+  added by the Registry team's admin. Decide whether Site admins may hold the grant.
 - "Shown in the catalog" (ac-2): the catalog browse is KOBE-336; the card is stored and the
   review screen shows it.
 - A completed re-run whose version was decided meanwhile is not stored (logged only).
