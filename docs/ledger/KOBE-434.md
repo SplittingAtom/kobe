@@ -46,7 +46,29 @@ pinnedHash, bytes, mimeType, meta}`: never the bytes.
   refused, `fetch` never called; other windows ignored; CSP injection), `line-diff.test.ts`,
   `connectors-page.test.tsx` "app template review" (escaped diff, sandbox, CSP, approve body).
 
-## Question for MA-5 (spec T3)
+## Review fixes (review-ma2-3: M1, M2, M4, L1)
+
+- **M1:** `/templates/source` returns `{approved?, live?}` each as `{html, sha256, pinnedHash,
+bytes, mimeType, meta}` from one read. The web shows those versions once loaded, keeps Approve
+  disabled until the source is loaded, and approves with `source.live.pinnedHash`. The server
+  still refuses a hash that is not current (`stale`).
+- **M2 (coordinator decision on the question below):** the preview loads
+  `GET /v1/site/connectors/:id/templates/frame?uri=&version=live|approved` (site permission,
+  `isSameSiteFrameRequest`). It sends `text/html` with `APP_FRAME_HEADERS`
+  (`services/server/src/connectors/app-frame.ts`): CSP `sandbox allow-scripts; default-src
+'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src
+data:; media-src 'none'; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src
+'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`, XFO SAMEORIGIN,
+  no-referrer, no-store and nosniff. The iframe keeps `sandbox="allow-scripts"`, and the stub
+  bridge is unchanged. Spec MA4, MA2, T2, T3, §5, the D25 row and MA-5 are amended. MA-5 needs its
+  own member route (pinned and approved only); the two routes are never merged. A browser
+  test that scripts run and `fetch` fails is left for MA-5's e2e (no browser runner here).
+- **L1:** `withAppCsp` is removed; `lib/apps/app-frame.ts` keeps only the sandbox attribute.
+- **M4:** the tool review shows annotations and `ui` (template, visibility) for the approved and
+  live definitions (`reapproval.ts`, `connector-tool-review.tsx`; tests in
+  `reapproval.test.ts` and the web "visibility and template change" test).
+
+## Question for MA-5 (spec T3), now decided (M2 above)
 
 Kobe's page CSP (`lib/security/csp.ts`) allows scripts only with a nonce and `'strict-dynamic'`.
 A `srcdoc` iframe inherits the parent's CSP, so a template's inline scripts are blocked in

@@ -36,6 +36,22 @@ Group MCP Apps (`group-ma-apps`), after KOBE-434. Spec `docs/specs/mcp-apps-host
   is denied `unknown_tool`.
 - db `ui-resources.test.ts`: the schema accepts visibility and refuses unknown values.
 
+## Review fixes (review-ma2-3: M3, L3, L4)
+
+- **M3 (rollout and rollback):** the server's allow carries `tool.model_visible: true`. When an
+  allow lacks it (a previous-release server pod), the new proxy runs the upstream's `tools/list`
+  in the same session and refuses (`not_offered`, before `tools/call`) a tool that is not
+  model-visible by the same rules, or that the upstream no longer lists (`visibility.ts`,
+  `upstream.ts` `checkModelVisible`). Tests are in `mcp.test.ts` (old-server allow).
+  `docs/install.md` documents the rollout (any mix of pods is safe) and the rollback (both old:
+  app-only tools are exposed again, so disable those connectors first).
+- **L4:** a present but non-array visibility pins as `["model"]` and is not rejected. The model
+  keeps what it had before MCP Apps (any non-Apps host would offer the tool), apps get nothing
+  new, and one malformed field does not fail the whole snapshot (which would stop the
+  connector's refresh and drift checks). The proxy's check uses the same rule.
+- **L3 accepted (coordinator):** the policy engine ignores visibility. The catalog, the proxy's
+  `tools/list`, `decideMcpCall` and the proxy's own check enforce it.
+
 ## Notes and questions
 
 - The policy engine's exposure gate (`policy/gates.ts`) does not know visibility. A dedicated
