@@ -5,6 +5,7 @@ import {
   cancelRerun,
   rerunEvals,
   type ReviewDetail,
+  type ExternalScanState,
   type ReviewFinding,
 } from "../../../lib/admin/api/site/skill-review";
 import { visibleParts } from "../../../lib/admin/visible-text";
@@ -200,7 +201,19 @@ function Finding({
         {shown(f.file)}
         {f.line ? `:${f.line}` : ""}
       </code>{" "}
-      {f.rule} <Badge tone={f.severity === "block" ? "failed" : "attention"}>{f.severity}</Badge>{" "}
+      {f.rule}{" "}
+      {f.source === "external" ? (
+        <>
+          <Badge tone={f.severity === "caution" ? "attention" : "neutral"}>
+            {f.externalSeverity ?? f.severity}
+          </Badge>{" "}
+          {f.title ? <span>{shown(f.title)} </span> : null}
+        </>
+      ) : (
+        <>
+          <Badge tone={f.severity === "block" ? "failed" : "attention"}>{f.severity}</Badge>{" "}
+        </>
+      )}
       {f.severity === "caution" &&
         (f.acknowledged ? (
           <span className="text-console-muted">acknowledged by {f.acknowledged.by.name}</span>
@@ -218,6 +231,67 @@ function Finding({
   );
 }
 
+const EXTERNAL_REASONS: Readonly<Record<string, string>> = {
+  too_large: "the package is too large for it",
+  no_image: "no scanner image is configured",
+  registry_not_ready: "the Registry team is missing",
+  interrupted: "the scan was interrupted",
+  timeout: "the scan timed out",
+};
+
+/**
+ * The optional external scanner's part (KOBE-341, SK32): its state and its findings, apart from
+ * Kobe's own. Advisory: MEDIUM and up are Caution findings to acknowledge, the rest information.
+ */
+function ExternalScan({
+  state,
+  findings,
+  open,
+  mutation,
+  onAcknowledge,
+}: {
+  readonly state: ExternalScanState | undefined;
+  readonly findings: readonly ReviewFinding[];
+  readonly open: boolean;
+  readonly mutation: Mutation;
+  readonly onAcknowledge: (key: string) => void;
+}) {
+  if (!state) return null;
+  if (state.status === "running")
+    return <p>External scanner: scanning. Approve waits for its findings.</p>;
+  if (state.status !== "done")
+    return (
+      <p className="text-console-muted">
+        External scanner: {state.status}
+        {EXTERNAL_REASONS[state.reason] ? ` (${EXTERNAL_REASONS[state.reason]})` : ""}. Kobe&apos;s
+        own scan above still stands.
+      </p>
+    );
+  return (
+    <>
+      <h4 className="mt-3 font-medium">
+        External scanner (advisory): {state.scanner} {state.version}
+      </h4>
+      {findings.length === 0 ? (
+        <p>No findings.</p>
+      ) : (
+        <ul className="list-disc ps-6">
+          {findings.map((f) => (
+            <Finding
+              key={f.key}
+              f={f}
+              open={open}
+              mutation={mutation}
+              onAcknowledge={onAcknowledge}
+            />
+          ))}
+        </ul>
+      )}
+      {state.truncated && <p className="text-console-muted">Only the first 200 are shown.</p>}
+    </>
+  );
+}
+
 export function ReviewEvidence({
   detail,
   mutation,
@@ -227,7 +301,8 @@ export function ReviewEvidence({
   readonly mutation: Mutation;
   readonly onChanged: () => void;
 }) {
-  const findings = detail.findings;
+  const findings = detail.findings.filter((f) => f.source !== "external");
+  const external = detail.findings.filter((f) => f.source === "external");
   const open = detail.state === "submitted" || detail.state === "in_review";
   const p = detail.provenance as { fromConversation?: boolean };
   const acknowledge = async (key: string) => {
@@ -266,6 +341,13 @@ export function ReviewEvidence({
             </ul>
           </>
         )}
+        <ExternalScan
+          state={detail.scan.external}
+          findings={external}
+          open={open}
+          mutation={mutation}
+          onAcknowledge={(k) => void acknowledge(k)}
+        />
       </Section>
       <Section title="Scorecards" level={3}>
         <h4 className="font-medium">Authoritative (Registry team, Site judge)</h4>

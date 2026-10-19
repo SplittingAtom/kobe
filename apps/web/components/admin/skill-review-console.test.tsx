@@ -258,6 +258,85 @@ describe("the review screen (ac-1, ac-2)", () => {
     );
   });
 
+  it("shows the external scanner's findings apart, advisory, and its state (KOBE-341)", async () => {
+    stubApi({
+      [`GET ${BASE}/${ID}`]: [
+        200,
+        detail({
+          scan: {
+            findings: [],
+            external: {
+              status: "done",
+              scanner: "cisco-ai-skill-scanner",
+              version: "2.2.1",
+              findings: [],
+              truncated: false,
+              started_at: null,
+              finished_at: "2026-10-19T10:01:00Z",
+            },
+          },
+          findings: [
+            {
+              key: "cisco:YARA_prompt_injection_generic@SKILL.md:2",
+              rule: "cisco:YARA_prompt_injection_generic",
+              file: "SKILL.md",
+              line: 2,
+              severity: "caution",
+              category: "prompt_injection",
+              acknowledged: null,
+              source: "external",
+              title: "PROMPT INJECTION detected by YARA",
+              external_severity: "critical",
+            },
+            {
+              key: "cisco:MANIFEST_MISSING_LICENSE@SKILL.md:0",
+              rule: "cisco:MANIFEST_MISSING_LICENSE",
+              file: "SKILL.md",
+              line: 0,
+              severity: "info",
+              category: "policy_violation",
+              acknowledged: null,
+              source: "external",
+              title: "Skill does not specify a license",
+              external_severity: "info",
+            },
+          ],
+        }),
+      ],
+      [`GET ${BASE}/${ID}/diff`]: [200, diff],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    expect(
+      await screen.findByText(/External scanner \(advisory\): cisco-ai-skill-scanner 2\.2\.1/),
+    ).toBeTruthy();
+    expect(screen.getByText(/PROMPT INJECTION detected by YARA/)).toBeTruthy();
+    expect(screen.getByText("critical")).toBeTruthy();
+    // A Caution one is acknowledged like Kobe's own; an info one needs nothing.
+    expect(
+      screen.getByRole("button", {
+        name: "Acknowledge cisco:YARA_prompt_injection_generic in SKILL.md line 2",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /MANIFEST_MISSING_LICENSE/ })).toBeNull();
+  });
+
+  it("says when the external scan is running or failed", async () => {
+    stubApi({
+      [`GET ${BASE}/${ID}`]: [
+        200,
+        detail({
+          scan: { findings: [], external: { status: "running", started_at: "x", job: "j" } },
+          findings: [],
+        }),
+      ],
+      [`GET ${BASE}/${ID}/diff`]: [200, diff],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    expect(
+      await screen.findByText(/External scanner: scanning. Approve waits for its findings./),
+    ).toBeTruthy();
+  });
+
   it("re-runs the evals in the Registry team and shows the latest run (KOBE-335)", async () => {
     const entry = (over: Record<string, unknown>) => ({
       eval_run_id: "e-0",

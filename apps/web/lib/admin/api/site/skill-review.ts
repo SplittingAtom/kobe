@@ -112,10 +112,27 @@ export interface ReviewFinding {
   readonly rule: string;
   readonly file: string;
   readonly line: number;
-  readonly severity: "caution" | "block";
+  /** `info`: an external finding shown only (KOBE-341). */
+  readonly severity: "caution" | "block" | "info";
   readonly category: string | null;
   readonly acknowledged: { readonly by: Person; readonly at: string } | null;
+  /** `external`: the optional external scanner's (advisory, KOBE-341). */
+  readonly source?: "kobe" | "external";
+  readonly title?: string;
+  readonly externalSeverity?: string;
 }
+
+/** The optional external scanner's state on the version (KOBE-341). */
+export type ExternalScanState =
+  | { readonly status: "running"; readonly startedAt: string }
+  | {
+      readonly status: "done";
+      readonly scanner: string;
+      readonly version: string;
+      readonly truncated: boolean;
+      readonly finishedAt: string;
+    }
+  | { readonly status: "failed" | "skipped" | "unavailable"; readonly reason: string };
 
 export interface ReviewEvent {
   readonly action: string;
@@ -142,7 +159,11 @@ export interface ReviewDetail {
   readonly previous: { readonly id: string; readonly semver: string } | null;
   readonly bump: Bump;
   readonly verdict: string;
-  readonly scan: { readonly findings?: readonly ScanFinding[]; readonly rulesVersion?: string };
+  readonly scan: {
+    readonly findings?: readonly ScanFinding[];
+    readonly rulesVersion?: string;
+    readonly external?: ExternalScanState;
+  };
   readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
