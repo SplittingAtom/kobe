@@ -4,6 +4,7 @@ import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import {
   deprecateSkill,
+  publishedForActors,
   retireVersion,
   type RetireResult,
   type Retired,
@@ -68,6 +69,16 @@ export function siteSkillRetireRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
       notified: notified ? { teams: notified.teams, members: notified.members } : null,
     });
   }
+
+  // The published versions to act on (Site console): Site admins and the skill's maintainers.
+  app.get("/catalog/:skillId/versions", async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    const r = await publishedForActors(db, id.data, actor(c));
+    if (r === "not_found") return c.json({ code: "not_found", message: ERRORS.not_found[1] }, 404);
+    if (r === "forbidden") return c.json({ code: "forbidden", message: ERRORS.forbidden[1] }, 403);
+    return c.json(r);
+  });
 
   app.post("/catalog/:skillId/versions/:semver/:act", async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));

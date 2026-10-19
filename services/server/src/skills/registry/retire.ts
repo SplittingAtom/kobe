@@ -237,3 +237,41 @@ export function deprecateSkill(
     };
   });
 }
+
+export interface PublishedVersionRow {
+  readonly semver: string;
+  readonly state: string;
+  readonly suspended: boolean;
+}
+
+/** A skill's status and published versions, newest first, for those who may act on them. */
+export async function publishedForActors(
+  db: KobeDb,
+  skillId: string,
+  who: Actor,
+): Promise<
+  | {
+      readonly status: string;
+      readonly mayRetire: boolean;
+      readonly versions: PublishedVersionRow[];
+    }
+  | "not_found"
+  | "forbidden"
+> {
+  return db.transaction(async (tx) => {
+    const s = await tx.execute<{ status: string }>(
+      sql`SELECT status::text AS status FROM registry_skills WHERE id = ${skillId}`,
+    );
+    const status = s.rows[0]?.status;
+    if (!status) return "not_found" as const;
+    const admin = siteRoleAllows(who.siteRole, "site.skills.catalog.manage");
+    if (!admin && !(await isActiveMaintainer(tx, skillId, who.userId))) return "forbidden" as const;
+    const v = await tx.execute<{ semver: string; state: string; suspended: boolean }>(sql`
+      SELECT semver, state::text AS state, suspended_at IS NOT NULL AS suspended
+        FROM registry_versions
+       WHERE skill_id = ${skillId}
+         AND state::text IN ('approved', 'deprecated', 'withdrawn', 'revoked')
+       ORDER BY seq DESC`);
+    return { status, mayRetire: admin, versions: v.rows };
+  });
+}

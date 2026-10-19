@@ -195,6 +195,20 @@ describe("Deprecate (ac-1, ac-3)", () => {
 });
 
 describe("Withdraw (ac-1, ac-3)", () => {
+  it("lists the versions to act on to maintainers and Site admins only", async () => {
+    const path = `/v1/site/skills/catalog/${skillId}/versions`;
+    const m = await (as.maintainer as TestBrowser).get(path);
+    expect(m.json).toMatchObject({ status: "active", mayRetire: false });
+    expect((m.json.versions as { semver: string; state: string }[]).map((x) => x.state)).toEqual([
+      "approved",
+      "approved",
+      "deprecated",
+      "approved",
+    ]);
+    expect((await (as.admin as TestBrowser).get(path)).json.mayRetire).toBe(true);
+    expect((await (as.outsider as TestBrowser).get(path)).status).toBe(403);
+  });
+
   it("Site admins only; tracking moves within range, pins keep it with a notice", async () => {
     expect((await act("maintainer", "1.2.0", "withdraw")).status).toBe(403);
     expect((await act("reviewer", "1.2.0", "withdraw")).status).toBe(403);
