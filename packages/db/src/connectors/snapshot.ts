@@ -37,7 +37,10 @@ export const pinnedToolUiSchema = z.strictObject({
    * `["model", "app"]`: sorted, known values only. Without `"model"` the tool is never offered
    * to or callable by Pi; without `"app"` no app may call it.
    */
-  visibility: z.array(z.enum(["app", "model"])).max(2).optional(),
+  visibility: z
+    .array(z.enum(["app", "model"]))
+    .max(2)
+    .optional(),
 });
 export type PinnedToolUi = z.infer<typeof pinnedToolUiSchema>;
 
