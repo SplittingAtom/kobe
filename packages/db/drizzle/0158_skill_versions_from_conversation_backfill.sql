@@ -1,6 +1,7 @@
 -- KOBE-333 review C4-M3: backfill `from_conversation` (0157) for versions saved before it, from
 -- the audit log (never rewritten): a version is from a conversation when its `skill.uploaded` row
--- names a draft whose `skill.draft.created` row says it started from a thread or names one, and,
+-- names a draft whose `skill.draft.created` row (in the version's own team, for a team version)
+-- says it started from a thread or names one, and,
 -- for personal versions, when a `skill.draft.personalized` row of the same skill and semver says
 -- so (in any team). Versions saved from a fork of such a version before this release are not
 -- traced through the fork (new saves are: the server sets the flag from the fork's parent).
@@ -15,7 +16,8 @@ ALTER TABLE "team_skill_versions" DISABLE TRIGGER "team_skill_versions_immutable
 ALTER TABLE "personal_skill_versions" DISABLE TRIGGER "personal_skill_versions_immutable";--> statement-breakpoint
 UPDATE "team_skill_versions" AS v SET "from_conversation" = true
   FROM "audit_log" u JOIN "audit_log" d
-    ON d."action" = 'skill.draft.created' AND d."target" ->> 'draftId' = u."target" ->> 'draftId'
+    ON d."action" = 'skill.draft.created' AND d."team_id" = u."team_id"
+   AND d."target" ->> 'draftId' = u."target" ->> 'draftId'
  WHERE u."action" = 'skill.uploaded' AND u."team_id" = v."team_id"
    AND u."target" ->> 'scope' = 'team'
    AND u."target" ->> 'skillId' = v."skill_id"::text
