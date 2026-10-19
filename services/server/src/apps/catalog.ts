@@ -1,6 +1,5 @@
 import {
   and,
-  connectorSiteKeys,
   connectorUiResources,
   connectors,
   eq,
@@ -14,7 +13,7 @@ import {
   type KobeDb,
   type PinnedTool,
 } from "@kobe/db";
-import { urlSha256 } from "../connectors/site-key.js";
+import { usableSiteKeyIds } from "../connectors/site-key.js";
 import { servedTemplate } from "../connectors/template-store.js";
 import { appVisible } from "../connectors/visibility.js";
 import type { TeamConnector } from "../mcp/catalog.js";
@@ -114,16 +113,12 @@ async function enabledConnectors(
   });
 }
 
-/** Connectors whose site-wide key is set and bound to their current URL. */
-async function liveSiteKeys(db: KobeDb, rows: readonly MemberAppConnector[]): Promise<Set<string>> {
-  const ids = rows.filter((r) => r.credentialSource === "site").map((r) => r.id);
-  if (ids.length === 0) return new Set();
-  const keys = await db
-    .select({ id: connectorSiteKeys.connectorId, boundTo: connectorSiteKeys.urlSha256 })
-    .from(connectorSiteKeys)
-    .where(inArray(connectorSiteKeys.connectorId, ids));
-  const url = new Map(rows.map((r) => [r.id, r.url]));
-  return new Set(keys.filter((k) => k.boundTo === urlSha256(url.get(k.id) ?? "")).map((k) => k.id));
+/** Connectors whose site-wide key is usable now (the proxy's own check, KOBE-303). */
+function liveSiteKeys(db: KobeDb, rows: readonly MemberAppConnector[]): Promise<Set<string>> {
+  return usableSiteKeyIds(
+    db,
+    rows.filter((r) => r.credentialSource === "site").map((r) => r.id),
+  );
 }
 
 /** MA8: whether the member can call the connector right now (no secret is opened). */
