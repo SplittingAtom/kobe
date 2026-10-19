@@ -115,9 +115,24 @@ export const SKILL_EVAL_SUBMISSION_DEFAULTS = {
   minLift: 0,
   minTriggerPrecision: 0.8,
 } as const;
-export type SkillEvalSubmissionRules = {
-  readonly [K in keyof typeof SKILL_EVAL_SUBMISSION_DEFAULTS]: number;
-};
+/** `site_skill_settings.submission_rules` (eval part): counts ≥ 0, ratios in 0..1, lift in −1..1. */
+export const skillEvalSubmissionRulesSchema = z.strictObject({
+  minCases: z.number().int().min(0).max(25).default(SKILL_EVAL_SUBMISSION_DEFAULTS.minCases),
+  minNegativeTriggerCases: z
+    .number()
+    .int()
+    .min(0)
+    .max(25)
+    .default(SKILL_EVAL_SUBMISSION_DEFAULTS.minNegativeTriggerCases),
+  minPassRate: z.number().min(0).max(1).default(SKILL_EVAL_SUBMISSION_DEFAULTS.minPassRate),
+  minLift: z.number().min(-1).max(1).default(SKILL_EVAL_SUBMISSION_DEFAULTS.minLift),
+  minTriggerPrecision: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(SKILL_EVAL_SUBMISSION_DEFAULTS.minTriggerPrecision),
+});
+export type SkillEvalSubmissionRules = z.infer<typeof skillEvalSubmissionRulesSchema>;
 
 export const SKILL_EVAL_SUBMISSION_SHORTFALLS = [
   "stale",

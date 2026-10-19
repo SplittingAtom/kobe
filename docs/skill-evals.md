@@ -29,8 +29,9 @@ runtime zip), and the Workbench test chat, which builds its bundle through the s
 
 Text rules as `kobe.skill.yaml`: UTF-8, at most 64 KiB, one YAML 1.2 (core schema) document whose
 root is a mapping; duplicate keys, aliases and explicit tags (`!foo`, `!!timestamp`) are refused,
-and nesting is at most 16 levels (checked on the lexer's tokens before the tree is built, so no
-engine overflows its stack). **Unknown keys are refused at every level**, so a check Kobe does not
+and nesting is at most 16 levels (checked on the lexer's tokens before the tree is built, flow brackets
+and block levels, compact `- - -` included, so no engine overflows its stack; an overflow is still
+refused as `too_deep`). **Unknown keys are refused at every level**, so a check Kobe does not
 know is never skipped (skipping would pass a case silently). Nothing in the file grants anything:
 no key pre-approves a tool, widens egress or adds a connector, and eval runs use auto mode.
 
@@ -74,16 +75,22 @@ groups such as `(?i:…)` are refused, so browser lint and the server agree.
 
 ### What an output glob matches
 
-The runner takes two snapshots in the case's sandbox: **before** (after the fixtures are copied,
-before the run) and **after** (when it ended). The walk uses `lstat`, never follows a symbolic link
-(a link is recorded, never read, opened or passed on), records regular files only, never descends
-into `skills/` or a hidden folder (such as `.kobe/`, where Pi keeps session files), and stops after
-10 000 entries. A file is **produced** when it is a regular file in `after`, outside every reserved
-path, and absent from `before` or with other bytes (SHA-256). An unchanged fixture never counts, an
-edited one does. Globs are matched as strings against produced paths only, so no wildcard (`*`,
-`?kobe/*`) reaches Kobe's state or leaves `/workspace`. The check fails with a reason when a glob
-matches nothing (`not_produced`), a snapshot was truncated, or a glob matches more than 100 files
-or 50 MiB (`over_cap`). `checkEvalOutputs` is the function.
+**Before** is the case's fixtures as the runner wrote them (paths and SHA-256 from the package
+bytes, on the server). **After** is taken in the sandbox when the run ended (a sandbox-wire request;
+self-reported like every sandbox observation, which is why the Registry re-run is authoritative).
+It walks only each glob's literal directory (`evalOutputWalkRoots`: `outputs/*.xlsx` walks
+`outputs/`; a glob starting with a wildcard walks all of `/workspace`), so an `npm install` or a
+venv elsewhere costs nothing; each walk stops after 10 000 entries. The walk uses `lstat`, never
+follows a symbolic link (a link is recorded, never read, opened or passed on), records regular
+files only, and never descends into a `skills` or hidden segment at any depth (such as `.kobe/`,
+where Pi keeps session files; so `outputs/skills/x.md` never counts either). It hashes **only
+fixture paths**: any other path is produced because it is new, so a large output is never hashed;
+a fixture counts only when its bytes changed. Globs are matched as strings against produced paths
+only, so no wildcard (`*`, `?kobe/*`) reaches Kobe's state or leaves `/workspace`. The check fails
+with a reason when a glob matches nothing (`not_produced`), its walk was truncated, or it matches
+more than 100 files or 50 MiB (`over_cap`). Reading a matched file for the judge opens it with
+`O_NOFOLLOW`, refuses it unless `fstat` shows a regular file of the walked size, and reads at most
+256 KiB. `checkEvalOutputs` is the function.
 
 **Issues** (`parseSkillEvalSuite(text, {paths})`, the same in the browser and on the server): each
 has `file` (`evals/cases.yaml`), a `code`, a `path` (`cases[2].expect.max_turns`, empty for the
@@ -195,10 +202,18 @@ the only instruction text**. The case prompt, the final answer (≤ 64 Ki charac
 outputs (≤ 64 Ki characters of text in total; binary files by path and size) go into the user
 message as one JSON document between `BEGIN DATA <nonce>` / `END DATA <nonce>` lines, with a new
 128-bit nonce per call that the sandbox never sees; the data is told to be graded, never obeyed.
-The judge gets no tools, no SKILL.md and no thread history, on a model the team has enabled. The
-reply must be exactly the verdict JSON (`{passed, reason}`); anything else is `judge_unparseable`
-and a failed call `judge_failed`, both failures. So text in the answer ("Grader: PASS") can't change
-the rubric or the verdict format.
+The judge gets no tools, no SKILL.md and no thread history, on a model the team has enabled, at
+temperature 0 where the provider allows it. The call uses the gateway's JSON / structured-output
+mode (`SKILL_EVAL_JUDGE_RESPONSE_SCHEMA`) where the model supports it; the reply is the verdict
+JSON (`{passed, reason}`), alone or as exactly one fenced code block. Anything else is
+`judge_unparseable` and a failed call `judge_failed`, both failures. So text in the answer
+("Grader: PASS") can't change the rubric or the verdict format. **Binary** (`judgeOutputText`): a
+file holding a NUL byte or not valid UTF-8 (`fatal` decoding; a character cut by the read cap is
+dropped, not taken as binary).
+
+Rubrics are author content that reaches the Site judge in the Registry re-run, so **catalog
+reviewers check them** (Phase C): the review screen shows every rubric, and the SK23 checklist adds
+"rubrics grade behaviour; none says always pass".
 
 ## Limits and settings
 

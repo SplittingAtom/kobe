@@ -153,12 +153,19 @@ describe("parsing evals/cases.yaml", () => {
     expect(codes(`a: ${"[".repeat(5000)}${"]".repeat(5000)}\n`)).toEqual(["too_deep"]);
     const block = Array.from({ length: 20 }, (_, i) => `${" ".repeat(i)}k:`).join("\n");
     expect(codes(`${block}\n${" ".repeat(20)}v: 1\n`)).toEqual(["too_deep"]);
+    expect(codes(`cases:\n  ${"- ".repeat(2000)}x\n`)).toEqual(["too_deep"]);
+    expect(codes(`cases:\n  ${"- ".repeat(20)}x\n`)).toEqual(["too_deep"]);
+    expect(codes(`a:\n${"  ".repeat(1)}${"? ".repeat(30)}x\n`)).toEqual(["too_deep"]);
   });
 
   it("takes the Site's lower case limit, so lint agrees with the runner", () => {
     const result = parseSkillEvalSuite(read("valid-full.yaml"), { maxCases: 2 });
     expect(shape(result.issues)).toEqual([{ code: "out_of_range", path: "cases", line: 5 }]);
     expect(result.issues[0]?.message).toBe("cases: this Site runs at most 2 cases per suite.");
+    expect(parseSkillEvalSuite(read("valid-full.yaml"), { maxCases: 0 }).issues[0]?.message).toBe(
+      "cases: this Site runs at most 1 cases per suite.",
+    );
+    expect(parseSkillEvalSuite(read("valid-full.yaml"), { maxCases: 99 }).ok).toBe(true);
   });
 
   it("keeps contains exactly as written and refuses engine-specific regex syntax", () => {

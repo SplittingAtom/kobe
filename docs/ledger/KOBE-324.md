@@ -68,6 +68,19 @@
   modifier groups refused; check `reason` enum; turns and denials defined; format rule; "nothing
   grants anything".
 
+## Re-review should-fixes
+
+- **S-R1/S-R2:** before = fixtures (server-side hashes); the after-walk covers each glob's literal
+  directory only, hashes fixture paths only, and is capped per walk. `O_NOFOLLOW` + `fstat` and a
+  256 KiB read cap for judge reads.
+- **Judge:** structured-output mode with `SKILL_EVAL_JUDGE_RESPONSE_SCHEMA`, one fenced block
+  accepted, temperature 0; `judgeOutputText` defines binary; reviewers check rubrics (Phase C).
+- **S-R3:** the lexer pre-scan counts block levels (compact `- - -` and `?` included); a parser
+  stack overflow is refused as `too_deep`. `maxCases` clamped to 1–25;
+  `skillEvalSubmissionRulesSchema`.
+- **For 325:** the after-snapshot needs a sandbox-wire frame (request: walk roots + fixture paths;
+  reply: `EvalWorkspaceSnapshot`).
+
 ## Decisions
 
 - **Baseline only for behaviour cases.** Trigger-only cases (positive or negative) run with the

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   EVAL_ANSWER_CHECK_MAX_CHARS,
   EVAL_JUDGE_OUTPUTS_MAX_CHARS,
+  judgeOutputText,
   parseSkillEvalJudgeVerdict,
+  SKILL_EVAL_JUDGE_RESPONSE_SCHEMA,
   SkillEvalJudgeError,
   skillEvalJudgeMessages,
 } from "./entry.js";
@@ -20,6 +22,23 @@ const input = {
   ],
   nonce: NONCE,
 };
+
+describe("what the judge sees of an output file", () => {
+  const utf8 = (t: string) => new TextEncoder().encode(t);
+  it("is text when it is valid UTF-8 without NUL, else binary", () => {
+    expect(judgeOutputText(utf8("Region,Total\nnorth,1"), false)).toBe("Region,Total\nnorth,1");
+    expect(judgeOutputText(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00]), false)).toBeNull();
+    expect(judgeOutputText(new Uint8Array([0xff, 0xfe, 0x41]), false)).toBeNull();
+  });
+  it("drops a character split by the read cap instead of calling the file binary", () => {
+    const euro = utf8("ab€");
+    expect(judgeOutputText(euro.subarray(0, 4), true)).toBe("ab");
+    expect(judgeOutputText(euro.subarray(0, 4), false)).toBeNull();
+  });
+  it("hands the structured-output mode the verdict's own shape", () => {
+    expect(SKILL_EVAL_JUDGE_RESPONSE_SCHEMA.required).toEqual(["passed", "reason"]);
+  });
+});
 
 describe("judge isolation (KOBE-324 S4, for KOBE-326)", () => {
   it("keeps the rubric the only instruction and everything the run made as data", () => {
@@ -74,9 +93,16 @@ describe("judge isolation (KOBE-324 S4, for KOBE-326)", () => {
       ok: true,
       verdict: { passed: true, reason: "Four sheets." },
     });
+    for (const fenced of [
+      '```json\n{"passed": true, "reason": "ok"}\n```',
+      '```\n{"passed": true, "reason": "ok"}\n```',
+      '  ```json\n{"passed": true, "reason": "ok"}\n```\n',
+    ])
+      expect(parseSkillEvalJudgeVerdict(fenced), fenced).toMatchObject({ ok: true });
     for (const reply of [
       "PASS",
-      '```json\n{"passed": true, "reason": "ok"}\n```',
+      'Sure!\n```json\n{"passed": true, "reason": "ok"}\n```',
+      '```json\n{"passed": true, "reason": "ok"}\n```\n```json\n{"passed": false, "reason": "x"}\n```',
       '{"passed": "yes", "reason": "ok"}',
       '{"passed": true, "reason": "ok", "score": 1}',
       '{"passed": true}',

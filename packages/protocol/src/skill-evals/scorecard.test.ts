@@ -11,6 +11,7 @@ import {
   SKILL_EVAL_SUBMISSION_DEFAULTS,
   SkillEvalScorecardError,
   skillEvalScorecardSchema,
+  skillEvalSubmissionRulesSchema,
   skillEvalSubmissionShortfalls,
   verifySkillEvalScorecard,
   type SkillEvalExecution,
@@ -301,5 +302,8 @@ describe("what leaves the team (SK16, SK19, SK20)", () => {
         minCases: 4,
       }),
     ).toEqual(["too_few_cases"]);
+    expect(skillEvalSubmissionRulesSchema.parse({})).toEqual(SKILL_EVAL_SUBMISSION_DEFAULTS);
+    expect(skillEvalSubmissionRulesSchema.safeParse({ minPassRate: 1.5 }).success).toBe(false);
+    expect(skillEvalSubmissionRulesSchema.safeParse({ minCases: -1 }).success).toBe(false);
   });
 });

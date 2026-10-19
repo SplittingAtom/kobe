@@ -75,7 +75,7 @@ export type SkillEvalParseResult =
 export interface ParseSkillEvalSuiteOptions {
   /** Every path of the package; when given, each case's `files` must be among them. */
   readonly paths?: Iterable<string>;
-  /** The Site's case limit (`eval_limits.maxCases`, at most 25), so lint agrees with the runner. */
+  /** The Site's case limit (`eval_limits.maxCases`, clamped to 1–25), so lint agrees with the runner. */
   readonly maxCases?: number;
 }
 
@@ -255,17 +255,39 @@ function duplicateIdIssues(doc: Document, lines: LineCounter, raw: unknown): Ski
 /** The lexer's document, flow-error-end and scalar markers. */
 const LEXER_MARKERS: ReadonlySet<string> = new Set(["\u0002", "\u0018", "\u001f"]);
 
-/** Offset of the first flow collection opened past the depth limit, or null (lexer tokens). */
-function flowTooDeep(text: string): number | null {
-  let depth = 0;
+/**
+ * Offset of the first node nested past the depth limit, or null, from the lexer's tokens (an
+ * iterative scan, before any recursive parsing). Flow collections count their brackets. Block
+ * nesting is tracked as a stack of columns: the first token of each line and every `-` / `?`
+ * indicator opens a level at its column, closing those at the same column or deeper. This bounds
+ * compact nesting (`- - - - x`) too, and over-counts a little, never under.
+ */
+function tooDeepAt(text: string): number | null {
+  let flow = 0;
   let offset = 0;
+  let column = 0;
+  let lineStart = true;
+  const block: number[] = [];
+  const open = (at: number) => {
+    while (block.length > 0 && (block[block.length - 1] as number) >= at) block.pop();
+    block.push(at);
+  };
   for (const token of new Lexer().lex(text)) {
-    if (token === "[" || token === "{") {
-      depth += 1;
-      if (depth > EVAL_YAML_MAX_DEPTH) return offset;
-    } else if (token === "]" || token === "}") depth -= 1;
-    // The lexer's own control tokens (document, scalar, flow-end markers) are not in the source.
-    if (!LEXER_MARKERS.has(token)) offset += token.length;
+    if (LEXER_MARKERS.has(token)) continue;
+    const startColumn = column;
+    if (token === "[" || token === "{") flow += 1;
+    else if (token === "]" || token === "}") flow -= 1;
+    else if (flow === 0 && (token === "-" || token === "?")) open(startColumn);
+    else if (flow === 0 && lineStart && !/^[ \t]*$/.test(token) && !token.startsWith("#"))
+      open(startColumn);
+    if (flow + block.length > EVAL_YAML_MAX_DEPTH) return offset;
+    if (!/^[ \t]*$/.test(token)) lineStart = false;
+    offset += token.length;
+    const newline = token.lastIndexOf("\n");
+    if (newline >= 0) {
+      column = token.length - newline - 1;
+      lineStart = true;
+    } else column += token.length;
   }
   return null;
 }
@@ -313,6 +335,9 @@ function nodeIssues(doc: Document, lines: LineCounter): SkillEvalIssue[] {
   return out;
 }
 
+const tooDeepIssue = (pos?: { line: number; col: number }) =>
+  fileIssue("too_deep", `Nested deeper than ${EVAL_YAML_MAX_DEPTH} levels.`, pos);
+
 const byPosition = (a: SkillEvalIssue, b: SkillEvalIssue) =>
   a.line - b.line || a.column - b.column || a.path.localeCompare(b.path);
 
@@ -332,7 +357,7 @@ export function parseSkillEvalSuite(
       ],
     };
   const lines = new LineCounter();
-  const deepAt = flowTooDeep(text);
+  const deepAt = tooDeepAt(text);
   if (deepAt !== null) {
     lines.addNewLine(0);
     for (let i = 0; i < text.length; i += 1) if (text[i] === "\n") lines.addNewLine(i + 1);
@@ -347,7 +372,16 @@ export function parseSkillEvalSuite(
       ],
     };
   }
-  const doc = parseDocument(text, { ...MANIFEST_YAML_OPTIONS, lineCounter: lines });
+  let doc: Document;
+  try {
+    doc = parseDocument(text, { ...MANIFEST_YAML_OPTIONS, lineCounter: lines });
+  } catch (err) {
+    // A stack overflow the pre-scan missed is refused as nesting, never as a crash.
+    if (err instanceof RangeError) return { ok: false, issues: [tooDeepIssue()] };
+    throw err;
+  }
+  if (doc.errors.some((e) => /call stack/i.test(e.message)))
+    return { ok: false, issues: [tooDeepIssue()] };
   if (doc.errors.length > 0)
     return {
       ok: false,
@@ -402,7 +436,10 @@ export function parseSkillEvalSuite(
     ];
     return { ok: false, issues: issues.sort(byPosition) };
   }
-  const maxCases = options.maxCases ?? EVAL_MAX_CASES;
+  const maxCases = Math.min(
+    EVAL_MAX_CASES,
+    Math.max(1, Math.trunc(options.maxCases ?? EVAL_MAX_CASES)),
+  );
   if (parsed.data.cases.length > maxCases) {
     const { node } = locate(doc, ["cases"]);
     const pos = lines.linePos(rangeStart(node));
