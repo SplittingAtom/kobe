@@ -11,8 +11,8 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-340 (0167): an install with skill notifications upgrades; a block notice keeps its shape;
- * a retirement notice names its skill, and a version one its version.
+ * KOBE-340 (0153, regenerated with the rest of Phase C): an install with notifications upgrades;
+ * a pause keeps its shape; a retirement notice names its skill, and a version one its version.
  */
 const MARKER = `ADD COLUMN "skill_semver"`;
 
@@ -48,9 +48,9 @@ beforeAll(async () => {
       `retire-${suffix}`,
     ]);
     await c.query(
-      `INSERT INTO notifications (team_id, id, user_id, kind, skill_id)
-       VALUES ($1, $2, $3, 'skill.member_add.blocked', $4)`,
-      [ids.team, ids.old, ids.user, ids.skill],
+      `INSERT INTO notifications (team_id, id, user_id, kind, paused_by)
+       VALUES ($1, $2, $3, 'schedule.paused', 'team_admin')`,
+      [ids.team, ids.old, ids.user],
     );
   });
   await runMigrations({ databaseUrl: db.ownerUrl, appRole: db.appRole });
@@ -62,13 +62,13 @@ afterAll(async () => {
 });
 
 describe("retirement notifications (0167)", () => {
-  it("keeps the block notice and takes retirement notices with their skill and version", async () => {
+  it("keeps the pause and takes retirement notices with their skill and version", async () => {
     if (!db) throw new Error("database not created");
     await withClient(db.adminUrl, async (c) => {
       const old = await c.query(`SELECT kind, skill_semver FROM notifications WHERE id = $1`, [
         ids.old,
       ]);
-      expect(old.rows).toEqual([{ kind: "skill.member_add.blocked", skill_semver: null }]);
+      expect(old.rows).toEqual([{ kind: "schedule.paused", skill_semver: null }]);
       const insert = (kind: string, semver: string | null) =>
         c.query(
           `INSERT INTO notifications (team_id, id, user_id, kind, skill_id, skill_semver)
