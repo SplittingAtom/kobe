@@ -10,6 +10,8 @@ export const conversations = defineDomain({
     "events",
     "answer_feedback",
     "answer_feedback_history",
+    // MCP Apps results of model calls (KOBE-438): they follow their thread.
+    "thread_app_results",
   ],
   siteWide: [],
   grants: {},
