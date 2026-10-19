@@ -43,7 +43,8 @@ export function usageRecordOf(call: CallRecord): ModelUsageRecord | undefined {
     userId: call.userId,
     sandboxId: call.sandboxId,
     runId: call.runId,
-    ...(call.purpose ? { kind: call.purpose } : {}),
+    // A server call's purpose, an eval sandbox's `eval` (KOBE-327), else the default `run`.
+    ...(call.purpose ? { kind: call.purpose } : call.eval ? { kind: "eval" as const } : {}),
     at: call.startedAt,
     route: call.route,
     model: call.model,

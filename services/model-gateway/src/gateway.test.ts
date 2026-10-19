@@ -10,6 +10,7 @@ import {
   signRunToken,
 } from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { usageRecordOf } from "./usage/sink.js";
 import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
 import { runRootSpanId, runTraceId } from "@kobe/protocol";
 import pino from "pino";
@@ -28,7 +29,13 @@ const sandbox = randomUUID();
 const logger = pino({ level: "silent" });
 
 function token(
-  over: Partial<{ aud: SessionTokenAudience; exp: number; sub: string; key: string }> = {},
+  over: Partial<{
+    aud: SessionTokenAudience;
+    exp: number;
+    sub: string;
+    key: string;
+    evalThread: string;
+  }> = {},
 ) {
   const now = Math.floor(Date.now() / 1000);
   return signSessionToken(
@@ -41,6 +48,7 @@ function token(
       iat: now - 10,
       exp: over.exp ?? now + 900,
       jti: randomUUID().replace(/-/g, ""),
+      ...(over.evalThread ? { eval_thread: over.evalThread } : {}),
     },
     over.key ?? KEY,
   );
@@ -356,6 +364,19 @@ describe("routing", () => {
       model: "openai/m",
       status: 200,
     });
+  });
+
+  it("KOBE-327: an eval sandbox's call is usage kind eval and carries the eval cap", async () => {
+    const r = await call("/v1/chat/completions", {
+      headers: bearer(token({ evalThread: randomUUID() })),
+    });
+    expect(r.status).toBe(200);
+    expect(records[0]).toMatchObject({ teamId: team, sandboxId: sandbox, eval: true });
+    expect(usageRecordOf(must(records[0]))?.kind).toBe("eval");
+    const plain = await call("/v1/chat/completions", { headers: bearer(token()) });
+    expect(plain.status).toBe(200);
+    expect(records[1]?.eval).toBeUndefined();
+    expect(usageRecordOf(must(records[1]))?.kind).toBeUndefined();
   });
 
   it("takes the token from each SDK's header and strips it (Anthropic, Gemini, ?key=)", async () => {
@@ -978,3 +999,8 @@ describe("shared eval cases for an Orbit eval Job (KOBE-276)", () => {
     expect(hits).toEqual([]);
   });
 });
+
+function must<T>(x: T | undefined): T {
+  if (x === undefined) throw new Error("missing");
+  return x;
+}

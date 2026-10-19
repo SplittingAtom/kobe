@@ -26,6 +26,11 @@ export interface CallContext {
   readonly runId: string | undefined;
   /** Set on a server call (KOBE-234): what it is for; its usage row's `kind`. */
   readonly purpose?: ServerCallTokenPurpose;
+  /**
+   * A skill eval's sandbox made the call (its session token names an `eval_thread`, KOBE-327):
+   * usage kind `eval`, and the team eval cap applies.
+   */
+  readonly eval?: boolean;
   readonly route: RouteKind;
   readonly path: string;
   /** The model the request names (body `model`, or Gemini's path), when it does. */
