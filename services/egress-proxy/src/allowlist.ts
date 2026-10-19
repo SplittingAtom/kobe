@@ -1,4 +1,6 @@
-import { findMatchingPattern } from "@kobe/db";
+import { decideEgress, type EgressDecision } from "@kobe/db";
+
+export type { EgressDecision };
 
 /**
  * Per-team egress allowlists (spec D6, D28): effective(team) = team enablement ∩ site ceiling,
@@ -14,10 +16,6 @@ export interface EgressPolicySource {
   /** The team's sealed injected headers per enabled pattern (KOBE-39); absent: none. */
   loadTeamHeaders?(teamId: string): Promise<readonly { domain: string; sealed: string }[]>;
 }
-
-export type EgressDecision =
-  | { readonly allowed: true; readonly pattern: string }
-  | { readonly allowed: false; readonly reason: "not_enabled" | "not_in_ceiling" };
 
 export interface AllowlistCacheOptions {
   readonly ttlMs: number;
@@ -89,13 +87,8 @@ export class AllowlistCache {
 
   async decide(teamId: string, host: string): Promise<EgressDecision> {
     const [ceiling, team] = await Promise.all([this.getCeiling(), this.getTeam(teamId)]);
-    const effective = new Set([...team].filter((p) => ceiling.has(p)));
-    const pattern = findMatchingPattern(effective, host);
-    if (pattern !== undefined) return { allowed: true, pattern };
-    return {
-      allowed: false,
-      reason: findMatchingPattern(ceiling, host) === undefined ? "not_in_ceiling" : "not_enabled",
-    };
+    // The shared decision (@kobe/db): the catalog's egress check uses the same one (KOBE-336).
+    return decideEgress(ceiling, team, host);
   }
 
   /**

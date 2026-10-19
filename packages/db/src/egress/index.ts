@@ -1,5 +1,7 @@
 export {
   MAX_HOST_LENGTH,
+  decideEgress,
+  type EgressDecision,
   findMatchingPattern,
   normalizeHost,
   parseDomainPattern,

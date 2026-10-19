@@ -78,3 +78,27 @@ export function findMatchingPattern(
   }
   return undefined;
 }
+
+export type EgressDecision =
+  | { readonly allowed: true; readonly pattern: string }
+  | { readonly allowed: false; readonly reason: "not_in_ceiling" | "not_enabled" };
+
+/**
+ * The egress proxy's decision for `host` (canonical): allowed when a pattern the team enabled, and
+ * the Site ceiling still holds, covers it; otherwise why not. Shared by the proxy and every
+ * server-side "is this host reachable here" view (the catalog's egress check, KOBE-336), so they
+ * can't disagree.
+ */
+export function decideEgress(
+  ceiling: ReadonlySet<string>,
+  team: ReadonlySet<string>,
+  host: string,
+): EgressDecision {
+  const effective = new Set([...team].filter((p) => ceiling.has(p)));
+  const pattern = findMatchingPattern(effective, host);
+  if (pattern !== undefined) return { allowed: true, pattern };
+  return {
+    allowed: false,
+    reason: findMatchingPattern(ceiling, host) === undefined ? "not_in_ceiling" : "not_enabled",
+  };
+}
