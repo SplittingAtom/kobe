@@ -57,6 +57,15 @@ export const orbitEvalSettingsSchema = z.strictObject({
 });
 export type OrbitEvalSettings = z.infer<typeof orbitEvalSettingsSchema>;
 
+/** The optional external skill scanner Job (KOBE-341): image from the chart, never a request. */
+export const skillScanSettingsSchema = z.strictObject({
+  image: z.string().min(1).max(512),
+  /** activeDeadlineSeconds of the Job: the longest a scan may run before it counts as failed. */
+  deadlineSeconds: z.number().int().min(60).max(3600),
+  resources: resourcesSchema,
+});
+export type SkillScanSettings = z.infer<typeof skillScanSettingsSchema>;
+
 export const sandboxSettingsSchema = z.strictObject({
   image: z.string().min(1).max(512),
   imagePullPolicy: z.enum(["Always", "IfNotPresent", "Never"]),
@@ -129,6 +138,8 @@ export const sandboxSettingsSchema = z.strictObject({
   toolExecutor: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),
   /** Pre-publish eval gate (KOBE-93). Unset: publishing under an enabled gate fails closed. */
   orbitEval: orbitEvalSettingsSchema.optional(),
+  /** The optional external skill scanner (KOBE-341). Unset: the Site setting can't turn it on. */
+  skillScan: skillScanSettingsSchema.optional(),
   /**
    * Skill eval sandboxes (KOBE-325): at most `maxConcurrentPerTeam` per team (the Site setting
    * may lower it). Each team gets a quota of that many sandbox pods for them, added to

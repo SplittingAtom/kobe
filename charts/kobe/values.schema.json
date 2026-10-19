@@ -220,6 +220,20 @@
             }
           }
         },
+        "skillScan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "deadlineSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 3600
+            },
+            "resources": {
+              "$ref": "#/$defs/resources"
+            }
+          }
+        },
         "sessionKeysSecret": {
           "type": "string"
         },
