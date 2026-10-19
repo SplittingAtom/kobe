@@ -35,7 +35,11 @@ function Links({
   );
 }
 
-/** Bar row one, right side: the member's own areas (full pages for now; CE4 moves some beside). */
+/**
+ * The bar's right side: the member's own areas. On the chat page My memory and My schedules open
+ * beside the thread (CE4, KOBE-424, `IconAction` through `lib/shell/areas.ts`); My agents, the
+ * agent builder, stays a full page.
+ */
 export function AreaLinks() {
   return <Links commands={linksOf("areas", { consoles: [] })} label="My area" />;
 }

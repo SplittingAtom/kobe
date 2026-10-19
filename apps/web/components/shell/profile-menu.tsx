@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { authClient } from "../../lib/auth-client";
+import { openBeside, plainClick } from "../../lib/shell/areas";
 import { forgetLastThread } from "../../lib/shell/last-thread";
 import { barMenuProps } from "./bar-menu";
 import { IconAction } from "./icon-action";
@@ -10,10 +11,20 @@ import styles from "./shell.module.css";
 
 /**
  * The profile menu at the bar's right end (CE3): the member's other areas and sign-out. A
- * disclosure, like the team switcher; one of the two is open at a time. Slot: a member settings page joins this menu when one exists.
+ * disclosure, like the team switcher; one of the two is open at a time. On the chat page My
+ * approvals and My connectors open beside the thread (CE4, KOBE-424); the builders (My skills),
+ * Projects and My shared cases stay full pages. Slot: a member settings page joins this menu when
+ * one exists.
  */
 export function ProfileMenu() {
   const [error, setError] = useState<string | null>(null);
+  /** CE4 (KOBE-424): My approvals and My connectors open beside the thread on the chat page. */
+  const beside = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (!plainClick(e) || !openBeside(e.currentTarget.getAttribute("href") ?? "")) return;
+    e.preventDefault();
+    const menu = e.currentTarget.closest("details");
+    if (menu) menu.open = false;
+  };
 
   async function signOut() {
     setError(null);
@@ -38,10 +49,14 @@ export function ProfileMenu() {
           <MenuLink href="/me/projects">Projects</MenuLink>
         </li>
         <li>
-          <MenuLink href="/me/connectors">My connectors</MenuLink>
+          <MenuLink href="/me/connectors" onClick={beside}>
+            My connectors
+          </MenuLink>
         </li>
         <li>
-          <MenuLink href="/me/approvals">My approvals</MenuLink>
+          <MenuLink href="/me/approvals" onClick={beside}>
+            My approvals
+          </MenuLink>
         </li>
         <li>
           <MenuLink href="/me/shared-cases">My shared cases</MenuLink>

@@ -31,6 +31,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * (`fake reasoning at <effort>`) before the text `fake-openai: thought at <effort>`, where
  * `<effort>` is the request's `reasoning_effort` (`default` when absent). With
  * `reasoning_effort: "none"` there is no reasoning part and the text says `thought at none`.
+ *
+ * Long answers and prompt sizes (OpenAI chat API only, KOBE-227 Gate 5 browser checks): a last user
+ * message containing `kobe-long-answer=<n>` is streamed as n numbered lines, one every
+ * {@link LONG_LINE_MS} (a run that streams long enough to scroll, queue and stop), and one
+ * containing `kobe-prompt-tokens=<n>` reports n prompt tokens (the context gauge's fill).
  */
 export interface SeenRequest {
   readonly method: string;
@@ -379,7 +384,13 @@ function openai(
   model: string,
   /** Reasoning sent before the text (`reasoning_content`, as Ollama and vLLM send it). */
   reasoning?: string,
+  promptTokens = 5,
 ): void {
+  const usage = {
+    prompt_tokens: promptTokens,
+    completion_tokens: 3,
+    total_tokens: promptTokens + 3,
+  };
   if (!stream) {
     const message = {
       role: "assistant",
@@ -392,7 +403,7 @@ function openai(
       created: 1,
       model,
       choices: [{ index: 0, message, finish_reason: "stop" }],
-      usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      usage,
     });
     return;
   }
@@ -409,9 +420,44 @@ function openai(
     chunk({ role: "assistant", content: "" }, null),
     ...(reasoning === undefined ? [] : [chunk({ reasoning_content: reasoning }, null)]),
     ...reply.split(" ").map((w, i) => chunk({ content: i === 0 ? w : ` ${w}` }, null)),
-    chunk({}, "stop", { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 }),
+    chunk({}, "stop", usage),
     "data: [DONE]\n\n",
   ]);
+}
+
+const LONG_ANSWER = /kobe-long-answer=(\d{1,4})/;
+const PROMPT_TOKENS = /kobe-prompt-tokens=(\d{1,9})/;
+/** The pause between the lines of a long answer. */
+export const LONG_LINE_MS = 60;
+const MAX_LONG_LINES = 2_000;
+
+/** A `kobe-long-answer=<n>` reply: n numbered lines, streamed one at a time until the caller goes. */
+function openaiLongAnswer(res: ServerResponse, lines: number, model: string): void {
+  const chunk = (delta: unknown, finish: string | null, usage?: unknown) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-fake",
+      object: "chat.completion.chunk",
+      created: 1,
+      model,
+      choices: [{ index: 0, delta, finish_reason: finish }],
+      ...(usage ? { usage } : {}),
+    })}\n\n`;
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  res.write(chunk({ role: "assistant", content: "" }, null));
+  let sent = 0;
+  const timer = setInterval(() => {
+    sent += 1;
+    res.write(
+      chunk({ content: `${sent}. fake line ${sent} of ${lines}, streamed slowly.\n` }, null),
+    );
+    if (sent < lines) return;
+    clearInterval(timer);
+    res.write(
+      chunk({}, "stop", { prompt_tokens: 5, completion_tokens: lines, total_tokens: 5 + lines }),
+    );
+    res.end("data: [DONE]\n\n");
+  }, LONG_LINE_MS);
+  res.on("close", () => clearInterval(timer));
 }
 
 function anthropic(res: ServerResponse, reply: string, stream: boolean, model: string): void {
@@ -563,8 +609,12 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       } else if (text.startsWith(TOOL_PREFIX) && parseToolPrompt(text)) {
         const parsed = parseToolPrompt(text);
         if (parsed) openaiNamedCall(res, parsed, stream, model);
+      } else if (LONG_ANSWER.test(text) && stream) {
+        const lines = Math.min(Number(LONG_ANSWER.exec(text)?.[1] ?? 1), MAX_LONG_LINES);
+        openaiLongAnswer(res, Math.max(lines, 1), model);
       } else {
-        openai(res, `fake-openai: ${text}`, stream, model);
+        const tokens = PROMPT_TOKENS.exec(text)?.[1];
+        openai(res, `fake-openai: ${text}`, stream, model, undefined, tokens ? Number(tokens) : 5);
       }
     } else if (p.endsWith("/v1/messages")) {
       anthropic(res, `fake-anthropic: ${text}`, stream, model);

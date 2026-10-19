@@ -352,6 +352,17 @@ export const AUDIT_EVENTS = {
       .string()
       .regex(/^[0-9a-f]{64}$/)
       .optional(),
+    /**
+     * The started target's own chain, replaced by the backup's (KOBE-422: only its start-up
+     * events): its head before the restore and its row count. Explains anchors the fresh site
+     * logged before the restore. Absent when the target's log was empty.
+     */
+    replacedAuditHeadSeq: z.number().int().positive().optional(),
+    replacedAuditHeadHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    replacedAuditRows: z.number().int().positive().optional(),
   }),
 
   // ── policy: tool rules and switches (D29, KOBE-35); site rules site-only, others team ──

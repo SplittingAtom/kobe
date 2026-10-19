@@ -16,6 +16,7 @@ import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
 import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel } from "./artifact-panel";
+import { AreaPanel, useAreaUrl } from "../shell/area-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { AppCommands } from "../shell/app-commands";
 import { CommandBindingsProvider } from "../shell/command-bindings";
@@ -131,12 +132,16 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
 }
 
 /** The shell grid with the rail's and the artifact column's dragged widths (CE6) and sheet (CE7). */
-function WorkspaceGrid(
-  props: Omit<
-    Parameters<typeof ShellGrid>[0],
-    "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
-  >,
-) {
+function WorkspaceGrid({
+  areaOpen,
+  ...props
+}: Omit<
+  Parameters<typeof ShellGrid>[0],
+  "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
+> & {
+  /** A My area page is beside the thread (CE4): the column (or its sheet) shows it. */
+  readonly areaOpen: boolean;
+}) {
   const panel = useArtifactPanel();
   const rail = useRail();
   return (
@@ -144,8 +149,8 @@ function WorkspaceGrid(
       {...props}
       artifactWidth={panel?.width ?? null}
       railWidth={rail?.width ?? null}
-      artifactSheet={panel?.sheetOpen ?? false}
-      artifactHidden={panel?.hidden ?? false}
+      artifactSheet={areaOpen || (panel?.sheetOpen ?? false)}
+      artifactHidden={!areaOpen && (panel?.hidden ?? false)}
     />
   );
 }
@@ -183,6 +188,8 @@ function ChatWorkspace({
 }) {
   const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
   const [threadId, setThreadId] = useThreadUrl();
+  // A My area page beside the thread (CE4, KOBE-424): `?area=`, with Back and Forward.
+  const area = useAreaUrl();
   // The consoles and builders return here, to this thread (CE4).
   useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
   // The one-row bar's Menu closes once another thread is on screen (a search hit, the bell).
@@ -249,6 +256,7 @@ function ChatWorkspace({
                           <RailDrawerButton teamName={teamName} />
                         </ShellSlot>
                         <WorkspaceGrid
+                          areaOpen={area !== undefined}
                           rail={
                             <WorkspaceRail
                               teamName={teamName || "Workspace"}
@@ -256,7 +264,12 @@ function ChatWorkspace({
                               filesApi={filesApi}
                             />
                           }
-                          artifact={<ArtifactPanel filesApi={filesApi} />}
+                          artifact={
+                            <>
+                              <AreaPanel area={area} fetchFn={fetchFn} />
+                              <ArtifactPanel filesApi={filesApi} />
+                            </>
+                          }
                           conversation={
                             <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
                               <ThreadView onOpenThread={setThreadId} inShell />

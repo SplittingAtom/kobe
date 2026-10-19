@@ -385,8 +385,16 @@ sections:
         version: 1.55.0
         license: Apache-2.0
         use: test-only
-        where: e2e/browser (packages below)
+        where: e2e/browser (packages below); CI e2e shard gate3 (e2e/browser/scripts/gate3-browser.mjs)
         link: https://github.com/microsoft/playwright/blob/main/LICENSE
+        images: []
+      - id: playwright-chromium
+        component: Chromium (Playwright's build, `npx playwright install chromium`)
+        version: the build Playwright 1.55.0 pins
+        license: BSD-3-Clause
+        use: test-only
+        where: CI e2e shard gate3 and e2e/browser runs (downloaded at test time, never shipped)
+        link: https://chromium.googlesource.com/chromium/src/+/main/LICENSE
         images: []
       - id: mailpit
         component: Mailpit (`axllent/mailpit`)

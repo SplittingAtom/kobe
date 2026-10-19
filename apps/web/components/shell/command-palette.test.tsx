@@ -313,8 +313,14 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     );
     await ready();
     await openPalette();
+    await userEvent.setup().keyboard("my agents{Enter}");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/agents"));
+    // CE4 (KOBE-424): My memory opens beside the thread, not as a page.
+    await openPalette();
     await userEvent.setup().keyboard("my memory{Enter}");
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/memory"));
+    expect(await screen.findByRole("region", { name: "My memory" })).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("thread")).toBe(t);
+    expect(push).not.toHaveBeenCalledWith("/me/memory");
   });
 
   it("a reader of a shared thread can't run the owner's actions from it", async () => {

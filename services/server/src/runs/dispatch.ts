@@ -98,7 +98,15 @@ export class RunDispatcher {
       },
     );
     if (outcome.ok || this.#h.closed()) return;
-    this.#h.log.warn({ run_id: plan.runId, code: outcome.error.code }, "run.start failed");
+    // Pi's refusals are fixed reasons ("thread has an active run", "could not start Pi"): kept,
+    // capped, for the operator; other codes say all there is.
+    const detail = /^pi_/.test(outcome.error.code)
+      ? outcome.error.message.slice(0, 160)
+      : undefined;
+    this.#h.log.warn(
+      { run_id: plan.runId, code: outcome.error.code, ...(detail ? { detail } : {}) },
+      "run.start failed",
+    );
     await this.#startFailed(plan, outcome.error.code);
   }
 

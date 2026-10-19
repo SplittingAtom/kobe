@@ -44,6 +44,11 @@ export interface ThreadState {
   readonly live?: LiveRun | undefined;
   /** The model the thread's agent pins (KOBE-44): the model picker is locked to it. */
   readonly agentModel?: string | null | undefined;
+  /**
+   * The agent's current published version (D19, U8): newer than `summary.agentVersion` means the
+   * header offers "v<N> available" (KOBE-420). Null: no agent, or none readable.
+   */
+  readonly agentCurrentVersion?: number | null | undefined;
   /** The live run's message text, until Pi commits it. */
   readonly livePrompt?:
     | {

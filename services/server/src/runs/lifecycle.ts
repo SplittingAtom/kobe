@@ -215,13 +215,16 @@ export async function promoteInTx(
       approvalMode,
     });
     transitions.push(applied.transition);
-    if (thinkingLevel !== undefined) {
-      // The gateway reads it for every call of the run (KOBE-260): fixed now, never raised.
-      await tx
-        .update(runs)
-        .set({ thinkingLevel })
-        .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
-    }
+    // The gateway reads the thinking level for every call of the run (KOBE-260): fixed now, never
+    // raised. The agent version the run starts on (KOBE-420), read from the pin under the thread
+    // lock like `run.started`'s: the chat marks where it changes between the thread's runs.
+    await tx
+      .update(runs)
+      .set({
+        agentVersion: resolved.agent?.version ?? null,
+        ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+      })
+      .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
     await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
     // KOBE-315 (CE12): skills at another version than this thread's last run with them.
     const updates = await skillUpdatesInTx(tx, teamId, threadId, next.id, resolved.skillRefs ?? []);

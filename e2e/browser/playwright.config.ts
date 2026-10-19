@@ -2,12 +2,22 @@ import { defineConfig, devices } from "@playwright/test";
 import { STORAGE_STATE } from "./tests/support/constants.js";
 
 /**
- * Browser suite for the chat surfaces (v1.1 Phase A/B), run against a deployment: never in CI.
+ * Browser suite for the chat surfaces (v1.1 Phase A/B), run against a deployment; in CI only as
+ * Gate 5 (e2e/gate5.sh, KOBE-227) against k3d.
  * The deployment and the account come from the environment only (the repository is public):
  * KOBE_BASE_URL, KOBE_USER, KOBE_PW. See README.md.
  */
 const baseURL = process.env["KOBE_BASE_URL"];
 if (!baseURL) throw new Error("KOBE_BASE_URL is required (the deployment's https URL)");
+
+/**
+ * KOBE_BROWSER_MAP=host:port: Chromium connects there for the base URL's host (a port-forward to a
+ * k3d ingress, e2e/gate5.sh), so the pages keep the deployment's own origin.
+ */
+const map = process.env["KOBE_BROWSER_MAP"];
+const launchOptions = map
+  ? { args: [`--host-resolver-rules=MAP ${new URL(baseURL).hostname} ${map}`] }
+  : {};
 
 /** A test talks to real models: generous, and the compaction spec raises it further. */
 const TEST_TIMEOUT_MS = 10 * 60_000;
@@ -16,6 +26,7 @@ const TEST_TIMEOUT_MS = 10 * 60_000;
 const browserUse = {
   colorScheme: "light",
   viewport: { width: 1280, height: 800 },
+  launchOptions,
 } as const;
 
 export default defineConfig({
@@ -33,7 +44,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { open: "never" }],
-    ["json", { outputFile: "test-results/results.json" }],
+    ["json", { outputFile: process.env["KOBE_BROWSER_RESULTS"] ?? "test-results/results.json" }],
   ],
   use: {
     baseURL,

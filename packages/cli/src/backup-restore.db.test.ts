@@ -25,6 +25,9 @@ import {
   OAUTH_TOKENS,
   SEARCH_WORD,
   T1,
+  T2,
+  U1,
+  U3,
   allBackupBytes,
   copyWithManifest,
   dumpScript,
@@ -33,6 +36,7 @@ import {
   memoryLister,
   rowsOf,
   seed,
+  serverStarted,
   sql,
   trapBinDir,
 } from "./testing/fixtures.js";
@@ -429,6 +433,99 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       await expect(restore(dst)).rejects.toThrow(/already has data/);
       expect(await rowsOf(dst.adminUrl, "users")).toEqual(await rowsOf(src.adminUrl, "users"));
       expect(await forcedTables(dst.adminUrl)).toEqual(forcedBefore);
+    });
+
+    it("restores into a site whose server started: its startup seeds are replaced, never duplicated (KOBE-422)", async () => {
+      // A source whose server started too: its gallery agent has the same key as the target's.
+      const started = await createTestDatabase(server);
+      created.push(started);
+      await seed(started);
+      await serverStarted(started.adminUrl);
+      const url = new URL(started.adminUrl);
+      url.username = backupRole;
+      url.password = password;
+      const dir = join(work, "b-started");
+      await backup(dir, { databaseUrl: url.toString() });
+
+      const dst = await target();
+      const seeded = await serverStarted(dst.adminUrl);
+      const [replaced] = await sql<{ hash: string }>(
+        dst.adminUrl,
+        "SELECT hash FROM audit_log WHERE seq = 2",
+      );
+      await restore(dst, dir);
+      // The started site's own chain is named in the restore's event (anchors it logged).
+      const [event] = await sql<{ target: Record<string, unknown> }>(
+        dst.adminUrl,
+        "SELECT target FROM audit_log WHERE action = 'platform.restore.completed'",
+      );
+      expect(event?.target).toMatchObject({
+        replacedAuditHeadSeq: 2,
+        replacedAuditHeadHash: replaced?.hash,
+        replacedAuditRows: 2,
+      });
+      for (const t of ["site_agents", "site_agent_versions"]) {
+        expect(await rowsOf(dst.adminUrl, t), t).toEqual(await rowsOf(started.adminUrl, t));
+      }
+      expect(await sql(dst.adminUrl, `SELECT 1 FROM site_agents WHERE id = '${seeded}'`)).toEqual(
+        [],
+      );
+      const actions = (url: string) =>
+        sql<{ action: string }>(url, "SELECT action FROM audit_log ORDER BY seq").then((rows) =>
+          rows.map((r) => r.action),
+        );
+      expect(await actions(dst.adminUrl)).toEqual([
+        ...(await actions(started.adminUrl)),
+        "platform.restore.completed",
+      ]);
+      const settings = (url: string) =>
+        sql(
+          url,
+          `SELECT key, value FROM site_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
+        );
+      expect(await settings(dst.adminUrl)).toEqual(await settings(started.adminUrl));
+    });
+
+    it("restores every awake sandbox as hibernated, so the first turn wakes it visibly (KOBE-426)", async () => {
+      const withSandboxes = await createTestDatabase(server);
+      created.push(withSandboxes);
+      await seed(withSandboxes);
+      // U1's sandbox was awake (with a live wire connection) at backup time, U3's offboarded.
+      await sql(
+        withSandboxes.adminUrl,
+        `INSERT INTO sandboxes (team_id, user_id, sandbox_id, state, pvc) VALUES
+           ('${T1}', '${U1}', gen_random_uuid(), 'running', 'workspace-u-${U1}');
+         INSERT INTO sandboxes (team_id, user_id, state, retain_until) VALUES
+           ('${T2}', '${U3}', 'destroyed', now() + interval '30 days');
+         INSERT INTO sandbox_connections (team_id, user_id, sandbox_id, connection_id, replica_id)
+           VALUES ('${T1}', '${U1}', gen_random_uuid(), gen_random_uuid(), 'replica-1');`,
+      );
+      const url = new URL(withSandboxes.adminUrl);
+      url.username = backupRole;
+      url.password = password;
+      const dir = join(work, "b-sandboxes");
+      await backup(dir, { databaseUrl: url.toString() });
+      const dst = await target();
+      await restore(dst, dir);
+      const states = await sql<{ user_id: string; state: string; pvc: string | null }>(
+        dst.adminUrl,
+        "SELECT user_id, state, pvc FROM sandboxes ORDER BY user_id",
+      );
+      expect(states).toEqual([
+        { user_id: U1, state: "hibernated", pvc: `workspace-u-${U1}` },
+        { user_id: U3, state: "destroyed", pvc: null },
+      ]);
+      expect(await rowsOf(dst.adminUrl, "sandbox_connections")).toEqual(
+        await rowsOf(withSandboxes.adminUrl, "sandbox_connections"),
+      );
+    });
+
+    it("still refuses a started site that holds real data (KOBE-422)", async () => {
+      const dst = await target();
+      await serverStarted(dst.adminUrl);
+      await sql(dst.adminUrl, "INSERT INTO users (name, email) VALUES ('Zed', 'zed@example.com')");
+      await expect(restore(dst)).rejects.toThrow(/already has data in: users\b/);
+      expect(await sql(dst.adminUrl, "SELECT slug FROM site_agents")).toEqual([{ slug: "kobe" }]);
     });
 
     it("refuses a backup whose audit chain was tampered with, and restores nothing (KOBE-15)", async () => {

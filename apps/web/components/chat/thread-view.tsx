@@ -10,6 +10,7 @@ import { StatusBadge, type StatusTone } from "../ui/status";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
 import { ThreadContextGauge } from "../shell/context-gauge";
+import { AgentVersionBadge } from "./agent-version";
 import { ArtifactList } from "./artifact-list";
 import { CompactNowProvider, useCompactNow } from "./compact-now";
 import { Composer } from "./composer";
@@ -266,6 +267,7 @@ export function ThreadView({
 
   return (
     <ThreadPrimitive.Root
+      data-kobe-thread-root
       className="bg-background @container flex min-h-0 flex-1 flex-col overflow-hidden"
       style={COMPOSER_VARS}
     >
@@ -276,6 +278,7 @@ export function ThreadView({
             {label.label}
           </StatusBadge>
         )}
+        <AgentVersionBadge extras={extras} />
       </header>
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />

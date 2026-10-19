@@ -1,10 +1,12 @@
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
 import { expect, test } from "./support/chat.js";
+import { longAnswer } from "./support/gate5.js";
 
 /** Long enough to overflow the list and keep streaming while the test scrolls. */
-const LONG_ANSWER =
+const LONG_ANSWER = longAnswer(
   "No tools. Write a numbered list of 80 short lines, one per line, each naming a different " +
-  "fruit with about ten words about it. No intro, no outro.";
+    "fruit with about ten words about it. No intro, no outro.",
+);
 /** Within this many pixels of the bottom the list counts as following (smooth scroll lags). */
 const FOLLOW_SLACK_PX = 64;
 

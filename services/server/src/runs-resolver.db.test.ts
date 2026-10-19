@@ -104,6 +104,61 @@ describe("run start uses the resolver (KOBE-76)", () => {
     await f.until(w.team, second, "completed");
   });
 
+  it("KOBE-420: each run records the agent version it started on; the switch is marked on the first run on the new one", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const ws = await f.connect(w, 0);
+    const b = f.on(0, w.owner);
+    const thread = await pinnedThread(w.owner, {});
+    const agentId = (await b.get(`/v1/threads/${thread}`)).json.agent_id as string;
+    const version = async (run: string) =>
+      (
+        await f.fx.admin.query<{ v: number | null }>(
+          `SELECT agent_version AS v FROM runs WHERE team_id = $1 AND id = $2`,
+          [w.team, run],
+        )
+      ).rows[0]?.v;
+    const turn = async (text: string) => {
+      const run = await f.message(w.owner, thread, text);
+      ws.reply(await ws.started(run), "ok");
+      await f.until(w.team, run, "completed");
+      return run;
+    };
+    const first = await turn("on v1");
+    expect(await version(first)).toBe(1);
+
+    const edited = await b.request(
+      "PUT",
+      `/v1/agents/${agentId}`,
+      { frontmatter: { name: "Resolved" }, prompt: "You are v2." },
+      ANY,
+    );
+    expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+    expect((await b.request("POST", `/v1/agents/${agentId}/publish`, {}, ANY)).status).toBe(201);
+    const still = await turn("still on v1");
+    expect(await version(still)).toBe(1);
+    const markers = async () =>
+      (await b.get(`/v1/threads/${thread}/markers`)).json.agents as Record<string, unknown>[];
+    expect(await markers()).toEqual([]);
+
+    expect((await b.post(`/v1/threads/${thread}/agent-version`, {})).json.agent_version).toBe(2);
+    expect(await markers()).toEqual([]); // nothing ran on v2 yet
+    const switched = await turn("on v2");
+    expect(await version(switched)).toBe(2);
+    // The prompt entry is mirrored as the run goes; the marker sits above it.
+    await expect.poll(async () => (await f.run(w.team, switched)).user_entry_id).not.toBeNull();
+    const row = await f.run(w.team, switched);
+    expect(await markers()).toEqual([
+      {
+        run_id: switched,
+        user_entry_id: row.user_entry_id,
+        parent_entry_id: row.parent_entry_id,
+        from_version: 1,
+        to_version: 2,
+      },
+    ]);
+  });
+
   it("ac-2: a pinned alias the team did not enable fails the run with the agreed error", async () => {
     const w = await f.world();
     await catalog(w.team, w.owner.id, [["fast", true]]);

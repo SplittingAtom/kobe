@@ -204,6 +204,8 @@ interface ActiveRun {
   readonly compaction: boolean;
   stopAfterStep: boolean;
   stopping: boolean;
+  /** Started, its prompt not yet sent to Pi (a message run): Pi has nothing of it to abort. */
+  preparing: boolean;
   readonly ended: Promise<void>;
   readonly resolveEnded: () => void;
 }
@@ -761,7 +763,15 @@ export class Thread {
     const ended = new Promise<void>((resolve) => {
       resolveEnded = resolve;
     });
-    this.#run = { runId, compaction, stopAfterStep: false, stopping: false, ended, resolveEnded };
+    this.#run = {
+      runId,
+      compaction,
+      stopAfterStep: false,
+      stopping: false,
+      preparing: false,
+      ended,
+      resolveEnded,
+    };
     this.onStopDue = undefined;
     this.lastUsed = Date.now();
     this.#hooks.runStarted(runId, this.id);
@@ -794,6 +804,17 @@ export class Thread {
   markStopAfterStep(): void {
     const run = this.#run;
     if (run !== undefined) run.stopAfterStep = true;
+  }
+
+  /** The active message run is being prepared (true) or its prompt goes to Pi now (false). */
+  setPreparing(preparing: boolean): void {
+    const run = this.#run;
+    if (run !== undefined && !run.compaction) run.preparing = preparing;
+  }
+
+  /** The active run's prompt has not gone to Pi: there is nothing in Pi to abort or settle. */
+  get runPreparing(): boolean {
+    return this.#run?.preparing === true;
   }
 
   /** Mark the run as stopping; false when a stop is already under way. */

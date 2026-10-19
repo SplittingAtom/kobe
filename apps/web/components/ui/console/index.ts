@@ -21,6 +21,7 @@ export {
   type ConfirmOptions,
 } from "./confirm-dialog";
 export { Dialog, DialogClose } from "./dialog";
+export { EmbeddedPage } from "./embedded-context";
 export { EmptyState } from "./empty-state";
 export { Field, FieldError, FormRow, RequiredMark, useFieldControl } from "./field";
 export { FOCUS_RING } from "./focus";

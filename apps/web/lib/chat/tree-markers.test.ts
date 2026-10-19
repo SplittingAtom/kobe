@@ -10,12 +10,7 @@ import {
   toolResult,
   user,
 } from "./testing/entries";
-import {
-  placeProjectMarkers,
-  placeRunMarkers,
-  type ProjectMarker,
-  type RunMarker,
-} from "./markers";
+import { placePromptMarkers, placeRunMarkers, type ProjectMarker, type RunMarker } from "./markers";
 import { messageMeta, projectThread, type Projection } from "./tree";
 import { must } from "../testing/must";
 
@@ -231,7 +226,7 @@ describe("placeRunMarkers", () => {
   });
 });
 
-describe("placeProjectMarkers (CE19, KOBE-220)", () => {
+describe("placePromptMarkers (CE19, KOBE-220)", () => {
   const moved = (over: Partial<ProjectMarker>): ProjectMarker => ({
     runId: "r1",
     userEntryId: null,
@@ -252,7 +247,7 @@ describe("placeProjectMarkers (CE19, KOBE-220)", () => {
     ];
     const p = projectThread(entries, "a2");
     const node = must(p.nodeOfEntry.get("u2"));
-    const placed = placeProjectMarkers(
+    const placed = placePromptMarkers(
       [moved({ runId: "r2", userEntryId: "u2" }), moved({ runId: "r3", userEntryId: "gone" })],
       p,
     );

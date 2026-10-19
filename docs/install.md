@@ -489,6 +489,36 @@ helm install kobe charts/kobe -n kobe \
   --set smtp.existingSecret=kobe-smtp
 ```
 
+### First run: to the first chat
+
+`helm install` leaves a site with no users. To get to a first chat (not on a site you are about
+to restore a backup into: see [Backup and restore](#backup-and-restore)):
+
+1. **Create the Owner.** Open `https://<ingress.host>/setup`. The wizard asks for the setup token,
+   which proves you control the site:
+
+   ```bash
+   kubectl -n kobe get secret kobe-auth -o jsonpath='{.data.setup-token}' | base64 -d
+   ```
+
+   (with `auth.existingSecret`, the `setup-token` key of that Secret). Setup runs once; afterwards
+   `/setup` is closed.
+
+2. **Add a model.** Site console → **Models and providers**: add a provider with its API key, then a
+   catalog model with an alias (for example `fast`). See [Models](#models). Bifrost picks the
+   configuration up within seconds.
+3. **Create a team.** Site console → **Teams**: a slug, a name and its team admin. The server
+   creates the team's namespace `kobe-team-<slug>` and its sandbox policies itself (by the first
+   sandbox at the latest).
+4. **Enable the model for the team.** Team console → **Models**: enable it and make it the default.
+   Invite members from **Members** (an email through SMTP).
+5. **Start a chat.** The first message of each member starts their sandbox (a cold start of the
+   sandbox image under gVisor); later chats reuse it.
+
+If the first chat fails with a model error, check that the team has a default model and that the
+gateway is in sync (site console **Models and providers**); if it waits for a sandbox, see
+[Sandboxes](#sandboxes) and `kubectl -n kobe-team-<slug> get pods,events`.
+
 ### Object storage (S3)
 
 Kobe keeps a durable copy of every sandbox's `/workspace` in the bucket (`sandbox.workspaceSync`,
@@ -864,9 +894,25 @@ EXISTS` an invalid leftover.
 ## Backup and restore
 
 `kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see
-[backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and the
-generated `<release>-auth` and `<release>-envelope-key` Secrets) in your secret store: backups never
-contain them. Losing the envelope key makes every stored credential unreadable.
+[backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and every
+Secret the chart generates, listed in [backup-restore.md](backup-restore.md#secrets)) in your secret
+store: backups never contain them. Losing the envelope key makes every stored credential unreadable;
+losing the model keys Secret makes every model provider key unreadable.
+
+To recover a site from a backup (full steps in
+[backup-restore.md](backup-restore.md#restore-onto-a-fresh-cluster)):
+
+1. Recreate every Secret of the [Secrets table](backup-restore.md#secrets) from your secret store
+   under new names.
+2. Install the Kobe version the backup was taken with, pointing each one's values key
+   (`auth.existingSecret`, `envelope.keySecret`, `bifrost.keysSecret`, ...) at it, with the same public URL and the same bucket (or a copy). **Skip
+   first-run setup** ([First run](#first-run-to-the-first-chat)): the restore refuses a site with
+   users. The server's start seeds the gallery agents; the restore replaces those.
+3. Stop the writers: `kubectl -n kobe scale deploy/kobe-server deploy/kobe-scheduler --replicas=0`.
+4. Run `kobe restore --from <backup>` as the owner role (`KOBE_DB_MIGRATE_URL`), and check the
+   printed fingerprint against the one recorded at backup time.
+5. If the backup is older than the bucket or the cluster, set `retention.paused: true` first; then
+   scale back up. Users sign in again.
 
 ## Local development cluster
 

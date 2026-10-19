@@ -175,6 +175,13 @@ export const runs = pgTable(
     parentEntryId: text(),
     /** The Pi entry id of the prompt this run answered, once mirrored (KOBE-30). */
     userEntryId: text(),
+    /**
+     * The agent version the run started on (D19, KOBE-420): the thread's pin read under the thread
+     * lock when the run starts, as its `run.started` event records it. Null for a run without an
+     * agent (or a test thread's draft), one not started yet, and runs whose events were compacted
+     * before this column existed. The chat marks where it changes between a thread's runs.
+     */
+    agentVersion: integer(),
     /** The interrupted run this run retries (D14; at most one retry per run, KOBE-26 contract). */
     retryOfRunId: uuid(),
     /**

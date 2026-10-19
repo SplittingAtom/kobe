@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# t2's sandbox pod for e2e/gate2.sh (KOBE-193). Sourced; uses KUBECTL, TNS, T2, claim_uid and the
-# helpers of e2e/lib/gate-common.sh (ok, fail, until_ok).
+# t2's sandbox pod for e2e/gate2.sh (KOBE-193); e2e/gate3.sh reuses it (SBX_WHO names its user).
+# Sourced; uses KUBECTL, TNS, T2, claim_uid and the helpers of e2e/lib/gate-common.sh (ok, fail,
+# until_ok).
 #
 # Waits (bounded) for the pod to be Running and Ready. When it is not, it says so once, with the
 # pod's phase, its containers' waiting reasons and its last events, and every later step that needs
@@ -78,12 +79,12 @@ sbx_diagnose() { # every pod of t2's claim: phase, container reasons, last event
 sbx_await() {
   local secs="$1" label="$2"
   if ((SBX_DOWN)); then
-    echo "skip $label: t2's sandbox is not running (see the FAIL above)"
+    echo "skip $label: ${SBX_WHO:-t2}'s sandbox is not running (see the FAIL above)"
     return 1
   fi
   until_ok "$secs" sbx_running_ready && return 0
   SBX_DOWN=1
-  fail "t2's sandbox pod is not Running and Ready after ${secs}s (at $label): $(sbx_summary); every step that needs the sandbox is skipped"
+  fail "${SBX_WHO:-t2}'s sandbox pod is not Running and Ready after ${secs}s (at $label): $(sbx_summary); every step that needs the sandbox is skipped"
   sbx_diagnose
   return 1
 }
