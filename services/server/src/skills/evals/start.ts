@@ -325,6 +325,7 @@ export async function estimateSkillEval(
     if (!run) return null;
     const estimate = await estimateSkillEvalIn(tx, {
       teamId: who.teamId,
+      userId: who.userId,
       runModel: run.used,
       suite: prepared.suite,
       plan,
@@ -364,6 +365,7 @@ export async function startSkillEval(
     // From the team's history before this run is stored (it has none of its own yet).
     const estimate = await estimateSkillEvalIn(tx, {
       teamId: who.teamId,
+      userId: who.userId,
       runModel: run.used,
       suite,
       plan,

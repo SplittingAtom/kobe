@@ -24,6 +24,11 @@ export class FakeEvalProvider {
   maxLive = 0;
   answer: (start: RunStart, attempt: number) => string = () => "Total: 42";
   beforeReply: (ws: FakeWorkspace, start: RunStart) => Promise<void> = async () => {};
+  /**
+   * When it returns a Pi error message for a run (e.g. the gateway's budget refusal,
+   * `kobe.model_error:model_budget_exhausted: …`), the run fails with it instead of answering.
+   */
+  fail: (start: RunStart) => string | null = () => null;
   snapshot: EvalWorkspaceSnapshot = { walks: [] };
   /** The `eval.read` reply's files (default: every file read, empty). */
   read: (files: readonly { path: string; size: number }[]) => EvalReadResult["files"] = (files) =>
@@ -83,7 +88,18 @@ export class FakeEvalProvider {
       const n = (this.attempts.get(key) ?? 0) + 1;
       this.attempts.set(key, n);
       setTimeout(() => {
-        void this.beforeReply(ws, frame).then(() => ws.reply(frame, this.answer(frame, n)));
+        void this.beforeReply(ws, frame).then(() => {
+          const error = this.fail(frame);
+          if (error === null) return ws.reply(frame, this.answer(frame, n));
+          ws.event(frame, { type: "agent_start" });
+          ws.event(frame, {
+            type: "message_end",
+            message: { role: "assistant", stopReason: "error", errorMessage: error },
+          });
+          ws.event(frame, { type: "turn_end", message: { role: "assistant" } });
+          ws.event(frame, { type: "agent_settled" });
+          return undefined;
+        });
       }, 20);
     };
     this.sandboxes.set(spec.threadId, ws);

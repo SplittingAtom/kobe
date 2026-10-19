@@ -45,6 +45,8 @@ export type EvalJudgeResult =
       readonly costUsd: number;
       /** Why, for the case (a judge model no longer enabled, the call's error code). */
       readonly detail?: string;
+      /** The gateway refused the call for a budget or the eval cap: the eval stops (KOBE-327). */
+      readonly budgetRefused?: boolean;
     };
 
 /** The judge seam (KOBE-326): grade the answer and the matched outputs against the rubric. */
@@ -59,6 +61,8 @@ export interface EvalChecksResult {
   readonly status: "passed" | "failed";
   readonly checks: SkillEvalCheckResult[];
   readonly judgeCostUsd: number;
+  /** The judge's call was refused for a budget or the eval cap (no verdict; the eval stops). */
+  readonly budgetRefused?: boolean;
 }
 
 const pass = (check: SkillEvalCheck): SkillEvalCheckResult => ({ check, passed: true });
@@ -189,6 +193,7 @@ export async function evalChecks(
   const wanted = expectedChecks(c, withSkill);
   const { results, files } = plainChecks(c, o, fixtures, wanted);
   let judgeCostUsd = 0;
+  let budgetRefused = false;
   if (wanted.includes("judge") && [...results.values()].every((r) => r.passed)) {
     const verdict = opts.judge
       ? await opts.judge({
@@ -199,6 +204,7 @@ export async function evalChecks(
         })
       : ({ kind: "failed", costUsd: 0 } as const);
     judgeCostUsd = verdict.costUsd;
+    budgetRefused = verdict.kind === "failed" && verdict.budgetRefused === true;
     results.set(
       "judge",
       verdict.kind === "passed"
@@ -210,5 +216,10 @@ export async function evalChecks(
   }
   const checks = wanted.flatMap((k) => results.get(k) ?? []);
   const passed = checks.length === wanted.length && checks.every((r) => r.passed);
-  return { status: passed ? "passed" : "failed", checks, judgeCostUsd };
+  return {
+    status: passed ? "passed" : "failed",
+    checks,
+    judgeCostUsd,
+    ...(budgetRefused ? { budgetRefused } : {}),
+  };
 }

@@ -17,6 +17,7 @@ import {
 import type { Logger } from "pino";
 import { ServerCallError, type ServerCallClient } from "../../models/gateway-client.js";
 import { resolveRunModel } from "../../runs/models.js";
+import { JUDGE_BUDGET_CODES } from "./budget.js";
 import type { EvalJudgeResult } from "./checks.js";
 
 // The skill eval judge (KOBE-326, SK17; contract KOBE-324 `judge.ts`): one server-originated model
@@ -185,7 +186,13 @@ export function createSkillEvalJudge(options: SkillEvalJudgeOptions): SkillEvalJ
       } catch (err) {
         const code = err instanceof ServerCallError ? err.code : "internal";
         log.warn({ code, run_id: call.runId, model: target.model }, "skill eval judge call failed");
-        return failed(`The judge call failed (${code}).`, await costOf(call, false));
+        const costUsd = await costOf(call, false);
+        if (JUDGE_BUDGET_CODES.has(code))
+          return {
+            ...failed(`The judge call was refused (${code}).`, costUsd),
+            budgetRefused: true,
+          };
+        return failed(`The judge call failed (${code}).`, costUsd);
       }
       const costUsd = await costOf(call, true);
       const outcome = parseSkillEvalJudgeVerdict(reply);

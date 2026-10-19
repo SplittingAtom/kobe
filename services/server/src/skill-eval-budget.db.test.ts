@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { recordModelUsage, type ModelUsageRecord } from "@kobe/db";
+import { TEAM_EVAL_CAP_USD_MESSAGE } from "@kobe/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ServerCallClient } from "./models/gateway-client.js";
 import { createSkillEvalJudge } from "./skills/evals/judge.js";
@@ -269,8 +270,9 @@ describe("skill eval budgets (KOBE-327)", () => {
     const refused = await startEval(w, draft, "with_only");
     expect(refused.status).toBe(409);
     expect(refused.json.code).toBe("eval_cap_reached");
-    expect(refused.json.message).toMatch(
-      /^Your team's monthly eval cap \(\$0\.05\) is used up: \$0\.0\d spent on evals this month\. A Team admin can raise or remove it\.$/,
+    // The team's own spend is not in the message (aggregate amounts stay with the admins).
+    expect(refused.json.message).toBe(
+      "Your team's monthly eval cap ($0.05) is used up. A Team admin can raise or remove it.",
     );
     const est = await estimate(w, draft, "with_only");
     expect(est.json.blocked).toMatchObject({ code: "eval_cap_reached" });
@@ -279,8 +281,54 @@ describe("skill eval budgets (KOBE-327)", () => {
     expect(raised.json.evalCap).toEqual({ tokens: 1_000_000 });
     expect((await startEval(w, draft, "with_only")).status).toBe(202);
     await bench.closeEvals(w.team);
-    const bad = await putSettings(w, { evalCap: { usd: 0 } });
-    expect(bad.status).toBe(400);
+    for (const usd of [0, 0.001, 12.345]) {
+      const bad = await putSettings(w, { evalCap: { usd } });
+      expect([bad.status, bad.json.message]).toEqual([400, TEAM_EVAL_CAP_USD_MESSAGE]);
+    }
+  });
+
+  it("M1: a gateway refusal at the cap with calls in flight ends the eval budget_stopped, never scored", async () => {
+    const w = await pricedWorld();
+    expect((await putSettings(w, { evalCap: { usd: 0.05 } })).status).toBe(200);
+    // $0.045 spent and another eval call holding $0.01: the ledger alone is under the cap, but
+    // the gateway (spend plus reservations) refuses the next call.
+    await recordModelUsage(f.fx.db, [
+      usageRow(w, { kind: "eval", inputTokens: 20_000, outputTokens: 500 }),
+    ]);
+    await f.fx.admin.query(
+      `INSERT INTO budget_reservations (team_id, call_id, user_id, usd, tokens, eval, expires_at)
+       VALUES ($1, $2, $3, 0.01, 100, true, now() + interval '10 minutes')`,
+      [w.team, `held-${w.team}`, w.owner.id],
+    );
+    const cases = [
+      "cases:",
+      ...["a", "b"].flatMap((id) => [
+        `  - id: ${id}`,
+        `    prompt: Case ${id}`,
+        "    expect: {contains: Total}",
+      ]),
+      "",
+    ].join("\n");
+    const draft = await bench.draftWith(w.owner, "refused", cases, {});
+    const provider = bench.provider();
+    provider.fail = () => "kobe.model_error:model_budget_exhausted: gave up after 1 attempt";
+    const started = await startEval(w, draft, "with_only");
+    expect(started.status, JSON.stringify(started.json)).toBe(202);
+    const evalRunId = started.json.evalRunId as string;
+    await bench.drive(bench.runnerFor(provider, 2), w.team, evalRunId);
+    const stopped = await evalRow(w, evalRunId);
+    expect(stopped.status).toBe("budget_stopped");
+    expect(stopped.failure?.code).toBe("eval_cap_reached");
+    // Not recorded, not retried, no scorecard: each execution ran at most once.
+    expect(stopped.progress_done).toBe(0);
+    expect(provider.created.length).toBeLessThanOrEqual(2);
+    const { rows } = await f.fx.admin.query(
+      `SELECT 1 FROM skill_eval_results WHERE team_id = $1 AND eval_run_id = $2 AND (execution IS NOT NULL OR attempt = 2)`,
+      [w.team, evalRunId],
+    );
+    expect(rows).toEqual([]);
+    const read = await f.on(0, w.owner).get(`/v1/skill-evals/${evalRunId}`);
+    expect(read.json).toMatchObject({ status: "budget_stopped", scorecard: null });
   });
 
   it("ac-4: a used-up budget refuses new evals and ends a running one budget_stopped", async () => {

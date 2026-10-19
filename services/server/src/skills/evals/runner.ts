@@ -34,7 +34,7 @@ import { messageText } from "../../threads/messages.js";
 import { evalChecks, type EvalJudge, type EvalObservation } from "./checks.js";
 import { errorAttempt, type EvalAttempt } from "./execution.js";
 import { caseFixtureList, readFixtures } from "./storage.js";
-import { evalBudgetBlock } from "./budget.js";
+import { BUDGET_FAILURES, REFUSED_BLOCK, evalBudgetBlock } from "./budget.js";
 import {
   budgetStopEvalRun,
   claimNextExecution,
@@ -306,6 +306,13 @@ export class SkillEvalRunner {
       };
     }
     await markExecution(this.#o.db, claim, "collecting");
+    // The gateway refused the run's model calls for a budget or the team eval cap (spend plus
+    // the calls in flight reached it, review-327 M1), or the budget monitor stopped the run: the
+    // eval ends `budget_stopped`; this attempt is neither recorded, retried nor scored.
+    if (observed.status === "budget_stopped" || BUDGET_FAILURES.has(observed.failureCode ?? "")) {
+      await this.#stopForBudget(claim, true);
+      throw new EvalAbort("budget");
+    }
     if (observed.status !== "completed" && end !== "over_turns") {
       return {
         ...errorAttempt(claim.threadId, runId, Date.now() - started, observed.numbers.costUsd),
@@ -325,6 +332,11 @@ export class SkillEvalRunner {
     const checked = await evalChecks(c, claim.withSkill, obs, fixtures, {
       ...(judge ? { judge } : {}),
     });
+    // The judge's call was refused for a budget or the eval cap: the same stop, not a failure.
+    if (checked.budgetRefused) {
+      await this.#stopForBudget(claim, true);
+      throw new EvalAbort("budget");
+    }
     return {
       status: checked.status,
       checks: checked.checks,
@@ -341,8 +353,18 @@ export class SkillEvalRunner {
 
   /** Ends the eval `budget_stopped` when a budget or the eval cap stops it; whether it did. */
   async #stopIfBudget(claim: ClaimedExecution): Promise<boolean> {
+    return this.#stopForBudget(claim, false);
+  }
+
+  /**
+   * `refused`: the gateway already refused a call (so the eval stops whatever the ledger says,
+   * naming the line that spend plus the calls in flight reached, else a general reason).
+   */
+  async #stopForBudget(claim: ClaimedExecution, refused: boolean): Promise<boolean> {
     try {
-      const block = await evalBudgetBlock(this.#o.db, claim.teamId, claim.userId);
+      const block =
+        (await evalBudgetBlock(this.#o.db, claim.teamId, claim.userId, { inFlight: refused })) ??
+        (refused ? REFUSED_BLOCK : null);
       if (!block) return false;
       await budgetStopEvalRun(this.#o.db, claim.teamId, claim.evalRunId, block);
       return true;
@@ -456,6 +478,10 @@ export class SkillEvalRunner {
       const denied = await tx.execute<{ n: string | number }>(sql`
         SELECT count(*) AS n FROM run_events
          WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND type = 'policy.denied'`);
+      const failed = await tx.execute<{ code: string | null }>(sql`
+        SELECT payload -> 'error' ->> 'code' AS code FROM run_events
+         WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND type = 'run.failed'
+         ORDER BY seq DESC LIMIT 1`);
       const answers = await tx.execute<{ content: unknown }>(sql`
         SELECT payload -> 'message' -> 'content' AS content FROM thread_entries
          WHERE team_id = ${claim.teamId} AND thread_id = ${claim.threadId} AND type = 'message'
@@ -465,6 +491,7 @@ export class SkillEvalRunner {
       const used = run.rows[0]?.skills_used ?? [];
       return {
         status: run.rows[0]?.status ?? "failed",
+        failureCode: failed.rows[0]?.code ?? null,
         answer: answer ?? "",
         numbers: {
           // The run's only skill is the eval's (withSkillEvals): a read of its SKILL.md.

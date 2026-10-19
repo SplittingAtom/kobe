@@ -102,7 +102,10 @@ async function spendByKind(tx: KobeTx, teamId: string, month: string) {
   const res = await tx.execute<Row>(sql`
     SELECT kind, COALESCE(sum(cost_usd), 0) AS usd,
            sum(input_tokens::bigint + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens
-      FROM run_usage WHERE team_id = ${teamId}::uuid AND at >= ${month}::date
+      FROM run_usage
+     WHERE team_id = ${teamId}::uuid
+       -- The UTC month, as the counters and budget lines count it (never the session zone).
+       AND at >= (${month}::date)::timestamp AT TIME ZONE 'UTC'
      GROUP BY kind ORDER BY kind`);
   return res.rows.map((r) => ({
     kind: String(r.kind),
