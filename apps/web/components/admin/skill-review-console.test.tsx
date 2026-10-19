@@ -58,6 +58,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
   ],
   scorecard: { cases: 5, pass_rate_with: 0.8, lift: 0.2 },
   authoritative_scorecard: null,
+  rerun: null,
   manifest: {},
   capabilities: {
     egress: [
@@ -255,5 +256,33 @@ describe("the review screen (ac-1, ac-2)", () => {
         JSON.stringify({ finding: "prerequisite-step@SKILL.md:3" }),
       ),
     );
+  });
+
+  it("re-runs the evals in the Registry team and shows the latest run (KOBE-335)", async () => {
+    const running = detail({
+      rerun: {
+        eval_run_id: "e-1",
+        status: "running",
+        progress: { done: 1, total: 5 },
+        started_at: "2026-10-19T12:00:00Z",
+      },
+    });
+    const calls = stubApi({
+      [`GET ${BASE}/${ID}`]: [
+        [200, detail()],
+        [200, running],
+      ],
+      [`GET ${BASE}/${ID}/diff`]: [200, diff],
+      [`POST ${BASE}/${ID}/rerun-evals`]: [202, { eval_run_id: "e-1" }],
+    });
+    renderReviewer(<SkillReviewPage versionId={ID} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Re-run evals" }));
+    expect(await screen.findByText(/Latest re-run: running \(1 of 5 executions\)/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Re-run evals" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
+      `${BASE}/${ID}/rerun-evals`,
+    ]);
   });
 });

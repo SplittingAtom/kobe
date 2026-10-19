@@ -2,6 +2,7 @@
 
 import {
   acknowledgeFinding,
+  rerunEvals,
   type ReviewDetail,
   type ReviewFinding,
 } from "../../../lib/admin/api/site/skill-review";
@@ -47,6 +48,60 @@ function Scorecard({ card }: { readonly card: Record<string, unknown> }) {
  * The evidence beside the diff (SK23): scan verdict and findings, the scorecards, capabilities
  * against the site egress ceiling, provenance and similar-name hints.
  */
+const RERUN_STATES: Readonly<Record<string, string>> = {
+  queued: "queued",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+  budget_stopped: "stopped by the Registry team's budget",
+};
+
+/** Re-run evals (KOBE-335): a full eval in the Registry team, judged by the Site judge. */
+function RerunControl({
+  detail,
+  open,
+  mutation,
+  onChanged,
+}: {
+  readonly detail: ReviewDetail;
+  readonly open: boolean;
+  readonly mutation: Mutation;
+  readonly onChanged: () => void;
+}) {
+  const r = detail.rerun;
+  const running = r?.status === "queued" || r?.status === "running";
+  const start = async () => {
+    if (
+      await mutation.run(
+        () => rerunEvals(detail.id),
+        () => "Re-run started in the Registry team. Refresh to follow it.",
+      )
+    )
+      onChanged();
+  };
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {r && (
+        <span>
+          Latest re-run: {RERUN_STATES[r.status] ?? r.status} ({r.progress.done} of{" "}
+          {r.progress.total} executions)
+        </span>
+      )}
+      {open && (
+        <Button disabled={mutation.pending || running} onClick={() => void start()}>
+          Re-run evals
+        </Button>
+      )}
+      {running && (
+        <Button disabled={mutation.pending} onClick={onChanged}>
+          Refresh
+        </Button>
+      )}
+    </div>
+  );
+}
+
 const shown = (text: string) =>
   visibleParts(text)
     .map((p) => p.text)
@@ -146,6 +201,7 @@ export function ReviewEvidence({
             re-run in the Registry team.
           </Notice>
         )}
+        <RerunControl detail={detail} open={open} mutation={mutation} onChanged={onChanged} />
         <h4 className="mt-3 font-medium">Submitted (the author&apos;s team)</h4>
         {detail.scorecard ? (
           <Scorecard card={detail.scorecard} />

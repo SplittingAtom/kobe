@@ -120,6 +120,13 @@ export interface ReviewDetail {
   readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
+  /** The latest re-run in the Registry team (KOBE-335). */
+  readonly rerun: {
+    readonly evalRunId: string;
+    readonly status: string;
+    readonly progress: { readonly done: number; readonly total: number };
+    readonly startedAt: string;
+  } | null;
   readonly manifest: Record<string, unknown>;
   readonly capabilities: {
     readonly egress: readonly { readonly host: string; readonly inCeiling: boolean }[];
@@ -176,6 +183,11 @@ export function commentOn(id: string, note: string): Promise<ApiResult<StateAnsw
     method: "POST",
     json: { note },
   });
+}
+
+/** Re-runs the version's evals in the Registry team with the Site judge (KOBE-335). */
+export function rerunEvals(id: string): Promise<ApiResult<{ evalRunId: string }>> {
+  return apiRequest(`${BASE}/${encodeURIComponent(id)}/rerun-evals`, { method: "POST", json: {} });
 }
 
 /** Acknowledges one Caution finding by its key (KOBE-334 review M1). */
