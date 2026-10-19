@@ -134,3 +134,94 @@ describe("the team eval cap in kobe_reserve_budget (KOBE-327)", () => {
     ).rejects.toMatchObject({ cause: { code: "22023" } });
   });
 });
+
+describe("the team eval cap: concurrency, periods, shares, settle (KOBE-327 review L5)", () => {
+  const t2 = randomUUID();
+  let other: KobeDatabase;
+  const reserveIn = async (
+    db: KobeDatabase,
+    who: string,
+    call: string,
+    tokens: number,
+    lines: unknown[],
+    share = 1,
+  ) =>
+    (
+      await db.db.execute<{ r: string }>(
+        sql`SELECT kobe_reserve_budget(${t2}::uuid, ${who}::uuid, ${call}, ${0}::numeric, ${tokens}::bigint,
+          ${60_000}::integer, ${share}::numeric, ${JSON.stringify(lines)}::jsonb, ${SALT}) AS r`,
+      )
+    ).rows[0]?.r;
+  const settleIn = (calls: string[], keepMs: number | null) =>
+    app.db.execute(
+      sql`SELECT kobe_settle_budget(${t2}::uuid, ${`{${calls.join(",")}}`}::text[], ${keepMs}::integer, ${SALT})`,
+    );
+  const row = (who: string, tokens: number, at: Date): ModelUsageRecord => ({
+    ...usage(who, tokens, "eval"),
+    teamId: t2,
+    at,
+  });
+
+  beforeAll(async () => {
+    const owner = createDb(inject("ownerUrl"));
+    await owner.db.insert(teams).values({ id: t2, slug: `ec-${t2.slice(0, 8)}`, name: "Ec" });
+    await owner.close();
+    other = createDb(inject("appUrl"), { max: 2 });
+    const now = new Date();
+    const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
+    // 500 eval tokens last month (never counted), 100 this month.
+    await recordModelUsage(app.db, [row(alice, 500, lastMonth), row(alice, 100, now)]);
+  });
+  afterAll(() => other.close());
+
+  it("counts this UTC month's eval spend only, and today's on a day line", async () => {
+    const ok = randomUUID();
+    expect(await reserveIn(app, alice, ok, 1, [evalLine(101)])).toBe("ok");
+    await settleIn([ok], null);
+    expect(await reserveIn(app, alice, randomUUID(), 1, [evalLine(100)])).toBe("full:0");
+    const day = { ...evalLine(100), period: "day" };
+    expect(await reserveIn(app, alice, randomUUID(), 1, [day])).toBe("full:0");
+  });
+
+  it("admits exactly one of two calls racing for the last of the cap from two connections", async () => {
+    // 100 spent, cap 140: the first call holds 40, which fills the line for the second.
+    const calls = [randomUUID(), randomUUID()];
+    const verdicts = await Promise.all([
+      reserveIn(app, alice, must(calls[0]), 40, [evalLine(140)]),
+      reserveIn(other, bob, must(calls[1]), 40, [evalLine(140)]),
+    ]);
+    // Serialised by the team lock: one is admitted, the other refused (the line full, or the
+    // admitted call holding all that is left).
+    expect(verdicts.filter((v) => v === "ok")).toHaveLength(1);
+    expect(verdicts.find((v) => v !== "ok")).toMatch(/^(full|own_share):0$/);
+    await settleIn(calls, null);
+  });
+
+  it("caps one member's share of what is left while another member's eval call is in flight", async () => {
+    // 100 spent, cap 500: 400 left, a quarter (100) per member while others hold some.
+    const bobs = randomUUID();
+    expect(await reserveIn(app, bob, bobs, 50, [evalLine(500)], 0.25)).toBe("ok");
+    expect(await reserveIn(app, alice, randomUUID(), 150, [evalLine(500)], 0.25)).toBe(
+      "own_share:0",
+    );
+    const fits = randomUUID();
+    expect(await reserveIn(app, alice, fits, 90, [evalLine(500)], 0.25)).toBe("ok");
+    await settleIn([bobs, fits], null);
+  });
+
+  it("keeps a settled eval call counting for keep_ms, then frees it", async () => {
+    const call = randomUUID();
+    expect(await reserveIn(app, alice, call, 30, [evalLine(140)])).toBe("ok");
+    await settleIn([call], 60_000);
+    expect(await reserveIn(app, bob, randomUUID(), 1, [evalLine(130)])).toBe("full:0");
+    await settleIn([call], null);
+    const free = randomUUID();
+    expect(await reserveIn(app, bob, free, 1, [evalLine(130)])).toBe("ok");
+    await settleIn([free], null);
+  });
+});
+
+function must<T>(x: T | undefined): T {
+  if (x === undefined) throw new Error("missing");
+  return x;
+}
