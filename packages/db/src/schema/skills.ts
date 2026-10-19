@@ -83,6 +83,12 @@ const versionColumns = () => ({
    * stored before KOBE-310 (their `storage_key` zip is the whole upload).
    */
   packageStorageKey: text(),
+  /**
+   * Saved from a Workbench draft that started from a conversation, directly or through a fork of
+   * such a version (KOBE-333 review C4-M3): SK19 shows it before anything leaves the team. Set at
+   * insert (versions are immutable); false for uploads.
+   */
+  fromConversation: boolean().notNull().default(false),
   /** SKILL.md frontmatter as uploaded (name, description and any other keys). */
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
   source: skillSource().notNull(),

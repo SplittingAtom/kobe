@@ -1100,6 +1100,13 @@
       "when": 1792413672224,
       "tag": "0156_skill_promotion_requests_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1792415222074,
+      "tag": "0157_skill_versions_from_conversation",
+      "breakpoints": true
     }
   ]
 }
