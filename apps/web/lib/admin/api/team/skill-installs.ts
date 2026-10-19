@@ -186,6 +186,8 @@ export interface InstallRequest {
   readonly requesters: readonly { readonly userId: string; readonly name: string }[];
   readonly count: number;
   readonly lastAt: string;
+  /** The team's install's version: the members ask for a change. */
+  readonly installed?: string | null;
 }
 
 export function listMemberAdds(teamId: string): Promise<ApiResult<{ adds: MemberAdd[] }>> {

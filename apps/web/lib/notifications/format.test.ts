@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KobeNotification } from "./api";
-import { notificationTitle, scheduleLabel } from "./format";
+import { notificationLabel, notificationTitle, scheduleLabel } from "./format";
 
 const base: KobeNotification = {
   notificationId: "n",
@@ -31,6 +31,23 @@ describe("notification words (KOBE-181)", () => {
     ["schedule.paused", { pausedBy: "deactivation" }, "Schedule paused (access deactivated)"],
   ] as const)("%s %o → %s", (kind, extra, words) => {
     expect(notificationTitle({ ...base, kind, ...extra })).toBe(words);
+  });
+
+  it("says a Team admin's block removed the member's add (KOBE-338)", () => {
+    const blocked = {
+      ...base,
+      kind: "skill.member_add.blocked",
+      scheduleId: null,
+      threadId: null,
+      runId: null,
+      skillId: "k1",
+      skillName: "sales-report",
+    } as const;
+    expect(notificationTitle(blocked)).toBe(
+      "A Team admin blocked sales-report in this team; your Add for me was removed",
+    );
+    expect(notificationLabel(blocked, null)).toBe("Catalog skill sales-report");
+    expect(notificationLabel(base, null)).toBe("One of your schedules");
   });
 
   it("names a schedule by its recurrence and zone, or says it is gone", () => {

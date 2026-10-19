@@ -30,8 +30,8 @@ interface Props {
 /**
  * Add for me (KOBE-338, SK25): the skill loads only in this member's runs in this team, at the
  * version and pin they choose. Only approved versions (a deprecated one is a Team admin's
- * override); hidden while the team switch is off, and for a skill the team blocked or installed
- * Required or Hidden. The server checks every rule again.
+ * override); hidden while the team switch is off, and for a skill the team blocked or installed in
+ * any mode (the install governs; Request for team asks for a change). The server checks again.
  */
 function AddForMe({ detail, teamId, mutation, onDone }: Props) {
   const approved = detail.versions.filter((v) => v.state === "approved");
@@ -40,8 +40,16 @@ function AddForMe({ detail, teamId, mutation, onDone }: Props) {
   const [pinMode, setPinMode] = useState<PinMode>(
     (mine?.pinMode as PinMode | undefined) ?? "within_major",
   );
-  const installedAs = detail.state.installed?.access;
-  if (installedAs === "required" || installedAs === "hidden") return null;
+  const installed = detail.state.installed;
+  if (installed)
+    return (
+      <Section title="Add for me">
+        <p>
+          The team installed it ({installed.semver ?? "no version"}, {pinLabel(installed.pinMode)}):
+          the team&apos;s install governs. To ask for another version, use Request for team.
+        </p>
+      </Section>
+    );
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const done = await mutation.run(
@@ -174,7 +182,7 @@ export function CatalogMemberActions(props: Props) {
   return (
     <>
       <AddForMe {...props} />
-      {!detail.state.installed && (
+      {
         <p>
           <Button
             disabled={mutation.pending}
@@ -184,14 +192,16 @@ export function CatalogMemberActions(props: Props) {
                 (r) =>
                   r.alreadyRequested
                     ? `You already asked for ${detail.name} today.`
-                    : `Asked your Team admins to install ${detail.name} for the team.`,
+                    : detail.state.installed
+                      ? `Asked your Team admins to change the team's install of ${detail.name}.`
+                      : `Asked your Team admins to install ${detail.name} for the team.`,
               )
             }
           >
             Request for team
           </Button>
         </p>
-      )}
+      }
       {detail.canBlock && (
         <p>
           <BlockButton {...props} />

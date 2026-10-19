@@ -31,7 +31,20 @@ export function notificationTitle(n: KobeNotification): string {
       return n.pausedBy === "team_admin"
         ? "Schedule paused by a team admin"
         : "Schedule paused (access deactivated)";
+    case "skill.member_add.blocked":
+      return `A Team admin blocked ${n.skillName ?? "a catalog skill"} in this team; your Add for me was removed`;
   }
+}
+
+/** What the notification is about: its schedule, or the catalog skill (KOBE-338). */
+export function notificationLabel(
+  n: KobeNotification,
+  known: ReadonlyMap<string, ScheduleWhen> | null,
+): string {
+  if (n.kind === "skill.member_add.blocked") return `Catalog skill ${n.skillName ?? ""}`.trim();
+  return n.scheduleId === null
+    ? "A schedule that no longer exists"
+    : scheduleLabel(n.scheduleId, known);
 }
 
 /**

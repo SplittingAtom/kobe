@@ -1,5 +1,5 @@
 /**
- * The caller's scheduled-run notifications (`/v1/notifications`, KOBE-179; contract KOBE-176).
+ * The caller's notifications: scheduled runs and skill notices (`/v1/notifications`, KOBE-179; contract KOBE-176).
  * Responses arrive camelized; request bodies use the route's snake_case. Every call sends
  * `X-Kobe-Team`: notifications belong to the active team.
  */
@@ -9,12 +9,15 @@ import { apiRequest, type ApiResult } from "../api/client";
 export interface KobeNotification {
   readonly notificationId: string;
   readonly kind: NotificationKind;
-  readonly scheduleId: string;
-  /** Null for `schedule.paused`. */
+  /** Null for `skill.member_add.blocked`, which names a catalog skill instead (KOBE-338). */
+  readonly scheduleId: string | null;
+  /** Null for `schedule.paused` and `skill.member_add.blocked`. */
   readonly threadId: string | null;
   readonly runId: string | null;
   readonly skippedCount?: number | undefined;
   readonly pausedBy?: "team_admin" | "deactivation" | undefined;
+  readonly skillId?: string | undefined;
+  readonly skillName?: string | undefined;
   readonly readAt: string | null;
   readonly createdAt: string;
 }

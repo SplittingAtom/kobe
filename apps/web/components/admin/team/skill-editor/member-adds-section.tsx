@@ -113,6 +113,9 @@ export function MemberAddsSection() {
                   <TableRow key={r.skillId}>
                     <TableRowHeader>
                       <Link href={catalogHref(r.skillId)}>{r.name}</Link>
+                      <div className="text-sm font-normal text-console-muted">
+                        {r.installed ? `Installed at ${r.installed}: a change` : "Not installed"}
+                      </div>
                     </TableRowHeader>
                     <TableCell>{r.requesters.map((u) => u.name).join(", ")}</TableCell>
                     <TableCell className="whitespace-nowrap">

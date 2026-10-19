@@ -91,18 +91,11 @@ describe("Add for me and Request for team on the catalog detail", () => {
     ).toBeTruthy();
   });
 
-  it("shows the member's add with Remove, and no Request once the team installed it", async () => {
+  it("shows the member's add with Remove", async () => {
     const calls = stubApi({
       "GET /v1/skills/catalog/id-sales": [
         200,
-        detail(
-          {},
-          {
-            installed: { semver: "1.1.0", pin_mode: "pinned", access: "available" },
-            added_by_me: true,
-            my_add: { semver: "1.0.0", pin_mode: "within_major" },
-          },
-        ),
+        detail({}, { added_by_me: true, my_add: { semver: "1.0.0", pin_mode: "within_major" } }),
       ],
       "DELETE /v1/me/skills/adds/id-sales": [200, { removed: true }],
     });
@@ -110,9 +103,30 @@ describe("Add for me and Request for team on the catalog detail", () => {
     expect(
       await screen.findByText("You added 1.0.0 (Track within major) for your own runs here."),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Request for team" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Remove my add" }));
     await waitFor(() => expect(summary(calls)).toContain("DELETE /v1/me/skills/adds/id-sales"));
+  });
+
+  it("installed: no Add for me; Request for team asks for a change (review M3)", async () => {
+    stubApi({
+      "GET /v1/skills/catalog/id-sales": [
+        200,
+        detail({}, { installed: { semver: "1.1.0", pin_mode: "pinned", access: "available" } }),
+      ],
+      "POST /v1/skills/catalog/id-sales/request": [
+        202,
+        { requested: true, already_requested: false },
+      ],
+    });
+    renderTeam(<CatalogDetailPage skillId="id-sales" />, MEMBER);
+    expect(await screen.findByText(/the team's install governs/)).toBeTruthy();
+    expect(screen.queryByRole("form", { name: "Add for me" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Request for team" }));
+    expect(
+      await screen.findByText(
+        "Asked your Team admins to change the team's install of sales-report.",
+      ),
+    ).toBeTruthy();
   });
 
   it("hides Add for me while the team switch is off", async () => {
