@@ -29,6 +29,8 @@ export const agents = defineDomain({
     "skill_eval_results",
     // Builders' Promote to Site requests (KOBE-333).
     "skill_promotion_requests",
+    // Members' Request for team of a catalog skill (KOBE-338).
+    "team_skill_requests",
   ],
   siteWide: [
     "skill_blocklist",

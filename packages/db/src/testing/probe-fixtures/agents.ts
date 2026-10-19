@@ -12,6 +12,7 @@ import {
   skillPromotionRequests,
   teamMembers,
   teamSkillBlocks,
+  teamSkillRequests,
   teamSkillInstalls,
   teamSkillOptouts,
   agentEvalCaseHistory,
@@ -190,6 +191,12 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
   team_skill_blocks: async (tx, teamId) => {
     const { userId, skillId } = await probeCatalogSkill(tx);
     await tx.insert(teamSkillBlocks).values({ teamId, skillId, blockedBy: userId });
+  },
+  team_skill_requests: async (tx, teamId) => {
+    // A member's Request for team (KOBE-338).
+    const { userId, skillId } = await probeCatalogSkill(tx);
+    await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
+    await tx.insert(teamSkillRequests).values({ teamId, skillId, userId });
   },
   member_skill_enablements: async (tx, teamId) => {
     const { userId, skillId, versionId } = await probeCatalogSkill(tx);

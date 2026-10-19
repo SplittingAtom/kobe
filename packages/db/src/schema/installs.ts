@@ -185,3 +185,41 @@ export const memberSkillEnablements = pgTable(
     ),
   ],
 );
+
+/**
+ * Team table: a member's Request for team of a catalog skill (KOBE-338, SK25): live state for the
+ * Team console (listed, dismissed, rate-limited); the audit log keeps who asked and when. One row
+ * per member and skill. `last_at` is when the member last asked (a repeat within a day is not a new
+ * request, dismissed or not); a Team admin's Dismiss sets `dismissed_at`, and a later request clears
+ * it. Installing or blocking the skill answers the requests (the rows are deleted); they leave with
+ * the membership (cascade from `team_members`).
+ */
+export const teamSkillRequests = pgTable(
+  "team_skill_requests",
+  {
+    teamId: uuid()
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    skillId: uuid()
+      .notNull()
+      .references(() => registrySkills.id),
+    userId: uuid().notNull(),
+    firstAt: ts().notNull().defaultNow(),
+    lastAt: ts().notNull().defaultNow(),
+    dismissedAt: ts(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.skillId, t.userId] }),
+    foreignKey({
+      name: "team_skill_requests_member_fk",
+      columns: [t.teamId, t.userId],
+      foreignColumns: [teamMembers.teamId, teamMembers.userId],
+    }).onDelete("cascade"),
+    // The console's open list, newest first, and a member's requests of the day (the cap).
+    index("team_skill_requests_open_idx")
+      .on(t.teamId, t.lastAt.desc())
+      .where(sql`${t.dismissedAt} IS NULL`),
+    index("team_skill_requests_member_idx").on(t.teamId, t.userId, t.lastAt),
+    check("team_skill_requests_order", sql`${t.firstAt} <= ${t.lastAt}`),
+  ],
+);
