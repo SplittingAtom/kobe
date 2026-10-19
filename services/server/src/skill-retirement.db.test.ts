@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { withTeam } from "@kobe/db";
+import { SYSTEM_ACTOR, withTeam } from "@kobe/db";
+import { runWithAuditContext } from "./audit/context.js";
 import { loadCatalogFacts } from "./runs/catalog-facts.js";
+import { seedDefaultSkillInstalls } from "./skills/default-sync-team.js";
 import { hashOf } from "./testing/catalog-seed.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -340,5 +342,47 @@ describe("Deprecate a whole skill (ac-1)", () => {
     expect(await audits("skill.catalog.deprecated")).toEqual([
       { skillId, name: NAME, replacementId: otherId },
     ]);
+  });
+});
+
+describe("the Default sync and retired skills (review M2)", () => {
+  it("never installs a deprecated skill in a new team; a live Default still installs", async () => {
+    const tag = await h.admin.query<{ id: string }>(
+      `SELECT id FROM registry_tags WHERE kind = 'system' AND name = 'default'`,
+    );
+    const otherVersion = await h.admin.query<{ id: string }>(
+      `SELECT id FROM registry_versions WHERE skill_id = $1`,
+      [otherId],
+    );
+    for (const [skill, versionId] of [
+      [skillId, v["1.0.0"]],
+      [otherId, otherVersion.rows[0]?.id],
+    ]) {
+      await h.admin.query(
+        `INSERT INTO registry_skill_tags (skill_id, tag_id, added_by) VALUES ($1, $2, $3)`,
+        [skill, tag.rows[0]?.id, ids.admin],
+      );
+      await h.admin.query(
+        `INSERT INTO skill_default_syncs (skill_id, kind, major, version_id, requested_by, status,
+           started_at, finished_at)
+         VALUES ($1, 'add', 1, $2, $3, 'done', now(), now())`,
+        [skill, versionId, ids.admin],
+      );
+    }
+    const fresh = randomUUID();
+    await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'retire-new', 'New')`, [
+      fresh,
+    ]);
+    const installed = await withTeam(h.deps.database.db, fresh, (tx) =>
+      runWithAuditContext({ actor: SYSTEM_ACTOR, ip: null, userAgent: null }, () =>
+        seedDefaultSkillInstalls(tx, fresh),
+      ),
+    );
+    expect(installed).toBe(1);
+    const rows = await h.admin.query<{ skill_id: string }>(
+      `SELECT skill_id FROM team_skill_installs WHERE team_id = $1`,
+      [fresh],
+    );
+    expect(rows.rows).toEqual([{ skill_id: otherId }]);
   });
 });

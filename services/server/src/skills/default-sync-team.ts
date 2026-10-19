@@ -61,9 +61,18 @@ export async function addInTeam(
   version: TargetVersion,
   /** Null: Kobe's own Default sync (a Kobe-published skill, KOBE-317); the row says `by_kobe`. */
   installedBy: string | null,
+  /**
+   * A Team admin's Reinstall of a removed Default may install a deprecated skill (their override,
+   * SK31); the sync and the new-team hook never do (KOBE-340 review M2).
+   */
+  allowDeprecated = false,
 ): Promise<TeamStepResult> {
   await lockSkillInstall(tx, teamId, skillId);
   await lockTeamSkillNames(tx, teamId);
+  const status = await tx.execute<{ status: string }>(sql`
+    SELECT status::text AS status FROM registry_skills WHERE id = ${skillId}`);
+  const live = ["active", "unmaintained"].includes(status.rows[0]?.status ?? "");
+  if (!live && !allowDeprecated) return NOTHING;
   const blocked = await tx.execute(sql`
     SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
   if (blocked.rows.length > 0) return { ...NOTHING, blocked: 1 };

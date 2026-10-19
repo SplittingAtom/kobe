@@ -118,7 +118,7 @@ async function pendingKobeDefaults(
   if (names.length === 0) return out;
   const { rows } = await tx.execute<{ id: string; name: string }>(sql`
     SELECT s.id, s.name FROM registry_skills s
-    WHERE s.publisher = 'kobe' AND s.name IN (${sql.join(
+    WHERE s.publisher = 'kobe' AND s.status IN ('active', 'unmaintained') AND s.name IN (${sql.join(
       names.map((n) => sql`${n}`),
       sql`, `,
     )})

@@ -234,7 +234,7 @@ export async function reinstallDefault(
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     // The install names the Team admin who brought it back.
-    await addInTeam(tx, teamId, skillId, version, input.userId);
+    await addInTeam(tx, teamId, skillId, version, input.userId, true);
     await recordAudit(tx, {
       action: "skill.default.restored",
       teamId,
