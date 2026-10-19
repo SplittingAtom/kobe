@@ -1,6 +1,6 @@
 {
-  "id": "babae48b-6a7b-4f03-bade-50c26fe07d6b",
-  "prevId": "6b0f9bae-8e11-4c63-a061-b9bed921a4b5",
+  "id": "27206d5e-02a7-47e0-a1c5-f49251ad6710",
+  "prevId": "17a1ecbf-770b-4ce4-9626-2fac4d124d59",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -18341,6 +18341,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "bundle_size": {
+          "name": "bundle_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "fixtures_key": {
           "name": "fixtures_key",
           "type": "text",
@@ -18580,7 +18586,7 @@
         },
         "skill_eval_runs_keys": {
           "name": "skill_eval_runs_keys",
-          "value": "char_length(\"skill_eval_runs\".\"bundle_key\") BETWEEN 1 AND 512\n        AND (\"skill_eval_runs\".\"fixtures_key\" IS NULL OR char_length(\"skill_eval_runs\".\"fixtures_key\") BETWEEN 1 AND 512)"
+          "value": "char_length(\"skill_eval_runs\".\"bundle_key\") BETWEEN 1 AND 512 AND \"skill_eval_runs\".\"bundle_size\" > 0\n        AND (\"skill_eval_runs\".\"fixtures_key\" IS NULL OR char_length(\"skill_eval_runs\".\"fixtures_key\") BETWEEN 1 AND 512)"
         },
         "skill_eval_runs_json": {
           "name": "skill_eval_runs_json",

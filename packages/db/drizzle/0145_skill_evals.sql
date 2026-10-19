@@ -36,6 +36,7 @@ CREATE TABLE "skill_eval_runs" (
 	"package_hash" text NOT NULL,
 	"runtime_hash" text NOT NULL,
 	"bundle_key" text NOT NULL,
+	"bundle_size" integer NOT NULL,
 	"fixtures_key" text,
 	"mode" text NOT NULL,
 	"status" text DEFAULT 'queued' NOT NULL,
@@ -58,7 +59,7 @@ CREATE TABLE "skill_eval_runs" (
 	CONSTRAINT "skill_eval_runs_status" CHECK ("skill_eval_runs"."status" IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'budget_stopped')),
 	CONSTRAINT "skill_eval_runs_name" CHECK ("skill_eval_runs"."skill_name" ~ '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'),
 	CONSTRAINT "skill_eval_runs_hashes" CHECK ("skill_eval_runs"."package_hash" ~ '^[0-9a-f]{64}$' AND "skill_eval_runs"."runtime_hash" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "skill_eval_runs_keys" CHECK (char_length("skill_eval_runs"."bundle_key") BETWEEN 1 AND 512
+	CONSTRAINT "skill_eval_runs_keys" CHECK (char_length("skill_eval_runs"."bundle_key") BETWEEN 1 AND 512 AND "skill_eval_runs"."bundle_size" > 0
         AND ("skill_eval_runs"."fixtures_key" IS NULL OR char_length("skill_eval_runs"."fixtures_key") BETWEEN 1 AND 512)),
 	CONSTRAINT "skill_eval_runs_json" CHECK (jsonb_typeof("skill_eval_runs"."suite") = 'object' AND jsonb_typeof("skill_eval_runs"."limits") = 'object'
         AND ("skill_eval_runs"."run_model" IS NULL OR jsonb_typeof("skill_eval_runs"."run_model") = 'object')

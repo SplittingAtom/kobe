@@ -89,6 +89,8 @@ export const skillEvalRuns = pgTable(
      * (`<prefix>teams/<team>/skill-evals/<id>/`).
      */
     bundleKey: text().notNull(),
+    /** Its size in bytes (the run.start's `skill_bundles` entry; the fetch is checked against it). */
+    bundleSize: integer().notNull(),
     /**
      * Object key of the fixtures zip (`evals/` files the cases name) unpacked into each execution's
      * workspace, in the same tree; null when no case has fixtures. Never part of the runtime zip.
@@ -135,7 +137,7 @@ export const skillEvalRuns = pgTable(
     ),
     check(
       "skill_eval_runs_keys",
-      sql`char_length(${t.bundleKey}) BETWEEN 1 AND 512
+      sql`char_length(${t.bundleKey}) BETWEEN 1 AND 512 AND ${t.bundleSize} > 0
         AND (${t.fixturesKey} IS NULL OR char_length(${t.fixturesKey}) BETWEEN 1 AND 512)`,
     ),
     check(
