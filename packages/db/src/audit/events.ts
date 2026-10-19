@@ -672,7 +672,10 @@ export const AUDIT_EVENTS = {
     connectorId: id,
     userId: id,
     /** The upstream tool name (MCP grammar). */
-    tool: z.string().max(128).regex(/^[A-Za-z0-9_.-]{1,128}$/),
+    tool: z
+      .string()
+      .max(128)
+      .regex(/^[A-Za-z0-9_.-]{1,128}$/),
     decision: z.enum(["allowed", "denied"]),
     reason: z.enum(APP_CALL_REASONS),
     /** The pinned template of the app the call came from. */
