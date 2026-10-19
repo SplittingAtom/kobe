@@ -1121,6 +1121,13 @@
       "when": 1792421331412,
       "tag": "0159_registry_review_states",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1792421355057,
+      "tag": "0160_registry_versions_review_confirmer",
+      "breakpoints": true
     }
   ]
 }

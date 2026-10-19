@@ -266,11 +266,16 @@ export const registryVersions = pgTable(
         AND (${t.mirror} IS NULL OR ${jsonObject(t.mirror)})`,
     ),
     check("registry_versions_claim", sql`(${t.claimedBy} IS NULL) = (${t.claimedAt} IS NULL)`),
-    // Separation of duties (SK22): a review by the submitter is a flagged self-approval, and only
-    // an approval (a submitter withdraws rather than rejects their own submission).
+    // Separation of duties (SK22): an approval by the submitter, or by the Team admin who
+    // confirmed the promotion (provenance `confirmedBy`, KOBE-334 review M2), is a flagged
+    // self-approval; any other approval is not. Only an approval is flagged
+    // (registry_versions_self_approval); the guard trigger refuses the submitter anything else.
     check(
       "registry_versions_review",
-      sql`${t.reviewedBy} IS NULL OR (${t.reviewedBy} = ${t.submittedBy}) = ${t.selfApproved}`,
+      sql`${t.reviewedBy} IS NULL OR ${t.approvedAt} IS NULL
+        OR (${t.reviewedBy} = ${t.submittedBy}
+          OR COALESCE(${t.reviewedBy}::text = ${t.provenance} #>> '{confirmedBy,userId}', false))
+          = ${t.selfApproved}`,
     ),
     check(
       "registry_versions_self_approval",
