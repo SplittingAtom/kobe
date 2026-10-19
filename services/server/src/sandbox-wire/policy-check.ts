@@ -178,6 +178,20 @@ async function accountActive(db: KobeDb, userId: string): Promise<boolean> {
   return row !== undefined && row.deactivatedAt === null;
 }
 
+const EVAL_NO_PROMPT: PolicyReason = {
+  code: "eval_run_no_prompt",
+  stage: "prompt",
+  message: "Skill eval runs never ask for approval; this call was denied.",
+};
+
+async function isEvalThread(db: KobeDb, teamId: string, threadId: string): Promise<boolean> {
+  const res = await withTeam(db, teamId, (tx) =>
+    tx.execute<{ skill_eval: boolean }>(sql`
+      SELECT skill_eval FROM threads WHERE team_id = ${teamId} AND id = ${threadId}`),
+  );
+  return res.rows[0]?.skill_eval === true;
+}
+
 /** Builds the engine input from server state, or the reason to deny instead. */
 async function buildInput(
   deps: PolicyCheckDeps,
@@ -399,6 +413,14 @@ export async function decidePolicyCheck(
       await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
       await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
       return denyFrame(frame, reasons, never.message);
+    }
+    // A skill eval's run (KOBE-325) never asks either, whatever mode the floor clamped it to: the
+    // call is denied and recorded (its `no_denied_tools` check reads the denial).
+    if (await isEvalThread(deps.db, target.teamId, frame.thread_id)) {
+      const reasons = [EVAL_NO_PROMPT, ...decision.reasons];
+      await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
+      await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
+      return denyFrame(frame, reasons, EVAL_NO_PROMPT.message);
     }
     const outcome = await deps.approvals.request(
       {

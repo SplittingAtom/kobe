@@ -55,6 +55,8 @@ export interface McpPrincipal {
   readonly sandboxId: string;
   readonly teamId: string;
   readonly userId: string;
+  /** A skill eval's sandbox (KOBE-325): never given the member's personal credentials. */
+  readonly evalThreadId?: string;
 }
 
 export interface McpCallRequest {

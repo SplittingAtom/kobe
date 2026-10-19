@@ -34,6 +34,15 @@ export interface AgentResolutionInput {
    * offered or personal ones). Every other part of the resolution is the agent's as usual.
    */
   readonly onlySkill?: { readonly ref: SkillRef; readonly bundle: SkillBundleRef };
+  /** A skill eval's thread (KOBE-325): `withSkillEvals` decides its skills and credentials. */
+  readonly skillEval?: true;
+  /** Set by `withSkillEvals` for a baseline execution: no skills at all (SK25). */
+  readonly noSkills?: true;
+  /**
+   * Set by `withSkillEvals`: the owner's personal connector grants are not read, so only
+   * connectors that need no personal credential connect (a team's, under its policy).
+   */
+  readonly noPersonalGrants?: true;
 }
 
 export type AgentResolution =

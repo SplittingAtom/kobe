@@ -216,6 +216,8 @@ export interface ThreadRow {
   /** A Workbench test chat (KOBE-323) and its draft (null once deleted); absent = ordinary. */
   readonly skillTest?: boolean;
   readonly skillDraftId?: string | null;
+  /** A skill eval's thread (KOBE-325); absent = ordinary. */
+  readonly skillEval?: boolean;
 }
 
 /** Fail fast instead of queueing behind a long-held thread row (KOBE-29/34: status writers). */
@@ -253,9 +255,11 @@ export async function lockThreadRow(
     thinking_level: ThinkingLevel | null;
     skill_test: boolean;
     skill_draft_id: string | null;
+    skill_eval: boolean;
   }>(sql`
     SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
-           deleted_at, model_alias, project_id, thinking_level, skill_test, skill_draft_id
+           deleted_at, model_alias, project_id, thinking_level, skill_test, skill_draft_id,
+           skill_eval
       FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const r = res.rows[0];
   return r
@@ -273,6 +277,7 @@ export async function lockThreadRow(
         thinkingLevel: r.thinking_level,
         skillTest: r.skill_test,
         skillDraftId: r.skill_draft_id,
+        skillEval: r.skill_eval,
       }
     : undefined;
 }

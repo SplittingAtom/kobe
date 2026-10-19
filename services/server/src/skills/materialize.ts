@@ -164,8 +164,12 @@ export async function locateBundle(
 ): Promise<LocatedBundle | null> {
   if (await isBlocked(tx, hash)) return null;
   if (await isSuspended(tx, who.teamId, hash)) return null;
-  const bound = await tx.execute<{ skill_draft_id: string | null; size: number | null }>(sql`
-    SELECT t.skill_draft_id,
+  const bound = await tx.execute<{
+    skill_draft_id: string | null;
+    skill_eval_run_id: string | null;
+    size: number | null;
+  }>(sql`
+    SELECT t.skill_draft_id, t.skill_eval_run_id,
            (SELECT (b ->> 'size')::int FROM jsonb_array_elements(c.frame -> 'config' -> 'skill_bundles') b
              WHERE b ->> 'sha256' = ${hash}::text LIMIT 1) AS size
       FROM sandbox_run_leases l
@@ -182,6 +186,23 @@ export async function locateBundle(
      ORDER BY t.skill_draft_id IS NULL
      LIMIT 8`);
   if (bound.rows.length === 0) return null;
+  // A skill eval's run (KOBE-325): the eval's own stored runtime zip, scanned at its start.
+  const evalRuns = [
+    ...new Set(bound.rows.flatMap((r) => (r.skill_eval_run_id ? [r.skill_eval_run_id] : []))),
+  ];
+  if (evalRuns.length > 0) {
+    const size = bound.rows.find((r) => r.skill_eval_run_id !== null)?.size;
+    const evalBundle = await tx.execute<{ key: string }>(sql`
+      SELECT bundle_key AS key FROM skill_eval_runs
+       WHERE team_id = ${who.teamId} AND runtime_hash = ${hash}
+         AND id IN (${sql.join(
+           evalRuns.map((id) => sql`${id}::uuid`),
+           sql`, `,
+         )})
+       LIMIT 1`);
+    const key = evalBundle.rows[0]?.key;
+    return key && size != null ? { storageKey: key, size: Number(size) } : null;
+  }
   // The bytes: this team's version with that hash, else one of the caller's own personal versions
   // (versions are immutable, so a replaced skill's old bytes are still there).
   const [team] = await tx

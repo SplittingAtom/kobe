@@ -317,6 +317,7 @@ export async function resolveForStart(
       agentVersion: thread.agentVersion,
       approvalMode: run.approvalMode,
       ...(thread.skillTest ? { skillTest: { draftId: thread.skillDraftId ?? null } } : {}),
+      ...(thread.skillEval ? { skillEval: true as const } : {}),
     })
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
   if (!resolved.ok) return resolved;

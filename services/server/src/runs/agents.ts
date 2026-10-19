@@ -42,6 +42,23 @@ const onlySkillFacts = (ref: SkillRef): SkillFacts => ({
   blockedHashes: [],
 });
 
+/** A skill eval's baseline (KOBE-325, SK25): no Required, agent-named, offered or personal skill. */
+const NO_SKILL_FACTS: SkillFacts = {
+  agent: [],
+  agentCatalog: [],
+  agentOmissions: [],
+  user: [],
+  agentUnapproved: [],
+  agentSuspended: [],
+  userUnapproved: [],
+  userSuspended: [],
+  required: [],
+  requiredOmissions: [],
+  offered: [],
+  offeredOmissions: [],
+  blockedHashes: [],
+};
+
 const unavailableOmissions = (names: readonly string[]): Omission[] =>
   names.map((name) => ({ kind: "skill", name, reason: "unavailable" }));
 
@@ -139,18 +156,22 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // A Workbench test chat (KOBE-323) runs its draft alone: no other skill's facts are read.
     const skills = input.onlySkill
       ? onlySkillFacts(input.onlySkill.ref)
-      : await loadSkillFacts(tx, {
-          teamId: input.teamId,
-          userId: input.ownerUserId,
-          agentSkillNames: agentSkills(frontmatter).names,
-          personalSkillsDisabled: team.personalSkillsDisabled,
-          // A published team version runs the local skill versions it froze (KOBE-318).
-          ...(pinned.version.skillManifest ? { frozen: pinned.version.skillManifest.skills } : {}),
-        });
+      : input.noSkills
+        ? NO_SKILL_FACTS
+        : await loadSkillFacts(tx, {
+            teamId: input.teamId,
+            userId: input.ownerUserId,
+            agentSkillNames: agentSkills(frontmatter).names,
+            personalSkillsDisabled: team.personalSkillsDisabled,
+            // A published team version runs the local skill versions it froze (KOBE-318).
+            ...(pinned.version.skillManifest
+              ? { frozen: pinned.version.skillManifest.skills }
+              : {}),
+          });
     const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
     const connectedConnectors = connectedConnectorNames(
       connectorRows,
-      await loadUserGrantFacts(tx, input.teamId, input.ownerUserId),
+      input.noPersonalGrants ? [] : await loadUserGrantFacts(tx, input.teamId, input.ownerUserId),
       new Date(),
     );
     const resolved = resolveEffective(
@@ -180,11 +201,13 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // checked the blocklist and the scanned object in this same transaction.
     const { refs: skillBundles, unavailable } = input.onlySkill
       ? { refs: [input.onlySkill.bundle], unavailable: [] }
-      : await bundleRefsWithGaps(
-          tx,
-          { teamId: input.teamId, userId: input.ownerUserId },
-          value.skills,
-        );
+      : input.noSkills
+        ? { refs: [], unavailable: [] }
+        : await bundleRefsWithGaps(
+            tx,
+            { teamId: input.teamId, userId: input.ownerUserId },
+            value.skills,
+          );
     const omissions = [...value.omissions, ...unavailableOmissions(unavailable)];
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""

@@ -44,6 +44,7 @@ import { schedulerAuthStandIn } from "./scheduler/process-deps.js";
 import { onScheduledRunEnded } from "./scheduler/run-hook.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
+import { skillEvalFixtureRoutes } from "./skills/evals/fixture-routes.js";
 import { runTokenKeyFromEnv, traceSpanKeyFromEnv } from "./sandbox-wire/run-token.js";
 import { serverCallKeyFromEnv } from "./models/gateway-client.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
@@ -423,8 +424,9 @@ if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
 }
 /** Workspace sync's caller checks; revocations (deactivation, removal) clear its cache. */
-function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
+function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>, allowEval = false) {
   const authenticate = createSandboxAuthenticator({
+    allowEval,
     db: d.database.db,
     verify: sandboxWireVerifier(s.sessionKeys),
     // Short positive cache: a destroyed or replaced sandbox loses access within 5 s.
@@ -435,6 +437,9 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
 }
 // One caller check for every sandbox-listener HTTP endpoint (workspace sync, skill bundles).
 const sandboxAuth = sandbox && deps ? workspaceAuth(deps, sandbox) : undefined;
+// Skill bundles and eval fixtures also serve a skill eval's own sandbox (KOBE-325); workspace
+// sync never does.
+const evalCapableAuth = sandbox && deps ? workspaceAuth(deps, sandbox, true) : undefined;
 const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
 
 // Pre-publish Orbit evals (KOBE-93): Jobs in team namespaces, through the sandbox provider.
@@ -478,12 +483,18 @@ const sandboxServer =
               ? { workspace: workspaceSync.routes(sandboxAuth) }
               : {}),
             // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
-            ...(deps?.blobs && sandboxAuth
+            ...(deps?.blobs && evalCapableAuth
               ? {
                   skills: skillSandboxRoutes({
                     db: deps.database.db,
                     blobs: deps.blobs,
-                    authenticate: sandboxAuth,
+                    authenticate: evalCapableAuth,
+                    log: logger,
+                  }),
+                  evalFixtures: skillEvalFixtureRoutes({
+                    db: deps.database.db,
+                    blobs: deps.blobs,
+                    authenticate: evalCapableAuth,
                     log: logger,
                   }),
                 }
