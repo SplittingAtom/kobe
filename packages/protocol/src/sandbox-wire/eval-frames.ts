@@ -60,7 +60,17 @@ export const evalSnapshotFrameSchema = frame("eval.snapshot", {
   command_id: idSchema,
   thread_id: uuidSchema,
   /** Literal directories to walk (`evalOutputWalkRoots`; `""` is all of `/workspace`). */
-  roots: z.array(z.string().max(1024)).max(EVAL_MAX_OUTPUTS),
+  roots: z
+    .array(
+      z
+        .string()
+        .max(1024)
+        .refine(
+          (r) => r === "" || (r.endsWith("/") && workspacePath.safeParse(r.slice(0, -1)).success),
+          "a directory relative to /workspace (ending in /), or empty for all of it",
+        ),
+    )
+    .max(EVAL_MAX_OUTPUTS),
   hash_paths: z.array(workspacePath).max(EVAL_MAX_FILES_PER_CASE),
 });
 
