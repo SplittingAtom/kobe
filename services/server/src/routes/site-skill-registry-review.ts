@@ -18,6 +18,7 @@ import {
 } from "../skills/registry/review-decide.js";
 import { REVIEW_CHECKLIST, reviewDetail } from "../skills/registry/review-detail.js";
 import { acknowledge } from "../skills/registry/review-findings.js";
+import { rerunEvals } from "../skills/registry/rerun.js";
 import { notifySubmitter } from "../skills/registry/review-notify.js";
 import {
   QUEUE_FILTERS,
@@ -147,6 +148,16 @@ export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!body) return invalidRequest(c, "Send a note (up to 4000 characters).");
     // A comment is for reviewers: no state changes, so no email.
     return answer(c, await comment(db, id, c.get("user").id, body.note), null, false);
+  });
+
+  // Re-run evals in the Registry team with the Site judge (KOBE-335): the authoritative scorecard.
+  app.post("/:id/rerun-evals", requireSkillReview(deps, "rerun"), async (c) => {
+    const id = versionId(c);
+    if (!id) return c.json(NOT_FOUND, 404);
+    if (!deps.blobs) return c.json(UNAVAILABLE, 503);
+    const r = await rerunEvals({ db, blobs: deps.blobs }, id, c.get("user").id);
+    if (!r.ok) return c.json({ code: r.code, message: r.message }, r.status);
+    return c.json({ evalRunId: r.evalRunId }, 202);
   });
 
   // One Caution finding acknowledged (review M1): Approve needs every one.

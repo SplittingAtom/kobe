@@ -92,7 +92,6 @@ const audit = async (action: string) =>
 describe("Approve fails closed (KOBE-334 must-dos 1 and 6)", () => {
   it("refuses until the Registry team exists, then until the authoritative scorecard is there", async () => {
     const v = await submitted("author", "first-skill", "0.1.0");
-    await authoritative(h, v.id);
     const early = await decision("admin2", v.id, "approve");
     expect([early.status, early.json.code]).toEqual([409, "registry_not_ready"]);
     const team = await as.admin1.post("/v1/site/skills/registry/team", {
@@ -113,6 +112,7 @@ describe("Approve fails closed (KOBE-334 must-dos 1 and 6)", () => {
     expect(row.rows[0]?.state).toBe("submitted");
 
     // Now it may: the first approval makes the submitter the first maintainer (must-do 2).
+    await authoritative(h, v.id);
     const ok = await decision("admin2", v.id, "approve", { note: "Looks right." });
     expect(ok.status, JSON.stringify(ok.json)).toBe(200);
     expect(ok.json).toMatchObject({ state: "approved", selfApproved: false });

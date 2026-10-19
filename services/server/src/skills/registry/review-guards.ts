@@ -1,4 +1,5 @@
 import { sql, type KobeTx } from "@kobe/db";
+import { rerunProblem } from "./authoritative.js";
 
 /**
  * Guards the Registry's Approve (KOBE-334, SK22, SK23) shares with the tickets after it.
@@ -25,20 +26,33 @@ export interface ScorecardProblem {
   readonly message: string;
 }
 
-/** Why the version's authoritative scorecard doesn't let it be approved; null when it does. */
-export function authoritativeScorecardProblem(version: {
-  readonly authoritativeScorecard: Record<string, unknown> | null;
-  readonly packageHash: string;
-}): ScorecardProblem | null {
+/**
+ * Why the version's authoritative scorecard doesn't let it be approved; null when it does. The
+ * card must name this version's own package (review L2) and come from a re-run in the current
+ * Registry team, judged by the current Site judge when the suite has judged cases (KOBE-335).
+ */
+export function authoritativeScorecardProblem(
+  version: {
+    readonly authoritativeScorecard: Record<string, unknown> | null;
+    readonly packageHash: string;
+  },
+  now: { readonly registryTeamId: string | null; readonly siteJudgeAlias: string | null },
+): ScorecardProblem | null {
   const card = version.authoritativeScorecard;
   if (!card) return AUTHORITATIVE_SCORECARD_MISSING;
-  // The card must name this version's own package (review L2: a card naming none fails closed).
   if (card.packageHash !== version.packageHash)
     return {
       code: "authoritative_scorecard_stale",
       message: "The authoritative scorecard is from another package: re-run the evals.",
     };
-  return null;
+  return rerunProblem(card, now);
+}
+
+/** The Site judge's alias (null: none set). */
+export async function siteJudgeAlias(tx: KobeTx): Promise<string | null> {
+  const res = await tx.execute<{ alias: string | null }>(sql`
+    SELECT judge_alias AS alias FROM site_skill_settings WHERE id = 1`);
+  return res.rows[0]?.alias ?? null;
 }
 
 /**

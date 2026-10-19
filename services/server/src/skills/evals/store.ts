@@ -12,6 +12,7 @@ import {
 import { createThread } from "../../threads/repository.js";
 import type { AgentPin } from "../../agents/versions.js";
 import { executionFromAttempts, retries, type EvalAttempt } from "./execution.js";
+import { recordAuthoritativeScorecard } from "../registry/authoritative.js";
 
 // The skill eval queue in Postgres (KOBE-325): eval runs, their executions and every state change.
 // Postgres is the record; `NOTIFY kobe_skill_eval '<team>:<eval run>'` is only a hint (events).
@@ -31,7 +32,7 @@ export interface NewEvalRun {
   readonly id: string;
   readonly startedBy: string;
   readonly subject: {
-    readonly kind: "draft" | "team" | "personal";
+    readonly kind: "draft" | "team" | "personal" | "registry";
     readonly id: string;
     readonly rev: number;
   };
@@ -399,8 +400,11 @@ async function completeIfDone(tx: KobeTx, teamId: string, evalRunId: string): Pr
     run_model: SkillEvalRunModel;
     judge_model: SkillEvalJudgeModel | null;
     started_at: Date | string;
+    subject_kind: string;
+    subject_id: string;
   }>(sql`
-    SELECT suite, mode, package_hash, run_model, judge_model, started_at FROM skill_eval_runs
+    SELECT suite, mode, package_hash, run_model, judge_model, started_at, subject_kind, subject_id
+      FROM skill_eval_runs
      WHERE team_id = ${teamId} AND id = ${evalRunId}`);
   const r = run.rows[0];
   if (!r) return false;
@@ -422,6 +426,16 @@ async function completeIfDone(tx: KobeTx, teamId: string, evalRunId: string): Pr
        SET status = 'completed', scorecard = ${JSON.stringify(card)}::jsonb, finished_at = now(),
            updated_at = now()
      WHERE team_id = ${teamId} AND id = ${evalRunId} AND status = 'running'`);
+  // A Registry re-run's card becomes the version's authoritative scorecard (KOBE-335), in the
+  // same transaction: numbers only leave the Registry team.
+  if (r.subject_kind === "registry")
+    await recordAuthoritativeScorecard(tx, {
+      teamId,
+      evalRunId,
+      versionId: r.subject_id,
+      card,
+      judgeModel: r.judge_model,
+    });
   await notifyEval(tx, teamId, evalRunId);
   return true;
 }

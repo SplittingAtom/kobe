@@ -115,12 +115,20 @@ export async function promoteTeamVersion(
   return res.json.registryVersionId as string;
 }
 
-/** Stands in for KOBE-335's re-run: the version's authoritative scorecard, of its own package. */
+/**
+ * A version's authoritative scorecard as a completed re-run leaves it (KOBE-335): its own
+ * package, the current Registry team and Site judge. Tests that need the real re-run use
+ * `skill-registry-rerun.db.test.ts`.
+ */
 export async function authoritative(h: Harness, registryVersionId: string): Promise<void> {
   await h.admin.query(
-    `UPDATE registry_versions
-        SET authoritative_scorecard = jsonb_set($2::jsonb, '{packageHash}', to_jsonb(package_hash))
-      WHERE id = $1`,
+    `UPDATE registry_versions v
+        SET authoritative_scorecard = jsonb_set($2::jsonb, '{packageHash}', to_jsonb(v.package_hash))
+          || jsonb_build_object('rerun', jsonb_build_object(
+               'teamId', s.registry_team_id, 'evalRunId', gen_random_uuid(),
+               'judgeAlias', s.judge_alias))
+       FROM site_skill_settings s
+      WHERE v.id = $1 AND s.id = 1`,
     [registryVersionId, JSON.stringify(GOLDEN)],
   );
 }

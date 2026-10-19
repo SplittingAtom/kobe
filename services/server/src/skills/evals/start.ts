@@ -37,6 +37,8 @@ import { validateZipBundle } from "../bundle.js";
 import { readAllFiles, visibleDraft } from "../drafts/records.js";
 import { testGate } from "../drafts/test-gates.js";
 import { readEvalJudgeAlias } from "../settings.js";
+import { readPackage } from "../registry/review-diff.js";
+import { versionRow as registryVersionRow } from "../registry/review-queue.js";
 import { scanCanonicalZip } from "../review.js";
 import { ScanBusyError } from "../scan-pool.js";
 import { siteEvalLimits } from "./runner.js";
@@ -65,10 +67,15 @@ export type StartRefusal = {
   readonly issues?: readonly SkillEvalIssue[];
 };
 
-/** What to evaluate: a draft's current revision, or a saved version (by its seq). */
+/**
+ * What to evaluate: a draft's current revision, a saved version (by its seq), or a Registry
+ * version (KOBE-335: the Registry team's re-run for its authoritative scorecard; its package is
+ * read from the catalog store by the hashes its row records).
+ */
 export type StartSubject =
   | { readonly kind: "draft"; readonly draftId: string }
-  | Extract<SkillEvalSubject, { kind: "version" }>;
+  | Extract<SkillEvalSubject, { kind: "version" }>
+  | { readonly kind: "registry"; readonly versionId: string };
 
 export interface EvalStarter {
   readonly teamId: string;
@@ -77,7 +84,7 @@ export interface EvalStarter {
 }
 
 interface LoadedPackage {
-  readonly kind: "draft" | "team" | "personal";
+  readonly kind: "draft" | "team" | "personal" | "registry";
   readonly id: string;
   readonly rev: number;
   readonly files: ReadonlyMap<string, Uint8Array>;
@@ -102,6 +109,18 @@ async function loadPackage(
       const files = await readAllFiles(tx, who.teamId, subject.draftId);
       return { kind: "draft" as const, id: subject.draftId, rev: draft.rev, files };
     });
+  }
+  if (subject.kind === "registry") {
+    const v = await registryVersionRow(db, subject.versionId);
+    if (!v || v.publisher !== "maintainer") return null;
+    const zip = await readPackage(blobs, v);
+    if (!zip) return null;
+    return {
+      kind: "registry",
+      id: v.id,
+      rev: v.seq,
+      files: new Map(Object.entries(unzipSync(zip))),
+    };
   }
   const row = await withTeam(db, who.teamId, (tx) => versionRow(tx, who, subject));
   if (!row) return null;
@@ -220,6 +239,17 @@ export async function judgeModelFor(
   return { alias: (fallback.ok && fallback.model?.alias) || runModel.used, source: "team" };
 }
 
+/** The Site's judge when set and enabled in the team; null otherwise (a Registry re-run's only judge). */
+export async function siteJudgeFor(
+  tx: KobeTx,
+  teamId: string,
+): Promise<SkillEvalJudgeModel | null> {
+  const [site] = await tx.select({ alias: siteSkillSettings.judgeAlias }).from(siteSkillSettings);
+  if (site?.alias && (await isModelEnabled(tx, teamId, site.alias)))
+    return { alias: site.alias, source: "site" };
+  return null;
+}
+
 const DUPLICATE =
   "You already have an eval of this revision in this mode queued or running. Wait for it or cancel it.";
 
@@ -302,7 +332,9 @@ async function prepareSubject(
   const suite = parsed.suite;
   const gate = await withTeam(deps.db, who.teamId, async (tx) => {
     if (await isBlocked(tx, runtimeHash)) return "blocklisted" as const;
-    if (pkg.kind !== "team") return testGate(tx, who, runtimeHash);
+    // A team version passed the team's review; a Registry version is the Registry team's own
+    // review (KOBE-335). Drafts and personal versions are gated like a test chat.
+    if (pkg.kind !== "team" && pkg.kind !== "registry") return testGate(tx, who, runtimeHash);
     return null;
   });
   if (gate === "blocklisted")
@@ -401,9 +433,22 @@ export async function startSkillEval(
       concurrency: limits.maxConcurrentSandboxes,
       fixtureBytes: (f) => pkg.files.get(`evals/${f}`)?.length ?? 0,
     });
-    return { run, judge: rubric ? await judgeModelFor(tx, who.teamId, run) : null, estimate };
+    if (!rubric) return { run, judge: null, estimate };
+    // A Registry re-run is judged by the Site judge only (SK17, SK23), never a team's choice.
+    const judge =
+      pkg.kind === "registry"
+        ? await siteJudgeFor(tx, who.teamId)
+        : await judgeModelFor(tx, who.teamId, run);
+    if (!judge) return "no_site_judge" as const;
+    return { run, judge, estimate };
   });
   if (!models) return refuse(409, "no_model", "The team has no model enabled for evals.");
+  if (models === "no_site_judge")
+    return refuse(
+      409,
+      "site_judge_unavailable",
+      "The suite has judged cases: set the Site judge and enable it in the Registry team first.",
+    );
   const id = randomUUID();
   const tree = evalTree(deps.blobs.prefix, who.teamId, id);
   const bundleKey = evalBundleKey(tree, runtimeHash);

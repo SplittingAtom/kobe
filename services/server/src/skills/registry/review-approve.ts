@@ -2,7 +2,12 @@ import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { blockedAmong } from "../blocklist.js";
 import { listMaintainers, recordFirstMaintainer } from "./maintainers.js";
-import { authoritativeScorecardProblem, isSiteAdmin, soleReviewer } from "./review-guards.js";
+import {
+  authoritativeScorecardProblem,
+  isSiteAdmin,
+  siteJudgeAlias,
+  soleReviewer,
+} from "./review-guards.js";
 import { cautionKeys, unacknowledgedProblem } from "./review-findings.js";
 import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
@@ -76,11 +81,15 @@ export async function approveProblems(
   input?: DecisionInput,
 ): Promise<{ problems: Problem[]; sole: boolean }> {
   const problems: Problem[] = [];
-  if ((await requireRegistryTeam(tx)).ok === false) problems.push(PROBLEMS.registry_not_ready);
+  const registry = await requireRegistryTeam(tx);
+  if (registry.ok === false) problems.push(PROBLEMS.registry_not_ready);
   if (!v) return { problems: [...problems, PROBLEMS.not_found], sole: false };
   if (!DECIDABLE_STATES.has(v.state)) problems.push(PROBLEMS.decided);
   else if (v.claimedBy !== null && v.claimedBy !== userId) problems.push(PROBLEMS.claimed);
-  const card = authoritativeScorecardProblem(v);
+  const card = authoritativeScorecardProblem(v, {
+    registryTeamId: registry.ok ? registry.teamId : null,
+    siteJudgeAlias: await siteJudgeAlias(tx),
+  });
   if (card) problems.push(card as Problem);
   if ((await blockedAmong(tx, [v.runtimeHash, v.packageHash])).length > 0)
     problems.push(PROBLEMS.blocked);

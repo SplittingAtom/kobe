@@ -1543,6 +1543,10 @@ export const AUDIT_EVENTS = {
   }),
   /** The submitter took back their submission before a decision (KOBE-334 review M3). */
   "registry.retracted": event("site", { registryVersionId: id }),
+  /** A reviewer started the Registry team's re-run of a version's evals (KOBE-335, SK23). */
+  "registry.evals_rerun": event("site", { registryVersionId: id, evalRunId: id, teamId: id }),
+  /** A re-run completed: its card (numbers only) is the version's authoritative scorecard (system). */
+  "registry.authoritative_scorecard": event("site", { registryVersionId: id, evalRunId: id }),
   /** A reviewer sent the version back to its author's Workbench with comments. */
   "registry.changes_requested": event("site", { registryVersionId: id }),
   /** A reviewer rejected the version; `blocked`: a Site admin also blocklisted its runtime hash. */
