@@ -1,5 +1,5 @@
 {
-  "id": "b1b44b2e-7618-454b-b95b-e4ea4f1091f1",
+  "id": "f248468e-c08a-43f5-8dfe-8216cdf6c503",
   "prevId": "234a4db9-2f33-46f2-ae99-6e0bcbac1dd3",
   "version": "7",
   "dialect": "postgresql",
@@ -18911,6 +18911,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "url_sha256": {
+          "name": "url_sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "hint": {
           "name": "hint",
           "type": "text",
@@ -18974,6 +18980,10 @@
         "connector_site_keys_sealed": {
           "name": "connector_site_keys_sealed",
           "value": "\"connector_site_keys\".\"sealed\" ~ '^e1\\.[A-Za-z0-9_.-]+$' AND char_length(\"connector_site_keys\".\"sealed\") <= 16384"
+        },
+        "connector_site_keys_url_sha256": {
+          "name": "connector_site_keys_url_sha256",
+          "value": "\"connector_site_keys\".\"url_sha256\" ~ '^[0-9a-f]{64}$'"
         },
         "connector_site_keys_key_id": {
           "name": "connector_site_keys_key_id",

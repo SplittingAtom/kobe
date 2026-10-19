@@ -74,7 +74,8 @@ describe("connector site keys on upgrade (KOBE-303)", () => {
     await withClient(appUrl, async (c) => {
       await c.query(`UPDATE connectors SET credential_source = 'site' WHERE id = $1`, [ids.apiKey]);
       await c.query(
-        `INSERT INTO connector_site_keys (connector_id, sealed, key_id, hint) VALUES ($1, 'e1.k.x', 'k', '••••')`,
+        `INSERT INTO connector_site_keys (connector_id, sealed, key_id, url_sha256, hint)
+         VALUES ($1, 'e1.k.x', 'k', repeat('a', 64), '••••')`,
         [ids.apiKey],
       );
       const { rows } = await c.query(`SELECT connector_id FROM connector_site_keys`);
