@@ -51,12 +51,18 @@ async function unclaimed(tx: KobeTx, claims: CaptureClaims): Promise<number> {
   return res.rows[0]?.n ?? 0;
 }
 
+/**
+ * The run, locked (KOBE-439 review LOW-A, LOW-B): a run end waits for this store to commit, so its
+ * cleanup (0160) sees the row; a store that waited on an ended run finds it inactive and refuses;
+ * and reports of one run are serialised, so the unclaimed cap is exact.
+ */
 async function runActive(tx: KobeTx, claims: CaptureClaims): Promise<boolean> {
-  const res = await tx.execute(sql`
-    SELECT 1 FROM runs
+  const res = await tx.execute<{ status: string }>(sql`
+    SELECT status FROM runs
      WHERE team_id = ${claims.teamId} AND id = ${claims.runId} AND thread_id = ${claims.threadId}
-       AND status IN ('running', 'waiting_approval')`);
-  return res.rows.length === 1;
+     FOR UPDATE`);
+  const status = res.rows[0]?.status;
+  return status === "running" || status === "waiting_approval";
 }
 
 function rowFor(

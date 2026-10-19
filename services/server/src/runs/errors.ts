@@ -21,7 +21,8 @@ export type OrchestratorErrorCode =
   | "storage_unavailable" // 503: object storage did not take the files
   | "sandbox_unavailable" // 503: the workspace did not answer a steer
   | "invalid_mention" // 422: an @file mention is malformed, outside /workspace or unknown (KOBE-223)
-  | "app_context_invalid"; // 422: an app context chip names an app the member can't open now (KOBE-439)
+  | "app_context_invalid" // 422: an app context chip names an app the member can't open now (KOBE-439)
+  | "invalid_content"; // 422: the text imitates Kobe's app-context markers (KOBE-439)
 
 export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   run_not_found: 404,
@@ -46,6 +47,7 @@ export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   sandbox_unavailable: 503,
   invalid_mention: 422,
   app_context_invalid: 422,
+  invalid_content: 422,
 };
 
 const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
@@ -72,6 +74,7 @@ const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
   sandbox_unavailable: "Your workspace did not answer. Try again.",
   invalid_mention: "A mentioned file is not in your workspace.",
   app_context_invalid: "An app's context can no longer be sent. Remove its chip and try again.",
+  invalid_content: "Your message can't contain Kobe's app-context markers.",
 };
 
 export class RunError extends Error {

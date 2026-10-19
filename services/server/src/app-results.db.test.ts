@@ -465,6 +465,16 @@ describe("review fixes (KOBE-438 review)", () => {
     expect(await rows(w.team)).toEqual([]);
   });
 
+  it("holds the cap under parallel reports (KOBE-439 review LOW-B)", async () => {
+    const w = await world();
+    const tickets: string[] = [];
+    for (let i = 0; i < 25; i++) tickets.push((await decide(w)).json.app_capture.ticket as string);
+    const answers = await Promise.all(tickets.map((t) => report(w, t, RESULT)));
+    expect(answers.filter((a) => a.status === 201)).toHaveLength(20);
+    expect(answers.filter((a) => a.status === 429)).toHaveLength(5);
+    expect(await rows(w.team)).toHaveLength(20);
+  });
+
   it("caps a run's unclaimed results (MEDIUM-1)", async () => {
     const w = await world();
     for (let i = 0; i < 20; i++) {

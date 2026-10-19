@@ -17,12 +17,17 @@ export interface ResolvedAppContext {
   readonly data: AppContextPart["data"];
 }
 
-/** JSON that cannot close the fence or open markup: `<`, `>` and `&` as escapes. */
+/** Format, bidi and line/paragraph separator characters (review LOW-I). */
+const INVISIBLE = /[\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+const escape = (c: string) => `\\u${(c.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`;
+
+/**
+ * Compact JSON that cannot close the fence or open markup (`<`, `>`, `&` as escapes), and whose
+ * invisible and bidi characters are escaped too, so what Pi reads is what history shows.
+ */
 function fencedJson(value: unknown): string {
-  return JSON.stringify(value, null, 2)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026");
+  return JSON.stringify(value).replace(/[<>&]/g, escape).replace(INVISIBLE, escape);
 }
 
 /** An attribute value: no quotes, angle brackets or ampersands. */

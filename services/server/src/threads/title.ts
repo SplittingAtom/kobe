@@ -4,7 +4,7 @@ import {
   type ServerCallRequest,
 } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
-import { cutText, firstUserMessage } from "./messages.js";
+import { cutText, firstUserMessage, memberText } from "./messages.js";
 
 /**
  * Auto-titles (CE18, KOBE-219) on the KOBE-234 contract (docs/design/server-model-calls.md): after
@@ -184,7 +184,7 @@ export async function saveFallbackTitleInTx(
   if (prompt === "") {
     const run = await tx.execute<{ input: string }>(sql`
       SELECT input FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
-    prompt = run.rows[0]?.input ?? "";
+    prompt = memberText(run.rows[0]?.input ?? "");
   }
   const title = fallbackTitle(prompt);
   if (title === undefined) return undefined;

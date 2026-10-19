@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { APP_CONTEXT_PREAMBLE, appContextBlock, withAppContext } from "./context-block.js";
 
+const must = (v: string | undefined): string => {
+  if (v === undefined) throw new Error("missing line");
+  return v;
+};
+
 /** KOBE-439 ac-3: the block reaches Pi fenced and marked untrusted. */
 describe("app context blocks", () => {
   it("puts the preamble and fenced blocks before the member's text", () => {
@@ -15,6 +20,19 @@ describe("app context blocks", () => {
     ).toBe(true);
     expect(input.endsWith("</app-context>\n\nUse this table")).toBe(true);
     expect(withAppContext([], "plain")).toBe("plain");
+  });
+
+  it("escapes bidi and invisible characters, compactly (review LOW-I, LOW-F)", () => {
+    const block = appContextBlock({
+      connectorName: "C",
+      data: { structuredContent: { name: "abc\u202Edcba\u200B\u2028x" } },
+    });
+    expect(block).not.toMatch(/[\u202E\u200B\u2028]/u);
+    expect(block).toContain("\\u202e");
+    expect(block.split("\n")).toHaveLength(3);
+    expect(JSON.parse(must(block.split("\n")[1]))).toEqual({
+      structuredContent: { name: "abc\u202Edcba\u200B\u2028x" },
+    });
   });
 
   it("cannot be closed or escaped by the data or the connector name", () => {
