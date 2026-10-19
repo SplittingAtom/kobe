@@ -331,6 +331,101 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(reaped).toEqual({ executions: 0, claims: 0 });
   });
 
+  it("on shutdown puts a running execution back without using its attempt (review M2)", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    provider.beforeReply = () => new Promise(() => {}); // the run never answers
+    const id = await draftWith(
+      w.owner,
+      "shutdown",
+      ["cases:", "  - id: a", "    prompt: Wait", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    const runner = runnerFor(provider);
+    await runner.sweep();
+    const state = async () =>
+      (
+        await f.fx.admin.query<{ state: string; attempt: number; thread_id: string | null }>(
+          `SELECT state, attempt, thread_id FROM skill_eval_results WHERE team_id = $1 AND eval_run_id = $2`,
+          [w.team, evalRunId],
+        )
+      ).rows[0];
+    await expect.poll(async () => (await state())?.state, { timeout: 20_000 }).toBe("running");
+    await runner.shutdown(10_000);
+    expect(await state()).toEqual({ state: "queued", attempt: 1, thread_id: null });
+    expect(provider.deleted).toEqual(provider.created);
+    const { rows } = await f.fx.admin.query<{ status: string }>(
+      `SELECT status FROM runs WHERE team_id = $1 AND thread_id = $2`,
+      [w.team, must(provider.created[0], "thread")],
+    );
+    expect(rows[0]?.status).toBe("cancelled");
+  });
+
+  it("the reaper takes over only executions whose heartbeat stopped (review M2)", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    const id = await draftWith(
+      w.owner,
+      "reap",
+      [
+        "cases:",
+        "  - id: a",
+        "    prompt: P",
+        "    expect: {contains: Total}",
+        "  - id: b",
+        "    prompt: Q",
+        "    expect: {contains: Total}",
+        "",
+      ].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    // Two executions "running" on a replica that is gone: one beat recently (past its deadline,
+    // still collecting), one has been silent for minutes.
+    const live = randomUUID();
+    const dead = randomUUID();
+    for (const [thread, caseId, beat] of [
+      [live, "a", "now()"],
+      [dead, "b", "now() - interval '5 minutes'"],
+    ] as const) {
+      await f.fx.admin.query(
+        `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_eval_run_id)
+         VALUES ($1, $2, $3, 'e', true, $4)`,
+        [w.team, thread, w.owner.id, evalRunId],
+      );
+      await f.fx.admin.query(
+        `UPDATE skill_eval_results SET state = 'collecting', thread_id = $3,
+                deadline_at = now() - interval '3 minutes', updated_at = ${beat}
+          WHERE team_id = $1 AND eval_run_id = $2 AND case_id = '${caseId}'`,
+        [w.team, evalRunId, thread],
+      );
+    }
+    const reaped = await reapSkillEvals({
+      db: f.fx.db,
+      provider,
+      runs: f.fx.replica(0).deps.runs,
+      log: silent,
+    });
+    expect(reaped.executions).toBe(1);
+    const { rows } = await f.fx.admin.query<{ case_id: string; state: string; attempt: number }>(
+      `SELECT case_id, state, attempt FROM skill_eval_results
+        WHERE team_id = $1 AND eval_run_id = $2 ORDER BY case_id`,
+      [w.team, evalRunId],
+    );
+    expect(rows).toEqual([
+      { case_id: "a", state: "collecting", attempt: 1 },
+      { case_id: "b", state: "queued", attempt: 1 },
+    ]);
+    expect(provider.deleted).toEqual([dead]);
+  });
+
   it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
     const w = await world();
     const provider = new FakeEvalProvider(url);

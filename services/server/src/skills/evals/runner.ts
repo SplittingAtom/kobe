@@ -35,8 +35,11 @@ import { caseFixtureList, readFixtures } from "./storage.js";
 import {
   claimNextExecution,
   evalRunOpen,
+  hasQueuedExecution,
+  heartbeat,
   markExecution,
   recordAttempt,
+  requeueExecution,
   type ClaimedExecution,
 } from "./store.js";
 
@@ -56,6 +59,10 @@ export interface SkillEvalRunnerTuning {
   readonly pollMs: number;
   /** The cluster deletes a claim this long after its execution's deadline (backstop). */
   readonly shutdownGraceMs: number;
+  /** How often a running execution's heartbeat is written (the reaper waits for ~4 missed). */
+  readonly heartbeatMs: number;
+  /** Most executions this replica runs at once, across teams (review L8). */
+  readonly maxActive: number;
 }
 
 export const SKILL_EVAL_RUNNER_TUNING: SkillEvalRunnerTuning = {
@@ -63,6 +70,8 @@ export const SKILL_EVAL_RUNNER_TUNING: SkillEvalRunnerTuning = {
   connectWaitMs: 3 * 60_000,
   pollMs: 1_000,
   shutdownGraceMs: 5 * 60_000,
+  heartbeatMs: 15_000,
+  maxActive: 16,
 };
 
 export interface SkillEvalRunnerOptions {
@@ -81,8 +90,13 @@ export interface SkillEvalRunnerOptions {
   readonly staleConnectionMs?: number;
 }
 
+/** What an attempt has started so far (for cleanup when it fails). */
+interface AttemptState {
+  runId: string | null;
+}
+
 class EvalAbort extends Error {
-  constructor(readonly reason: "cancelled" | "timeout" | "start") {
+  constructor(readonly reason: "cancelled" | "timeout" | "start" | "shutdown") {
     super(reason);
   }
 }
@@ -131,6 +145,16 @@ export class SkillEvalRunner {
     this.#closed = true;
   }
 
+  /**
+   * Shutdown (review M2): no new claims, and every execution here stops now: its run is cancelled,
+   * its sandbox deleted and it goes back to queued without using its attempt (another replica
+   * runs it). Resolves once they are back, or after `timeoutMs` (the reaper finishes the rest).
+   */
+  async shutdown(timeoutMs: number): Promise<void> {
+    this.#closed = true;
+    await Promise.race([this.idle(), delay(timeoutMs)]);
+  }
+
   async #sweep(): Promise<number> {
     const limits = await siteEvalLimits(this.#o.db);
     const cap = Math.min(limits.maxConcurrentSandboxes, this.#o.maxConcurrentPerTeam);
@@ -138,8 +162,10 @@ export class SkillEvalRunner {
     const all = await this.#o.db.select({ id: teams.id, slug: teams.slug }).from(teams);
     let started = 0;
     for (const team of all) {
+      if (this.#running.size >= this.#t.maxActive) break;
+      if (!(await hasQueuedExecution(this.#o.db, team.id).catch(() => false))) continue;
       for (;;) {
-        if (this.#closed) return started;
+        if (this.#closed || this.#running.size >= this.#t.maxActive) return started;
         let claim: ClaimedExecution | null;
         try {
           claim = await claimNextExecution(this.#o.db, team.id, {
@@ -163,17 +189,29 @@ export class SkillEvalRunner {
 
   async #execute(team: { id: string; slug: string }, claim: ClaimedExecution): Promise<void> {
     const started = Date.now();
-    let attempt: EvalAttempt;
+    const state: AttemptState = { runId: null };
+    const beat = setInterval(() => {
+      void heartbeat(this.#o.db, claim).catch(() => undefined);
+    }, this.#t.heartbeatMs);
+    beat.unref();
+    let attempt: EvalAttempt | null;
     try {
-      attempt = await this.#attempt(team, claim, started);
+      attempt = await this.#attempt(team, claim, started, state);
     } catch (err) {
+      const shutdown = err instanceof EvalAbort && err.reason === "shutdown";
       if (!(err instanceof EvalAbort))
         this.#o.log.warn(
           { err, team_id: claim.teamId, eval_run_id: claim.evalRunId, case_id: claim.caseId },
           "skill evals: execution failed",
         );
-      attempt = errorAttempt(claim.threadId, null, Date.now() - started);
+      // A run started before the failure is stopped here, not left to the lost-run sweep (L9).
+      if (state.runId)
+        await this.#o.runs
+          .cancel(ownerActor(claim.teamId, claim.userId), state.runId)
+          .catch(() => undefined);
+      attempt = shutdown ? null : errorAttempt(claim.threadId, state.runId, Date.now() - started);
     } finally {
+      clearInterval(beat);
       // Cleanup on every path (KOBE-325): the claim's shutdownTime and the reaper are backstops.
       await this.#o.provider
         .deleteEvalSandbox(team, claim.threadId)
@@ -185,7 +223,8 @@ export class SkillEvalRunner {
         );
     }
     try {
-      await recordAttempt(this.#o.db, claim, attempt, claim.runModel.used);
+      if (attempt === null) await requeueExecution(this.#o.db, claim);
+      else await recordAttempt(this.#o.db, claim, attempt, claim.runModel.used);
     } catch (err) {
       this.#o.log.error({ err, eval_run_id: claim.evalRunId }, "skill evals: could not record");
     }
@@ -195,6 +234,7 @@ export class SkillEvalRunner {
     team: { id: string; slug: string },
     claim: ClaimedExecution,
     started: number,
+    state: AttemptState,
   ): Promise<EvalAttempt> {
     const c = claim.suite.cases.find((x) => x.id === claim.caseId);
     if (!c) throw new Error(`the suite has no case ${claim.caseId}`);
@@ -228,11 +268,15 @@ export class SkillEvalRunner {
       approval_mode: "auto",
     });
     const runId = submitted.run_id;
+    state.runId = runId;
     await markExecution(this.#o.db, claim, "running", runId);
     const end = await this.#waitRun(claim, runId, c.expect.max_turns, deadline);
     if (end !== "ended") {
       await this.#o.runs.cancel(actor, runId).catch(() => undefined);
-      if (end === "cancelled") throw new EvalAbort("cancelled");
+      if (end === "cancelled" || end === "shutdown") {
+        state.runId = null;
+        throw new EvalAbort(end);
+      }
     }
     const observed = await this.#observe(claim, runId);
     if (end === "timeout") {
@@ -286,6 +330,7 @@ export class SkillEvalRunner {
         liveConnection(tx, target, stale),
       );
       if (live) return;
+      if (this.#closed) throw new EvalAbort("shutdown");
       if (!(await evalRunOpen(this.#o.db, claim.teamId, claim.evalRunId)))
         throw new EvalAbort("cancelled");
       if (Date.now() >= until) throw new EvalAbort("start");
@@ -326,8 +371,9 @@ export class SkillEvalRunner {
     runId: string,
     maxTurns: number,
     deadline: number,
-  ): Promise<"ended" | "timeout" | "cancelled" | "over_turns"> {
+  ): Promise<"ended" | "timeout" | "cancelled" | "over_turns" | "shutdown"> {
     for (;;) {
+      if (this.#closed) return "shutdown";
       const state = await withTeam(this.#o.db, claim.teamId, (tx) =>
         runState(tx, claim.teamId, runId),
       );

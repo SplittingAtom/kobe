@@ -97,8 +97,18 @@ export interface ClaimedExecution {
   readonly runModel: SkillEvalRunModel;
 }
 
+/** Whether the team has any queued execution (a cheap look before taking the team's lock). */
+export async function hasQueuedExecution(db: KobeDb, teamId: string): Promise<boolean> {
+  return withTeam(db, teamId, async (tx) => {
+    const res = await tx.execute(sql`
+      SELECT 1 FROM skill_eval_results WHERE team_id = ${teamId} AND state = 'queued' LIMIT 1`);
+    return res.rows.length > 0;
+  });
+}
+
 /**
- * Takes the oldest queued execution of an open eval run in the team, if fewer than `cap` of the
+ * Takes the next queued execution of an open eval run in the team (starters with the fewest
+ * active executions first, then the oldest eval: one member's backlog never blocks the others'), if fewer than `cap` of the
  * team's executions are active: under the team's transaction advisory lock (every replica counts
  * and claims in turn), so the cap holds across replicas. The execution gets a new eval thread
  * (the Kobe agent `pin`, the run's model), its wall-clock deadline and state `starting`.
@@ -108,6 +118,7 @@ export async function claimNextExecution(
   teamId: string,
   opts: {
     readonly cap: number;
+    /** Used when the eval run stored no wall clock (it normally keeps the one it started with). */
     readonly wallClockMs: number;
     /** The Kobe agent's pin for the eval's thread (null: unavailable, the eval run fails). */
     readonly pinFor: (tx: KobeTx, teamId: string, userId: string) => Promise<AgentPin | null>;
@@ -132,14 +143,23 @@ export async function claimNextExecution(
       runtime_hash: string;
       skill_name: string;
       run_model: SkillEvalRunModel;
+      wall_minutes: number | null;
     }>(sql`
       SELECT x.eval_run_id, x.case_id, x.with_skill, x.attempt, x.first_attempt, r.started_by,
-             r.suite, r.fixtures_key, r.runtime_hash, r.skill_name, r.run_model
+             r.suite, r.fixtures_key, r.runtime_hash, r.skill_name, r.run_model,
+             (r.limits ->> 'caseWallClockMinutes')::int AS wall_minutes
         FROM skill_eval_results x
         JOIN skill_eval_runs r ON r.team_id = x.team_id AND r.id = x.eval_run_id
+        -- Only a starter who is still an active member of the team (review L8).
+        JOIN team_members m ON m.team_id = r.team_id AND m.user_id = r.started_by
+        JOIN users u ON u.id = r.started_by AND u.deactivated_at IS NULL
        WHERE x.team_id = ${teamId} AND x.state = 'queued' AND r.status IN ${OPEN}
          AND r.cancel_requested_at IS NULL
-       ORDER BY r.started_at, r.id, x.case_id, x.with_skill DESC
+       ORDER BY (SELECT count(*) FROM skill_eval_results a
+                   JOIN skill_eval_runs ar ON ar.team_id = a.team_id AND ar.id = a.eval_run_id
+                  WHERE a.team_id = x.team_id AND a.state IN ${ACTIVE}
+                    AND ar.started_by = r.started_by),
+                r.started_at, r.id, x.case_id, x.with_skill DESC
        LIMIT 1
        FOR UPDATE OF x SKIP LOCKED`);
     const row = next.rows[0];
@@ -166,7 +186,9 @@ export async function claimNextExecution(
     const deadline = await tx.execute<{ deadline_at: Date | string }>(sql`
       UPDATE skill_eval_results
          SET state = 'starting', thread_id = ${thread.thread_id}, run_id = NULL,
-             deadline_at = now() + make_interval(secs => ${opts.wallClockMs / 1000}),
+             deadline_at = now() + make_interval(secs => ${
+               row.wall_minutes ? row.wall_minutes * 60 : opts.wallClockMs / 1000
+             }),
              started_at = coalesce(started_at, now()), updated_at = now()
        WHERE team_id = ${teamId} AND eval_run_id = ${row.eval_run_id}
          AND case_id = ${row.case_id} AND with_skill = ${row.with_skill}
@@ -191,6 +213,41 @@ export async function claimNextExecution(
       skillName: row.skill_name,
       runModel: row.run_model,
     };
+  });
+}
+
+type ExecutionKey = Pick<
+  ClaimedExecution,
+  "teamId" | "evalRunId" | "caseId" | "withSkill" | "threadId"
+>;
+
+const keyOf = (e: ExecutionKey) => sql`team_id = ${e.teamId} AND eval_run_id = ${e.evalRunId}
+  AND case_id = ${e.caseId} AND with_skill = ${e.withSkill} AND thread_id = ${e.threadId}`;
+
+/**
+ * The running replica's heartbeat (review M2): the reaper takes over an execution whose heartbeat
+ * stopped (its replica died), never one whose runner is still working, deadline or not.
+ */
+export async function heartbeat(db: KobeDb, e: ExecutionKey): Promise<boolean> {
+  return withTeam(db, e.teamId, async (tx) => {
+    const res = await tx.execute(sql`
+      UPDATE skill_eval_results SET updated_at = now() WHERE ${keyOf(e)} AND state IN ${ACTIVE}`);
+    return res.rowCount === 1;
+  });
+}
+
+/**
+ * Puts an execution back to queued without using up its attempt (a shutdown or a dead replica:
+ * an infrastructure event, never the skill's result). Its thread stays as history.
+ */
+export async function requeueExecution(db: KobeDb, e: ExecutionKey): Promise<boolean> {
+  return withTeam(db, e.teamId, async (tx) => {
+    const res = await tx.execute(sql`
+      UPDATE skill_eval_results
+         SET state = 'queued', thread_id = NULL, run_id = NULL, deadline_at = NULL, updated_at = now()
+       WHERE ${keyOf(e)} AND state IN ${ACTIVE}`);
+    if (res.rowCount === 1) await notifyEval(tx, e.teamId, e.evalRunId);
+    return res.rowCount === 1;
   });
 }
 

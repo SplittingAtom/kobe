@@ -732,7 +732,9 @@ function shutdown(signal: string): void {
   if (evalSweep) clearInterval(evalSweep);
   if (skillEvalSweep) clearInterval(skillEvalSweep);
   if (skillEvalReaper) clearInterval(skillEvalReaper);
-  skillEvalRunner?.close();
+  // Running eval executions go back to queued (another replica takes them), their runs stopped
+  // and sandboxes deleted, before the database pool closes (review M2).
+  const evalsStopped = skillEvalRunner?.shutdown(DRAIN_TIMEOUT_MS - 2_000) ?? Promise.resolve();
   void skillEvalHub?.close();
   stopHibernation?.();
   stopCollector?.();
@@ -752,9 +754,10 @@ function shutdown(signal: string): void {
   void deps?.eventStream.hub.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
-    void Promise.all([deps?.close(), telemetry.shutdown()]).finally(() =>
-      process.exit(err ? 1 : 0),
-    );
+    void evalsStopped
+      .catch(() => undefined)
+      .then(() => Promise.all([deps?.close(), telemetry.shutdown()]))
+      .finally(() => process.exit(err ? 1 : 0));
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();
   setTimeout(() => {
