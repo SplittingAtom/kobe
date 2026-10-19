@@ -22,6 +22,8 @@ import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation, useResource, type Mutation } from "../admin/use-resource";
 import { CatalogInstall } from "./catalog-install";
 import { CatalogMemberActions } from "./catalog-member";
+import { SkillUsagePanel } from "./skill-usage-panel";
+import { shownCount, shownShare, windowLabel } from "../../lib/skills/catalog-api";
 import { TeamStateBadges } from "./catalog-tab";
 import { visibleText } from "../../lib/admin/visible-text";
 
@@ -131,6 +133,22 @@ export function CatalogDetailPage({ skillId }: { readonly skillId: string }) {
                 onDone={reload}
               />
             )}
+            <Section title="Usage">
+              <p>
+                {shownCount(d.teamsInstalled, "team")} installed it
+                {d.usage
+                  ? `; ${shownCount(d.usage.members, "member")} used it; ${shownShare(d.usage.thumbsUp)}`
+                  : ""}
+                .
+              </p>
+              {d.usageWindow && (
+                <p className="text-sm text-console-muted">
+                  {windowLabel(d.usageWindow)}, refreshed nightly; fewer than three other teams or
+                  20 ratings read Few.
+                </p>
+              )}
+              <SkillUsagePanel skillId={d.id} />
+            </Section>
             <Section title="Capabilities">
               <EgressCheck detail={d} teamId={teamId} mutation={mutation} />
             </Section>

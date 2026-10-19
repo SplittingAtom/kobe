@@ -27,6 +27,8 @@ export interface CatalogCard {
     readonly cases: number | null;
   } | null;
   readonly teamsInstalled: number | "few";
+  /** Members using it and the thumbs-up share (0–1) in the window, or "few" (KOBE-339). */
+  readonly usage?: { readonly members: number | "few"; readonly thumbsUp: number | "few" };
   readonly state: {
     readonly installed: {
       readonly semver: string | null;
@@ -45,6 +47,7 @@ export interface CatalogPage {
   readonly tags: readonly string[];
   /** The team switch "Members may add catalog skills for themselves" (KOBE-338). */
   readonly membersMayAdd?: boolean;
+  readonly usageWindow?: UsageWindow;
 }
 
 export interface CatalogDetail extends CatalogCard {
@@ -74,6 +77,7 @@ export interface CatalogDetail extends CatalogCard {
   readonly membersMayAdd?: boolean;
   /** The caller may block the skill in this team (Team admins). */
   readonly canBlock?: boolean;
+  readonly usageWindow?: UsageWindow;
 }
 
 export interface CatalogFilter {
@@ -156,3 +160,48 @@ export function unblockInTeam(teamId: string, skillId: string): Promise<ApiResul
     teamId,
   });
 }
+
+/** The fixed window usage covers: the last 30 finished UTC days (KOBE-339). */
+export interface UsageWindow {
+  readonly from: string;
+  readonly to: string;
+}
+
+export type Shown = number | "few";
+
+/** Site-wide usage of one skill, for its maintainers and Site admins (KOBE-339, SK26). */
+export interface SiteSkillUsage {
+  readonly totals: {
+    readonly teamsInstalled: Shown;
+    readonly members: Shown;
+    readonly runs: Shown;
+    readonly thumbsUp: Shown;
+    readonly optOuts: Shown;
+  };
+  readonly versions: readonly string[];
+  /** A column is null when it is withheld (a hidden cell could be read from it). */
+  readonly perVersion: {
+    readonly teamsRunning: readonly Shown[] | null;
+    readonly members: readonly Shown[] | null;
+    readonly runs: readonly Shown[] | null;
+    readonly thumbsUp: readonly Shown[] | null;
+  };
+  readonly window: UsageWindow;
+  readonly refreshedAt: string;
+}
+
+export function getSkillUsage(skillId: string): Promise<ApiResult<SiteSkillUsage>> {
+  return apiRequest(`/v1/skills/catalog/${encodeURIComponent(skillId)}/usage`);
+}
+
+/** "From to To" as UTC days; the window's end is exclusive, so the last day is the one before. */
+export function windowLabel(w: UsageWindow): string {
+  const last = new Date(new Date(w.to).getTime() - 86_400_000);
+  return `${w.from.slice(0, 10)} to ${last.toISOString().slice(0, 10)} (UTC)`;
+}
+
+export const shownCount = (v: Shown, noun: string, plural = `${noun}s`): string =>
+  v === "few" ? `Few ${plural}` : `${v} ${v === 1 ? noun : plural}`;
+
+export const shownShare = (v: Shown): string =>
+  v === "few" ? "Few ratings" : `${Math.round(v * 100)}% thumbs up`;

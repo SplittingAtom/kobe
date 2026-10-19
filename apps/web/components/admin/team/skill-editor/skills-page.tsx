@@ -18,6 +18,7 @@ import { useTeamAccess } from "../../console-context";
 import { CatalogInstallsSection } from "./catalog-installs-section";
 import { CatalogSwitchesSection } from "./catalog-switches";
 import { MemberAddsSection } from "./member-adds-section";
+import { TeamUsageSection } from "./team-usage-section";
 import { PromotionRequestsSection } from "./promotion-requests-section";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
@@ -76,6 +77,7 @@ export function SkillsPage() {
       </ResourceView>
       <CatalogInstallsSection />
       {canManage && <MemberAddsSection />}
+      {canManage && <TeamUsageSection />}
       <CatalogSwitchesSection />
       <PromotionRequestsSection />
     </>

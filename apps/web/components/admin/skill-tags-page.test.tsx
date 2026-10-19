@@ -181,3 +181,28 @@ describe("Catalog maintainers (KOBE-332)", () => {
     );
   });
 });
+
+describe("catalog usage in the Site console (KOBE-339)", () => {
+  it("opens a skill's site-wide usage per version", async () => {
+    stubApi(
+      routes({
+        "GET /v1/skills/catalog/s-1/usage": [
+          200,
+          {
+            totals: { teams_installed: 4, members: 5, runs: 23, thumbs_up: "few", opt_outs: "few" },
+            versions: ["2.0.0"],
+            per_version: { teams_running: [4], members: [5], runs: [23], thumbs_up: null },
+            window: { from: "2026-09-19T00:00:00.000Z", to: "2026-10-19T00:00:00.000Z" },
+            refreshed_at: "2026-10-19T00:05:00.000Z",
+          },
+        ],
+      }) as never,
+    );
+    renderSite(<SkillTagsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Usage of xlsx-pro" }));
+    const totals = await screen.findByRole("table", { name: "Site-wide usage" });
+    expect(within(totals).getByText("23")).toBeTruthy();
+    const per = screen.getByRole("table", { name: "Usage by version" });
+    expect(within(per).getByText("Withheld")).toBeTruthy();
+  });
+});

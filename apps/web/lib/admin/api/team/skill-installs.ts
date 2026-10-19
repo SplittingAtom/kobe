@@ -218,3 +218,33 @@ export function dismissInstallRequests(
     json: {},
   });
 }
+
+export type TeamThumbs =
+  | { readonly enough: true; readonly up: number; readonly down: number }
+  | { readonly enough: false };
+
+/** The team's own usage of one catalog skill in the window (KOBE-339). */
+export interface TeamSkillUsage {
+  readonly skillId: string;
+  readonly name: string;
+  readonly runs: number;
+  readonly members: number;
+  readonly thumbs: TeamThumbs;
+  readonly versions: readonly {
+    readonly semver: string;
+    readonly runs: number;
+    readonly members: number;
+  }[];
+  readonly versionThumbs:
+    readonly { readonly semver: string; readonly thumbs: TeamThumbs }[] | null;
+}
+
+export interface TeamUsage {
+  readonly skills: readonly TeamSkillUsage[];
+  readonly window: { readonly from: string; readonly to: string };
+  readonly refreshedAt: string;
+}
+
+export function getTeamSkillUsage(teamId: string): Promise<ApiResult<TeamUsage>> {
+  return apiRequest(`${BASE}/usage`, { teamId });
+}

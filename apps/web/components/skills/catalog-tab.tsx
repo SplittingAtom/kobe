@@ -5,6 +5,8 @@ import { useState, type FormEvent } from "react";
 import {
   CATALOG_SORTS,
   listCatalog,
+  shownCount,
+  shownShare,
   type CatalogCard,
   type CatalogFilter,
   type CatalogSort,
@@ -60,11 +62,15 @@ function Card({ card }: { readonly card: CatalogCard }) {
           scan: {card.latest.verdict}
         </Badge>
         {pass && <span>passes {pass} of its evals</span>}
-        <span className="text-console-muted">
-          {card.teamsInstalled === "few"
-            ? "a few teams"
-            : `${card.teamsInstalled} ${card.teamsInstalled === 1 ? "team" : "teams"}`}
-        </span>
+        <span className="text-console-muted">{shownCount(card.teamsInstalled, "team")}</span>
+        {card.usage && (
+          <>
+            <span className="text-console-muted">
+              {shownCount(card.usage.members, "member")} in 30 days
+            </span>
+            <span className="text-console-muted">{shownShare(card.usage.thumbsUp)}</span>
+          </>
+        )}
         {card.topics.map((t) => (
           <Badge key={t}>{t}</Badge>
         ))}
