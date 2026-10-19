@@ -2,7 +2,6 @@ import { withTeam, type KobeDb, type TeamRole } from "@kobe/db";
 import {
   skillEvalCompletedPayloadSchema,
   skillEvalProgressPayloadSchema,
-  type SkillEvalRun,
   type SkillEvalRunView,
 } from "@kobe/protocol";
 import pg from "pg";
