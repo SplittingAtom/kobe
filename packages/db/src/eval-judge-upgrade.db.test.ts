@@ -11,8 +11,8 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-326: a site with usage rows and team skill settings migrates through 0147 (eval.read,
- * eval_judge_alias) and 0148 (run_usage kinds eval / eval_judge, NOT VALID) as the non-superuser
+ * KOBE-326: a site with usage rows and team skill settings migrates through 0143 (eval.read,
+ * eval_judge_alias) and 0147 (run_usage kinds eval / eval_judge, NOT VALID) as the non-superuser
  * owner. Existing rows are untouched, every team's judge choice starts unset, the previous
  * release's inserts still pass, and the new kinds hold their shapes.
  */

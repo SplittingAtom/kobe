@@ -36,10 +36,11 @@
 
 - **Branch:** `group-skills-b` in `../Kobe-skB`. **325 is complete** (step 1 DB layer reviewed and
   approved; step 2 built, see Progress). Ready for review.
-- **Migrations:** 0145 (generated: eval tables incl. `fixtures_key`, `bundle_size`;
-  `sandbox_eval_connections`; `slot` on commands/leases; eval command kinds) and 0146 (custom: RLS,
+- **Migrations (renumbered at the group rebase):** generated 0143 (was 0145, now with the
+  branch's other schema: eval tables incl. `fixtures_key`, `bundle_size`;
+  `sandbox_eval_connections`; `slot` on commands/leases; eval command kinds) and 0146 (custom, unchanged number: RLS,
   break-glass, silent hold, slot check + trigger, eval thread run fixed, eval lease sandbox fixed).
-  Renumbered with 0141–0144 at the coordinator's `db:rebase` (main has its own 0141/0142).
+  `db:rebase` onto main (its own 0141/0142) merged the branch's generated migrations into 0143.
 - **Where things are:** `services/server/src/skills/evals/` (start, store, runner, reaper,
   checks, execution, events, views, storage, fixture-routes), `routes/skill-evals.ts`,
   `routes/eval-thread-guard.ts`, `runs/eval-tests.ts` (`withSkillEvals`), `sandbox/eval-*.ts`,
@@ -139,7 +140,7 @@ timeout).
 
 ## Progress
 
-- [x] Migration (generated, 0145): eval tables (`fixtures_key` too), `threads.skill_eval*`,
+- [x] Migration (generated, 0145, now part of 0143): eval tables (`fixtures_key` too), `threads.skill_eval*`,
       `sandbox_eval_connections`, `slot` on commands and leases. No wire key or index changes.
 - [x] Migration (custom, 0146): RLS, break-glass read, silent legal hold; slot check
       (`'' or 'e-'||thread_id`, NOT VALID) and slot-matches-thread trigger; eval connections and

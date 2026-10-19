@@ -43,7 +43,7 @@ export type UsageSource = (typeof USAGE_SOURCES)[number];
  * kind; per-run views and the context gauge read `run` rows only. Skill evals (KOBE-326, SK17):
  * `eval_judge` for the server's judge call after an eval execution's run (a server call, like
  * titles), and `eval` for an eval sandbox's own calls (a sandbox call, like `run`; written once
- * KOBE-327 bills eval runs apart, until then they are `run`). Migration 0148 widens the CHECKs.
+ * KOBE-327 bills eval runs apart, until then they are `run`). Migration 0147 widens the CHECKs.
  */
 export const USAGE_KINDS = ["run", "title", "followups", "eval", "eval_judge"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];

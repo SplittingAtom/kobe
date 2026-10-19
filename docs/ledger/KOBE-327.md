@@ -4,13 +4,13 @@
 
 - **Status:** in review (group branch `group-skills-b`, one PR for Phase B)
 - **Branch / worktree:** `group-skills-b` in `../Kobe-skB`
-- **Depends on:** KOBE-325, KOBE-326 (the `eval` / `eval_judge` kinds and their CHECKs, 0148)
+- **Depends on:** KOBE-325, KOBE-326 (the `eval` / `eval_judge` kinds and their CHECKs, 0147)
 
 ## Handoff (for the reviewer and KOBE-328)
 
-- **Migrations:** 0149 (generated: `model_spend_daily.eval_cost_usd` / `eval_tokens`,
+- **Migrations (renumbered at the group rebase):** generated 0143 (was 0149: `model_spend_daily.eval_cost_usd` / `eval_tokens`,
   `budget_reservations.eval`, `team_skill_settings.eval_cap_usd` / `eval_cap_tokens` with a CHECK;
-  constant defaults, no rewrite) and 0150 (custom: `kobe_count_model_spend` also sums kinds
+  constant defaults, no rewrite) and 0148 (custom, was 0150: `kobe_count_model_spend` also sums kinds
   `eval` / `eval_judge`; `kobe_reserve_budget` judges a line of scope `eval`). Upgrade test
   `packages/db/src/eval-cap-upgrade.db.test.ts`; function test `budget-reservations-eval.db.test.ts`.
 - **Where things are:** server `skills/evals/estimate.ts`, `budget.ts`, `start.ts`
@@ -54,7 +54,7 @@
   `eval_judge` call. Nothing: `basis: none`. Returned on start too (from history before the run).
 - **Settings:** the cap lives in the team skill settings (Team admin, `team.skills.review`), one
   transaction with the other switches, audited `skill.eval_cap.changed`.
-- **No backfill** of `eval_*` counters: the eval kinds are new in this release (0148).
+- **No backfill** of `eval_*` counters: the eval kinds are new in this release (0147).
 
 ## Review-327 fixes (`review-327.md`)
 

@@ -8,8 +8,8 @@
 
 ## Handoff (for the reviewer and KOBE-327)
 
-- **Migrations:** 0147 (generated: `sandbox_commands_kind` + `eval.read`,
-  `team_skill_settings.eval_judge_alias` with a length CHECK) and 0148 (custom: `run_usage_kind`
+- **Migrations (renumbered at the group rebase):** generated 0143 (was 0147: `sandbox_commands_kind` + `eval.read`,
+  `team_skill_settings.eval_judge_alias` with a length CHECK) and 0147 (custom, was 0148: `run_usage_kind`
   and `run_usage_kind_shape` widened to `eval` / `eval_judge`, NOT VALID like 0100). Upgrade test
   `packages/db/src/eval-judge-upgrade.db.test.ts`. Renumbering at `db:rebase` is the coordinator's.
 - **327 overlap:** the `eval` and `eval_judge` usage kinds land here (one CHECK change). The gateway

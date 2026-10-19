@@ -14,7 +14,7 @@ run completed, on the team-enabled judge model, under the execution's member and
 its own (`SERVER_CALL_LIMITS.eval_judge`: 512 / 2048 output tokens, 60 s, messages up to 400 000
 characters, 2 MiB body, temperature 0, skipped only at 100 %); it may send exactly one
 `response_format`, the verdict schema (`SERVER_CALL_RESPONSE_FORMATS`), which the gateway compares.
-Usage rows are `kind = eval_judge` (migration 0148). Details in [skill-evals.md](../skill-evals.md).
+Usage rows are `kind = eval_judge` (migration 0147). Details in [skill-evals.md](../skill-evals.md).
 
 ## Decisions
 

@@ -11,8 +11,8 @@ import {
 } from "./test-support/database.js";
 
 /**
- * KOBE-327: a site with spend, a live reservation and team skill settings migrates through 0149
- * (eval spend columns, `budget_reservations.eval`, the eval cap) and 0150 (the trigger and
+ * KOBE-327: a site with spend, a live reservation and team skill settings migrates through 0143
+ * (eval spend columns, `budget_reservations.eval`, the eval cap) and 0148 (the trigger and
  * `kobe_reserve_budget`) as the non-superuser owner. Existing counters keep their numbers with no
  * eval spend, the reservation stays an ordinary one, no team has a cap, the previous release's
  * reserve call (no eval line) is judged as before, and new eval rows count as eval spend.

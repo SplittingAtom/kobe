@@ -5,9 +5,10 @@
 - **Branch:** `group-skills-b` in `../Kobe-skB`, from main 5d60abd7; KOBE-320 approved, committed,
   nothing pushed (one PR for Phase B at the end; never push, don't touch Hadron). Briefs are
   `BRIEF-<N>.md` (untracked; never commit them). Ledgers: `docs/ledger/KOBE-<N>.md`.
-- **Migrations so far:** 0141 `skill_drafts` (generated), 0142 `skill_drafts_rls` (custom: RLS,
+- **Migrations so far:** 0143 (generated, with the rest of the branch's schema since the group
+  rebase; was 0141 `skill_drafts`), 0144 `skill_drafts_rls` (custom, was 0142: RLS,
   break-glass, size/co-edit/provenance triggers, hold history). Both were edited in place while
-  unreleased, each edit alone in its own commit. **G5 (PR #314) lands 0141/0142 on main first:**
+  unreleased, each edit alone in its own commit. **G5 (PR #314) landed main's own 0141/0142 first:**
   at merge run `pnpm --filter @kobe/db db:rebase` (expected; it renumbers ours after G5's, the
   custom one keeps its SQL), then fix text naming migrations by number (schema comments, ledgers).
   Keep generated and custom SQL in separate migrations; new team tables need probe fixtures
@@ -89,8 +90,8 @@
 
 ## Review round 1 (security/DB review, coordinator decisions)
 
-- **B1 legal hold (silent history pattern):** 0141 adds `skill_draft_history` and
-  `skill_draft_file_history`; files record their writer (`updated_by`). 0142's triggers copy what a
+- **B1 legal hold (silent history pattern):** 0143 (was 0141) adds `skill_draft_history` and
+  `skill_draft_file_history`; files record their writer (`updated_by`). 0144's triggers copy what a
   change would lose while a hold covers the author **or the writer** (`skill_draft_held`): a file
   overwritten or deleted, a draft renamed or (un)shared, a draft deleted (its files copied before
   the cascade). Nothing is refused: edits, deletes and both purges go through, so a held draft past

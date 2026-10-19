@@ -284,7 +284,7 @@ revision and mode while one is open is refused (409 `eval_already_running`).
 | Wall clock per case                | 10 min (Site may lower: `caseWallClockMinutes`)                              |
 | Concurrent eval sandboxes per team | 4 by default, 1–16 (`maxConcurrentSandboxes`), inside the team ResourceQuota |
 | Team eval cap (Team admin)         | none by default; monthly `{usd}` or `{tokens}` (`teamEvalCapSchema`)         |
-| `run_usage` kinds                  | `eval`, `eval_judge` (migration 0148)                                        |
+| `run_usage` kinds                  | `eval`, `eval_judge` (migration 0147)                                        |
 
 ## API
 

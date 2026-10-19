@@ -7,7 +7,7 @@ import { teams, users, type UsageKind } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
 /**
- * KOBE-327 (SK18): the team eval cap through `kobe_reserve_budget` (0150). The run_usage trigger
+ * KOBE-327 (SK18): the team eval cap through `kobe_reserve_budget` (0148). The run_usage trigger
  * counts kinds `eval` and `eval_judge` into `model_spend_daily.eval_*`; an `eval` line is judged
  * on that spend and the other eval calls' live reservations, atomically under the team lock, and
  * ordinary calls neither count against it nor are judged by it.

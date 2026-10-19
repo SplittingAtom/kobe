@@ -24,7 +24,7 @@
   325 picks it). Startup seeds / jobs (e.g. a stale-eval-sandbox sweep) must be written to slot
   into `packages/db/src/startup-seeds.ts` and `services/server/src/startup/jobs.ts` from main
   (G5) at rebase; note them in the 325 ledger.
-- **No migrations** in 324. Branch migrations stay 0141–0144 until the coordinator's `db:rebase`.
+- **No migrations** in 324. (The branch's migrations were renumbered at the group rebase: see KOBE-325.)
 
 - **Status:** in review (group branch `group-skills-b`, one PR for Phase B)
 - **Depends on:** KOBE-309

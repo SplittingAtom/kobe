@@ -72,7 +72,7 @@ describe("thread skill_test upgrade (KOBE-323)", () => {
         `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'threads'`,
       );
       expect(rls.rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
-      // 0144's objects exist, and the NOT VALID key still holds every new row (review N4).
+      // 0145's objects exist, and the NOT VALID key still holds every new row (review N4).
       const objects = await c.query<{ name: string }>(
         `SELECT conname AS name FROM pg_constraint WHERE conrelid = 'threads'::regclass
            AND conname LIKE 'threads_skill_%' AND conname NOT LIKE 'threads_skill_eval%'

@@ -619,7 +619,7 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
-- **Skill evals (KOBE-325, migrations `*_skill_evals` and `*_skill_evals_rls`).** Members can run
+- **Skill evals (KOBE-325, migrations `0143_skill_drafts_thread_skill_test_skill_evals_eval_judge_eval_cap` and `0146_skill_evals_rls`).** Members can run
   a skill's eval suite: each case runs in its own short-lived sandbox in the team namespace
   (template and warm pool `kobe-skill-eval`, claims `e-<thread id>`, PriorityClass and quota
   `kobe-skill-eval`), beside the member's own sandbox; members' pods keep `teamQuota`
@@ -638,8 +638,8 @@ app.kubernetes.io/instance=<release>`; server, model gateway, MCP proxy and egre
   delivery on an eval's `run.start`. Kobe does not detect a rollout in progress. Before a
   `helm rollback`, cancel running evals; any eval sandbox left behind deletes itself at its
   shutdown time (the case's wall clock plus 5 minutes).
-  **Eval spend and the team eval cap (KOBE-327 / KOBE-326, migrations `*_run_usage_eval_kinds`,
-  `*_eval_cap`, `*_eval_cap_reserve`) have the same wait:** until every model gateway pod runs this
+  **Eval spend and the team eval cap (KOBE-327 / KOBE-326, migrations `0143` (its eval cap part),
+  `0147_run_usage_eval_kinds`, `0148_eval_cap_reserve`) have the same wait:** until every model gateway pod runs this
   release, an eval sandbox's calls that reach a previous-release gateway are billed as kind `run`
   and are not held against the team eval cap (budgets still apply), and its judge calls
   (`eval_judge`) are refused, which fails the judged cases. Nothing else changes for members' own

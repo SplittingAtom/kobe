@@ -9,9 +9,9 @@
   `docs/ledger/KOBE-320.md` … `KOBE-322.md`.
 - **Next:** 324 (eval cases and the scorecard contract, contract only, reviewed before 325),
   then 325 (eval runner: a migration ticket, security-critical), 326, 327, 328. Stop after each.
-- **Migrations on this branch:** 0141/0142 (drafts) and 0143/0144 (test chats; 0144 is custom
-  SQL). Main has its own 0141/0142 since G5 (#314). These get renumbered by
-  `pnpm --filter @kobe/db db:rebase` at the group rebase (coordinator), not before.
+- **Migrations on this branch (after the group rebase):** the drafts' and test chats' schema is
+  in generated 0143 (was 0141 and 0143), their custom SQL in 0144 (drafts, was 0142) and 0145
+  (test chats, was 0144). Main has its own 0141/0142 since G5 (#314).
 - **Startup work:** none in 320–323, so nothing to slot into `startup-seeds.ts` or
   `startup/jobs.ts` at rebase. Bundle cleanup is a step of the per-team retention pass.
 - **Reuse for 325:**
@@ -37,7 +37,7 @@
 
 ## What shipped
 
-- **Threads** (migration 0143 generated, 0144 custom): `skill_test boolean NOT NULL DEFAULT
+- **Threads** (migration 0143 generated, 0145 custom; were 0143/0144): `skill_test boolean NOT NULL DEFAULT
 false`, `skill_draft_id uuid`; FK (team_id, skill_draft_id) → skill_drafts ON DELETE SET NULL
   (skill_draft_id), checks `threads_skill_draft_test`, `threads_skill_test_not_builder`, index
   `threads_skill_draft_idx`; NOT VALID / IF NOT EXISTS (no scan under the migration lock).
@@ -89,7 +89,7 @@ false`, `skill_draft_id uuid`; FK (team_id, skill_draft_id) → skill_drafts ON 
 
 ## Departures
 
-- Brief: "Adds migrations: no" → 0143/0144 (approved).
+- Brief: "Adds migrations: no" → 0143/0145 after the rebase (approved; were 0143/0144).
 
 ## Evidence (acceptance criteria → test or command output)
 
