@@ -15,6 +15,7 @@ import { teamRoleAllows } from "../../authz/permissions.js";
 import type { BlobStore } from "../../retention/blobs.js";
 import { ensureObject, scanDocument } from "../kobe-seed.js";
 import type { SkillStore } from "../skill-store.js";
+import { submissionRight } from "./maintainers.js";
 import {
   lockedTeamReview,
   preparePromotion,
@@ -166,6 +167,47 @@ async function submit(
     { userId: submitterId, at: now },
     confirmed ? { userId: confirmed.by, at: now } : undefined,
   );
+  try {
+    return await submitInTeam(deps, plan, source, submitterId, provenance, now, confirmed, {
+      runtimeKey,
+      packageKey,
+    });
+  } catch (err) {
+    const refusal = uniqueRefusal(err);
+    if (refusal) throw new SubmitRefusedError(refusal);
+    throw err;
+  }
+}
+
+/** A submission that lost a race on the catalog's unique keys, as a refusal (review C3-L3). */
+function uniqueRefusal(err: unknown): Refusal | null {
+  const e = err as {
+    code?: unknown;
+    constraint?: unknown;
+    cause?: { code?: unknown; constraint?: unknown };
+  };
+  if ((e.cause?.code ?? e.code) !== "23505") return null;
+  const constraint = String(e.cause?.constraint ?? e.constraint ?? "");
+  if (constraint === "registry_versions_semver_unique")
+    return { code: "already_submitted", message: "This version was just submitted." };
+  return {
+    code: "taken",
+    message: "Someone else submitted under this name at the same time: preview again.",
+  };
+}
+
+async function submitInTeam(
+  deps: PromoteDeps,
+  plan: PromotionPlan,
+  source: PromoteSource,
+  submitterId: string,
+  provenance: SkillProvenance,
+  now: Date,
+  confirmed: { readonly requestId: string; readonly by: string } | undefined,
+  keys: { readonly runtimeKey: string; readonly packageKey: string | null },
+): Promise<string> {
+  const { bundle } = plan;
+  const { runtimeKey, packageKey } = keys;
   return withTeam(deps.db, source.teamId, async (tx) => {
     // The first decision on a request wins (review C4-M1): lock it and check it is still open,
     // before anything is written.
@@ -175,6 +217,19 @@ async function submit(
       const refusal = teamReviewRefusal(await lockedTeamReview(tx, source));
       if (refusal) throw new SubmitRefusedError(refusal);
     }
+    // The submission right again, on the locked catalog skill (review C3-L3): a maintainer removed,
+    // or a name taken, since the preview no longer goes through, and `seq` can't race.
+    if (plan.catalogSkillId)
+      await tx.execute(
+        sql`SELECT 1 FROM registry_skills WHERE id = ${plan.catalogSkillId} FOR UPDATE`,
+      );
+    const right = await submissionRight(tx, plan.name, submitterId);
+    if (!right.ok) throw new SubmitRefusedError({ code: right.code, message: right.message });
+    if ((right.skill?.id ?? null) !== plan.catalogSkillId)
+      throw new SubmitRefusedError({
+        code: "taken",
+        message: "The name's catalog entry changed while you promoted: preview again.",
+      });
     const skill = await catalogSkill(tx, plan);
     const seq = await tx.execute<{ next: number }>(sql`
       SELECT COALESCE(max(seq), 0) + 1 AS next FROM registry_versions WHERE skill_id = ${skill.id}`);
