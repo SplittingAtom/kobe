@@ -2,6 +2,7 @@ import { sql, type KobeDb } from "@kobe/db";
 import { listMaintainers, type Maintainer } from "./maintainers.js";
 import { similarCatalogNames } from "./names-db.js";
 import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
+import { acknowledgements, findingKey, type Acknowledgement } from "./review-findings.js";
 import {
   approvedVersion,
   bumpOf,
@@ -36,6 +37,17 @@ export interface EgressCapability {
   readonly inCeiling: boolean;
 }
 
+/** A scan finding with its key and, for a Caution one, its acknowledgement (review M1). */
+export interface ReviewFinding {
+  readonly key: string;
+  readonly rule: string;
+  readonly file: string;
+  readonly line: number;
+  readonly severity: string;
+  readonly category: string | null;
+  readonly acknowledged: Acknowledgement | null;
+}
+
 export interface ReviewDetail {
   readonly id: string;
   readonly skill: {
@@ -50,6 +62,7 @@ export interface ReviewDetail {
   readonly bump: Bump;
   readonly verdict: string;
   readonly scan: Record<string, unknown>;
+  readonly findings: readonly ReviewFinding[];
   readonly scorecard: Record<string, unknown> | null;
   readonly authoritativeScorecard: Record<string, unknown> | null;
   readonly manifest: Record<string, unknown>;
@@ -94,6 +107,24 @@ async function inCeiling(db: KobeDb, hosts: readonly string[]): Promise<Set<stri
   return new Set(res.rows.map((r) => r.domain));
 }
 
+async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unknown> }) {
+  const raw = Array.isArray(v.scan.findings) ? (v.scan.findings as Record<string, unknown>[]) : [];
+  const acks = await acknowledgements(db, v.id);
+  return raw.map((f): ReviewFinding => {
+    const key = findingKey(f);
+    const severity = f.severity === "block" ? "block" : "caution";
+    return {
+      key,
+      rule: String(f.rule ?? ""),
+      file: String(f.file ?? ""),
+      line: Number(f.line ?? 0),
+      severity,
+      category: typeof f.category === "string" ? f.category : null,
+      acknowledged: severity === "caution" ? (acks.get(key) ?? null) : null,
+    };
+  });
+}
+
 async function teamName(db: KobeDb, teamId: unknown): Promise<string | null> {
   if (typeof teamId !== "string") return null;
   const res = await db.execute<{ name: string }>(sql`SELECT name FROM teams WHERE id = ${teamId}`);
@@ -129,6 +160,7 @@ export async function reviewDetail(
     bump: bumpOf(approved?.semver ?? null, v.semver),
     verdict: v.verdict,
     scan: v.scan,
+    findings: await findingsOf(db, v),
     scorecard: v.scorecard,
     authoritativeScorecard: v.authoritativeScorecard,
     manifest: v.manifest,

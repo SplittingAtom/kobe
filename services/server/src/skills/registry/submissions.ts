@@ -20,6 +20,8 @@ export interface Submission {
   readonly state: string;
   readonly submittedAt: string;
   readonly updatedAt: string;
+  /** Approved by its submitter or confirming Team admin on a single-admin Site (SK22). */
+  readonly selfApproved: boolean;
   readonly notes: readonly SubmissionNote[];
 }
 
@@ -34,9 +36,10 @@ export async function mySubmissions(db: KobeDb, userId: string): Promise<Submiss
     state: string;
     submitted_at: Date;
     updated_at: Date;
+    self_approved: boolean;
     notes: { action: string; note: string; at: string }[] | null;
   }>(sql`
-    SELECT v.id, s.name, v.semver, v.state, v.submitted_at, v.updated_at,
+    SELECT v.id, s.name, v.semver, v.state, v.submitted_at, v.updated_at, v.self_approved,
       (SELECT jsonb_agg(jsonb_build_object('action', e.action, 'note', e.note, 'at', e.at)
                         ORDER BY e.at, e.id)
          FROM registry_review_events e
@@ -55,6 +58,7 @@ export async function mySubmissions(db: KobeDb, userId: string): Promise<Submiss
     state: r.state,
     submittedAt: new Date(r.submitted_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
+    selfApproved: r.self_approved,
     notes: (r.notes ?? []).map((n) => ({
       action: n.action,
       note: n.note,

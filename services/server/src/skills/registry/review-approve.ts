@@ -3,6 +3,8 @@ import { recordAudit } from "../../audit/record.js";
 import { blockedAmong } from "../blocklist.js";
 import { listMaintainers, recordFirstMaintainer } from "./maintainers.js";
 import { authoritativeScorecardProblem, isSiteAdmin, soleReviewer } from "./review-guards.js";
+import { cautionKeys, unacknowledgedProblem } from "./review-findings.js";
+import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
 import { requireRegistryTeam } from "./settings.js";
 
@@ -19,58 +21,23 @@ import { requireRegistryTeam } from "./settings.js";
  * 4. separation of duties (SK22): not the submitter's own, not the confirming Team admin's, except
  *    on a single-admin Site (the database decides and flags the submitter's case itself);
  * 5. the submitter may still submit under this name: once the skill has maintainers, only an
- *    active one (a name freed after a rejection can't be approved for two people).
+ *    active one (a name freed after a rejection can't be approved for two people); the catalog
+ *    skill row is locked first, so two first approvals can't both find no maintainer (review L1);
+ *    an archived skill takes nothing more, a deactivated submitter can't become its maintainer;
+ * 6. every Caution finding acknowledged (review M1), and a note for a Block override (L3).
  *
  * Then: the review (reviewer, time; the database sets `self_approved`), the first maintainer
  * (`recordFirstMaintainer`), the catalog summary from the approved manifest, the review event and
  * `registry.approved`.
  */
 
-export interface Problem {
-  readonly code: ProblemCode;
-  readonly message: string;
-}
-
-export type ProblemCode =
-  | "registry_not_ready"
-  | "not_found"
-  | "decided"
-  | "claimed"
-  | "authoritative_scorecard_missing"
-  | "authoritative_scorecard_stale"
-  | "blocked"
-  | "block_verdict"
-  | "own_submission"
-  | "confirmed_by_you"
-  | "not_maintainer";
-
-export const DECIDABLE_STATES: ReadonlySet<string> = new Set(["submitted", "in_review"]);
-
-export const PROBLEMS = {
-  registry_not_ready: {
-    code: "registry_not_ready",
-    message: "The Registry is not ready: a Site admin creates the Registry team first.",
-  },
-  not_found: { code: "not_found", message: "No such Registry version." },
-  decided: { code: "decided", message: "This version was already decided." },
-  claimed: { code: "claimed", message: "Another reviewer has claimed this version." },
-  blocked: {
-    code: "blocked",
-    message: "The package is on the site skill blocklist: it can't be approved.",
-  },
-  block_verdict: {
-    code: "block_verdict",
-    message: "The scanner blocks this package: only a Site admin can approve it.",
-  },
-  own_submission: {
-    code: "own_submission",
-    message: "You submitted this version: another reviewer must decide it.",
-  },
-  confirmed_by_you: {
-    code: "confirmed_by_you",
-    message: "You confirmed this promotion as Team admin: another reviewer must approve it.",
-  },
-} as const satisfies Record<string, Problem>;
+export {
+  DECIDABLE_STATES,
+  PROBLEMS,
+  REJECTABLE_STATES,
+  type Problem,
+  type ProblemCode,
+} from "./review-problems.js";
 
 /** The Team admin who confirmed a Builder's promotion (provenance `confirmedBy`), if any. */
 export function confirmerOf(v: Pick<VersionRow, "provenance">): string | null {
@@ -106,6 +73,7 @@ export async function approveProblems(
   tx: KobeTx,
   v: VersionRow | undefined,
   userId: string,
+  input?: DecisionInput,
 ): Promise<{ problems: Problem[]; sole: boolean }> {
   const problems: Problem[] = [];
   if ((await requireRegistryTeam(tx)).ok === false) problems.push(PROBLEMS.registry_not_ready);
@@ -118,8 +86,20 @@ export async function approveProblems(
     problems.push(PROBLEMS.blocked);
   if (v.verdict === "block" && !(await isSiteAdmin(tx, userId)))
     problems.push(PROBLEMS.block_verdict);
+  else if (v.verdict === "block" && input && !input.note)
+    problems.push(PROBLEMS.scan_override_reason);
+  const findings = await unacknowledgedProblem(tx, v.id, v.scan);
+  if (findings) problems.push(findings);
   const duties = await dutiesProblem(tx, v, userId);
   if (duties.problem) problems.push(duties.problem);
+  // The catalog skill row, locked when approving: maintainers are decided one approval at a time
+  // (review L1). The review screen's read (no input) takes no lock.
+  const skill = await tx.execute<{ status: string; deactivated: boolean }>(sql`
+    SELECT s.status, (u.deactivated_at IS NOT NULL) AS deactivated
+      FROM registry_skills s LEFT JOIN users u ON u.id = ${v.submittedBy}
+     WHERE s.id = ${v.skillId} ${input ? sql`FOR UPDATE OF s` : sql``}`);
+  if (skill.rows[0]?.status === "archived") problems.push(PROBLEMS.archived);
+  if (skill.rows[0]?.deactivated) problems.push(PROBLEMS.submitter_deactivated);
   const right = await maintainerProblem(tx, v);
   if (right) problems.push(right);
   return { problems, sole: duties.sole };
@@ -155,7 +135,7 @@ export async function approve(
   try {
     return await db.transaction(async (tx) => {
       const v = await versionRow(tx, versionId, true);
-      const { problems, sole } = await approveProblems(tx, v, userId);
+      const { problems, sole } = await approveProblems(tx, v, userId, input);
       const first = problems[0];
       if (first || !v) throw new Refused(first ?? PROBLEMS.not_found);
       const res = await tx.execute<{ self_approved: boolean }>(sql`
@@ -186,6 +166,8 @@ export async function approve(
           semver: v.semver,
           selfApproved,
           verdict: v.verdict as "pass" | "caution" | "block",
+          ...(v.verdict === "block" ? { scanOverride: true } : {}),
+          acknowledgedFindings: cautionKeys(v.scan).length,
           ...(confirmerApproved ? { confirmerApproved } : {}),
         },
       });
@@ -193,7 +175,8 @@ export async function approve(
     });
   } catch (err) {
     if (err instanceof Refused) return { ok: false, problem: err.problem };
-    // The database's own separation-of-duties guard (0133) refused the submitter.
+    // The database's own separation-of-duties guard (0133, 0161) refused the submitter or the
+    // confirmer.
     if (isInsufficientPrivilege(err)) return { ok: false, problem: PROBLEMS.own_submission };
     throw err;
   }

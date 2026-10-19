@@ -1530,8 +1530,19 @@ export const AUDIT_EVENTS = {
     selfApproved: z.boolean(),
     /** The scan verdict approved: `block` is a Site admin's override (SK32). */
     verdict: z.enum(["pass", "caution", "block"]),
+    /** A Site admin approved over a Block verdict, with a note (SK32, review L3). */
+    scanOverride: z.literal(true).optional(),
+    /** Caution findings acknowledged before approving (review M1). */
+    acknowledgedFindings: count.optional(),
     confirmerApproved: z.boolean().optional(),
   }),
+  /** A reviewer acknowledged one Caution finding (`rule@file:line`), as Approve needs (SK32). */
+  "registry.finding_acknowledged": event("site", {
+    registryVersionId: id,
+    finding: z.string().min(1).max(700),
+  }),
+  /** The submitter took back their submission before a decision (KOBE-334 review M3). */
+  "registry.retracted": event("site", { registryVersionId: id }),
   /** A reviewer sent the version back to its author's Workbench with comments. */
   "registry.changes_requested": event("site", { registryVersionId: id }),
   /** A reviewer rejected the version; `blocked`: a Site admin also blocklisted its runtime hash. */

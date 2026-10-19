@@ -79,6 +79,17 @@ describe("a single-admin Site (SK22)", () => {
     await authoritative(h, bid);
     const ok2 = await approve(bid);
     expect(ok2.status, JSON.stringify(ok2.json)).toBe(200);
+    // The version is flagged like the submitter's own (review M2), and the author sees it.
+    expect(ok2.json.selfApproved).toBe(true);
+    const flagged = await h.admin.query(
+      `SELECT self_approved FROM registry_versions WHERE id = $1`,
+      [bid],
+    );
+    expect(flagged.rows[0]?.self_approved).toBe(true);
+    const mine = await builder.get("/v1/me/skill-submissions");
+    expect(
+      (mine.json.submissions as { id: string; selfApproved: boolean }[]).find((x) => x.id === bid),
+    ).toMatchObject({ selfApproved: true });
     const audit = await h.admin.query<{ target: Record<string, unknown> }>(
       `SELECT target FROM audit_log WHERE action = 'registry.approved' ORDER BY seq`,
     );
@@ -98,5 +109,22 @@ describe("a single-admin Site (SK22)", () => {
     await authoritative(h, nid);
     const refused = await approve(nid);
     expect([refused.status, refused.json.code]).toEqual([403, "own_submission"]);
+    // And what it confirms for a Builder needs the second reviewer too.
+    const later = await readyTeamVersion(h, builder, team, ids.admin, "solo-builder", "0.2.0", {
+      body: "Second.",
+    });
+    const req2 = await builder.post("/v1/skills/promotions", {
+      scope: "team",
+      skillId: later.skillId,
+      version: later.version,
+    });
+    const conf2 = await admin.post(
+      `/v1/team/skill-promotions/${req2.json.requestId as string}/confirm`,
+      {},
+    );
+    const cid = conf2.json.registryVersionId as string;
+    await authoritative(h, cid);
+    const byConfirmer = await approve(cid);
+    expect([byConfirmer.status, byConfirmer.json.code]).toEqual([403, "confirmed_by_you"]);
   });
 });

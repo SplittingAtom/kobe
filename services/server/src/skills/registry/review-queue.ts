@@ -25,6 +25,7 @@ export const QUEUE_FILTERS = [
   "changes_requested",
   "approved",
   "rejected",
+  "retracted",
   "all",
 ] as const;
 export type QueueFilter = (typeof QUEUE_FILTERS)[number];
@@ -36,6 +37,7 @@ const FILTER_STATES: Readonly<Record<QueueFilter, readonly string[] | null>> = {
   changes_requested: ["changes_requested"],
   approved: ["approved"],
   rejected: ["rejected"],
+  retracted: ["retracted"],
   all: null,
 };
 
@@ -185,6 +187,8 @@ export interface QueueItem {
   readonly submittedAt: string;
   readonly claimedBy: Person | null;
   readonly authoritativeScorecard: boolean;
+  /** Approved by its submitter or confirming Team admin on a single-admin Site (SK22). */
+  readonly selfApproved: boolean;
 }
 
 /** The queue, oldest submission first; maintainer submissions only (Kobe publishes unreviewed). */
@@ -226,6 +230,7 @@ export async function listQueue(
       submittedAt: new Date(v.submittedAt).toISOString(),
       claimedBy: personOf(who, v.claimedBy),
       authoritativeScorecard: v.authoritativeScorecard !== null,
+      selfApproved: v.selfApproved,
     });
   }
   return items;

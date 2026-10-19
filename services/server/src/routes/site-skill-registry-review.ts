@@ -17,6 +17,7 @@ import {
   type ReviewResult,
 } from "../skills/registry/review-decide.js";
 import { REVIEW_CHECKLIST, reviewDetail } from "../skills/registry/review-detail.js";
+import { acknowledge } from "../skills/registry/review-findings.js";
 import { notifySubmitter } from "../skills/registry/review-notify.js";
 import {
   QUEUE_FILTERS,
@@ -39,6 +40,7 @@ const checklistSchema = z.strictObject(
   >,
 );
 const commentSchema = z.strictObject({ note: noteSchema });
+const acknowledgeSchema = z.strictObject({ finding: z.string().min(1).max(700) });
 const decisionSchema = z
   .strictObject({
     action: z.enum(["approve", "request_changes", "reject", "reject_and_block"]),
@@ -52,6 +54,7 @@ const decisionSchema = z
 
 const STATUS: Readonly<Record<string, 403 | 404 | 409>> = {
   not_found: 404,
+  unknown_finding: 404,
   own_submission: 403,
   block_verdict: 403,
   confirmed_by_you: 403,
@@ -144,6 +147,17 @@ export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!body) return invalidRequest(c, "Send a note (up to 4000 characters).");
     // A comment is for reviewers: no state changes, so no email.
     return answer(c, await comment(db, id, c.get("user").id, body.note), null, false);
+  });
+
+  // One Caution finding acknowledged (review M1): Approve needs every one.
+  app.post("/:id/acknowledgements", requireSkillReview(deps, "approve"), async (c) => {
+    const id = versionId(c);
+    const body = await parseBody(c, acknowledgeSchema);
+    if (!id) return c.json(NOT_FOUND, 404);
+    if (!body) return invalidRequest(c, "Send the finding's key.");
+    const r = await acknowledge(db, id, c.get("user").id, body.finding);
+    if (!r.ok) return refuse(c, r.problem);
+    return c.json({ finding: body.finding, acknowledged: true, changed: r.changed });
   });
 
   app.post("/:id/decision", async (c) => {

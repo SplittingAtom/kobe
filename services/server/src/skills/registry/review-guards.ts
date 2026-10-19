@@ -32,8 +32,8 @@ export function authoritativeScorecardProblem(version: {
 }): ScorecardProblem | null {
   const card = version.authoritativeScorecard;
   if (!card) return AUTHORITATIVE_SCORECARD_MISSING;
-  // A card that names a package names this one (the re-run evaluates the version's own package).
-  if (typeof card.packageHash === "string" && card.packageHash !== version.packageHash)
+  // The card must name this version's own package (review L2: a card naming none fails closed).
+  if (card.packageHash !== version.packageHash)
     return {
       code: "authoritative_scorecard_stale",
       message: "The authoritative scorecard is from another package: re-run the evals.",

@@ -1,13 +1,8 @@
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { addBlockedInTx } from "../blocklist.js";
-import {
-  DECIDABLE_STATES,
-  PROBLEMS,
-  dutiesProblem,
-  type DecisionInput,
-  type Problem,
-} from "./review-approve.js";
+import { dutiesProblem, type DecisionInput } from "./review-approve.js";
+import { DECIDABLE_STATES, PROBLEMS, REJECTABLE_STATES, type Problem } from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
 
 /**
@@ -135,8 +130,9 @@ export function decide(
   input: DecisionInput,
 ): Promise<ReviewResult> {
   const plan = VERDICT[verdict];
+  const states = verdict === "request_changes" ? DECIDABLE_STATES : REJECTABLE_STATES;
   return locked(db, versionId, async (tx, v) => {
-    if (!DECIDABLE_STATES.has(v.state)) throw new Refused(PROBLEMS.decided);
+    if (!states.has(v.state)) throw new Refused(PROBLEMS.decided);
     if (v.claimedBy !== null && v.claimedBy !== userId) throw new Refused(PROBLEMS.claimed);
     // Only an approval may be the submitter's own (a single-admin Site's): the database refuses
     // the rest. The confirming Team admin may send it back or reject it (only approving is theirs
@@ -164,5 +160,24 @@ export function decide(
           },
     );
     return { version: { ...v, state: plan.state, claimedBy: null }, changed: true };
+  });
+}
+
+/**
+ * The submitter takes back their own submission before a decision (review M3): Submitted, In
+ * review or Changes requested → Retracted. A never-approved name comes free with it (no open
+ * submission holds it any more).
+ */
+export function retract(db: KobeDb, versionId: string, userId: string): Promise<ReviewResult> {
+  return locked(db, versionId, async (tx, v) => {
+    if (v.submittedBy !== userId) throw new Refused(PROBLEMS.not_found);
+    if (!REJECTABLE_STATES.has(v.state)) throw new Refused(PROBLEMS.decided);
+    await tx.execute(sql`
+      UPDATE registry_versions
+         SET state = 'retracted', claimed_by = NULL, claimed_at = NULL, updated_at = now()
+       WHERE id = ${v.id}`);
+    await event(tx, v.id, userId, "retracted");
+    await recordAudit(tx, { action: "registry.retracted", target: { registryVersionId: v.id } });
+    return { version: { ...v, state: "retracted", claimedBy: null }, changed: true };
   });
 }

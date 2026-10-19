@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import { grantsOf } from "../skills/registry/grants.js";
+import { retract } from "../skills/registry/review-decide.js";
 import { mySubmissions } from "../skills/registry/submissions.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
@@ -38,6 +39,19 @@ export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   app.get("/skill-submissions", async (c) =>
     c.json({ submissions: await mySubmissions(db, c.get("user").id) }),
   );
+
+  /** The submitter takes a submission back before a decision (KOBE-334 review M3). */
+  app.post("/skill-submissions/:id/retract", async (c) => {
+    const id = z.uuid().safeParse(c.req.param("id"));
+    const notFound = { code: "not_found", message: "No such submission of yours." };
+    if (!id.success) return c.json(notFound, 404);
+    const r = await retract(db, id.data, c.get("user").id);
+    if (!r.ok)
+      return r.problem.code === "not_found"
+        ? c.json(notFound, 404)
+        : c.json({ code: r.problem.code, message: "This submission was already decided." }, 409);
+    return c.json({ id: r.version.id, state: r.version.state });
+  });
 
   /**
    * `GET/PUT /v1/me/preferences` (KOBE-202, CE8): the caller's layout preferences, kept on their

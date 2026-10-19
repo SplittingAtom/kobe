@@ -300,7 +300,9 @@ describe("what the scanner and the blocklist say (SK32, D22)", () => {
     await h.admin.query(`UPDATE registry_versions SET verdict = 'block' WHERE id = $1`, [w.id]);
     const byReviewer = await decision("reviewer", w.id, "approve");
     expect([byReviewer.status, byReviewer.json.code]).toEqual([403, "block_verdict"]);
-    const byAdmin = await decision("admin2", w.id, "approve");
+    const byAdmin = await decision("admin2", w.id, "approve", {
+      note: "Reviewed: false positive.",
+    });
     expect(byAdmin.status, JSON.stringify(byAdmin.json)).toBe(200);
     expect((await audit("registry.approved")).at(-1)).toMatchObject({
       target: { registryVersionId: w.id, verdict: "block" },
