@@ -36,6 +36,7 @@ import { clientMetadataDocument, kobeOrigin } from "./connectors/oauth/client.js
 import { siteConnectorsRoutes } from "./routes/site-connectors.js";
 import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
+import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
@@ -234,6 +235,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/connectors", siteConnectorsRoutes(deps));
   api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));
   api.route("/site/skill-rescans", siteSkillRescanRoutes(deps));
+  api.route("/site/skills/registry", siteSkillRegistryRoutes(deps));
   api.route("/site/skills", siteSkillTagRoutes(deps));
   if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);

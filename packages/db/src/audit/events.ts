@@ -1457,6 +1457,28 @@ export const AUDIT_EVENTS = {
 
   // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
   /** A Site admin added a topic tag to the vocabulary. */
+  /**
+   * A Site admin changed the Registry settings (KOBE-330, SK20, SK21): which settings, and the
+   * Registry team and judge alias when they changed (ids and aliases, never URLs or rules).
+   */
+  "skill.registry.settings_updated": event("site", {
+    changed: z
+      .array(
+        z.enum([
+          "registryTeamId",
+          "judgeAlias",
+          "submissionRules",
+          "evalLimits",
+          "importAllowlist",
+          "scanner",
+          "mirror",
+        ]),
+      )
+      .min(1)
+      .max(7),
+    registryTeamId: id.nullable().optional(),
+    judgeAlias: z.string().min(1).max(64).nullable().optional(),
+  }),
   "skill.tag.created": event("site", { tagId: id, name: catalogName }),
   /** A Site admin renamed, retired or restored a topic tag. */
   "skill.tag.updated": event("site", {
