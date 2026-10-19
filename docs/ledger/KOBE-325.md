@@ -32,6 +32,22 @@
 - **Later (327):** `run_usage` kinds `eval` / `eval_judge`, estimates, team eval caps; today eval
   runs bill as kind `run` and the judge's spend is only on the scorecard.
 
+## PR #316 CI fix (2026-10-19): scoped quotas
+
+- The API server refused `kobe-skill-eval-quota` ("unsupported scope applied to resource"):
+  a PriorityClass-scoped quota may count only `pods`, `cpu`, `memory` and their requests/limits.
+  Probed on k3s 1.34.6: `ephemeral-storage` and its requests/limits are refused too (the earlier
+  check used a smaller quota). Both scoped quotas now hold only `POD_SCOPED_QUOTA_KEYS`
+  (`sandbox/eval-quota.ts`); ephemeral storage, storage, PVCs and counts stay in the unscoped team
+  quota, which still adds the eval share (eval pods' ephemeral storage is bounded by their count).
+- Real-cluster check (scratch namespace and a scratch PriorityClass, both deleted): the exact
+  manifests the code generates from gate1's sandbox config were accepted; a member pod and an
+  eval pod were admitted; used counts: team quota 2 pods, eval quota 1, member quota 1
+  (requests.cpu 500m and limits.memory 4Gi each).
+- The reconcile no longer stops on a scoped quota: each failure is logged, the rest of the
+  namespace converges, the namespace counts as failed (`TeamQuotaDegradedError`), and
+  `ensureTeam` still returns it, so members start under the team quota.
+
 ## Handoff (read first)
 
 - **Branch:** `group-skills-b` in `../Kobe-skB`. **325 is complete** (step 1 DB layer reviewed and

@@ -1,4 +1,5 @@
 import { AUDIT_EVENTS } from "@kobe/db";
+import { POD_SCOPED_QUOTA_KEYS } from "./eval-quota.js";
 import { describe, expect, it, vi } from "vitest";
 import { IsolationRuntimeMissingError, type IsolationGate } from "../isolation/gate.js";
 import { createFakeKube, simulateAgentSandbox, type FakeKube } from "../testing/fake-kube.js";
@@ -118,8 +119,6 @@ describe("ensureSandbox: team namespace (D11)", () => {
         "requests.memory": gi(4),
         "limits.cpu": "8",
         "limits.memory": gi(16),
-        "requests.ephemeral-storage": gi(4),
-        "limits.ephemeral-storage": gi(16),
       },
       scopeSelector: {
         matchExpressions: [
@@ -127,12 +126,11 @@ describe("ensureSandbox: team namespace (D11)", () => {
         ],
       },
     });
-    // Members stay within teamQuota (pod keys only: a scoped quota holds no storage counts).
+    // Members stay within teamQuota (pod count, CPU and memory only: the PriorityClass scope
+    // allows nothing else, ephemeral storage included).
     expect(objectAt(kube, "ResourceQuota", "kobe-team-member-quota", NS)?.spec).toEqual({
       hard: Object.fromEntries(
-        Object.entries(SETTINGS.teamQuota).filter(
-          ([k]) => !["requests.storage", "persistentvolumeclaims"].includes(k),
-        ),
+        Object.entries(SETTINGS.teamQuota).filter(([k]) => POD_SCOPED_QUOTA_KEYS.has(k)),
       ),
       scopeSelector: {
         matchExpressions: [
