@@ -1,7 +1,31 @@
 "use client";
 
 import type { FileDiff, VersionDiff } from "../../../lib/admin/api/site/skill-review";
+import { visibleParts } from "../../../lib/admin/visible-text";
 import { Badge, EmptyState, Notice, type BadgeTone } from "../../ui/console";
+
+const NOT_DIFFED: Readonly<Record<NonNullable<FileDiff["notDiffed"]>, string>> = {
+  too_large: "too large to diff",
+  too_different: "too different to diff line by line",
+  skipped: "not diffed: the diff is too long",
+};
+
+/** Text with hidden characters shown as highlighted markers (review L4). */
+function Visible({ text }: { readonly text: string }) {
+  return (
+    <>
+      {visibleParts(text).map((p, i) =>
+        p.hidden ? (
+          <mark key={i} className="bg-status-attention-bg text-status-attention">
+            {p.text}
+          </mark>
+        ) : (
+          p.text
+        ),
+      )}
+    </>
+  );
+}
 
 const STATUS: Readonly<Record<FileDiff["status"], { label: string; tone: BadgeTone }>> = {
   changed: { label: "changed", tone: "attention" },
@@ -23,7 +47,7 @@ function PatchLine({ line }: { readonly line: string }) {
     <span className={`block whitespace-pre-wrap ${tone}`}>
       {sign === "+" && <span className="sr-only">Added: </span>}
       {sign === "-" && <span className="sr-only">Removed: </span>}
-      {line}
+      <Visible text={line} />
     </span>
   );
 }
@@ -33,9 +57,15 @@ function FilePatch({ file }: { readonly file: FileDiff }) {
   return (
     <details open={file.status !== "unchanged"} className="mt-3">
       <summary className="cursor-pointer">
-        <code>{file.path}</code> <Badge tone={status.tone}>{status.label}</Badge>
+        <code>
+          <Visible text={file.path} />
+        </code>{" "}
+        <Badge tone={status.tone}>{status.label}</Badge>
         {file.binary && file.status !== "unchanged" && (
-          <span className="ms-2 text-console-muted">binary or too large to show</span>
+          <span className="ms-2 text-console-muted">binary</span>
+        )}
+        {file.notDiffed && (
+          <span className="ms-2 text-console-muted">{NOT_DIFFED[file.notDiffed]}</span>
         )}
       </summary>
       {file.hunks.map((h) => (
@@ -72,7 +102,7 @@ export function ReviewDiff({ diff }: { readonly diff: VersionDiff }) {
       </p>
       {diff.truncated && (
         <Notice tone="warn">
-          The diff is long: the last files show their status only. Read them in the package.
+          The diff is long: some files show their status only. Read them in the package.
         </Notice>
       )}
       {changed.length === 0 ? (
@@ -86,7 +116,9 @@ export function ReviewDiff({ diff }: { readonly diff: VersionDiff }) {
           <ul className="mt-2 list-disc ps-6">
             {same.map((f) => (
               <li key={f.path}>
-                <code>{f.path}</code>
+                <code>
+                  <Visible text={f.path} />
+                </code>
               </li>
             ))}
           </ul>
