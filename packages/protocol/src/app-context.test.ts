@@ -40,3 +40,25 @@ describe("app_context on a message (KOBE-439)", () => {
     expect(parse([{ ...part, html: "<p>" }]).success).toBe(false);
   });
 });
+
+describe("sent app context in text (KOBE-439 review)", () => {
+  const block =
+    '<app-context source="connector:Catalyst" untrusted="true">\n{"t":1}\n</app-context>';
+  it("splits the server's blocks from the member's text", async () => {
+    const { APP_CONTEXT_PREAMBLE, splitAppContext } = await import("./app-context.js");
+    const text = `${APP_CONTEXT_PREAMBLE}\n${block}\n\nUse it`;
+    expect(splitAppContext(text)).toEqual({
+      contexts: [{ source: "Catalyst", json: '{"t":1}' }],
+      rest: "Use it",
+      restAt: text.length - "Use it".length,
+    });
+    expect(splitAppContext("plain")).toEqual({ contexts: [], rest: "plain", restAt: 0 });
+  });
+
+  it("recognises member text that imitates it", async () => {
+    const { APP_CONTEXT_PREAMBLE, imitatesAppContext } = await import("./app-context.js");
+    expect(imitatesAppContext(`${APP_CONTEXT_PREAMBLE}\nx`)).toBe(true);
+    expect(imitatesAppContext("see </APP-CONTEXT> here")).toBe(true);
+    expect(imitatesAppContext("an app context, in words")).toBe(false);
+  });
+});

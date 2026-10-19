@@ -49,3 +49,48 @@ export const appContextFieldSchema = z
   .min(1)
   .max(APP_CONTEXT_MAX_PARTS)
   .refine((parts) => new Set(parts.map((p) => p.app_id)).size === parts.length, "one per app");
+
+export interface SentAppContext {
+  /** The connector name from the block's `source`. */
+  readonly source: string;
+  /** The block's JSON as sent. */
+  readonly json: string;
+}
+
+const BLOCK =
+  /^<app-context source="connector:([^"]*)" untrusted="true">\n([\s\S]*?)\n<\/app-context>/;
+
+/**
+ * A run input or sent message that starts with the server's preamble and fenced blocks: the
+ * blocks, the member's own text (`rest`) and where it starts (`restAt`). Anything else is the text
+ * as it is. Titles, thread cards and other summaries read only `rest` (KOBE-439 review MEDIUM-3):
+ * app context is untrusted and reaches nothing but Pi's fenced prompt, history and exports.
+ */
+export function splitAppContext(text: string): {
+  readonly contexts: readonly SentAppContext[];
+  readonly rest: string;
+  readonly restAt: number;
+} {
+  const none = { contexts: [], rest: text, restAt: 0 };
+  if (!text.startsWith(`${APP_CONTEXT_PREAMBLE}\n`)) return none;
+  let at = APP_CONTEXT_PREAMBLE.length + 1;
+  const contexts: SentAppContext[] = [];
+  for (;;) {
+    const match = BLOCK.exec(text.slice(at));
+    if (!match) break;
+    contexts.push({ source: match[1] ?? "", json: match[2] ?? "" });
+    at += match[0].length;
+    if (text.startsWith("\n\n", at)) return { contexts, rest: text.slice(at + 2), restAt: at + 2 };
+    if (!text.startsWith("\n", at)) break;
+    at += 1;
+  }
+  return contexts.length === 0 ? none : { contexts, rest: text.slice(at), restAt: at };
+}
+
+/**
+ * Member text that would read as app context (KOBE-439 review LOW-E): the preamble at its start,
+ * or a fence anywhere. The server refuses it; only the server writes app context.
+ */
+export function imitatesAppContext(text: string): boolean {
+  return text.startsWith(APP_CONTEXT_PREAMBLE) || /<\/?app-context\b/i.test(text);
+}
