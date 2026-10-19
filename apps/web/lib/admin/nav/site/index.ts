@@ -11,6 +11,7 @@ export { default as policyFloor } from "./policy-floor";
 export { default as egress } from "./egress";
 export { default as skillBlocklist } from "./skill-blocklist";
 export { default as skillTags } from "./skill-tags";
+export { default as skillRegistry } from "./skill-registry";
 export { default as audit } from "./audit";
 export { default as breakGlass } from "./break-glass";
 export { default as legalHold } from "./legal-hold";
