@@ -153,6 +153,7 @@ describe("server-side tool registry", () => {
         "read_mcp_resource",
         "recall",
         "remember",
+        "save_skill_draft",
         "share_file",
         "tool_search",
         "update_artifact",
