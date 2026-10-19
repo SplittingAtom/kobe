@@ -43,9 +43,18 @@ export const startSkillEvalBodySchema = z.strictObject({ mode: z.enum(SKILL_EVAL
 export type StartSkillEvalBody = z.infer<typeof startSkillEvalBodySchema>;
 
 /**
- * "≈ $X, ≈ N min" (SK18, KOBE-327): executions × the team's recent per-model averages. Null
- * numbers (`basis: none`) when the team has no history for the model yet.
+ * "≈ $X, ≈ N min" (SK18, KOBE-327): executions × recent per-model averages. `team_history`: the
+ * team's (Team admins only, who see team usage anyway); `own_history`: the caller's own runs and
+ * evals (everyone else: never another member's usage); `suite_size`: no history of the caller's,
+ * so the suite's own token sizes at the catalog's prices; `none`: not even that (no price, no
+ * model). Null numbers only with `none` (or an unpriced model's cost).
  */
+export const SKILL_EVAL_ESTIMATE_BASES = [
+  "team_history",
+  "own_history",
+  "suite_size",
+  "none",
+] as const;
 export const skillEvalEstimateSchema = z.strictObject({
   executions: z
     .number()
@@ -54,7 +63,7 @@ export const skillEvalEstimateSchema = z.strictObject({
     .max(EVAL_MAX_CASES * 2),
   costUsd: z.number().min(0).nullable(),
   minutes: z.number().min(0).nullable(),
-  basis: z.enum(["team_history", "none"]),
+  basis: z.enum(SKILL_EVAL_ESTIMATE_BASES),
 });
 export type SkillEvalEstimate = z.infer<typeof skillEvalEstimateSchema>;
 
