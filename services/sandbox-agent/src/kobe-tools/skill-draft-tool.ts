@@ -26,6 +26,8 @@ const PARAMETERS = {
   },
 };
 
+const NEW_BECAUSE =
+  "The user's earlier draft from this conversation was shared or edited, so this is a new draft; say so.";
 const NEXT =
   "Tell the user the draft is in their Workbench (the Open in Workbench card): there they can try it in the test pane, Run evals from evals/cases.yaml, and Save version when it is ready. Nothing is shared or published until they do.";
 
@@ -77,10 +79,18 @@ async function save(
   if (!outcome.ok) throw new ToolFailure(`${outcome.error.code}: ${outcome.error.message}`);
   if (!("op" in outcome) || outcome.op !== "skill_draft_save")
     throw new ToolFailure("unexpected answer to save_skill_draft");
-  const { draft_id, name, created, rev, file_count } = outcome;
-  const record = { draft_id, name, created, rev, file_count };
+  const { draft_id, name, created, rev, file_count, new_because } = outcome;
+  const record = {
+    draft_id,
+    name,
+    created,
+    rev,
+    file_count,
+    ...(new_because ? { new_because } : {}),
+  };
+  const why = new_because ? `${NEW_BECAUSE} ` : "";
   return {
-    content: [{ type: "text", text: JSON.stringify({ ...record, next: NEXT }) }],
+    content: [{ type: "text", text: JSON.stringify({ ...record, next: `${why}${NEXT}` }) }],
     details: { ...record },
   };
 }
@@ -93,6 +103,8 @@ export function parseSkillDraftReply(value: Record<string, unknown>): ToolsRespo
   if (!isRecordId(draft) || typeof name !== "string" || typeof created !== "boolean")
     return undefined;
   if (!Number.isSafeInteger(rev) || !Number.isSafeInteger(count)) return undefined;
+  const because = value.new_because;
+  if (because !== undefined && because !== "shared" && because !== "edited") return undefined;
   return {
     id: value.id as string,
     ok: true,
@@ -102,5 +114,6 @@ export function parseSkillDraftReply(value: Record<string, unknown>): ToolsRespo
     created,
     rev: rev as number,
     file_count: count as number,
+    ...(because === undefined ? {} : { new_because: because }),
   };
 }

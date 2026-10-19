@@ -144,6 +144,8 @@ export interface SkillDraftAnswer {
   readonly created: boolean;
   readonly rev: number;
   readonly file_count: number;
+  /** A new draft although the conversation had one: it was shared, or edited since. */
+  readonly new_because?: "shared" | "edited";
 }
 
 export interface WebSearchCitation {

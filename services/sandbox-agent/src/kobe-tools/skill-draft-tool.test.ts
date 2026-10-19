@@ -56,6 +56,17 @@ describe("save_skill_draft (KOBE-442)", () => {
     });
   });
 
+  it("tells the model when a shared or edited draft made a new one", async () => {
+    const tool = saveSkillDraftTool(transport({ ...SAVED, new_because: "shared" }).t);
+    const result = await tool.execute("c", { folder: "close-helper" });
+    const body = JSON.parse(result.content[0]?.text ?? "{}") as {
+      new_because: string;
+      next: string;
+    };
+    expect(body.new_because).toBe("shared");
+    expect(body.next).toMatch(/shared or edited, so this is a new draft/);
+  });
+
   it("tells the model the draft is private and what the member does next", () => {
     const tool = saveSkillDraftTool(transport(SAVED).t);
     const text = [tool.description, ...tool.promptGuidelines].join(" ");
@@ -112,5 +123,11 @@ describe("save_skill_draft (KOBE-442)", () => {
     expect(parseSkillDraftReply({ id: "kt_1", ...SAVED, created: "yes" })).toBeUndefined();
     expect(parseSkillDraftReply({ id: "kt_1", ...SAVED, rev: 1.5 })).toBeUndefined();
     expect(parseSkillDraftReply({ id: "kt_1", ...SAVED, draft_id: 3 })).toBeUndefined();
+    expect(parseSkillDraftReply({ id: "kt_1", ...SAVED, new_because: "edited" })).toEqual({
+      id: "kt_1",
+      ...SAVED,
+      new_because: "edited",
+    });
+    expect(parseSkillDraftReply({ id: "kt_1", ...SAVED, new_because: "x" })).toBeUndefined();
   });
 });
