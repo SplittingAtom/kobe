@@ -1,5 +1,5 @@
 {
-  "id": "49355631-6915-4e9c-94f5-f6718aca29de",
+  "id": "20c3a456-d6f4-40b2-9861-a5bbb01625a4",
   "prevId": "ba031dbf-089a-44fd-8907-463568ca09a0",
   "version": "7",
   "dialect": "postgresql",
@@ -4875,12 +4875,6 @@
               "nulls": "last"
             },
             {
-              "expression": "slot",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
@@ -4961,10 +4955,6 @@
           "name": "sandbox_commands_kind",
           "value": "\"sandbox_commands\".\"kind\" IN ('run.start', 'run.steer', 'run.stop', 'pi.command', 'thread.compact')"
         },
-        "sandbox_commands_slot": {
-          "name": "sandbox_commands_slot",
-          "value": "\"sandbox_commands\".\"slot\" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'"
-        },
         "sandbox_commands_requester": {
           "name": "sandbox_commands_requester",
           "value": "char_length(\"sandbox_commands\".\"requester_replica\") BETWEEN 1 AND 64"
@@ -4995,13 +4985,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "slot": {
-          "name": "slot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
         },
         "sandbox_id": {
           "name": "sandbox_id",
@@ -5042,35 +5025,7 @@
           "notNull": false
         }
       },
-      "indexes": {
-        "sandbox_connections_key": {
-          "name": "sandbox_connections_key",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "slot",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "sandbox_connections_team_id_teams_id_fk": {
           "name": "sandbox_connections_team_id_teams_id_fk",
@@ -5099,14 +5054,18 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "sandbox_connections_team_id_user_id_pk": {
+          "name": "sandbox_connections_team_id_user_id_pk",
+          "columns": [
+            "team_id",
+            "user_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "sandbox_connections_slot": {
-          "name": "sandbox_connections_slot",
-          "value": "\"sandbox_connections\".\"slot\" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'"
-        },
         "sandbox_connections_replica_id": {
           "name": "sandbox_connections_replica_id",
           "value": "char_length(\"sandbox_connections\".\"replica_id\") BETWEEN 1 AND 64"
@@ -5178,12 +5137,6 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "slot",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -5248,12 +5201,7 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "sandbox_run_leases_slot": {
-          "name": "sandbox_run_leases_slot",
-          "value": "\"sandbox_run_leases\".\"slot\" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.sandboxes": {
@@ -18393,6 +18341,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "fixtures_key": {
+          "name": "fixtures_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "mode": {
           "name": "mode",
           "type": "text",
@@ -18624,9 +18578,9 @@
           "name": "skill_eval_runs_hashes",
           "value": "\"skill_eval_runs\".\"package_hash\" ~ '^[0-9a-f]{64}$' AND \"skill_eval_runs\".\"runtime_hash\" ~ '^[0-9a-f]{64}$'"
         },
-        "skill_eval_runs_bundle_key": {
-          "name": "skill_eval_runs_bundle_key",
-          "value": "char_length(\"skill_eval_runs\".\"bundle_key\") BETWEEN 1 AND 512"
+        "skill_eval_runs_keys": {
+          "name": "skill_eval_runs_keys",
+          "value": "char_length(\"skill_eval_runs\".\"bundle_key\") BETWEEN 1 AND 512\n        AND (\"skill_eval_runs\".\"fixtures_key\" IS NULL OR char_length(\"skill_eval_runs\".\"fixtures_key\") BETWEEN 1 AND 512)"
         },
         "skill_eval_runs_json": {
           "name": "skill_eval_runs_json",
@@ -18643,6 +18597,173 @@
         "skill_eval_runs_scorecard_size": {
           "name": "skill_eval_runs_scorecard_size",
           "value": "\"skill_eval_runs\".\"scorecard\" IS NULL OR pg_column_size(\"skill_eval_runs\".\"scorecard\") <= 1048576"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_eval_connections": {
+      "name": "sandbox_eval_connections",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sandbox_id": {
+          "name": "sandbox_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connection_id": {
+          "name": "connection_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "replica_id": {
+          "name": "replica_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "connected_at": {
+          "name": "connected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sandbox_eval_connections_user_idx": {
+          "name": "sandbox_eval_connections_user_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_eval_connections_sandbox_idx": {
+          "name": "sandbox_eval_connections_sandbox_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sandbox_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_eval_connections_team_id_teams_id_fk": {
+          "name": "sandbox_eval_connections_team_id_teams_id_fk",
+          "tableFrom": "sandbox_eval_connections",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_eval_connections_user_id_users_id_fk": {
+          "name": "sandbox_eval_connections_user_id_users_id_fk",
+          "tableFrom": "sandbox_eval_connections",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sandbox_eval_connections_thread_fk": {
+          "name": "sandbox_eval_connections_thread_fk",
+          "tableFrom": "sandbox_eval_connections",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "team_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "team_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_eval_connections_team_id_thread_id_pk": {
+          "name": "sandbox_eval_connections_team_id_thread_id_pk",
+          "columns": [
+            "team_id",
+            "thread_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_eval_connections_replica_id": {
+          "name": "sandbox_eval_connections_replica_id",
+          "value": "char_length(\"sandbox_eval_connections\".\"replica_id\") BETWEEN 1 AND 64"
         }
       },
       "isRLSEnabled": false

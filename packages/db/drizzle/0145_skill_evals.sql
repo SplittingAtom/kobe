@@ -36,6 +36,7 @@ CREATE TABLE "skill_eval_runs" (
 	"package_hash" text NOT NULL,
 	"runtime_hash" text NOT NULL,
 	"bundle_key" text NOT NULL,
+	"fixtures_key" text,
 	"mode" text NOT NULL,
 	"status" text DEFAULT 'queued' NOT NULL,
 	"suite" jsonb NOT NULL,
@@ -57,7 +58,8 @@ CREATE TABLE "skill_eval_runs" (
 	CONSTRAINT "skill_eval_runs_status" CHECK ("skill_eval_runs"."status" IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'budget_stopped')),
 	CONSTRAINT "skill_eval_runs_name" CHECK ("skill_eval_runs"."skill_name" ~ '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'),
 	CONSTRAINT "skill_eval_runs_hashes" CHECK ("skill_eval_runs"."package_hash" ~ '^[0-9a-f]{64}$' AND "skill_eval_runs"."runtime_hash" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "skill_eval_runs_bundle_key" CHECK (char_length("skill_eval_runs"."bundle_key") BETWEEN 1 AND 512),
+	CONSTRAINT "skill_eval_runs_keys" CHECK (char_length("skill_eval_runs"."bundle_key") BETWEEN 1 AND 512
+        AND ("skill_eval_runs"."fixtures_key" IS NULL OR char_length("skill_eval_runs"."fixtures_key") BETWEEN 1 AND 512)),
 	CONSTRAINT "skill_eval_runs_json" CHECK (jsonb_typeof("skill_eval_runs"."suite") = 'object' AND jsonb_typeof("skill_eval_runs"."limits") = 'object'
         AND ("skill_eval_runs"."run_model" IS NULL OR jsonb_typeof("skill_eval_runs"."run_model") = 'object')
         AND ("skill_eval_runs"."judge_model" IS NULL OR jsonb_typeof("skill_eval_runs"."judge_model") = 'object')
@@ -71,25 +73,34 @@ CREATE TABLE "skill_eval_runs" (
 	CONSTRAINT "skill_eval_runs_scorecard_size" CHECK ("skill_eval_runs"."scorecard" IS NULL OR pg_column_size("skill_eval_runs"."scorecard") <= 1048576)
 );
 --> statement-breakpoint
-DROP INDEX "sandbox_commands_open_idx";--> statement-breakpoint
-DROP INDEX "sandbox_run_leases_user_idx";--> statement-breakpoint
-ALTER TABLE "sandbox_connections" DROP CONSTRAINT "sandbox_connections_team_id_user_id_pk";--> statement-breakpoint
+CREATE TABLE "sandbox_eval_connections" (
+	"team_id" uuid NOT NULL,
+	"thread_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"sandbox_id" uuid NOT NULL,
+	"connection_id" uuid NOT NULL,
+	"replica_id" text NOT NULL,
+	"connected_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_seen_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"closed_at" timestamp with time zone,
+	CONSTRAINT "sandbox_eval_connections_team_id_thread_id_pk" PRIMARY KEY("team_id","thread_id"),
+	CONSTRAINT "sandbox_eval_connections_replica_id" CHECK (char_length("sandbox_eval_connections"."replica_id") BETWEEN 1 AND 64)
+);
+--> statement-breakpoint
 ALTER TABLE "threads" ADD COLUMN "skill_eval" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "threads" ADD COLUMN "skill_eval_run_id" uuid;--> statement-breakpoint
 ALTER TABLE "sandbox_commands" ADD COLUMN "slot" text DEFAULT '' NOT NULL;--> statement-breakpoint
-ALTER TABLE "sandbox_connections" ADD COLUMN "slot" text DEFAULT '' NOT NULL;--> statement-breakpoint
 ALTER TABLE "sandbox_run_leases" ADD COLUMN "slot" text DEFAULT '' NOT NULL;--> statement-breakpoint
 ALTER TABLE "skill_eval_results" ADD CONSTRAINT "skill_eval_results_run_fk" FOREIGN KEY ("team_id","eval_run_id") REFERENCES "public"."skill_eval_runs"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "skill_eval_runs" ADD CONSTRAINT "skill_eval_runs_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "skill_eval_runs" ADD CONSTRAINT "skill_eval_runs_started_by_users_id_fk" FOREIGN KEY ("started_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sandbox_eval_connections" ADD CONSTRAINT "sandbox_eval_connections_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sandbox_eval_connections" ADD CONSTRAINT "sandbox_eval_connections_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sandbox_eval_connections" ADD CONSTRAINT "sandbox_eval_connections_thread_fk" FOREIGN KEY ("team_id","thread_id") REFERENCES "public"."threads"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "skill_eval_results_open_idx" ON "skill_eval_results" USING btree ("team_id","state") WHERE "skill_eval_results"."state" <> 'done';--> statement-breakpoint
 CREATE INDEX "skill_eval_results_thread_idx" ON "skill_eval_results" USING btree ("team_id","thread_id") WHERE "skill_eval_results"."thread_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "skill_eval_runs_subject_idx" ON "skill_eval_runs" USING btree ("team_id","subject_kind","subject_id","started_at");--> statement-breakpoint
 CREATE INDEX "skill_eval_runs_open_idx" ON "skill_eval_runs" USING btree ("team_id","started_at") WHERE "skill_eval_runs"."status" IN ('queued', 'running');--> statement-breakpoint
 CREATE INDEX "skill_eval_runs_starter_idx" ON "skill_eval_runs" USING btree ("team_id","started_by");--> statement-breakpoint
-CREATE UNIQUE INDEX "sandbox_connections_key" ON "sandbox_connections" USING btree ("team_id","user_id","slot");--> statement-breakpoint
-CREATE INDEX "sandbox_commands_open_idx" ON "sandbox_commands" USING btree ("team_id","user_id","slot","created_at") WHERE "sandbox_commands"."status" IN ('pending', 'delivered');--> statement-breakpoint
-CREATE INDEX "sandbox_run_leases_user_idx" ON "sandbox_run_leases" USING btree ("team_id","user_id","slot");--> statement-breakpoint
-ALTER TABLE "sandbox_commands" ADD CONSTRAINT "sandbox_commands_slot" CHECK ("sandbox_commands"."slot" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$');--> statement-breakpoint
-ALTER TABLE "sandbox_connections" ADD CONSTRAINT "sandbox_connections_slot" CHECK ("sandbox_connections"."slot" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$');--> statement-breakpoint
-ALTER TABLE "sandbox_run_leases" ADD CONSTRAINT "sandbox_run_leases_slot" CHECK ("sandbox_run_leases"."slot" ~ '^(|e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$');
+CREATE INDEX "sandbox_eval_connections_user_idx" ON "sandbox_eval_connections" USING btree ("team_id","user_id");--> statement-breakpoint
+CREATE INDEX "sandbox_eval_connections_sandbox_idx" ON "sandbox_eval_connections" USING btree ("team_id","sandbox_id");

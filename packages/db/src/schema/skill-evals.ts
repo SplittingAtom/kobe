@@ -20,7 +20,8 @@ import { teams } from "./teams.js";
 // Team tables: team_id NOT NULL, ENABLE + FORCE RLS with the canonical policy and a break-glass
 // read (custom migration `*_skill_evals_rls.sql`). An eval run evaluates one package (a draft's
 // revision or a saved version) and plans executions; each execution is one ordinary run in its
-// own eval thread (`threads.skill_eval`) and its own ephemeral sandbox (wire slot `e-<thread>`).
+// own eval thread (`threads.skill_eval`) and its own ephemeral sandbox (wire slot `e-<thread>`,
+// connection in `sandbox_eval_connections`).
 // The rows hold the scorecard and per-case detail (judge reasons, thread ids): team content that
 // never leaves the team. They follow team retention (by start) and offboarding (the starter's).
 //
@@ -83,8 +84,19 @@ export const skillEvalRuns = pgTable(
     skillName: text().notNull(),
     packageHash: text().notNull(),
     runtimeHash: text().notNull(),
-    /** Object key of the scanned runtime zip the "with" executions load. */
+    /**
+     * Object key of the scanned runtime zip the "with" executions load, in the eval's own tree
+     * (`<prefix>teams/<team>/skill-evals/<id>/`).
+     */
     bundleKey: text().notNull(),
+    /**
+     * Object key of the fixtures zip (`evals/` files the cases name) unpacked into each execution's
+     * workspace, in the same tree; null when no case has fixtures. Never part of the runtime zip.
+     * Purges (retention, offboarding) delete a run's objects only for the rows their
+     * `DELETE … RETURNING bundle_key, fixtures_key` returned: the silent hold skips a held row, and
+     * its objects stay with it.
+     */
+    fixturesKey: text(),
     mode: text().$type<(typeof SKILL_EVAL_RUN_MODES)[number]>().notNull(),
     status: text().$type<SkillEvalRunState>().notNull().default("queued"),
     suite: jsonb().$type<Record<string, unknown>>().notNull(),
@@ -121,7 +133,11 @@ export const skillEvalRuns = pgTable(
       "skill_eval_runs_hashes",
       sql`${t.packageHash} ~ '${sql.raw(SHA256)}' AND ${t.runtimeHash} ~ '${sql.raw(SHA256)}'`,
     ),
-    check("skill_eval_runs_bundle_key", sql`char_length(${t.bundleKey}) BETWEEN 1 AND 512`),
+    check(
+      "skill_eval_runs_keys",
+      sql`char_length(${t.bundleKey}) BETWEEN 1 AND 512
+        AND (${t.fixturesKey} IS NULL OR char_length(${t.fixturesKey}) BETWEEN 1 AND 512)`,
+    ),
     check(
       "skill_eval_runs_json",
       sql`jsonb_typeof(${t.suite}) = 'object' AND jsonb_typeof(${t.limits}) = 'object'
@@ -151,8 +167,8 @@ export const skillEvalRuns = pgTable(
 /**
  * Team table: one execution (a case with or without the skill). `attempt` 2 is the automatic
  * retry, in a new thread and sandbox; `first_attempt` keeps what the first one cost. `thread_id`
- * is the current attempt's eval thread (SQL-only foreign key ON DELETE SET NULL, custom
- * migration); `deadline_at` the end of its wall clock, after which the reaper ends it. `execution`
+ * is the current attempt's eval thread (SQL-only, custom migration: foreign key ON DELETE SET
+ * NULL, and a row trigger that requires an eval thread of this same eval run); `deadline_at` the end of its wall clock, after which the reaper ends it. `execution`
  * is the final `SkillEvalExecution` (KOBE-324), set exactly when the row is done.
  */
 export const skillEvalResults = pgTable(
