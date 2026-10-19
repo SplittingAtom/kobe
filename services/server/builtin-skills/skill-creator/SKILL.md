@@ -77,10 +77,10 @@ cases:
   - id: monthly-report
     prompt: "Build the March sales report from sales.csv"
     files: [fixtures/sales.csv]
-    expect: {triggers: true, outputs: ["outputs/*.xlsx"]}
+    expect: { triggers: true, outputs: ["outputs/*.xlsx"] }
   - id: near-miss-chart
     prompt: "What does this chart show?"
-    expect: {triggers: false}
+    expect: { triggers: false }
 ```
 
 Case ids are lowercase letters, digits and hyphens; fixtures live under `evals/fixtures/`. The

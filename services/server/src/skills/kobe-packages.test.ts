@@ -59,8 +59,8 @@ const PUBLISHED: Record<string, Record<string, { runtime: string; package: strin
       package: "05b240a4aa419c924a3be770f1952ec83a6731e5c072e19f251cf2059dae5aa6",
     },
     "1.1.0": {
-      runtime: "d581c24a077427ba792400bfd87c44f391ccff8bbb4d85fc8cb1552b648b0aec",
-      package: "136befd3c38c93b787060c1da4fb7f24a549e91591718996ea9d656dffd85924",
+      runtime: "ecc8c31c7980eb49ccc1f74645feb358eeb67068eede450c672a05a25841bcd6",
+      package: "1ff17aa2a178cf2c6ff3731e09951ca0d16e782a6c361e9ead949c7a380c6860",
     },
   },
 };
@@ -134,8 +134,8 @@ describe("skill-creator proposes eval cases (KOBE-328 ac-2)", () => {
     );
     expect(md).toContain("evals/cases.yaml");
     expect(md).toMatch(/always at\s+least one near miss into a negative case/);
-    expect(md).toContain("expect: {triggers: false}");
-    expect(md).toContain("expect: {triggers: true");
+    expect(md).toContain("expect: { triggers: false }");
+    expect(md).toContain("expect: { triggers: true");
   });
 });
 
