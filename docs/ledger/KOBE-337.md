@@ -2,6 +2,63 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
+## Handoff for KOBE-338 onward (a fresh agent continues)
+
+- **Branch:** `group-skills-c` in `../Kobe-skC`, from main 16155c46; ~95 commits; nothing pushed;
+  one PR for Phase C (Chris's gate review after it; KOBE-342 is not ours). Done and reviewed:
+  KOBE-442, 330–337 (ledgers in `docs/ledger/`; reviews in the coordinator's scratchpad,
+  `review-*.md`). At PR time run `pnpm --filter @kobe/db db:rebase` (G10 PR #317 and MCP Apps add
+  migrations too).
+- **Migrations on this branch** (each alone, generated/custom apart, upgrade tests in
+  `packages/db/src/*-upgrade.db.test.ts`): 0149–0151 drafts sync (442); 0152 `teams.registry`,
+  0153 dedicated-Registry guard (custom); 0154 `team_members.added_via`; 0155/0156 promotion
+  requests + RLS (custom); 0157/0158 `from_conversation` + backfill (custom; 0158 edited in place
+  before release); 0159 `retracted` state, `finding_acknowledged`/`retracted` actions; 0160
+  `registry_versions_review` CHECK covers the confirmer; 0161 review guard for the confirmer
+  (custom); 0162 eval subject kind `registry`. The scanner's rule set is 5 (rescans).
+- **Decisions in force (coordinator / Chris):**
+  - Registry team: a dedicated team Kobe creates; Skill reviewers join it via the grant; Site
+    admins may hold the grant from another admin; a self-grant only on a single-admin Site
+    (flagged `selfGranted`).
+  - Separation of duties for every act that weighs a version (Approve, acknowledging Caution
+    findings, starting or cancelling re-runs): never the submitter or the confirming Team admin,
+    except the single admin (DB flags `self_approved`, 0161).
+  - Approve fails closed: Registry team, row lock, authoritative card (this package, current
+    Registry team and Site judge alias/model, ≤ 30 days, not all errored), blocklist, Block
+    override with a note (Site admins), every Caution finding acknowledged, live skill, active
+    submitter who may still submit (catalog skill row locked).
+  - Names: free once no submission is open (reject from any open state, or the author retracts).
+  - Re-runs: in the Registry team as the reviewer, Site judge only, every run kept in the
+    history; the card is the latest completed run's.
+  - Egress reachability anywhere server-side uses `decideEgress` + the proxy's loaders
+    (`egress/host-standing.ts`).
+  - Installs: Roll back or Move pin back on a tracking install pins it (audited `pinModeFrom`,
+    console notice); Roll back never rolls forward; blocklisted, withdrawn, revoked never offered.
+- **KOBE-338 (member adds, blocks, requests):** `member_skill_enablements` (catalog adds carry
+  `version_id`, `pin_mode`), the DB trigger refusing adds of a blocked skill and the block trigger
+  removing adds (0133), `readCatalogSwitches().membersMayAdd`, the resolver's member adds
+  (`runs/catalog-facts.ts`), and `/v1/me/skills/enablements` already exist; build `PUT/DELETE
+/v1/me/skills/adds/:skillId {version, pinMode}` (refuse withdrawn/revoked/blocklisted like
+  `installCatalogSkill`), the team block/unblock routes (Team admins, audited), the console list of
+  member adds, Request for team (notify Team admins like egress requests' outbox), and the catalog
+  card/detail buttons (`catalog-tab.tsx`, `catalog-detail-page.tsx`; `state.addedByMe/blocked`
+  are there).
+- **KOBE-339 (usage signals):** `catalog-browse.ts` shows teams installed from a cached
+  `scanTeams` count with the "few" rule (`MIN_TEAMS` in `catalog-admin.ts`); replace with the
+  nightly aggregates; run skill uses are on `runs.skills_used` (KOBE-297), thumbs from KOBE-275.
+  Fixed windows, no team names, probe test for cross-team endpoints.
+- **KOBE-340 (deprecate/withdraw/revoke):** admin-only actions are already in
+  `skillReviewAllows` (`withdraw`, `revoke`); the review events enum has `deprecated`,
+  `withdrawn`, `revoked`, `unrevoked`; the resolver (`resolver/catalog-pins.ts`) already applies
+  SK31 to pins; `addBlockedInTx` for revoke; decisions run in `inRegistryTx` (Registry team
+  context). Install updates/diff already exclude withdrawn/revoked/blocklisted targets.
+- **KOBE-341 (external scanner):** `site_skill_settings.scanner.external` (off); Job in the
+  Registry team's namespace, no secrets, no egress unless configured; findings advisory (Caution
+  at most). Licence check first; stop for Chris if the scanner isn't in the family.
+- **Known open items:** no `registry.version.updated` stream event; budget-cap and
+  personal-connector re-run tests rely on shared code (judged not required); C4-L1/L2/L4 from
+  review-c2 (requests outliving a demoted requester, orphan catalog blobs, preview cost) remain.
+
 - **Status:** in review (group branch `group-skills-c`, one PR for Phase C)
 - **Branch / worktree:** `group-skills-c` in `../Kobe-skC`
 - **Depends on:** KOBE-314/315/316 (installs, pin resolution `pickCatalogVersion`, the install
@@ -39,6 +96,17 @@
 - Update available lists versions newer than what runs; those the pin takes by itself are marked
   so (Move pin is offered for the others).
 - Members see updates (published content); only installers move pins.
+
+## Review fixes (review-337.md)
+
+- **M1** (coordinator) a move back on a tracking install pins it; audited with `pinModeFrom`,
+  `runningFrom`, `runningTo`; `pinnedBy` on the install list and the console notice; Roll back's
+  target starts from what runs. Tests for within major and latest.
+- **L1** a second Roll back skips the change it undid (409 `no_rollback` when nothing is left);
+  **L2** diffs target approved/deprecated only; **L3** blocklisted versions neither offered nor
+  installable; **L4** pin mode and access read under the install lock; **L5** the Install form
+  names hosts not enabled here; **L6** the escaped raw view escapes backslashes, UTF-8 validated
+  by hand.
 
 ## Open questions (for Chris or the coordinator)
 
