@@ -9,6 +9,7 @@ import {
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
 import { RunError } from "../runs/errors.js";
 import { queueOrderBodySchema } from "../runs/queue-order.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -79,6 +80,7 @@ function scoped(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
  */
 export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = scoped(deps);
+  app.use("/:id/*", refuseEvalThreadWrites(deps, "thread"));
 
   app.post("/:id/messages", async (c) => {
     const id = idParam(c);
@@ -154,6 +156,8 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
  */
 export function runRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = scoped(deps);
+  app.use("/:id", refuseEvalThreadWrites(deps, "run"));
+  app.use("/:id/*", refuseEvalThreadWrites(deps, "run"));
 
   app.get("/:id", async (c) => {
     const id = idParam(c);

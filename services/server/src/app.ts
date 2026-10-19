@@ -53,6 +53,7 @@ import { runRoutes, threadRunRoutes } from "./routes/runs.js";
 import { setupRoutes } from "./routes/setup.js";
 import { skillRoutes } from "./routes/skills.js";
 import { skillDraftRoutes } from "./routes/skill-drafts.js";
+import { skillEvalRoutes, type SkillEvalRouteOptions } from "./routes/skill-evals.js";
 import { skillReachRoutes } from "./routes/skill-reach.js";
 import { meSkillEnablementRoutes } from "./routes/me-skill-enablements.js";
 import { teamAuditRoutes } from "./routes/team-audit.js";
@@ -91,6 +92,8 @@ export interface AppOptions {
   readonly evals?: EvalRunner;
   /** Workspace file browser (KOBE-148); unset (no object storage), its routes answer 503. */
   readonly workspaceFiles?: WorkspaceFilesOptions;
+  /** Skill evals (KOBE-325): the event hub and the runner's kick. */
+  readonly skillEvals?: SkillEvalRouteOptions;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -201,6 +204,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/connector-grants", connectorGrantRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
+  // Skill evals (KOBE-325): full paths under /skills and /skill-evals, before /skills' `/:id`.
+  api.route("/", skillEvalRoutes(deps, options.skillEvals));
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
   api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
   api.route("/skills", skillRoutes(deps));

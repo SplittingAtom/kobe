@@ -12,6 +12,7 @@ import { listOffboarded, startExport, type ExportStart, type OffboardedMember } 
 import { departedNotOffboarded, dueForPurge, purgeDeparted } from "./purge.js";
 import { reinstateReturning } from "./reinstate.js";
 import { sweepDepartedDrafts } from "../retention/skill-drafts.js";
+import { sweepDepartedSkillEvals } from "../retention/skill-evals.js";
 import {
   RETAIN_DAYS,
   type Departed,
@@ -130,6 +131,13 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     } catch (err) {
       failed += 1;
       log.error({ err }, "departed authors' drafts purge failed");
+    }
+    try {
+      // KOBE-325: a departed starter's finished eval runs, after the same retention.
+      await sweepDepartedSkillEvals(ctx.db, ctx.blobs, RETAIN_DAYS);
+    } catch (err) {
+      failed += 1;
+      log.error({ err }, "departed starters' skill evals purge failed");
     }
     return { offboarded, purged, held, drafts, failed };
   };

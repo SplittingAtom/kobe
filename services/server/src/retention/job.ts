@@ -1,3 +1,4 @@
+import { NO_EVAL_PURGE, purgeSkillEvals, type EvalPurgeCounts } from "./skill-evals.js";
 import {
   SYSTEM_ACTOR,
   asc,
@@ -99,6 +100,8 @@ export interface TeamPassResult {
   readonly skillDraftHistory: { readonly rows: number };
   /** Test bundles of drafts that are gone, deleted (KOBE-323). */
   readonly skillDraftBundles: { readonly drafts: number };
+  /** Finished skill eval runs past the window, and their objects (KOBE-325). */
+  readonly skillEvals: EvalPurgeCounts;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -323,6 +326,13 @@ async function teamPass(
           sweepOrphanDraftBundles(db, deps.blobs as BlobStore, teamId, { stop }),
         )
       : { drafts: 0 };
+  const skillEvals = stop()
+    ? NO_EVAL_PURGE
+    : await step("skill_evals", NO_EVAL_PURGE, async () => {
+        const days = await windowDays(db, teamId);
+        const cutoff = days === null ? null : new Date(Date.now() - days * 86_400_000);
+        return purgeSkillEvals(db, deps.blobs, teamId, cutoff, { stop });
+      });
   return {
     teamId,
     trash,
@@ -338,6 +348,7 @@ async function teamPass(
     skillDrafts,
     skillDraftHistory,
     skillDraftBundles,
+    skillEvals,
     failed,
   };
 }

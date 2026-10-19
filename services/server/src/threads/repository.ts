@@ -431,7 +431,7 @@ export async function listThreads(
         // Explicit, not only in `scope` and RLS: see the KOBE-16 note in packages/db/README.md.
         eq(threads.teamId, viewer.teamId),
         scope,
-        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
+        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest} AND NOT ${threads.skillEval}`,
         options.cursor ? after(threads.lastActivityAt, options.cursor) : undefined,
       ),
     )
@@ -458,7 +458,8 @@ export async function listOwnOrganized(
       and(
         eq(threads.teamId, viewer.teamId),
         eq(threads.ownerUserId, viewer.userId),
-        sql`${column} IS NOT NULL AND ${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
+        sql`${column} IS NOT NULL AND ${threads.deletedAt} IS NULL AND NOT ${threads.isTest}
+            AND NOT ${threads.skillEval}`,
         options.which === "pinned" ? sql`${threads.archivedAt} IS NULL` : undefined,
         options.cursor ? after(column, options.cursor) : undefined,
       ),
@@ -487,7 +488,7 @@ export async function listSharedWithMe(
         eq(threads.teamId, viewer.teamId),
         sql`${threads.ownerUserId} <> ${viewer.userId}`,
         sharedWith(viewer),
-        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
+        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest} AND NOT ${threads.skillEval}`,
         options.cursor ? after(threads.lastActivityAt, options.cursor) : undefined,
       ),
     )
@@ -509,7 +510,8 @@ export async function listTrash(
       and(
         eq(threads.teamId, viewer.teamId),
         eq(threads.ownerUserId, viewer.userId),
-        sql`${threads.deletedAt} > now() - ${TRASH_INTERVAL} AND NOT ${threads.isTest}`,
+        sql`${threads.deletedAt} > now() - ${TRASH_INTERVAL} AND NOT ${threads.isTest}
+            AND NOT ${threads.skillEval}`,
         options.cursor ? after(threads.deletedAt, options.cursor) : undefined,
       ),
     )
@@ -536,6 +538,8 @@ export async function createThread(
     skillDraftId?: string;
     /** The schedule that started the thread (KOBE-174): it sits in the user's Scheduled folder. */
     scheduleId?: string;
+    /** A skill eval execution's thread (KOBE-325): run by the eval runner, never listed. */
+    skillEvalRunId?: string;
     title: string | null;
     /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
     modelAlias?: string | null;
@@ -548,7 +552,7 @@ export async function createThread(
     forkedFrom?: { readonly threadId: string; readonly entryId: string };
   },
 ): Promise<ThreadSummary> {
-  const { agent, modelAlias, isTest, forkedFrom, skillDraftId, ...rest } = input;
+  const { agent, modelAlias, isTest, forkedFrom, skillDraftId, skillEvalRunId, ...rest } = input;
   const [row] = await tx
     .insert(threads)
     .values({
@@ -559,6 +563,8 @@ export async function createThread(
       isTest: isTest ?? false,
       skillTest: skillDraftId !== undefined,
       skillDraftId: skillDraftId ?? null,
+      skillEval: skillEvalRunId !== undefined,
+      skillEvalRunId: skillEvalRunId ?? null,
       agentScope: agent?.agentScope ?? null,
       agentId: agent?.agentId ?? null,
       agentVersion: agent?.agentVersion ?? null,

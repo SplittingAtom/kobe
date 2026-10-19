@@ -1,0 +1,409 @@
+import {
+  and,
+  eq,
+  isNull,
+  siteAgents,
+  siteSkillSettings,
+  sql,
+  teams,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
+import {
+  evalOutputWalkRoots,
+  evalSnapshotResultSchema,
+  fixtureWorkspacePath,
+  skillEvalLimitsSchema,
+  type ActorContext,
+  type EvalWorkspaceSnapshot,
+  type SkillEvalCase,
+  type SkillEvalLimits,
+} from "@kobe/protocol";
+import type { Logger } from "pino";
+import { resolveAgentPin, type AgentPin } from "../../agents/versions.js";
+import { KOBE_GALLERY_KEY } from "../../gallery/definitions.js";
+import type { BlobStore } from "../../retention/blobs.js";
+import type { ServerRunOrchestrator } from "../../runs/orchestrator.js";
+import type { SandboxProvider } from "../../sandbox/provider.js";
+import { liveConnection } from "../../sandbox-wire/commands.js";
+import type { SandboxRouter, SandboxTarget } from "../../sandbox-wire/types.js";
+import { messageText } from "../../threads/messages.js";
+import { evalChecks, type EvalJudge, type EvalObservation } from "./checks.js";
+import { errorAttempt, type EvalAttempt } from "./execution.js";
+import { caseFixtureList, readFixtures } from "./storage.js";
+import {
+  claimNextExecution,
+  evalRunOpen,
+  markExecution,
+  recordAttempt,
+  type ClaimedExecution,
+} from "./store.js";
+
+// The skill eval runner (KOBE-325, SK16). Every server replica sweeps: for each team with queued
+// executions it claims as many as the team's cap allows (the claim is atomic across replicas) and
+// runs each in its own ephemeral sandbox: create the claim `e-<thread>`, wait for its wire
+// connection, copy the case's fixtures in, send the case's prompt as an ordinary run of the eval
+// thread (auto mode; would-ask calls are denied), wait for the end (wall clock, cancel, turns),
+// take the after-snapshot, make the checks, delete the sandbox, record the attempt (one retry in a
+// new thread and sandbox). A replica that dies mid-execution leaves it to the reaper.
+
+export interface SkillEvalRunnerTuning {
+  /** How long a sandbox may take to have a pod (it may wait for the eval quota). */
+  readonly podWaitMs: number;
+  /** How long its agent may take to connect once the pod exists. */
+  readonly connectWaitMs: number;
+  readonly pollMs: number;
+  /** The cluster deletes a claim this long after its execution's deadline (backstop). */
+  readonly shutdownGraceMs: number;
+}
+
+export const SKILL_EVAL_RUNNER_TUNING: SkillEvalRunnerTuning = {
+  podWaitMs: 3 * 60_000,
+  connectWaitMs: 3 * 60_000,
+  pollMs: 1_000,
+  shutdownGraceMs: 5 * 60_000,
+};
+
+export interface SkillEvalRunnerOptions {
+  readonly db: KobeDb;
+  readonly blobs: BlobStore;
+  readonly router: SandboxRouter;
+  readonly runs: Pick<ServerRunOrchestrator, "submitMessage" | "cancel">;
+  readonly provider: Pick<SandboxProvider, "createEvalSandbox" | "deleteEvalSandbox">;
+  /** The chart's `sandbox.skillEval.maxConcurrentPerTeam` (the eval quota's size). */
+  readonly maxConcurrentPerTeam: number;
+  readonly log: Pick<Logger, "info" | "warn" | "error">;
+  /** The judge (KOBE-326); absent: a `judge` check fails `judge_failed`. */
+  readonly judge?: EvalJudge;
+  readonly tuning?: Partial<SkillEvalRunnerTuning>;
+  /** How long a stale wire connection still counts as live (the wire's `staleConnectionMs`). */
+  readonly staleConnectionMs?: number;
+}
+
+class EvalAbort extends Error {
+  constructor(readonly reason: "cancelled" | "timeout" | "start") {
+    super(reason);
+  }
+}
+
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref());
+
+const ownerActor = (teamId: string, userId: string): ActorContext => ({
+  user_id: userId,
+  team_id: teamId,
+  site_role: "user",
+  team_role: "member",
+});
+
+export class SkillEvalRunner {
+  readonly #o: SkillEvalRunnerOptions;
+  readonly #t: SkillEvalRunnerTuning;
+  readonly #running = new Map<string, Promise<void>>();
+  #closed = false;
+  #sweeping: Promise<number> | undefined;
+
+  constructor(options: SkillEvalRunnerOptions) {
+    this.#o = options;
+    this.#t = { ...SKILL_EVAL_RUNNER_TUNING, ...options.tuning };
+  }
+
+  /** Executions running on this replica. */
+  get active(): number {
+    return this.#running.size;
+  }
+
+  /** Claims and starts what the caps allow, in every team; resolves with how many started. */
+  sweep(): Promise<number> {
+    if (this.#closed) return Promise.resolve(0);
+    this.#sweeping ??= this.#sweep().finally(() => {
+      this.#sweeping = undefined;
+    });
+    return this.#sweeping;
+  }
+
+  /** Resolves when every execution started so far has finished (tests, shutdown). */
+  async idle(): Promise<void> {
+    while (this.#running.size > 0) await Promise.allSettled([...this.#running.values()]);
+  }
+
+  close(): void {
+    this.#closed = true;
+  }
+
+  async #sweep(): Promise<number> {
+    const limits = await siteEvalLimits(this.#o.db);
+    const cap = Math.min(limits.maxConcurrentSandboxes, this.#o.maxConcurrentPerTeam);
+    const wallClockMs = limits.caseWallClockMinutes * 60_000;
+    const all = await this.#o.db.select({ id: teams.id, slug: teams.slug }).from(teams);
+    let started = 0;
+    for (const team of all) {
+      for (;;) {
+        if (this.#closed) return started;
+        let claim: ClaimedExecution | null;
+        try {
+          claim = await claimNextExecution(this.#o.db, team.id, {
+            cap,
+            wallClockMs,
+            pinFor: kobePin,
+          });
+        } catch (err) {
+          this.#o.log.error({ err, team_id: team.id }, "skill evals: claim failed");
+          break;
+        }
+        if (!claim) break;
+        started += 1;
+        const key = `${claim.teamId}:${claim.threadId}`;
+        const task = this.#execute(team, claim).finally(() => this.#running.delete(key));
+        this.#running.set(key, task);
+      }
+    }
+    return started;
+  }
+
+  async #execute(team: { id: string; slug: string }, claim: ClaimedExecution): Promise<void> {
+    const started = Date.now();
+    let attempt: EvalAttempt;
+    try {
+      attempt = await this.#attempt(team, claim, started);
+    } catch (err) {
+      if (!(err instanceof EvalAbort))
+        this.#o.log.warn(
+          { err, team_id: claim.teamId, eval_run_id: claim.evalRunId, case_id: claim.caseId },
+          "skill evals: execution failed",
+        );
+      attempt = errorAttempt(claim.threadId, null, Date.now() - started);
+    } finally {
+      // Cleanup on every path (KOBE-325): the claim's shutdownTime and the reaper are backstops.
+      await this.#o.provider
+        .deleteEvalSandbox(team, claim.threadId)
+        .catch((err: unknown) =>
+          this.#o.log.warn(
+            { err, thread_id: claim.threadId },
+            "skill evals: sandbox delete failed",
+          ),
+        );
+    }
+    try {
+      await recordAttempt(this.#o.db, claim, attempt, claim.runModel.used);
+    } catch (err) {
+      this.#o.log.error({ err, eval_run_id: claim.evalRunId }, "skill evals: could not record");
+    }
+  }
+
+  async #attempt(
+    team: { id: string; slug: string },
+    claim: ClaimedExecution,
+    started: number,
+  ): Promise<EvalAttempt> {
+    const c = claim.suite.cases.find((x) => x.id === claim.caseId);
+    if (!c) throw new Error(`the suite has no case ${claim.caseId}`);
+    const target: SandboxTarget = {
+      teamId: claim.teamId,
+      userId: claim.userId,
+      evalThreadId: claim.threadId,
+    };
+    const deadline = claim.deadlineAt.getTime();
+    await this.#o.provider.createEvalSandbox(
+      team,
+      {
+        userId: claim.userId,
+        threadId: claim.threadId,
+        evalRunId: claim.evalRunId,
+        shutdownAt: new Date(deadline + this.#t.shutdownGraceMs),
+      },
+      Math.max(1_000, Math.min(this.#t.podWaitMs, deadline - Date.now())),
+    );
+    await this.#waitConnected(
+      target,
+      claim,
+      Math.min(deadline, Date.now() + this.#t.connectWaitMs),
+    );
+    const fixtures = await this.#prepare(target, claim, c);
+    const actor = ownerActor(claim.teamId, claim.userId);
+    const submitted = await this.#o.runs.submitMessage(actor, {
+      thread_id: claim.threadId,
+      content: c.prompt,
+      trigger: "user",
+      approval_mode: "auto",
+    });
+    const runId = submitted.run_id;
+    await markExecution(this.#o.db, claim, "running", runId);
+    const end = await this.#waitRun(claim, runId, c.expect.max_turns, deadline);
+    if (end !== "ended") {
+      await this.#o.runs.cancel(actor, runId).catch(() => undefined);
+      if (end === "cancelled") throw new EvalAbort("cancelled");
+    }
+    const observed = await this.#observe(claim, runId);
+    if (end === "timeout") {
+      return {
+        ...observed.numbers,
+        status: "timed_out",
+        checks: [],
+        judgeCostUsd: 0,
+        durationMs: Date.now() - started,
+        threadId: claim.threadId,
+        runId,
+      };
+    }
+    await markExecution(this.#o.db, claim, "collecting");
+    if (observed.status !== "completed" && end !== "over_turns") {
+      return {
+        ...errorAttempt(claim.threadId, runId, Date.now() - started, observed.numbers.costUsd),
+      };
+    }
+    const snapshot = c.expect.outputs ? await this.#snapshot(target, claim, c) : { walks: [] };
+    const obs: EvalObservation = {
+      answer: observed.answer,
+      skillUses: claim.withSkill ? observed.numbers.skillUses : 0,
+      costUsd: observed.numbers.costUsd,
+      turns: observed.numbers.turns,
+      overTurnLimit: end === "over_turns",
+      deniedToolCalls: observed.numbers.deniedToolCalls,
+      snapshot,
+    };
+    const checked = await evalChecks(c, claim.withSkill, obs, fixtures, {
+      ...(this.#o.judge ? { judge: this.#o.judge } : {}),
+    });
+    return {
+      status: checked.status,
+      checks: checked.checks,
+      skillUses: obs.skillUses,
+      costUsd: obs.costUsd,
+      judgeCostUsd: checked.judgeCostUsd,
+      durationMs: Date.now() - started,
+      turns: obs.turns,
+      deniedToolCalls: obs.deniedToolCalls,
+      threadId: claim.threadId,
+      runId,
+    };
+  }
+
+  async #waitConnected(target: SandboxTarget, claim: ClaimedExecution, until: number) {
+    const stale = this.#o.staleConnectionMs ?? 45_000;
+    for (;;) {
+      const live = await withTeam(this.#o.db, target.teamId, (tx) =>
+        liveConnection(tx, target, stale),
+      );
+      if (live) return;
+      if (!(await evalRunOpen(this.#o.db, claim.teamId, claim.evalRunId)))
+        throw new EvalAbort("cancelled");
+      if (Date.now() >= until) throw new EvalAbort("start");
+      await delay(this.#t.pollMs);
+    }
+  }
+
+  /** The case's fixtures into the sandbox; what the checks compare the after-snapshot with. */
+  async #prepare(target: SandboxTarget, claim: ClaimedExecution, c: SkillEvalCase) {
+    if (c.files.length === 0) return [];
+    if (!claim.fixturesKey) throw new Error("the eval has no stored fixtures");
+    const stored = await readFixtures(this.#o.blobs, claim.fixturesKey);
+    if (!stored) throw new Error("the eval's fixtures are missing");
+    const files = caseFixtureList(stored, c.files);
+    const out = await this.#o.router.evalPrepare(target, { threadId: claim.threadId, files });
+    if (!out.ok) throw new Error(`eval.prepare: ${out.error.code}`);
+    return files.map((f) => ({ path: f.path, sha256: f.sha256 }));
+  }
+
+  async #snapshot(
+    target: SandboxTarget,
+    claim: ClaimedExecution,
+    c: SkillEvalCase,
+  ): Promise<EvalWorkspaceSnapshot | null> {
+    const out = await this.#o.router.evalSnapshot(target, {
+      threadId: claim.threadId,
+      roots: evalOutputWalkRoots(c.expect.outputs ?? []),
+      hashPaths: c.files.map(fixtureWorkspacePath),
+    });
+    if (!out.ok) return null;
+    const parsed = evalSnapshotResultSchema.safeParse(out.data);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** Until the run ends, the deadline passes, the eval is cancelled or a turn past the limit. */
+  async #waitRun(
+    claim: ClaimedExecution,
+    runId: string,
+    maxTurns: number,
+    deadline: number,
+  ): Promise<"ended" | "timeout" | "cancelled" | "over_turns"> {
+    for (;;) {
+      const state = await withTeam(this.#o.db, claim.teamId, (tx) =>
+        runState(tx, claim.teamId, runId),
+      );
+      if (state.ended) return "ended";
+      if (state.turns > maxTurns) return "over_turns";
+      if (Date.now() >= deadline) return "timeout";
+      if (!(await evalRunOpen(this.#o.db, claim.teamId, claim.evalRunId))) return "cancelled";
+      await delay(this.#t.pollMs);
+    }
+  }
+
+  async #observe(claim: ClaimedExecution, runId: string) {
+    return withTeam(this.#o.db, claim.teamId, async (tx) => {
+      const run = await tx.execute<{ status: string; skills_used: { hash?: string }[] }>(sql`
+        SELECT status, skills_used FROM runs WHERE team_id = ${claim.teamId} AND id = ${runId}`);
+      const usage = await tx.execute<{ cost: string | number | null; n: string | number }>(sql`
+        SELECT coalesce(sum(cost_usd), 0) AS cost, count(*) AS n FROM run_usage
+         WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND kind = 'run'`);
+      const denied = await tx.execute<{ n: string | number }>(sql`
+        SELECT count(*) AS n FROM run_events
+         WHERE team_id = ${claim.teamId} AND run_id = ${runId} AND type = 'policy.denied'`);
+      const answers = await tx.execute<{ content: unknown }>(sql`
+        SELECT payload -> 'message' -> 'content' AS content FROM thread_entries
+         WHERE team_id = ${claim.teamId} AND thread_id = ${claim.threadId} AND type = 'message'
+           AND payload -> 'message' ->> 'role' = 'assistant'
+         ORDER BY seq DESC LIMIT 8`);
+      const answer = answers.rows.map((r) => messageText(r.content)).find((t) => t.trim() !== "");
+      const used = run.rows[0]?.skills_used ?? [];
+      return {
+        status: run.rows[0]?.status ?? "failed",
+        answer: answer ?? "",
+        numbers: {
+          skillUses: used.filter((u) => u.hash === claim.runtimeHash).length,
+          costUsd: Math.round(Number(usage.rows[0]?.cost ?? 0) * 1e6) / 1e6,
+          turns: Number(usage.rows[0]?.n ?? 0),
+          deniedToolCalls: Number(denied.rows[0]?.n ?? 0),
+        },
+      };
+    });
+  }
+}
+
+async function runState(tx: KobeTx, teamId: string, runId: string) {
+  const res = await tx.execute<{ ended: boolean; turns: string | number }>(sql`
+    SELECT r.status NOT IN ('queued', 'running', 'waiting_approval') AS ended,
+           (SELECT count(*) FROM run_usage u
+             WHERE u.team_id = r.team_id AND u.run_id = r.id AND u.kind = 'run') AS turns
+      FROM runs r WHERE r.team_id = ${teamId} AND r.id = ${runId}`);
+  const row = res.rows[0];
+  return { ended: row?.ended ?? true, turns: Number(row?.turns ?? 0) };
+}
+
+/** The Site's eval limits (`site_skill_settings.eval_limits`), defaults filled in. */
+export async function siteEvalLimits(db: KobeDb): Promise<SkillEvalLimits> {
+  const [row] = await db.select({ limits: siteSkillSettings.evalLimits }).from(siteSkillSettings);
+  const parsed = skillEvalLimitsSchema.safeParse(row?.limits ?? {});
+  return parsed.success ? parsed.data : skillEvalLimitsSchema.parse({});
+}
+
+/** The Kobe gallery agent's pin, as Workbench test chats use it. */
+export async function kobePin(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+): Promise<AgentPin | null> {
+  const [kobe] = await tx
+    .select({ id: siteAgents.id })
+    .from(siteAgents)
+    .where(
+      and(
+        eq(siteAgents.scope, "gallery"),
+        eq(siteAgents.galleryKey, KOBE_GALLERY_KEY),
+        isNull(siteAgents.archivedAt),
+      ),
+    );
+  if (!kobe) return null;
+  const pin = await resolveAgentPin(tx, { teamId, userId }, kobe.id);
+  return pin.ok ? pin.value : null;
+}

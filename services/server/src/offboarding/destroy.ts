@@ -1,6 +1,7 @@
 import { SYSTEM_ACTOR, eq, sql, teams, withTeam } from "@kobe/db";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAudit } from "../audit/record.js";
+import { offboardSkillEvals } from "./skill-evals.js";
 import {
   RETAIN_DAYS,
   type Departed,
@@ -43,6 +44,8 @@ export async function offboardSandbox(
   const team = await findTeam(ctx, target.teamId);
   if (!team) return "no_sandbox";
   const { userId, teamId } = target;
+  // KOBE-325: the member's eval runs stop and their eval sandboxes go, sandbox or not.
+  await offboardSkillEvals(ctx, team, userId);
   const provider = ctx.provider();
   const destroyed = provider
     ? await provider.destroySandbox(team, userId, { retainVolume: true })

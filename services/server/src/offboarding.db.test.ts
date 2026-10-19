@@ -29,6 +29,7 @@ type Person = (typeof WHO)[number];
 class FakeProvider implements OffboardProvider {
   readonly destroyed: string[] = [];
   readonly deletedVolumes: string[] = [];
+  readonly deletedEvalSandboxes: string[] = [];
   failDestroy = false;
   failDelete = false;
 
@@ -41,6 +42,11 @@ class FakeProvider implements OffboardProvider {
   async deleteVolume(_team: unknown, pvc: string) {
     if (this.failDelete) throw new Error("Kubernetes API unavailable");
     this.deletedVolumes.push(pvc);
+  }
+
+  async deleteEvalSandbox(_team: unknown, threadId: string) {
+    this.deletedEvalSandboxes.push(threadId);
+    return true;
   }
 }
 
@@ -236,6 +242,37 @@ describe("removal destroys the sandbox at once and keeps the volume (ac-1)", () 
     // Nothing of the workspace is deleted yet.
     expect(await workspaceRows(ids.bob)).toBe(5);
     expect(provider.deletedVolumes).not.toContain(`workspace-u-${ids.bob}`);
+  });
+
+  it("cancels a departing member's eval runs and deletes their live eval sandboxes (KOBE-325)", async () => {
+    const evalRunId = randomUUID();
+    const threadId = randomUUID();
+    const h = "d".repeat(64);
+    await admin.query(
+      `INSERT INTO skill_eval_runs (team_id, id, started_by, subject_kind, subject_id, subject_rev,
+         skill_name, package_hash, runtime_hash, bundle_key, bundle_size, mode, status, suite,
+         limits, progress_total)
+       VALUES ($1, $2, $3, 'draft', $4, 1, 'report', $5, $5, 'k', 10, 'full', 'running',
+         '{"cases":[]}', '{}', 1)`,
+      [teamId, evalRunId, ids.bob, randomUUID(), h],
+    );
+    await admin.query(
+      `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval, skill_eval_run_id)
+       VALUES ($1, $2, $3, 'e', true, $4)`,
+      [teamId, threadId, ids.bob, evalRunId],
+    );
+    await admin.query(
+      `INSERT INTO skill_eval_results (team_id, eval_run_id, case_id, with_skill, state, thread_id, deadline_at)
+       VALUES ($1, $2, 'a', true, 'running', $3, now() + interval '5 minutes')`,
+      [teamId, evalRunId, threadId],
+    );
+    await deps.offboarding.offboardMember(teamId, ids.bob, "member_removed");
+    const { rows } = await admin.query<{ status: string }>(
+      `SELECT status FROM skill_eval_runs WHERE team_id = $1 AND id = $2`,
+      [teamId, evalRunId],
+    );
+    expect(rows[0]?.status).toBe("cancelled");
+    expect(provider.deletedEvalSandboxes).toContain(threadId);
   });
 
   it("still removes the member when Kubernetes is down, and the sweep finishes the job", async () => {

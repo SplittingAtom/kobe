@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { withTeam, type KobeTx } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import {
   decodeActivityCursor,
@@ -152,6 +153,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   const db = deps.database.db;
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
+  // KOBE-325: a skill eval's thread is the eval runner's (reads stay open to its owner).
+  app.use("/:id", refuseEvalThreadWrites(deps, "thread"));
+  app.use("/:id/*", refuseEvalThreadWrites(deps, "thread"));
 
   /** Runs `fn` in the active team's transaction as the signed-in viewer. */
   const asViewer = <T>(c: ThreadContext, fn: (tx: KobeTx, viewer: Viewer) => Promise<T>) => {
