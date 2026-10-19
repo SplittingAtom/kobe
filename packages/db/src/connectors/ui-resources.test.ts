@@ -58,5 +58,8 @@ describe("ui:// resources (KOBE-433)", () => {
     const [kept] = parseToolsSnapshot([{ ...tool, ui: { resource_uri: "ui://c/app" } }]);
     expect(kept?.ui).toEqual({ resource_uri: "ui://c/app" });
     expect(parseToolsSnapshot([{ ...tool, ui: { resource_uri: "https://x" } }])).toEqual([]);
+    const [visible] = parseToolsSnapshot([{ ...tool, ui: { visibility: ["app"] } }]);
+    expect(visible?.ui).toEqual({ visibility: ["app"] });
+    expect(parseToolsSnapshot([{ ...tool, ui: { visibility: ["user"] } }])).toEqual([]);
   });
 });

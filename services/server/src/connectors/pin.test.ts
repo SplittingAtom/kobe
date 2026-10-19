@@ -154,3 +154,23 @@ describe("MCP Apps template references (KOBE-433)", () => {
     }
   });
 });
+
+describe("visibility (KOBE-435)", () => {
+  const withVisibility = (visibility: unknown) => ({ ...tool, _meta: { ui: { visibility } } });
+  const pinned = (v: unknown) => {
+    const r = buildSnapshot("jira", [withVisibility(v)]);
+    if (!r.ok) throw new Error("fixture");
+    return r.tools[0];
+  };
+
+  it("pins a visibility other than the default, normalized, as part of the hash", () => {
+    expect(pinned(["app"])?.ui).toEqual({ visibility: ["app"] });
+    expect(pinned(["model", "app", "app", "user"])?.ui).toBeUndefined();
+    expect(pinned(["model", "x"])?.ui).toEqual({ visibility: ["model"] });
+    expect(pinned([])?.ui).toEqual({ visibility: [] });
+    expect(pinned("app")?.ui).toBeUndefined();
+    expect(pinned(["app"])?.sha256).not.toBe(pinned(["model"])?.sha256);
+    // Spelling out the default is no change.
+    expect(pinned(["app", "model"])?.sha256).toBe(toolHash(tool));
+  });
+});

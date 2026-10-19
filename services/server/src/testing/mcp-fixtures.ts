@@ -18,6 +18,8 @@ export interface ToolSpec {
   /** `false` → write; undefined (and not read-only) → destructive (D29). */
   readonly destructive?: boolean;
   readonly status?: PinnedTool["status"];
+  /** The pinned `_meta.ui` (KOBE-433/435). */
+  readonly ui?: PinnedTool["ui"];
 }
 
 export function piName(connectorName: string, tool: string): string {
@@ -40,6 +42,7 @@ export function pinnedTool(connectorName: string, spec: ToolSpec): PinnedTool {
       .update(JSON.stringify([spec.name, description, input_schema]))
       .digest("hex"),
     status: spec.status ?? "pinned",
+    ...(spec.ui === undefined ? {} : { ui: spec.ui }),
   };
 }
 

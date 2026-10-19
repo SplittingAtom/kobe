@@ -26,11 +26,18 @@ export const pinnedToolAnnotationsSchema = z.object({
 });
 
 /**
- * The MCP Apps template a tool opens (`_meta.ui.resourceUri`, KOBE-433). Part of the tool's pin
- * when present, so pointing a tool at another template is drift.
+ * The tool's MCP Apps `_meta.ui`: the template it opens (`resourceUri`, KOBE-433) and who may
+ * see it (`visibility`, KOBE-435). Part of the tool's pin when present, so pointing a tool at
+ * another template or changing its visibility is drift.
  */
 export const pinnedToolUiSchema = z.strictObject({
-  resource_uri: z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN),
+  resource_uri: z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN).optional(),
+  /**
+   * `_meta.ui.visibility` (KOBE-435, MA6), only when it differs from the default
+   * `["model", "app"]`: sorted, known values only. Without `"model"` the tool is never offered
+   * to or callable by Pi; without `"app"` no app may call it.
+   */
+  visibility: z.array(z.enum(["app", "model"])).max(2).optional(),
 });
 export type PinnedToolUi = z.infer<typeof pinnedToolUiSchema>;
 

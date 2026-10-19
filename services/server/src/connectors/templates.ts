@@ -137,10 +137,12 @@ export function revalidate(t: {
  * proxy already reads no others). Entries that do not parse are dropped.
  */
 export function liveTemplates(
-  tools: readonly { readonly ui?: { readonly resource_uri: string } | undefined }[],
+  tools: readonly { readonly ui?: { readonly resource_uri?: string | undefined } | undefined }[],
   raw: readonly unknown[],
 ): LiveEntry[] {
-  const named = new Set(tools.flatMap((t) => (t.ui ? [t.ui.resource_uri] : [])));
+  const named = new Set(
+    tools.flatMap((t) => (t.ui?.resource_uri === undefined ? [] : [t.ui.resource_uri])),
+  );
   const seen = new Set<string>();
   const entries: LiveEntry[] = [];
   for (const item of raw) {

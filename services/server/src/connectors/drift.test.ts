@@ -186,3 +186,25 @@ describe("tools pinned before KOBE-433 whose upstream names a template (review H
     expect(r.tools[0]).not.toHaveProperty("ui");
   });
 });
+
+describe("visibility changes drift (KOBE-435 ac-2)", () => {
+  const vis = (visibility: string[]) => {
+    const s = buildSnapshot("srv", [{ ...listed("t"), _meta: { ui: { visibility } } }]);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("drifts a tool whose visibility changed, and approval takes the new one", () => {
+    const r = applyDrift(vis(["model", "app"]), vis(["app"]));
+    expect(r.changed).toEqual(["t"]);
+    expect(r.tools[0]).toMatchObject({
+      status: "drifted",
+      proposed: { ui: { visibility: ["app"] } },
+    });
+    const approved = approveTools(r.tools, [
+      { name: "t", sha256: r.tools[0]?.proposed?.sha256 ?? "" },
+    ]);
+    expect(approved.ok && approved.tools[0]?.ui).toEqual({ visibility: ["app"] });
+    expect(applyDrift(vis(["app"]), vis(["model", "app"])).changed).toEqual(["t"]);
+  });
+});

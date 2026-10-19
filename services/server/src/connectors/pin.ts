@@ -32,13 +32,32 @@ const listedToolSchema = z.object({
 const UI_URI_MAX = 2048;
 
 /** The `ui://` template a listed tool names, if any (anything else is not an app). */
+/**
+ * A declared `_meta.ui.visibility` (KOBE-435, MA6), normalized: known values only, sorted, and
+ * undefined when it says the default (`["model", "app"]`, or nothing), so a server spelling out
+ * the default is not drift. An array of nothing Kobe knows means visible to neither.
+ */
+function visibilityOf(value: unknown): PinnedToolUi["visibility"] {
+  if (!Array.isArray(value)) return undefined;
+  const known = [
+    ...new Set(value.filter((v): v is "app" | "model" => v === "app" || v === "model")),
+  ].sort();
+  return known.length === 2 ? undefined : known;
+}
+
+/** The pinned `_meta.ui` of a listed tool: its `ui://` template and visibility, if any. */
 function uiOf(meta: Record<string, unknown> | undefined): PinnedToolUi | undefined {
   const ui = meta?.ui;
   if (typeof ui !== "object" || ui === null) return undefined;
-  const uri = (ui as Record<string, unknown>).resourceUri;
-  return typeof uri === "string" && uri.length <= UI_URI_MAX && UI_RESOURCE_URI_PATTERN.test(uri)
-    ? { resource_uri: uri }
-    : undefined;
+  const declared = ui as Record<string, unknown>;
+  const uri = declared.resourceUri;
+  const resource =
+    typeof uri === "string" && uri.length <= UI_URI_MAX && UI_RESOURCE_URI_PATTERN.test(uri)
+      ? { resource_uri: uri }
+      : {};
+  const visibility = visibilityOf(declared.visibility);
+  const pinned = { ...resource, ...(visibility === undefined ? {} : { visibility }) };
+  return Object.keys(pinned).length === 0 ? undefined : pinned;
 }
 
 export interface PinInput {

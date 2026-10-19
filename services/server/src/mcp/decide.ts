@@ -1,3 +1,4 @@
+import { modelVisible } from "../connectors/visibility.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   canonicalJson,
@@ -334,6 +335,13 @@ export async function decideMcpCall(
       return await denied(
         "tool_drifted",
         `${pinned.pi_name} changed since it was approved and is disabled until an admin re-approves it.`,
+      );
+    }
+    // An app-only tool (KOBE-435) is not offered to agents: for Pi it does not exist.
+    if (!modelVisible(pinned)) {
+      return await denied(
+        "unknown_tool",
+        `${pinned.pi_name} is offered only to apps, not to agents.`,
       );
     }
     if (!exposedTools(connector).some((t) => t.pi_name === pinned.pi_name)) {
