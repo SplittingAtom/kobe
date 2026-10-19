@@ -82,3 +82,16 @@ describe("threadHeader title (KOBE-219 review L3)", () => {
     expect(heading).toBe("# \\[click\\]\\(javascript:alert\\(1\\)\\) \\*bold\\* \\<b\\>x\\</b\\>");
   });
 });
+
+describe("MCP Apps context in exports (KOBE-439 ac-3)", () => {
+  it("keeps the fenced, untrusted block of a sent message", async () => {
+    const { withAppContext } = await import("../apps/context-block.js");
+    const text = withAppContext(
+      [{ connectorName: "Catalyst", data: { structuredContent: { table: "c.n.t" } } }],
+      "What is in it?",
+    );
+    const md = entryMarkdown({ type: "message", message: { role: "user", content: text } });
+    expect(md).toContain('<app-context source="connector:Catalyst" untrusted="true">');
+    expect(md).toContain("What is in it?");
+  });
+});
