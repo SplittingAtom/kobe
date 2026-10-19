@@ -443,26 +443,34 @@ describe("skill eval runner (KOBE-325)", () => {
     await closeEvals(w.team);
   });
 
-  it("bounds a member's open evals (review M4)", async () => {
+  it("bounds a member's open evals (review M4) and refuses a second start of the same eval (KOBE-328)", async () => {
     const w = await world();
-    const id = await draftWith(
-      w.owner,
-      "bounded",
-      ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
-      {},
-    );
+    const suite = [
+      "cases:",
+      "  - id: a",
+      "    prompt: P",
+      "    expect: {contains: Total}",
+      "",
+    ].join("\n");
+    const drafts: string[] = [];
+    for (let i = 0; i < 4; i += 1) drafts.push(await draftWith(w.owner, `bounded-${i}`, suite, {}));
+    const start = (draft: string) =>
+      f.on(0, w.owner).post(`/v1/skills/drafts/${draft}/evals`, { mode: "with_only" });
     const open: string[] = [];
-    for (let i = 0; i < 3; i += 1) {
-      const ok = await f
-        .on(0, w.owner)
-        .post(`/v1/skills/drafts/${id}/evals`, { mode: "with_only" });
+    for (const draft of drafts.slice(0, 3)) {
+      const ok = await start(draft);
       expect(ok.status, JSON.stringify(ok.json)).toBe(202);
       open.push(ok.json.evalRunId as string);
+      if (open.length === 1) {
+        // The same revision and mode again (a double click): refused, nothing stored.
+        const before = objects.objects.size;
+        const again = await start(draft);
+        expect([again.status, again.json.code]).toEqual([409, "eval_already_running"]);
+        expect(objects.objects.size).toBe(before);
+      }
     }
     const before = objects.objects.size;
-    const refused = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
-      mode: "with_only",
-    });
+    const refused = await start(must(drafts[3], "draft"));
     expect(refused.status).toBe(409);
     expect(refused.json).toMatchObject({ code: "too_many_evals" });
     expect(objects.objects.size).toBe(before);

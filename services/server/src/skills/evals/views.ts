@@ -1,8 +1,10 @@
 import { sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
 import {
   skillEvalRunSchema,
+  withoutSkillEvalCosts,
   type SkillEvalExecutionStatus,
   type SkillEvalRun,
+  type SkillEvalRunView,
   type SkillEvalSubject,
 } from "@kobe/protocol";
 import { teamRoleAllows } from "../../authz/permissions.js";
@@ -61,6 +63,15 @@ export interface EvalViewer {
   readonly role: TeamRole;
 }
 
+/**
+ * An eval's costs are for Team admins (who see team usage) and its starter only (KOBE-328,
+ * with the KOBE-327 estimate decision): anyone else gets the run without any cost field.
+ */
+export function viewFor(who: EvalViewer, run: SkillEvalRun): SkillEvalRunView {
+  const mayCost = run.startedBy === who.userId || teamRoleAllows(who.role, "team.budgets.manage");
+  return mayCost ? run : withoutSkillEvalCosts(run);
+}
+
 /** Its starter, and whoever can see its subject (a draft shared with them, a team version). */
 async function mayRead(tx: KobeTx, who: EvalViewer, r: RunRow): Promise<boolean> {
   if (r.started_by === who.userId) return true;
@@ -92,19 +103,19 @@ export async function evalStreamAccess(
 }
 
 /** Whether `who` may cancel it: its starter, or a team admin (review L6). */
-export const mayCancel = (who: EvalViewer, run: SkillEvalRun): boolean =>
+export const mayCancel = (who: EvalViewer, run: SkillEvalRunView): boolean =>
   run.startedBy === who.userId || teamRoleAllows(who.role, "team.skills.review");
 
 export async function readEvalRun(
   tx: KobeTx,
   who: EvalViewer,
   id: string,
-): Promise<SkillEvalRun | null> {
+): Promise<SkillEvalRunView | null> {
   const res = await tx.execute<RunRow>(sql`
     SELECT ${COLUMNS} FROM skill_eval_runs WHERE team_id = ${who.teamId} AND id = ${id}`);
   const r = res.rows[0];
   if (!r || !(await mayRead(tx, who, r))) return null;
-  return toView(r);
+  return viewFor(who, toView(r));
 }
 
 /** A subject's eval history, newest first (KOBE-328 shows it). */
@@ -113,13 +124,13 @@ export async function listEvalRuns(
   who: EvalViewer,
   subject: { readonly kind: "draft" | "team" | "personal"; readonly id: string },
   limit = 50,
-): Promise<SkillEvalRun[]> {
+): Promise<SkillEvalRunView[]> {
   const res = await tx.execute<RunRow>(sql`
     SELECT ${COLUMNS} FROM skill_eval_runs
      WHERE team_id = ${who.teamId} AND subject_kind = ${subject.kind} AND subject_id = ${subject.id}
      ORDER BY started_at DESC LIMIT ${limit}`);
-  const out: SkillEvalRun[] = [];
-  for (const r of res.rows) if (await mayRead(tx, who, r)) out.push(toView(r));
+  const out: SkillEvalRunView[] = [];
+  for (const r of res.rows) if (await mayRead(tx, who, r)) out.push(viewFor(who, toView(r)));
   return out;
 }
 

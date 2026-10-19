@@ -1,5 +1,4 @@
 import { MODEL_ALIAS_PATTERN } from "@kobe/db";
-import { TEAM_EVAL_CAP_USD_MESSAGE, teamEvalCapSchema } from "@kobe/protocol";
 import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -49,8 +48,6 @@ const settingsSchema = z
     buildersMayInstallCatalog: z.boolean().optional(),
     /** The team's eval judge (KOBE-326): one of its enabled models, or null for the default. */
     evalJudgeAlias: z.string().regex(new RegExp(MODEL_ALIAS_PATTERN)).max(64).nullable().optional(),
-    /** The monthly team eval cap (KOBE-327): `{usd}` or `{tokens}`, or null for none. */
-    evalCap: z.unknown().optional(),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined));
 const idSchema = z.uuid();
@@ -213,16 +210,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     if (!body)
       return invalidRequest(
         c,
-        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog (true or false) evalJudgeAlias (a model alias or null) and evalCap ({usd} or {tokens} per month, or null).",
-      );
-    // The cap with its own message (review-327 L4: a sub-cent cap is refused, never a 500).
-    const cap = body.evalCap === undefined ? undefined : teamEvalCapSchema.safeParse(body.evalCap);
-    if (cap && !cap.success)
-      return invalidRequest(
-        c,
-        typeof body.evalCap === "object" && body.evalCap !== null && "usd" in body.evalCap
-          ? TEAM_EVAL_CAP_USD_MESSAGE
-          : "evalCap is {usd} (dollars, whole cents) or {tokens} per month, or null for none.",
+        "Send one or more of personalSkillsDisabled, membersMayAddCatalog and buildersMayInstallCatalog (true or false) and evalJudgeAlias (a model alias or null). The eval cap is set at PUT /v1/team/budgets/eval-cap.",
       );
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
@@ -240,7 +228,6 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           : {}),
       },
       ...(body.evalJudgeAlias !== undefined ? { evalJudgeAlias: body.evalJudgeAlias } : {}),
-      ...(cap ? { evalCap: cap.data } : {}),
     });
     if (!set.ok)
       return c.json(

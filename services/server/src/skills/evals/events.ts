@@ -3,6 +3,7 @@ import {
   skillEvalCompletedPayloadSchema,
   skillEvalProgressPayloadSchema,
   type SkillEvalRun,
+  type SkillEvalRunView,
 } from "@kobe/protocol";
 import pg from "pg";
 import type { Logger } from "pino";
@@ -235,7 +236,7 @@ export async function skillEvalEventStream(
   });
 }
 
-function completedPayload(run: SkillEvalRun) {
+function completedPayload(run: SkillEvalRunView) {
   const card = run.scorecard;
   return skillEvalCompletedPayloadSchema.parse({
     evalRunId: run.id,

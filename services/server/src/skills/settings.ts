@@ -210,7 +210,7 @@ export function getEvalCap(db: KobeDb, teamId: string): Promise<TeamEvalCap> {
 
 const sameCap = (a: TeamEvalCap, b: TeamEvalCap) => JSON.stringify(a) === JSON.stringify(b);
 
-async function writeEvalCap(
+export async function writeEvalCap(
   tx: KobeTx,
   teamId: string,
   userId: string,
@@ -239,7 +239,6 @@ export interface TeamSkillSettingsChange {
   readonly personalSkillsDisabled?: boolean;
   readonly catalog?: Partial<CatalogSwitches>;
   readonly evalJudgeAlias?: string | null;
-  readonly evalCap?: TeamEvalCap;
 }
 
 /**
@@ -262,7 +261,16 @@ export function setTeamSkillSettings(
       await writePersonalSkillsDisabled(tx, teamId, userId, change.personalSkillsDisabled);
     if (change.catalog && Object.keys(change.catalog).length > 0)
       await writeCatalogSwitches(tx, teamId, userId, change.catalog);
-    if (change.evalCap !== undefined) await writeEvalCap(tx, teamId, userId, change.evalCap);
     return { ok: true } as const;
   });
+}
+
+/** Sets or removes the team eval cap in its own transaction (`PUT /v1/team/budgets/eval-cap`). */
+export function setEvalCap(
+  db: KobeDb,
+  teamId: string,
+  userId: string,
+  cap: TeamEvalCap,
+): Promise<void> {
+  return withTeam(db, teamId, (tx) => writeEvalCap(tx, teamId, userId, cap));
 }

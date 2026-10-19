@@ -220,6 +220,26 @@ export async function judgeModelFor(
   return { alias: (fallback.ok && fallback.model?.alias) || runModel.used, source: "team" };
 }
 
+const DUPLICATE =
+  "You already have an eval of this revision in this mode queued or running. Wait for it or cancel it.";
+
+/** Whether the starter already has an open eval of the same subject revision and mode. */
+async function sameEvalOpen(
+  tx: KobeTx,
+  who: EvalStarter,
+  subject: { readonly kind: string; readonly id: string; readonly rev: number },
+  mode: SkillEvalMode,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM skill_eval_runs
+     WHERE team_id = ${who.teamId} AND started_by = ${who.userId}
+       AND subject_kind = ${subject.kind} AND subject_id = ${subject.id}
+       AND subject_rev = ${subject.rev} AND mode = ${mode}
+       AND status IN ('queued', 'running') AND cancel_requested_at IS NULL
+     LIMIT 1`);
+  return res.rows.length > 0;
+}
+
 /** Open evals at once: per starter and per team (review M4). */
 export const MAX_OPEN_EVALS_PER_MEMBER = 3;
 export const MAX_OPEN_EVALS_PER_TEAM = 20;
@@ -358,6 +378,11 @@ export async function startSkillEval(
   const prepared = await prepareSubject(deps, who, subject);
   if (!prepared.ok) return prepared;
   const { pkg, valid, runtime, runtimeHash, suite, limits } = prepared;
+  // A double start is refused before the scan; checked again under the team's lock below.
+  const twice = await withTeam(deps.db, who.teamId, (tx) =>
+    sameEvalOpen(tx, who, { kind: pkg.kind, id: pkg.id, rev: pkg.rev }, mode),
+  );
+  if (twice) return refuse(409, "eval_already_running", DUPLICATE);
   const scanned = await scanPackage(valid.packageZip ?? runtime, who.userId);
   if (!scanned.ok) return scanned;
   const plan = planSkillEvalExecutions(suite, mode);
@@ -388,6 +413,10 @@ export async function startSkillEval(
   if (fixtures && fixturesKey) await putEvalObject(deps.blobs, fixturesKey, fixtures);
   const inserted = await withTeam(deps.db, who.teamId, async (tx) => {
     await lockTeamEvals(tx, who.teamId);
+    // A second start of what is already running (a double click, two tabs): refused under the
+    // team's lock, so two concurrent starts never both pass (KOBE-328 review L5).
+    if (await sameEvalOpen(tx, who, { kind: pkg.kind, id: pkg.id, rev: pkg.rev }, mode))
+      return DUPLICATE;
     const refusal = await openEvalsRefusal(tx, who);
     if (refusal) return refusal;
     await insertEvalRun(tx, {
@@ -416,7 +445,9 @@ export async function startSkillEval(
   });
   if (inserted) {
     await deps.blobs.objects.delete(fixturesKey ? [bundleKey, fixturesKey] : [bundleKey]);
-    return refuse(409, "too_many_evals", inserted);
+    return inserted === DUPLICATE
+      ? refuse(409, "eval_already_running", DUPLICATE)
+      : refuse(409, "too_many_evals", inserted);
   }
   return {
     ok: true,

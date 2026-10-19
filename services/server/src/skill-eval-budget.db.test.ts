@@ -135,8 +135,9 @@ async function startEval(w: SkillEvalWorld, draft: string, mode: "full" | "with_
 }
 const estimate = (w: SkillEvalWorld, draft: string, mode: "full" | "with_only") =>
   f.on(0, w.owner).get(`/v1/skills/drafts/${draft}/evals/estimate?mode=${mode}`);
+/** The team eval cap: a budget route (the budget permission, never the review one). */
 const putSettings = (w: SkillEvalWorld, body: object) =>
-  f.on(0, w.owner).request("PUT", "/v1/team/skill-review/settings", body);
+  f.on(0, w.owner).request("PUT", "/v1/team/budgets/eval-cap", body);
 async function evalRow(w: SkillEvalWorld, id: string) {
   const { rows } = await f.fx.admin.query<{
     status: string;
@@ -247,7 +248,7 @@ describe("skill eval budgets (KOBE-327)", () => {
     const w = await pricedWorld();
     const set = await putSettings(w, { evalCap: { usd: 0.05 } });
     expect(set.status, JSON.stringify(set.json)).toBe(200);
-    expect(set.json.evalCap).toEqual({ usd: 0.05 });
+    expect(set.json.eval_cap).toMatchObject({ usd: 0.05, tokens: null });
     const { rows: audit } = await f.fx.admin.query<{ target: unknown }>(
       `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'skill.eval_cap.changed'`,
       [w.team],
@@ -289,12 +290,85 @@ describe("skill eval budgets (KOBE-327)", () => {
     expect(est.json.blocked).toMatchObject({ code: "eval_cap_reached" });
     // Ordinary runs don't count against the cap, and raising it lets evals start again.
     const raised = await putSettings(w, { evalCap: { tokens: 1_000_000 } });
-    expect(raised.json.evalCap).toEqual({ tokens: 1_000_000 });
+    expect(raised.json.eval_cap).toMatchObject({ usd: null, tokens: 1_000_000 });
     expect((await startEval(w, draft, "with_only")).status).toBe(202);
     await bench.closeEvals(w.team);
     for (const usd of [0, 0.001, 12.345]) {
       const bad = await putSettings(w, { evalCap: { usd } });
       expect([bad.status, bad.json.message]).toEqual([400, TEAM_EVAL_CAP_USD_MESSAGE]);
+    }
+  });
+
+  it("the cap needs the budget permission: a member is refused, and the review settings take no cap", async () => {
+    const w = await pricedWorld();
+    const member = await f.member(w.team);
+    const asMember = await f
+      .on(0, member)
+      .request("PUT", "/v1/team/budgets/eval-cap", { evalCap: { usd: 100 } });
+    expect(asMember.status).toBe(403);
+    // The skill review settings (team.skills.review) no longer set it at all.
+    const viaReview = await f
+      .on(0, w.owner)
+      .request("PUT", "/v1/team/skill-review/settings", { evalCap: { usd: 100 } });
+    expect(viaReview.status).toBe(400);
+    const read = await f.on(0, w.owner).get("/v1/team/budgets");
+    expect(read.json.eval_cap).toMatchObject({ usd: null, tokens: null });
+  });
+
+  it("shows an eval's costs only to its starter and Team admins (KOBE-328)", async () => {
+    const w = await pricedWorld();
+    const builder = await f.member(w.team);
+    const viewer = await f.member(w.team);
+    for (const p of [builder, viewer])
+      await f.fx.admin.query(
+        `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+        [w.team, p.id],
+      );
+    const draft = await bench.draftWith(
+      builder,
+      "shared-costs",
+      ["cases:", "  - id: a", "    prompt: Case a", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const meta = await f.on(0, builder).get(`/v1/skills/drafts/${draft}`);
+    const shared = await f
+      .on(0, builder)
+      .request(
+        "PATCH",
+        `/v1/skills/drafts/${draft}`,
+        { shared: true },
+        { "if-match": `"${meta.json.draft.rev}"` },
+      );
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    const started = await f
+      .on(0, builder)
+      .post(`/v1/skills/drafts/${draft}/evals`, { mode: "with_only" });
+    const evalRunId = started.json.evalRunId as string;
+    await bench.drive(
+      bench.runnerFor(
+        spendingProvider(w, () => [1_000, 100]),
+        1,
+      ),
+      w.team,
+      evalRunId,
+    );
+    const costsOf = async (p: typeof builder) => {
+      const one = await f.on(0, p).get(`/v1/skill-evals/${evalRunId}`);
+      const list = await f.on(0, p).get(`/v1/skill-evals?draft_id=${draft}`);
+      expect(one.status, JSON.stringify(one.json)).toBe(200);
+      return { one: one.json, listed: list.json.evals[0] };
+    };
+    for (const p of [builder, w.owner]) {
+      const { one, listed } = await costsOf(p);
+      expect(one.scorecard.costUsd).toBeGreaterThan(0);
+      expect(listed.scorecard.costUsd).toBe(one.scorecard.costUsd);
+      expect(one.costsHidden).toBeUndefined();
+    }
+    const { one, listed } = await costsOf(viewer);
+    for (const run of [one, listed]) {
+      expect(run).toMatchObject({ costsHidden: true, startedBy: builder.id, status: "completed" });
+      expect(run.scorecard.passRate).toBe(1);
+      expect(JSON.stringify(run)).not.toMatch(/costUsd|CostUsd/);
     }
   });
 
