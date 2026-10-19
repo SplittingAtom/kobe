@@ -1,5 +1,7 @@
 import {
   APPROVAL_MODES,
+  MEMORY_TOOLS,
+  PROJECT_TOOLS,
   approvalModeSchema,
   type ApprovalMode,
   type PolicyCheckFrame,
@@ -184,6 +186,13 @@ const EVAL_NO_PROMPT: PolicyReason = {
   message: "Skill eval runs never ask for approval; this call was denied.",
 };
 
+const EVAL_ISOLATED: PolicyReason = {
+  code: "eval_run_isolated",
+  stage: "prompt",
+  message: "Skill evals never use your memory or projects; this call was denied.",
+};
+const EVAL_ISOLATED_TOOLS: ReadonlySet<string> = new Set([...MEMORY_TOOLS, ...PROJECT_TOOLS]);
+
 async function isEvalThread(db: KobeDb, teamId: string, threadId: string): Promise<boolean> {
   const res = await withTeam(db, teamId, (tx) =>
     tx.execute<{ skill_eval: boolean }>(sql`
@@ -365,6 +374,15 @@ export async function decidePolicyCheck(
       return denyFrame(frame, [{ ...input, message }], message);
     }
     const { decision } = evaluated;
+    // A skill eval's run (KOBE-325) never reads or writes the member's memory or projects: an eval
+    // measures the skill alone and leaves nothing behind in the member's own state.
+    const evalRun = await isEvalThread(deps.db, target.teamId, frame.thread_id);
+    if (evalRun && EVAL_ISOLATED_TOOLS.has(frame.tool)) {
+      const reasons = [EVAL_ISOLATED];
+      await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
+      await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
+      return denyFrame(frame, reasons, EVAL_ISOLATED.message);
+    }
     if (decision.effect === "allow") {
       // A remembered approval allowed it (KOBE-289): recorded first (last used, audit, tool card).
       // A rule revoked meanwhile, or a failed record, denies the call instead.
@@ -416,7 +434,7 @@ export async function decidePolicyCheck(
     }
     // A skill eval's run (KOBE-325) never asks either, whatever mode the floor clamped it to: the
     // call is denied and recorded (its `no_denied_tools` check reads the denial).
-    if (await isEvalThread(deps.db, target.teamId, frame.thread_id)) {
+    if (evalRun) {
       const reasons = [EVAL_NO_PROMPT, ...decision.reasons];
       await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
       await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);

@@ -49,6 +49,17 @@ export interface NewEvalRun {
   readonly plan: readonly { readonly caseId: string; readonly withSkill: boolean }[];
 }
 
+/**
+ * The suite as stored: what `skillEvalSuiteSchema` parses back to the same suite (a case without
+ * fixtures leaves `files` out, as the file did; the parser's defaults fill it in again).
+ */
+export function storedSuite(suite: SkillEvalSuite): Record<string, unknown> {
+  return {
+    ...suite,
+    cases: suite.cases.map(({ files, ...c }) => (files.length > 0 ? { ...c, files } : c)),
+  };
+}
+
 /** Inserts the run and one queued result per planned execution. */
 export async function insertEvalRun(tx: KobeTx, r: NewEvalRun): Promise<void> {
   await tx.execute(sql`
@@ -57,7 +68,7 @@ export async function insertEvalRun(tx: KobeTx, r: NewEvalRun): Promise<void> {
       limits, run_model, judge_model, progress_total)
     VALUES (${r.teamId}, ${r.id}, ${r.startedBy}, ${r.subject.kind}, ${r.subject.id},
       ${r.subject.rev}, ${r.skillName}, ${r.packageHash}, ${r.runtimeHash}, ${r.bundleKey},
-      ${r.bundleSize}, ${r.fixturesKey}, ${r.mode}, ${JSON.stringify(r.suite)}::jsonb,
+      ${r.bundleSize}, ${r.fixturesKey}, ${r.mode}, ${JSON.stringify(storedSuite(r.suite))}::jsonb,
       ${JSON.stringify(r.limits)}::jsonb, ${JSON.stringify(r.runModel)}::jsonb,
       ${r.judgeModel === null ? null : JSON.stringify(r.judgeModel)}::jsonb, ${r.plan.length})`);
   for (const p of r.plan) {
@@ -82,6 +93,7 @@ export interface ClaimedExecution {
   readonly suite: SkillEvalSuite;
   readonly fixturesKey: string | null;
   readonly runtimeHash: string;
+  readonly skillName: string;
   readonly runModel: SkillEvalRunModel;
 }
 
@@ -118,10 +130,11 @@ export async function claimNextExecution(
       suite: unknown;
       fixtures_key: string | null;
       runtime_hash: string;
+      skill_name: string;
       run_model: SkillEvalRunModel;
     }>(sql`
       SELECT x.eval_run_id, x.case_id, x.with_skill, x.attempt, x.first_attempt, r.started_by,
-             r.suite, r.fixtures_key, r.runtime_hash, r.run_model
+             r.suite, r.fixtures_key, r.runtime_hash, r.skill_name, r.run_model
         FROM skill_eval_results x
         JOIN skill_eval_runs r ON r.team_id = x.team_id AND r.id = x.eval_run_id
        WHERE x.team_id = ${teamId} AND x.state = 'queued' AND r.status IN ${OPEN}
@@ -175,6 +188,7 @@ export async function claimNextExecution(
       suite: skillEvalSuiteSchema.parse(row.suite),
       fixturesKey: row.fixtures_key,
       runtimeHash: row.runtime_hash,
+      skillName: row.skill_name,
       runModel: row.run_model,
     };
   });

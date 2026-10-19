@@ -1,0 +1,382 @@
+import { randomUUID } from "node:crypto";
+import pino from "pino";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { EvalWorkspaceSnapshot } from "@kobe/protocol";
+import { seedGalleryAgents } from "./gallery/seed.js";
+import { SkillEvalRunner } from "./skills/evals/runner.js";
+import { reapSkillEvals } from "./skills/evals/reaper.js";
+import { RawBody } from "./testing/browser.js";
+import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
+import { MemoryObjects } from "./testing/memory-objects.js";
+import { RunFixture, FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
+import { must, type Person } from "./testing/event-stream-fixture.js";
+
+/**
+ * The skill eval runner (KOBE-325) end to end against Postgres, the real wire and a scripted eval
+ * sandbox agent: a full run creates and destroys one sandbox per case per mode, the baseline loads
+ * no skill and the "with" run only the eval's bundle (ac-1); the cap holds and a failing case is
+ * retried once (ac-2); results are stored, scored and streamed (ac-3); eval sandboxes hold only
+ * session tokens, are always deleted, and eval threads stay out of the member's lists (ac-4).
+ */
+const objects = new MemoryObjects();
+const blobs = { objects, prefix: "kobe/" };
+const f = new RunFixture();
+const silent = pino({ level: process.env.EVAL_TEST_LOG ?? "silent" });
+type World = Awaited<ReturnType<RunFixture["world"]>>;
+
+/** A scripted eval sandbox per claim: answers fixtures, snapshots and runs as the test says. */
+class FakeEvalProvider {
+  readonly created: string[] = [];
+  readonly deleted: string[] = [];
+  readonly sandboxes = new Map<string, FakeWorkspace>();
+  live = 0;
+  maxLive = 0;
+  answer: (start: RunStart, attempt: number) => string = () => "Total: 42";
+  beforeReply: (ws: FakeWorkspace, start: RunStart) => Promise<void> = async () => {};
+  snapshot: EvalWorkspaceSnapshot = { walks: [] };
+  readonly attempts = new Map<string, number>();
+
+  constructor(private readonly url: () => string) {}
+
+  createEvalSandbox = async (
+    team: { id: string },
+    spec: { userId: string; threadId: string; evalRunId: string; shutdownAt: Date },
+  ) => {
+    this.created.push(spec.threadId);
+    this.live += 1;
+    this.maxLive = Math.max(this.maxLive, this.live);
+    const sandboxId = randomUUID();
+    const token = f.auth.issue({
+      sandboxId,
+      teamId: team.id,
+      userId: spec.userId,
+      evalThreadId: spec.threadId,
+    });
+    const sb = await FakeSandbox.connect(this.url(), token);
+    if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
+    sb.hello(sandboxId, [], "1.0.0", ["skill_bundles", "skill_eval"]);
+    await sb.ready();
+    const ws = new FakeWorkspace(sb);
+    const base = sb.respond;
+    sb.respond = (frame) => {
+      if (frame.type === "eval.prepare")
+        return { v: 1, type: "command.result", command_id: frame.command_id, ok: true };
+      if (frame.type === "eval.snapshot")
+        return {
+          v: 1,
+          type: "command.result",
+          command_id: frame.command_id,
+          ok: true,
+          data: this.snapshot,
+        };
+      return base?.(frame);
+    };
+    sb.onFrame = (frame) => {
+      if (frame.type !== "run.start") return;
+      const key = frame.message;
+      const n = (this.attempts.get(key) ?? 0) + 1;
+      this.attempts.set(key, n);
+      setTimeout(() => {
+        void this.beforeReply(ws, frame).then(() => ws.reply(frame, this.answer(frame, n)));
+      }, 20);
+    };
+    this.sandboxes.set(spec.threadId, ws);
+    return {
+      sandboxId,
+      namespace: "kobe-team-x",
+      claimName: `e-${spec.threadId}`,
+      sandboxName: "s",
+      state: "running" as const,
+    };
+  };
+
+  deleteEvalSandbox = async (_team: unknown, threadId: string) => {
+    this.deleted.push(threadId);
+    const ws = this.sandboxes.get(threadId);
+    if (ws) {
+      this.sandboxes.delete(threadId);
+      this.live -= 1;
+      ws.kill();
+    }
+    return true;
+  };
+
+  listEvalSandboxes = async () => [];
+}
+
+beforeAll(async () => {
+  await f.setup({ blobs });
+  await seedGalleryAgents(f.fx.db);
+});
+afterAll(async () => {
+  await f.teardown();
+});
+
+const text = (t: string) => new RawBody(t, "text/plain; charset=utf-8");
+const skillMd = (name: string) =>
+  `---\nname: ${name}\ndescription: Formats ${name} reports. Use when asked for a ${name} report.\n---\n# ${name}\nAdd a totals row.\n`;
+
+async function world(): Promise<World> {
+  const w = await f.world();
+  const admin = f.fx.admin;
+  await admin.query(
+    `INSERT INTO model_providers (id, kind, name, api_key_enc, created_by)
+     VALUES ('openai', 'openai', 'openai', 'v2.test.sealed-provider-key', $1) ON CONFLICT (id) DO NOTHING`,
+    [w.owner.id],
+  );
+  await admin.query(
+    `INSERT INTO model_catalog (alias, provider_id, model, created_by)
+     VALUES ('fast', 'openai', 'fast-fake', $1) ON CONFLICT (alias) DO NOTHING`,
+    [w.owner.id],
+  );
+  await admin.query(
+    `INSERT INTO team_models (team_id, alias, is_default, enabled_by) VALUES ($1, 'fast', true, $2)`,
+    [w.team, w.owner.id],
+  );
+  return w;
+}
+
+async function put(p: Person, id: string, path: string, rev: number, body: RawBody) {
+  const res = await f
+    .on(0, p)
+    .request("PUT", `/v1/skills/drafts/${id}/files/${path}`, body, { "if-match": `"${rev}"` });
+  expect(res.status, JSON.stringify(res.json)).toBe(200);
+  return res.json.rev as number;
+}
+
+/** A draft with a SKILL.md, a suite and its fixtures. */
+async function draftWith(p: Person, name: string, cases: string, fixtures: Record<string, string>) {
+  const created = await f.on(0, p).post("/v1/skills/drafts", { name });
+  expect(created.status, JSON.stringify(created.json)).toBe(201);
+  const id = created.json.draft.id as string;
+  let rev = await put(p, id, "SKILL.md", created.json.draft.rev as number, text(skillMd(name)));
+  rev = await put(p, id, "evals/cases.yaml", rev, text(cases));
+  for (const [path, body] of Object.entries(fixtures))
+    rev = await put(p, id, `evals/fixtures/${path}`, rev, text(body));
+  return id;
+}
+
+function runnerFor(provider: FakeEvalProvider, maxConcurrentPerTeam = 4) {
+  return new SkillEvalRunner({
+    db: f.fx.db,
+    blobs,
+    router: f.fx.replica(0).deps.sandboxWire.router,
+    runs: f.fx.replica(0).deps.runs,
+    provider,
+    maxConcurrentPerTeam,
+    log: silent,
+    tuning: { pollMs: 50, podWaitMs: 5_000, connectWaitMs: 5_000 },
+  });
+}
+
+async function drive(runner: SkillEvalRunner, team: string, evalRunId: string) {
+  await expect
+    .poll(
+      async () => {
+        await runner.sweep();
+        const { rows } = await f.fx.admin.query<{ status: string }>(
+          `SELECT status FROM skill_eval_runs WHERE team_id = $1 AND id = $2`,
+          [team, evalRunId],
+        );
+        return rows[0]?.status;
+      },
+      { timeout: 60_000, interval: 200 },
+    )
+    .toMatch(/completed|failed|cancelled/);
+  await runner.idle();
+}
+
+const url = () => must(f.listeners[0], "listener").url;
+
+describe("skill eval runner (KOBE-325)", () => {
+  it("runs a full eval: one sandbox per case per mode, baseline without skills, scored and streamed", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    provider.snapshot = {
+      walks: [
+        {
+          root: "outputs/",
+          entries: [{ path: "outputs/report.txt", type: "file", size: 9 }],
+          truncated: false,
+        },
+      ],
+    };
+    const id = await draftWith(
+      w.owner,
+      "report",
+      [
+        "cases:",
+        "  - id: totals",
+        "    prompt: Build the report from in.csv",
+        "    files: [fixtures/in.csv]",
+        "    expect: {contains: Total, outputs: ['outputs/*.txt']}",
+        "  - id: unrelated",
+        "    prompt: What is the capital of France?",
+        "    expect: {triggers: false}",
+        "",
+      ].join("\n"),
+      { "in.csv": "a,b\n1,2\n" },
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, { mode: "full" });
+    expect(started.status, JSON.stringify(started.json)).toBe(202);
+    const evalRunId = started.json.evalRunId as string;
+    expect(started.json.estimate).toMatchObject({ executions: 3 });
+    const runner = runnerFor(provider);
+    await drive(runner, w.team, evalRunId);
+
+    const read = await f.on(0, w.owner).get(`/v1/skill-evals/${evalRunId}`);
+    expect(read.status).toBe(200);
+    expect(read.json).toMatchObject({ status: "completed", progress: { done: 3, total: 3 } });
+    expect(read.json.scorecard).toMatchObject({ passRate: 1, baselinePassRate: 1 });
+    // One sandbox per execution, each deleted.
+    expect(provider.created).toHaveLength(3);
+    expect([...provider.deleted].sort()).toEqual([...provider.created].sort());
+    expect(provider.live).toBe(0);
+    // The baseline's run lists no skill; the "with" runs only the eval's bundle.
+    const { rows: runs } = await f.fx.admin.query<{ with_skill: boolean; skill_refs: unknown[] }>(
+      `SELECT x.with_skill, r.skill_refs FROM skill_eval_results x
+         JOIN runs r ON r.team_id = x.team_id AND r.id = (x.execution ->> 'runId')::uuid
+        WHERE x.team_id = $1 AND x.eval_run_id = $2`,
+      [w.team, evalRunId],
+    );
+    const { rows: evalRow } = await f.fx.admin.query<{ runtime_hash: string }>(
+      `SELECT runtime_hash FROM skill_eval_runs WHERE id = $1`,
+      [evalRunId],
+    );
+    const hash = evalRow[0]?.runtime_hash;
+    for (const r of runs) {
+      const hashes = (r.skill_refs as { sha256?: string }[]).map((s) => s.sha256);
+      expect(hashes).toEqual(r.with_skill ? [hash] : []);
+    }
+    // Eval threads are not the member's chats, and nobody posts into them.
+    const list = await f.on(0, w.owner).get("/v1/threads");
+    const { rows: threads } = await f.fx.admin.query<{ id: string }>(
+      `SELECT id FROM threads WHERE team_id = $1 AND skill_eval`,
+      [w.team],
+    );
+    expect(threads).toHaveLength(3);
+    const listed = JSON.stringify(list.json);
+    for (const t of threads) expect(listed).not.toContain(t.id);
+    const post = await f
+      .on(0, w.owner)
+      .post(`/v1/threads/${must(threads[0], "thread").id}/messages`, { content: "hi" });
+    expect(post.status).toBe(409);
+    expect(post.json).toMatchObject({ code: "skill_eval_thread" });
+    // The stream replays the progress and ends with the completion.
+    const events = await f.on(0, w.owner).get(`/v1/skill-evals/${evalRunId}/events`);
+    expect(events.status).toBe(200);
+    expect(events.text.match(/event: skill\.eval\.progress/g)).toHaveLength(3);
+    expect(events.text).toContain("event: skill.eval.completed");
+    expect(events.text).not.toContain("Total: 42");
+  });
+
+  it("retries a failing case once in a new thread and sandbox, within a cap of one", async () => {
+    const w = await world();
+    await f.fx.admin.query(
+      `INSERT INTO site_skill_settings (id, eval_limits) VALUES (1, '{"maxConcurrentSandboxes": 1}')
+       ON CONFLICT (id) DO UPDATE SET eval_limits = EXCLUDED.eval_limits`,
+    );
+    const provider = new FakeEvalProvider(url);
+    provider.answer = (_start, attempt) => (attempt === 1 ? "no idea" : "Total: 7");
+    const id = await draftWith(
+      w.owner,
+      "retry",
+      ["cases:", "  - id: a", "    prompt: Sum it", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    expect(started.status, JSON.stringify(started.json)).toBe(202);
+    const evalRunId = started.json.evalRunId as string;
+    const runner = runnerFor(provider);
+    await drive(runner, w.team, evalRunId);
+    await f.fx.admin.query(`UPDATE site_skill_settings SET eval_limits = '{}' WHERE id = 1`);
+    const { rows } = await f.fx.admin.query<{ execution: Record<string, unknown> }>(
+      `SELECT execution FROM skill_eval_results WHERE team_id = $1 AND eval_run_id = $2`,
+      [w.team, evalRunId],
+    );
+    expect(rows[0]?.execution).toMatchObject({ status: "passed", attempts: 2 });
+    expect(provider.created).toHaveLength(2);
+    expect(new Set(provider.created).size).toBe(2);
+    expect(provider.maxLive).toBe(1);
+    expect(provider.deleted).toHaveLength(2);
+  });
+
+  it("cancels: nothing more starts, the sandbox goes, and the reaper finds nothing left", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    const id = await draftWith(
+      w.owner,
+      "cancel",
+      ["cases:", "  - id: a", "    prompt: Slow", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    const cancelled = await f.on(0, w.owner).post(`/v1/skill-evals/${evalRunId}/cancel`, {});
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.json).toMatchObject({ status: "cancelled", scorecard: null });
+    const runner = runnerFor(provider);
+    expect(await runner.sweep()).toBe(0);
+    expect(provider.created).toHaveLength(0);
+    const reaped = await reapSkillEvals({
+      db: f.fx.db,
+      provider,
+      runs: f.fx.replica(0).deps.runs,
+      log: silent,
+    });
+    expect(reaped).toEqual({ executions: 0, claims: 0 });
+  });
+
+  it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
+    const w = await world();
+    const provider = new FakeEvalProvider(url);
+    provider.beforeReply = async (ws, start) => {
+      ws.sb.send({
+        v: 1,
+        type: "policy.check",
+        request_id: "r1",
+        run_id: start.run_id,
+        thread_id: start.thread_id,
+        tool_call_id: "c1",
+        // The member's memory: never used by an eval (denied, recorded).
+        tool: "remember",
+        input: { scope: "user", path: "a.md", content: "x" },
+      });
+      const r = await ws.sb.until(() =>
+        ws.sb.frames("policy.result").find((r) => r.request_id === "r1"),
+      );
+      expect(r).toMatchObject({ decision: "deny", reasons: [{ code: "eval_run_isolated" }] });
+    };
+    const id = await draftWith(
+      w.owner,
+      "denied",
+      [
+        "cases:",
+        "  - id: a",
+        "    prompt: Clean up",
+        "    expect: {contains: Total, no_denied_tools: true}",
+        "",
+      ].join("\n"),
+      {},
+    );
+    const started = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    const evalRunId = started.json.evalRunId as string;
+    await drive(runnerFor(provider), w.team, evalRunId);
+    const { rows } = await f.fx.admin.query<{ execution: Record<string, unknown> }>(
+      `SELECT execution FROM skill_eval_results WHERE team_id = $1 AND eval_run_id = $2`,
+      [w.team, evalRunId],
+    );
+    const execution = rows[0]?.execution as {
+      deniedToolCalls: number;
+      checks: { check: string; reason?: string }[];
+    };
+    expect(execution.deniedToolCalls).toBeGreaterThan(0);
+    expect(execution.checks.find((c) => c.check === "no_denied_tools")?.reason).toBe("denied");
+  });
+});

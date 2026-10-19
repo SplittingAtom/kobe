@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { canonicalZip, fixtureWorkspacePath, type SkillEvalSuite } from "@kobe/protocol";
-import { unzipSync } from "fflate";
+import { fixtureWorkspacePath, type SkillEvalSuite } from "@kobe/protocol";
+import { unzipSync, zipSync } from "fflate";
 import type { BlobStore } from "../../retention/blobs.js";
 import { readVerified } from "../blob-read.js";
 
@@ -51,7 +51,10 @@ export function fixturesZip(
       if (!bytes) throw new Error(`the package has no evals/${f}`);
       named.set(f, bytes);
     }
-  return named.size === 0 ? null : canonicalZip(named);
+  if (named.size === 0) return null;
+  // Not a skill package (no SKILL.md): a plain zip, entries in name order, fixed timestamps.
+  const sorted = [...named.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return zipSync(Object.fromEntries(sorted), { mtime: new Date(Date.UTC(1980, 0, 2)) });
 }
 
 /** The case's fixtures as `eval.prepare` lists them: workspace path, hash and size. */

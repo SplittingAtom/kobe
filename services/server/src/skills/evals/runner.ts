@@ -341,7 +341,7 @@ export class SkillEvalRunner {
 
   async #observe(claim: ClaimedExecution, runId: string) {
     return withTeam(this.#o.db, claim.teamId, async (tx) => {
-      const run = await tx.execute<{ status: string; skills_used: { hash?: string }[] }>(sql`
+      const run = await tx.execute<{ status: string; skills_used: { name?: string }[] }>(sql`
         SELECT status, skills_used FROM runs WHERE team_id = ${claim.teamId} AND id = ${runId}`);
       const usage = await tx.execute<{ cost: string | number | null; n: string | number }>(sql`
         SELECT coalesce(sum(cost_usd), 0) AS cost, count(*) AS n FROM run_usage
@@ -360,7 +360,8 @@ export class SkillEvalRunner {
         status: run.rows[0]?.status ?? "failed",
         answer: answer ?? "",
         numbers: {
-          skillUses: used.filter((u) => u.hash === claim.runtimeHash).length,
+          // The run's only skill is the eval's (withSkillEvals): a read of its SKILL.md.
+          skillUses: used.filter((u) => u.name === claim.skillName).length,
           costUsd: Math.round(Number(usage.rows[0]?.cost ?? 0) * 1e6) / 1e6,
           turns: Number(usage.rows[0]?.n ?? 0),
           deniedToolCalls: Number(denied.rows[0]?.n ?? 0),
