@@ -14,8 +14,14 @@ import {
  * Shared by the model-gateway's call gate, the run orchestrator's new-run gate and the server's
  * budget monitor, so all three judge the same numbers.
  */
+/**
+ * A line's scope: a budget (site, team, user-in-team), or the team eval cap (`eval`, KOBE-327),
+ * which only skill evals' calls carry and only `kind` eval / eval_judge spend counts toward.
+ */
+export type BudgetLineScope = BudgetScope | "eval";
+
 export interface BudgetLine {
-  readonly scope: BudgetScope;
+  readonly scope: BudgetLineScope;
   /** Set for a user-in-team budget. */
   readonly userId: string | undefined;
   readonly period: BudgetPeriod;
@@ -54,6 +60,11 @@ export function lineUsedUp(line: BudgetLine): boolean {
 
 export interface MemberBudgetState {
   readonly lines: readonly BudgetLine[];
+  /**
+   * The team eval cap (scope `eval`, month): applies to skill evals' calls only, beside `lines`
+   * (KOBE-327). Empty when the team sets no cap, and from {@link loadTeamBudgetLines}.
+   */
+  readonly evalLines?: readonly BudgetLine[];
   /** Effective per-user requests per minute (the site's, or the team's lower one). */
   readonly requestsPerMinute: number;
 }
@@ -65,7 +76,12 @@ export function periodStarts(now: Date): { readonly month: string; readonly day:
 }
 
 /** Scopes from the widest: a stop names the widest budget that is used up. */
-const SCOPE_ORDER: Readonly<Record<BudgetScope, number>> = { site: 0, team: 1, user: 2 };
+const SCOPE_ORDER: Readonly<Record<BudgetLineScope, number>> = {
+  site: 0,
+  team: 1,
+  user: 2,
+  eval: 3,
+};
 
 /** Percent of the limit spent; a zero budget counts as used up (it allows nothing). */
 export const percentUsed = (line: BudgetLine): number =>
@@ -232,14 +248,57 @@ function memberDefaults(r: Row): Row | undefined {
   return Object.values(d).some((v) => v !== null && v !== undefined) ? d : undefined;
 }
 
-/** The lines that apply to one member: site, team and their own (inside `withTeam`). */
+/**
+ * The lines that apply to one member: site, team and their own, and the team eval cap for the
+ * member's eval calls (inside `withTeam`).
+ */
 export async function loadMemberBudgetState(
   tx: KobeTx,
   teamId: string,
   userId: string,
   now = new Date(),
 ): Promise<MemberBudgetState> {
-  return budgetLines(tx, teamId, userId, now);
+  const state = await budgetLines(tx, teamId, userId, now);
+  return { ...state, evalLines: await loadEvalCapLines(tx, teamId, now) };
+}
+
+/**
+ * The team eval cap as a budget line (KOBE-327, SK18): monthly, dollars or tokens, judged on the
+ * team's eval spend (`model_spend_daily.eval_*`: kinds eval and eval_judge). Empty without a cap.
+ * Inside the team's transaction.
+ */
+export async function loadEvalCapLines(
+  tx: KobeTx,
+  teamId: string,
+  now = new Date(),
+): Promise<BudgetLine[]> {
+  const starts = periodStarts(now);
+  const res = await tx.execute<Row>(sql`
+    SELECT c.eval_cap_usd, c.eval_cap_tokens,
+           (SELECT COALESCE(sum(s.eval_cost_usd), 0) FROM model_spend_daily s
+             WHERE s.team_id = c.team_id AND s.day >= ${starts.month}::date) AS month_usd,
+           (SELECT COALESCE(sum(s.eval_tokens), 0) FROM model_spend_daily s
+             WHERE s.team_id = c.team_id AND s.day >= ${starts.month}::date) AS month_tokens
+      FROM team_skill_settings c WHERE c.team_id = ${teamId}::uuid`);
+  const r = res.rows[0];
+  if (!r) return [];
+  const out: BudgetLine[] = [];
+  for (const unit of ["usd", "tokens"] as const) {
+    const limit = num(r[`eval_cap_${unit}`]);
+    if (limit === undefined) continue;
+    out.push({
+      scope: "eval",
+      userId: undefined,
+      period: "month",
+      periodStart: starts.month,
+      unit,
+      limit,
+      spent: num(r[`month_${unit}`]) ?? 0,
+      limitExact: decimalText(r[`eval_cap_${unit}`]) ?? String(limit),
+      spentExact: decimalText(r[`month_${unit}`]) ?? "0",
+    });
+  }
+  return out;
 }
 
 export interface ModelPrice {
