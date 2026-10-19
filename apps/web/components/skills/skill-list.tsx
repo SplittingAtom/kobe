@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { listSkills, type SkillScope } from "../../lib/admin/api/team/skills";
 import { forkToDraft } from "../../lib/skills/drafts-api";
 import { MutationStatus } from "../admin/error-notice";
 import { useMutation } from "../admin/use-resource";
 import { draftHref } from "./draft-href";
+import { PromotePanel } from "./promote-panel";
 import {
   Button,
   EmptyState,
@@ -39,6 +41,10 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const canEdit = access.permissions.includes("team.personal.create");
+  // Team skills: Builders and Team admins; personal skills: their author (KOBE-333, SK19).
+  const canPromote =
+    scope === "personal" ? canEdit : access.permissions.includes("team.skills.publish");
+  const [promoting, setPromoting] = useState<string | null>(null);
   const { state } = useResource(() => listSkills(teamId, scope));
   const mutation = useMutation();
   const edit = (skillId: string) =>
@@ -70,6 +76,13 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
                     <TableRowHeader>
                       {s.slug}
                       <div className="text-sm font-normal text-console-muted">{s.description}</div>
+                      {promoting === s.id && (
+                        <PromotePanel
+                          teamId={teamId}
+                          source={{ scope, skillId: s.id, version: s.latestVersion }}
+                          onDone={() => setPromoting(null)}
+                        />
+                      )}
                     </TableRowHeader>
                     <TableCell>v{s.latestSemver}</TableCell>
                     <TableCell>
@@ -85,6 +98,17 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
                         >
                           Edit in Workbench
                         </Button>
+                        {canPromote && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-expanded={promoting === s.id}
+                            aria-label={`Promote ${s.slug} v${s.latestSemver} to the Site`}
+                            onClick={() => setPromoting(promoting === s.id ? null : s.id)}
+                          >
+                            Promote to Site
+                          </Button>
+                        )}
                       </TableCell>
                     )}
                   </TableRow>

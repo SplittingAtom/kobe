@@ -62,6 +62,20 @@ export function CatalogSwitchesSection() {
                 )
               }
             />
+            <Checkbox
+              label="Builders may promote without confirmation"
+              hint="Off: a Builder's Promote to Site waits for a team admin, who sees what leaves the team."
+              checked={s.buildersMayPromote}
+              disabled={!isAdmin || mutation.pending}
+              onChange={(e) =>
+                change(
+                  { buildersMayPromote: e.target.checked },
+                  e.target.checked
+                    ? "Builders promote to the Site without confirmation."
+                    : "Builders' promotions wait for a team admin.",
+                )
+              }
+            />
             {!isAdmin && <p className={HINT}>Only team admins can change these.</p>}
             <MutationStatus error={mutation.error} notice={mutation.notice} />
           </>

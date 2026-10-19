@@ -89,6 +89,8 @@ export async function putPersonalSkillsDisabled(
 export interface CatalogSwitches {
   readonly membersMayAddCatalog: boolean;
   readonly buildersMayInstallCatalog: boolean;
+  /** "Builders may promote without confirmation" (KOBE-333, SK19, default off). */
+  readonly buildersMayPromote: boolean;
 }
 
 export async function getCatalogSwitches(teamId: string): Promise<ApiResult<CatalogSwitches>> {
@@ -99,6 +101,7 @@ export async function getCatalogSwitches(teamId: string): Promise<ApiResult<Cata
         data: {
           membersMayAddCatalog: res.data.membersMayAddCatalog,
           buildersMayInstallCatalog: res.data.buildersMayInstallCatalog,
+          buildersMayPromote: res.data.buildersMayPromote === true,
         },
       }
     : res;

@@ -17,6 +17,7 @@ import {
 import { useTeamAccess } from "../../console-context";
 import { CatalogInstallsSection } from "./catalog-installs-section";
 import { CatalogSwitchesSection } from "./catalog-switches";
+import { PromotionRequestsSection } from "./promotion-requests-section";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 
@@ -72,6 +73,7 @@ export function SkillsPage() {
       </ResourceView>
       <CatalogInstallsSection />
       <CatalogSwitchesSection />
+      <PromotionRequestsSection />
     </>
   );
 }
