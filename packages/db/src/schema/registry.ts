@@ -65,6 +65,8 @@ export const registryVersionState = pgEnum("registry_version_state", [
   "deprecated",
   "withdrawn",
   "revoked",
+  // The submitter took back a submission before any decision (KOBE-334 review M3).
+  "retracted",
 ]);
 export const scanVerdict = pgEnum("scan_verdict", ["pass", "caution", "block"]);
 export const registryReviewAction = pgEnum("registry_review_action", [
@@ -81,6 +83,9 @@ export const registryReviewAction = pgEnum("registry_review_action", [
   "withdrawn",
   "revoked",
   "unrevoked",
+  // A reviewer acknowledged one Caution finding (KOBE-334 review M1, SK32).
+  "finding_acknowledged",
+  "retracted",
 ]);
 export const registryTagKind = pgEnum("registry_tag_kind", ["system", "topic"]);
 export const registryTagStatus = pgEnum("registry_tag_status", ["active", "retired"]);
