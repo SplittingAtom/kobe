@@ -64,14 +64,14 @@ describe("validateArguments (rule 3)", () => {
     },
   };
   it("validates against the pinned JSON Schema", async () => {
-    expect(await validateArguments(pool, tool, { table: "t" })).toBe(true);
-    expect(await validateArguments(pool, tool, {})).toBe(false);
-    expect(await validateArguments(pool, tool, { table: 1 })).toBe(false);
-    expect(await validateArguments(pool, tool, { table: "t", x: 1 })).toBe(false);
+    expect(await validateArguments(pool, tool, { table: "t" }, "u1")).toBe("valid");
+    expect(await validateArguments(pool, tool, {}, "u1")).toBe("invalid");
+    expect(await validateArguments(pool, tool, { table: 1 }, "u1")).toBe("invalid");
+    expect(await validateArguments(pool, tool, { table: "t", x: 1 }, "u1")).toBe("invalid");
   });
   it("refuses more than 64 KiB of arguments", async () => {
     const open = { ...read, input_schema: { type: "object" } };
-    expect(await validateArguments(pool, open, { x: "y".repeat(64 * 1024) })).toBe(false);
+    expect(await validateArguments(pool, open, { x: "y".repeat(64 * 1024) }, "u1")).toBe("invalid");
   });
 });
 

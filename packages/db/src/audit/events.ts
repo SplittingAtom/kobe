@@ -47,7 +47,9 @@ export type AuditScope =
 const id = z.uuid();
 /**
  * Why an app call was allowed or denied (KOBE-436, spec §6, MA5). `app_no_prompt`: an ask rule
- * matched, and the browser principal is never prompted; `app_read_only`: not a read tool.
+ * matched, and the browser principal is never prompted; `app_read_only`: not a read tool;
+ * `validation_busy`: the argument validator had no room for the member's call (one at a time per
+ * member, a bounded queue), so nothing was judged.
  */
 export const APP_CALL_REASONS = [
   "allowed",
@@ -58,6 +60,7 @@ export const APP_CALL_REASONS = [
   "tool_not_app_visible",
   "connector_exposure",
   "invalid_arguments",
+  "validation_busy",
   "site_deny_rule",
   "team_deny_rule",
   "app_no_prompt",

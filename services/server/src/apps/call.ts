@@ -20,7 +20,8 @@ import { appBridgeDecision, checkAppTool, validateArguments } from "./decide.js"
  *    body is read ({@link takeRateToken});
  * 1. the app is live for the member (MA8) and the tool is of the app's connector;
  * 2. the tool is pinned, read-only, app-visible and in the team's exposure;
- * 3. the arguments are a JSON object of at most 64 KiB valid against the pinned schema;
+ * 3. the arguments are a JSON object of at most 64 KiB valid against the pinned schema (one
+ *    validation per member at a time; a full validator answers `validation_busy`, 503);
  * 4. policy at `app_bridge` (MA5): deny rules, ask → deny, read only; no user rule widens it;
  * 5. the member's credential is revealed (grant or site key, the full liveness chain);
  * 6. mcp-proxy calls the upstream; the result goes back as is.
@@ -48,11 +49,13 @@ export interface BrowserPrincipal {
   readonly teamId: string;
 }
 
+type Status = 403 | 404 | 422 | 429 | 502 | 503;
+
 export type AppCallOutcome =
   | { readonly ok: true; readonly result: Record<string, unknown> }
   | {
       readonly ok: false;
-      readonly status: 403 | 404 | 422 | 429 | 502;
+      readonly status: Status;
       readonly code: AppCallReason;
       readonly message: string;
     };
@@ -66,6 +69,7 @@ const MESSAGES: Readonly<Record<AppCallReason, string>> = {
   tool_not_app_visible: "That tool is not offered to apps.",
   connector_exposure: "Your team does not expose that tool.",
   invalid_arguments: "The tool's arguments are not valid.",
+  validation_busy: "Kobe is still checking this app's previous call. Try again in a moment.",
   site_deny_rule: "Site policy blocks that tool.",
   team_deny_rule: "Team policy blocks that tool.",
   app_no_prompt: "That tool needs an approval, and apps cannot ask for one.",
@@ -76,7 +80,7 @@ const MESSAGES: Readonly<Record<AppCallReason, string>> = {
   upstream_failed: "The connector's server did not answer the call.",
 };
 
-const STATUS: Readonly<Record<AppCallReason, 403 | 404 | 422 | 429 | 502>> = {
+const STATUS: Readonly<Record<AppCallReason, Status>> = {
   allowed: 403,
   app_not_available: 404,
   tool_not_in_app: 403,
@@ -85,6 +89,7 @@ const STATUS: Readonly<Record<AppCallReason, 403 | 404 | 422 | 429 | 502>> = {
   tool_not_app_visible: 403,
   connector_exposure: 403,
   invalid_arguments: 422,
+  validation_busy: 503,
   site_deny_rule: 403,
   team_deny_rule: 403,
   app_no_prompt: 403,
@@ -160,8 +165,10 @@ async function decide(
   const checked = checkAppTool(app.connector, toolName);
   if (!checked.ok) return { ok: false, reason: checked.reason };
   const input = toolInputSchema.safeParse(args ?? {});
-  if (!input.success || !(await validateArguments(deps.validator, checked.tool, input.data))) {
-    return { ok: false, reason: "invalid_arguments" };
+  if (!input.success) return { ok: false, reason: "invalid_arguments" };
+  const valid = await validateArguments(deps.validator, checked.tool, input.data, p.userId);
+  if (valid !== "valid") {
+    return { ok: false, reason: valid === "busy" ? "validation_busy" : "invalid_arguments" };
   }
   const rules = await deps.rules.load(p.teamId, p.userId, now);
   const bridge = appBridgeDecision(app.connector.id, checked.tool, input.data, rules, now);

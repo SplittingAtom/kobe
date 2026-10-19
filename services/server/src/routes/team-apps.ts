@@ -46,7 +46,8 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   // Workers start on the first call, not for every app instance (tests build many).
   let pool: SchemaValidator | undefined;
   const validator: SchemaValidator = {
-    validate: (schema, instance) => (pool ??= createValidatorPool()).validate(schema, instance),
+    validate: (schema, instance, owner) =>
+      (pool ??= createValidatorPool()).validate(schema, instance, owner),
     close: async () => pool?.close(),
   };
   const callDeps: AppCallDeps = {

@@ -14,15 +14,30 @@ import { Worker } from "node:worker_threads";
  * interpreter: no code is generated from a schema) by its resolved path, so it works from
  * TypeScript sources in tests and from `dist` in the image alike.
  */
+/**
+ * `valid`; `invalid` (also a timeout or a failure: fail closed); or `busy` when the pool cannot
+ * take the task: the owner already has one in flight or queued, the queue is full, or the pool
+ * is closed (KOBE-436 re-review R-LOW-1). Busy is a capacity refusal, never a verdict.
+ */
+export type Validation = "valid" | "invalid" | "busy";
+
 export interface SchemaValidator {
-  /** `true` valid, `false` invalid, or timed out / failed (fail closed). */
-  validate(schema: unknown, instance: unknown): Promise<boolean>;
+  /** `owner` (the member) holds at most one task in flight or queued. */
+  validate(schema: unknown, instance: unknown, owner: string): Promise<Validation>;
   close(): Promise<void>;
 }
 
 export const VALIDATION_DEADLINE_MS = 100;
 const POOL_SIZE = 2;
 const MAX_QUEUE = 64;
+/**
+ * Heap caps per worker (re-review R-LOW-2): a schema or instance that allocates heavily ends the
+ * worker (an `error` event), which is replaced, and the call is refused.
+ */
+export const WORKER_RESOURCE_LIMITS = Object.freeze({
+  maxOldGenerationSizeMb: 64,
+  maxYoungGenerationSizeMb: 16,
+});
 
 const LIBRARY = createRequire(import.meta.url).resolve("@cfworker/json-schema");
 
@@ -53,6 +68,7 @@ interface Task {
   readonly key: string;
   readonly schema: unknown;
   readonly instance: unknown;
+  readonly owner: string;
   readonly resolve: (ok: boolean) => void;
 }
 
@@ -62,17 +78,31 @@ interface Slot {
   timer: NodeJS.Timeout | undefined;
 }
 
-export function createValidatorPool(
-  options: { readonly size?: number; readonly deadlineMs?: number } = {},
-): SchemaValidator {
+export interface ValidatorPoolOptions {
+  readonly size?: number;
+  readonly deadlineMs?: number;
+  readonly maxQueue?: number;
+  /** Tests only: sees each worker as it is spawned. */
+  readonly onSpawn?: (worker: Worker) => void;
+}
+
+export function createValidatorPool(options: ValidatorPoolOptions = {}): SchemaValidator {
   const deadline = options.deadlineMs ?? VALIDATION_DEADLINE_MS;
+  const maxQueue = options.maxQueue ?? MAX_QUEUE;
   const queue: Task[] = [];
+  /** Owners with a task in flight or queued. */
+  const owners = new Set<string>();
   let nextId = 1;
   let closed = false;
 
   const spawn = (): Worker => {
-    const worker = new Worker(WORKER_SOURCE, { eval: true, workerData: { library: LIBRARY } });
+    const worker = new Worker(WORKER_SOURCE, {
+      eval: true,
+      workerData: { library: LIBRARY },
+      resourceLimits: { ...WORKER_RESOURCE_LIMITS },
+    });
     worker.unref();
+    options.onSpawn?.(worker);
     return worker;
   };
 
@@ -130,11 +160,18 @@ export function createValidatorPool(
   }
 
   return {
-    validate(schema, instance) {
-      if (closed || queue.length >= MAX_QUEUE) return Promise.resolve(false);
+    validate(schema, instance, owner) {
+      if (closed || queue.length >= maxQueue || owners.has(owner)) {
+        return Promise.resolve("busy");
+      }
+      owners.add(owner);
       const key = createHash("sha256").update(JSON.stringify(schema)).digest("hex");
-      return new Promise<boolean>((resolve) => {
-        queue.push({ id: nextId++, key, schema, instance, resolve });
+      return new Promise<Validation>((resolve) => {
+        const done = (ok: boolean) => {
+          owners.delete(owner);
+          resolve(ok ? "valid" : "invalid");
+        };
+        queue.push({ id: nextId++, key, schema, instance, owner, resolve: done });
         pump();
       });
     },

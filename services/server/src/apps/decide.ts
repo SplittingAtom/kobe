@@ -3,7 +3,7 @@ import type { JsonObject } from "@kobe/protocol";
 import { appVisible } from "../connectors/visibility.js";
 import { describePinnedTool, type TeamConnector } from "../mcp/catalog.js";
 import { matchingRules, type PolicyRuleSet } from "../policy/rules.js";
-import type { SchemaValidator } from "./validate-pool.js";
+import type { SchemaValidator, Validation } from "./validate-pool.js";
 
 /**
  * The server's decision for an MCP App's own `tools/call` (KOBE-436, spec §6 and MA5). Pure:
@@ -54,9 +54,10 @@ export async function validateArguments(
   validator: SchemaValidator,
   tool: PinnedTool,
   args: JsonObject,
-): Promise<boolean> {
-  if (Buffer.byteLength(JSON.stringify(args), "utf8") > APP_ARGUMENTS_MAX_BYTES) return false;
-  return validator.validate(tool.input_schema, args);
+  owner: string,
+): Promise<Validation> {
+  if (Buffer.byteLength(JSON.stringify(args), "utf8") > APP_ARGUMENTS_MAX_BYTES) return "invalid";
+  return validator.validate(tool.input_schema, args, owner);
 }
 
 export type BridgeDecision =

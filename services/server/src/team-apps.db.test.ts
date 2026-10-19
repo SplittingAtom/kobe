@@ -326,6 +326,24 @@ describe("hostile inputs (review HIGH-1, MEDIUM-1)", () => {
     ]);
   });
 
+  it("takes one validation per member at a time: a second is busy (503), not invalid", async () => {
+    const id = await connector("apps4-busy");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const slow = appCall(alice, appId, "search", { q: `${"a".repeat(50)}!` });
+    // Give the first call time to reach the pool.
+    await new Promise((r) => setTimeout(r, 30));
+    const busy = await appCall(alice, appId, "search", { q: "fine words" });
+    expect([busy.status, busy.json.error?.code]).toEqual([503, "validation_busy"]);
+    // Bob is not held up by Alice's task.
+    expect((await appCall(bob, appId, "search", { q: "fine words" })).status).toBe(200);
+    expect((await slow).json.error?.code).toBe("invalid_arguments");
+    expect((await audits(id)).map((r) => r.target.reason).sort()).toEqual([
+      "allowed",
+      "invalid_arguments",
+      "validation_busy",
+    ]);
+  });
+
   it("refuses a body over 96 KiB before parsing it", async () => {
     const id = await connector("apps4-big");
     const appId = appIdOf(id, "ui://cat/explorer");
