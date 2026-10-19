@@ -230,8 +230,12 @@ describe("members use it (ac-3, ac-5)", () => {
     const listed = (await alice.get("/v1/team/connectors")).json.connectors as {
       id: string;
       credential_source: string;
+      site_key_ready: boolean;
     }[];
-    expect(listed.find((c) => c.id === id)?.credential_source).toBe("site");
+    expect(listed.find((c) => c.id === id)).toMatchObject({
+      credential_source: "site",
+      site_key_ready: true,
+    });
     const own = await alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY });
     expect(own.status).toBe(409);
     expect(own.json.code).toBe("provided_by_site");
@@ -334,6 +338,15 @@ describe("the refresh probes with the site key", () => {
   });
 });
 
+/** What a member's `/v1/team/connectors` says about the connector's site key (KOBE-449). */
+async function siteKeyReady(id: string): Promise<boolean | undefined> {
+  const listed = (await alice.get("/v1/team/connectors")).json.connectors as {
+    id: string;
+    site_key_ready: boolean;
+  }[];
+  return listed.find((c) => c.id === id)?.site_key_ready;
+}
+
 describe("review follow-ups", () => {
   it("serves no key once the URL changed outside the registry, and says to re-enter it (M2)", async () => {
     const id = await siteConnector("site-bound");
@@ -345,6 +358,8 @@ describe("review follow-ups", () => {
     );
     expect(await siteKeyRow(id)).toBeDefined();
     expect((await grantFor(teamOn, aliceId, id)).status).toBe(404);
+    // Members are not told it is provided while the key is stale (KOBE-449).
+    expect(await siteKeyReady(id)).toBe(false);
     probedKeys.length = 0;
     await refreshConnector(h.deps.database.db, h.deps.connectorProbe, id, {
       envelope: h.deps.envelope,
@@ -357,6 +372,9 @@ describe("review follow-ups", () => {
     await root.put(`${BASE}/${id}/site-key`, { api_key: SITE_KEY2 });
     expect((await grantFor(teamOn, aliceId, id)).body.api_key).toBe(SITE_KEY2);
     expect((await root.get(`${BASE}/${id}`)).json.connector.siteKeyStale).toBe(false);
+    expect(await siteKeyReady(id)).toBe(true);
+    await root.delete(`${BASE}/${id}/site-key`);
+    expect(await siteKeyReady(id)).toBe(false);
   });
 
   it("gives a skill eval's sandbox no site key (test 3)", async () => {
