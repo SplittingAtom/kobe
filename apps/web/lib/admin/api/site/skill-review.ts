@@ -53,6 +53,7 @@ export interface FileDiff {
   readonly status: "added" | "removed" | "changed" | "unchanged";
   readonly size: number;
   readonly binary: boolean;
+  readonly notDiffed?: "too_large" | "too_different" | "skipped";
   readonly hunks: readonly DiffHunk[];
 }
 

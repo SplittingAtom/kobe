@@ -1,7 +1,13 @@
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import type { BlobStore } from "../../retention/blobs.js";
 import { parseSemver } from "../semver.js";
-import { diffPackages, readPackage, type PackageDiff, type StoredPackage } from "./review-diff.js";
+import {
+  changedFileCount,
+  diffPackages,
+  readPackage,
+  type PackageDiff,
+  type StoredPackage,
+} from "./review-diff.js";
 
 /**
  * The Registry queue (KOBE-334, SK23): what reviewers see. Site-wide records only: the Registry
@@ -130,6 +136,7 @@ export async function versionDiff(
   return diffPackages(before, after);
 }
 
+/** Bytes compared per file only (review H1): the queue never computes a line diff. */
 async function changedFiles(
   blobs: BlobStore,
   version: StoredPackage,
@@ -138,11 +145,17 @@ async function changedFiles(
   const key = `${approved?.packageHash ?? "-"}:${version.packageHash}`;
   const cached = changedCache.get(key);
   if (cached !== undefined) return cached;
-  const diff = await versionDiff(blobs, version, approved).catch(() => null);
-  if (!diff) return null;
-  if (changedCache.size >= CACHE_MAX) changedCache.clear();
-  changedCache.set(key, diff.changedFiles);
-  return diff.changedFiles;
+  try {
+    const after = await readPackage(blobs, version);
+    if (!after) return null;
+    const before = approved ? await readPackage(blobs, approved) : null;
+    const count = changedFileCount(before, after);
+    if (changedCache.size >= CACHE_MAX) changedCache.clear();
+    changedCache.set(key, count);
+    return count;
+  } catch {
+    return null;
+  }
 }
 
 async function names(db: Db, ids: readonly (string | null)[]): Promise<Map<string, string>> {

@@ -34,8 +34,14 @@ export interface FileDiff {
   readonly path: string;
   readonly status: FileStatus;
   readonly size: number;
-  /** Not UTF-8 text, or too large to diff line by line: only the status is shown. */
+  /** Not UTF-8 text: only the status is shown. */
   readonly binary: boolean;
+  /**
+   * Why a changed text file has no line diff (review H1): `too_large` (over {@link MAX_TEXT_BYTES}
+   * or {@link MAX_DIFF_LINES} lines), `too_different` (the diff gave up at its time or edit
+   * limit), `skipped` (the request's time or line budget ran out). Absent when it has one.
+   */
+  readonly notDiffed?: "too_large" | "too_different" | "skipped";
   readonly hunks: readonly DiffHunk[];
 }
 
@@ -47,8 +53,17 @@ export interface PackageDiff {
   readonly truncated: boolean;
 }
 
-/** A text file larger than this is shown as changed without a line diff. */
-export const MAX_TEXT_BYTES = 256 * 1024;
+/**
+ * Bounds on the line diff, which runs on the server's event loop (review H1: Myers is O(N·D), and
+ * two 180 KB files that differ everywhere took minutes): a file over these sizes shows its status
+ * only; each file's diff gives up after {@link FILE_TIMEOUT_MS} or {@link MAX_EDIT_LENGTH} edits;
+ * the whole request stops diffing after {@link REQUEST_BUDGET_MS}.
+ */
+export const MAX_TEXT_BYTES = 128 * 1024;
+export const MAX_DIFF_LINES = 5_000;
+export const MAX_EDIT_LENGTH = 5_000;
+export const FILE_TIMEOUT_MS = 250;
+export const REQUEST_BUDGET_MS = 1_500;
 /** Lines of patch across the whole diff, so a huge package can't make a huge response. */
 export const MAX_PATCH_LINES = 20_000;
 const CONTEXT_LINES = 3;
@@ -68,15 +83,37 @@ function filesOf(zip: Uint8Array | null): Map<string, Uint8Array> {
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
-/** The file as text, or null when it is binary (a NUL, invalid UTF-8) or too large to diff. */
+/** The file as text, or null when it is binary (a NUL, invalid UTF-8). */
 function textOf(bytes: Uint8Array | undefined): string | null {
   if (!bytes) return "";
-  if (bytes.length > MAX_TEXT_BYTES || bytes.includes(0)) return null;
+  if (bytes.includes(0)) return null;
   try {
     return decoder.decode(bytes);
   } catch {
     return null;
   }
+}
+
+/** Over {@link MAX_TEXT_BYTES}, or more lines than {@link MAX_DIFF_LINES} (newline bytes). */
+function tooLarge(bytes: Uint8Array | undefined): boolean {
+  if (!bytes) return false;
+  if (bytes.length > MAX_TEXT_BYTES) return true;
+  let lines = 0;
+  for (const byte of bytes) if (byte === 10 && ++lines > MAX_DIFF_LINES) return true;
+  return false;
+}
+
+/**
+ * The queue's changed-file count (review H1): a byte comparison per path, no line diff, so listing
+ * the queue never diffs anything.
+ */
+export function changedFileCount(before: Uint8Array | null, after: Uint8Array): number {
+  const old = filesOf(before);
+  const next = filesOf(after);
+  let n = 0;
+  for (const path of new Set([...old.keys(), ...next.keys()]))
+    if (statusOf(old.get(path), next.get(path)) !== "unchanged") n += 1;
+  return n;
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -109,6 +146,7 @@ export function diffPackages(before: Uint8Array | null, after: Uint8Array): Pack
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.path < b.path ? -1 : 1));
   let budget = MAX_PATCH_LINES;
   let truncated = false;
+  const deadline = Date.now() + REQUEST_BUDGET_MS;
   const files = entries.map(({ path, status }): FileDiff => {
     const a = old.get(path);
     const b = next.get(path);
@@ -116,11 +154,19 @@ export function diffPackages(before: Uint8Array | null, after: Uint8Array): Pack
     const textA = textOf(a);
     const textB = textOf(b);
     const binary = textA === null || textB === null;
-    if (binary || status === "unchanged" || budget <= 0) {
-      if (!binary && status !== "unchanged" && budget <= 0) truncated = true;
-      return { path, status, size, binary, hunks: [] };
+    if (binary || status === "unchanged") return { path, status, size, binary, hunks: [] };
+    if (tooLarge(a) || tooLarge(b))
+      return { path, status, size, binary, notDiffed: "too_large", hunks: [] };
+    if (budget <= 0 || Date.now() >= deadline) {
+      truncated = true;
+      return { path, status, size, binary, notDiffed: "skipped", hunks: [] };
     }
-    const patch = structuredPatch(path, path, textA, textB, "", "", { context: CONTEXT_LINES });
+    const patch = structuredPatch(path, path, textA, textB, "", "", {
+      context: CONTEXT_LINES,
+      timeout: Math.min(FILE_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+      maxEditLength: MAX_EDIT_LENGTH,
+    });
+    if (!patch) return { path, status, size, binary, notDiffed: "too_different", hunks: [] };
     const hunks = patch.hunks.map((h) => ({
       oldStart: h.oldStart,
       oldLines: h.oldLines,

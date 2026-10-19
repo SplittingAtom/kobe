@@ -1,6 +1,12 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { MAX_PATCH_LINES, MAX_TEXT_BYTES, diffPackages } from "./review-diff.js";
+import {
+  MAX_DIFF_LINES,
+  MAX_PATCH_LINES,
+  MAX_TEXT_BYTES,
+  changedFileCount,
+  diffPackages,
+} from "./review-diff.js";
 
 const zip = (files: Record<string, string | Uint8Array>) =>
   zipSync(
@@ -42,21 +48,54 @@ describe("diffPackages (KOBE-334, SK23)", () => {
       zip({ "a.bin": new Uint8Array([0, 1, 2]), "big.txt": "small\n" }),
       zip({ "a.bin": new Uint8Array([0, 1, 3]), "big.txt": big }),
     );
-    expect(d.files.map((f) => [f.path, f.status, f.binary, f.hunks.length])).toEqual([
-      ["a.bin", "changed", true, 0],
-      ["big.txt", "changed", true, 0],
+    expect(d.files.map((f) => [f.path, f.status, f.binary, f.notDiffed, f.hunks.length])).toEqual([
+      ["a.bin", "changed", true, undefined, 0],
+      ["big.txt", "changed", false, "too_large", 0],
     ]);
   });
 
-  it("stops patching at the line budget and says so", () => {
+  it("never stalls on files that differ everywhere (review H1)", () => {
     const lines = (n: number, tag: string) =>
-      Array.from({ length: n }, (_, i) => `${tag}${i}`).join("\n");
-    const half = Math.ceil(MAX_PATCH_LINES / 2) + 1;
-    const d = diffPackages(
-      zip({}),
-      zip({ "a.txt": lines(half, "a"), "b.txt": lines(half, "b"), "c.txt": "c\n" }),
+      Array.from({ length: n }, (_, i) => `${tag}-${i}-${"x".repeat(4)}`).join("\n");
+    // The review's case: two 180 KB files where every line differs.
+    const started = Date.now();
+    const huge = diffPackages(
+      zip({ "data.csv": lines(20_000, "a") }),
+      zip({ "data.csv": lines(20_000, "b") }),
     );
+    expect(huge.files[0]?.notDiffed).toBe("too_large");
+    // Under the line cap but different everywhere: the diff gives up in time.
+    const n = MAX_DIFF_LINES - 1;
+    const many = diffPackages(
+      zip({ "a.txt": lines(n, "a"), "b.txt": lines(n, "c"), "c.txt": lines(n, "e") }),
+      zip({ "a.txt": lines(n, "b"), "b.txt": lines(n, "d"), "c.txt": lines(n, "f") }),
+    );
+    expect(Date.now() - started).toBeLessThan(3_000);
+    for (const f of many.files)
+      expect(["too_different", "skipped", undefined]).toContain(f.notDiffed);
+  });
+
+  it("counts changed files by bytes alone", () => {
+    expect(
+      changedFileCount(
+        zip({ "SKILL.md": "a\n", "same.txt": "s\n", "gone.txt": "g\n" }),
+        zip({ "SKILL.md": "b\n", "same.txt": "s\n", "new.txt": "n\n" }),
+      ),
+    ).toBe(3);
+    expect(changedFileCount(null, zip({ "SKILL.md": "a\n" }))).toBe(1);
+  });
+
+  it("stops patching at the line budget and says so", () => {
+    const lines = (tag: string) =>
+      Array.from({ length: MAX_DIFF_LINES - 1 }, (_, i) => `${tag}${i}`).join("\n");
+    const files = Object.fromEntries(
+      Array.from({ length: Math.ceil(MAX_PATCH_LINES / (MAX_DIFF_LINES - 1)) + 1 }, (_, i) => [
+        `f${i}.txt`,
+        lines(`f${i}-`),
+      ]),
+    );
+    const d = diffPackages(zip({}), zip(files));
     expect(d.truncated).toBe(true);
-    expect(d.files.find((f) => f.path === "c.txt")?.hunks).toEqual([]);
+    expect(d.files.at(-1)?.notDiffed).toBe("skipped");
   });
 });
