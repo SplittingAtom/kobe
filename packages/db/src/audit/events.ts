@@ -1701,6 +1701,24 @@ export const AUDIT_EVENTS = {
       })
       .optional(),
   }),
+  /** Move pin (KOBE-337, SK25): the install now runs another version (`major`: across majors). */
+  "skill.catalog.pin_moved": event("team", {
+    skillId: id,
+    name: catalogName,
+    from: z.string().max(32),
+    to: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    deprecated: z.boolean(),
+  }),
+  /** Roll back (KOBE-337, SK25): the install returns to the version it ran before its last move. */
+  "skill.catalog.rolled_back": event("team", {
+    skillId: id,
+    name: catalogName,
+    from: z.string().max(32),
+    to: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    deprecated: z.boolean(),
+  }),
   /** A Team admin reinstalled a removed Default skill, clearing the team's opt-out (SK7). */
   "skill.default.restored": event("team", {
     skillId: id,

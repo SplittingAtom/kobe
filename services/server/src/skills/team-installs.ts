@@ -274,6 +274,11 @@ export async function installCatalogSkill(
      * deprecated version (the override is the Team admin's, SK31).
      */
     readonly asBuilder?: boolean;
+    /**
+     * Move pin or Roll back (KOBE-337, SK25): the same change with its own audit event naming
+     * both versions, instead of `skill.catalog.configured`.
+     */
+    readonly act?: "move" | "rollback";
   },
 ): Promise<SkillInstallResult> {
   const { teamId, skillId } = input;
@@ -331,27 +336,41 @@ export async function installCatalogSkill(
           ELSE team_skill_installs.team_changed_at END`);
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
-    await recordAudit(tx, {
-      action: "skill.catalog.configured",
-      teamId,
-      target: {
-        skillId,
-        name,
-        semver: input.version,
-        pinMode: input.pinMode,
-        access: input.access,
-        deprecated: v.state === "deprecated",
-        ...(previous
-          ? {
-              previous: {
-                semver: previous.semver,
-                pinMode: previous.pin_mode as SkillInstallRow["pinMode"],
-                access: previous.access as SkillInstallRow["access"],
-              },
-            }
-          : {}),
-      },
-    });
+    if (input.act && previous)
+      await recordAudit(tx, {
+        action: input.act === "move" ? "skill.catalog.pin_moved" : "skill.catalog.rolled_back",
+        teamId,
+        target: {
+          skillId,
+          name,
+          from: previous.semver,
+          to: input.version,
+          pinMode: input.pinMode,
+          deprecated: v.state === "deprecated",
+        },
+      });
+    else
+      await recordAudit(tx, {
+        action: "skill.catalog.configured",
+        teamId,
+        target: {
+          skillId,
+          name,
+          semver: input.version,
+          pinMode: input.pinMode,
+          access: input.access,
+          deprecated: v.state === "deprecated",
+          ...(previous
+            ? {
+                previous: {
+                  semver: previous.semver,
+                  pinMode: previous.pin_mode as SkillInstallRow["pinMode"],
+                  access: previous.access as SkillInstallRow["access"],
+                },
+              }
+            : {}),
+        },
+      });
     return {
       ok: true,
       semver: input.version,

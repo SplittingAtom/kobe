@@ -1,15 +1,18 @@
 import { putTeamSkillInstallSchema, uninstallSkillSchema } from "@kobe/protocol";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
   installCatalogSkill,
+  type SkillInstallResult,
   listTeamSkillInstalls,
   reinstallDefault,
   uninstallCatalogSkill,
 } from "../skills/team-installs.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { installDiff, installUpdates } from "../skills/install-updates.js";
+import { semverSchema } from "../skills/semver.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { REQUIRED_WARN_AT } from "../skills/access.js";
 
@@ -28,6 +31,38 @@ const SKILL_INSTALL_MISSING = {
   code: "not_found",
   message: "The team has no install of that skill.",
 };
+
+type Ctx = Context<{ Variables: TeamVariables }>;
+
+/** The answer to an install, a Move pin or a Roll back. */
+function installAnswer(c: Ctx, r: SkillInstallResult) {
+  if (r.ok)
+    return c.json({
+      semver: r.semver,
+      deprecated: r.deprecated,
+      requiredCount: r.requiredCount,
+      ...(r.requiredCount >= REQUIRED_WARN_AT ? { warning: "many_required" } : {}),
+    });
+  const errors = {
+    not_found: [404, "No catalog skill with that id."],
+    no_version: [404, "The skill has no version with that number."],
+    not_installable: [
+      409,
+      "That version was withdrawn, revoked or suspended by a rescan, or is not approved.",
+    ],
+    blocked: [409, "The team blocked this skill: unblock it first."],
+    forbidden: [
+      403,
+      "Builders can install catalog skills only while the team allows it, and never Required or deprecated versions.",
+    ],
+    name_clash: [
+      409,
+      "One of this team's own skills has the same name: rename or archive it first.",
+    ],
+  } as const;
+  const [status, message] = errors[r.code];
+  return c.json({ code: r.code, message }, status);
+}
 
 /**
  * A team's catalog installs (`/v1/team/skills`, KOBE-314, SK6, SK7): any member reads them and the
@@ -57,33 +92,79 @@ export function teamSkillInstallRoutes(deps: ServerDeps): Hono<{ Variables: Team
       asBuilder: !teamRoleAllows(c.get("team").role, "team.skills.installs.manage"),
       ...body,
     });
-    if (r.ok)
-      return c.json({
-        semver: r.semver,
-        deprecated: r.deprecated,
-        requiredCount: r.requiredCount,
-        ...(r.requiredCount >= REQUIRED_WARN_AT ? { warning: "many_required" } : {}),
-      });
-    const errors = {
-      not_found: [404, "No catalog skill with that id."],
-      no_version: [404, "The skill has no version with that number."],
-      not_installable: [
-        409,
-        "That version was withdrawn, revoked or suspended by a rescan, or is not approved.",
-      ],
-      blocked: [409, "The team blocked this skill: unblock it first."],
-      forbidden: [
-        403,
-        "Builders can install catalog skills only while the team allows it, and never Required or deprecated versions.",
-      ],
-      name_clash: [
-        409,
-        "One of this team's own skills has the same name: rename or archive it first.",
-      ],
-    } as const;
-    const [status, message] = errors[r.code];
-    return c.json({ code: r.code, message }, status);
+    return installAnswer(c, r);
   });
+
+  // Updates of an install (KOBE-337, SK25): what runs, newer versions with changelog and eval
+  // delta, whether the pin takes them, and the Roll back target. Any member reads them.
+  app.get("/installs/:skillId/updates", requireTeamPermission("team.read"), async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
+    const u = await installUpdates(db, c.get("team").id, id.data);
+    return u ? c.json(u) : c.json(SKILL_INSTALL_MISSING, 404);
+  });
+
+  // The file diff from the running version to another published one.
+  app.get("/installs/:skillId/diff", requireTeamPermission("team.read"), async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    const to = semverSchema.safeParse(c.req.query("to"));
+    if (!id.success || !to.success) return invalidRequest(c, "Send ?to=<version>.");
+    if (!deps.blobs)
+      return c.json(
+        { code: "storage_unavailable", message: "Skill storage is not configured." },
+        503,
+      );
+    const d = await installDiff(db, deps.blobs, c.get("team").id, id.data, to.data);
+    return d
+      ? c.json(d)
+      : c.json({ code: "not_found", message: "No such install or version." }, 404);
+  });
+
+  // Move pin and Roll back (KOBE-337, SK25): single audited acts that keep the pin mode and
+  // access; the same rules as an install (Builders, withdrawn and revoked versions, blocks).
+  const moveTo = async (c: Ctx, version: string, act: "move" | "rollback") => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
+    const teamId = c.get("team").id;
+    const current = (await listTeamSkillInstalls(db, teamId)).installs.find(
+      (i) => i.skillId === id.data,
+    );
+    if (!current) return c.json(SKILL_INSTALL_MISSING, 404);
+    const r = await installCatalogSkill(db, {
+      teamId,
+      skillId: id.data,
+      userId: c.get("user").id,
+      asBuilder: !teamRoleAllows(c.get("team").role, "team.skills.installs.manage"),
+      version,
+      pinMode: current.pinMode,
+      access: current.access,
+      act,
+    });
+    return installAnswer(c, r);
+  };
+
+  app.post("/installs/:skillId/move", requireTeamPermission("team.skills.publish"), async (c) => {
+    const body = await parseBody(c, z.strictObject({ version: semverSchema }));
+    if (!body) return invalidRequest(c, "Send the version to move the pin to.");
+    return moveTo(c, body.version, "move");
+  });
+
+  app.post(
+    "/installs/:skillId/rollback",
+    requireTeamPermission("team.skills.publish"),
+    async (c) => {
+      const id = idSchema.safeParse(c.req.param("skillId"));
+      if (!id.success) return c.json(SKILL_INSTALL_MISSING, 404);
+      const u = await installUpdates(db, c.get("team").id, id.data);
+      if (!u) return c.json(SKILL_INSTALL_MISSING, 404);
+      if (!u.rollbackTo)
+        return c.json(
+          { code: "no_rollback", message: "This install has no earlier version to go back to." },
+          409,
+        );
+      return moveTo(c, u.rollbackTo, "rollback");
+    },
+  );
 
   app.delete(
     "/installs/:skillId",
