@@ -41,6 +41,7 @@ import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
 import { skillCatalogRoutes } from "./routes/skill-catalog.js";
 import { skillPromotionRoutes, teamSkillPromotionRoutes } from "./routes/skill-promotions.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
+import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { siteWebSearchRoutes } from "./routes/site-web-search.js";
@@ -248,6 +249,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));
   api.route("/site/skill-rescans", siteSkillRescanRoutes(deps));
   api.route("/site/skills/registry", siteSkillRegistryRoutes(deps));
+  // Before the tag routes: their Site-admin gate covers `/catalog/*`, and maintainers deprecate.
+  api.route("/site/skills", siteSkillRetireRoutes(deps));
   api.route("/site/skills", siteSkillTagRoutes(deps));
   if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);

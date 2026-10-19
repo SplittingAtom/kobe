@@ -6,6 +6,7 @@ import { readCatalogSwitches } from "./settings.js";
 import { requiredCount } from "./access.js";
 import { publishedVersions, runningVersion } from "./install-versions.js";
 import { compareSemver } from "./semver.js";
+import { retirementOf, skillStanding, type Retirement } from "./retirement-state.js";
 import {
   defaultTargets,
   defaultVersion,
@@ -38,6 +39,8 @@ export interface SkillInstallRow {
    * (review-337 M1), and nothing changed it since: the console says so until tracking is back.
    */
   readonly pinnedBy: "rollback" | "move" | null;
+  /** A retirement the install shows (KOBE-340, SK31): "Revoked — choose a version" and so on. */
+  readonly retirement: Retirement | null;
 }
 
 export interface RemovedDefault {
@@ -109,6 +112,19 @@ export async function listTeamSkillInstalls(
       FROM team_skill_optouts o JOIN registry_skills s ON s.id = o.skill_id
       WHERE o.team_id = ${teamId}
       ORDER BY s.name`);
+    const retirements = new Map<string, Retirement | null>();
+    for (const r of installs.rows) {
+      const skillId = String(r.skill_id);
+      const versions = await publishedVersions(tx, skillId);
+      retirements.set(
+        skillId,
+        retirementOf(
+          versions,
+          { pinMode: r.pin_mode as SkillInstallRow["pinMode"], versionId: String(r.version_id) },
+          await skillStanding(tx, skillId),
+        ),
+      );
+    }
     return {
       installs: installs.rows.map((r) => ({
         skillId: String(r.skill_id),
@@ -125,6 +141,7 @@ export async function listTeamSkillInstalls(
           r.pin_mode === "pinned" && r.pinned_by_act === true
             ? (r.last_act as "rollback" | "move")
             : null,
+        retirement: retirements.get(String(r.skill_id)) ?? null,
       })),
       removedDefaults: removed.rows.map((r) => ({
         skillId: String(r.skill_id),
@@ -317,11 +334,13 @@ export async function installCatalogSkill(
     // The team's skill-name lock (store.ts uploads take it too): the name-clash checks on both
     // sides see each other's commits (review R-N1).
     await lockTeamSkillNames(tx, teamId);
-    const skill = await tx.execute<{ name: string }>(
-      sql`SELECT name FROM registry_skills WHERE id = ${skillId}`,
+    const skill = await tx.execute<{ name: string; status: string }>(
+      sql`SELECT name, status::text AS status FROM registry_skills WHERE id = ${skillId}`,
     );
     const name = skill.rows[0]?.name;
     if (!name) return { ok: false, code: "not_found" };
+    // A deprecated skill (SK31, KOBE-340): every version installs only with a Team admin's warning.
+    const skillDeprecated = skill.rows[0]?.status === "deprecated";
     if (await hasOwnSkillNamed(tx, teamId, name)) return { ok: false, code: "name_clash" };
     const blocked = await tx.execute(sql`
       SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
@@ -369,7 +388,11 @@ export async function installCatalogSkill(
       compareSemver(input.version, runningFrom.semver) < 0
     )
       pinMode = "pinned";
-    if (input.asBuilder && !(await builderMay(tx, teamId, access, v.state, previous)))
+    const deprecated = v.state === "deprecated" || skillDeprecated;
+    if (
+      input.asBuilder &&
+      !(await builderMay(tx, teamId, access, deprecated ? "deprecated" : v.state, previous))
+    )
       return { ok: false, code: "forbidden" };
     const changed = sql`(team_skill_installs.version_id <> EXCLUDED.version_id
       OR team_skill_installs.pin_mode <> EXCLUDED.pin_mode
@@ -403,7 +426,7 @@ export async function installCatalogSkill(
             : {}),
           runningFrom: runningFrom?.semver ?? null,
           runningTo: runningVersion(versions, { pinMode, versionId: v.id })?.semver ?? null,
-          deprecated: v.state === "deprecated",
+          deprecated,
         },
       });
     else
@@ -416,7 +439,7 @@ export async function installCatalogSkill(
           semver: input.version,
           pinMode,
           access,
-          deprecated: v.state === "deprecated",
+          deprecated,
           ...(previous
             ? {
                 previous: {
@@ -432,7 +455,7 @@ export async function installCatalogSkill(
       ok: true,
       pinMode,
       semver: input.version,
-      deprecated: v.state === "deprecated",
+      deprecated,
       requiredCount: await requiredCount(tx, teamId),
     };
   });

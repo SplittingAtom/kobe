@@ -147,7 +147,12 @@ export async function addBlockedInTx(
  * only, in the same transaction); false when nothing in the group was listed.
  */
 export function removeBlocked(db: KobeDb, hash: string): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => removeBlockedInTx(tx, hash));
+}
+
+/** {@link removeBlocked} inside the caller's transaction (Unrevoke, KOBE-340). */
+export function removeBlockedInTx(tx: KobeTx, hash: string): Promise<boolean> {
+  return (async () => {
     await lockBlocklist(tx);
     const group = (await hashGroups(tx, [hash])).get(hash) ?? [hash];
     const rows = await tx
@@ -158,7 +163,7 @@ export function removeBlocked(db: KobeDb, hash: string): Promise<boolean> {
     for (const r of rows.sort((a, b) => a.hash.localeCompare(b.hash)))
       await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: r.hash } });
     return true;
-  });
+  })();
 }
 
 /** Serializes blocklist writes, so two adds in one alias group can't both see it unblocked. */

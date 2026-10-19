@@ -1,7 +1,8 @@
 import { unzipSync } from "fflate";
 import { catalogSkillEvalScorecardSchema } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb, type KobeTx, type TeamRole } from "@kobe/db";
-import { teamRoleAllows } from "../authz/permissions.js";
+import { siteRoleAllows, teamRoleAllows, type SiteRole } from "../authz/permissions.js";
+import { skillStanding } from "./retirement-state.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { readVerified } from "./blob-read.js";
 import { usageSnapshot, viewerTeamsOf } from "./usage-snapshot.js";
@@ -287,6 +288,10 @@ export interface CatalogDetail extends CatalogCard {
   readonly membersMayAdd: boolean;
   /** The caller may block the skill in this team (Team admins). */
   readonly canBlock: boolean;
+  /** A deprecated skill's replacement (KOBE-340). */
+  readonly replacement: { readonly id: string; readonly name: string } | null;
+  /** The caller may deprecate the skill or a version: an active maintainer or a Site admin. */
+  readonly canDeprecate: boolean;
   /** The fixed window the usage numbers cover (KOBE-339). */
   readonly usageWindow: { readonly from: string; readonly to: string };
 }
@@ -400,7 +405,12 @@ async function agentsUsing(tx: KobeTx, teamId: string, name: string) {
 export async function catalogDetail(
   db: KobeDb,
   blobs: BlobStore | null,
-  who: { readonly teamId: string; readonly userId: string; readonly role: TeamRole },
+  who: {
+    readonly teamId: string;
+    readonly userId: string;
+    readonly role: TeamRole;
+    readonly siteRole?: SiteRole;
+  },
   skillId: string,
 ): Promise<CatalogDetail | null> {
   const found = await withTeam(db, who.teamId, async (tx) => {
@@ -454,6 +464,15 @@ export async function catalogDetail(
     canRequestEgress: teamRoleAllows(who.role, "team.chat"),
     membersMayAdd: found.membersMayAdd,
     canBlock: teamRoleAllows(who.role, "team.skills.installs.manage"),
+    replacement: (await skillStanding(db, skillId)).replacement,
+    canDeprecate:
+      (who.siteRole !== undefined && siteRoleAllows(who.siteRole, "site.skills.catalog.manage")) ||
+      (
+        await db.execute(sql`
+          SELECT 1 FROM registry_maintainers m JOIN users u ON u.id = m.user_id
+           WHERE m.skill_id = ${skillId} AND m.user_id = ${who.userId}
+             AND u.deactivated_at IS NULL`)
+      ).rows.length > 0,
     usageWindow: usageOf.window,
   };
 }

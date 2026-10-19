@@ -3,6 +3,12 @@ import { recordAudit } from "../audit/record.js";
 import { publishedVersions, runningVersion, type PublishedVersion } from "./install-versions.js";
 import { lockSkillInstall, lockTeamSkillNames } from "./default-target.js";
 import { readCatalogSwitches } from "./settings.js";
+import {
+  retirementOf,
+  skillStanding,
+  type Retirement,
+  type SkillStanding,
+} from "./retirement-state.js";
 
 /**
  * A member's Add for me (KOBE-338, SK25): a catalog skill that loads only in this member's runs in
@@ -26,6 +32,8 @@ export interface MemberAdd {
   readonly pinMode: PinMode;
   /** The version the member's runs load now, or null when none can (withdrawn, revoked). */
   readonly runs: string | null;
+  /** A retirement the add shows (KOBE-340): "Revoked — choose a version" and so on. */
+  readonly retirement: Retirement | null;
   readonly updatedAt: string;
 }
 
@@ -120,8 +128,9 @@ export function addForMe(
     await lockSkillInstall(tx, teamId, skillId);
     // The team's skill-name lock (review L1): a team skill made meanwhile sees this add's name.
     await lockTeamSkillNames(tx, teamId);
-    const skill = await tx.execute<{ name: string }>(sql`
-      SELECT name FROM registry_skills WHERE id = ${skillId} AND status <> 'archived'`);
+    const skill = await tx.execute<{ name: string; status: string }>(sql`
+      SELECT name, status::text AS status FROM registry_skills
+       WHERE id = ${skillId} AND status <> 'archived'`);
     const name = skill.rows[0]?.name;
     if (!name) return { ok: false, code: "not_found" };
     const gate = await teamGate(tx, teamId, skillId, name);
@@ -138,6 +147,9 @@ export function addForMe(
     const versions = await publishedVersions(tx, skillId);
     const v = addable(versions, input.version, previous?.version_id);
     if (typeof v === "string") return { ok: false, code: v };
+    // A deprecated skill (KOBE-340, SK31): no new adds; keeping one's own version is allowed.
+    if (skill.rows[0]?.status === "deprecated" && v.id !== previous?.version_id)
+      return { ok: false, code: "deprecated" };
     await tx.execute(sql`
       INSERT INTO member_skill_enablements
         (team_id, user_id, catalog_skill_id, enabled, version_id, pin_mode)
@@ -206,8 +218,11 @@ async function addsIn(tx: KobeTx, teamId: string, userId?: string): Promise<Team
        ${userId ? sql`AND e.user_id = ${userId}` : sql``}
      ORDER BY s.name, u.name`);
   const versions = new Map<string, PublishedVersion[]>();
-  for (const id of new Set(rows.map((r) => r.skill_id)))
+  const standing = new Map<string, SkillStanding>();
+  for (const id of new Set(rows.map((r) => r.skill_id))) {
     versions.set(id, await publishedVersions(tx, id));
+    standing.set(id, await skillStanding(tx, id));
+  }
   return rows.map((r) => ({
     userId: r.user_id,
     memberName: r.member_name,
@@ -221,6 +236,11 @@ async function addsIn(tx: KobeTx, teamId: string, userId?: string): Promise<Team
         versionId: r.version_id,
       })?.semver ?? null,
     updatedAt: iso(r.updated_at),
+    retirement: retirementOf(
+      versions.get(r.skill_id) ?? [],
+      { pinMode: r.pin_mode, versionId: r.version_id },
+      standing.get(r.skill_id) ?? { status: "active", replacement: null },
+    ),
   }));
 }
 

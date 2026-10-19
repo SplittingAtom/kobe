@@ -1558,6 +1558,48 @@ export const AUDIT_EVENTS = {
   "registry.changes_requested": event("site", { registryVersionId: id }),
   /** A reviewer rejected the version; `blocked`: a Site admin also blocklisted its runtime hash. */
   "registry.rejected": event("site", { registryVersionId: id, blocked: z.boolean() }),
+  /**
+   * A published version was retired (KOBE-340, SK31): deprecated (a maintainer or Site admin),
+   * withdrawn or revoked (Site admins); `from` is the state it left. Revoke puts the runtime hash on
+   * the blocklist (`blocklisted`: this revoke added it); unrevoke returns to `to` and lifts the
+   * entry its revoke added (`unblocked`).
+   */
+  "registry.deprecated": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+  }),
+  "registry.withdrawn": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+  }),
+  "registry.revoked": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+    blocklisted: z.boolean(),
+  }),
+  "registry.unrevoked": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    to: z.string().max(32),
+    unblocked: z.boolean(),
+  }),
+  /** A maintainer or Site admin deprecated a whole catalog skill, naming its replacement or not. */
+  "skill.catalog.deprecated": event("site", {
+    skillId: id,
+    name: catalogName,
+    replacementId: id.nullable(),
+  }),
 
   // ── catalog maintainers (KOBE-332, SK24): ids only ──
   /** A maintainer (or a Site admin) added a maintainer to a catalog skill. */
