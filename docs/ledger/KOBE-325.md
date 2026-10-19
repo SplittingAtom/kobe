@@ -19,10 +19,18 @@
 - **Not here (later tickets):** the judge (326: a `judge` check fails `judge_failed` until then;
   seam `EvalJudge`), estimates and `eval`/`eval_judge` usage kinds and caps (327: runs bill as
   kind `run` today), the Workbench panel (328), OpenAPI paths for the eval routes.
+- **Runner review (review-325-runner.md) fixed:** M1 members' scoped quota
+  `kobe-team-member-quota` (PriorityClass NotIn matches pods without a class: checked on k3s
+  1.34.6 with a scratch namespace, removed), M2 heartbeat + shutdown requeue + reaper by heartbeat,
+  M3 retention skips held starters, M4 ≤ 3 open evals per member / 20 per team, L1–L9, L11, L12
+  (coordinator: eval runs ignore the starter's remembered approvals; tested), the minor items.
+  **Not done:** L10 (UID precondition on claim deletes; optional, thread ids are never reused);
+  an SSE stream is not cut on session revocation (membership is re-checked every read, and a
+  stream ends after 30 min).
 - **Known limits:** `max_turns` is enforced by polling `run_usage`: the run is stopped once the
-  turn past the limit is recorded (it fails `over_limit`), not before it starts. The
-  `eval_run_no_prompt` deny (a floor stricter than auto) is unit-free: covered by code review
-  only; the auto-mode and isolation denials are in `skill-eval-runner.db.test.ts`.
+  turn past the limit is recorded (it fails `over_limit`), not before it starts. A shutdown or a
+  dead replica requeues an execution without using its attempt (an execution that kills its
+  replica each time would loop until its eval is cancelled).
 - **Coordinator decisions (2026-10-18):** leases and claim checks by claim UID; per-team cap
   atomic across replicas (advisory lock); eval sandboxes have their own quota (never a member's);
   no personal connector or MCP credentials in evals (team connectors under team policy only), so
@@ -30,12 +38,11 @@
   the snapshot never follows a symlinked root or any link; offboarding deletes live eval
   sandboxes and cancels eval runs; cleanup on every path incl. a crash reaper.
 - **Rollout:** no replica records its build, so nothing refuses eval starts during a rollout;
-  docs/install.md says to start evals only after `rollout status` (an old pod could hand an
-  eval's stop or steer to the member's own sandbox).
-- **Startup jobs:** the runner and reaper need the sandbox provider, so they start in
-  `index.ts` beside the Orbit eval sweep; main's G5 `startup/jobs.ts` is the place once this
-  branch merges with it (renumbered at PR time): the reaper is a lock-guarded periodic job that
-  slots in there.
+  docs/install.md says to start evals only after every Kobe deployment rolled (only evals can
+  break meanwhile).
+- **Startup jobs:** the runner and reaper need the sandbox provider, so they stay in `index.ts`
+  beside the Orbit eval sweep, also after the merge with main's G5 (`startup/jobs.ts` keeps
+  provider-backed jobs in index.ts).
 - **Gotchas:** never change a key the previous release's SQL infers (`ON CONFLICT`): rolling
   upgrades and `helm rollback` run it on the new schema; `threads-plans.db.test.ts` counts
   break-glass policies (18); the CLI's `catalog.db.test.ts` lists blob-ref tables newer than its
