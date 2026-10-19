@@ -4,6 +4,7 @@ import {
   parseTraceparent,
   runTraceId,
   type WireTraceContext,
+  CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
@@ -612,6 +613,11 @@ export class CommandDelivery {
       const { project: _project, ...rest } = out as RunStartFrame;
       out = rest as ServerToSandboxFrame;
     }
+    // App cards (KOBE-440): an agent that cannot append them starts below them (Pi does not know
+    // them), so its model does not see them, and the run does not fail on an unknown parent.
+    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_APP_CARDS)) {
+      out = withoutAppCards(out as RunStartFrame) as ServerToSandboxFrame;
+    }
     // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
       const { mcp: _mcp, ...rest } = out as RunStartFrame;
@@ -801,4 +807,12 @@ export class CommandDelivery {
 function withoutTrace<F extends RunStartFrame | ThreadCompactFrame>(frame: F): Omit<F, "trace"> {
   const { trace: _trace, ...rest } = frame;
   return rest;
+}
+
+/** A start without its app cards: the branch point moves to the first card's parent. */
+export function withoutAppCards(frame: RunStartFrame): RunStartFrame {
+  const { app_cards: cards, parent_entry_id: _parent, ...rest } = frame;
+  if (cards === undefined || cards.length === 0) return frame;
+  const below = cards[0]?.parentId ?? null;
+  return below === null ? rest : { ...rest, parent_entry_id: below };
 }

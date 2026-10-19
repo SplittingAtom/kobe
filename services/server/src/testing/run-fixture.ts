@@ -170,7 +170,10 @@ export class FakeWorkspace {
    * entry, `turn_end` (entries mirrored), and `agent_settled` unless `settle` is false.
    */
   reply(start: RunStart, text: string, settle = true): { user: string; assistant: string } {
-    const session = this.sessions.get(start.thread_id) ?? [];
+    // The agent appends the run's app cards it does not have before the prompt (KOBE-440).
+    const known = this.sessions.get(start.thread_id) ?? [];
+    const cards = (start.app_cards ?? []).filter((c) => !known.some((e) => e.id === c.id));
+    const session = [...known, ...(cards as Entry[])];
     const now = new Date().toISOString();
     const parent = start.parent_entry_id ?? session.at(-1)?.id ?? null;
     const user: Entry = {
@@ -240,6 +243,8 @@ export class RunFixture {
       readonly serverCalls?: { readonly gatewayUrl: string; readonly key: Uint8Array };
       /** Answer ratings as trace scores (KOBE-275): a (fake) sink for both replicas. */
       readonly feedbackScores?: ServerDepsOptions["feedbackScores"];
+      /** mcp-proxy's app-calls endpoint (KOBE-436): a (fake) caller for both replicas. */
+      readonly appCaller?: ServerDepsOptions["appCaller"];
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
@@ -251,6 +256,7 @@ export class RunFixture {
         : { modelTokenDefaults: options.modelTokenDefaults }),
       ...(options.serverCalls === undefined ? {} : { serverCalls: options.serverCalls }),
       ...(options.feedbackScores === undefined ? {} : { feedbackScores: options.feedbackScores }),
+      ...(options.appCaller === undefined ? {} : { appCaller: options.appCaller }),
       sandboxWire: {
         sweep: false,
         ...(options.runTokenKey === undefined ? {} : { runTokenKey: options.runTokenKey }),

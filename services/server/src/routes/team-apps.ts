@@ -3,16 +3,13 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { APP_ID_PATTERN } from "../apps/app-id.js";
-import { callApp, takeRateToken, type AppCallDeps, type BrowserPrincipal } from "../apps/call.js";
-import { createValidatorPool, type SchemaValidator } from "../apps/validate-pool.js";
-import { DENIED_AUDIT_RATE } from "../mcp/service.js";
+import { callApp, takeRateToken, type BrowserPrincipal } from "../apps/call.js";
+import { appCallDepsFor } from "../apps/call-deps.js";
 import { memberApp, memberAppHtml, memberApps, viewOf } from "../apps/catalog.js";
 import { checkAppTool } from "../apps/decide.js";
 import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
 import { uuidSchema } from "../threads/schemas.js";
 import type { ServerDeps } from "../deps.js";
-import { createDbRuleSource } from "../policy/rule-store.js";
-import { createRateLimiter } from "../sandbox/rate-limit.js";
 import { parseBody } from "../teams/http.js";
 
 /**
@@ -35,7 +32,7 @@ import { parseBody } from "../teams/http.js";
  *   app's connector that pass `checkAppTool`, in MCP's shape, under the calls' rate limit.
  * Frame documents start with `WEBRTC_GUARD` and the CSP carries `webrtc 'block'` (MEDIUM-2).
  */
-export const APP_CALL_RATE = { capacity: 30, refillPerSecond: 5 } as const;
+export { APP_CALL_RATE } from "../apps/call-deps.js";
 /** 64 KiB of arguments plus the JSON envelope (review MEDIUM-1). */
 export const APP_CALL_BODY_MAX = 96 * 1024;
 
@@ -61,23 +58,7 @@ const NOT_FOUND = { code: "app_not_available", message: "This app is not availab
 export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
-  // Workers start on the first call, not for every app instance (tests build many).
-  let pool: SchemaValidator | undefined;
-  const validator: SchemaValidator = {
-    validate: (schema, instance, owner) =>
-      (pool ??= createValidatorPool()).validate(schema, instance, owner),
-    close: async () => pool?.close(),
-  };
-  const callDeps: AppCallDeps = {
-    db,
-    mcp: deps.mcp,
-    rules: createDbRuleSource(db),
-    caller: deps.appCaller,
-    validator,
-    limiter: createRateLimiter(APP_CALL_RATE),
-    limitedAudits: createRateLimiter({ capacity: 1, refillPerSecond: 1 / 60 }),
-    deniedAudits: createRateLimiter(DENIED_AUDIT_RATE),
-  };
+  const callDeps = appCallDepsFor(deps);
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
   app.use(async (c, next) => {

@@ -73,7 +73,7 @@ function rowFor(
   storage: ThreadAppResultStorage,
   bytes: number,
   input: Record<string, unknown>,
-  content: { result?: Record<string, unknown>; blobRef?: string } = {},
+  content: ResultContent = {},
 ): typeof threadAppResults.$inferInsert {
   return {
     teamId: claims.teamId,
@@ -95,9 +95,98 @@ function rowFor(
   };
 }
 
+/** Where a result goes: its row id and its thread (the blob key's tree), and who stored it. */
+export interface ResultPlace {
+  readonly teamId: string;
+  readonly threadId: string;
+  readonly userId: string;
+  readonly id: string;
+}
+
 /** The result's key in the thread's tree: derived here, never named by anyone else. */
-export function appResultBlobKey(prefix: string, claims: CaptureClaims, id: string): string {
-  return `${prefix}teams/${claims.teamId}/threads/${claims.threadId}/apps/${id}`;
+export function appResultBlobKey(prefix: string, place: Omit<ResultPlace, "userId">): string {
+  return `${prefix}teams/${place.teamId}/threads/${place.threadId}/apps/${place.id}`;
+}
+
+export interface ResultContent {
+  readonly result?: Record<string, unknown>;
+  readonly blobRef?: string;
+}
+
+/**
+ * Writes the row in the team's transaction: `stored` false when it refused (nothing written; an
+ * upload is then deleted). `storage` is what is kept (quota already applied) and `content` what
+ * goes with it.
+ */
+export type ResultRowWriter<T> = (
+  tx: KobeTx,
+  storage: ThreadAppResultStorage,
+  content: ResultContent,
+  bytes: number,
+) => Promise<{ readonly stored: boolean; readonly value: T }>;
+
+/**
+ * Keeps `result` at `place` (MA10): inline up to 256 KiB, a blob in the thread's tree up to 4 MiB
+ * (artifacts' order: queue the key, upload, then the row and the unqueue in one transaction),
+ * else `too_large`; over the team's quota (D26) `too_large`. Shared by mcp-proxy's captures and
+ * rail-launched app cards (KOBE-440).
+ */
+export async function persistAppResult<T>(
+  deps: AppResultStoreDeps,
+  place: ResultPlace,
+  result: Record<string, unknown>,
+  writer: ResultRowWriter<T>,
+): Promise<T> {
+  const json = JSON.stringify(result);
+  const bytes = Buffer.byteLength(json, "utf8");
+  const write = async (storage: ThreadAppResultStorage, content: ResultContent = {}) =>
+    withTeam(deps.db, place.teamId, async (tx) => {
+      // Stored bytes count against the team's quota (D26); a refusal keeps the text card.
+      const fits =
+        storage === "too_large" ||
+        (await teamStorageAllows(tx, place.teamId, deps.defaultQuotaBytes, bytes));
+      const kept = fits ? storage : "too_large";
+      const out = await writer(tx, kept, kept === storage ? content : {}, bytes);
+      if (out.stored && content.blobRef !== undefined && kept === storage) {
+        await tx.execute(sql`
+          DELETE FROM retention_blob_deletions
+           WHERE team_id = ${place.teamId} AND key = ${content.blobRef}`);
+      }
+      return { ...out, kept };
+    });
+
+  if (bytes <= APP_RESULT_INLINE_MAX_BYTES) return (await write("inline", { result })).value;
+  const blobs = deps.blobs;
+  const key = blobs ? appResultBlobKey(blobs.prefix, place) : undefined;
+  if (
+    bytes > APP_RESULT_MAX_BYTES ||
+    !blobs ||
+    key === undefined ||
+    !threadKey(blobs.prefix, place.teamId, place.threadId, key)
+  ) {
+    return (await write("too_large")).value;
+  }
+  try {
+    await withTeam(deps.db, place.teamId, (tx) =>
+      tx.execute(sql`
+        INSERT INTO retention_blob_deletions (team_id, key, thread_id, owner_user_id, enqueued_at)
+        VALUES (${place.teamId}, ${key}, ${place.threadId}, ${place.userId}, now() + ${PENDING_GRACE})
+        ON CONFLICT (team_id, key) DO NOTHING`),
+    );
+    await blobs.objects.put(key, Readable.from([Buffer.from(json, "utf8")]), bytes);
+  } catch (err) {
+    logger.error({ err, team_id: place.teamId }, "app result upload failed; kept as text only");
+    return (await write("too_large")).value;
+  }
+  const out = await write("blob", { blobRef: key });
+  if (!out.stored || out.kept !== "blob") {
+    try {
+      await blobs.objects.delete([key]);
+    } catch (err) {
+      logger.warn({ err }, "app result: could not delete an unused upload");
+    }
+  }
+  return out.value;
 }
 
 export async function storeCapturedResult(
@@ -106,74 +195,21 @@ export async function storeCapturedResult(
   input: Record<string, unknown>,
   result: Record<string, unknown>,
 ): Promise<StoreOutcome> {
-  const json = JSON.stringify(result);
-  const bytes = Buffer.byteLength(json, "utf8");
   const id = randomUUID();
-  const write = (
-    storage: ThreadAppResultStorage,
-    content?: { result?: Record<string, unknown>; blobRef?: string },
-  ) =>
-    withTeam(deps.db, claims.teamId, async (tx) => {
-      if (!(await runActive(tx, claims))) return false;
-      if ((await unclaimed(tx, claims)) >= MAX_UNCLAIMED_PER_RUN) return "capped" as const;
-      // Stored bytes count against the team's quota (D26); a refusal keeps the text card.
-      const fits =
-        storage === "too_large" ||
-        (await teamStorageAllows(tx, claims.teamId, deps.defaultQuotaBytes, bytes));
-      const kept = fits ? storage : "too_large";
-      await tx
-        .insert(threadAppResults)
-        .values(rowFor(claims, id, kept, bytes, input, kept === storage ? content : {}));
-      if (content?.blobRef !== undefined && kept === storage) {
-        await tx.execute(sql`
-          DELETE FROM retention_blob_deletions
-           WHERE team_id = ${claims.teamId} AND key = ${content.blobRef}`);
+  const place = { teamId: claims.teamId, threadId: claims.threadId, userId: claims.userId, id };
+  return persistAppResult<StoreOutcome>(
+    deps,
+    place,
+    result,
+    async (tx, storage, content, bytes) => {
+      if (!(await runActive(tx, claims))) {
+        return { stored: false, value: { ok: false, code: "run_not_active" } };
       }
-      return kept;
-    });
-
-  const outcome = (kept: ThreadAppResultStorage | false | "capped"): StoreOutcome =>
-    kept === false
-      ? { ok: false, code: "run_not_active" }
-      : kept === "capped"
-        ? { ok: false, code: "too_many_unclaimed" }
-        : { ok: true, id, storage: kept };
-
-  if (bytes <= APP_RESULT_INLINE_MAX_BYTES) {
-    const kept = await write("inline", { result });
-    return outcome(kept);
-  }
-  const blobs = deps.blobs;
-  const key = blobs ? appResultBlobKey(blobs.prefix, claims, id) : undefined;
-  if (
-    bytes > APP_RESULT_MAX_BYTES ||
-    !blobs ||
-    key === undefined ||
-    !threadKey(blobs.prefix, claims.teamId, claims.threadId, key)
-  ) {
-    const kept = await write("too_large");
-    return outcome(kept);
-  }
-  try {
-    await withTeam(deps.db, claims.teamId, (tx) =>
-      tx.execute(sql`
-        INSERT INTO retention_blob_deletions (team_id, key, thread_id, owner_user_id, enqueued_at)
-        VALUES (${claims.teamId}, ${key}, ${claims.threadId}, ${claims.userId}, now() + ${PENDING_GRACE})
-        ON CONFLICT (team_id, key) DO NOTHING`),
-    );
-    await blobs.objects.put(key, Readable.from([Buffer.from(json, "utf8")]), bytes);
-  } catch (err) {
-    logger.error({ err, team_id: claims.teamId }, "app result upload failed; kept as text only");
-    const kept = await write("too_large");
-    return outcome(kept);
-  }
-  const kept = await write("blob", { blobRef: key });
-  if (kept !== "blob") {
-    try {
-      await blobs.objects.delete([key]);
-    } catch (err) {
-      logger.warn({ err }, "app result: could not delete an unused upload");
-    }
-  }
-  return outcome(kept);
+      if ((await unclaimed(tx, claims)) >= MAX_UNCLAIMED_PER_RUN) {
+        return { stored: false, value: { ok: false, code: "too_many_unclaimed" } };
+      }
+      await tx.insert(threadAppResults).values(rowFor(claims, id, storage, bytes, input, content));
+      return { stored: true, value: { ok: true, id, storage } };
+    },
+  );
 }

@@ -53,6 +53,8 @@ export interface AppResultView {
   readonly app_id: string;
   readonly template_sha256: string;
   readonly view: "app" | "text";
+  /** A rail-launched card waiting for the thread's run to end (KOBE-440): no entry yet. */
+  readonly queued: boolean;
   readonly reason?: AppTextReason;
   /** Only with `view: "app"`: what the frame needs. */
   readonly app?: { readonly title: string };
@@ -105,6 +107,7 @@ export async function appResultViews(
       storage: threadAppResults.storage,
       createdAt: threadAppResults.createdAt,
       promptEntryId: threadAppResults.promptEntryId,
+      queuedAt: threadAppResults.queuedAt,
       userEntryId: runs.userEntryId,
     })
     .from(threadAppResults)
@@ -158,6 +161,7 @@ export async function appResultViews(
       tool: r.tool,
       app_id: r.appId,
       template_sha256: r.templateSha256,
+      queued: r.queuedAt !== null,
       ...(decided.view === "app"
         ? {
             view: "app" as const,

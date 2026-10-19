@@ -1,4 +1,5 @@
 import {
+  APP_CARD_ENTRY_PREFIX,
   jsonValueSchema,
   parseEventPayload,
   piGetEntriesDataSchema,
@@ -48,9 +49,17 @@ export function isUnsentPromptEntryId(entryId: string): boolean {
   return entryId.startsWith(UNSENT_PROMPT_PREFIX);
 }
 
-/** Ids only the server writes (the skipped-actions note `ks-`, an unsent prompt `ku-`). */
+/**
+ * Ids only the server writes (the skipped-actions note `ks-`, an unsent prompt `ku-`, an app card
+ * `ka-`, KOBE-440). A sandbox can never introduce one; an app card it echoes back after the
+ * agent appended it is an entry the server already has.
+ */
 export function isServerEntryId(entryId: string): boolean {
-  return entryId.startsWith("ks-") || isUnsentPromptEntryId(entryId);
+  return (
+    entryId.startsWith("ks-") ||
+    isUnsentPromptEntryId(entryId) ||
+    entryId.startsWith(APP_CARD_ENTRY_PREFIX)
+  );
 }
 
 /**
@@ -69,7 +78,8 @@ export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
 /**
  * The last mirrored entry of a thread (the `get_entries since` cursor), by append order. Entries
  * the server wrote itself (the scheduled run's skipped-actions report, an unsent prompt) are not
- * in Pi's session, so they are never the cursor: Pi would not know them.
+ * in Pi's session, so they are never the cursor: Pi would not know them. Nor is an app card
+ * (KOBE-440): Pi gets it only at the next run start.
  */
 export async function lastMirroredEntryId(
   tx: KobeTx,
@@ -79,6 +89,7 @@ export async function lastMirroredEntryId(
   const res = await tx.execute<{ entry_id: string }>(sql`
     SELECT entry_id FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${threadId} AND ${piSessionEntrySql}
+       AND entry_id NOT LIKE ${`${APP_CARD_ENTRY_PREFIX}%`}
      ORDER BY seq DESC LIMIT 1`);
   return res.rows[0]?.entry_id;
 }
@@ -145,12 +156,12 @@ export async function mirrorEntriesInTx(
   let existing = 0;
   let reserved = 0;
   for (const entry of data.entries) {
-    if (isServerEntryId(entry.id)) {
-      reserved += 1;
-      continue;
-    }
     if (known.has(entry.id)) {
       existing += 1;
+      continue;
+    }
+    if (isServerEntryId(entry.id)) {
+      reserved += 1;
       continue;
     }
     if (entry.parentId !== null && !known.has(entry.parentId)) {
