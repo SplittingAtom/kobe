@@ -21,8 +21,18 @@ export async function pinConnector(
   db: KobeDb,
   prober: ConnectorProbe,
   connectorId: string,
-  /** A user's API-key grant for connectors that need one (KOBE-108); used for this probe only. */
-  apiKey?: string,
+  options: {
+    /**
+     * The probe's credential, asked for only when a probe will run (`adminPinCredential` in
+     * probe-credential.ts, which also audits the choice); used for this probe only.
+     */
+    readonly credential?: (connector: {
+      readonly id: string;
+      readonly name: string;
+    }) => Promise<string | undefined>;
+    /** The site admin pinning: their own key probes the periodic refresh (KOBE-431). */
+    readonly pinnedBy?: string | undefined;
+  } = {},
 ): Promise<PinOutcome | undefined> {
   const [row] = await db
     .select({ name: connectors.name, url: connectors.url, hash: connectors.toolsHash })
@@ -31,6 +41,7 @@ export async function pinConnector(
   if (!row) return undefined;
   if (row.hash !== null) return { ok: false, failure: "already_pinned" };
 
+  const apiKey = await options.credential?.({ id: connectorId, name: row.name });
   const probed = await prober.probe(row.url, apiKey);
   if (!probed.ok) return probed;
   const snapshot = buildSnapshot(row.name, probed.tools);
@@ -39,7 +50,13 @@ export async function pinConnector(
   return db.transaction(async (tx): Promise<PinOutcome> => {
     const written = await tx
       .update(connectors)
-      .set({ toolsSnapshot: snapshot.tools, toolsHash: snapshot.hash, updatedAt: sql`now()` })
+      .set({
+        toolsSnapshot: snapshot.tools,
+        toolsHash: snapshot.hash,
+        ...(options.pinnedBy === undefined ? {} : { pinnedBy: options.pinnedBy }),
+        refreshSkipped: null,
+        updatedAt: sql`now()`,
+      })
       .where(
         and(
           eq(connectors.id, connectorId),

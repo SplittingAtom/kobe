@@ -25,6 +25,8 @@ import { OauthError, type OauthIo } from "./oauth/http.js";
 import type { RefreshGate } from "./oauth/refresh-gate.js";
 import { refreshAccessToken } from "./oauth/refresh.js";
 import { sameUrl } from "./oauth/discovery.js";
+import { maskHint } from "./mask.js";
+import { revealSiteKey } from "./site-key.js";
 
 /**
  * Per-user API-key grants (KOBE-108, D27: no shared team credentials; OAuth tokens KOBE-109). A user stores their own key
@@ -32,7 +34,9 @@ import { sameUrl } from "./oauth/discovery.js";
  * (KOBE-107, bound to team + user + connector) before it reaches Postgres, is never returned by
  * any API (callers get {@link GrantSummary}: a masked hint and timestamps), and is decrypted only
  * by {@link revealCredential}, which the internal API hands to the MCP proxy for the run's own user.
- * Neither the key nor its hint is audited or logged.
+ * Neither the key nor its hint is audited or logged. A connector in `site` mode (KOBE-303) has
+ * no member grants: {@link revealCredential} serves its site-wide key (`site-key.ts`) after the
+ * same liveness checks, and members cannot store their own.
  */
 export const API_KEY_MAX = 2048;
 export const API_KEY_MIN = 8;
@@ -58,17 +62,18 @@ export interface GrantSummary {
 
 export type PutOutcome =
   | { readonly ok: true; readonly replaced: boolean; readonly grant: GrantSummary }
-  | { readonly ok: false; readonly failure: "not_available" | "not_api_key" };
+  | {
+      readonly ok: false;
+      /** `provided_by_site`: the connector uses its site-wide key (KOBE-303); no own keys. */
+      readonly failure: "not_available" | "not_api_key" | "provided_by_site";
+    };
 
 /** Envelope binding: a sealed key opens only for this team, user and connector. */
 export function grantContext(teamId: string, userId: string, connectorId: string) {
   return { teamId, kind: "connector_grant", recordId: `${userId}:${connectorId}` } as const;
 }
 
-/** Last four characters of a long key; nothing of a short one. */
-export function maskHint(apiKey: string): string {
-  return apiKey.length >= 16 ? `••••${apiKey.slice(-4)}` : "••••";
-}
+export { maskHint } from "./mask.js";
 
 const summaryColumns = {
   connectorId: connectorGrants.connectorId,
@@ -105,6 +110,7 @@ export async function enabledConnector(
       name: connectors.name,
       url: connectors.url,
       authKind: connectors.authKind,
+      credentialSource: connectors.credentialSource,
       status: connectors.status,
     })
     .from(teamConnectors)
@@ -150,6 +156,7 @@ export async function storeGrant(
     const connector = await enabledConnector(tx, subject);
     if (!connector) return { ok: false, failure: "not_available" };
     if (connector.authKind !== material.kind) return { ok: false, failure: "not_api_key" };
+    if (connector.credentialSource === "site") return { ok: false, failure: "provided_by_site" };
     const [existing] = await tx
       .select({ connectorId: connectorGrants.connectorId })
       .from(connectorGrants)
@@ -267,7 +274,8 @@ interface GrantRow {
   readonly connectorUrl: string;
   readonly connectorName: string;
 }
-type GrantLookup = GrantRow | "not_available" | "not_connected" | "user_inactive";
+/** `site_key`: the chain is live and the connector uses its site-wide key (KOBE-303). */
+type GrantLookup = GrantRow | "not_available" | "not_connected" | "user_inactive" | "site_key";
 
 /**
  * The grant, if the whole chain is live right now: the connector enabled for the team and active,
@@ -287,6 +295,7 @@ async function loadGrant(tx: KobeTx, s: Subject, lock: boolean): Promise<GrantLo
     .from(teamMembers)
     .where(and(eq(teamMembers.teamId, s.teamId), eq(teamMembers.userId, s.userId)));
   if (!account || account.deactivatedAt !== null || !member) return "user_inactive";
+  if (connector.credentialSource === "site") return "site_key";
   const query = tx
     .select({
       sealed: connectorGrants.sealed,
@@ -350,6 +359,7 @@ export async function revealCredential(
   refresh?: RefreshSupport,
 ): Promise<RevealOutcome> {
   const row = await withTeam(db, subject.teamId, (tx) => loadGrant(tx, subject, false));
+  if (row === "site_key") return revealSiteCredential(db, envelope, subject.connectorId);
   const refused = await refusal(db, subject, row);
   if (refused) return refused;
   const grant = row as GrantRow;
@@ -365,6 +375,22 @@ export async function revealCredential(
   }
 }
 
+/**
+ * The site-wide key, for a member whose whole chain was just checked (KOBE-303). Read and opened
+ * per call, so a replaced or removed key takes effect on the next call. No key set (or one that
+ * does not open) is `not_connected`: the site admin has not provided one.
+ */
+async function revealSiteCredential(
+  db: KobeDb,
+  envelope: Envelope,
+  connectorId: string,
+): Promise<RevealOutcome> {
+  const apiKey = await revealSiteKey(db, envelope, connectorId);
+  return apiKey === undefined
+    ? { ok: false, failure: "not_connected" }
+    : { ok: true, credential: { kind: "api_key", apiKey } };
+}
+
 function bundleWithoutVersion(bundle: OauthBundle): Omit<OauthBundle, "v"> {
   const { v: _v, ...rest } = bundle;
   return rest;
@@ -378,6 +404,8 @@ async function refusal(
   row: GrantLookup,
 ): Promise<RevealOutcome | undefined> {
   if (typeof row !== "string") return undefined;
+  // Only OAuth grants come back here after a refresh race; a site key is never refreshed.
+  if (row === "site_key") return { ok: false, failure: "not_connected" };
   if (row === "user_inactive") {
     await auditRefusal(db, subject, "connector", "user_inactive");
     return { ok: false, failure: "not_available" };

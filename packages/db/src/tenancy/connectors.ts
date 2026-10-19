@@ -6,7 +6,7 @@ export const connectors = defineDomain({
   // each user's own API-key grant for it (KOBE-108; sealed with the KOBE-107 envelope), and the
   // team's opt-in to web search (KOBE-113).
   team: ["team_connectors", "connector_grants", "team_web_search"],
-  siteWide: ["connectors", "web_search_settings"],
+  siteWide: ["connectors", "web_search_settings", "connector_site_keys"],
   grants: {
     // The connector registry (site admins, KOBE-59): server URL, auth kind, pinned tools; no
     // team data. Deleting a connector cascades into every team's `team_connectors` row for it
@@ -15,6 +15,8 @@ export const connectors = defineDomain({
     // The web search provider and its sealed key (KOBE-113): one row, no team data. Teams opt in
     // through the team table `team_web_search`.
     web_search_settings: ALL_PRIVILEGES,
+    // A connector's site-wide API key (KOBE-303), sealed like connector_grants: no team data.
+    connector_site_keys: ALL_PRIVILEGES,
   },
   teamReferencing: {},
 });
