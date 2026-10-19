@@ -158,7 +158,11 @@ describe("system tags are code-defined (ac-3)", () => {
 describe("registry invariants", () => {
   it("keeps the settings a singleton the app can only update", async () => {
     await withClient(database().appUrl, async (c) => {
-      await c.query(`UPDATE site_skill_settings SET registry_team_id = $1`, [ids.team]);
+      await c.query(`UPDATE site_skill_settings SET judge_alias = 'smart'`);
+      // Only the dedicated Registry team can be named (KOBE-330 review H1).
+      await expect(
+        c.query(`UPDATE site_skill_settings SET registry_team_id = $1`, [ids.team]),
+      ).rejects.toMatchObject({ code: "23514" });
       await expect(
         c.query(`INSERT INTO site_skill_settings (id) VALUES (2)`),
       ).rejects.toMatchObject({ code: "42501" });
@@ -439,7 +443,7 @@ describe("registry invariants", () => {
   it("leaves the Registry not ready when its team is deleted", async () => {
     await withClient(database().adminUrl, async (c) => {
       const team = randomUUID();
-      await c.query(`INSERT INTO teams (id, slug, name) VALUES ($1, $2, 'Gone')`, [
+      await c.query(`INSERT INTO teams (id, slug, name, registry) VALUES ($1, $2, 'Gone', true)`, [
         team,
         `gone-${suffix}`,
       ]);
