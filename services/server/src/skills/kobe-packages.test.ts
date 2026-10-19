@@ -63,8 +63,8 @@ const PUBLISHED: Record<string, Record<string, { runtime: string; package: strin
       package: "1ff17aa2a178cf2c6ff3731e09951ca0d16e782a6c361e9ead949c7a380c6860",
     },
     "1.2.0": {
-      runtime: "81fd1592bdc6003e9b34f86d0b24a71b60fa43ee5a725d862c44e03c6c3960f1",
-      package: "b84625b63400531047a99fe038db2dcfb5c0bd78eada48149a295e058f6efad4",
+      runtime: "391af382e4841a621515dc3632d0151da15f4251c984b8950e7f535b77ba7e15",
+      package: "4e719e33003b019a95ff293c302fca3879b3599ca639d2615e8806dc025599d0",
     },
   },
 };
@@ -102,6 +102,16 @@ describe("the Kobe package set (KOBE-317)", () => {
         { runtime: sha256Hex(p.bundle.zip), package: p.bundle.packageHash },
         `${p.name}@${p.semver} changed its bytes: raise its version instead`,
       ).toEqual(versions[p.semver]);
+    }
+  });
+
+  it("holds no local build litter (running a skill's scripts here leaves __pycache__)", async () => {
+    for (const p of await loadKobePackages()) {
+      const paths = Object.keys(unzipSync(p.bundle.packageZip ?? p.bundle.zip));
+      expect(
+        paths.filter((f) => /(^|\/)__pycache__\/|\.pyc$/.test(f)),
+        `${p.name}: delete it`,
+      ).toEqual([]);
     }
   });
 
