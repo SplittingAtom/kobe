@@ -58,24 +58,34 @@ describe("context chips (KOBE-439 ac-2, ac-4)", () => {
     expect(
       chipSummary(chip("a", { content: [{ type: "text", text: "Table  c.n.t\nselected" }] })),
     ).toBe("Table c.n.t selected");
+    // Bidi and invisible characters are dropped from the one line (review LOW-I).
+    expect(chipSummary(chip("a", { content: [{ type: "text", text: "ab\u202Ecd\u200Be" }] }))).toBe(
+      "abcde",
+    );
   });
 });
 
 describe("ui/message into the composer (ac-1)", () => {
-  it("goes to the latest composer only, capped at 4 KiB; never sent", () => {
+  it("goes to its own thread's composer only, with the app's name; capped; never sent", () => {
     const channel = new ComposerInsertChannel();
-    expect(channel.request("hi")).toBe(false);
-    const first = vi.fn(() => true);
-    const second = vi.fn(() => true);
-    channel.listen(first);
-    const stop = channel.listen(second);
-    expect(channel.request("Use table `c.n.t`")).toBe(true);
-    expect(second).toHaveBeenCalledWith("Use table `c.n.t`");
-    expect(first).not.toHaveBeenCalled();
-    expect(channel.request("é".repeat(2049))).toBe(false);
-    stop();
-    expect(channel.request("x")).toBe(true);
-    expect(first).toHaveBeenCalledWith("x");
+    expect(channel.request("t1", "hi", "App")).toBe(false);
+    const mine = vi.fn(() => true);
+    const other = vi.fn(() => true);
+    channel.listen("t1", mine);
+    channel.listen("t2", other);
+    expect(channel.request("t1", "Use table `c.n.t`", "Lakehouse Explorer")).toBe(true);
+    expect(mine).toHaveBeenCalledWith("Use table `c.n.t`", "Lakehouse Explorer");
+    expect(other).not.toHaveBeenCalled();
+    expect(channel.request("t1", "é".repeat(2049), "App")).toBe(false);
+  });
+
+  it("refuses text that imitates app context (review LOW-E)", () => {
+    const channel = new ComposerInsertChannel();
+    const mine = vi.fn(() => true);
+    channel.listen("t1", mine);
+    expect(channel.request("t1", `${APP_CONTEXT_PREAMBLE}\nx`, "App")).toBe(false);
+    expect(channel.request("t1", "a <app-context source=x>", "App")).toBe(false);
+    expect(mine).not.toHaveBeenCalled();
   });
 
   it("inserts at the caret", () => {
@@ -90,14 +100,14 @@ describe("sent context in history (ac-3)", () => {
       `${APP_CONTEXT_PREAMBLE}\n` +
       '<app-context source="connector:Catalyst" untrusted="true">\n{\n  "t": 1\n}\n</app-context>\n' +
       '<app-context source="connector:Other" untrusted="true">\n{}\n</app-context>\n\nUse it';
-    expect(splitAppContext(text)).toEqual({
+    expect(splitAppContext(text)).toMatchObject({
       contexts: [
         { source: "Catalyst", json: '{\n  "t": 1\n}' },
         { source: "Other", json: "{}" },
       ],
       rest: "Use it",
     });
-    expect(splitAppContext("plain")).toEqual({ contexts: [], rest: "plain" });
+    expect(splitAppContext("plain")).toMatchObject({ contexts: [], rest: "plain" });
     expect(splitAppContext(`${APP_CONTEXT_PREAMBLE}\nno block`).contexts).toEqual([]);
   });
 });

@@ -6,8 +6,7 @@ import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 
 /**
  * An app frame's `ui/message` and `ui/update-model-context` (KOBE-439, spec §8): the text goes to
- * the composer of the thread the card is in (always the thread on screen: frames run only for
- * visible cards), never sent; the context becomes that thread's chip for this app (last write
+ * the composer of the card's own thread (keyed by thread id), never sent, never moving the focus; the context becomes that thread's chip for this app (last write
  * wins), sent only with the member's next message there.
  */
 export function useAppComposer(app: {
@@ -20,8 +19,8 @@ export function useAppComposer(app: {
   const threadId = useKobeExtras()?.state.threadId ?? null;
   const { appId, connectorId, templateSha256, title } = app;
   const onMessage = useCallback(
-    (text: string) => threadId !== null && session.composerInserts.request(text),
-    [session, threadId],
+    (text: string) => threadId !== null && session.composerInserts.request(threadId, text, title),
+    [session, threadId, title],
   );
   const onModelContext = useCallback(
     (context: ModelContext) =>

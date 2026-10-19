@@ -98,9 +98,16 @@ async function appWindow() {
 const posts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 
 describe("ui/message and model context (KOBE-439)", () => {
-  it("puts ui/message text into this thread's composer and never sends it (ac-1)", async () => {
+  it("puts ui/message text into this thread's composer without moving the focus; an Enter in the app sends nothing (ac-1, MEDIUM-2)", async () => {
     openApp(fake, thread());
     const app = await appWindow();
+    const frame = screen.getByTitle("Lakehouse Explorer (app from Catalyst)");
+    // Let the chat finish opening (it may focus its composer once) before the app has the focus.
+    await composer();
+    await act(() => new Promise((r) => setTimeout(r, 300)));
+    frame.focus();
+    expect(document.activeElement).toBe(frame);
+    const focused = document.activeElement;
     await app.send({
       jsonrpc: "2.0",
       id: 1,
@@ -112,7 +119,46 @@ describe("ui/message and model context (KOBE-439)", () => {
     await waitFor(() =>
       expect(app.replies()).toContainEqual({ jsonrpc: "2.0", id: 1, result: {} }),
     );
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.activeElement).toBe(focused);
+    expect(document.activeElement).not.toBe(box);
+    await waitFor(() =>
+      expect(document.querySelector("[data-kobe-app-insert-from]")?.textContent).toContain(
+        "From Lakehouse Explorer",
+      ),
+    );
+    // The member presses Enter where the focus is: the app's frame. Nothing is sent.
+    fireEvent.keyDown(focused ?? document.body, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 50));
     expect(posts()).toEqual([]);
+  });
+
+  it("does not send inserted text on Enter until the member edits or confirms it (MEDIUM-2)", async () => {
+    openApp(fake, thread());
+    const app = await appWindow();
+    const user = userEvent.setup();
+    const box = (await composer()) as HTMLTextAreaElement;
+    await user.click(box);
+    await user.type(box, "Look at ");
+    await app.send({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ui/message",
+      params: { role: "user", content: [{ type: "text", text: "table t" }] },
+    });
+    await waitFor(() => expect(box.value).toBe("Look at table t"));
+    expect(document.querySelector("[data-kobe-app-insert-from]")?.textContent).toContain(
+      "From Lakehouse Explorer",
+    );
+    await user.keyboard("{Enter}");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(posts()).toEqual([]);
+    // The member edits: the marker goes, and their Enter sends.
+    await user.type(box, "!");
+    await waitFor(() => expect(document.querySelector("[data-kobe-app-insert-from]")).toBeNull());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(must(posts()[0]).body).toMatchObject({ content: "Look at table t!" });
   });
 
   it("shows a removable chip and sends exactly the chips shown (ac-2)", async () => {

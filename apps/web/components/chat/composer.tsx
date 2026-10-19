@@ -129,7 +129,7 @@ export function Composer({
   const readOnly = extras.state.summary?.readOnly === true;
   // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
   const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
-  const appInsert = useAppInserts(input, text, !readOnly && !inTrash);
+  const appInsert = useAppInserts(input, text, remoteId, !readOnly && !inTrash);
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const onDragOver = (e: DragEvent) => {
     if (rowDrop.over(e) || !hasFiles(e)) return;
@@ -176,6 +176,11 @@ export function Composer({
         e.preventDefault();
         editLast.onSelect();
       }
+      return;
+    }
+    // Text an app inserted is not sent until the member edits or confirms it (MEDIUM-2).
+    if (e.key === "Enter" && !e.shiftKey && appInsert.pending !== null) {
+      e.preventDefault();
       return;
     }
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
@@ -241,7 +246,7 @@ export function Composer({
           data-running={running || undefined}
           data-dragging={dragging || undefined}
           data-mention-drop={rowDrop.rowDrop ?? undefined}
-          data-app-insert={appInsert || undefined}
+          data-app-insert={appInsert.flash || undefined}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDrop}
@@ -255,6 +260,20 @@ export function Composer({
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
+          {appInsert.pending && (
+            <p
+              role="note"
+              data-kobe-app-insert-from={appInsert.pending.from}
+              className="text-muted-foreground m-0 flex items-center gap-2 px-2 text-xs"
+            >
+              <span>
+                From {appInsert.pending.from}: edit the text or confirm it before you send.
+              </span>
+              <button type="button" className="underline" onClick={appInsert.confirm}>
+                Confirm
+              </button>
+            </p>
+          )}
           <label htmlFor="kobe-composer" className="sr-only">
             Message
           </label>
@@ -315,7 +334,7 @@ export function Composer({
                 size="sm"
                 className="h-8 shrink-0 rounded-full px-3"
                 onClick={() => void queue()}
-                disabled={empty || blocker !== undefined}
+                disabled={empty || blocker !== undefined || appInsert.pending !== null}
               >
                 Queue
               </Button>
@@ -326,7 +345,7 @@ export function Composer({
                   type="button"
                   variant="default"
                   className="size-7 shrink-0 rounded-full"
-                  disabled={blocker !== undefined}
+                  disabled={blocker !== undefined || appInsert.pending !== null}
                 />
               </ComposerPrimitive.Send>
             )}
@@ -366,31 +385,47 @@ export function Composer({
 /** How long the composer flashes after an app put text in it. */
 const INSERT_FLASH_MS = 600;
 
+/** Text an app put in the composer that the member has not edited or confirmed yet. */
+interface PendingInsert {
+  readonly from: string;
+  /** The composer's whole text right after the insert. */
+  readonly text: string;
+  /** The composer has shown that text (its state catches up a render later). */
+  readonly seen: boolean;
+}
+
 /**
- * An app's `ui/message` (KOBE-439, spec §8): the text goes in at the caret of this composer, which
- * takes the focus and flashes; it is never sent. Only a writable composer listens.
+ * An app's `ui/message` (KOBE-439, spec §8; review MEDIUM-2, coordinator decision): the text goes
+ * in at the caret of this thread's composer and **never moves the focus**: an Enter the member
+ * presses in the app (or anywhere else) cannot send it. Until the member edits the text or
+ * confirms it, it carries a visible "From <app>" marker, and Enter and Send do nothing. It is
+ * never sent by itself. Only a writable composer of a thread listens.
  */
 function useAppInserts(
   input: RefObject<HTMLTextAreaElement | null>,
   text: string,
+  threadId: string | undefined,
   writable: boolean,
-): boolean {
+): {
+  readonly flash: boolean;
+  readonly pending: PendingInsert | null;
+  confirm(): void;
+} {
   const aui = useAui();
   const session = useChatSession();
   const [flash, setFlash] = useState(false);
+  const [pending, setPending] = useState<PendingInsert | null>(null);
   const latest = useRef(text);
   latest.current = text;
   useEffect(() => {
-    if (!writable) return undefined;
+    if (!writable || threadId === undefined) return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const stop = session.composerInserts.listen((insert) => {
+    const stop = session.composerInserts.listen(threadId, (insert, from) => {
       const el = input.current;
-      const next = insertAt(latest.current, el?.selectionEnd ?? latest.current.length, insert);
+      const caret = el !== null && document.activeElement === el ? el.selectionEnd : undefined;
+      const next = insertAt(latest.current, caret ?? latest.current.length, insert);
       aui.composer.setText(next.text);
-      requestAnimationFrame(() => {
-        input.current?.focus();
-        input.current?.setSelectionRange(next.caret, next.caret);
-      });
+      setPending({ from, text: next.text, seen: false });
       setFlash(true);
       clearTimeout(timer);
       timer = setTimeout(() => setFlash(false), INSERT_FLASH_MS);
@@ -400,6 +435,16 @@ function useAppInserts(
       stop();
       clearTimeout(timer);
     };
-  }, [session, aui, input, writable]);
-  return flash;
+  }, [session, aui, input, threadId, writable]);
+  // Any change of the text after the insert (the member typing, a send clearing it) settles it.
+  if (pending !== null && !pending.seen && text === pending.text) {
+    setPending({ ...pending, seen: true });
+  } else if (pending !== null && pending.seen && text !== pending.text) {
+    setPending(null);
+  }
+  const confirm = () => {
+    setPending(null);
+    input.current?.focus();
+  };
+  return { flash, pending, confirm };
 }

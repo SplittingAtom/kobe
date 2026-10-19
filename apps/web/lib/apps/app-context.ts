@@ -1,4 +1,6 @@
-import { APP_CONTEXT_MAX_BYTES, APP_CONTEXT_PREAMBLE } from "@kobe/protocol";
+import { APP_CONTEXT_MAX_BYTES, imitatesAppContext } from "@kobe/protocol";
+
+export { splitAppContext, type SentAppContext } from "@kobe/protocol";
 import { MESSAGE_TEXT_MAX } from "./host-bridge";
 
 /**
@@ -28,7 +30,11 @@ export function chipSummary(chip: AppContextChip): string {
   );
   const raw =
     (text?.["text"] as string | undefined) ?? JSON.stringify(chip.data.structuredContent ?? {});
-  const line = raw.replace(/\s+/g, " ").trim();
+  // Invisible and bidi characters could make the line read differently (review LOW-I).
+  const line = raw
+    .replace(/[\p{Cf}\p{Zl}\p{Zp}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
 }
 
@@ -100,21 +106,28 @@ export function appContextBody(chips: readonly AppContextChip[]) {
   }));
 }
 
-/** `ui/message` text into the composer on screen; false when there is none to take it. */
+/**
+ * `ui/message` text for the composer of one thread (review LOW-H: the card's own thread, never
+ * whichever composer mounted last), with the app's name for the "From …" marker. Text that
+ * imitates app context, or over 4 KiB, is refused.
+ */
 export class ComposerInsertChannel {
-  #listeners: readonly ((text: string) => boolean)[] = [];
+  #listeners = new Map<string, readonly ((text: string, from: string) => boolean)[]>();
 
-  listen(listener: (text: string) => boolean): () => void {
-    const own = (text: string) => listener(text);
-    this.#listeners = [...this.#listeners, own];
+  listen(threadId: string, listener: (text: string, from: string) => boolean): () => void {
+    const own = (text: string, from: string) => listener(text, from);
+    this.#listeners.set(threadId, [...(this.#listeners.get(threadId) ?? []), own]);
     return () => {
-      this.#listeners = this.#listeners.filter((l) => l !== own);
+      const left = (this.#listeners.get(threadId) ?? []).filter((l) => l !== own);
+      if (left.length === 0) this.#listeners.delete(threadId);
+      else this.#listeners.set(threadId, left);
     };
   }
 
-  request(text: string): boolean {
+  request(threadId: string, text: string, from: string): boolean {
     if (new TextEncoder().encode(text).length > MESSAGE_TEXT_MAX) return false;
-    return this.#listeners.at(-1)?.(text) ?? false;
+    if (imitatesAppContext(text)) return false;
+    return this.#listeners.get(threadId)?.at(-1)?.(text, from) ?? false;
   }
 }
 
@@ -122,37 +135,4 @@ export class ComposerInsertChannel {
 export function insertAt(text: string, caret: number, insert: string) {
   const at = Math.max(0, Math.min(caret, text.length));
   return { text: text.slice(0, at) + insert + text.slice(at), caret: at + insert.length };
-}
-
-export interface SentAppContext {
-  /** The connector name from the block's `source`. */
-  readonly source: string;
-  /** The block's JSON as sent (pretty-printed). */
-  readonly json: string;
-}
-
-const BLOCK =
-  /^<app-context source="connector:([^"]*)" untrusted="true">\n([\s\S]*?)\n<\/app-context>/;
-
-/**
- * A sent message whose text starts with the server's preamble and fenced blocks: the blocks (for
- * chips in history) and the member's own text. Anything else is the text as it is.
- */
-export function splitAppContext(text: string): {
-  readonly contexts: readonly SentAppContext[];
-  readonly rest: string;
-} {
-  if (!text.startsWith(`${APP_CONTEXT_PREAMBLE}\n`)) return { contexts: [], rest: text };
-  let at = APP_CONTEXT_PREAMBLE.length + 1;
-  const contexts: SentAppContext[] = [];
-  for (;;) {
-    const match = BLOCK.exec(text.slice(at));
-    if (!match) break;
-    contexts.push({ source: match[1] ?? "", json: match[2] ?? "" });
-    at += match[0].length;
-    if (text.startsWith("\n\n", at)) return { contexts, rest: text.slice(at + 2) };
-    if (!text.startsWith("\n", at)) break;
-    at += 1;
-  }
-  return contexts.length === 0 ? { contexts: [], rest: text } : { contexts, rest: text.slice(at) };
 }
