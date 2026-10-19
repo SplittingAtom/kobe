@@ -273,6 +273,17 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     }
   });
 
+  it("takes the legal-hold lock before the run-end discard checks for a hold (0161)", async () => {
+    const { rows } = await withClient(database().adminUrl, (c) =>
+      c.query<{ src: string }>(
+        `SELECT prosrc AS src FROM pg_proc WHERE proname = 'thread_app_results_discard_unclaimed'`,
+      ),
+    );
+    const src = rows[0]?.src ?? "";
+    expect(src.indexOf("legal_hold_lock_shared")).toBeGreaterThan(-1);
+    expect(src.indexOf("legal_hold_lock_shared")).toBeLessThan(src.indexOf("legal_hold_covers"));
+  });
+
   it("refuses deleting a held thread's results and TRUNCATE during a hold; a thread delete cascades", async () => {
     const { adminUrl } = database();
     const hold = await withClient(adminUrl, async (c) => {

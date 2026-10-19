@@ -1128,6 +1128,13 @@
       "when": 1792418977280,
       "tag": "0160_thread_app_results_discard_unclaimed",
       "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1792421022368,
+      "tag": "0161_thread_app_results_discard_hold_lock",
+      "breakpoints": true
     }
   ]
 }
