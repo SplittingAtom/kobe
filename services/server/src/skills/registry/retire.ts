@@ -153,7 +153,18 @@ export function retireVersion(
       .map((x) => x.id);
     let revokedAt: string | null = null;
     let to: string = TO[act];
-    let checklist: Record<string, unknown> = { from: v.state };
+    const admin = siteRoleAllows(actor.siteRole, "site.skills.catalog.manage");
+    // A maintainer doesn't undo a Site admin's deprecation (review-341 L4).
+    if (act === "undeprecate" && !admin) {
+      const last = await tx.execute<{ by_admin: boolean | null }>(sql`
+        SELECT (checklist ->> 'byAdmin')::boolean AS by_admin FROM registry_review_events
+         WHERE version_id = ${v.id} AND action = 'deprecated' ORDER BY id DESC LIMIT 1`);
+      if (last.rows[0]?.by_admin === true) return { ok: false, code: "forbidden" };
+    }
+    let checklist: Record<string, unknown> = {
+      from: v.state,
+      ...(act === "deprecate" ? { byAdmin: admin } : {}),
+    };
     const target = { registryVersionId: v.id, skillId, name: v.name, semver: input.semver };
     if (act === "revoke") {
       const added = await addBlockedInTx(tx, {
@@ -277,6 +288,7 @@ export function deprecateSkill(
         name: s.name,
         replacementId: input.replacementId ?? null,
         from: s.status as "active" | "unmaintained",
+        byAdmin: siteRoleAllows(actor.siteRole, "site.skills.catalog.manage"),
       },
     });
     return {
@@ -351,10 +363,16 @@ export function undeprecateSkill(
     if (!s) return { ok: false, code: "not_found" };
     if (!(await mayAct(tx, "undeprecate", skillId, actor))) return { ok: false, code: "forbidden" };
     if (s.status !== "deprecated") return { ok: false, code: "wrong_state" };
-    const last = await tx.execute<{ from: string | null }>(sql`
-      SELECT target ->> 'from' AS from FROM audit_log
+    const last = await tx.execute<{ from: string | null; by_admin: boolean | null }>(sql`
+      SELECT target ->> 'from' AS from, (target ->> 'byAdmin')::boolean AS by_admin FROM audit_log
        WHERE action = 'skill.catalog.deprecated' AND target ->> 'skillId' = ${skillId}
        ORDER BY seq DESC LIMIT 1`);
+    // A maintainer doesn't undo a Site admin's deprecation (review-341 L4).
+    if (
+      last.rows[0]?.by_admin === true &&
+      !siteRoleAllows(actor.siteRole, "site.skills.catalog.manage")
+    )
+      return { ok: false, code: "forbidden" };
     const to = last.rows[0]?.from === "unmaintained" ? "unmaintained" : "active";
     const before = await versionsBefore(tx, skillId);
     await tx.execute(sql`

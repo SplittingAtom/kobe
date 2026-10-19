@@ -140,10 +140,18 @@ async function teamPart(tx: KobeTx, teamId: string, r: Retired) {
 async function write(tx: KobeTx, teamId: string, r: Retired, users: ReadonlySet<string>) {
   if (users.size === 0) return undefined;
   const kind = kindOf(r);
+  // A deprecation told again within a day isn't news: a deprecate–undo loop can't flood bells
+  // (review-341 L3).
+  const once = kind === "skill.deprecated" || kind === "skill.version.deprecated";
   for (const userId of users)
     await tx.execute(sql`
       INSERT INTO notifications (team_id, user_id, kind, skill_id, skill_semver)
-      VALUES (${teamId}, ${userId}, ${kind}, ${r.skillId}, ${r.semver})`);
+      SELECT ${teamId}, ${userId}, ${kind}, ${r.skillId}, ${r.semver}
+       WHERE NOT ${once} OR NOT EXISTS (
+         SELECT 1 FROM notifications n
+          WHERE n.team_id = ${teamId} AND n.user_id = ${userId} AND n.kind = ${kind}
+            AND n.skill_id = ${r.skillId} AND n.skill_semver IS NOT DISTINCT FROM ${r.semver}
+            AND n.created_at > now() - interval '1 day')`);
   return [...users];
 }
 

@@ -1617,6 +1617,8 @@ export const AUDIT_EVENTS = {
     replacementId: id.nullable(),
     /** The status it left, where an undo returns it (review L1). */
     from: z.enum(["active", "unmaintained"]).optional(),
+    /** A Site admin deprecated it: only a Site admin undoes it (review-341 L4). */
+    byAdmin: z.boolean().optional(),
   }),
 
   // ── catalog maintainers (KOBE-332, SK24): ids only ──

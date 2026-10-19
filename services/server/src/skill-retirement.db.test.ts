@@ -463,7 +463,7 @@ describe("Deprecate a whole skill (ac-1)", () => {
     });
     expect(b?.status).toBe(403);
     expect(await audits("skill.catalog.deprecated")).toEqual([
-      { skillId, name: NAME, replacementId: otherId, from: "active" },
+      { skillId, name: NAME, replacementId: otherId, from: "active", byAdmin: false },
     ]);
   });
 });
@@ -550,5 +550,24 @@ describe("Undo a deprecation", () => {
       to: "unmaintained",
     });
     await h.admin.query(`UPDATE registry_skills SET status = 'active' WHERE id = $1`, [otherId]);
+  });
+
+  it("one notice a day per deprecation, and a Site admin's deprecation only a Site admin undoes (review-341 L3, L4)", async () => {
+    const before = (await notices(teams.t2, ids.a2)).length;
+    // Team 2 tracks major 1 and runs 1.1.0 now: a deprecate–undo–deprecate loop tells it once.
+    expect((await act("maintainer", "1.1.0", "deprecate")).status).toBe(200);
+    expect((await act("maintainer", "1.1.0", "undeprecate")).status).toBe(200);
+    expect((await act("maintainer", "1.1.0", "deprecate")).status).toBe(200);
+    expect((await notices(teams.t2, ids.a2)).length - before).toBe(1);
+    expect((await act("maintainer", "1.1.0", "undeprecate")).status).toBe(200);
+
+    expect((await act("admin", "1.1.0", "deprecate")).status).toBe(200);
+    expect((await act("maintainer", "1.1.0", "undeprecate")).status).toBe(403);
+    expect((await act("admin", "1.1.0", "undeprecate")).status).toBe(200);
+
+    const path = `/v1/site/skills/catalog/${skillId}`;
+    expect((await (as.admin as TestBrowser).post(`${path}/deprecate`, {})).status).toBe(200);
+    expect((await (as.maintainer as TestBrowser).post(`${path}/undeprecate`, {})).status).toBe(403);
+    expect((await (as.admin as TestBrowser).post(`${path}/undeprecate`, {})).status).toBe(200);
   });
 });
