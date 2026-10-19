@@ -12,6 +12,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { users } from "./auth.js";
 import { teams } from "./teams.js";
 import { threads } from "./threads.js";
 
@@ -79,6 +80,14 @@ export const threadAppResults = pgTable(
     bytes: bigint({ mode: "number" }).notNull(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     claimedAt: timestamp({ withTimezone: true }),
+    /** MA-6 (KOBE-440): the member who launched an app card (cleared if the user is deleted). */
+    openedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    /**
+     * A card launched during an active run waits (D17, spec MA11): `queued_at` is set and
+     * `card_text` holds its entry's content until the run ends and the card is inserted.
+     */
+    cardText: text(),
+    queuedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -128,6 +137,13 @@ export const threadAppResults = pgTable(
     check(
       "thread_app_results_input_size",
       sql`${t.input} IS NULL OR octet_length(${t.input}::text) <= 65536`,
+    ),
+    // Only an app card waits, and it waits with its text (at most 16 Ki characters).
+    check(
+      "thread_app_results_queued",
+      sql`(${t.queuedAt} IS NULL OR (${t.entryId} IS NOT NULL AND ${t.cardText} IS NOT NULL))
+        AND (${t.cardText} IS NULL OR char_length(${t.cardText}) <= 16384)
+        AND (${t.openedBy} IS NULL OR ${t.entryId} IS NOT NULL)`,
     ),
   ],
 );
