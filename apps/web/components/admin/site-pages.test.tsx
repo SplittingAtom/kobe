@@ -228,12 +228,19 @@ describe("Site roles", () => {
     ],
   };
 
-  it("is read-only for Admins", async () => {
-    stubApi({ "GET /v1/site/roles": [200, ROLES], "GET /v1/site/users": [200, USERS] });
+  it("is read-only for Admins, who still give Skill reviewer (KOBE-331)", async () => {
+    stubApi({
+      "GET /v1/site/roles": [200, ROLES],
+      "GET /v1/site/users": [200, USERS],
+      "GET /v1/site/roles/grants": [200, { grants: [] }],
+    });
     renderSite(<RolesPage />, "admin");
     await screen.findByRole("table");
     expect(screen.getByText(/Only the Owner grants or revokes Admin/)).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    await screen.findByRole("form", { name: "Give Skill reviewer" });
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Make Skill reviewer",
+    ]);
     expect(screen.queryByRole("form", { name: "Transfer ownership" })).toBeNull();
   });
 
