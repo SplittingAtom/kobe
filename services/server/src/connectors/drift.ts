@@ -29,6 +29,7 @@ const proposalOf = (live: PinnedTool): ProposedTool => ({
   input_schema: live.input_schema,
   ...(live.output_schema === undefined ? {} : { output_schema: live.output_schema }),
   annotations: live.annotations,
+  ...(live.ui === undefined ? {} : { ui: live.ui }),
   sha256: live.sha256,
 });
 
@@ -117,7 +118,10 @@ export function approveTools(
     if (!wanted.has(tool.name)) return tool;
     approved.push(tool.name);
     const { proposed, ...rest } = tool;
-    return { ...rest, ...(proposed ?? {}), status: "pinned" };
+    if (!proposed) return { ...rest, status: "pinned" };
+    // The live definition replaces the approved one whole: an optional field it lacks goes too.
+    const { title: _title, output_schema: _output, ui: _ui, ...required } = rest;
+    return { ...required, ...proposed, status: "pinned" };
   });
   return { ok: true, tools, approved };
 }

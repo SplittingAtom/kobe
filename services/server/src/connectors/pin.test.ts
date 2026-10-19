@@ -128,3 +128,29 @@ describe("buildSnapshot", () => {
     ).toEqual({ ok: false, failure: "ambiguous_tool_names" });
   });
 });
+
+describe("MCP Apps template references (KOBE-433)", () => {
+  const withUi = (resourceUri: unknown) => ({ ...tool, _meta: { ui: { resourceUri } } });
+
+  it("pins the ui:// template a tool names, as part of its hash", () => {
+    const result = buildSnapshot("jira", [withUi("ui://jira/app")]);
+    expect(result.ok && result.tools[0]?.ui).toEqual({ resource_uri: "ui://jira/app" });
+    const other = buildSnapshot("jira", [withUi("ui://jira/other")]);
+    const plain = buildSnapshot("jira", [tool]);
+    const hashes = [result, other, plain].map((r) => (r.ok ? r.tools[0]?.sha256 : undefined));
+    expect(new Set(hashes).size).toBe(3);
+  });
+
+  it("keeps the hash of a tool without a template as before (no drift on upgrade)", () => {
+    const plain = buildSnapshot("jira", [tool]);
+    expect(plain.ok && plain.tools[0]?.sha256).toBe(toolHash(tool));
+    expect(plain.ok && plain.tools[0]?.ui).toBeUndefined();
+  });
+
+  it("ignores a template reference that is not a ui:// URI", () => {
+    for (const uri of ["https://x.example/app", 7, "ui://"]) {
+      const r = buildSnapshot("jira", [withUi(uri)]);
+      expect(r.ok && r.tools[0]?.ui, String(uri)).toBeUndefined();
+    }
+  });
+});

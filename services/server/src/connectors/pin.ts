@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, mcpServerSegment } from "@kobe/protocol";
-import { pinnedToolSchema, type PinnedTool } from "@kobe/db";
+import {
+  UI_RESOURCE_URI_PATTERN,
+  pinnedToolSchema,
+  type PinnedTool,
+  type PinnedToolUi,
+} from "@kobe/db";
 import { z } from "zod";
 
 /**
@@ -8,7 +13,9 @@ import { z } from "zod";
  * `tools/list` into the snapshot stored on `connectors.tools_snapshot`. Each tool is pinned by the
  * SHA-256 of the canonical JSON (RFC 8785 via `canonicalJson`) of exactly its name, description and
  * input schema, so key order and JSON whitespace never change a pin and any change to the three
- * fields does. Title, annotations and output schema are stored but not part of the pin.
+ * fields does. Title, annotations and output schema are stored but not part of the pin. A tool
+ * that names an MCP Apps template (`_meta.ui.resourceUri`, KOBE-433) pins it too, so pointing the
+ * tool at another template is drift; tools without one keep the hash they always had.
  */
 
 /** What a server may send per tool; unknown keys are dropped, malformed ones fail the snapshot. */
@@ -19,23 +26,38 @@ const listedToolSchema = z.object({
   inputSchema: z.record(z.string(), z.unknown()),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   annotations: z.record(z.string(), z.unknown()).optional(),
+  _meta: z.record(z.string(), z.unknown()).optional(),
 });
+
+const UI_URI_MAX = 2048;
+
+/** The `ui://` template a listed tool names, if any (anything else is not an app). */
+function uiOf(meta: Record<string, unknown> | undefined): PinnedToolUi | undefined {
+  const ui = meta?.ui;
+  if (typeof ui !== "object" || ui === null) return undefined;
+  const uri = (ui as Record<string, unknown>).resourceUri;
+  return typeof uri === "string" && uri.length <= UI_URI_MAX && UI_RESOURCE_URI_PATTERN.test(uri)
+    ? { resource_uri: uri }
+    : undefined;
+}
 
 export interface PinInput {
   readonly name: string;
   readonly description?: string | undefined;
   readonly inputSchema: Record<string, unknown>;
+  readonly ui?: PinnedToolUi | undefined;
 }
 
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
-/** SHA-256 (hex) over the canonical form of `{description, inputSchema, name}`. */
+/** SHA-256 (hex) over the canonical form of `{description, inputSchema, name}` (and `ui`). */
 export function toolHash(tool: PinInput): string {
   return sha256(
     canonicalJson({
       name: tool.name,
       description: tool.description ?? "",
       inputSchema: tool.inputSchema,
+      ...(tool.ui === undefined ? {} : { ui: tool.ui }),
     }),
   );
 }
@@ -69,6 +91,7 @@ export function buildSnapshot(connectorName: string, listed: readonly unknown[])
       const tool = listedToolSchema.safeParse(raw);
       if (!tool.success) return { ok: false, failure: "invalid_tool" };
       const t = tool.data;
+      const ui = uiOf(t._meta);
       const candidate = {
         name: t.name,
         pi_name: `mcp__${server}__${piToolSegment(t.name)}`,
@@ -77,7 +100,8 @@ export function buildSnapshot(connectorName: string, listed: readonly unknown[])
         input_schema: t.inputSchema,
         ...(t.outputSchema === undefined ? {} : { output_schema: t.outputSchema }),
         annotations: t.annotations ?? {},
-        sha256: toolHash(t),
+        ...(ui === undefined ? {} : { ui }),
+        sha256: toolHash({ ...t, ui }),
         status: "pinned" as const,
       };
       const pinned = pinnedToolSchema.safeParse(candidate);

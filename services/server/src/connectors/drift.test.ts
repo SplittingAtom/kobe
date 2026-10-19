@@ -112,3 +112,36 @@ describe("approveTools", () => {
     expect(approvedHash(drifted())).toBe(approvedHash(snap(listed("a", "old"), listed("b"))));
   });
 });
+
+describe("tools that name an MCP Apps template (KOBE-433)", () => {
+  const withUi = (name: string, uri: string) => ({
+    ...listed(name),
+    _meta: { ui: { resourceUri: uri } },
+  });
+  const snapOf = (...tools: Record<string, unknown>[]): PinnedTool[] => {
+    const s = buildSnapshot("srv", tools);
+    if (!s.ok) throw new Error("fixture");
+    return s.tools;
+  };
+
+  it("drifts a tool pointed at another template, and approval takes the new reference", () => {
+    const pinned = snapOf(withUi("open", "ui://srv/a"));
+    const r = applyDrift(pinned, snapOf(withUi("open", "ui://srv/b")));
+    expect(r.changed).toEqual(["open"]);
+    expect(byName(r.tools, "open")).toMatchObject({
+      status: "drifted",
+      ui: { resource_uri: "ui://srv/a" },
+      proposed: { ui: { resource_uri: "ui://srv/b" } },
+    });
+    const live = byName(r.tools, "open")?.proposed?.sha256 ?? "";
+    const approved = approveTools(r.tools, [{ name: "open", sha256: live }]);
+    expect(approved.ok && approved.tools[0]?.ui).toEqual({ resource_uri: "ui://srv/b" });
+  });
+
+  it("drops the reference when the approved definition no longer names a template", () => {
+    const r = applyDrift(snapOf(withUi("open", "ui://srv/a")), snapOf(listed("open")));
+    const live = byName(r.tools, "open")?.proposed?.sha256 ?? "";
+    const approved = approveTools(r.tools, [{ name: "open", sha256: live }]);
+    expect(approved.ok && approved.tools[0]).not.toHaveProperty("ui");
+  });
+});

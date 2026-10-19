@@ -19,6 +19,13 @@ import { applyDrift, approvedHash } from "./drift.js";
 import { buildSnapshot } from "./pin.js";
 import type { ConnectorProbe } from "./probe.js";
 import { auditProbeCredential, chooseProbeCredential } from "./probe-credential.js";
+import { loadTemplates, writeTemplateDrift } from "./template-store.js";
+import {
+  applyTemplateDrift,
+  liveTemplates,
+  type LiveEntry,
+  type TemplateDrift,
+} from "./templates.js";
 
 /**
  * Periodic refresh (KOBE-102, spec D27): re-probes every pinned, active connector through the MCP
@@ -32,6 +39,10 @@ import { auditProbeCredential, chooseProbeCredential } from "./probe-credential.
  * it; never a member's). Each pass records when it probed and, if it skipped, why
  * (`refresh_skipped`, shown on the connector page); the start of an `auth_required` skip is an
  * `mcp.connector.refresh_skipped` event, which site admins are emailed about.
+ *
+ * The same probe re-reads the connector's MCP Apps `ui://` templates (KOBE-433) and applies
+ * {@link applyTemplateDrift} to them in the same transaction, so a skip (`auth_required` or any
+ * failure) leaves the templates exactly as they were, like the tools.
  */
 export const CONNECTOR_REFRESH_LOCK = "kobe.connector-refresh";
 
@@ -42,8 +53,15 @@ export type RefreshOutcome =
       readonly changed: number;
       readonly added: number;
       readonly removed: number;
+      readonly templates: {
+        readonly changed: number;
+        readonly added: number;
+        readonly removed: number;
+      };
     }
   | { readonly status: "skipped"; readonly reason: string };
+
+const NO_TEMPLATE_DRIFT: Omit<TemplateDrift, "templates"> = { changed: [], added: [], removed: [] };
 
 const skipped = (reason: string): RefreshOutcome => ({ status: "skipped", reason });
 
@@ -113,6 +131,9 @@ export async function refreshConnector(
   if (!probed.ok) return recordSkip(db, connectorId, row, probed.failure);
   const live = buildSnapshot(row.name, probed.tools);
   if (!live.ok) return recordSkip(db, connectorId, row, live.failure);
+  // A prober that reports no templates leaves them alone (the real proxy always reports them).
+  const liveUi: LiveEntry[] | undefined =
+    probed.uiResources === undefined ? undefined : liveTemplates(live.tools, probed.uiResources);
 
   return db.transaction(async (tx): Promise<RefreshOutcome> => {
     const [locked] = await tx
@@ -124,9 +145,14 @@ export async function refreshConnector(
 
     const before = parseToolsSnapshot(locked.snapshot);
     const drift = applyDrift(before, live.tools);
-    const events = drift.changed.length + drift.added.length + drift.removed.length;
+    const templates =
+      liveUi === undefined ? undefined : await driftTemplates(tx, connectorId, liveUi);
+    const ui = templates ?? NO_TEMPLATE_DRIFT;
+    const toolEvents = drift.changed.length + drift.added.length + drift.removed.length;
+    const events = toolEvents + ui.changed.length + ui.added.length + ui.removed.length;
+    const toolsSame = canonicalJson(drift.tools) === canonicalJson(before);
     // A drifted tool returning to its approval rewrites the rows without being an event.
-    if (events === 0 && canonicalJson(drift.tools) === canonicalJson(before)) {
+    if (events === 0 && toolsSame) {
       await markRefreshed(tx, connectorId);
       return { status: "unchanged" };
     }
@@ -150,6 +176,7 @@ export async function refreshConnector(
         changed: drift.changed,
         added: drift.added,
         removed: drift.removed,
+        templates: { changed: ui.changed, added: ui.added, removed: ui.removed },
       },
     });
     return {
@@ -157,8 +184,25 @@ export async function refreshConnector(
       changed: drift.changed.length,
       added: drift.added.length,
       removed: drift.removed.length,
+      templates: {
+        changed: ui.changed.length,
+        added: ui.added.length,
+        removed: ui.removed.length,
+      },
     };
   });
+}
+
+/** Template drift under the connector's row lock; written at once (they have their own rows). */
+async function driftTemplates(
+  tx: KobeTx,
+  connectorId: string,
+  live: readonly LiveEntry[],
+): Promise<TemplateDrift> {
+  const stored = await loadTemplates(tx, connectorId, { forUpdate: true });
+  const drift = applyTemplateDrift(stored, live);
+  await writeTemplateDrift(tx, connectorId, stored, drift.templates);
+  return drift;
 }
 
 export interface RefreshSummary {

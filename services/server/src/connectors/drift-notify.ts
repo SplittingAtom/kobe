@@ -14,6 +14,7 @@ import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { driftRecipients, siteAdminIds, type DriftRecipient } from "./drift-recipients.js";
 import { CONSOLE_PATHS } from "../mail/console-paths.js";
+import { driftedTemplateUris } from "./template-store.js";
 
 /**
  * Emails about connector tool drift (KOBE-103, D27). Driven by the audit log, so no table is
@@ -42,27 +43,53 @@ interface DriftEvent {
   readonly connectorId: string;
   readonly name: string;
   readonly tools: readonly string[];
+  /** MCP Apps templates (URIs) changed or new in this event (KOBE-433). */
+  readonly templates: readonly string[];
   /** Skip events: whose key the connector uses, for the remedy text (review L2). */
   readonly source?: "member" | "site";
 }
 
+/** A bounded bullet list of names. */
+const bullets = (names: readonly string[]): string[] => {
+  const shown = names.slice(0, MAX_NAMES).map((t) => `  - ${oneLine(t)}`);
+  const more = names.length - shown.length;
+  return [...shown, ...(more > 0 ? [`  ... and ${more} more`] : [])];
+};
+
 export function driftMessage(
   publicUrl: string,
-  event: Pick<DriftEvent, "name" | "tools">,
+  event: Pick<DriftEvent, "name" | "tools"> & { readonly templates?: readonly string[] },
   to: string,
 ): MailMessage {
   const name = oneLine(event.name);
-  const shown = event.tools.slice(0, MAX_NAMES).map((t) => `  - ${oneLine(t)}`);
-  const more = event.tools.length - shown.length;
+  const templates = event.templates ?? [];
+  const toolPart =
+    event.tools.length === 0
+      ? []
+      : [
+          `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
+          "a site admin reviews and re-approves them:",
+          ...bullets(event.tools),
+          "",
+        ];
+  const templatePart =
+    templates.length === 0
+      ? []
+      : [
+          `These app templates of the ${name} connector changed upstream or are new. Kobe shows`,
+          "their tools' results as text until a site admin reviews and approves them:",
+          ...bullets(templates),
+          "",
+        ];
   return {
     to,
-    subject: `Connector ${name}: tools changed and are disabled`,
+    subject:
+      event.tools.length === 0
+        ? `Connector ${name}: app templates changed and are disabled`
+        : `Connector ${name}: tools changed and are disabled`,
     text: [
-      `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
-      "a site admin reviews and re-approves them:",
-      ...shown,
-      ...(more > 0 ? [`  ... and ${more} more`] : []),
-      "",
+      ...toolPart,
+      ...templatePart,
       `Site admins can review them at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
     ].join("\n"),
   };
@@ -104,6 +131,15 @@ export function skippedMessage(
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
 
+/** The changed and added template URIs of a drift event's `templates` field. */
+const templateNames = (value: unknown): string[] =>
+  typeof value === "object" && value !== null
+    ? [
+        ...strings((value as Record<string, unknown>).changed),
+        ...strings((value as Record<string, unknown>).added),
+      ]
+    : [];
+
 async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
   const rows = await db.execute<{
     seq: string;
@@ -123,18 +159,21 @@ async function recentEvents(db: KobeDb): Promise<DriftEvent[]> {
       connectorId: target.connectorId,
       name: target.name,
       tools: [...strings(target.changed), ...strings(target.added)],
+      templates: templateNames(target.templates),
     });
   }
   return events;
 }
 
-/** Still has tools awaiting re-approval (an approval or a removal ends the notice). */
+/** Still has tools or templates awaiting re-approval (an approval or a removal ends the notice). */
 async function stillDrifted(db: KobeDb, connectorId: string): Promise<boolean> {
   const [row] = await db
     .select({ snapshot: connectors.toolsSnapshot })
     .from(connectors)
     .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)));
-  return !!row && parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted");
+  if (!row) return false;
+  if (parseToolsSnapshot(row.snapshot).some((t) => t.status === "drifted")) return true;
+  return ((await driftedTemplateUris(db)).get(connectorId)?.length ?? 0) > 0;
 }
 
 /**

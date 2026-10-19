@@ -20,6 +20,7 @@ import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../sch
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
+import { UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
 
 /**
  * The audit event taxonomy (KOBE-15, spec D31). Every audited action is one entry: its dotted name,
@@ -44,6 +45,8 @@ export type AuditScope =
   | "any";
 
 const id = z.uuid();
+/** An MCP Apps template URI (KOBE-433): `ui://...`, never another scheme. */
+const uiUri = z.string().max(2048).regex(UI_RESOURCE_URI_PATTERN);
 /** A short human label (team or agent name): no control characters, bounded. */
 const label = z
   .string()
@@ -1596,12 +1599,20 @@ export const AUDIT_EVENTS = {
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
   }),
-  /** Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools. */
+  /**
+   * Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools.
+   * `templates`: the MCP Apps `ui://` templates pinned with them and Kobe's SHA-256 of each
+   * (KOBE-433); URIs and hashes only, never the template.
+   */
   "mcp.connector.pinned": event("site", {
     connectorId: id,
     name: z.string().max(64),
     tools: z.number().int().nonnegative(),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
+    templates: z
+      .array(z.strictObject({ uri: uiUri, sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+      .max(64)
+      .optional(),
   }),
   // ── connectors: team enablement (KOBE-104); names and Pi tool names, never URLs or credentials ──
   /** A team admin enabled a connector for the team, changed its exposure or tick list, or disabled it. */
@@ -1617,6 +1628,7 @@ export const AUDIT_EVENTS = {
    * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
    * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
    * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
+   * `templates` (KOBE-433): the same for the connector's MCP Apps `ui://` templates, by URI.
    */
   "mcp.connector.drift": event("site", {
     connectorId: id,
@@ -1624,6 +1636,13 @@ export const AUDIT_EVENTS = {
     changed: z.array(z.string().max(128)).max(500),
     added: z.array(z.string().max(128)).max(500),
     removed: z.array(z.string().max(128)).max(500),
+    templates: z
+      .strictObject({
+        changed: z.array(uiUri).max(64),
+        added: z.array(uiUri).max(64),
+        removed: z.array(uiUri).max(64),
+      })
+      .optional(),
   }),
   /**
    * A recipient was handled for one drift event (KOBE-103): `driftSeq` is the `mcp.connector.drift`

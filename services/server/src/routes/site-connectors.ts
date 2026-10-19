@@ -54,6 +54,10 @@ const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string
   invalid_tool: "The server listed a tool Kobe cannot pin (invalid name, description or schema).",
   ambiguous_tool_names:
     "The server lists tools whose names collide once - . and _ are treated alike, so none was pinned.",
+  ui_resource_invalid:
+    "An app template (ui://) of the server is not one UTF-8 HTML document of type text/html;profile=mcp-app of at most 512 KiB, so nothing was pinned.",
+  ui_resource_hash_mismatch:
+    "An app template's declared contentHash does not match its bytes, so nothing was pinned.",
   already_pinned: "This connector already has pinned tools; changing them needs re-approval.",
   changed: "The connector changed while it was being probed. Probe it again.",
 };
@@ -65,7 +69,12 @@ const SITE_AUTH_REQUIRED =
 
 const pinBody = (pin: PinOutcome, connector?: { readonly credentialSource: string }) =>
   pin.ok
-    ? { ok: true as const, tools: pin.tools }
+    ? {
+        ok: true as const,
+        tools: pin.tools,
+        // MCP Apps templates pinned with the tools (KOBE-433), named only when there are any.
+        ...(pin.templates > 0 ? { templates: pin.templates } : {}),
+      }
     : {
         ok: false as const,
         failure: pin.failure,

@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * The server's client for the MCP proxy's probe endpoint (KOBE-101): the proxy fetches a
- * connector's live `tools/list` under the address policy and size/time caps; the server only
- * pins what comes back. Any failure to reach or understand the proxy is `proxy_unavailable`.
+ * connector's live `tools/list` (and the `ui://` templates its tools name, KOBE-433) under the
+ * address policy and size/time caps; the server only pins what comes back. Any failure to reach or understand the proxy is `proxy_unavailable`.
  */
 export type ProbeFailure =
   | "url_not_allowed"
@@ -18,7 +18,15 @@ export type ProbeFailure =
   | "proxy_unavailable";
 
 export type ProbeResult =
-  | { readonly ok: true; readonly tools: readonly unknown[] }
+  | {
+      readonly ok: true;
+      readonly tools: readonly unknown[];
+      /**
+       * The `ui://` templates the tools name (KOBE-433), as the proxy read them (validated by
+       * templates.ts). Absent when the prober did not report any (refresh then leaves them alone).
+       */
+      readonly uiResources?: readonly unknown[];
+    }
   | { readonly ok: false; readonly failure: ProbeFailure };
 
 export interface ConnectorProbe {
@@ -39,7 +47,11 @@ const FAILURES = [
 ] as const;
 
 const answerSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), tools: z.array(z.unknown()) }),
+  z.object({
+    ok: z.literal(true),
+    tools: z.array(z.unknown()),
+    ui_resources: z.array(z.unknown()).optional(),
+  }),
   z.object({ ok: z.literal(false), failure: z.enum(FAILURES) }),
 ]);
 
@@ -65,7 +77,11 @@ export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
             authorization: `Bearer ${options.internalKey}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify(apiKey === undefined ? { url } : { url, api_key: apiKey }),
+          body: JSON.stringify({
+            url,
+            ...(apiKey === undefined ? {} : { api_key: apiKey }),
+            ui_resources: true,
+          }),
           signal: AbortSignal.timeout(options.timeoutMs),
           redirect: "error",
         });
@@ -74,7 +90,10 @@ export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
           return { ok: false, failure: "proxy_unavailable" };
         }
         const parsed = answerSchema.safeParse(await res.json());
-        return parsed.success ? parsed.data : { ok: false, failure: "proxy_unavailable" };
+        if (!parsed.success) return { ok: false, failure: "proxy_unavailable" };
+        if (!parsed.data.ok) return parsed.data;
+        const { tools, ui_resources: uiResources } = parsed.data;
+        return uiResources === undefined ? { ok: true, tools } : { ok: true, tools, uiResources };
       } catch {
         return { ok: false, failure: "proxy_unavailable" };
       }

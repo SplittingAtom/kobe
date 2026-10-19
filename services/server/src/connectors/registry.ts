@@ -19,6 +19,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { dropConnectorGrants } from "./grants.js";
 import { dropSiteKey } from "./site-key.js";
+import { dropTemplates } from "./template-store.js";
 
 /**
  * The site connector registry (KOBE-100, spec D6, D27): MCP servers a site admin registers.
@@ -224,6 +225,8 @@ export async function updateConnector(
       set.toolsHash = null;
       set.refreshSkipped = null;
       changed.push("url");
+      // Its MCP Apps templates too (KOBE-433): nothing of the old server is ever rendered.
+      await dropTemplates(tx, id);
       // Credentials were issued for the old server: drop them (users reconnect), same transaction.
       await dropConnectorGrants(tx, id, current.name);
       await dropSiteKey(tx, { id, name: current.name }, "url_changed");
