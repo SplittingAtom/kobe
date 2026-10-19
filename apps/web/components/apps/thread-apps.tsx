@@ -26,6 +26,11 @@ export interface ThreadApps {
   /** By prompt entry and tool call (`approvalKey`); the live run's by `runToolKey`. */
   readonly byPrompt: ReadonlyMap<string, AppResultView>;
   readonly byRun: ReadonlyMap<string, AppResultView>;
+  /**
+   * By tool call id, for ids that occur once in the thread (KOBE-445): a card the prompt key does
+   * not place still finds its result.
+   */
+  readonly byTool: ReadonlyMap<string, AppResultView>;
   /** Rail-launched app cards in the thread, by entry id (KOBE-440). */
   readonly byEntry: ReadonlyMap<string, AppResultView>;
   /** Cards launched during the run, waiting for it to end (KOBE-440), in launch order. */
@@ -65,6 +70,19 @@ function useLiveMarkers(): string {
             .join(",")
         : "",
     [tools],
+  );
+}
+
+/** Results by tool call id, leaving out ids that occur more than once (never a guess). */
+function uniqueByToolCall(results: readonly AppResultView[]): ReadonlyMap<string, AppResultView> {
+  const counts = new Map<string, number>();
+  for (const r of results) {
+    if (r.toolCallId !== null) counts.set(r.toolCallId, (counts.get(r.toolCallId) ?? 0) + 1);
+  }
+  return new Map(
+    results.flatMap((r) =>
+      r.toolCallId !== null && counts.get(r.toolCallId) === 1 ? [[r.toolCallId, r] as const] : [],
+    ),
   );
 }
 
@@ -133,6 +151,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
           ),
     [results],
   );
+  const byTool = useMemo(() => (results === null ? NONE : uniqueByToolCall(results)), [results]);
   const byEntry = useMemo(
     () =>
       results === null
@@ -177,6 +196,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       teamId,
       byPrompt,
       byRun,
+      byTool,
       byEntry,
       queued,
       live,
@@ -192,6 +212,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       teamId,
       byPrompt,
       byRun,
+      byTool,
       byEntry,
       queued,
       live,

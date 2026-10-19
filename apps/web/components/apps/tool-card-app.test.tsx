@@ -14,6 +14,8 @@ import { composer, openApp, streaming } from "../chat/testing";
  * the app into the artifact column ("Opened in the side column").
  */
 let fake: FakeKobe;
+/** The options each IntersectionObserver was made with (KOBE-445). */
+let observed: (IntersectionObserverInit | undefined)[];
 
 afterEach(() => {
   cleanup();
@@ -24,12 +26,18 @@ beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   fake = new FakeKobe();
+  observed = [];
   vi.stubGlobal("fetch", fake.fetch);
   // happy-dom never lays out: every card is in view.
   vi.stubGlobal(
     "IntersectionObserver",
     class {
-      constructor(private readonly cb: IntersectionObserverCallback) {}
+      constructor(
+        private readonly cb: IntersectionObserverCallback,
+        options?: IntersectionObserverInit,
+      ) {
+        observed.push(options);
+      }
       observe(target: Element) {
         this.cb([{ isIntersecting: true, target } as IntersectionObserverEntry], this as never);
       }
@@ -191,5 +199,72 @@ describe("apps in tool cards (KOBE-438)", () => {
       },
     });
     await waitFor(() => expect(frames()).toHaveLength(1), { timeout: 4_000 });
+  });
+
+  it("finds the card after a reload when system and custom entries precede the prompt (KOBE-445)", async () => {
+    // The gate's shape: Pi's settings entries, its system message, the prompt, the app call, an
+    // answer, Kobe's branch entry, then a second prompt and its answer.
+    const t = fake.addThread("Gate shape");
+    const model = fake.addSystemEntry(t, null, "model_change", { modelId: "m", provider: "kobe" });
+    const level = fake.addSystemEntry(t, model, "thinking_level_change", { thinkingLevel: "off" });
+    const system = fake.addEntry(t, level, { role: "system", content: "", sections: {} });
+    const prompt = fake.addEntry(t, system, {
+      role: "user",
+      content: [{ type: "text", text: "Open" }],
+    });
+    const call = fake.addEntry(t, prompt, {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "tc1", name: TOOL, arguments: {} }],
+    });
+    const result = fake.addEntry(t, call, {
+      role: "toolResult",
+      toolCallId: "tc1",
+      toolName: TOOL,
+      content: [{ type: "text", text: "18 catalogs" }],
+      isError: false,
+    });
+    const answer = fake.addEntry(t, result, {
+      role: "assistant",
+      content: [{ type: "text", text: "Opened." }],
+    });
+    const branch = fake.addSystemEntry(t, answer, "custom", {
+      customType: "kobe.branch",
+      data: { run_id: "run-2" },
+    });
+    const second = fake.addEntry(t, branch, { role: "user", content: "Use the table" });
+    fake.addEntry(t, second, { role: "assistant", content: [{ type: "text", text: "Done." }] });
+    fake.appResults.set(t, [view(prompt, "tc1")]);
+    fake.appResultBodies.set("ref-tc1", { id: "tc1" });
+    openApp(fake, t);
+    await waitFor(() => expect(frames()).toHaveLength(1), { timeout: 4_000 });
+    const paths = fake.requests.map((r) => r.path.split("?")[0] ?? "");
+    expect(paths).toContain(`/v1/threads/${t}/app-results/ref-tc1`);
+    expect(paths.some((p) => p.endsWith("/calls"))).toBe(false);
+  });
+
+  it("falls back to the tool call id when the prompt entry does not place the result (KOBE-445)", async () => {
+    const { t } = thread(["tc1"]);
+    fake.appResults.set(t, [view("not-the-prompt", "tc1")]);
+    fake.appResultBodies.set("ref-tc1", { id: "tc1" });
+    openApp(fake, t);
+    await waitFor(() => expect(frames()).toHaveLength(1), { timeout: 4_000 });
+  });
+
+  it("measures nearness against the conversation's scroller, not the window (KOBE-445)", async () => {
+    // With the window as root, the margins never apply inside the scrolling conversation: a card
+    // above the fold after a reload never came near and stayed on "Loading app".
+    const { t, prompt } = thread(["tc1"]);
+    fake.appResults.set(t, [view(prompt, "tc1")]);
+    fake.appResultBodies.set("ref-tc1", { id: "tc1" });
+    openApp(fake, t);
+    await waitFor(() => expect(frames()).toHaveLength(1), { timeout: 4_000 });
+    const scroller = document.querySelector('[data-kobe-scroll="messages"]');
+    expect(scroller).not.toBeNull();
+    // The cards' observers: one viewport (near) and three (within).
+    const cards = observed.filter(
+      (o) => o?.rootMargin === "100% 0px" || o?.rootMargin === "300% 0px",
+    );
+    expect(cards.length).toBeGreaterThan(0);
+    for (const o of cards) expect(o?.root).toBe(scroller);
   });
 });
