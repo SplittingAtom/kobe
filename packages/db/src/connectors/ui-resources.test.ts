@@ -17,7 +17,16 @@ const live = {
 describe("ui:// resources (KOBE-433)", () => {
   it("accepts ui:// URIs only", () => {
     expect(UI_RESOURCE_URI_PATTERN.test("ui://catalyst/lakehouse-explorer")).toBe(true);
-    for (const bad of ["https://x/y", "ui://", "ui://a b", "UI://x", "file:///etc/passwd"]) {
+    for (const bad of [
+      "https://x/y",
+      "ui://",
+      "ui://a b",
+      "UI://x",
+      "file:///etc/passwd",
+      "ui://a\u0000b",
+      "ui://a\u0001b",
+      "ui://é",
+    ]) {
       expect(UI_RESOURCE_URI_PATTERN.test(bad), bad).toBe(false);
     }
   });

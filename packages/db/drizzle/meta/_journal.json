@@ -1072,6 +1072,13 @@
       "when": 1792408114748,
       "tag": "0152_connector_ui_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1792409386130,
+      "tag": "0153_connector_ui_resources_approved",
+      "breakpoints": true
     }
   ]
 }

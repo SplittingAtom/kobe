@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { check, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import type { ProposedUiResource, UiResourceMeta } from "../connectors/ui-resources.js";
 import { users } from "./auth.js";
 import { connectors } from "./connectors.js";
@@ -10,6 +19,8 @@ export const UI_RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 export const UI_RESOURCE_MAX_BYTES = 512 * 1024;
 /** Longest `ui://` URI Kobe pins. */
 export const UI_RESOURCE_URI_MAX = 2048;
+/** Largest declared `_meta.ui` Kobe stores (serialized JSON). */
+export const UI_RESOURCE_META_MAX_BYTES = 16 * 1024;
 
 /** `drifted`: changed or new upstream; never rendered until a site admin approves (D27, MA-2). */
 export const UI_RESOURCE_STATUSES = ["pinned", "drifted"] as const;
@@ -40,8 +51,17 @@ export const connectorUiResources = pgTable(
     /** SHA-256 of the canonical `{uri, mimeType, sha256, ui}`: the pin drift compares. */
     pinnedHash: text().notNull(),
     status: text().$type<UiResourceStatus>().notNull().default("pinned"),
-    /** On a drifted, previously approved row: the live template awaiting review. */
+    /**
+     * On a drifted row: the live template awaiting review, or why the live one cannot be pinned
+     * (`{invalid}`). An unapproved row that was invalid from the start holds an empty placeholder
+     * in `html` and its reason here.
+     */
     proposed: jsonb().$type<ProposedUiResource>(),
+    /**
+     * Whether a site admin ever approved this row's `html` (first pin or review). A row the
+     * refresh found (new upstream) is not, and can never be `pinned` until it is (CHECK).
+     */
+    approved: boolean().notNull().default(false),
     /** The site admin who pinned or approved it; null for refresh-added (new) rows. */
     pinnedBy: uuid().references(() => users.id, { onDelete: "set null" }),
     pinnedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -51,7 +71,7 @@ export const connectorUiResources = pgTable(
     primaryKey({ columns: [t.connectorId, t.uri] }),
     check(
       "connector_ui_resources_uri",
-      sql`char_length(${t.uri}) <= ${sql.raw(String(UI_RESOURCE_URI_MAX))} AND ${t.uri} ~ '^ui://[^[:space:]]+$'`,
+      sql`char_length(${t.uri}) <= ${sql.raw(String(UI_RESOURCE_URI_MAX))} AND ${t.uri} ~ '^ui://[!-~]+$'`,
     ),
     // `chr(59)` is the `;`: drizzle-kit splits generated statements on a literal one.
     check(
@@ -64,7 +84,10 @@ export const connectorUiResources = pgTable(
     ),
     check("connector_ui_resources_sha256", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
     check("connector_ui_resources_pinned_hash", sql`${t.pinnedHash} ~ '^[0-9a-f]{64}$'`),
-    check("connector_ui_resources_meta", sql`jsonb_typeof(${t.meta}) = 'object'`),
+    check(
+      "connector_ui_resources_meta",
+      sql`jsonb_typeof(${t.meta}) = 'object' AND octet_length(${t.meta}::text) <= ${sql.raw(String(UI_RESOURCE_META_MAX_BYTES))}`,
+    ),
     check("connector_ui_resources_status", sql`${t.status} IN ('pinned', 'drifted')`),
     check(
       "connector_ui_resources_proposed",

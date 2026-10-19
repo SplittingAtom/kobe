@@ -6,8 +6,8 @@ import { z } from "zod";
  * parse is treated as absent (the row stays not approvable until the next refresh).
  */
 
-/** `ui://` followed by at least one non-space character. */
-export const UI_RESOURCE_URI_PATTERN = /^ui:\/\/\S+$/;
+/** `ui://` then printable ASCII only (no space, control or NUL: Postgres and JS agree). */
+export const UI_RESOURCE_URI_PATTERN = /^ui:\/\/[\x21-\x7e]+$/;
 
 const json = z.unknown();
 
