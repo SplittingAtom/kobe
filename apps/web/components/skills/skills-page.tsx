@@ -5,6 +5,7 @@ import { EmptyState, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from
 import { MySkillChoices } from "../admin/team/skill-editor/my-skill-choices";
 import { CatalogForks } from "./catalog-forks";
 import { SkillList } from "./skill-list";
+import { MySubmissions } from "./my-submissions";
 import { WorkbenchList } from "./workbench-list";
 import { SKILL_TABS, skillTab, type SkillTab } from "../../lib/skills/tabs";
 
@@ -65,6 +66,7 @@ export function SkillsPage({ initialTab = "team" }: { readonly initialTab?: Skil
         </TabsContent>
         <TabsContent value="workbench">
           <WorkbenchList />
+          <MySubmissions />
         </TabsContent>
       </Tabs>
     </>

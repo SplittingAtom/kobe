@@ -62,11 +62,16 @@ interface SectionBase {
   readonly status: SectionStatus;
 }
 
+/** Site grants checked beside the role ladder (`/v1/me` `siteGrants`, KOBE-331, SK22). */
+export type SiteGrant = "skill_reviewer";
+
 export interface SiteSection extends SectionBase {
   readonly console: "site";
   readonly group: SiteGroup;
   /** Least site role that may open it, mirroring the route's `site.*` permission. */
   readonly minRole: "admin" | "owner";
+  /** A grant that also opens it below `minRole` (the Registry queue for Skill reviewers). */
+  readonly grant?: SiteGrant;
 }
 
 export interface TeamSection extends SectionBase {
@@ -121,6 +126,8 @@ export interface SiteAccess {
   readonly console: "site";
   readonly user: CurrentUser;
   readonly siteRole: SiteRole;
+  /** The caller's site grants; absent means none. */
+  readonly grants?: readonly SiteGrant[];
 }
 
 export interface TeamAccess {
