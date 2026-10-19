@@ -89,7 +89,12 @@ inside the frame, `fetch` (remote and Kobe), `XMLHttpRequest`, `WebSocket`, a re
 form post, `window.open`, top navigation, `document.cookie`, storage and the parent's DOM must
 all fail, and each network attempt must be a CSP violation (not just an unreachable host). It
 needs an app the member can open (`KOBE_APP_ID`, or the first of `GET /v1/team/apps`) and skips
-without one. No tokens; it changes nothing: `npx playwright test app-frame`.
+without one, unless `KOBE_REQUIRE_APP=1` (set it at gates), when it fails. It keeps the route's
+own WebRTC guard script before the probe, runs the probe a second time in an iframe without the
+`sandbox` attribute (the header alone must isolate it), checks the CSP by parsing it, and records
+what the browser does with `RTCPeerConnection` (a `webrtc` annotation). `KOBE_ALL_BROWSERS=1`
+adds Firefox and WebKit projects for this spec (`npx playwright install firefox webkit` once).
+No tokens; it changes nothing: `npx playwright test app-frame`.
 
 ## Console sections (KOBE-291)
 

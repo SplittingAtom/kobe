@@ -62,6 +62,37 @@ export const PROBE_HTML = `<!doctype html>
   await attempt("cookie", async () => "read:" + document.cookie.length);
   await attempt("local_storage", async () => "read:" + window.localStorage.length);
   await attempt("parent_dom", async () => "read:" + window.parent.document.title.length);
+  // WebRTC (review MEDIUM-2): connect-src does not govern it. Record what this browser does in
+  // this realm (Kobe's guard should have removed the constructor) and in a fresh one.
+  const rtc = (win) => new Promise((resolve) => {
+    const Ctor = win.RTCPeerConnection || win.webkitRTCPeerConnection;
+    if (typeof Ctor !== "function") return resolve({ constructor: "absent" });
+    let pc;
+    try {
+      pc = new Ctor({ iceServers: [{ urls: "stun:" + new URL(REMOTE).hostname + ":3478" }] });
+    } catch (e) {
+      return resolve({ constructor: "present", create: "threw:" + e.name });
+    }
+    const types = [];
+    pc.onicecandidate = (e) => { if (e.candidate) types.push(e.candidate.type || "unknown"); };
+    const finish = (how) => { try { pc.close(); } catch (e) {} resolve({ constructor: "present", create: "ok", gathering: how, candidates: types }); };
+    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === "complete") finish("complete"); };
+    try {
+      pc.createDataChannel("probe");
+      pc.createOffer().then((o) => pc.setLocalDescription(o)).catch((e) => finish("threw:" + e.name));
+    } catch (e) {
+      finish("threw:" + e.name);
+    }
+    setTimeout(() => finish("timeout"), 3000);
+  });
+  await attempt("webrtc", async () => JSON.stringify(await rtc(window)));
+  await attempt("webrtc_fresh_realm", async () => {
+    const child = document.createElement("iframe");
+    document.body.appendChild(child);
+    const win = child.contentWindow;
+    if (!win) return JSON.stringify({ realm: "none" });
+    return JSON.stringify({ realm: "about:blank", ...(await rtc(win)) });
+  });
   // Let late violation reports arrive before reporting.
   await new Promise((r) => setTimeout(r, 300));
   parent.postMessage({ probe: ${JSON.stringify(PROBE_MESSAGE)}, origin: self.origin, results, violations }, "*");
