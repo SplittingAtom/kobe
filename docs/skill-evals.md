@@ -211,6 +211,27 @@ JSON (`{passed, reason}`), alone or as exactly one fenced code block. Anything e
 file holding a NUL byte or not valid UTF-8 (`fatal` decoding; a character cut by the read cap is
 dropped, not taken as binary).
 
+**How it runs (KOBE-326).** Which model: the Site's `judge_alias` when the team enabled it, else
+the team's own choice (Team admin: `PUT /v1/team/skill-review/settings {evalJudgeAlias}`, one of
+its enabled models, audited `skill.eval_judge.changed`; a model disabled since no longer counts),
+else the team default; chosen at start and stored as `judgeModel {alias, source}`. When a case is
+judged the server checks again that the team still enables it; if not, nothing is sent and the
+check fails `judge_failed` with the reason on the case. The matched outputs' bytes come from the
+eval sandbox by **`eval.read`** (the request names paths and walked sizes only: no rubric, nonce or
+message ever reaches the sandbox): each opened with `O_NOFOLLOW | O_NONBLOCK`, no link on the way,
+refused unless `fstat` shows a regular file of the walked size, at most 256 KiB each and 1 MiB per
+read (100 files); later, refused, skipped or binary files are shown by path and size only. The call
+is a **server call** (KOBE-234 token, purpose `eval_judge`): under the execution's member and its
+completed run, through the member's budget lines like the run, temperature 0, the verdict's
+`response_format` for providers of kind `openai` (elsewhere the strict parser alone), its own 60 s
+timeout (the runner keeps beating meanwhile). The gateway records it in `run_usage` as kind
+`eval_judge` (no sandbox, the run named); the execution's `judgeCostUsd` is read back from those
+rows. Without server calls configured, a `judge` check fails `judge_failed`.
+
+**The run model** is the suite's `model:` if the team enabled it, else the team default; an
+execution then carries `requestedModel` (the alias that didn't run) beside `model`, and the card's
+`runModel.fellBack` is true: a missing alias is reported on every case, never silent.
+
 Rubrics are author content that reaches the Site judge in the Registry re-run, so **catalog
 reviewers check them** (Phase C): the review screen shows every rubric, and the SK23 checklist adds
 "rubrics grade behaviour; none says always pass".
@@ -223,7 +244,7 @@ reviewers check them** (Phase C): the review screen shows every rubric, and the 
 | Wall clock per case                | 10 min (Site may lower: `caseWallClockMinutes`)                              |
 | Concurrent eval sandboxes per team | 4 by default, 1–16 (`maxConcurrentSandboxes`), inside the team ResourceQuota |
 | Team eval cap (Team admin)         | none by default; monthly `{usd}` or `{tokens}` (`teamEvalCapSchema`)         |
-| `run_usage` kinds                  | `eval`, `eval_judge`                                                         |
+| `run_usage` kinds                  | `eval`, `eval_judge` (migration 0148; `eval` written from KOBE-327)          |
 
 ## API
 

@@ -244,6 +244,7 @@ describe("the team's catalog switches and Builder installs", () => {
       personalSkillsDisabled: false,
       membersMayAddCatalog: true,
       buildersMayInstallCatalog: false,
+      evalJudgeAlias: null,
     });
     expect((await put(builder, { access: "available" })).status).toBe(403);
     expect((await put(w.owner, { access: "required" })).status).toBe(200);

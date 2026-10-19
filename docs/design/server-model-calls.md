@@ -8,6 +8,14 @@ KOBE-219 (titles) and KOBE-222 (follow-ups) build on. The wire shapes live in
 `src/sse.ts`; the gateway side is implemented and tested in `services/model-gateway`
 (`server-call.ts`, `server-call.test.ts`); the ledger column is migration 0099.
 
+**Eval judge (KOBE-326).** The skill eval judge is a server call too: purpose `eval_judge` (a token
+purpose, never announced in `run.completed.epilogue`), one call per judged eval execution after its
+run completed, on the team-enabled judge model, under the execution's member and run. Its limits are
+its own (`SERVER_CALL_LIMITS.eval_judge`: 512 / 2048 output tokens, 60 s, messages up to 400 000
+characters, 2 MiB body, temperature 0, skipped only at 100 %); it may send exactly one
+`response_format`, the verdict schema (`SERVER_CALL_RESPONSE_FORMATS`), which the gateway compares.
+Usage rows are `kind = eval_judge` (migration 0148). Details in [skill-evals.md](../skill-evals.md).
+
 ## Decisions
 
 | Topic         | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
