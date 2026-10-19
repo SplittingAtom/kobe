@@ -55,6 +55,25 @@ describe("skill eval commands (KOBE-325)", () => {
         ],
       },
     });
+    // KOBE-326: the matched outputs' bytes for the judge, by path and walked size only.
+    const read = await h.server.command({
+      type: "eval.read",
+      thread_id: THREAD,
+      files: [{ path: "outputs/r.txt", size: 4 }],
+    });
+    expect(read).toMatchObject({
+      ok: true,
+      data: {
+        files: [
+          {
+            path: "outputs/r.txt",
+            status: "read",
+            data: Buffer.from("done").toString("base64"),
+            truncated: false,
+          },
+        ],
+      },
+    });
   });
 
   it("refuses eval commands without the hooks", async () => {

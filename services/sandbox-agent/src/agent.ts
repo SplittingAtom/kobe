@@ -126,6 +126,7 @@ const COMMAND_FRAMES = new Set([
   "session.restore",
   "eval.prepare",
   "eval.snapshot",
+  "eval.read",
 ]);
 const DRAIN_ON_FATAL_MS = 5000;
 
@@ -528,15 +529,19 @@ export class Agent {
         return this.#threads.restore(frame);
       case "eval.prepare":
       case "eval.snapshot":
+      case "eval.read":
         return this.#skillEval(frame);
       default:
         return Promise.resolve(fail("internal", "not a command"));
     }
   }
 
-  /** KOBE-325: a skill eval's fixtures in (`eval.prepare`) or its workspace snapshot out. */
+  /**
+   * KOBE-325: a skill eval's fixtures in (`eval.prepare`) or its workspace snapshot out; KOBE-326:
+   * the matched outputs' bytes for the server's judge (`eval.read`).
+   */
   async #skillEval(
-    frame: Extract<ServerToSandboxFrame, { type: "eval.prepare" | "eval.snapshot" }>,
+    frame: Extract<ServerToSandboxFrame, { type: "eval.prepare" | "eval.snapshot" | "eval.read" }>,
   ): Promise<CommandOutcome> {
     const hooks = this.#deps.skillEval;
     if (!hooks) return fail("unknown_type", "this agent takes no skill eval commands");
@@ -545,6 +550,7 @@ export class Agent {
         await hooks.prepare(frame);
         return ok();
       }
+      if (frame.type === "eval.read") return ok(await hooks.read(frame));
       return ok(await hooks.snapshot(frame));
     } catch (error) {
       this.#deps.logger.warn(
