@@ -57,6 +57,17 @@ import {
 import { logger } from "../logger.js";
 import { diagnoseStall, isPodReady, type StallDiagnosis } from "./stall-diagnosis.js";
 import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
+
+/** A team namespace converged except for these scoped ResourceQuotas (members are unaffected). */
+export class TeamQuotaDegradedError extends Error {
+  constructor(
+    readonly namespace: string,
+    readonly quotas: readonly string[],
+  ) {
+    super(`${namespace}: could not apply ${quotas.join(", ")}`);
+    this.name = "TeamQuotaDegradedError";
+  }
+}
 import type { SandboxPrincipal } from "./session-token.js";
 
 /**
@@ -436,7 +447,10 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     }
   };
 
-  const convergeTeam = async (team: TeamRef, verified: VerifiedIsolation): Promise<string> => {
+  const convergeTeam = async (
+    team: TeamRef,
+    verified: VerifiedIsolation,
+  ): Promise<{ namespace: string; degraded: readonly string[] }> => {
     const namespace = teamNamespaceName(team);
     await checkAdmission();
     const existing = await kube.get(ref("v1", "Namespace", namespace));
@@ -458,8 +472,25 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     await applyWithRbacRetry(networkPolicyManifest(namespace, settings));
     await applyWithRbacRetry(evalNetworkPolicyManifest(namespace, settings));
     await kube.apply(resourceQuotaManifest(namespace, settings));
-    await kube.apply(evalResourceQuotaManifest(namespace, settings));
-    await kube.apply(memberResourceQuotaManifest(namespace, settings));
+    // The scoped quotas split the team quota between members and evals (KOBE-325). Neither may
+    // stop member sandboxes: without the eval quota evals stay inside the team quota; without the
+    // member quota members are held by the team quota alone (it includes the eval share). Each
+    // failure is logged and the reconcile counts the namespace as failed (TeamQuotaDegraded).
+    const degraded: string[] = [];
+    for (const manifest of [
+      evalResourceQuotaManifest(namespace, settings),
+      memberResourceQuotaManifest(namespace, settings),
+    ]) {
+      try {
+        await kube.apply(manifest);
+      } catch (err) {
+        degraded.push(manifest.metadata.name);
+        logger.error(
+          { namespace, quota: manifest.metadata.name, err },
+          "scoped ResourceQuota could not be applied; members keep starting under the team quota",
+        );
+      }
+    }
     await kube.apply(limitRangeManifest(namespace, settings));
     await kube.apply(sandboxServiceAccountManifest(namespace));
     for (const name of settings.imagePullSecrets) {
@@ -476,7 +507,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     await kube.apply(warmPoolManifest(namespace, settings));
     await kube.apply(evalSandboxTemplateManifest(namespace, verified, settings, addresses));
     await kube.apply(evalWarmPoolManifest(namespace));
-    return namespace;
+    return { namespace, degraded };
   };
 
   const ensureTeam = (team: TeamRef, verified: VerifiedIsolation): Promise<string> => {
@@ -484,7 +515,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const key = `${team.id}/${verified.runtimeClassName}/${verified.handler}`;
     const cached = ensured.get(key);
     if (cached && now() - cached.at < TEAM_RECONVERGE_MS) return cached.pending;
-    const entry = { at: now(), pending: convergeTeam(team, verified) };
+    // A degraded namespace (a scoped quota refused) still serves its members.
+    const entry = { at: now(), pending: convergeTeam(team, verified).then((c) => c.namespace) };
     ensured.set(key, entry);
     // A failed attempt is retried by the next caller rather than cached.
     entry.pending.catch(() => {
@@ -1096,7 +1128,11 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const verified = await isolation.require();
     return reconcileTeamNamespaces({
       kube,
-      converge: (team) => convergeTeam(team, verified),
+      converge: async (team) => {
+        const { namespace, degraded } = await convergeTeam(team, verified);
+        // Everything else converged; the namespace still counts as failed until both apply.
+        if (degraded.length > 0) throw new TeamQuotaDegradedError(namespace, degraded);
+      },
       onFailure: (namespace, err) =>
         logger.warn({ namespace, err }, "team namespace reconcile failed"),
     });

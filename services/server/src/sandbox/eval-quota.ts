@@ -16,22 +16,46 @@ function perPod(s: SandboxSettings): Record<string, string> {
   };
 }
 
-/** The eval quota: `maxConcurrentPerTeam` eval pods. */
-export function evalQuotaHard(s: SandboxSettings): Record<string, string> {
+/** What `maxConcurrentPerTeam` eval pods may use in all (the team quota adds it). */
+export function evalShare(s: SandboxSettings): Record<string, string> {
   const n = s.skillEval.maxConcurrentPerTeam;
   return Object.fromEntries(Object.entries(perPod(s)).map(([k, v]) => [k, scaleQuantity(v, n)]));
 }
 
-/** Quota keys a PriorityClass-scoped quota may hold (pod resources; no storage or PVC counts). */
-const POD_SCOPED =
-  /^(pods|cpu|memory|ephemeral-storage|(requests|limits)\.(cpu|memory|ephemeral-storage))$/;
+/**
+ * Quota keys a PriorityClass-scoped quota may hold: pod count, CPU and memory. Checked against the
+ * k3s 1.34 API server (2026-10-19): it refuses `ephemeral-storage` and its requests/limits under
+ * the PriorityClass scope ("unsupported scope applied to resource"), like storage, PVCs, services
+ * and object counts, which stay in the unscoped team quota.
+ */
+export const POD_SCOPED_QUOTA_KEYS: ReadonlySet<string> = new Set([
+  "pods",
+  "cpu",
+  "memory",
+  "requests.cpu",
+  "requests.memory",
+  "limits.cpu",
+  "limits.memory",
+]);
+
+const scoped = (hard: Record<string, string>) =>
+  Object.fromEntries(Object.entries(hard).filter(([k]) => POD_SCOPED_QUOTA_KEYS.has(k)));
+
+/**
+ * The eval quota (scoped to the eval PriorityClass): the eval share's pod count, CPU and memory.
+ * Ephemeral storage stays bounded through the pod count: each eval pod has its own limit, so
+ * `maxConcurrentPerTeam` of them never use more than the eval share the team quota adds.
+ */
+export function evalQuotaHard(s: SandboxSettings): Record<string, string> {
+  return scoped(evalShare(s));
+}
 
 /**
  * The members' own quota (scoped to pods without the eval PriorityClass, a pod with none
  * included, checked on k3s 1.34): `teamQuota`'s pod keys, so members never use the eval share.
  */
 export function memberQuotaHard(s: SandboxSettings): Record<string, string> {
-  return Object.fromEntries(Object.entries(s.teamQuota).filter(([k]) => POD_SCOPED.test(k)));
+  return scoped(s.teamQuota);
 }
 
 /**
@@ -40,7 +64,7 @@ export function memberQuotaHard(s: SandboxSettings): Record<string, string> {
  * always keep theirs.
  */
 export function teamQuotaHard(s: SandboxSettings): Record<string, string> {
-  const evals = evalQuotaHard(s);
+  const evals = evalShare(s);
   return Object.fromEntries(
     Object.entries(s.teamQuota).map(([k, v]) => {
       const extra = evals[k];
