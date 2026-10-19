@@ -1,6 +1,7 @@
 """Scans one catalog skill package with Cisco skill-scanner and prints one result line (KOBE-341).
 
-The package zip is read from --package (the Job mounts it read-only), unpacked into a private
+The package zip is read from --package, or reassembled from --parts (a directory of `part-NNN`
+files: the Job mounts the package split across ConfigMaps, read-only), unpacked into a private
 directory under /tmp with strict checks (no absolute or parent paths, no links, bounded sizes) and
 scanned with the scanner's offline analyzers only: static rules, YARA, bytecode and behavioural
 dataflow. Nothing calls out: no LLM judge, no VirusTotal, no Cisco AI Defense, no OSV, and the
@@ -77,6 +78,23 @@ def safe_extract(package, dest):
                 shutil.copyfileobj(src, out)
 
 
+def join_parts(directory, target):
+    """Concatenates `part-000`, `part-001`, ... (the ConfigMaps' keys) into one zip."""
+    parts = sorted(n for n in os.listdir(directory) if n.startswith("part-"))
+    if not parts:
+        raise ValueError("no package parts")
+    total = 0
+    with open(target, "wb") as out:
+        for name in parts:
+            with open(os.path.join(directory, name), "rb") as src:
+                data = src.read(MAX_TOTAL_BYTES + 1)
+            total += len(data)
+            if total > MAX_TOTAL_BYTES:
+                raise ValueError("package too large")
+            out.write(data)
+    return target
+
+
 def text(value, limit):
     return value[:limit] if isinstance(value, str) else None
 
@@ -103,7 +121,9 @@ def reduce(report):
 
 def main():
     parser = argparse.ArgumentParser(prog="kobe_skill_scan")
-    parser.add_argument("--package", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--package")
+    source.add_argument("--parts")
     args = parser.parse_args()
     version = importlib.metadata.version("cisco-ai-skill-scanner")
     base = {"v": 1, "scanner": "cisco-ai-skill-scanner", "version": version}
@@ -111,7 +131,8 @@ def main():
     try:
         skill = os.path.join(work, "skill")
         os.makedirs(skill)
-        safe_extract(args.package, skill)
+        package = args.package or join_parts(args.parts, os.path.join(work, "package.zip"))
+        safe_extract(package, skill)
         out = os.path.join(work, "report.json")
         env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
         done = subprocess.run(

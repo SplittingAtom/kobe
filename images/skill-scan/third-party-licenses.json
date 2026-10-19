@@ -11,28 +11,6 @@
       ]
     }
   ],
-  "Apache 2.0": [
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-cloud-aiplatform",
-      "versions": [
-        "1.148.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-cloud-bigquery",
-      "versions": [
-        "3.41.0"
-      ]
-    }
-  ],
   "Apache License 2.0": [
     {
       "ecosystem": "pypi",
@@ -54,28 +32,6 @@
       "name": "aiosignal",
       "versions": [
         "1.4.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "boto3",
-      "notice": "boto3\nCopyright 2013-2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.",
-      "versions": [
-        "1.42.97"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "botocore",
-      "notice": "Botocore\nCopyright 2012-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.\n\n----\n\nBotocore includes vendorized parts of the requests python library for backwards compatibility.\n\nRequests License\n================\n\nCopyright 2013 Kenneth Reitz\n\n   Licensed under the Apache License, Version 2.0 (the \"License\");\n   you may not use this file except in compliance with the License.\n   You may obtain a copy of the License at\n\n       http://www.apache.org/licenses/LICENSE-2.0\n\n   Unless required by applicable law or agreed to in writing, software\n   distributed under the License is distributed on an \"AS IS\" BASIS,\n   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n   See the License for the specific language governing permissions and\n   limitations under the License.\n\nBotocore includes vendorized parts of the urllib3 library for backwards compatibility.\n\nUrllib3 License\n===============\n\nThis is the MIT license: http://www.opensource.org/licenses/mit-license.php\n\nCopyright 2008-2011 Andrey Petrov and contributors (see CONTRIBUTORS.txt),\nModifications copyright 2012 Kenneth Reitz.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this\nsoftware and associated documentation files (the \"Software\"), to deal in the Software\nwithout restriction, including without limitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of the Software, and to permit persons\nto whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or\nsubstantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,\nINCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE\nFOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR\nOTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n\nBundle of CA Root Certificates\n==============================\n\n***** BEGIN LICENSE BLOCK *****\nThis Source Code Form is subject to the terms of the\nMozilla Public License, v. 2.0. If a copy of the MPL\nwas not distributed with this file, You can obtain\none at http://mozilla.org/MPL/2.0/.\n\n***** END LICENSE BLOCK *****",
-      "versions": [
-        "1.42.97"
       ]
     },
     {
@@ -116,156 +72,6 @@
       "name": "frozenlist",
       "versions": [
         "1.8.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-ai-generativelanguage",
-      "versions": [
-        "0.6.15"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-api-core",
-      "versions": [
-        "2.25.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-api-python-client",
-      "versions": [
-        "2.194.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-auth",
-      "versions": [
-        "2.49.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-auth-httplib2",
-      "versions": [
-        "0.3.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-cloud-core",
-      "versions": [
-        "2.5.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-cloud-resource-manager",
-      "versions": [
-        "1.17.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-cloud-storage",
-      "versions": [
-        "3.4.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-genai",
-      "versions": [
-        "1.73.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-generativeai",
-      "versions": [
-        "0.8.6"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-resumable-media",
-      "versions": [
-        "2.8.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "googleapis-common-protos",
-      "versions": [
-        "1.74.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "grpc-google-iam-v1",
-      "versions": [
-        "0.14.4"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "grpcio",
-      "versions": [
-        "1.80.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "grpcio-status",
-      "versions": [
-        "1.71.2"
       ]
     },
     {
@@ -334,16 +140,6 @@
       "locations": [
         "python"
       ],
-      "name": "proto-plus",
-      "versions": [
-        "1.27.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
       "name": "python-multipart",
       "versions": [
         "0.0.32"
@@ -358,27 +154,6 @@
       "notice": "Requests\nCopyright 2019 Kenneth Reitz",
       "versions": [
         "2.33.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "s3transfer",
-      "notice": "s3transfer\nCopyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.",
-      "versions": [
-        "0.16.1"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "tenacity",
-      "versions": [
-        "9.1.4"
       ]
     },
     {
@@ -449,16 +224,6 @@
       "versions": [
         "50.0.0"
       ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "python-dateutil",
-      "versions": [
-        "2.9.0.post0"
-      ]
     }
   ],
   "Apache-2.0 OR MIT": [
@@ -483,29 +248,7 @@
       ]
     }
   ],
-  "BSD 3-Clause OR Apache-2.0": [
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "uritemplate",
-      "versions": [
-        "4.2.0"
-      ]
-    }
-  ],
   "BSD-2-Clause": [
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "pyasn1",
-      "versions": [
-        "0.6.4"
-      ]
-    },
     {
       "ecosystem": "pypi",
       "locations": [
@@ -555,7 +298,7 @@
       ],
       "name": "fsspec",
       "versions": [
-        "2026.3.0"
+        "2026.6.0"
       ]
     },
     {
@@ -633,16 +376,6 @@
       "locations": [
         "python"
       ],
-      "name": "pyasn1_modules",
-      "versions": [
-        "0.4.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
       "name": "pycparser",
       "versions": [
         "3.0"
@@ -711,18 +444,6 @@
       ]
     }
   ],
-  "GNU General Public License v3 (GPLv3)": [
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "pcodedmp",
-      "versions": [
-        "1.2.6"
-      ]
-    }
-  ],
   "ISC": [
     {
       "ecosystem": "pypi",
@@ -784,26 +505,6 @@
       "name": "attrs",
       "versions": [
         "26.1.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "azure-core",
-      "versions": [
-        "1.39.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "azure-identity",
-      "versions": [
-        "1.25.3"
       ]
     },
     {
@@ -891,16 +592,6 @@
       "locations": [
         "python"
       ],
-      "name": "httplib2",
-      "versions": [
-        "0.32.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
       "name": "httptools",
       "versions": [
         "0.7.1"
@@ -914,16 +605,6 @@
       "name": "jiter",
       "versions": [
         "0.14.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "jmespath",
-      "versions": [
-        "1.1.0"
       ]
     },
     {
@@ -994,26 +675,6 @@
       "name": "mdurl",
       "versions": [
         "0.1.2"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "msal",
-      "versions": [
-        "1.37.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "msal-extensions",
-      "versions": [
-        "1.3.1"
       ]
     },
     {
@@ -1145,16 +806,6 @@
       "name": "rpds-py",
       "versions": [
         "0.30.0"
-      ]
-    },
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "six",
-      "versions": [
-        "1.17.0"
       ]
     },
     {
@@ -1295,18 +946,6 @@
       "name": "aiohappyeyeballs",
       "versions": [
         "2.6.1"
-      ]
-    }
-  ],
-  "UNKNOWN": [
-    {
-      "ecosystem": "pypi",
-      "locations": [
-        "python"
-      ],
-      "name": "google-crc32c",
-      "versions": [
-        "1.8.0"
       ]
     }
   ]
