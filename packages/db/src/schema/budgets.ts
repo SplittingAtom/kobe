@@ -149,6 +149,12 @@ export const modelSpendDaily = pgTable(
     /** Input + output + cache read + cache write tokens. */
     tokens: bigint({ mode: "number" }).notNull().default(0),
     calls: integer().notNull().default(0),
+    /**
+     * Of the above, skill evals' spend (KOBE-327, SK18: `run_usage` kinds `eval` and
+     * `eval_judge`): what the team eval cap counts. Kept by the same trigger (migration 0150).
+     */
+    evalCostUsd: numeric({ precision: 24, scale: 10, mode: "number" }).notNull().default(0),
+    evalTokens: bigint({ mode: "number" }).notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.day, t.userId] })],
 );
