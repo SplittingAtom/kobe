@@ -218,6 +218,61 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     });
   });
 
+  it("drops a run's unclaimed results (and queues their blobs) whenever the run ends (0160)", async () => {
+    const { adminUrl } = database();
+    for (const status of ["completed", "failed", "cancelled", "interrupted", "budget_stopped"]) {
+      const thread = randomUUID();
+      const run = randomUUID();
+      await withClient(adminUrl, async (c) => {
+        await c.query(
+          `INSERT INTO threads (id, team_id, owner_user_id, title) VALUES ($1, $2, $3, 'T')`,
+          [thread, teamId, userId],
+        );
+        await c.query(
+          `INSERT INTO runs (id, team_id, thread_id, trigger, status, started_at)
+           VALUES ($1, $2, $3, 'user', 'running', now())`,
+          [run, teamId, thread],
+        );
+      });
+      const key = `teams/${teamId}/threads/${thread}/apps/${run}`;
+      await asTeam(teamId, async (c) => {
+        const row = (overrides: Record<string, unknown>) =>
+          c.query(
+            `INSERT INTO thread_app_results
+               (team_id, thread_id, run_id, pi_name, input_sha256, tool_call_id, connector_id, tool,
+                template_uri, template_sha256, app_id, storage, result, blob_ref, bytes)
+             VALUES ($1, $2, $3, 'mcp__c__open', $4, $5, $6, 'open', 'ui://c/app', $4, $4,
+                     $7, $8::jsonb, $9, 10)`,
+            [
+              teamId,
+              thread,
+              run,
+              HEX,
+              overrides.tool_call_id ?? null,
+              randomUUID(),
+              overrides.storage ?? "inline",
+              overrides.storage === "blob" ? null : "{}",
+              overrides.storage === "blob" ? key : null,
+            ],
+          );
+        await row({});
+        await row({ storage: "blob" });
+        await row({ tool_call_id: "tc-kept" });
+        await c.query(`UPDATE runs SET status = $2, ended_at = now() WHERE id = $1`, [run, status]);
+        const left = await c.query(
+          `SELECT tool_call_id FROM thread_app_results WHERE run_id = $1`,
+          [run],
+        );
+        expect(left.rows, status).toEqual([{ tool_call_id: "tc-kept" }]);
+        const queued = await c.query(
+          `SELECT thread_id FROM retention_blob_deletions WHERE team_id = $1 AND key = $2`,
+          [teamId, key],
+        );
+        expect(queued.rows, status).toEqual([{ thread_id: thread }]);
+      });
+    }
+  });
+
   it("refuses deleting a held thread's results and TRUNCATE during a hold; a thread delete cascades", async () => {
     const { adminUrl } = database();
     const hold = await withClient(adminUrl, async (c) => {
@@ -252,7 +307,13 @@ describe("thread_app_results on upgrade (KOBE-438)", () => {
     });
     await withClient(adminUrl, (c) => c.query(`DELETE FROM threads WHERE id = $1`, [threadId]));
     await asTeam(teamId, async (c) => {
-      expect((await c.query(`SELECT count(*)::int AS n FROM thread_app_results`)).rows[0]).toEqual({
+      expect(
+        (
+          await c.query(`SELECT count(*)::int AS n FROM thread_app_results WHERE thread_id = $1`, [
+            threadId,
+          ])
+        ).rows[0],
+      ).toEqual({
         n: 0,
       });
     });
