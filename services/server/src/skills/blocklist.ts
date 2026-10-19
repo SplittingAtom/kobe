@@ -122,18 +122,24 @@ export function addBlocked(
   db: KobeDb,
   entry: { hash: string; reason: string; userId: string },
 ): Promise<BlockedEntry | null> {
-  return db.transaction(async (tx) => {
-    await lockBlocklist(tx);
-    if (await isBlocked(tx, entry.hash)) return null;
-    const [row] = await tx
-      .insert(skillBlocklist)
-      .values({ contentHash: entry.hash, reason: entry.reason, addedBy: entry.userId })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) return null;
-    await recordAudit(tx, { action: "skill.blocklist.added", target: { bundleHash: entry.hash } });
-    return row;
-  });
+  return db.transaction((tx) => addBlockedInTx(tx, entry));
+}
+
+/** {@link addBlocked} inside the caller's transaction (Reject and block, KOBE-334). */
+export async function addBlockedInTx(
+  tx: KobeTx,
+  entry: { hash: string; reason: string; userId: string },
+): Promise<BlockedEntry | null> {
+  await lockBlocklist(tx);
+  if (await isBlocked(tx, entry.hash)) return null;
+  const [row] = await tx
+    .insert(skillBlocklist)
+    .values({ contentHash: entry.hash, reason: entry.reason, addedBy: entry.userId })
+    .onConflictDoNothing()
+    .returning();
+  if (!row) return null;
+  await recordAudit(tx, { action: "skill.blocklist.added", target: { bundleHash: entry.hash } });
+  return row;
 }
 
 /**

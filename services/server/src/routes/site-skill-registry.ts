@@ -10,6 +10,7 @@ import {
 } from "../skills/registry/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { similarCatalogNames } from "../skills/registry/names-db.js";
+import { registryReviewRoutes } from "./site-skill-registry-review.js";
 
 /**
  * Registry settings (`/v1/site/skills/registry/settings`, KOBE-330, SK20, SK21): Site Owner and
@@ -53,6 +54,10 @@ export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     if (r.ok) return c.json(r.settings);
     return c.json({ code: r.code, message: r.message }, 400);
   });
+
+  // The review console (KOBE-334): the queue at `/` and each version at `/:id`, after the fixed
+  // paths above.
+  app.route("/", registryReviewRoutes(deps));
 
   return app;
 }

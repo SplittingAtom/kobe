@@ -1510,6 +1510,30 @@ export const AUDIT_EVENTS = {
     semver: z.string().max(32),
     newSkill: z.boolean(),
   }),
+  // ── the Registry review (KOBE-334, SK23): ids and outcomes; notes stay in the Registry ──
+  /** A reviewer claimed a submitted version: it is In review (site log). */
+  "registry.claimed": event("site", { registryVersionId: id }),
+  /** A reviewer let go of a claim; the version waits in the queue again. */
+  "registry.unclaimed": event("site", { registryVersionId: id }),
+  /** A reviewer commented on a version under review. */
+  "registry.commented": event("site", { registryVersionId: id }),
+  /**
+   * A reviewer approved a version into the Catalog. `selfApproved`: the single admin approved
+   * their own submission (SK22); `confirmerApproved`: the single admin approved a promotion they
+   * confirmed as Team admin.
+   */
+  "registry.approved": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    selfApproved: z.boolean(),
+    confirmerApproved: z.boolean().optional(),
+  }),
+  /** A reviewer sent the version back to its author's Workbench with comments. */
+  "registry.changes_requested": event("site", { registryVersionId: id }),
+  /** A reviewer rejected the version; `blocked`: a Site admin also blocklisted its runtime hash. */
+  "registry.rejected": event("site", { registryVersionId: id, blocked: z.boolean() }),
 
   // ── catalog maintainers (KOBE-332, SK24): ids only ──
   /** A maintainer (or a Site admin) added a maintainer to a catalog skill. */

@@ -10,6 +10,8 @@ import {
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { grantsOf } from "../skills/registry/grants.js";
+import { mySubmissions } from "../skills/registry/submissions.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 const INVALID = "Send known layout preferences within their bounds.";
@@ -23,7 +25,19 @@ function pgCode(err: unknown): string | undefined {
 export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.get("/", (c) => c.json({ user: c.get("user"), siteRole: c.get("siteRole") }));
+  // `siteGrants` (KOBE-334): Skill reviewers see the Registry queue though they hold no site role.
+  app.get("/", async (c) =>
+    c.json({
+      user: c.get("user"),
+      siteRole: c.get("siteRole"),
+      siteGrants: await grantsOf(db, c.get("user").id),
+    }),
+  );
+
+  /** The caller's submissions to the Site Registry and reviewers' decisions (KOBE-334, SK23). */
+  app.get("/skill-submissions", async (c) =>
+    c.json({ submissions: await mySubmissions(db, c.get("user").id) }),
+  );
 
   /**
    * `GET/PUT /v1/me/preferences` (KOBE-202, CE8): the caller's layout preferences, kept on their

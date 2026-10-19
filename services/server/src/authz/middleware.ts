@@ -9,6 +9,7 @@ import {
   skillReviewAllows,
   teamRoleAllows,
   type SitePermission,
+  type SiteRole,
   type SkillReviewAction,
   type TeamPermission,
 } from "./permissions.js";
@@ -122,13 +123,27 @@ export function requireTeamPermission(permission: TeamPermission) {
  */
 export function requireSkillReview(deps: ServerDeps, action: SkillReviewAction) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
-    const siteRole = c.get("siteRole");
-    const grants = siteRoleAllows(siteRole, "site.skills.review")
-      ? []
-      : await grantsOf(deps.database.db, c.get("user").id);
-    if (!skillReviewAllows({ siteRole, grants }, action)) {
-      return c.json({ code: "forbidden", message: "You don't have permission to do that." }, 403);
+    if (!(await mayReviewSkills(deps, c.get("siteRole"), c.get("user").id, action))) {
+      return c.json(SKILL_REVIEW_FORBIDDEN, 403);
     }
     await next();
   });
+}
+
+export const SKILL_REVIEW_FORBIDDEN = {
+  code: "forbidden",
+  message: "You don't have permission to do that.",
+} as const;
+
+/** {@link requireSkillReview}'s check, for a route whose action is in its body (KOBE-334). */
+export async function mayReviewSkills(
+  deps: ServerDeps,
+  siteRole: SiteRole,
+  userId: string,
+  action: SkillReviewAction,
+): Promise<boolean> {
+  const grants = siteRoleAllows(siteRole, "site.skills.review")
+    ? []
+    : await grantsOf(deps.database.db, userId);
+  return skillReviewAllows({ siteRole, grants }, action);
 }
