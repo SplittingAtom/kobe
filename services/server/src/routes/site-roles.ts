@@ -91,14 +91,28 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   app.put("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
     const p = grantParams(c);
     if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
-    if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
-    const { changed } = await giveGrant(db, p.userId, p.grant, c.get("user").id);
-    return c.json({ userId: p.userId, grant: p.grant, changed });
+    const r = await giveGrant(db, p.userId, p.grant, c.get("user").id);
+    if (r.ok) return c.json({ userId: p.userId, grant: p.grant, changed: r.changed });
+    if (r.code === "user_not_found") return c.json(userNotFound, 404);
+    if (r.code === "user_deactivated")
+      return c.json(
+        { code: "user_deactivated", message: "Reactivate the account before granting." },
+        409,
+      );
+    return c.json(
+      {
+        code: "not_grantable",
+        message:
+          "Site admins and the Owner review through their role, and nobody grants themselves.",
+      },
+      400,
+    );
   });
 
   app.delete("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
     const p = grantParams(c);
     if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
+    if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
     const { changed } = await takeGrant(db, p.userId, p.grant);
     if (!changed)
       return c.json({ code: "not_found", message: "That user doesn't hold that grant." }, 404);

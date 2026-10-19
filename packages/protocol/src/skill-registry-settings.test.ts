@@ -65,12 +65,17 @@ describe("Registry settings (KOBE-330, SK20, SK21)", () => {
 
   it("updates any subset, but at least one setting", () => {
     expect(registrySettingsUpdateSchema.safeParse({}).success).toBe(false);
-    expect(registrySettingsUpdateSchema.safeParse({ registryTeamId: null }).success).toBe(true);
+    // The Registry team is never named here: it is created (review H1).
+    expect(registrySettingsUpdateSchema.safeParse({ registryTeamId: null }).success).toBe(false);
     expect(registrySettingsUpdateSchema.safeParse({ judgeAlias: "smart" }).success).toBe(true);
     expect(registrySettingsUpdateSchema.safeParse({ judgeAlias: "" }).success).toBe(false);
     expect(
       registrySettingsUpdateSchema.safeParse({ evalLimits: { maxConcurrentSandboxes: 2 } }).success,
     ).toBe(true);
-    expect(registrySettingsUpdateSchema.safeParse({ registryTeamId: "x" }).success).toBe(false);
+    expect(
+      registrySettingsUpdateSchema.safeParse({
+        registryTeamId: "7a1e2b3c-4d5e-4f60-8a71-92b3c4d5e6f7",
+      }).success,
+    ).toBe(false);
   });
 });

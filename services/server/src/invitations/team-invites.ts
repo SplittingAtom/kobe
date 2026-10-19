@@ -166,6 +166,13 @@ export async function acceptTeamInvite(
       .values({ teamId, userId: user.id, role: invite.role })
       .onConflictDoNothing()
       .returning({ role: teamMembers.role });
+    // Already a member that Kobe added for the Skill reviewer grant: accepting an invitation
+    // makes them the team's own member, so taking the grant later keeps them (KOBE-331 review).
+    if (joined.length === 0)
+      await tx
+        .update(teamMembers)
+        .set({ addedVia: null })
+        .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
     const [membership] = await tx
       .select({ role: teamMembers.role })
       .from(teamMembers)

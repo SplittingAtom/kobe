@@ -338,7 +338,12 @@ export const AUDIT_EVENTS = {
   /** Actor: the invitee. */
   "identity.team_invitation.declined": event("team", {}),
   "identity.member.role_changed": event("team", { userId: id, from: role, to: role }),
-  "identity.member.removed": event("team", { userId: id, role }),
+  /** `via`: Kobe removed a membership the Skill reviewer grant made when the grant was taken. */
+  "identity.member.removed": event("team", {
+    userId: id,
+    role,
+    via: z.enum(["skill_reviewer_grant"]).optional(),
+  }),
   /**
    * Kobe added someone to the team on its own (KOBE-331): a Skill reviewer joins the Registry
    * team as a member when granted, or when the team becomes the Registry team (SK22).
@@ -1468,7 +1473,6 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 
   // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
-  /** A Site admin added a topic tag to the vocabulary. */
   /**
    * A Site admin changed the Registry settings (KOBE-330, SK20, SK21): which settings, and the
    * Registry team and judge alias when they changed (ids and aliases, never URLs or rules).
@@ -1491,6 +1495,7 @@ export const AUDIT_EVENTS = {
     registryTeamId: id.nullable().optional(),
     judgeAlias: z.string().min(1).max(64).nullable().optional(),
   }),
+  /** A Site admin added a topic tag to the vocabulary. */
   "skill.tag.created": event("site", { tagId: id, name: catalogName }),
   /** A Site admin renamed, retired or restored a topic tag. */
   "skill.tag.updated": event("site", {

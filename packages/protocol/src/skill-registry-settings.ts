@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { uuidSchema } from "./common.js";
 import { skillEvalLimitsSchema } from "./skill-evals/api.js";
 
 /**
@@ -67,6 +66,11 @@ export const registryMirrorSchema = z
     url: z
       .url({ protocol: /^https$/ })
       .max(512)
+      // The token lives in a Kubernetes Secret (SK29), never in the URL (review M1).
+      .refine((u) => {
+        const url = new URL(u);
+        return url.username === "" && url.password === "" && url.search === "" && url.hash === "";
+      }, "no credentials, query or fragment in the URL")
       .optional(),
     branch: z
       .string()
@@ -80,10 +84,13 @@ export const registryMirrorSchema = z
 
 export const registryJudgeAliasSchema = z.string().min(1).max(64);
 
-/** `PUT /v1/site/skills/registry/settings`: any subset of the settings, at least one. */
+/**
+ * `PUT /v1/site/skills/registry/settings`: any subset of the settings, at least one. The Registry
+ * team is not among them: it is always a dedicated team Kobe creates ({@link
+ * registryTeamCreateSchema}), never an existing one (coordinator decision, KOBE-330 review H1).
+ */
 export const registrySettingsUpdateSchema = z
   .strictObject({
-    registryTeamId: uuidSchema.nullable().optional(),
     judgeAlias: registryJudgeAliasSchema.nullable().optional(),
     submissionRules: registrySubmissionRulesSchema.optional(),
     evalLimits: skillEvalLimitsSchema.optional(),
@@ -93,6 +100,16 @@ export const registrySettingsUpdateSchema = z
   })
   .refine((u) => Object.keys(u).length > 0, { message: "Change at least one setting." });
 export type RegistrySettingsUpdate = z.infer<typeof registrySettingsUpdateSchema>;
+
+/**
+ * `POST /v1/site/skills/registry/team`: Kobe creates the dedicated Registry team (flagged, at most
+ * one), with the creating Site admin as its team admin and every Skill reviewer as a member.
+ */
+export const registryTeamCreateSchema = z.strictObject({
+  name: z.string().trim().min(1).max(100),
+  slug: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/),
+});
+export type RegistryTeamCreate = z.infer<typeof registryTeamCreateSchema>;
 
 export const REGISTRY_SETTING_NAMES = [
   "registryTeamId",

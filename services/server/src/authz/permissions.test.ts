@@ -9,6 +9,7 @@ import {
   teamPermissionsFor,
   teamRoleAllows,
   type SitePermission,
+  type SkillReviewAction,
   type TeamPermission,
 } from "./permissions.js";
 
@@ -99,25 +100,30 @@ describe("Skill reviewer grant beside the ladder (KOBE-331, SK22)", () => {
   const admin = { siteRole: "admin", grants: [] } as const;
   const owner = { siteRole: "owner", grants: [] } as const;
 
-  it.each<[(typeof SKILL_REVIEW_ACTIONS)[number], boolean]>([
-    // action, Skill reviewer may
-    ["queue.read", true],
-    ["claim", true],
-    ["comment", true],
-    ["approve", true],
-    ["request_changes", true],
-    ["reject", true],
-    ["reject_and_block", false],
-    ["withdraw", false],
-    ["revoke", false],
-    ["tag_default", false],
-    ["settings", false],
-  ])("%s: reviewer=%s, Site admins and the Owner always, users never", (action, mayReview) => {
-    expect(skillReviewAllows(reviewer, action)).toBe(mayReview);
-    expect(skillReviewAllows(admin, action)).toBe(true);
-    expect(skillReviewAllows(owner, action)).toBe(true);
-    expect(skillReviewAllows(user, action)).toBe(false);
-  });
+  /** Exhaustive: a new action fails to compile until it is placed here (review L5). */
+  const REVIEWER_MAY = {
+    "queue.read": true,
+    claim: true,
+    comment: true,
+    approve: true,
+    request_changes: true,
+    reject: true,
+    reject_and_block: false,
+    withdraw: false,
+    revoke: false,
+    tag_default: false,
+    settings: false,
+  } as const satisfies Record<SkillReviewAction, boolean>;
+
+  it.each(Object.entries(REVIEWER_MAY) as [SkillReviewAction, boolean][])(
+    "%s: reviewer=%s, Site admins and the Owner always, users never",
+    (action, mayReview) => {
+      expect(skillReviewAllows(reviewer, action)).toBe(mayReview);
+      expect(skillReviewAllows(admin, action)).toBe(true);
+      expect(skillReviewAllows(owner, action)).toBe(true);
+      expect(skillReviewAllows(user, action)).toBe(false);
+    },
+  );
 
   it("covers every review action in the matrix", () => {
     expect([...SKILL_REVIEW_ACTIONS].sort()).toEqual(

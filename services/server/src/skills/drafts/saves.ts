@@ -35,9 +35,10 @@ export async function recordedSaves(
         JOIN runs r ON r.team_id = e.team_id AND r.id = e.run_id
        WHERE e.team_id = ${ctx.teamId} AND r.thread_id = ${threadId}
          AND e.type = 'skill.draft_saved'
-       ORDER BY e.run_id, e.seq
+       ORDER BY r.created_at DESC, r.id DESC, e.seq DESC
        LIMIT ${SAVES_MAX}`);
-    return res.rows.map(({ payload: p }) => ({
+    // The newest SAVES_MAX, oldest first (review LOW-442a: a random run id is no order).
+    return res.rows.reverse().map(({ payload: p }) => ({
       toolCallId: String(p.tool_call_id),
       draftId: String(p.draft_id),
       name: String(p.name),
