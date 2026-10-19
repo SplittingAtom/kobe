@@ -10,7 +10,9 @@ import { PiProcessError } from "../pi/pi-process.js";
 import { buildPiLaunch } from "../pi/pi-launch.js";
 import {
   SessionRestore,
+  appendAppCards,
   appendBranchMarker,
+  missingAppCards,
   ensureSessionDir,
   sessionFilePath,
 } from "../pi/session-files.js";
@@ -622,6 +624,25 @@ export class ThreadManager {
     // Re-checked under the lock: a concurrent run.start may have won the thread meanwhile.
     if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
+    // App cards the server added while Pi was not running (KOBE-440): appended with Pi stopped,
+    // before the branch marker that hangs below the last one.
+    const file = this.#sessionFile(thread.id);
+    const cards = await missingAppCards(file, frame.app_cards ?? []);
+    if (cards.length > 0) {
+      await thread.stopProcess();
+      await ensureSessionDir(this.#options.sessionDir, {
+        shared: this.#options.identities !== undefined,
+        workspaceDir: this.#options.workspaceDir,
+      });
+      const caught = await appendAppCards(
+        file,
+        cards,
+        () => this.#defaultHeader(thread.id),
+        this.#options.restoreMaxBytes,
+        this.#options.workspaceDir,
+      );
+      if (!caught.ok) return fail("pi_rejected", caught.message);
+    }
     if (frame.parent_entry_id !== undefined) {
       await thread.stopProcess();
       const branch = await appendBranchMarker(

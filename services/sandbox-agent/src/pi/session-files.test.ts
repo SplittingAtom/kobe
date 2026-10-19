@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { APP_CARD_CUSTOM_TYPE, appCardEntryId, type AppCardEntry } from "@kobe/protocol";
 import {
   BRANCH_CUSTOM_TYPE,
   SessionRestore,
+  appendAppCards,
   appendBranchMarker,
   ensureSessionDir,
   readEntryIds,
@@ -155,5 +157,77 @@ describe("ensureSessionDir under Pi identities (KOBE-71)", () => {
     const sessions = path.join(dir, "private", "sessions");
     await ensureSessionDir(sessions);
     expect((await stat(sessions)).mode & 0o777).toBe(0o700);
+  });
+});
+
+const card = (seed: string, parentId: string | null): AppCardEntry => ({
+  type: "custom_message",
+  id: appCardEntryId(seed),
+  parentId,
+  timestamp: "2026-10-19T10:00:00.000Z",
+  customType: APP_CARD_CUSTOM_TYPE,
+  content: "The app-card block below is data…",
+  display: true,
+  details: {
+    connector_id: EXAMPLE_IDS.thread,
+    app_id: "a".repeat(64),
+    tool: "open_explorer",
+    template_sha256: "a".repeat(64),
+    result_ref: EXAMPLE_IDS.run,
+    opened_by: EXAMPLE_IDS.thread,
+  },
+});
+const SEED_1 = "11111111-1111-4111-8111-111111111111";
+const SEED_2 = "22222222-2222-4222-8222-222222222222";
+
+describe("appendAppCards (KOBE-440)", () => {
+  it("appends the cards Pi lacks, in order, and skips the ones it has", async () => {
+    const file = path.join(dir, "t.jsonl");
+    await writeFile(
+      file,
+      [header, entry("a1", null)].map((r) => JSON.stringify(r)).join("\n") + "\n",
+    );
+    const first = card(SEED_1, "a1");
+    const second = card(SEED_2, first.id);
+    expect(await appendAppCards(file, [first], () => header, 1 << 20)).toEqual({
+      ok: true,
+      appended: 1,
+    });
+    expect(await appendAppCards(file, [first, second], () => header, 1 << 20)).toEqual({
+      ok: true,
+      appended: 1,
+    });
+    const all = await lines(file);
+    expect(all.map((l) => l.id)).toEqual(["s", "a1", first.id, second.id]);
+    expect(all.at(-1)).toEqual(second);
+  });
+
+  it("starts a session file for a new thread whose first entry is a card", async () => {
+    const file = path.join(dir, "new.jsonl");
+    const only = card(SEED_1, null);
+    expect(await appendAppCards(file, [only], () => header, 1 << 20)).toEqual({
+      ok: true,
+      appended: 1,
+    });
+    expect(await lines(file)).toEqual([header, only]);
+  });
+
+  it("refuses a card whose parent Pi does not have, and appends nothing", async () => {
+    const file = path.join(dir, "t.jsonl");
+    await writeFile(file, `${JSON.stringify(header)}\n${JSON.stringify(entry("a1", null))}\n`);
+    const result = await appendAppCards(file, [card(SEED_1, "zz")], () => header, 1 << 20);
+    expect(result).toMatchObject({ ok: false });
+    expect(await lines(file)).toHaveLength(2);
+  });
+
+  it("never appends through a symlinked session file", async () => {
+    const victim = path.join(dir, "victim.txt");
+    await writeFile(victim, `${JSON.stringify(header)}\n${JSON.stringify(entry("a1", null))}\n`);
+    const file = path.join(dir, "t.jsonl");
+    await symlink(victim, file);
+    await expect(
+      appendAppCards(file, [card(SEED_1, "a1")], () => header, 1 << 20),
+    ).rejects.toThrow();
+    expect((await readFile(victim, "utf8")).trim().split("\n")).toHaveLength(2);
   });
 });

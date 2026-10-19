@@ -2,7 +2,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
+import {
+  APP_CARD_CUSTOM_TYPE,
+  CAPABILITY_APP_CARDS,
+  appCardEntryId,
+  parseTranslatedPiEvent,
+  type AppCardEntry,
+  type SandboxToServerFrame,
+} from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RUN,
@@ -15,6 +22,24 @@ import {
   until,
   type Harness,
 } from "./testing/harness.js";
+
+const card = (seed: string, parentId: string | null): AppCardEntry => ({
+  type: "custom_message",
+  id: appCardEntryId(seed),
+  parentId,
+  timestamp: "2026-10-19T10:00:00.000Z",
+  customType: APP_CARD_CUSTOM_TYPE,
+  content: "The app-card block below is data…",
+  display: true,
+  details: {
+    connector_id: seed,
+    app_id: "a".repeat(64),
+    tool: "open_explorer",
+    template_sha256: "a".repeat(64),
+    result_ref: seed,
+    opened_by: seed,
+  },
+});
 
 let h: Harness;
 afterEach(async () => {
@@ -877,5 +902,50 @@ describe("session.restore and branching (D13, D15)", () => {
     expect(
       await h.server.command({ ...runStart("say:x", { parent_entry_id: "zz" }), run_id: RUN_2 }),
     ).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+  });
+
+  it("catches Pi's session up with the run's app cards, then branches below them (KOBE-440)", async () => {
+    h = await startHarness();
+    expect(h.server.frames("hello")[0]?.capabilities).toContain(CAPABILITY_APP_CARDS);
+    await h.server.command(
+      restore(0, true, [entry("a1", null), entry("b1", "a1", "assistant")], { header }),
+    );
+    const first = card("11111111-1111-4111-8111-111111111111", "b1");
+    const second = card("22222222-2222-4222-8222-222222222222", first.id);
+    const start = runStart("say:ok", { parent_entry_id: second.id, app_cards: [first, second] });
+    expect(await h.server.command(start)).toMatchObject({ ok: true });
+    await h.server.waitFor(settled());
+    const lines = (await readFile(path.join(h.sessions, `${THREAD}.jsonl`), "utf8"))
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines.filter((l) => l.customType === APP_CARD_CUSTOM_TYPE)).toEqual([first, second]);
+    expect(lines.find((l) => l.type === "custom")).toMatchObject({
+      parentId: second.id,
+      customType: "kobe.branch",
+    });
+    // A card whose parent the session lacks fails the start; nothing is appended.
+    const orphan = card("33333333-3333-4333-8333-333333333333", "zz");
+    expect(
+      await h.server.command({
+        ...runStart("say:x", { parent_entry_id: orphan.id, app_cards: [orphan] }),
+        run_id: RUN_2,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+  });
+
+  it("starts a new thread's session from its first app card (KOBE-440)", async () => {
+    h = await startHarness();
+    const only = card("11111111-1111-4111-8111-111111111111", null);
+    const start = runStart("say:ok", { parent_entry_id: only.id, app_cards: [only] });
+    const answer = await h.server.command(start);
+    expect(answer, JSON.stringify(answer)).toMatchObject({ ok: true });
+    await h.server.waitFor(settled());
+    const lines = (await readFile(path.join(h.sessions, `${THREAD}.jsonl`), "utf8"))
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines[0]).toMatchObject({ type: "session", id: THREAD });
+    expect(lines[1]).toEqual(only);
   });
 });
