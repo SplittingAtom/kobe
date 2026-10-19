@@ -33,9 +33,17 @@ kill, and the connection was stable through it.
   reconnect as usual. The wait is bounded by `LOST_ACK_TIMEOUT_MS` (3 s; past it a warning is
   logged). Then `pi.exited` (`exit_code` null, `signal` "SIGTERM") goes out for each lost run, and
   the server's existing handler interrupts it with cause `pi_exited` (Retry and Continue).
-  Only then does the workspace flush run and the wire close. Budget: 10 s drain + Pi stop + at
-  most 3 s + the flush, within the 30 s grace. If SIGKILL comes first, the sweeper still
-  interrupts the run once the connection has been closed for 30 s.
+  Only then does the workspace flush run and the wire close. Worst case: a 10 s drain, up to 5 s
+  per Pi stop, at most 3 s of ack wait, and up to 15 s of flush, about 33 s. That is more than
+  Kubernetes' default 30 s grace (review M1), so the sandbox pod now sets
+  `terminationGracePeriodSeconds: 45` (`SANDBOX_TERMINATION_GRACE_SECONDS` in
+  `services/server/src/sandbox/manifests.ts`, applied to the team SandboxTemplates by the
+  reconcile). I raised the grace rather than shortening the waits because that is the safer of
+  the two: shorter waits would cut acks or the flush on a slow node, while a longer grace only
+  delays the SIGKILL of an agent that is stuck, and an agent that finishes sooner exits sooner.
+  The lost-run report comes before the flush, so even a SIGKILL would cut only the flush. If no
+  report gets out at all, the sweeper still interrupts the run once the connection has been
+  closed for 30 s.
 - Nothing already sent is lost. Every event frame is stored before the run is interrupted, because
   the report waits for the acks. Pi's entries live in its session file on the workspace volume
   (`/workspace/.kobe/sessions`), which is flushed afterwards. The server forgets the thread's sync
@@ -46,7 +54,15 @@ kill, and the connection was stable through it.
 
 ## Open questions (for Chris or the coordinator)
 
-- U19 itself is unchanged. Its kill is the graceful case this fixes.
+- U19 itself is unchanged. Its kill is the graceful case this fixes. Residual risk (review
+  L3, accepted): the run reaches `interrupted` only if it is still streaming when the 10 s drain
+  ends. A fast model that finishes within the drain ends the run `completed`, which is correct,
+  but fails the test. A wire outage during SIGTERM loses the `pi.exited` report (queued exits die
+  with the process), and the sweeper then interrupts after 30 s, within the test's wait. Options
+  if it flakes: kill sooner after the stream starts, use a slow deterministic fake for this case,
+  and print the server's run-end lines on failure.
+- Follow-up (review L5): when the connection closes during a run-end sync, end the run interrupted
+  (`sandbox_gone`) rather than `entries_not_saved` (`ingest.#fetchEntries`, `#closed`).
 
 ## Evidence (acceptance criteria → test or command output)
 

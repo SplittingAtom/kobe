@@ -834,13 +834,13 @@ export class ThreadManager {
   }
 }
 
-/** A run.start in progress; `stopped` once a Stop for its run arrived before the run began. */
 /** A run that was active when its Pi was stopped on SIGTERM (KOBE-444). */
 export interface LostRun {
   readonly threadId: string;
   readonly runId: string;
 }
 
+/** A run.start in progress; `stopped` once a Stop for its run arrived before the run began. */
 interface PendingStart {
   readonly threadId: string;
   stopped: boolean;

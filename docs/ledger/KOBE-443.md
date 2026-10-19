@@ -35,10 +35,17 @@ True exposure: 780 = 12 calls.
   per line, the sweep, the eval line. `own_share` still caps a member when it reserves, so the
   change refuses only what the old count wrongly admitted.
 - Behaviour change: a **lone** call that holds more than is left (admitted because nobody else held
-  anything) now counts in full, so the line is `full` (402 `budget_exhausted`) for others until
-  it ends. Before, others could still get in under the cap (and overshoot). Two gate unit tests
-  were changed to match. One keeps the share cap on a newcomer's first call ($700 left), and a
-  new one covers the lone large call.
+  anything) now counts in full, so the line is `full` for others until it ends. Before, others
+  could still get in under the cap (and overshoot).
+- Review H1: a line that is `full` only because of holds must not end other members' runs. On
+  `full`, the gate re-reads the member's spend (the cached spend may be stale). If the spend itself
+  reached the limit, the answer is 402 `budget_exhausted` (final). Otherwise the line is full of
+  calls in flight, which end or expire, so the answer is 429 `too_many_calls_in_flight` with
+  Retry-After 2, which the sandbox retries. That is the KOBE-259 promise: overlapping calls wait.
+  It also covers the settle window's double count and a crashed replica's holds. Some gate and DB
+  tests used to expect 402 for holds-only lines. Several did even before 0149 (user lines had no
+  cap), so they now expect 429. New unit tests cover a stale cache (402 after the re-read) and a
+  fresh spend still below the limit (429). Gateway-only change, no SQL or wire change.
 - `MemoryReservations.inFlight` (gateway, tests and single replica) changed the same way.
 - The KOBE-261/278/286 fixes are intact: the spend is read under the lock, `release(true)` extends
   the hold, settle deletes the hold only after the row commits.
