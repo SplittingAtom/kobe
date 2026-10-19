@@ -120,3 +120,8 @@ the audit doc comment.
   endpoint; 413; the rate limit. `connector-template-review.db.test.ts` covers the frame route's
   409 and `Sec-Fetch-Dest`.
 - proxy `app-calls.test.ts` (5).
+
+## Re-review LOWs (R-LOW-1, R-LOW-2), fixed in c5b9e8be with MA-5
+
+One validation per member at a time; a busy pool answers `validation_busy` (503, audited), not
+`invalid_arguments`; workers have `resourceLimits` (64/16 MiB). Details in `KOBE-437.md`.
