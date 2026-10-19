@@ -18,19 +18,22 @@ export const ESTIMATE_DEBOUNCE_MS = 500;
 /**
  * Run the draft's evals (KOBE-327, SK18): the estimate is shown before Run ("≈ $X, ≈ N min"),
  * and a budget or the team eval cap that would refuse the start says so instead of the button.
- * The scorecard panel is the Workbench's (KOBE-328).
+ * Part of the Workbench evals panel (`evals-panel.tsx`, KOBE-328).
  */
 export function EvalRun({
   teamId,
   draftId,
   rev,
   flush,
+  onStarted,
 }: {
   readonly teamId: string;
   readonly draftId: string;
   /** The draft's revision: the estimate follows edits. */
   readonly rev: number;
   readonly flush: () => Promise<unknown>;
+  /** Told the new eval's id once it started. */
+  readonly onStarted?: (evalRunId: string) => void;
 }) {
   const [mode, setMode] = useState<EvalMode>("full");
   const [view, setView] = useState<EvalEstimateView | null>(null);
@@ -59,8 +62,10 @@ export function EvalRun({
     try {
       await flush();
       const res = await startDraftEval(teamId, draftId, mode);
-      if (res.ok) setStarted(res.data.evalRunId);
-      else setError(res.error);
+      if (res.ok) {
+        setStarted(res.data.evalRunId);
+        onStarted?.(res.data.evalRunId);
+      } else setError(res.error);
     } catch {
       setError({
         status: 0,

@@ -15,6 +15,7 @@ import {
 import { listTeamMembers, type TeamMember } from "../../../lib/admin/api/team/members";
 import { formatTokens, formatUsd } from "../../../lib/admin/usage-format";
 import { AmountFields, parseAmounts, useAmountTexts } from "../budgets/amount-fields";
+import { EvalCapForm } from "./eval-cap-form";
 import {
   Button,
   EmptyState,
@@ -169,7 +170,7 @@ export function TeamBudgetsPage() {
       <ResourceView state={state} label="budgets">
         {({ budgets, members }) => (
           <Body
-            key={JSON.stringify([budgets.team, budgets.members])}
+            key={JSON.stringify([budgets.team, budgets.members, budgets.evalCap])}
             teamId={teamId}
             budgets={budgets}
             members={members}
@@ -204,6 +205,8 @@ function Body({
   const [invalid, setInvalid] = useState<string | null>(null);
   const siteRpm = budgets.site.userRequestsPerMinute;
   const [confirm, confirmDialog] = useConfirm();
+  // The cap lives in the team skill settings: Team admins (`team.skills.review`) set it.
+  const canSetCap = useTeamAccess().permissions.includes("team.skills.review");
 
   async function removeBudget(m: TeamBudgets["members"][number], trigger: HTMLElement | null) {
     const yes = await confirm(
@@ -310,6 +313,9 @@ function Body({
       </Section>
 
       <SpendByKind budgets={budgets} />
+      {budgets.evalCap && canSetCap && (
+        <EvalCapForm teamId={teamId} cap={budgets.evalCap} run={run} />
+      )}
 
       <Section
         id="default-budget"

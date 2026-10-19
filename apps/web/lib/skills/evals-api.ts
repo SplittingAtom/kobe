@@ -2,7 +2,10 @@
  * Skill evals over the API (KOBE-325, KOBE-327; contract `@kobe/protocol` skill-evals `api.ts`):
  * the estimate before Run and the start. Responses arrive camelized.
  */
+import type { SkillEvalRun } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../api/client";
+
+export type { SkillEvalRun };
 
 export type EvalMode = "full" | "with_only";
 
@@ -57,4 +60,44 @@ export function estimateText(e: EvalEstimate): string {
       ? "cost unknown (unpriced model)"
       : `≈ $${e.costUsd < 0.01 ? e.costUsd.toFixed(4) : e.costUsd.toFixed(2)}`;
   return `${cost}, ≈ ${e.minutes ?? "?"} min · ${runs}`;
+}
+
+export function getEvalRun(teamId: string, id: string): Promise<ApiResult<SkillEvalRun>> {
+  return apiRequest(`/v1/skill-evals/${enc(id)}`, { teamId });
+}
+
+/** A draft's eval history, newest first (every revision). */
+export async function listDraftEvals(
+  teamId: string,
+  draftId: string,
+): Promise<ApiResult<readonly SkillEvalRun[]>> {
+  const res = await apiRequest<{ readonly evals: readonly SkillEvalRun[] }>(
+    `/v1/skill-evals?draft_id=${enc(draftId)}`,
+    { teamId },
+  );
+  return res.ok ? { ...res, data: res.data.evals } : res;
+}
+
+/** A saved version's skill's eval history, newest first (every version). */
+export async function listSkillEvals(
+  teamId: string,
+  scope: "team" | "personal",
+  skillId: string,
+): Promise<ApiResult<readonly SkillEvalRun[]>> {
+  const res = await apiRequest<{ readonly evals: readonly SkillEvalRun[] }>(
+    `/v1/skill-evals?scope=${scope}&skill_id=${enc(skillId)}`,
+    { teamId },
+  );
+  return res.ok ? { ...res, data: res.data.evals } : res;
+}
+
+export function cancelEvalRun(teamId: string, id: string): Promise<ApiResult<SkillEvalRun>> {
+  return apiRequest(`/v1/skill-evals/${enc(id)}/cancel`, { method: "POST", json: {}, teamId });
+}
+
+/** "draft r3" or "v2": which revision or version a run evaluated. */
+export function subjectLabel(run: SkillEvalRun): string {
+  return run.subject.kind === "draft"
+    ? `revision ${run.subject.rev}`
+    : `version ${run.subject.seq}`;
 }

@@ -24,7 +24,7 @@ import { LintPanel, ScanPanel } from "./feedback";
 import { FileTree } from "./file-tree";
 import { SaveVersionDialog } from "./save-version-dialog";
 import { SkillMdEditor } from "./skill-md-editor";
-import { EvalRun } from "./eval-run";
+import { EvalsPanel } from "./evals-panel";
 import { SkillTestPane } from "./test-pane";
 import { useDraftEditor, type DraftEditor, type SaveStatus } from "./use-draft-editor";
 
@@ -152,9 +152,7 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
         {/* Beside the editor on wide screens, below it otherwise (KOBE-323). */}
         <div className="min-w-0 md:col-span-2 2xl:col-span-1">
           <SkillTestPane teamId={teamId} draftId={draft.id} flush={editor.flush} />
-          {paths.includes("evals/cases.yaml") && (
-            <EvalRun teamId={teamId} draftId={draft.id} rev={draft.rev} flush={editor.flush} />
-          )}
+          <EvalsPanel teamId={teamId} editor={editor} />
         </div>
       </div>
       <SaveVersionDialog

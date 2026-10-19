@@ -269,3 +269,57 @@ describe("chat budget banner text", () => {
     ).toBe("The site's monthly model budget is 90 % used.");
   });
 });
+
+describe("team eval cap (KOBE-327, KOBE-328)", () => {
+  const WITH_CAP = {
+    ...BUDGETS,
+    spent_by_kind: [
+      { kind: "run", usd: 40, tokens: 200_000 },
+      { kind: "eval", usd: 1.5, tokens: 40_000 },
+      { kind: "eval_judge", usd: 0.5, tokens: 10_000 },
+    ],
+    eval_cap: { usd: 5, tokens: null, month_usd: 2, month_tokens: 50_000 },
+  };
+  const ADMIN = { permissions: ["team.skills.review", "team.budgets.manage"] };
+
+  it("shows spend by kind and edits the cap in dollars or tokens, or removes it", async () => {
+    const calls = stubApi({
+      "GET /v1/team/budgets": [200, WITH_CAP],
+      "GET /v1/team/members": [200, MEMBERS],
+      "PUT /v1/team/skill-review/settings": [200, {}],
+    });
+    renderTeam(<TeamBudgetsPage />, ADMIN);
+    expect(await screen.findByRole("rowheader", { name: "Skill evals" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "Eval judge" })).toBeTruthy();
+    expect(screen.getByText(/Team eval cap: \$2\.00 of \$5\.00 \(40 %\)/)).toBeTruthy();
+    const amount = screen.getByLabelText("Cap per month");
+    expect((amount as HTMLInputElement).value).toBe("5");
+    // A sub-cent cap is refused here, before the server sees it.
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "0.001");
+    await userEvent.click(screen.getByRole("button", { name: "Save eval cap" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/at least \$0\.01, in whole cents/);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "2000000");
+    await userEvent.selectOptions(screen.getByLabelText("In"), "Tokens");
+    await userEvent.click(screen.getByRole("button", { name: "Save eval cap" }));
+    await screen.findByText("The team eval cap was saved.");
+    expect(body(calls, "PUT")).toEqual({ evalCap: { tokens: 2_000_000 } });
+    await userEvent.click(await screen.findByRole("button", { name: "Remove cap" }));
+    await screen.findByText("The team eval cap was removed.");
+    expect(JSON.parse(String(calls.filter((c) => c.method === "PUT").at(-1)?.body))).toEqual({
+      evalCap: null,
+    });
+  });
+
+  it("is not offered without the Team admin's skill settings permission", async () => {
+    stubApi({
+      "GET /v1/team/budgets": [200, WITH_CAP],
+      "GET /v1/team/members": [200, MEMBERS],
+    });
+    renderTeam(<TeamBudgetsPage />, { permissions: ["team.budgets.manage"] });
+    await screen.findByRole("rowheader", { name: "Skill evals" });
+    expect(screen.queryByRole("form", { name: "Team eval cap" })).toBeNull();
+  });
+});
