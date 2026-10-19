@@ -54,8 +54,8 @@ updated_at)`, PK `(connector_id, uri)`. Checks: `^ui://`, ≤ 2048; MIME exactly
 pinned_hash}`; the same proposal again is no new event;
 - approved template whose live one is invalid: drifted with `proposed {invalid: code}` (not
   approvable; recovers by itself when the live one is valid and equal again);
-- new: drifted with live bytes and no `proposed`, follows the live bytes; never added when
-  invalid; a new one that turns invalid is removed;
+- new (`approved = false`): drifted, follows the live bytes, never pinned by a refresh; invalid
+  ones are placeholders reported in `invalid` (see review fixes);
 - not listed or no longer named by any live tool: removed.
 
 ## Deviations from the spec text (for review)
@@ -65,7 +65,7 @@ pinned_hash}`; the same proposal again is no new event;
    instead of two, and the server re-filters to what live tools name.
 2. Extra column `meta` (the declared `_meta.ui`, needed by MA-2's review) and `updated_at`.
 3. Invalid live templates at refresh drift (above) rather than skipping the whole refresh, so a
-   broken upstream template stops the old one from being served.
+   broken upstream template stops the old one from being served (coordinator decision 2).
 
 ## Tests
 
@@ -79,8 +79,41 @@ pinned_hash}`; the same proposal again is no new event;
 - Full unit suite green (chart backup-secrets and model-gateway budget-gate flaked once under
   turbo load, pass alone); typecheck, lint, format, `license:check`, `db:check` green.
 
+## Review fixes (2026-10-19, review-ma1: 2 HIGH, 3 MEDIUM, 3 LOW)
+
+- **Migrations** 0153 (generated: `approved boolean DEFAULT false`, URI check printable ASCII
+  `^ui://[!-~]+$`, `octet_length(meta::text) <= 16384`), 0154 (custom backfill: pinned or with a
+  proposal = approved), 0155 (generated CHECK `approved OR status = 'drifted'`: nothing a site
+  admin never approved can be pinned). Upgrade test
+  `connector-ui-resources-approved-upgrade.db.test.ts`.
+- **HIGH-1:** `applyDrift` adopts a pre-433 pin (no `ui`) whose live tool equals it except for
+  `ui` (approved fields kept, `ui` and the new hash taken); no event. The template still arrives
+  as new and unapproved. DB test from G10's stored state (hash = G10 formula).
+- **HIGH-2 (decision 3):** "new" is now `approved = false`, not "no proposal". An invalid new
+  template becomes an empty unapproved placeholder with `proposed {invalid}`; reports go in
+  `mcp.connector.drift.templates.invalid [{uri, reason}]`, once per reason. An approved or new
+  template that turns invalid is reported invalid (not changed or removed). A placeholder that
+  gets valid bytes is `added`. Notices gain `invalidTemplates`; the email lists them with the
+  reason text.
+- **MEDIUM-1:** NUL in html or `_meta.ui` is `ui_resource_invalid` (server); URIs printable ASCII
+  everywhere (db pattern, proxy, CHECK). Template drift runs in a savepoint: a failed write logs,
+  reports `templatesSkipped: write_failed` and tools still refresh.
+- **MEDIUM-2:** proxy keeps `_meta` only of wanted list entries and only `ui` + contentHash,
+  16 KiB per template; server caps `_meta.ui` at 8 KiB serialized (half the CHECK, jsonb text
+  adds spaces) and reads the probe answer up to 16 MiB (`too_large` above).
+- **MEDIUM-3:** proxy: a `resources/list` failure (not -32601), the page cap or a transport
+  failure → `ui_resources_skipped: <reason>`, tools unaffected; > 16 named → first 16 read, the
+  rest `invalid`; a read over the response cap → that template's `too_large`. Server: skipped →
+  templates untouched, outcome `templatesSkipped`. A pin whose template part was skipped pins
+  the tools alone (the next refresh finds the templates as new).
+- **LOW-1:** server retries a 400 without `ui_resources` (old proxy): templates left alone.
+  **LOW-2:** blob decode keeps the BOM; strict base64.
+- **LOW-3 contracts** (for the MA-2 and MA-4 briefs):
+  - MA-4: `servedTemplate` checks only row and connector state; also require a pinned (not
+    drifted) tool with app visibility naming the URI (join on the tool snapshot).
+  - MA-2 approval: refuse `proposed {invalid}` and placeholders; require the reviewed
+    `pinned_hash` (a new row: its own); re-validate MIME, size and NUL; set `approved = true`.
+
 ## Open questions
 
-- A new template that is invalid on its first refresh is silently not added (no event). Should
-  the drift event carry an `invalid` list for site admins?
-- MA-2 approval must refuse a row whose `proposed` is `{invalid}`.
+- None open. (Invalid new templates: reported, per coordinator decision 3.)
