@@ -291,6 +291,7 @@ async function appsExport() {
 const MODES = {
   fixtures,
   turn,
+  "gallery-agent": galleryAgent,
   "apps-setup": appsSetup,
   "apps-member": appsMember,
   "apps-results": appsResults,

@@ -46,3 +46,25 @@ cluster (no local Docker engine; k3d is CI's).
   OpenAI conversion merges the two user messages, the echo path differs but still contains the card.
 - The queued launch's timing (`kobe-long-answer=400`, 6 s wait before the launch).
 - Catalyst's tree roles for the gate install (`KOBE_APPS_ITEM_ROLE`, runbook §3).
+
+## First CI run (PR #319): what the gate caught, and the fixes
+
+- **Args drift (product):** real Pi records the model's raw arguments in `tool.call` but calls
+  the tool with its conversions (TypeBox `Value.Convert` and its JSON-schema coercion: `"5"`
+  becomes `5`; optional nulls dropped). The capture ticket digested the proxy's input, the claim
+  Pi's raw one, so no card got its app. Both now digest the input canonicalised against the
+  tool's pinned schema (`apps/input-canonical.ts`: Pi's exact numeric/boolean coercions, optional
+  nulls dropped, defaults applied); the comparison stays exact (unit and DB tests: `"5"`/`5`
+  and a default left out match, `7`/`"8"` does not).
+- **Harness:** the API turns had no agent, so the run got no connectors (the resolver gives a run
+  only its agent's connectors) and Pi never had the tool; the turns now use the gallery agent
+  Kobe, as the chat does. The script also checks the upstream got `{"depth":5}`.
+- **Browser harness:** `route.fetch()` runs in Node and ignores Chromium's host map
+  (`ECONNREFUSED ::1:80`): `app-frame.spec` fetches the real frame through `KOBE_BROWSER_MAP`
+  with the site's Host header (run here against the MA-5 stand-in: passed). The rail locators
+  pick the app by its tooltip (two connectors offer "E2E Explorer"). The credential test is self
+  contained (a failed test restarts the worker and loses module state).
+- **Unit (CI only):** a validator worker's cold start (135 ms in CI) counted against the 100 ms
+  deadline; workers now say when their library is loaded and only then take tasks (test with a
+  25 ms deadline).
+- **db-core:** the CLI catalog's older-schema check lists `thread_app_results` as later.

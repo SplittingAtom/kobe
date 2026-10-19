@@ -75,6 +75,16 @@ async function theApp(page: Page): Promise<App> {
   return app as App;
 }
 
+/**
+ * The rail's button for this app: by its tooltip, which names the connector (two connectors may
+ * offer apps with the same title, as on k3d).
+ */
+function railButton(page: Page, app: App, where: "this conversation" | "a new conversation") {
+  return page
+    .getByRole("region", { name: "Apps", exact: true })
+    .getByTitle(`Open ${app.title} from ${app.connectorName} in ${where}`, { exact: true });
+}
+
 /** The app's frame inside the conversation (the card's), by its host-drawn title. */
 function frameOf(page: Page, app: App): FrameLocator {
   return page
@@ -189,10 +199,7 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
   record(page);
   await chat.open();
   const app = await theApp(page);
-  await page
-    .getByRole("region", { name: "Apps" })
-    .getByRole("button", { name: `Open ${app.title} in a new conversation` })
-    .click();
+  await railButton(page, app, "a new conversation").click();
   const threadId = await chat.threadId();
   await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
   await expect(
@@ -231,10 +238,7 @@ test("from the rail during a run: the launch waits as a chip and goes in after t
     longAnswer("Write a numbered list of 40 short facts about tables, one per line."),
   );
   await chat.waitForBusy();
-  await page
-    .getByRole("region", { name: "Apps" })
-    .getByRole("button", { name: `Open ${app.title} in this conversation` })
-    .click();
+  await railButton(page, app, "this conversation").click();
   const chip = page.getByText(`App: ${app.title} (waits for the run)`);
   await expect(chip).toBeVisible();
   await chat.waitForIdle();
@@ -242,10 +246,31 @@ test("from the rail during a run: the launch waits as a chip and goes in after t
   await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
 });
 
-test("no credential reaches the browser or the frame", async ({ page }) => {
+test("no credential reaches the browser or the frame", async ({ chat, page }) => {
   test.skip(SECRET === "", "KOBE_APPS_SECRET names the credential to look for");
-  expect(bodies.length).toBeGreaterThan(0);
-  // Every Kobe answer of the earlier tests, the frame documents (the frame route) included.
+  // Every answer from Kobe while the app opens from the rail and renders, frame document included.
+  const seen: string[] = [];
+  page.on("response", (r: Response) => {
+    if (!new URL(r.url()).pathname.startsWith("/v1/")) return;
+    void r
+      .text()
+      .then((t) => seen.push(t))
+      .catch(() => undefined);
+  });
+  await chat.open();
+  const app = await theApp(page);
+  await railButton(page, app, "a new conversation").click();
+  await chat.threadId();
+  const frame = frameOf(page, app);
+  await expect(frame.getByRole(ITEM_ROLE, { name: PATH[0] ?? "", exact: true })).toBeVisible({
+    timeout: RUN_TIMEOUT_MS,
+  });
+  await frame.getByRole(ITEM_ROLE, { name: PATH[0] ?? "", exact: true }).click();
+  await page.waitForTimeout(2_000);
+  expect(
+    seen.some((b) => /<!doctype html>/i.test(b)),
+    "the frame document was seen",
+  ).toBe(true);
+  expect(seen.filter((b) => b.includes(SECRET))).toEqual([]);
   expect(bodies.filter((b) => b.includes(SECRET))).toEqual([]);
-  expect(page).toBeDefined();
 });

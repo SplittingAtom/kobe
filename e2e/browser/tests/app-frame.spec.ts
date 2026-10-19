@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Response } from "@playwright/test";
+import http from "node:http";
+import { expect, test, type Page, type Response, type Route } from "@playwright/test";
 import { PROBE_HTML, PROBE_MESSAGE, REMOTE, type ProbeReport } from "./support/app-frame-probe.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 import { pageApi } from "./support/gate5.js";
@@ -49,6 +50,54 @@ function probeBody(realBody: string): string {
 }
 
 type Report = ProbeReport & { eventOrigin: string };
+
+/**
+ * The deployment's real answer to an intercepted request. `route.fetch()` runs in Node, which
+ * does not see Chromium's `--host-resolver-rules`: with `KOBE_BROWSER_MAP` (a k3d port-forward,
+ * e2e/gate-apps.sh) the request goes to the mapped address with the site's own Host header, the
+ * way Chromium sends it; otherwise `route.fetch()` as is.
+ */
+async function fetchReal(
+  route: Route,
+): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+  const map = process.env["KOBE_BROWSER_MAP"];
+  if (!map) {
+    const response = await route.fetch();
+    return { status: response.status(), headers: response.headers(), body: await response.text() };
+  }
+  const request = route.request();
+  const url = new URL(request.url());
+  const [host, port] = map.split(":");
+  const headers = { ...(await request.allHeaders()), host: url.host };
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host,
+        port: Number(port ?? 80),
+        path: `${url.pathname}${url.search}`,
+        method: request.method(),
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          const out: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (v !== undefined) out[k] = Array.isArray(v) ? v.join(", ") : v;
+          }
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: out,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 async function runProbe(page: Page, src: string, sandboxed: boolean): Promise<Report> {
   return (await page.evaluate(
@@ -128,10 +177,14 @@ test("an app frame cannot reach the network, Kobe or the page around it (KOBE-43
   await page.route(
     (url) => url.pathname === framePath,
     async (route) => {
-      const response = await route.fetch();
-      expect(response.status()).toBe(200);
-      frameHeaders = response.headers();
-      await route.fulfill({ response, body: probeBody(await response.text()) });
+      const real = await fetchReal(route);
+      expect(real.status).toBe(200);
+      frameHeaders = real.headers;
+      await route.fulfill({
+        status: real.status,
+        headers: real.headers,
+        body: probeBody(real.body),
+      });
     },
   );
   // Chromium reports a request the CSP blocked as a request that failed; a leak is a response.

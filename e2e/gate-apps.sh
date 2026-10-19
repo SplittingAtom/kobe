@@ -99,6 +99,12 @@ U_AD=$(printf '{"key":"ad","email":"gate-apps-ad@gate-apps.test","ip":"198.51.10
 U_M2=$(printf '{"key":"m2","email":"gate-apps-m2@gate-apps.test","ip":"198.51.100.82","teamId":"%s","userId":"%s"}' "$TEAM" "$M2")
 OWNER_JSON=$(printf '{"email":"%s","password":"%s"}' "$OWNER_EMAIL" "$OWNER_PASSWORD")
 step() { client "$(printf '{"mode":"%s","base":"%s","owner":%s,%s}' "$1" "$BASE" "$OWNER_JSON" "$2")"; }
+# Connectors reach a run only through its agent's list (resolver: agent list ∩ team-enabled ∩
+# user-connected; a thread with no agent gets none): the turns use the gallery agent Kobe
+# (`connectors: all`), as the chat preselects it for a new conversation (KOBE-124).
+KOBE_AGENT=$(field gallery_agent "$(step gallery-agent '"key":"kobe"')")
+[[ "$KOBE_AGENT" =~ ^[0-9a-f-]{36}$ ]] || { fail "the gallery agent Kobe exists"; exit 1; }
+AGENT_FIELD="\"agentId\":\"$KOBE_AGENT\""
 
 # ---- the fake MCP Apps server and the proxies' allow-list ---------------------------------------------
 part_begin "setup: the fake MCP server serves ui://e2e/explorer; the connectors are pinned and enabled"
@@ -143,7 +149,7 @@ part_end setup
 
 # ---- (a) in the conversation ----------------------------------------------------------------------
 part_begin "conversation: real Pi passes MCP arguments unchanged (a default; \"5\" for an integer)"
-coerced=$(turn "$U_AD" "tool: $APP_TOOL {\"depth\":\"5\"}" '"title":"apps coerced"')
+coerced=$(turn "$U_AD" "tool: $APP_TOOL {\"depth\":\"5\"}" "\"title\":\"apps coerced\",$AGENT_FIELD")
 show "coerced turn" "$coerced"
 contains "the turn that calls the opening tool with \"5\" completes" '^terminal=run.completed$' "$coerced"
 COERCED_THREAD=$(field thread "$coerced")
@@ -151,12 +157,15 @@ r1=$(step apps-results "\"user\":$U_AD,\"threadId\":\"$COERCED_THREAD\"")
 show "results" "$r1"
 contains "...its tool card gets the app (the claim matched Pi's input)" '^result=tool:app:-:in$' "$r1"
 contains "...the tool.result carries the server's app marker" "^app_marker=$APP_TOOL:yes\$" "$r1"
-defaulted=$(turn "$U_AD" "tool: $APP_TOOL {}" '"title":"apps default"')
+defaulted=$(turn "$U_AD" "tool: $APP_TOOL {}" "\"title\":\"apps default\",$AGENT_FIELD")
 contains "the turn that leaves the default out completes" '^terminal=run.completed$' "$defaulted"
 r2=$(step apps-results "\"user\":$U_AD,\"threadId\":\"$(field thread "$defaulted")\"")
 show "results" "$r2"
 contains "...its tool card gets the app too" '^result=tool:app:-:in$' "$r2"
-printf '     upstream saw: %s\n' "$($KUBECTL -n "$INFRA_NS" logs fake-mcp 2>&1 | grep '^CALL open_explorer' | tail -2 | tr '\n' ' ')"
+upstream=$($KUBECTL -n "$INFRA_NS" logs fake-mcp 2>&1 | grep '^CALL open_explorer' | tail -2 | tr '\n' ' ')
+printf '     upstream saw: %s\n' "$upstream"
+# What Pi recorded is the model's raw arguments; what reached the upstream is Pi's conversion.
+contains "the upstream received Pi's converted arguments (5, not \"5\")" 'CALL open_explorer \{"depth":5\}' "$upstream"
 part_end args
 
 part_begin "conversation: the app's own calls are the member's, read-only and audited"
