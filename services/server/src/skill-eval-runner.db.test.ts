@@ -462,6 +462,29 @@ describe("skill eval runner (KOBE-325)", () => {
     expect(rows[0]?.n).toBe(210);
   });
 
+  it("bounds a member's open evals (review M4)", async () => {
+    const w = await world();
+    const id = await draftWith(
+      w.owner,
+      "bounded",
+      ["cases:", "  - id: a", "    prompt: P", "    expect: {contains: Total}", ""].join("\n"),
+      {},
+    );
+    for (let i = 0; i < 3; i += 1) {
+      const ok = await f
+        .on(0, w.owner)
+        .post(`/v1/skills/drafts/${id}/evals`, { mode: "with_only" });
+      expect(ok.status, JSON.stringify(ok.json)).toBe(202);
+    }
+    const before = objects.objects.size;
+    const refused = await f.on(0, w.owner).post(`/v1/skills/drafts/${id}/evals`, {
+      mode: "with_only",
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.json).toMatchObject({ code: "too_many_evals" });
+    expect(objects.objects.size).toBe(before);
+  });
+
   it("denies and records a call to the member's memory: the eval leaves nothing behind", async () => {
     const w = await world();
     const provider = new FakeEvalProvider(url);

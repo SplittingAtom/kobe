@@ -6,6 +6,7 @@ import {
   personalSkills,
   siteSkillSettings,
   teamSkillVersions,
+  sql,
   withTeam,
   type KobeDb,
   type KobeTx,
@@ -207,12 +208,38 @@ async function judgeModelFor(
   return { alias: (fallback.ok && fallback.model?.alias) || runModel.used, source: "team" };
 }
 
+/** Open evals at once: per starter and per team (review M4). */
+export const MAX_OPEN_EVALS_PER_MEMBER = 3;
+export const MAX_OPEN_EVALS_PER_TEAM = 20;
+
+/** The team's skill eval lock (the runner's claims take the same one). */
+export async function lockTeamEvals(tx: KobeTx, teamId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.skill-eval:${teamId}`}, 0))`,
+  );
+}
+
+async function openEvalsRefusal(tx: KobeTx, who: EvalStarter): Promise<string | null> {
+  const res = await tx.execute<{ mine: number | string; team: number | string }>(sql`
+    SELECT count(*) FILTER (WHERE started_by = ${who.userId}) AS mine, count(*) AS team
+      FROM skill_eval_runs WHERE team_id = ${who.teamId} AND status IN ('queued', 'running')`);
+  const row = res.rows[0];
+  if (Number(row?.mine ?? 0) >= MAX_OPEN_EVALS_PER_MEMBER)
+    return `You already have ${MAX_OPEN_EVALS_PER_MEMBER} evals running or queued. Wait for one to finish or cancel one.`;
+  if (Number(row?.team ?? 0) >= MAX_OPEN_EVALS_PER_TEAM)
+    return `Your team already has ${MAX_OPEN_EVALS_PER_TEAM} evals running or queued. Try again later.`;
+  return null;
+}
+
 export async function startSkillEval(
   deps: { readonly db: KobeDb; readonly blobs: BlobStore },
   who: EvalStarter,
   subject: StartSubject,
   mode: SkillEvalMode,
 ): Promise<{ ok: true; value: SkillEvalStarted } | { ok: false; refusal: StartRefusal }> {
+  // Bounded queues (review M4): refused before the scan, checked again under the team's lock.
+  const full = await withTeam(deps.db, who.teamId, (tx) => openEvalsRefusal(tx, who));
+  if (full) return refuse(409, "too_many_evals", full);
   const pkg = await loadPackage(deps.db, deps.blobs, who, subject);
   if (!pkg) return refuse(404, "skill_not_found", "No such skill version or draft revision.");
   let zip: Uint8Array;
@@ -269,8 +296,11 @@ export async function startSkillEval(
   const fixtures = fixturesZip(pkg.files, suite);
   const fixturesKey = fixtures ? evalFixturesKey(tree, sha256Hex(fixtures)) : null;
   if (fixtures && fixturesKey) await putEvalObject(deps.blobs, fixturesKey, fixtures);
-  await withTeam(deps.db, who.teamId, (tx) =>
-    insertEvalRun(tx, {
+  const inserted = await withTeam(deps.db, who.teamId, async (tx) => {
+    await lockTeamEvals(tx, who.teamId);
+    const refusal = await openEvalsRefusal(tx, who);
+    if (refusal) return refusal;
+    await insertEvalRun(tx, {
       teamId: who.teamId,
       id,
       startedBy: who.userId,
@@ -287,8 +317,17 @@ export async function startSkillEval(
       runModel: models.run,
       judgeModel: models.judge,
       plan,
-    }),
-  );
+    });
+    return null;
+  }).catch(async (err: unknown) => {
+    // Never leave objects no row names (no purge would find them).
+    await deps.blobs.objects.delete(fixturesKey ? [bundleKey, fixturesKey] : [bundleKey]);
+    throw err;
+  });
+  if (inserted) {
+    await deps.blobs.objects.delete(fixturesKey ? [bundleKey, fixturesKey] : [bundleKey]);
+    return refuse(409, "too_many_evals", inserted);
+  }
   return {
     ok: true,
     value: {
