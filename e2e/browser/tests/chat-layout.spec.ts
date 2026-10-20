@@ -81,7 +81,9 @@ test("one bar row; the composer holds the selectors and the gauge (ac-1, ac-2, a
   await expect(page.locator('[data-bar-row="2"]')).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Conversation context" })).toHaveCount(0);
   const toolbar = chat.toolbar;
-  await expect(toolbar.getByRole("button", { name: "Attach files" })).toBeVisible();
+  // Attach files sits in the + menu (KOBE-451); before the first prompt the selectors are in the
+  // toolbar after it (KOBE-418, KOBE-450).
+  await expect(toolbar.getByRole("button", { name: "Add to your message" })).toBeVisible();
   await expect(
     toolbar.getByRole("combobox", { name: "Model for this conversation" }),
   ).toBeVisible();

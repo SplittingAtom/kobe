@@ -37,7 +37,7 @@ test("the selectors move below the composer after the first prompt; Pi's command
   await chat.waitForIdle();
   await expect(below.getByRole("combobox", MODEL)).toBeVisible();
   await expect(chat.toolbar.getByRole("combobox", MODEL)).toHaveCount(0);
-  await expect(chat.toolbar.getByRole("button", { name: "Attach files" })).toBeVisible();
+  await expect(chat.toolbar.getByRole("button", { name: "Add to your message" })).toBeVisible();
   const gauge = page.locator("[data-composer-footer] [data-composer-gauge]");
   const [s, g] = [await below.boundingBox(), await gauge.boundingBox()];
   if (s && g && g.width > 0) expect(s.x).toBeLessThan(g.x);
