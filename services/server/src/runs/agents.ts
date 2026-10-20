@@ -25,6 +25,7 @@ import {
   loadUsableSiteKeys,
 } from "./run-mcp.js";
 import type { AgentResolution, AgentResolutionInput, RunAgentResolver } from "./seams.js";
+import { connectorsOffIn } from "../connectors/thread-connectors.js";
 
 /** The skill facts of a test chat's run: its draft as the agent's only skill, nothing else. */
 const onlySkillFacts = (ref: SkillRef): SkillFacts => ({
@@ -195,9 +196,12 @@ export const PINNED_AGENTS: RunAgentResolver = {
           new Date(),
           await loadUsableSiteKeys(tx, connectorRows),
         );
+    // KOBE-451: the connectors the owner turned off for this thread are not connected for it.
+    const off = await connectorsOffIn(tx, input.teamId, input.threadId);
+    const offNames = new Set(connectorRows.filter((r) => off.has(r.id)).map((r) => r.name));
     const resolved = resolveEffective(
       buildResolveInput({
-        connectedConnectors,
+        connectedConnectors: connectedConnectors.filter((name) => !offNames.has(name)),
         frontmatter,
         versionMode: pinned.version.toolManifest.approval_mode.effective,
         floor,

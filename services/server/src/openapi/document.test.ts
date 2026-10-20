@@ -126,6 +126,7 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
       "file_ids",
       "mentions",
       "app_context",
+      "skill",
     ]);
     expect(props("SubmitMessageResult")).toEqual(["run_id", "queued"]);
     expect(props("SteerBody")).toEqual(["content", "mentions"]);

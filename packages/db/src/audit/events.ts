@@ -889,6 +889,12 @@ export const AUDIT_EVENTS = {
   "thread.exported": event("team", { threads: count, entries: count }),
   /** The owner downloaded one conversation as Markdown (`/export`, KOBE-450); a count, no text. */
   "thread.transcript_exported": event("team", { threadId: id, entries: count }),
+  /** The owner turned a connector off or back on for one conversation (KOBE-451). */
+  "thread.connector_toggled": event("team", {
+    threadId: id,
+    connectorId: id,
+    enabled: z.boolean(),
+  }),
 
   // ── retention: periods, purges and compaction (D18, KOBE-18); counts only, never content ──
   /** A team admin changed the team's retention period. */

@@ -1,4 +1,4 @@
-import { splitAppContext } from "@kobe/protocol";
+import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
 import { createHash } from "node:crypto";
 import {
   EVAL_CASE_EARLIER_MAX_CHARS,
@@ -286,7 +286,11 @@ export async function buildCopy(
     });
   const attached = new Set(options.attachment_ids);
   // App context (KOBE-439) is untrusted and tied to the run's apps: an eval case keeps the text.
-  const prompt = capText(splitAppContext(src.input).rest, EVAL_CASE_TEXT_MAX_CHARS);
+  // So is the server's skill line (KOBE-451): the case keeps the member's own text.
+  const prompt = capText(
+    splitSkillRequest(splitAppContext(src.input).rest).rest,
+    EVAL_CASE_TEXT_MAX_CHARS,
+  );
   const content: EvalCaseContent = {
     prompt: prompt.text,
     answer: answer.text.text,

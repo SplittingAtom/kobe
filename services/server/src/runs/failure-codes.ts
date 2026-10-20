@@ -17,6 +17,9 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
     "This team declined a personal skill with exactly these files, so the draft can't be tested here.",
   skill_draft_changed:
     "The draft changed after you sent the message, so the run didn't start. Send it again to test the current draft.",
+  // KOBE-451: the skill picked in the composer left the run's effective set before it started.
+  skill_not_available:
+    "The skill you picked isn't available to this agent any more, so the run didn't start. Remove it and send again.",
   agent_suspended:
     "This agent is suspended, so it can't start new runs. Ask your team admin to reactivate it, or start a conversation with another agent.",
   // KOBE-174: a scheduled run the budget refused at fire time (no retry; the next occurrence tries).

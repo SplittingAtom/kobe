@@ -1,3 +1,4 @@
+import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
 import {
   isActiveRunStatus,
   queueMayAdvance,
@@ -292,6 +293,7 @@ const OWN_START_CODES = new Set([
   "skill_draft_changed",
   "skill_draft_personal_off",
   "skill_draft_declined",
+  "skill_not_available",
 ]);
 const startFailureCode = (code: string) => (OWN_START_CODES.has(code) ? code : "agent_unavailable");
 
@@ -311,6 +313,11 @@ export function requestedModel(
   if (pinned !== undefined) return { alias: pinned, source: "agent" };
   if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
   return { alias: undefined, source: "default" };
+}
+
+/** The skill a run's input asks for (the server's line after any app context), or null. */
+export function requestedSkill(input: string): string | null {
+  return splitSkillRequest(splitAppContext(input).rest).skill;
 }
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
@@ -337,6 +344,11 @@ export async function resolveForStart(
     })
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
   if (!resolved.ok) return resolved;
+  // KOBE-451: a skill picked in the composer must still be in the run's effective set.
+  const asked = requestedSkill(run.input);
+  if (asked !== null && !(resolved.config?.skills ?? []).includes(asked)) {
+    return { ok: false, error: { code: "skill_not_available", message: "" } };
+  }
   // A scheduled run (D32, KOBE-174) is always `auto`: nobody is there to approve, so the agent
   // version's own (stricter) mode must not make it wait. Only the site floor tightens it.
   if (run.trigger === "schedule") {

@@ -7684,6 +7684,10 @@
               "required": ["connector_id", "app_id", "template_sha256", "data"],
               "additionalProperties": false
             }
+          },
+          "skill": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
           }
         },
         "required": ["content"],

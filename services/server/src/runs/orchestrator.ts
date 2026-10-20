@@ -1,4 +1,11 @@
-import { imitatesAppContext, splitAppContext } from "@kobe/protocol";
+import {
+  imitatesAppContext,
+  imitatesSkillRequest,
+  splitAppContext,
+  splitSkillRequest,
+  withSkillRequest,
+} from "@kobe/protocol";
+import { effectiveSkillNames } from "./effective-skills.js";
 import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
 import {
   resolveAppContexts,
@@ -288,7 +295,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (command.trigger === "user") checkMentionPaths(command.mentions ?? []);
     // Only the server writes app context (KOBE-439 review LOW-E): a member's text that imitates
     // it would show as a chip in history and could be mistaken for an app's data.
-    if (command.trigger === "user" && imitatesAppContext(command.content)) {
+    if (
+      command.trigger === "user" &&
+      (imitatesAppContext(command.content) || imitatesSkillRequest(command.content))
+    ) {
       throw new RunError("invalid_content");
     }
     // MCP Apps context chips (KOBE-439): only apps the member can open now, same template.
@@ -401,8 +411,20 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           "mentioned files not found; left as text",
         );
       }
+      // A skill picked in the composer (KOBE-451) must be one a run here loads; the server's
+      // line asks the agent to use it. The run start checks it once more.
+      const skill = command.trigger === "user" ? command.skill : undefined;
+      if (skill !== undefined) {
+        const names = await effectiveSkillNames(tx, this.#agents, {
+          teamId,
+          ...thread,
+          threadId: thread.id,
+        });
+        if (!names.includes(skill)) throw new RunError("skill_not_available");
+      }
+      const text = skill === undefined ? mentioned.text : withSkillRequest(skill, mentioned.text);
       // The member's chips go first, fenced as untrusted data (KOBE-439, spec §8).
-      const input = withAppContext(appContext, mentioned.text);
+      const input = withAppContext(appContext, text);
       // The rendered blocks count toward the input's limit (review LOW-F): a clear 413.
       if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
@@ -488,8 +510,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
-    // As for a send (re-review LOW-M): only the server writes app context.
-    if (imitatesAppContext(body.content)) throw new RunError("invalid_content");
+    // As for a send (re-review LOW-M): only the server writes app context or a skill line.
+    if (imitatesAppContext(body.content) || imitatesSkillRequest(body.content)) {
+      throw new RunError("invalid_content");
+    }
     const { run, message } = await this.#threadTx(actor, async (tx, viewer) => {
       const found = await ownedRun(tx, viewer, runId, false);
       await this.#assertMayRun(tx, actor, false);
@@ -597,7 +621,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (run.status !== "queued") {
         throw new RunError("invalid_transition", "Only queued messages can be edited.");
       }
-      if (imitatesAppContext(body.content)) throw new RunError("invalid_content");
+      if (imitatesAppContext(body.content) || imitatesSkillRequest(body.content)) {
+        throw new RunError("invalid_content");
+      }
       const { text } = await rewriteMentions(
         tx,
         ownerOf(actor.team_id, thread),
@@ -609,7 +635,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         SELECT input FROM runs WHERE team_id = ${actor.team_id} AND id = ${runId}`);
       const old = before.rows[0]?.input ?? "";
       const kept = splitAppContext(old);
-      const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + text : text;
+      // ... and so does the skill picked for it (KOBE-451).
+      const skill = splitSkillRequest(kept.rest).skill;
+      const own = skill === null ? text : withSkillRequest(skill, text);
+      const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + own : own;
       if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       await tx.execute(sql`
         UPDATE runs SET input = ${input} WHERE team_id = ${actor.team_id} AND id = ${runId}`);
