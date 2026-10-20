@@ -57,3 +57,4 @@ export * from "./sandbox-eval-connections.js";
 export * from "./connector-site-keys.js";
 export * from "./connector-ui-resources.js";
 export * from "./thread-app-results.js";
+export * from "./thread-connectors.js";
