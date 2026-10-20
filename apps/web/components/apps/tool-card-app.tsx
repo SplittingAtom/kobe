@@ -47,9 +47,16 @@ function lookup(
     where.prompt === undefined
       ? undefined
       : apps.byPrompt.get(approvalKey(where.prompt, toolCallId));
-  if (byPrompt !== undefined || where.liveRunId === undefined) return byPrompt;
-  return apps.byRun.get(runToolKey(where.liveRunId, toolCallId));
+  const byRun =
+    where.liveRunId === undefined
+      ? undefined
+      : apps.byRun.get(runToolKey(where.liveRunId, toolCallId));
+  // The thread's only result for this call (KOBE-445): never depends on the prompt's ancestry.
+  return byPrompt ?? byRun ?? apps.byTool.get(toolCallId);
 }
+
+/** The conversation's scroller: the margins below are measured against it (KOBE-445). */
+const SCROLLER = '[data-kobe-scroll="messages"]';
 
 /** Whether the element is within `margin` of the viewport (no observer: always). */
 function useWithin(ref: React.RefObject<HTMLElement | null>, margin: string): boolean {
@@ -57,9 +64,11 @@ function useWithin(ref: React.RefObject<HTMLElement | null>, margin: string): bo
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
+    // With the window as root, the margins never apply inside the scrolling conversation (the
+    // scroller clips the target first): a card above the fold after a reload never came near.
     const observer = new IntersectionObserver(
       (entries) => setWithin(entries.some((e) => e.isIntersecting)),
-      { rootMargin: margin },
+      { root: el.closest(SCROLLER), rootMargin: margin },
     );
     observer.observe(el);
     return () => observer.disconnect();

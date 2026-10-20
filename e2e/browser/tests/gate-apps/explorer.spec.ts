@@ -176,9 +176,17 @@ test("in the conversation: the app renders, calls once, gives a chip, inserts wi
     .toContain(`<app-context source=\\"connector:${app.connectorName}\\" untrusted=\\"true\\">`);
   if (FAKE_MODEL) await expect(chat.answers.last()).toContainText("app-context");
 
-  // A reload rebuilds the app from the stored result: no app call at all.
+  // k3d: a long answer puts the card well above the fold, as the real model's answers did on the
+  // gate install (KOBE-445: the reload opens at the bottom, and the card waited for a scroll).
+  if (FAKE_MODEL) await chat.ask(longAnswer(""));
+
+  // A reload rebuilds the app from the stored result: no app call at all. The thread opens at
+  // its end; the member scrolls up to the card, which loads as it comes near.
   const beforeReload = seen.calls();
   await page.reload();
+  const card = page.locator("[data-kobe-app-card]").first();
+  await expect(card).toBeAttached({ timeout: RUN_TIMEOUT_MS });
+  await card.scrollIntoViewIfNeeded();
   await expect(
     frameOf(page, app).getByRole(ITEM_ROLE, { name: PATH[0] ?? "", exact: true }),
   ).toBeVisible({
