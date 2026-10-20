@@ -18,7 +18,8 @@ import { z } from "zod";
  * `workbench_editor_width` (KOBE-459): the Workbench editor rail's dragged width; `null` goes back
  * to the default (the rail takes the width the file tree leaves).
  * `rail_picker` (KOBE-460): the picker app (its app id) the Apps tab renders live, or `null` for
- * None (the default); a picker that is not live for the member shows None.
+ * None. Absent (never chosen) shows the first live picker (KOBE-461); a remembered picker that is
+ * not live for the member shows the first live one, with a note.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
